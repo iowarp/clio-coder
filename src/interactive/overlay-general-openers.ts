@@ -193,7 +193,7 @@ export interface OverlayGeneralOpeners {
 	openSideQuestion(question: string): void;
 	/** `/draft [N] <request>`: N candidates in parallel, judged by a decision model. */
 	openDraft(request: string, count: number): void;
-	/** `/fleet run <name> [--var k=v ...]`: preview the plan, then dispatch on approval. */
+	/** `/fleet run <playbook> [--var k=v ...]`: preview the plan, then dispatch on approval. */
 	startFleetRun(name: string, vars: Readonly<Record<string, string>>): void;
 }
 
@@ -564,7 +564,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	/**
-	 * `/fleet run <name>`: compile the plan, show it, and dispatch only what the
+	 * `/fleet run <playbook>`: compile the plan, show it, and dispatch only what the
 	 * operator accepted.
 	 *
 	 * Nothing is dispatched and nothing is written before the accept key. A
@@ -624,7 +624,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		);
 		void run({
 			plan: preview.plan,
-			contractName: preview.name,
+			playbookName: preview.name,
 			commands: preview.commands,
 			workspaceRoot: deps.getSessionMeta()?.cwd ?? process.cwd(),
 			fleetRootId,

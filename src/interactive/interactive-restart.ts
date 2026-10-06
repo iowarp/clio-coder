@@ -1,8 +1,8 @@
+import { writeRestartIntent } from "../core/restart-intent.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { ChatLoop } from "../session-control/chat-loop.js";
-import { writeRestartIntent } from "../session-control/restart-intent.js";
 
 export interface InteractiveRestartDeps {
 	session?: SessionContract;

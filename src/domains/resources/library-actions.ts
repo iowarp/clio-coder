@@ -3,7 +3,7 @@
  * the atomic package writers. Planning stages sources and writes nothing; apply
  * rechecks reviewed facts inside each writer's lock, keeps every committed write
  * when a later step fails, releases every staged source, and reports disk/state
- * verification, actual recipe admission and host refresh as separate facts.
+ * verification, actual component admission and host refresh as separate facts.
  */
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -55,10 +55,9 @@ import {
 import { type LibraryPair, readLibraryPairs } from "./library-pairing.js";
 import {
 	isLibraryKind,
+	type LibraryComponentKind,
 	type LibraryEntryKind,
 	type LibraryRequirementRef,
-	type LibraryResourceKind,
-	readLegacyLibraryKind,
 } from "./library-types.js";
 import { validateLibraryPackage } from "./library-validation.js";
 
@@ -92,7 +91,7 @@ export interface LibraryPlanStep {
 	source?: { sourceUrl: string; sha256: string; staged: boolean };
 	content?: {
 		valid: boolean;
-		resources: Array<{ kind: LibraryResourceKind; name: string; valid: boolean }>;
+		resources: Array<{ kind: LibraryComponentKind; name: string; valid: boolean }>;
 		diagnostics: string[];
 	};
 	expected: LibraryExpectedCopy[];
@@ -145,7 +144,7 @@ export interface LibraryStepVerification {
 	tree: "present" | "absent" | "changed";
 	record: "recorded" | "absent" | "unreadable";
 	copy?: LibraryCopyState;
-	resources: Array<{ kind: LibraryResourceKind; name: string; available: boolean; reason?: string }>;
+	resources: Array<{ kind: LibraryComponentKind; name: string; available: boolean; reason?: string }>;
 	effective: { scope: PluginScope; loadable: boolean } | null;
 }
 
@@ -291,7 +290,7 @@ function contentOf(root: string): NonNullable<LibraryPlanStep["content"]> {
 	return {
 		valid: result.valid,
 		resources: result.validation.resources
-			.filter((item): item is typeof item & { kind: LibraryResourceKind } =>
+			.filter((item): item is typeof item & { kind: LibraryComponentKind } =>
 				["skill", "agent", "prompt", "playbook"].includes(item.kind),
 			)
 			.map((item) => ({ kind: item.kind, name: item.name, valid: item.valid })),
@@ -615,7 +614,7 @@ function reviewSteps(
 // Verification
 // ---------------------------------------------------------------------------
 
-/** Read back one copy: tree, record, inventory state, actual recipe admission and the surviving effective copy. */
+/** Read back one copy: tree, record, inventory state, actual component admission and the surviving effective copy. */
 export function verifyLibraryStep(
 	identity: LibraryPackageIdentity,
 	cwd: string,
@@ -641,10 +640,10 @@ export function verifyLibraryStep(
 			tree = "changed";
 		}
 	}
-	const kinds = new Set<LibraryResourceKind>();
+	const kinds = new Set<LibraryComponentKind>();
 	for (const kind of Object.keys(copy?.resources ?? {}))
 		if (kind === "skills" || kind === "agents" || kind === "prompts" || kind === "playbooks")
-			kinds.add(kind.slice(0, -1) as LibraryResourceKind);
+			kinds.add(kind.slice(0, -1) as LibraryComponentKind);
 	const resources: LibraryStepVerification["resources"] = [];
 	if (copy && kinds.size) {
 		const inventory = readLibraryInventory({
@@ -934,8 +933,7 @@ function importedKind(plan: LibraryImportPlan, result: LibraryImportApplyResult,
 	try {
 		const manifest = plan.files?.["plugin.json"];
 		const parsed = manifest ? (JSON.parse(manifest) as { extensions?: Record<string, { kind?: unknown }> }) : undefined;
-		// D9 legacy read: reviewed bytes written before the rename say kind `fleet`.
-		const kind = readLegacyLibraryKind(parsed?.extensions?.["ai.iowarp.clio"]?.kind);
+		const kind = parsed?.extensions?.["ai.iowarp.clio"]?.kind;
 		if (isLibraryKind(kind)) return kind;
 	} catch {
 		// Unreadable review bytes: portable default.

@@ -3,6 +3,8 @@ name: Materio
 version: 0.2.0
 description: Materials research lab bench with local commands, usage and advisory guardrails.
 plugin: materio
+compatibility:
+  clio: ">=0.6.2"
 runtime:
   api: 2
   entrypoint: runtime/extension.ts

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { parseFleetContract, resolveFleetReferences } from "../agents/fleet-contract.js";
 import { parseFrontmatter } from "../agents/frontmatter.js";
+import { parsePlaybook, resolvePlaybookReferences } from "../agents/playbook.js";
 import { recipeIdFromPath } from "../agents/recipe.js";
 import { parseAgentRecipeSchema } from "../agents/recipe-schema.js";
 import { assertAgentSpecPolicy, normalizeAgentSpec } from "../agents/spec.js";
@@ -24,7 +24,7 @@ export interface LibraryValidationDiagnostic {
 	kind?: string | undefined;
 }
 
-export interface LibraryResourceValidationRecord {
+export interface LibraryComponentValidationRecord {
 	kind: string;
 	name: string;
 	path: string;
@@ -44,7 +44,7 @@ export interface LibraryValidationPrerequisite {
 
 export interface LibraryPackageValidation {
 	contentValid: boolean;
-	resources: LibraryResourceValidationRecord[];
+	resources: LibraryComponentValidationRecord[];
 	diagnostics: LibraryValidationDiagnostic[];
 	prerequisites: LibraryValidationPrerequisite[];
 }
@@ -97,7 +97,7 @@ export function validateLibraryPackage(
 	const declaredComponents = manifest.clio.components ?? [];
 
 	const contentDiagnostics: LibraryValidationDiagnostic[] = [];
-	const resources: LibraryResourceValidationRecord[] = [];
+	const resources: LibraryComponentValidationRecord[] = [];
 	const prerequisites: LibraryValidationPrerequisite[] = [];
 
 	if (packageKind === "extension" || existsSync(path.join(resolved, "clio-coder-extension.yaml"))) {
@@ -306,7 +306,7 @@ export function validateLibraryPackage(
 							agentDiags.push({
 								severity: "error",
 								code: "ERR_AGENT",
-								message: `agent recipe: ${filepath}: standalone recipe cannot bind external skills; must declare skills: []`,
+								message: `agent: ${filepath}: a standalone agent cannot bind external skills; must declare skills: []`,
 								path: filepath,
 								kind: "agent",
 							});
@@ -314,7 +314,7 @@ export function validateLibraryPackage(
 							agentDiags.push({
 								severity: "error",
 								code: "ERR_AGENT",
-								message: `agent recipe: ${filepath}: plugin declares bound skills but no skills resource root`,
+								message: `agent: ${filepath}: plugin declares bound skills but no skills resource root`,
 								path: filepath,
 								kind: "agent",
 							});
@@ -326,7 +326,7 @@ export function validateLibraryPackage(
 									agentDiags.push({
 										severity: "error",
 										code: "ERR_AGENT",
-										message: `agent recipe: ${filepath}: bound skill unavailable: ${skillName}`,
+										message: `agent: ${filepath}: bound skill unavailable: ${skillName}`,
 										path: filepath,
 										kind: "agent",
 									});
@@ -337,7 +337,7 @@ export function validateLibraryPackage(
 										agentDiags.push({
 											severity: "error",
 											code: "ERR_AGENT",
-											message: `agent recipe: ${filepath}: bound skill escapes its plugin: ${skill.filePath}`,
+											message: `agent: ${filepath}: bound skill escapes its plugin: ${skill.filePath}`,
 											path: filepath,
 											kind: "agent",
 										});
@@ -385,36 +385,36 @@ export function validateLibraryPackage(
 	// ---------------------------------------------------------------------------
 	if (declaredResources.playbooks !== undefined) {
 		try {
-			const fleetsDir = pluginResourcePath(resolved, declaredResources.playbooks);
-			let fleetEntries: import("node:fs").Dirent[] = [];
+			const playbooksDir = pluginResourcePath(resolved, declaredResources.playbooks);
+			let playbookEntries: import("node:fs").Dirent[] = [];
 			try {
-				fleetEntries = readdirSync(fleetsDir, { withFileTypes: true });
+				playbookEntries = readdirSync(playbooksDir, { withFileTypes: true });
 			} catch (err) {
 				contentDiagnostics.push({
 					severity: "error",
-					code: "ERR_FLEET",
+					code: "ERR_PLAYBOOK",
 					message: `cannot read playbooks directory: ${err instanceof Error ? err.message : String(err)}`,
-					path: fleetsDir,
+					path: playbooksDir,
 					kind: "playbook",
 				});
 			}
 
-			for (const entry of fleetEntries) {
+			for (const entry of playbookEntries) {
 				if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-				const filepath = path.join(fleetsDir, entry.name);
+				const filepath = path.join(playbooksDir, entry.name);
 				const relPath = normalizePathRel(resolved, filepath);
-				const fleetDiags: LibraryValidationDiagnostic[] = [];
+				const playbookDiags: LibraryValidationDiagnostic[] = [];
 				let publicName = path.basename(entry.name, ".md");
-				let fleetDescription: string | undefined;
+				let playbookDescription: string | undefined;
 
 				try {
 					const raw = readFileSync(filepath, "utf8");
-					const contract = parseFleetContract(raw, filepath);
-					publicName = contract.name;
-					fleetDescription = contract.description;
-					const resolvedContract = resolveFleetReferences(contract, { source: "plugin", rootPath: resolved });
+					const playbook = parsePlaybook(raw, filepath);
+					publicName = playbook.name;
+					playbookDescription = playbook.description;
+					const resolvedPlaybook = resolvePlaybookReferences(playbook, { source: "plugin", rootPath: resolved });
 
-					for (const step of resolvedContract.steps) {
+					for (const step of resolvedPlaybook.steps) {
 						if (step.kind === "code") {
 							prerequisites.push({
 								type: "command",
@@ -497,29 +497,29 @@ export function validateLibraryPackage(
 					}
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
-					fleetDiags.push({
+					playbookDiags.push({
 						severity: "error",
-						code: parseRefErrorCode(message, "ERR_FLEET"),
+						code: parseRefErrorCode(message, "ERR_PLAYBOOK"),
 						message,
 						path: filepath,
 						kind: "playbook",
 					});
 				}
 
-				for (const d of fleetDiags) contentDiagnostics.push(d);
+				for (const d of playbookDiags) contentDiagnostics.push(d);
 				resources.push({
 					kind: "playbook",
 					name: publicName,
 					path: relPath,
-					...(fleetDescription !== undefined ? { description: fleetDescription } : {}),
-					valid: fleetDiags.length === 0,
-					diagnostics: fleetDiags,
+					...(playbookDescription !== undefined ? { description: playbookDescription } : {}),
+					valid: playbookDiags.length === 0,
+					diagnostics: playbookDiags,
 				});
 			}
 		} catch (err) {
 			contentDiagnostics.push({
 				severity: "error",
-				code: "ERR_FLEET",
+				code: "ERR_PLAYBOOK",
 				message: err instanceof Error ? err.message : String(err),
 				path: path.join(resolved, declaredResources.playbooks),
 				kind: "playbook",
@@ -563,8 +563,8 @@ export function validateLibraryPackage(
 					});
 				}
 			} else if (comp.kind === "playbook") {
-				const fleetsDir = declaredResources.playbooks ? pluginResourcePath(resolved, declaredResources.playbooks) : null;
-				if (fleetsDir && path.dirname(fullCompPath) !== fleetsDir) {
+				const playbooksDir = declaredResources.playbooks ? pluginResourcePath(resolved, declaredResources.playbooks) : null;
+				if (playbooksDir && path.dirname(fullCompPath) !== playbooksDir) {
 					contentDiagnostics.push({
 						severity: "error",
 						code: "ERR_COMPONENT",

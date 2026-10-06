@@ -1,25 +1,25 @@
 import { discoveryScore } from "../../core/harness-discovery.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type {
+	LibraryComponent,
 	LibraryInventory,
 	LibraryInventoryOptions,
 	LibraryOrigin,
 	LibraryPackageRecord,
-	LibraryResource,
 } from "../../domains/resources/library-inventory.js";
 import { finalizeObservation, type ObservationReservation } from "../observation.js";
 import type { ToolInvokeOptions, ToolResult } from "../registry.js";
 import { byteLength } from "../truncate-utf8.js";
 
 /**
- * scope=library: one bounded, body-free READ over the shared recipe inventory.
+ * scope=library: one bounded, body-free READ over the shared component inventory.
  *
- * It answers what recipes exist, who owns them, how they are actually invoked,
+ * It answers what components exist, who owns them, how they are actually invoked,
  * and what an uninstalled package would provide. It activates, registers,
  * installs and pins nothing, and it never returns an instruction body. Skill
  * activation stays entirely under scope=skills.
  *
- * Three row types, never conflated. A `resource` is a recipe that loaded and is
+ * Three row types, never conflated. A `resource` is a component that loaded and is
  * usable now. A `hint` is a catalog claim about a member of a package: it names
  * its installable owner and that member's honest status, and it never carries
  * an invocation, because nothing has loaded it. A `package` is the install
@@ -64,7 +64,7 @@ const WORKER_UNAVAILABLE =
 	"Work from the resources your assignment already bound, and record the gap with the limitation tool if it blocks the task.";
 
 const OPERATOR_NOTE =
-	"Read-only catalog: this tool does not install or activate. For an operator-requested installation, use clio-coder library install kind:name --user or --project through bash with operator approval. /library is the interactive package manager; /skill <name> activates a skill. A hint row is a catalog claim, not a loaded recipe, and cannot be invoked.";
+	"Read-only catalog: this tool does not install or activate. For an operator-requested installation, use clio-coder library install kind:name --user or --project through bash with operator approval. /library is the interactive package manager; /skill <name> activates a skill. A hint row is a catalog claim, not a loaded component, and cannot be invoked.";
 const NOTE_SKILLS_OFF = "Skill discovery is off for this run, so no skill rows are listed.";
 const NOTE_INVENTORY_CAPPED =
 	"The inventory returned as many records as it carries, so this listing and its install evidence are incomplete; narrow with kind or query.";
@@ -115,7 +115,7 @@ function boundOrigin(origin: LibraryOrigin): Record<string, unknown> {
 
 /**
  * Resource rows keep the origin evidence and the actual runtime name, and drop
- * the absolute path: the model's move on a recipe is to invoke it or suggest
+ * the absolute path: the model's move on a component is to invoke it or suggest
  * it, never to open its file, and a body-free projection should not hand out
  * the one field that routes around itself.
  *
@@ -124,7 +124,7 @@ function boundOrigin(origin: LibraryOrigin): Record<string, unknown> {
  * only if one ever survives that filter. They cost nothing when it does not,
  * and a silently mislabelled row is worse than a redundant field.
  */
-function projectResource(resource: LibraryResource, ambiguous: boolean): Record<string, unknown> {
+function projectResource(resource: LibraryComponent, ambiguous: boolean): Record<string, unknown> {
 	return {
 		row: "resource",
 		kind: resource.kind,
@@ -288,7 +288,7 @@ function fitPage(
 }
 
 /** Same kind and name from two different sources: the row must carry its key. */
-function ambiguousNames(resources: ReadonlyArray<LibraryResource>): Set<string> {
+function ambiguousNames(resources: ReadonlyArray<LibraryComponent>): Set<string> {
 	const seen = new Map<string, number>();
 	for (const resource of resources) {
 		const id = `${resource.kind}:${resource.name}`;
@@ -320,7 +320,7 @@ function hintSelection(
 
 function hintRows(
 	inventory: LibraryInventory,
-	resources: ReadonlyArray<LibraryResource>,
+	resources: ReadonlyArray<LibraryComponent>,
 	kind: LibraryRowKind | undefined,
 	query: string,
 	ref: string,
@@ -372,7 +372,7 @@ export async function runLibraryScope(
 	// not discovery.
 	const skillsDisabled = deps.skillLoaderOptions?.disableDiscovery === true;
 	// Packages are read at every kind: `kind=plugin` keeps its documented
-	// meaning (packages whose own kind is plugin) and a recipe kind still finds
+	// meaning (packages whose own kind is plugin) and a component kind still finds
 	// the installable owners that provide it.
 	const wantsResources = kind !== "plugin" && !(kind === "skill" && skillsDisabled);
 

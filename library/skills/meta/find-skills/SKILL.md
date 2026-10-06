@@ -25,14 +25,14 @@ clio-coder:
 # Find Skills
 
 Find reusable skills through Clio-Coder's Library. Keep the package's origin,
-format, installation scope and actual recipe availability distinct. Library
+format, installation scope and actual component availability distinct. Library
 management is operator authority in Clio-Coder; the agent discovers, inspects
 and recommends without trying to write protected active roots.
 
 ## Procedure
 
 1. **Search the Library first.** Run `clio-coder library search <query>` and
-   inspect `clio-coder library recipes --kind skill --json` for actual recipes.
+   inspect `clio-coder library components --kind skill --json` for actual components.
    In a Clio session, `context(scope="library", kind="skill", query="...")`
    provides the same discovery facts. A catalog hint describes a package's
    contents; it does not prove a skill is installed or usable. Check copy scope,
@@ -66,9 +66,9 @@ and recommends without trying to write protected active roots.
    through the UI or CLI; do not retry blocked install commands as shell tricks.
 
 5. **Verify after the operator applies it.** Read
-   `clio-coder library recipes --kind skill --json` and
+   `clio-coder library components --kind skill --json` and
    `clio-coder library inspect <kind>:<package-name> --json`. Confirm the actual
-   runtime name, whole-package owner, selected scope and recipe availability.
+   runtime name, whole-package owner, selected scope and component availability.
    Report disabled, foreign, shadowed or invalid states plainly; an installed
    directory alone is not success. Use `/skill <runtime-name>` for activation;
    `/skills` opens the category browser. Do not invent an audit status.

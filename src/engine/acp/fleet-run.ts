@@ -5,12 +5,12 @@ export { ACP_FLEET_META_KEY, ACP_FLEET_PREVIEW_METHOD, ACP_FLEET_RUN_METHOD } fr
 
 /**
  * `_clio-coder/fleet/preview` and `_clio-coder/fleet/run`: the terminal's
- * `/fleet run <name>` approval, split so a client can show the plan and send
+ * `/fleet run <playbook>` approval, split so a client can show the plan and send
  * back the hash it approved.
  *
- * Preview compiles the contract through the shared dispatch-domain compiler
+ * Preview compiles the playbook through the shared dispatch-domain compiler
  * and dispatches nothing. Run compiles it again and starts it only when the
- * fresh plan hashes to exactly what the client approved; a contract, agent or
+ * fresh plan hashes to exactly what the client approved; a playbook, agent or
  * route that changed in between is refused before any step is dispatched.
  *
  * The projection carries what the terminal overlay shows a person: waves,

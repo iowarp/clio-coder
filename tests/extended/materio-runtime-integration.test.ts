@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
-import { parseFleetCommands } from "../../src/domains/agents/fleet-commands.js";
-import { listFleetContracts, parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
+import { listPlaybooks, parsePlaybook } from "../../src/domains/agents/playbook.js";
+import { parsePlaybookCommands } from "../../src/domains/agents/playbook-commands.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
@@ -69,7 +69,7 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 		strictEqual(prompts.length, 17);
 		ok(prompts.every((x) => !x.unavailable && !/\$\{(?:pluginRoot|component:)/.test(x.content)));
 		strictEqual(loadSkills({ cwd, home: env.dir }).items.filter((x) => x.source === "plugin").length, 6);
-		strictEqual(listFleetContracts(cwd).filter((x) => x.source === "plugin" && !x.error).length, 1);
+		strictEqual(listPlaybooks(cwd).filter((x) => x.source === "plugin" && !x.error).length, 1);
 		for (const recipe of recipes) {
 			strictEqual(recipe.boundSkillPaths.length, 1);
 			const bound = loadSkills({ cwd, disableDiscovery: true, explicitSkillPaths: recipe.boundSkillPaths });
@@ -98,7 +98,7 @@ it("executes registered fleet task arguments against synthetic supplied data and
 		writeFileSync(join(cwd, task, "synthetic.csv"), "10\n12\n14\n");
 		const script =
 			"const fs=require('fs');const p=require('path');const task=process.argv[1];const values=fs.readFileSync(p.join(task,'synthetic.csv'),'utf8').trim().split('\\n').map(Number);process.stdout.write(JSON.stringify({synthetic:true,task,count:values.length,mean:values.reduce((a,b)=>a+b,0)/values.length}));";
-		const commands = parseFleetCommands(
+		const commands = parsePlaybookCommands(
 			JSON.stringify({
 				version: 1,
 				commands: {
@@ -107,7 +107,7 @@ it("executes registered fleet task arguments against synthetic supplied data and
 			}),
 			join(cwd, "commands.yaml"),
 		);
-		const contract = parseFleetContract(
+		const playbook = parsePlaybook(
 			`---
 version: 2
 name: synthetic-supplied-data
@@ -129,8 +129,8 @@ Pre-approved assumptions: synthetic scalar observations 10, 12, 14; arithmetic m
 		const vars = { taskDir: task };
 		const plan = compileFleetExecutionPlan({
 			commands,
-			contract,
-			task: contract.body,
+			playbook,
+			task: playbook.body,
 			vars,
 			resolveAgent() {
 				throw new Error("no model in this deterministic flow");
@@ -139,7 +139,7 @@ Pre-approved assumptions: synthetic scalar observations 10, 12, 14; arithmetic m
 		const settled: Array<{ recordPath?: string }> = [];
 		const outcome = await executeFleetRun({
 			plan,
-			contractName: contract.name,
+			playbookName: playbook.name,
 			commands,
 			workspaceRoot: cwd,
 			fleetRootId: "synthetic-materials-args",

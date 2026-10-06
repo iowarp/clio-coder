@@ -36,7 +36,7 @@ export interface ExtensionCapabilities {
  * The harness extension contract. An extension contributes executable runtime
  * capability to Clio: command tools declared here and hook declarations
  * captured from `hooks.yaml` at the package root. Prompts, skills, agents,
- * fleets, and reference files are plugin content and have no manifest key.
+ * playbooks, and reference files are plugin content and have no manifest key.
  */
 export interface ClioExtensionManifest {
 	runtime?: ExtensionRuntimeDeclaration;

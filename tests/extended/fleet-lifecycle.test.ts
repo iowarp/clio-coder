@@ -455,34 +455,34 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}
 			budget: {
 				ceilingUsd: 5,
 				currentUsd: 1.25,
-				contractUsd: 2,
+				playbookUsd: 2,
 			},
 		};
 		strictEqual(
 			formatBudgetLine(preview as unknown as Parameters<typeof formatBudgetLine>[0]),
-			"budget: admitted under $5.00 session ceiling, $1.25 spent, contract ceiling $2.00",
+			"budget: admitted under $5.00 session ceiling, $1.25 spent, playbook ceiling $2.00",
 		);
 		const subCent = {
 			budget: {
 				ceilingUsd: 5,
 				currentUsd: 0.0034,
-				contractUsd: null,
+				playbookUsd: null,
 			},
 		};
 		strictEqual(
 			formatBudgetLine(subCent as unknown as Parameters<typeof formatBudgetLine>[0]),
-			"budget: admitted under $5.00 session ceiling, $0.0034 spent, contract declares no ceiling",
+			"budget: admitted under $5.00 session ceiling, $0.0034 spent, playbook declares no ceiling",
 		);
 		const zero = {
 			budget: {
 				ceilingUsd: 5,
 				currentUsd: 0,
-				contractUsd: 1,
+				playbookUsd: 1,
 			},
 		};
 		strictEqual(
 			formatBudgetLine(zero as unknown as Parameters<typeof formatBudgetLine>[0]),
-			"budget: admitted under $5.00 session ceiling, $0.00 spent, contract ceiling $1.00",
+			"budget: admitted under $5.00 session ceiling, $0.00 spent, playbook ceiling $1.00",
 		);
 	});
 });

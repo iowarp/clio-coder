@@ -62,7 +62,7 @@ export function missingScopes(pkg: Package): Scope[] {
 	return (["user", "project"] as const).filter((scope) => !pkg.copies.some((copy) => copy.scope === scope));
 }
 
-/** A query also matches the recipes a bundle provides, so searching for a recipe finds its install target. */
+/** A query also matches the components a package provides, so searching for a component finds its install target. */
 export function matchesPackage(pkg: Package, query: string): boolean {
 	const needle = query.trim().toLocaleLowerCase("en-US");
 	if (!needle) return true;
@@ -121,14 +121,14 @@ export function diskSentence(outcome: Outcome): string {
 	return `Files on disk: ${v.tree}. Install record: ${v.record}.`;
 }
 
-export function recipeSentence(outcome: Outcome): string {
+export function componentSentence(outcome: Outcome): string {
 	const resources = outcome.verification?.resources ?? [];
-	if (outcome.operation === "remove") return "Its recipes are no longer offered.";
-	if (!resources.length) return "This package declares no recipes to admit.";
+	if (outcome.operation === "remove") return "Its components are no longer offered.";
+	if (!resources.length) return "This package declares no components to admit.";
 	const blocked = resources.filter((item) => !item.available);
 	if (!blocked.length)
-		return `${resources.length === 1 ? "Its recipe is" : `All ${resources.length} recipes are`} admitted: ${resources.map((item) => item.name).join(", ")}.`;
-	return `${resources.length - blocked.length} of ${resources.length} recipes admitted. Held back: ${blocked
+		return `${resources.length === 1 ? "Its component is" : `All ${resources.length} components are`} admitted: ${resources.map((item) => item.name).join(", ")}.`;
+	return `${resources.length - blocked.length} of ${resources.length} components admitted. Held back: ${blocked
 		.map((item) => `${item.name}${item.reason ? ` (${item.reason})` : ""}`)
 		.join(", ")}.`;
 }

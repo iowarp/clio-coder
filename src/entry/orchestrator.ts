@@ -21,6 +21,8 @@ import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardr
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
+import { armRestartHandoff } from "../core/restart-handoff.js";
+import { consumeRestartIntent } from "../core/restart-intent.js";
 import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
 import {
 	applyOverrides,
@@ -299,8 +301,6 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
 } from "../session-control/model-session-replay.js";
-import { armRestartHandoff } from "../session-control/restart-handoff.js";
-import { consumeRestartIntent } from "../session-control/restart-intent.js";
 import { createTurnOutcomeCollector } from "../session-control/turn-outcome-collector.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { surfaceSpecPlacement } from "../tools/surface.js";
@@ -1590,6 +1590,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.installSignalHandlers();
 
 	ensureClioState();
+	const { applyPendingMigrationsAtBoot, takeBootMigrationNotices } = await import(
+		"../domains/lifecycle/boot-migrations.js"
+	);
+	await applyPendingMigrationsAtBoot();
+	const bootConversions = takeBootMigrationNotices();
+	{
+		// A workspace's `.clio-coder/` converts the first time Clio opens it, before any domain reads it.
+		const { convertWorkspaceOnce, describeConversion } = await import("../domains/lifecycle/canonical-names.js");
+		const converted = convertWorkspaceOnce(process.cwd());
+		if (converted) bootConversions.push(describeConversion(converted, "this workspace"));
+	}
 	// The leased TUI turns boot diagnostics into transcript notices. Without a
 	// lease (instant shell off) stderr would print before the first frame, so
 	// the interactive boot holds trust notices for the transcript instead (C-4).
@@ -1902,6 +1913,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// the keyboard to tell, and the record is left unclaimed for the boot that does.
 	const upgrade = interactive ? takeUpgradeNotice() : null;
 	if (upgrade !== null) initialNotices.push(describeUpgradeNotice(upgrade));
+	// One notice per conversion; a surface with no operator at the keyboard gets it on stderr.
+	for (const conversion of bootConversions) {
+		if (interactive) initialNotices.push(conversion);
+		else bootStderr(`${conversion}\n`);
+	}
 	if (!providers || !dispatch || !observability || !safety || !middleware) {
 		bootStderr(
 			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",
@@ -4296,7 +4312,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										// first step answers the request with why, as the terminal's notice does.
 										void executeFleetRun({
 											plan: preview.plan,
-											contractName: preview.name,
+											playbookName: preview.name,
 											commands: preview.commands,
 											workspaceRoot: process.cwd(),
 											fleetRootId,

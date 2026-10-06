@@ -445,7 +445,7 @@ export interface ClioAcpServerOptions {
 	 */
 	handoff?: AcpHandoffControl;
 	/**
-	 * The terminal's `/fleet run` approval: compile a named fleet contract for
+	 * The terminal's `/fleet run` approval: compile a named playbook for
 	 * review and start it only against the hash that was approved. Absent means
 	 * the two fleet methods are not announced and refuse.
 	 */
@@ -5285,7 +5285,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (options.fleet === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		return options.fleet;
 	};
-	/** A contract name is a file stem under the workspace's fleets, never a path. */
+	/** A playbook name is a file stem under the workspace's playbooks, never a path. */
 	const fleetName = (value: unknown): string => {
 		const name = requireBoundedClientString(value, "name", 128);
 		if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(name) || name.includes("..")) {
@@ -5316,7 +5316,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 	};
 
-	// Compile a named fleet contract for review. Nothing is dispatched, reserved or written.
+	// Compile a named playbook for review. Nothing is dispatched, reserved or written.
 	options.transport.onRequest(ACP_FLEET_PREVIEW_METHOD, (params) => {
 		requireInitialized();
 		requireAuthenticated();

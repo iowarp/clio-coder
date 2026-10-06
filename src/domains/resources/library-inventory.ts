@@ -5,7 +5,7 @@ import { readSettings } from "../../core/config.js";
 import { discoveryScore } from "../../core/harness-discovery.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
-import { listFleetContracts } from "../agents/fleet-contract.js";
+import { listPlaybooks } from "../agents/playbook.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import { type AgentRecipeDiagnostic, discoverAgentRecipes } from "../agents/registry.js";
 import type { AgentAudience } from "../agents/spec.js";
@@ -17,22 +17,22 @@ import type { ResourceDiagnostic } from "./collision.js";
 import { discoverLibrary } from "./library.js";
 import { listInstalledLibraryPackages as listInstalledPlugins, readLibraryInstallRecord } from "./library-packages.js";
 import type {
+	LibraryComponentKind,
 	LibraryEntryKind,
 	LibraryPackageEntry,
 	LibraryProvidedResource,
 	LibraryRequirementRef,
-	LibraryResourceKind,
 } from "./library-types.js";
-import { isLibraryKind, isLibraryResourceKind } from "./library-types.js";
+import { isLibraryComponentKind, isLibraryKind } from "./library-types.js";
 import { type LibraryValidationPrerequisite, validateLibraryPackage } from "./library-validation.js";
 import { loadPromptTemplates, type PromptTemplate } from "./prompts/loader.js";
 import { loadSkills, type Skill } from "./skills/loader.js";
 
 /**
  * One body-free projection of three separate facts: catalog packages (install
- * targets), installed scoped copies (state), and actual recipe resources (what
+ * targets), installed scoped copies (state), and actual component resources (what
  * the loaders really see). It composes the existing readers and never fetches,
- * executes, reloads or writes. Package and recipe readers never call back into
+ * executes, reloads or writes. Package and component readers never call back into
  * this module.
  */
 
@@ -49,7 +49,7 @@ export type LibraryOrigin =
 
 /**
  * `loadable` means the package engine admits the copy's resource roots. It says
- * nothing about whether every recipe inside parsed or is trusted; that is the
+ * nothing about whether every component inside parsed or is trusted; that is the
  * resource row's availability.
  */
 export type LibraryCopyState =
@@ -103,23 +103,23 @@ export interface LibraryPackageRecord {
 	refusal?: string;
 }
 
-export type LibraryResourceSourceClass = "core" | "package" | "user" | "project" | "compat";
-export type LibraryResourceAvailability = "available" | "untrusted" | "invalid" | "shadowed" | "unavailable";
+export type LibraryComponentSourceClass = "core" | "package" | "user" | "project" | "compat";
+export type LibraryComponentAvailability = "available" | "untrusted" | "invalid" | "shadowed" | "unavailable";
 
-export interface LibraryResource {
+export interface LibraryComponent {
 	/** `${kind}:${name}@${sourceId}#${relativePath}`; two same-name files under one root stay distinct. */
 	key: string;
-	kind: LibraryResourceKind;
+	kind: LibraryComponentKind;
 	/** Actual runtime name: skill frontmatter name, agent file id, prompt path with colons, playbook name. */
 	name: string;
 	description: string;
 	invocation?: string;
 	path: string;
-	source: { class: LibraryResourceSourceClass; id: string; scope: "package" | "user" | "project" };
+	source: { class: LibraryComponentSourceClass; id: string; scope: "package" | "user" | "project" };
 	owner?: { ref: LibraryRequirementRef; scope: PluginScope; componentId?: string };
 	origin: LibraryOrigin;
 	format?: LibraryPackageFormat;
-	availability: LibraryResourceAvailability;
+	availability: LibraryComponentAvailability;
 	reason?: string;
 	trusted: boolean;
 	modelInvocable?: boolean;
@@ -134,7 +134,7 @@ export interface LibraryInventory {
 	audience: "operator" | "model";
 	packages: LibraryPackageRecord[];
 	copies: LibraryCopy[];
-	resources: LibraryResource[];
+	resources: LibraryComponent[];
 	diagnostics: string[];
 	truncated: { packages: boolean; copies: boolean; resources: boolean };
 }
@@ -181,7 +181,7 @@ export interface LibraryInventoryOptions {
 	query?: string;
 	/** `kind:name` package ref, a resource key, or a bare runtime name. */
 	ref?: string;
-	sources?: ReadonlyArray<LibraryResourceSourceClass>;
+	sources?: ReadonlyArray<LibraryComponentSourceClass>;
 	/** Skip a whole reader when a caller does not need it. */
 	include?: { packages?: boolean; copies?: boolean; resources?: boolean };
 	trustProjectCompatRoots?: boolean;
@@ -195,8 +195,8 @@ export interface LibraryInventoryOptions {
 // Keys
 // ---------------------------------------------------------------------------
 
-export function libraryResourceKey(
-	kind: LibraryResourceKind,
+export function libraryComponentKey(
+	kind: LibraryComponentKind,
 	name: string,
 	sourceId: string,
 	relativePath: string,
@@ -204,15 +204,15 @@ export function libraryResourceKey(
 	return `${kind}:${name}@${sourceId}#${relativePath}`;
 }
 
-export interface LibraryResourceKeyParts {
-	kind: LibraryResourceKind;
+export interface LibraryComponentKeyParts {
+	kind: LibraryComponentKind;
 	name: string;
 	sourceId: string;
 	/** Absent when a caller addresses every file with that name under that source. */
 	relativePath?: string;
 }
 
-export function parseLibraryResourceKey(key: string): LibraryResourceKeyParts | undefined {
+export function parseLibraryResourceKey(key: string): LibraryComponentKeyParts | undefined {
 	const hash = key.indexOf("#");
 	const head = hash >= 0 ? key.slice(0, hash) : key;
 	const at = head.lastIndexOf("@");
@@ -221,12 +221,12 @@ export function parseLibraryResourceKey(key: string): LibraryResourceKeyParts | 
 	const kind = head.slice(0, colon);
 	const name = head.slice(colon + 1, at);
 	const sourceId = head.slice(at + 1);
-	if (!isLibraryResourceKind(kind) || !name || !sourceId) return undefined;
+	if (!isLibraryComponentKind(kind) || !name || !sourceId) return undefined;
 	const relativePath = hash >= 0 ? key.slice(hash + 1) : undefined;
 	return { kind, name, sourceId, ...(relativePath ? { relativePath } : {}) };
 }
 
-function keyMatches(key: string, parts: LibraryResourceKeyParts): boolean {
+function keyMatches(key: string, parts: LibraryComponentKeyParts): boolean {
 	const own = parseLibraryResourceKey(key);
 	if (!own) return false;
 	return (
@@ -482,11 +482,11 @@ function ownerByPath(index: OwnerIndex, filePath: string): LibraryCopy | undefin
 	return index.roots.find((item) => contained(item.root, target))?.copy;
 }
 
-function ownerOf(copy: LibraryCopy): NonNullable<LibraryResource["owner"]> {
+function ownerOf(copy: LibraryCopy): NonNullable<LibraryComponent["owner"]> {
 	return { ref: copy.ref, scope: copy.scope };
 }
 
-function sourceClassFor(sourceId: string): LibraryResourceSourceClass {
+function sourceClassFor(sourceId: string): LibraryComponentSourceClass {
 	if (sourceId === "core") return "core";
 	if (sourceId.startsWith("plugin:")) return "package";
 	if (sourceId === "config") return "user";
@@ -509,12 +509,12 @@ function bounded(diagnostics: ReadonlyArray<string>): string[] {
 		.map((message) => clip(message, LIBRARY_INVENTORY_LIMITS.message));
 }
 
-function fromSkill(skill: Skill, index: OwnerIndex): LibraryResource {
+function fromSkill(skill: Skill, index: OwnerIndex): LibraryComponent {
 	const sourceId = skill.sourceInfo.source ?? `${skill.source}-${skill.scope}`;
 	const owner =
 		index.bySourceId.get(sourceId) ?? (skill.scope === "package" ? ownerByPath(index, skill.filePath) : undefined);
 	const hard = skill.diagnostics.some((item) => item.type === "error" || item.type === "collision");
-	const availability: LibraryResourceAvailability = hard ? "invalid" : skill.trusted ? "available" : "untrusted";
+	const availability: LibraryComponentAvailability = hard ? "invalid" : skill.trusted ? "available" : "untrusted";
 	const reason = hard
 		? skill.diagnostics.find((item) => item.type === "error" || item.type === "collision")?.message
 		: !skill.trusted
@@ -524,7 +524,7 @@ function fromSkill(skill: Skill, index: OwnerIndex): LibraryResource {
 			: undefined;
 	const scope = skill.scope === "cli" ? "user" : skill.scope;
 	return {
-		key: libraryResourceKey("skill", skill.name, sourceId, keyPath(index.anchors, sourceId, skill.filePath, owner)),
+		key: libraryComponentKey("skill", skill.name, sourceId, keyPath(index.anchors, sourceId, skill.filePath, owner)),
 		kind: "skill",
 		name: skill.name,
 		description: clip(skill.description),
@@ -541,12 +541,12 @@ function fromSkill(skill: Skill, index: OwnerIndex): LibraryResource {
 	};
 }
 
-function fromPrompt(template: PromptTemplate, index: OwnerIndex): LibraryResource {
+function fromPrompt(template: PromptTemplate, index: OwnerIndex): LibraryComponent {
 	const scope = template.sourceInfo.scope === "cli" ? "user" : template.sourceInfo.scope;
 	const sourceId = template.sourceInfo.source ?? scope;
 	const owner =
 		index.bySourceId.get(sourceId) ?? (scope === "package" ? ownerByPath(index, template.filePath) : undefined);
-	const availability: LibraryResourceAvailability = template.unavailable
+	const availability: LibraryComponentAvailability = template.unavailable
 		? "unavailable"
 		: template.trusted
 			? "available"
@@ -559,7 +559,7 @@ function fromPrompt(template: PromptTemplate, index: OwnerIndex): LibraryResourc
 				: "discovered only; explicitly import into Clio with interop adopt or library import"
 			: undefined;
 	return {
-		key: libraryResourceKey(
+		key: libraryComponentKey(
 			"prompt",
 			template.name,
 			sourceId,
@@ -595,11 +595,11 @@ function agentScope(source: AgentRecipe["source"]): "package" | "user" | "projec
 	return source === "user" ? "user" : source === "project" ? "project" : "package";
 }
 
-function fromAgent(recipe: AgentRecipe, index: OwnerIndex): LibraryResource {
+function fromAgent(recipe: AgentRecipe, index: OwnerIndex): LibraryComponent {
 	const { sourceId, owner } = agentSourceId(recipe, index);
 	const scope = agentScope(recipe.source);
 	return {
-		key: libraryResourceKey("agent", recipe.id, sourceId, keyPath(index.anchors, sourceId, recipe.filepath, owner)),
+		key: libraryComponentKey("agent", recipe.id, sourceId, keyPath(index.anchors, sourceId, recipe.filepath, owner)),
 		kind: "agent",
 		name: recipe.id,
 		description: clip(recipe.description),
@@ -615,14 +615,14 @@ function fromAgent(recipe: AgentRecipe, index: OwnerIndex): LibraryResource {
 	};
 }
 
-function fromAgentDiagnostic(diagnostic: AgentRecipeDiagnostic, index: OwnerIndex): LibraryResource {
+function fromAgentDiagnostic(diagnostic: AgentRecipeDiagnostic, index: OwnerIndex): LibraryComponent {
 	const { sourceId, owner } = agentSourceId({ source: diagnostic.source, filepath: diagnostic.filepath }, index);
 	const scope = agentScope(diagnostic.source);
 	const name = diagnostic.id ?? path.basename(diagnostic.filepath, ".md");
-	const availability: LibraryResourceAvailability =
+	const availability: LibraryComponentAvailability =
 		diagnostic.kind === "overridden" ? "shadowed" : diagnostic.kind === "ignored" ? "unavailable" : "invalid";
 	return {
-		key: libraryResourceKey("agent", name, sourceId, keyPath(index.anchors, sourceId, diagnostic.filepath, owner)),
+		key: libraryComponentKey("agent", name, sourceId, keyPath(index.anchors, sourceId, diagnostic.filepath, owner)),
 		kind: "agent",
 		name,
 		description: "",
@@ -638,21 +638,21 @@ function fromAgentDiagnostic(diagnostic: AgentRecipeDiagnostic, index: OwnerInde
 	};
 }
 
-function fromFleet(listing: ReturnType<typeof listFleetContracts>[number], index: OwnerIndex): LibraryResource {
+function fromFleet(listing: ReturnType<typeof listPlaybooks>[number], index: OwnerIndex): LibraryComponent {
 	const { sourceId, owner } = agentSourceId({ source: listing.source, filepath: listing.path }, index);
 	const scope = agentScope(listing.source);
-	const name = listing.contract?.name ?? listing.name;
-	const availability: LibraryResourceAvailability = listing.contract
+	const name = listing.playbook?.name ?? listing.name;
+	const availability: LibraryComponentAvailability = listing.playbook
 		? "available"
 		: listing.needsCommands
 			? "unavailable"
 			: "invalid";
 	const reason = listing.error ?? undefined;
 	return {
-		key: libraryResourceKey("playbook", name, sourceId, keyPath(index.anchors, sourceId, listing.path, owner)),
+		key: libraryComponentKey("playbook", name, sourceId, keyPath(index.anchors, sourceId, listing.path, owner)),
 		kind: "playbook",
 		name,
-		description: clip(listing.contract?.description ?? ""),
+		description: clip(listing.playbook?.description ?? ""),
 		...(availability === "available" ? { invocation: `/fleet run ${name}` } : {}),
 		path: listing.path,
 		source: { class: sourceClassFor(sourceId), id: sourceId, scope },
@@ -667,12 +667,12 @@ function fromFleet(listing: ReturnType<typeof listFleetContracts>[number], index
 
 /** A collision loser is a real file the loader read and discarded; it stays inspectable. */
 function fromCollisionLoser(
-	kind: LibraryResourceKind,
+	kind: LibraryComponentKind,
 	diagnostic: ResourceDiagnostic,
-	winners: ReadonlyArray<LibraryResource>,
+	winners: ReadonlyArray<LibraryComponent>,
 	index: OwnerIndex,
 	sourceIdFor: (filePath: string, scope: "package" | "user" | "project") => string,
-): LibraryResource | undefined {
+): LibraryComponent | undefined {
 	const collision = diagnostic.collision;
 	if (!collision) return undefined;
 	if (winners.some((item) => item.path === collision.loserPath)) return undefined;
@@ -680,7 +680,12 @@ function fromCollisionLoser(
 	const owner = scope === "package" ? ownerByPath(index, collision.loserPath) : undefined;
 	const sourceId = owner ? `plugin:${owner.scope}:${owner.name}` : sourceIdFor(collision.loserPath, scope);
 	return {
-		key: libraryResourceKey(kind, collision.name, sourceId, keyPath(index.anchors, sourceId, collision.loserPath, owner)),
+		key: libraryComponentKey(
+			kind,
+			collision.name,
+			sourceId,
+			keyPath(index.anchors, sourceId, collision.loserPath, owner),
+		),
 		kind,
 		name: collision.name,
 		description: "",
@@ -777,7 +782,7 @@ function copyMatches(copy: LibraryCopy, options: LibraryInventoryOptions, select
 	return true;
 }
 
-function resourceMatches(resource: LibraryResource, options: LibraryInventoryOptions, selection: Selection): boolean {
+function resourceMatches(resource: LibraryComponent, options: LibraryInventoryOptions, selection: Selection): boolean {
 	if (selection.packageRef && resource.owner?.ref !== selection.packageRef) {
 		const [kind, name] = selection.packageRef.split(":", 2);
 		if (!(kind === resource.kind && name === resource.name)) return false;
@@ -789,7 +794,7 @@ function resourceMatches(resource: LibraryResource, options: LibraryInventoryOpt
 	return matchesQuery(options, resource.name, resource.description);
 }
 
-function audienceAdmits(resource: LibraryResource, options: LibraryInventoryOptions): boolean {
+function audienceAdmits(resource: LibraryComponent, options: LibraryInventoryOptions): boolean {
 	const model = options.audience === "model";
 	if (resource.kind === "agent" && (resource.audience === "shadow" || resource.audience === "internal"))
 		return !model && options.all === true;
@@ -810,8 +815,8 @@ function trustSetting(explicit: boolean | undefined): boolean {
 	}
 }
 
-function sortResources(items: LibraryResource[]): LibraryResource[] {
-	const order: Record<LibraryResourceKind, number> = { skill: 0, agent: 1, prompt: 2, playbook: 3 };
+function sortResources(items: LibraryComponent[]): LibraryComponent[] {
+	const order: Record<LibraryComponentKind, number> = { skill: 0, agent: 1, prompt: 2, playbook: 3 };
 	return items.sort(
 		(a, b) =>
 			order[a.kind] - order[b.kind] ||
@@ -836,7 +841,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 		const text = clip(message, LIBRARY_INVENTORY_LIMITS.message);
 		if (!diagnostics.items.includes(text)) diagnostics.push(text);
 	};
-	const wants = (kind: LibraryResourceKind): boolean => !options.kinds?.length || options.kinds.includes(kind);
+	const wants = (kind: LibraryComponentKind): boolean => !options.kinds?.length || options.kinds.includes(kind);
 
 	// Copies underpin package state and resource ownership, so they are read
 	// whenever either of those is requested. The package engine enumerates every
@@ -883,7 +888,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 		}
 	}
 
-	const resources = new Bounded<LibraryResource>(LIBRARY_INVENTORY_LIMITS.resources);
+	const resources = new Bounded<LibraryComponent>(LIBRARY_INVENTORY_LIMITS.resources);
 	if (include.resources) {
 		let configDir = options.configDir;
 		if (!configDir) {
@@ -908,7 +913,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 		const trustProjectCompatRoots = trustSetting(options.trustProjectCompatRoots);
 		// Each loader enumerates its whole root set because precedence needs every
 		// candidate. What is bounded here is which loaders run and what is projected.
-		const skillRows: LibraryResource[] = [];
+		const skillRows: LibraryComponent[] = [];
 		if (wants("skill")) {
 			const skills = loadSkills({
 				cwd,
@@ -926,7 +931,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 					note(`skill: ${diagnostic.message}${diagnostic.path ? ` (${diagnostic.path})` : ""}`);
 			}
 		}
-		const promptRows: LibraryResource[] = [];
+		const promptRows: LibraryComponent[] = [];
 		if (wants("prompt")) {
 			const prompts = loadPromptTemplates({
 				cwd,
@@ -943,7 +948,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 					note(`prompt: ${diagnostic.message}${diagnostic.path ? ` (${diagnostic.path})` : ""}`);
 			}
 		}
-		const agentRows: LibraryResource[] = [];
+		const agentRows: LibraryComponent[] = [];
 		if (wants("agent")) {
 			const agentDiagnostics: AgentRecipeDiagnostic[] = [];
 			try {
@@ -953,10 +958,10 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 			}
 			for (const diagnostic of agentDiagnostics) agentRows.push(fromAgentDiagnostic(diagnostic, index));
 		}
-		const fleetRows: LibraryResource[] = [];
+		const fleetRows: LibraryComponent[] = [];
 		if (wants("playbook")) {
 			try {
-				for (const listing of listFleetContracts(cwd)) fleetRows.push(fromFleet(listing, index));
+				for (const listing of listPlaybooks(cwd)) fleetRows.push(fromFleet(listing, index));
 			} catch (error) {
 				note(`playbook: discovery failed: ${error instanceof Error ? error.message : String(error)}`);
 			}
@@ -1000,7 +1005,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 export interface LibraryCopyInspection {
 	copy: LibraryCopy;
 	resources: Array<{
-		kind: LibraryResourceKind;
+		kind: LibraryComponentKind;
 		name: string;
 		path: string;
 		componentId?: string;
@@ -1040,7 +1045,7 @@ export function inspectLibraryCopy(
 	const resources: LibraryCopyInspection["resources"] = [];
 	const ancillary: LibraryCopyInspection["ancillary"] = [];
 	for (const record of result.validation.resources) {
-		if (isLibraryResourceKind(record.kind)) {
+		if (isLibraryComponentKind(record.kind)) {
 			const componentId = record.componentRef ? components.get(record.componentRef) : undefined;
 			resources.push({
 				kind: record.kind,

@@ -78,7 +78,7 @@ const directory = (root: string): string => (root.endsWith(path.sep) ? root : `$
  * The store files directory is reachable only when `fs.write` names `store`;
  * the host key/value store is a separate service and needs no file access.
  */
-export function runtimePermissionArgs(declaration: ExtensionRuntimeDeclarationV2, roots: RuntimeRoots): string[] {
+function runtimePermissionArgs(declaration: ExtensionRuntimeDeclarationV2, roots: RuntimeRoots): string[] {
 	const storeFiles = declaration.permissions.fs.write.includes("store");
 	const read = new Set([
 		roots.bootstrap,

@@ -24,7 +24,11 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
-import { FLEET_COMMAND_BASE_ENV, type FleetCommand, validateFleetCommandArgs } from "../agents/fleet-commands.js";
+import {
+	PLAYBOOK_COMMAND_BASE_ENV,
+	type PlaybookCommand,
+	validatePlaybookCommandArgs,
+} from "../agents/playbook-commands.js";
 import type { CodeReportResult } from "../agents/result-contract.js";
 
 /** Bytes of command output retained for the artifact log. */
@@ -50,7 +54,7 @@ export interface CodeStepRunInput {
 	/** Already resolved literal arguments; never interpolated a second time. */
 	args?: ReadonlyArray<string>;
 	stepId: string;
-	command: FleetCommand;
+	command: PlaybookCommand;
 	/** Absolute workspace root the command's relative cwd resolves against. */
 	workspaceRoot: string;
 	/** Absolute directory the command log is written to; omitted means no artifact. */
@@ -146,7 +150,7 @@ function tailUtf8(value: Buffer, limit: number, marker: string): { text: string;
 	return { text: marker + value.subarray(value.length - limit).toString("utf8"), truncated: true };
 }
 
-function resolveCwd(command: FleetCommand, workspaceRoot: string): string {
+function resolveCwd(command: PlaybookCommand, workspaceRoot: string): string {
 	const root = resolve(workspaceRoot);
 	if (command.cwd === "") return root;
 	const target = resolve(root, command.cwd);
@@ -155,8 +159,8 @@ function resolveCwd(command: FleetCommand, workspaceRoot: string): string {
 }
 
 /** Closed environment: the base allowlist plus whatever this command declared. */
-function codeStepEnv(command: FleetCommand, source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	const names = [...FLEET_COMMAND_BASE_ENV, ...command.env];
+function codeStepEnv(command: PlaybookCommand, source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const names = [...PLAYBOOK_COMMAND_BASE_ENV, ...command.env];
 	const env: NodeJS.ProcessEnv = {};
 	for (const name of names) {
 		const value = source[name];
@@ -178,7 +182,7 @@ const ARGV_PLACEHOLDER = /^\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}$/u;
  * committing with an empty message is the failure this check exists to stop.
  */
 export function resolveCommandArgv(
-	command: FleetCommand,
+	command: PlaybookCommand,
 	substitutions: Readonly<Record<string, string>> = {},
 ): string[] {
 	return command.argv.map((token) => {
@@ -330,7 +334,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	) {
 		throw new Error("code step: invalid additional arguments");
 	}
-	validateFleetCommandArgs(command, extraArgs);
+	validatePlaybookCommandArgs(command, extraArgs);
 	const argv = [...resolveCommandArgv(command, input.substitutions), ...extraArgs];
 	const startedAtMs = Date.now();
 	const clock = process.hrtime.bigint();
@@ -366,7 +370,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		: { checks: [], notes: [] };
 	for (const test of testFiles.checks) {
 		if (input.signal?.aborted || spawned.timedOut) break;
-		const testCommand: FleetCommand = {
+		const testCommand: PlaybookCommand = {
 			id: `changed tests (${test.check.id})`,
 			argv: test.argv,
 			cwd: test.check.cwd,
@@ -448,7 +452,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		argv: [...argv],
 		...(commandRuns.length > 1 ? { commandRuns } : {}),
 		cwd,
-		envNames: [...FLEET_COMMAND_BASE_ENV, ...command.env],
+		envNames: [...PLAYBOOK_COMMAND_BASE_ENV, ...command.env],
 		timeoutMs: command.timeoutMs,
 		startedAt,
 		endedAt,

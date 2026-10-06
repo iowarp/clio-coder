@@ -42,7 +42,10 @@ test("command draws its card", async () => {
 
 Supply `{workspace,sessionId,options}` when a handler needs fixture
 context. Host methods: `command`, `observe`, `hook`, `tool`, `action`, `interview`,
-`tick`, `advance`, `dispose`; `state` and `store` are inspectable. `advance(ms)`
+`leave`, `tick`, `advance`, `dispose`; `state` and `store` are inspectable.
+`observe` of `workspace_enter` or `workspace_leave` moves the snapshot's
+`activeWorkspace` as the live host does, and `leave()` leaves the active
+workspace and delivers `workspace_leave`. `advance(ms)`
 advances Date inside handlers and delivers due declared ticks; deadlines still
 use real timers. Create fixture files in an owned temp directory and clean up.
 Test hosts have isolated stores: seed a peer's claim explicitly when testing

@@ -1286,7 +1286,7 @@ export type AcpFleetPreview =
 			planHash: string;
 			stepCount: number;
 			waves: Array<{ index: number; steps: AcpFleetStep[] }>;
-			budget: { ceilingUsd: number; currentUsd: number; contractUsd: number | null };
+			budget: { ceilingUsd: number; currentUsd: number; playbookUsd: number | null };
 			/** True when steps, lists or displayed text were cut at the wire bounds. */
 			truncated: boolean;
 	  }
@@ -2217,7 +2217,7 @@ export const AcpFleetPreviewSchema = Type.Union([
 				{
 					ceilingUsd: Type.Number({ minimum: 0 }),
 					currentUsd: Type.Number({ minimum: 0 }),
-					contractUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+					playbookUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
 				},
 				closed,
 			),

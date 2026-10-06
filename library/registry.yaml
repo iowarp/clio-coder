@@ -324,7 +324,7 @@ entries:
       - debug extension reload
     version: 0.1.0
     sourceUrl: skills/meta/extension-authoring
-    sha256: b560852c2daf407d8721207c963db569060ce19b6d2509780c63c817b0526bec
+    sha256: 90bd65a6b34d1f26b49e676f8f2ca82466e2a5f54f8672bfaefcf7bad6ecf588
     provides:
       - kind: skill
         name: extension-authoring
@@ -371,7 +371,7 @@ entries:
       - search the skills marketplace
     version: 0.2.2
     sourceUrl: skills/meta/find-skills
-    sha256: 709a6a460f773d0a74329a617203c8121bcdbdbbff8c99f5cac0846b1237db81
+    sha256: 04048cf4b03d13a8c2e2e3f03b1becd4ba597fbfb4b1f8c32b10877d5259ea8f
     provides:
       - kind: skill
         name: find-skills
@@ -440,7 +440,7 @@ entries:
       lab feasibility, task execution and verified paper handoff."
     version: 0.2.0
     sourceUrl: plugins/materio
-    sha256: a2f6d2da141e13b77b5a630e5b437df7bc8eec1e7c095be7c55e04498da6ef84
+    sha256: b13d844666768c1879a3e7f72e321ad04994a7d897c1cbf78d05bc0b34ab01d6
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -561,7 +561,7 @@ entries:
       advisory guardrails.
     version: 0.2.0
     sourceUrl: extensions/materio
-    sha256: 60410298119a92d9ce9a39424b83a718fc9d69994d609ce0c54a2d0028ae896a
+    sha256: 36a8681cd33cecc53f80ac4d354062c03fcdc7d8f615e95bc9c8b5164ca42399
     plugin: materio
     provides:
       - kind: extension

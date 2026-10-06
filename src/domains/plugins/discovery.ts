@@ -2,13 +2,9 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { evaluateClioCompatibility, isSemanticVersion } from "../extensions/compatibility.js";
-import {
-	isLibraryKind,
-	type LibraryRequirementRef,
-	readLegacyLibraryKind,
-	readLegacyLibraryRef,
-} from "../resources/library-types.js";
+import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
 import { pluginContentDigestWithCapture } from "./integrity.js";
+import { olderClioDeclaration, olderClioMessage } from "./older-clio.js";
 import type {
 	ClioPluginConfiguration,
 	PluginCandidate,
@@ -118,38 +114,9 @@ function components(value: unknown, root: string): PluginComponent[] {
 	return [...refs.values()];
 }
 
-/**
- * D9 legacy read, kept for one release: a namespace written before fleet
- * contracts became playbooks says `resources.fleets`, package or component kind
- * `fleet` and `fleet:<name>` requirements, and WTF-P 0.7.4 is pinned remotely
- * that way. Read those as the playbook names on a copy, so the manifest digest
- * still covers the exact bytes on disk. Delete this with the other D9 reads.
- */
-function readLegacyFleetNames(raw: Record<string, unknown>): Record<string, unknown> {
-	const value: Record<string, unknown> = { ...raw };
-	if (value.kind !== undefined) value.kind = readLegacyLibraryKind(value.kind);
-	if (Array.isArray(value.requires)) value.requires = value.requires.map(readLegacyLibraryRef);
-	if (record(value.resources) && "fleets" in value.resources) {
-		const { fleets, ...resources } = value.resources;
-		if ("playbooks" in resources) throw new Error("resources may declare playbooks or its legacy name fleets, not both");
-		value.resources = { ...resources, playbooks: fleets };
-	}
-	if (Array.isArray(value.components))
-		value.components = value.components.map((item: unknown) =>
-			record(item)
-				? {
-						...item,
-						kind: readLegacyLibraryKind(item.kind),
-						...(Array.isArray(item.requires) ? { requires: item.requires.map(readLegacyLibraryRef) } : {}),
-					}
-				: item,
-		);
-	return value;
-}
-
 function clioConfiguration(value: unknown, root: string): ClioPluginConfiguration {
 	if (value !== undefined && !record(value)) throw new Error(`${PLUGIN_EXTENSION_KEY} must be an object`);
-	const raw = readLegacyFleetNames(value ?? {});
+	const raw: Record<string, unknown> = value ?? {};
 	// `evals` is retired: an installed manifest that still declares package
 	// suites keeps loading and the value is ignored. The key leaves this set in
 	// the v0.7.0 compatibility window.
@@ -290,6 +257,8 @@ export function parsePluginManifest(raw: string, root: string): PluginManifest {
 	)
 		throw new Error("extensions must contain namespaced objects");
 	const extensions = value.extensions as Record<string, Record<string, unknown>> | undefined;
+	const older = olderClioDeclaration(extensions?.[PLUGIN_EXTENSION_KEY]);
+	if (older !== null) throw new Error(olderClioMessage(value.name, older));
 	const clio = clioConfiguration(extensions?.[PLUGIN_EXTENSION_KEY], root);
 	return { ...(value as unknown as Omit<PluginManifest, "clio">), clio };
 }

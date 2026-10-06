@@ -80,7 +80,7 @@ function makeScratch(): Scratch {
  * A declared check that records every execution and then prints `message`.
  *
  * `process.execPath` rather than `"node"`: `runCodeStep` passes a closed
- * environment allowlist (`code-step.ts` `FLEET_COMMAND_BASE_ENV`) and no
+ * environment allowlist (`code-step.ts` `PLAYBOOK_COMMAND_BASE_ENV`) and no
  * test-supplied variable survives it, so the run counter lives in the argv the
  * admission layer would have resolved.
  */

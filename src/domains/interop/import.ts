@@ -65,11 +65,11 @@ export interface LibraryImportApplyResult {
 	published: boolean;
 	installed?: string;
 	destination?: string;
-	/** Native validation of the installed recipe files; absent when nothing was published. */
+	/** Native validation of the installed component files; absent when nothing was published. */
 	validation?: LibraryPackageValidationResult;
 	/**
 	 * Trust admission is a separate fact from publication and validity. This is
-	 * only the gate setting the caller supplied; actual recipe availability is
+	 * only the gate setting the caller supplied; actual component availability is
 	 * the inventory's fact.
 	 */
 	admission: {

@@ -30,7 +30,7 @@ function packages(entries: ReadonlyArray<InstalledExtension | InstalledPlugin>):
 	);
 }
 
-export function inventoryChanges(
+function inventoryChanges(
 	before: Inventory,
 	after: Inventory,
 ): Record<"added" | "removed" | "modified" | "unchanged", string[]> {
@@ -135,7 +135,7 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 								if (issue.type === "error") failed = true;
 								lines.push(`  ${issue.type}: ${entry.id}: ${issue.message}`);
 							}
-						lines.push("  restart required: none (skills, prompts, agents and fleets reload here)");
+						lines.push("  restart required: none (skills, prompts, agents and playbooks reload here)");
 						if (!snapshot.packages.some((entry) => entry.diagnostics.some((issue) => issue.type === "error")))
 							lines.push("  failed: none");
 					} catch (error) {

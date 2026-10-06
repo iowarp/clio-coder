@@ -157,7 +157,7 @@ function normalizePathList(
 /**
  * Build typed intent from paths a non-model producer already holds.
  *
- * Fleet contracts, CLI entry points, and extensions declare repository-relative
+ * Playbooks, CLI entry points, and extensions declare repository-relative
  * scope in their own artifacts long before a dispatch request exists. Without
  * this they hand the request nothing, and the scope resolver falls back to
  * reading path-like tokens out of the rendered prompt, which is the exact

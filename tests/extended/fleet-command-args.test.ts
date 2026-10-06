@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import { parseFleetCommands, resolveFleetCommandArgs } from "../../src/domains/agents/fleet-commands.js";
-import { parseFleetContract, validateFleetCommands } from "../../src/domains/agents/fleet-contract.js";
+import { parsePlaybook, validatePlaybookCommands } from "../../src/domains/agents/playbook.js";
+import { parsePlaybookCommands, resolvePlaybookCommandArgs } from "../../src/domains/agents/playbook-commands.js";
 import { runCodeStep } from "../../src/domains/dispatch/code-step.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
 
@@ -26,7 +26,7 @@ Verify the task output.
 `;
 
 const parameterized = () =>
-	parseFleetCommands(
+	parsePlaybookCommands(
 		JSON.stringify({
 			version: 1,
 			commands: {
@@ -40,12 +40,12 @@ const parameterized = () =>
 	);
 
 it("seals resolved arguments into the execution plan and rejects missing variables before execution", () => {
-	const contract = parseFleetContract(raw, "/fixture/fleet.md");
+	const playbook = parsePlaybook(raw, "/fixture/fleet.md");
 	const plan = (taskDir: string) =>
 		compileFleetExecutionPlan({
 			commands: parameterized(),
-			contract,
-			task: contract.body,
+			playbook,
+			task: playbook.body,
 			vars: { taskDir },
 			resolveAgent() {
 				throw new Error("no agent");
@@ -58,25 +58,28 @@ it("seals resolved arguments into the execution plan and rejects missing variabl
 		() =>
 			compileFleetExecutionPlan({
 				commands: parameterized(),
-				contract,
-				task: contract.body,
+				playbook,
+				task: playbook.body,
 				resolveAgent() {
 					throw new Error("no agent");
 				},
 			}),
 		/missing variable/,
 	);
-	const registry = parseFleetCommands("version: 1\ncommands:\n  different: {argv: [echo]}\n", "/fixture/commands.yaml");
-	throws(() => validateFleetCommands(contract, registry), /unknown command/);
+	const registry = parsePlaybookCommands(
+		"version: 1\ncommands:\n  different: {argv: [echo]}\n",
+		"/fixture/commands.yaml",
+	);
+	throws(() => validatePlaybookCommands(playbook, registry), /unknown command/);
 });
 
 it("accepts only bounded string argument vectors and whole-token variables", () => {
-	throws(() => parseFleetContract(raw.replace('args: ["{{taskDir}}"]', 'args: "shell string"'), "/fixture/fleet.md"));
-	throws(() => parseFleetContract(raw.replace('args: ["{{taskDir}}"]', "args: [17]"), "/fixture/fleet.md"));
-	throws(() => resolveFleetCommandArgs(["--path={{taskDir}}"], { taskDir: "x" }), /whole argument/);
-	throws(() => resolveFleetCommandArgs(["{{taskDir}}"], { taskDir: "x\0y" }), /NUL/);
-	throws(() => resolveFleetCommandArgs(Array(65).fill("x")), /64/);
-	deepStrictEqual(resolveFleetCommandArgs(["{{taskDir}}", ""], { taskDir: "a b; $(echo secret)" }), [
+	throws(() => parsePlaybook(raw.replace('args: ["{{taskDir}}"]', 'args: "shell string"'), "/fixture/fleet.md"));
+	throws(() => parsePlaybook(raw.replace('args: ["{{taskDir}}"]', "args: [17]"), "/fixture/fleet.md"));
+	throws(() => resolvePlaybookCommandArgs(["--path={{taskDir}}"], { taskDir: "x" }), /whole argument/);
+	throws(() => resolvePlaybookCommandArgs(["{{taskDir}}"], { taskDir: "x\0y" }), /NUL/);
+	throws(() => resolvePlaybookCommandArgs(Array(65).fill("x")), /64/);
+	deepStrictEqual(resolvePlaybookCommandArgs(["{{taskDir}}", ""], { taskDir: "a b; $(echo secret)" }), [
 		"a b; $(echo secret)",
 		"",
 	]);
@@ -97,7 +100,9 @@ it("passes shell metacharacters and placeholder-looking values as literal argv e
 			env: [],
 			description: "argument fixture",
 		};
-		const args = resolveFleetCommandArgs(["{{taskDir}}", "literal"], { taskDir: "a b; $(touch impossible) {{unbound}}" });
+		const args = resolvePlaybookCommandArgs(["{{taskDir}}", "literal"], {
+			taskDir: "a b; $(touch impossible) {{unbound}}",
+		});
 		const result = await runCodeStep({ command, stepId: "verify", workspaceRoot, args });
 		strictEqual(result.record.exitCode, 0);
 		deepStrictEqual(JSON.parse(result.stdout), args);
@@ -109,7 +114,7 @@ it("passes shell metacharacters and placeholder-looking values as literal argv e
 });
 
 it("binds the same literal argument vector into every unrolled loop check", () => {
-	const contract = parseFleetContract(
+	const playbook = parsePlaybook(
 		`---
 version: 3
 name: loop-argument-fixture
@@ -130,8 +135,8 @@ Verify task output.
 	);
 	const plan = compileFleetExecutionPlan({
 		commands: parameterized(),
-		contract,
-		task: contract.body,
+		playbook,
+		task: playbook.body,
 		vars: { taskDir: "task-03" },
 		resolveAgent() {
 			return {
@@ -157,21 +162,21 @@ it("keeps legacy commands fixed and rejects eval flags before admission and dire
 	const workspaceRoot = mkdtempSync(join(tmpdir(), "clio-coder-fixed-command-"));
 	try {
 		const marker = join(workspaceRoot, "changed-authority.txt");
-		const registry = parseFleetCommands(
+		const registry = parsePlaybookCommands(
 			JSON.stringify({
 				version: 1,
 				commands: { verify: { argv: [process.execPath, "-e", "process.stdout.write('approved fixed check')"] } },
 			}),
 			"/fixture/commands.yaml",
 		);
-		const contract = parseFleetContract(raw, "/fixture/fleet.md");
-		throws(() => validateFleetCommands(contract, registry), /expected 0 declared argument slots/);
+		const playbook = parsePlaybook(raw, "/fixture/fleet.md");
+		throws(() => validatePlaybookCommands(playbook, registry), /expected 0 declared argument slots/);
 		throws(
 			() =>
 				compileFleetExecutionPlan({
 					commands: registry,
-					contract,
-					task: contract.body,
+					playbook,
+					task: playbook.body,
 					vars: { taskDir: "--eval" },
 					resolveAgent() {
 						throw new Error("unused");
@@ -196,7 +201,7 @@ it("keeps legacy commands fixed and rejects eval flags before admission and dire
 		const optedIn = { ...command, argumentSlots: [{ name: "taskDir", maxLength: 12 }] };
 		await rejects(runCodeStep({ command: optedIn, stepId: "flag", workspaceRoot, args: ["--eval"] }), /leading dash/);
 		await rejects(runCodeStep({ command: optedIn, stepId: "long", workspaceRoot, args: ["x".repeat(13)] }), /at most 12/);
-		throws(() => validateFleetCommands(contract, parameterized(), { taskDir: "--eval" }), /leading dash/);
+		throws(() => validatePlaybookCommands(playbook, parameterized(), { taskDir: "--eval" }), /leading dash/);
 	} finally {
 		rmSync(workspaceRoot, { recursive: true, force: true });
 	}

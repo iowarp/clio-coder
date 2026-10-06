@@ -7,7 +7,7 @@
  * that calls it owns presentation only: this module writes nothing to stdout
  * and reports progress through callbacks.
  *
- * Everything the run needs is passed in. The module resolves no contract by
+ * Everything the run needs is passed in. The module resolves no playbook by
  * itself, loads no domain, and reads no configuration, which is what lets a
  * headless CLI invocation and an interactive approval share it.
  */
@@ -17,8 +17,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import { clioStateDir } from "../../core/xdg.js";
-import type { FleetCommandRegistry } from "../agents/fleet-commands.js";
-import type { FleetContract } from "../agents/fleet-contract.js";
+import type { Playbook } from "../agents/playbook.js";
+import type { PlaybookCommandRegistry } from "../agents/playbook-commands.js";
 import { mutationReportPaths, resultContractAuthorship } from "../agents/result-contract.js";
 import type { AgentSpec } from "../agents/spec.js";
 import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../observability/cost.js";
@@ -145,11 +145,11 @@ function stepIdentity(step: unknown): string {
 export function planFleetResume(
 	record: FleetRunRecord,
 	plan: ExecutionPlan,
-	contract: Pick<FleetContract, "name">,
+	playbook: Pick<Playbook, "name">,
 	vars: Readonly<Record<string, string>>,
 ): FleetResumePlan {
-	if (record.fleet !== contract.name) {
-		return { ok: false, reason: "fleet-name", priorFleet: record.fleet, currentFleet: contract.name };
+	if (record.fleet !== playbook.name) {
+		return { ok: false, reason: "fleet-name", priorFleet: record.fleet, currentFleet: playbook.name };
 	}
 	if (sortedVars(record.vars) !== sortedVars(vars)) return { ok: false, reason: "vars" };
 	if (record.planHash !== plan.hash) {
@@ -183,10 +183,10 @@ export function planFleetResume(
 
 export interface ExecuteFleetRunInput {
 	plan: ExecutionPlan;
-	/** Contract name, used for the deterministic commit subject only. */
-	contractName: string;
+	/** Playbook name, used for the deterministic commit subject only. */
+	playbookName: string;
 	/** Registered command bindings; required when the plan carries code steps. */
-	commands: FleetCommandRegistry | null;
+	commands: PlaybookCommandRegistry | null;
 	workspaceRoot: string;
 	/** Lineage root every step in this run shares. */
 	fleetRootId: string;
@@ -198,7 +198,7 @@ export interface ExecuteFleetRunInput {
 	attributionEnabled: boolean;
 	/** Cancel the fleet, including queued and running proposals. */
 	signal?: AbortSignal;
-	/** Variables rendered into the contract body and sealed into the run record. */
+	/** Variables rendered into the playbook body and sealed into the run record. */
 	vars?: Readonly<Record<string, string>>;
 	/** A validated prior run and the successful prefix retained from it. */
 	resume?: { record: FleetRunRecord; replayed: ReadonlyMap<string, ExecutionStepResult> };
@@ -244,16 +244,16 @@ function fleetGateCorrelation(subject: RunReceipt, decider: RunReceipt): GateDec
 }
 
 /**
- * Typed scope for one fleet step, drawn from the boundary its contract already
- * declared. Returns null when the contract declared nothing for this position,
- * which is every step of a pre-v4 contract and every readonly step: those keep
+ * Typed scope for one fleet step, drawn from the boundary its playbook already
+ * declared. Returns null when the playbook declared nothing for this position,
+ * which is every step of a pre-v4 playbook and every readonly step: those keep
  * the legacy inference path rather than being handed an empty declaration that
  * would silently switch off path-scoped rule selection for them.
  *
- * A contract whose declared paths do not survive the boundary grammar is a
+ * A playbook whose declared paths do not survive the boundary grammar is a
  * compile-time authoring bug, not a dispatch-time one, so a malformed entry
  * falls back to inference here rather than aborting a run mid-wave; the
- * contract loader is the surface that refuses it.
+ * playbook loader is the surface that refuses it.
  */
 function fleetStepIntent(writes: ReadonlyArray<string> | undefined): DispatchIntent | null {
 	if (writes === undefined || writes.length === 0) return null;
@@ -283,7 +283,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		version: 1,
 		id: fleetRootId,
 		cwd: workspaceRoot,
-		fleet: input.contractName,
+		fleet: input.playbookName,
 		planHash: livePlan.hash,
 		stepIds: livePlan.steps.map((step) => step.id),
 		planSteps: livePlan.steps.map((step) => structuredClone(step)),
@@ -455,7 +455,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			if (authored.commitMessage !== null) return authored.commitMessage;
 			if (authored.summary !== null) return `clio(${fleetRootId}): ${authored.summary}`;
 		}
-		return `clio(${fleetRootId}): ${input.contractName} ${step.id}`;
+		return `clio(${fleetRootId}): ${input.playbookName} ${step.id}`;
 	};
 
 	let result: ExecutionPlanResult;
@@ -569,14 +569,14 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				//
 				// That enforcement split is exactly why a step's declared `writes:` reaches
 				// typed intent as `relevant_paths` rather than as `write_roots`. The
-				// contract already said what this position may change and the enforcer
+				// playbook already said what this position may change and the enforcer
 				// already holds it; restating it as intent write roots would mint a second
 				// grant enforced at the per-tool worker seam, which refuses outright on the
 				// subprocess and ACP runtimes a fleet may legitimately route a step to.
 				// Carrying it as declared scope changes no authority and gets the
-				// contract's own paths into project-rule selection and worker context,
+				// playbook's own paths into project-rule selection and worker context,
 				// where prose tokens scraped from the rendered prompt were standing in for
-				// a declaration the contract had already made.
+				// a declaration the playbook had already made.
 				const stepIntent = fleetStepIntent(step.writes);
 				const request: DispatchRequest = {
 					agentId: step.agentId,

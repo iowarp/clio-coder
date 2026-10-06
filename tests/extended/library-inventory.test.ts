@@ -10,7 +10,7 @@ import { disablePlugin, installPlugin, removePlugin } from "../../src/domains/pl
 import {
 	classifyLibraryOrigin,
 	inspectLibraryCopy,
-	type LibraryResource,
+	type LibraryComponent,
 	parseLibraryResourceKey,
 	readLibraryInventory,
 } from "../../src/domains/resources/library-inventory.js";
@@ -64,11 +64,11 @@ function fixture(root: string, name: string, options: { duplicateSkill?: boolean
 	);
 }
 
-function byOwner(resources: ReadonlyArray<LibraryResource>, ref: string): LibraryResource[] {
+function byOwner(resources: ReadonlyArray<LibraryComponent>, ref: string): LibraryComponent[] {
 	return resources.filter((item) => item.owner?.ref === ref);
 }
 
-function counts(resources: ReadonlyArray<LibraryResource>): Record<string, number> {
+function counts(resources: ReadonlyArray<LibraryComponent>): Record<string, number> {
 	const out: Record<string, number> = {};
 	for (const item of resources) out[item.kind] = (out[item.kind] ?? 0) + 1;
 	return out;
@@ -154,7 +154,7 @@ describe("library inventory", () => {
 			ok(record);
 			strictEqual(record.origin.kind, "bundled");
 			deepStrictEqual(record.copies, [{ scope: "user", state: "loadable" }]);
-			deepStrictEqual(counts(record.provides as LibraryResource[]), { skill: 6, agent: 6, prompt: 17, playbook: 1 });
+			deepStrictEqual(counts(record.provides as LibraryComponent[]), { skill: 6, agent: 6, prompt: 17, playbook: 1 });
 			deepStrictEqual(
 				(record.provides ?? []).filter((hint) => hint.kind === "agent").map((hint) => hint.name),
 				owned
@@ -639,11 +639,11 @@ describe("library inventory", () => {
 				"updatedAt",
 			]);
 
-			const recipes = cli(env, cwd, ["recipes", "--kind", "agent", "--json"]);
+			const recipes = cli(env, cwd, ["components", "--kind", "agent", "--json"]);
 			strictEqual(recipes.code, 0, recipes.stderr);
 			const read = recipes.json as {
 				version: number;
-				resources: LibraryResource[];
+				resources: LibraryComponent[];
 				packages?: unknown;
 				truncated: unknown;
 			};
@@ -680,7 +680,7 @@ describe("library inventory", () => {
 				"task-verifier",
 			);
 
-			const bad = cli(env, cwd, ["recipes", "--kind", "plugin", "--json"]);
+			const bad = cli(env, cwd, ["components", "--kind", "plugin", "--json"]);
 			strictEqual(bad.code, 1);
 		} finally {
 			env.restore();

@@ -12,12 +12,12 @@ import "./agents.css";
 type Ready = Extract<FleetPreview, { status: "ready" }>;
 
 /**
- * The terminal's `/fleet run <name>`. Preview compiles the contract and dispatches nothing; Run
+ * The terminal's `/fleet run <playbook>`. Preview compiles the playbook and dispatches nothing; Run
  * starts the plan only if it still hashes to the one shown, so a contract edited in between is
  * shown again instead of run. Its runs join the agent tree above this panel.
  *
  * The Agents drill keeps it as a collapsed section under the tree; the slash palette's dialog has its
- * own heading, so there it renders as plain content with the contract name ready for typing.
+ * own heading, so there it renders as plain content with the playbook name ready for typing.
  */
 export const FleetRunPanel = memo(function FleetRunPanel({
 	client,
@@ -103,7 +103,7 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 						A named plan in this project's <code className="agents-mono">.clio-coder/playbooks</code>. Previewing compiles it
 						and starts nothing.
 					</p>
-					<label htmlFor={`${fieldId}-name`}>Contract name</label>
+					<label htmlFor={`${fieldId}-name`}>Playbook name</label>
 					<input
 						id={`${fieldId}-name`}
 						data-autofocus

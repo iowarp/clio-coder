@@ -19,7 +19,6 @@ import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 // C-3: domain barrels also load execution and indexing code. Keep inspection
 // on the readers so source clients do not wait for that unrelated module graph.
-import { legacyPlaybookDirs } from "../domains/agents/fleet-commands.js";
 import { loadProjectClioMd } from "../domains/context/clio-md.js";
 import { loadOperatorProfile, renderOperatorProfile } from "../domains/context/operator-profile.js";
 import { loadProjectRules } from "../domains/context/project-rules.js";
@@ -365,23 +364,6 @@ function inspectResourceRoots(cwd: string, graph: CustomizationGraph): void {
 						...(root.precedence === undefined ? {} : { resourcePrecedence: root.precedence }),
 					},
 				});
-			}
-			// D9 legacy read: a pre-rename `fleets/` directory is listed while Clio still reads it.
-			if (kind === "playbooks") {
-				const legacy = legacyPlaybookDirs(cwd);
-				for (const scope of ["user", "project"] as const) {
-					if (!existsSync(legacy[scope])) continue;
-					graph.entries.push({
-						category,
-						id: `${kind}:${scope}-legacy`,
-						scope,
-						sourcePath: legacy[scope],
-						trust: "trusted",
-						precedence: "layer",
-						reloadClass: "next-turn",
-						detail: { present: true, source: scope === "user" ? "config" : "project", legacy: true },
-					});
-				}
 			}
 		} catch (err) {
 			graph.issues.push(`${kind}: ${err instanceof Error ? err.message : String(err)}`);

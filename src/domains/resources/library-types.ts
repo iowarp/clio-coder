@@ -18,30 +18,13 @@ export function isLibraryKind(value: unknown): value is LibraryEntryKind {
 	);
 }
 
-/** The four recipe kinds. A plugin owns recipes; it is never a fifth invocable kind. */
-export type LibraryResourceKind = Exclude<LibraryEntryKind, "plugin" | "extension">;
+/** The four component kinds. A plugin owns components; it is never a fifth invocable kind. */
+export type LibraryComponentKind = Exclude<LibraryEntryKind, "plugin" | "extension">;
 
-export const LIBRARY_RESOURCE_KINDS: readonly LibraryResourceKind[] = ["skill", "agent", "prompt", "playbook"];
+export const LIBRARY_COMPONENT_KINDS: readonly LibraryComponentKind[] = ["skill", "agent", "prompt", "playbook"];
 
-export function isLibraryResourceKind(value: unknown): value is LibraryResourceKind {
-	return typeof value === "string" && LIBRARY_RESOURCE_KINDS.includes(value as LibraryResourceKind);
-}
-
-/**
- * D9 legacy reads, kept for one release. A playbook was called a fleet
- * contract, so packages, library indexes and install records written before
- * the rename say kind `fleet` and requirement `fleet:<name>`. Readers of those
- * persisted names pass them through these two functions; writers emit only the
- * playbook names. Delete both, and each caller's single use, when the window
- * closes.
- */
-export function readLegacyLibraryKind(value: unknown): unknown {
-	return value === "fleet" ? "playbook" : value;
-}
-
-/** D9: `fleet:<name>` is read as `playbook:<name>`; any other value passes through unchanged. */
-export function readLegacyLibraryRef(value: unknown): unknown {
-	return typeof value === "string" && value.startsWith("fleet:") ? `playbook:${value.slice("fleet:".length)}` : value;
+export function isLibraryComponentKind(value: unknown): value is LibraryComponentKind {
+	return typeof value === "string" && LIBRARY_COMPONENT_KINDS.includes(value as LibraryComponentKind);
 }
 
 /**
@@ -50,7 +33,7 @@ export function readLegacyLibraryRef(value: unknown): unknown {
  * hint supports discovery only: it never proves the package installs or loads.
  */
 export interface LibraryProvidedResource {
-	kind: LibraryResourceKind | "extension";
+	kind: LibraryComponentKind | "extension";
 	name: string;
 	description?: string;
 }

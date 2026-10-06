@@ -191,7 +191,7 @@ type SlashCommandVariant =
 	| { kind: "council-usage"; reason?: string }
 	| { kind: "handoff"; goal: string }
 	| { kind: "handoff-usage" }
-	/** `/fleet run <name>`: compile the plan, show it for approval, dispatch on accept. */
+	/** `/fleet run <playbook>`: compile the plan, show it for approval, dispatch on accept. */
 	| { kind: "fleet-run"; name: string; vars: Record<string, string> }
 	| { kind: "fleet-run-usage"; reason?: string }
 	| { kind: "fleet" }
@@ -842,7 +842,7 @@ export interface SessionCommandContext {
 	 */
 	startHandoff?: (goal: string) => void;
 	/**
-	 * `/fleet run <name>`: compile the contract's plan, show every wave, agent,
+	 * `/fleet run <playbook>`: compile the playbook's plan, show every wave, agent,
 	 * target, boundary, budget, and code-step argv for approval, and dispatch
 	 * only what the operator accepted. Absent on a host with no fleet wiring.
 	 */
@@ -1280,14 +1280,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		kinds: ["resources"],
 		// The same verbs as `clio-coder library`; each opens the review that command would apply.
 		subcommandDescriptions: {
-			inspect: "Open the Library on one package or recipe",
+			inspect: "Open the Library on one package or component",
 			install: "Review installing one package, then apply it",
 			update: "Review updating one installed package, then apply it",
 			enable: "Review enabling one installed package, then apply it",
 			disable: "Review disabling one installed package, then apply it",
 			remove: "Review removing one package, then apply it",
 			import: "Review a plugin source from a path or URL",
-			reload: "Refresh installed recipe resources in this session",
+			reload: "Refresh installed components in this session",
 		},
 		args: {
 			subcommands: {
@@ -1356,7 +1356,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return {
 						kind: "usage-error",
 						command: "library",
-						reason: `/library ${subcommand} needs a kind:name reference, such as plugin:materio, or a recipe name`,
+						reason: `/library ${subcommand} needs a kind:name reference, such as plugin:materio, or a component name`,
 					};
 				const prefix = ref.split(":", 1)[0] ?? "";
 				return {
@@ -1384,7 +1384,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				else {
 					try {
 						const snapshot = ctx.reloadPlugins();
-						ctx.notice("success", `library: reloaded installed recipes (generation ${snapshot.generation})`);
+						ctx.notice("success", `library: reloaded installed components (generation ${snapshot.generation})`);
 					} catch (error) {
 						ctx.notice("error", `library: reload failed: ${error instanceof Error ? error.message : String(error)}`);
 					}
@@ -1515,7 +1515,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: false,
 		description: "Inspect extensions, reload them, or manage dev and muted ones for this session",
 		group: "Inspect",
-		// Harness navigation uses the shared overlay dispatcher, independently of recipe reload.
+		// Harness navigation uses the shared overlay dispatcher, independently of component reload.
 		kinds: [],
 		args: {
 			positionals: [
@@ -2193,7 +2193,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			subcommands: {
 				run: {
 					flags: [{ name: "--var", takesValue: true, repeatable: true, valueName: "key=value" }],
-					positionals: [{ name: "name", required: true }],
+					positionals: [{ name: "playbook", required: true }],
 				},
 			},
 		},
@@ -2221,7 +2221,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.kind === "fleet-run-usage") {
 				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "fleet");
-				const usage = entry ? usageNotice(entry, "run") : "usage: /fleet run <name> [--var key=value ...]";
+				const usage = entry ? usageNotice(entry, "run") : "usage: /fleet run <playbook> [--var key=value ...]";
 				ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
 				return;
 			}

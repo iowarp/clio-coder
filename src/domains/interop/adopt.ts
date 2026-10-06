@@ -88,23 +88,24 @@ export function preparePortablePackage(root: string): PreparedAdoption {
 	if (kind !== "plugin" && !components.some((component) => component.kind === kind))
 		throw new Error(`Not adoptable: the ${kind} package's public ${kind} component is not projectable.`);
 	// The portable skills/ convention needs no Clio component graph. Enumerate
-	// through the shared readers so implicit recipes and actual runtime names
+	// through the shared readers so implicit components and actual runtime names
 	// get the same checks as explicitly declared components.
 	const validation = validateLibraryPackage(root);
 	if (!validation.valid)
 		throw new Error(
-			`Not adoptable: invalid recipe content (${validation.validation.diagnostics
+			`Not adoptable: invalid component content (${validation.validation.diagnostics
 				.filter((item) => item.severity === "error")
 				.map((item) => item.message)
 				.join("; ")}).`,
 		);
-	const recipes = validation.validation.resources.filter(
+	const adoptable = validation.validation.resources.filter(
 		(resource) => ["skill", "agent", "prompt"].includes(resource.kind) && files[resource.path] !== undefined,
 	);
-	if (recipes.length === 0) throw new Error("Not adoptable: the portable package has no supported data-only recipes.");
-	// Retained recipe text that names an omitted companion cannot be claimed working.
+	if (adoptable.length === 0)
+		throw new Error("Not adoptable: the portable package has no supported data-only components.");
+	// Retained component text that names an omitted companion cannot be claimed working.
 	const outcomes: ForeignResourceOutcome[] = [];
-	for (const resource of recipes) {
+	for (const resource of adoptable) {
 		const component = components.find((item) => item.kind === resource.kind && item.path === resource.path);
 		// A root SKILL.md owns the whole package as its companion scope.
 		const skillDir = resource.kind === "skill" ? path.posix.dirname(resource.path) : undefined;
@@ -169,7 +170,7 @@ export function prepareForeignPackage(
 	});
 	if (!projection.outcomes.some((outcome) => outcome.status === "converted"))
 		throw new Error(
-			`Not adoptable: no supported recipe converted from ${detection.manifestPath}${
+			`Not adoptable: no supported component converted from ${detection.manifestPath}${
 				projection.outcomes.length
 					? ` (${projection.outcomes.map((o) => `${o.kind} ${o.name}: ${o.reason ?? "unsupported"}`).join("; ")})`
 					: ""
@@ -210,7 +211,7 @@ function prepared(item: InteropInventoryItem, host: InteropAgentId): PreparedAdo
 					: projectPrompt({ file: item.path, name: item.name });
 		if (item.kind === "agent")
 			note =
-				"Persona copied into a read-only Clio recipe; host tools, permissions, model, hooks and skill bindings are omitted.";
+				"Persona copied into a read-only Clio agent; host tools, permissions, model, hooks and skill bindings are omitted.";
 		const files = { ...resource.files };
 		files["plugin.json"] = JSON.stringify(
 			{

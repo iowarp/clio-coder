@@ -218,8 +218,8 @@ function mergeRecipes(
 
 /**
  * Discover the one native-agent catalog used by listing, fleet admission, and
- * dispatch. Plugin recipes occupy the same precedence slot as plugin fleets:
- * after builtins and before operator/user and project recipes. Their skill
+ * dispatch. Plugin agents occupy the same precedence slot as plugin playbooks:
+ * after builtins and before operator/user and project agents. Their skill
  * bindings remain constrained to the declaring plugin's skill root.
  */
 export function discoverAgentRecipes(

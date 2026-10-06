@@ -178,7 +178,7 @@ test("a two-cycle fleet loop persists independently recoverable states before re
 		};
 		const outcome = await executeFleetRun({
 			plan,
-			contractName: "test",
+			playbookName: "test",
 			commands,
 			workspaceRoot: root,
 			fleetRootId: "two-cycle-contract",

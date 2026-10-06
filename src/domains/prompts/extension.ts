@@ -5,7 +5,7 @@ import type { ClioSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { AgentsContract } from "../agents/contract.js";
-import { listFleetContracts } from "../agents/fleet-contract.js";
+import { listPlaybooks } from "../agents/playbook.js";
 import { isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import {
@@ -96,7 +96,7 @@ export function createPromptsBundle(
 
 	/** Names and purposes only; every route below re-checks readiness and admission when used. */
 	function captureCatalogs(cwd: string): CatalogSnapshot {
-		const snapshot: CatalogSnapshot = { skills: [], recipes: [], fleets: [], mcpServers: [] };
+		const snapshot: CatalogSnapshot = { skills: [], agents: [], playbooks: [], mcpServers: [] };
 		try {
 			const skills = resourcesDomain()?.skills(cwd).items ?? [];
 			snapshot.skills = modelVisibleSkills(skills).map((skill) => ({ name: skill.name, purpose: skill.description }));
@@ -104,7 +104,7 @@ export function createPromptsBundle(
 			// A skill catalog that cannot load lists nothing; context(scope="skills") reports why.
 		}
 		try {
-			snapshot.recipes = (agentsDomain()?.listSpecs() ?? [])
+			snapshot.agents = (agentsDomain()?.listSpecs() ?? [])
 				.filter((spec) => isUserVisibleAgent(spec) || spec.audience === "shadow")
 				// The marker rides on the purpose so the name stays a valid dispatch id.
 				.map((spec) => ({
@@ -116,11 +116,11 @@ export function createPromptsBundle(
 		}
 		try {
 			// A playbook needing an unregistered command is setup the operator owes, not a runnable playbook.
-			snapshot.fleets = listFleetContracts(cwd).flatMap((listing) =>
-				listing.contract === null ? [] : [{ name: listing.name, purpose: listing.contract.description }],
+			snapshot.playbooks = listPlaybooks(cwd).flatMap((listing) =>
+				listing.playbook === null ? [] : [{ name: listing.name, purpose: listing.playbook.description }],
 			);
 		} catch {
-			// /fleet lists every contract with its error; the index only names runnable ones.
+			// `clio-coder playbook list` shows every playbook with its error; the index only names runnable ones.
 		}
 		try {
 			snapshot.mcpServers = loadMcpServerConfig({ cwd })
@@ -568,8 +568,8 @@ interface CatalogEntry {
 
 interface CatalogSnapshot {
 	skills: CatalogEntry[];
-	recipes: CatalogEntry[];
-	fleets: CatalogEntry[];
+	agents: CatalogEntry[];
+	playbooks: CatalogEntry[];
 	mcpServers: string[];
 }
 
@@ -602,7 +602,7 @@ function catalogLines(entries: ReadonlyArray<CatalogEntry>): string[] {
 
 /**
  * What is installed for this session, by name and a short purpose, so a model
- * routes to a skill, recipe or MCP server by lookup instead of guessing a
+ * routes to a skill, agent or MCP server by lookup instead of guessing a
  * catalog query. Captured once per session, so it is session-layer bytes. It
  * lists only catalogs whose route this session's surface can reach, and it
  * grants nothing: loading, dispatching and MCP calls keep their own gates.
@@ -614,16 +614,16 @@ function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs
 	if (catalogs.skills.length > 0 && inputs.skillDiscoveryEnabled !== false && sessionHasContext(inputs)) {
 		sections.push("Skills (workflows; load one only at the step that needs it):", ...catalogLines(catalogs.skills));
 	}
-	if (catalogs.recipes.length > 0 && names.has("dispatch")) {
+	if (catalogs.agents.length > 0 && names.has("dispatch")) {
 		sections.push(
 			`Agents (dispatch one with agent="<name>"; dispatch({list:true}) shows tools and budgets; shadow ones run only through dispatch, so operator /run or \`run --agent\` commands use ${SHADOW_AGENT_OPERATOR_STAND_IN} --read-only):`,
-			...catalogLines(catalogs.recipes),
+			...catalogLines(catalogs.agents),
 		);
 	}
-	if (catalogs.fleets.length > 0) {
+	if (catalogs.playbooks.length > 0) {
 		sections.push(
-			"Playbooks (multi-step contracts the fleet runs; the operator starts one with /fleet run <name>, so suggest it rather than dispatching its steps yourself):",
-			...catalogLines(catalogs.fleets),
+			"Playbooks (multi-step workflows the fleet runs; the operator starts one with /fleet run <playbook>, so suggest it rather than dispatching its steps yourself):",
+			...catalogLines(catalogs.playbooks),
 		);
 	}
 	if (catalogs.mcpServers.length > 0 && names.has("gateway")) {

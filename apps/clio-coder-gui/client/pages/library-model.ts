@@ -1,14 +1,14 @@
-// The library's recipe collections, in the operator's words: what an agent may spend and where it
+// The library's components, in the operator's words: what an agent may spend and where it
 // stops, and whether the model can ever reach a skill. The agent's `configuration` is an open record
 // on the wire, so every key is read defensively. Pure, so the order and the sentences are testable
 // without a browser.
 
 import type { Static } from "typebox";
-import type { LibraryAgents, LibraryResource } from "../../contracts/library.js";
+import type { LibraryAgents, LibraryComponent } from "../../contracts/library.js";
 import { humanizeKey } from "../design/facts-model.js";
 
 export type Agent = Static<typeof LibraryAgents>["agents"][number];
-export type Resource = Static<typeof LibraryResource>;
+export type Resource = Static<typeof LibraryComponent>;
 
 export interface CardFact {
 	label: string;
@@ -23,7 +23,7 @@ const word = (value: unknown): string | null => (typeof value === "string" && va
 const fact = (label: string, value: string | null): CardFact =>
 	value === null ? { label, value: "Not declared", absent: true } : { label, value };
 
-/** `32–150` when the recipe declares a ceiling above its default, or the bare default when it does not. */
+/** `32–150` when the agent declares a ceiling above its default, or the bare default when it does not. */
 export function budgetRange(min: number | null, max: number | null): string | null {
 	if (min === null) return null;
 	const low = min.toLocaleString("en-US");
@@ -67,7 +67,7 @@ export function agentCard(agent: Agent): AgentCard {
  */
 export function reachSentence(skill: Pick<Resource, "availability" | "trusted" | "modelInvocable">): string {
 	if (skill.availability === "invalid") return "It did not load, so nothing can use it";
-	if (skill.availability === "shadowed") return "Another recipe of the same name outranks it, so this copy never loads";
+	if (skill.availability === "shadowed") return "Another skill of the same name outranks it, so this copy never loads";
 	if (skill.availability === "unavailable") return "Clio Coder reports it as unavailable";
 	if (!skill.trusted) return "Its root is not trusted, so the model never sees it";
 	if (skill.modelInvocable === false) return "Its frontmatter reserves it for you";

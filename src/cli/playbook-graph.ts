@@ -1,13 +1,13 @@
 import type { ExecutionPlanStep } from "../domains/dispatch/execution-plan.js";
-import { inspectFleet } from "./fleet-preflight.js";
+import { inspectPlaybook } from "./playbook-preflight.js";
 
 /**
- * The contract-level kind of a compiled step. The execution plan knows only
+ * The playbook-level kind of a compiled step. The execution plan knows only
  * `agent` and `code`; a version 5 `gate` or `plan` step compiles to an agent
  * step carrying `gate` or `plan` facts, and the graph names it as the author
  * wrote it.
  */
-function contractKind(step: ExecutionPlanStep): "agent" | "code" | "gate" | "plan" {
+function playbookKind(step: ExecutionPlanStep): "agent" | "code" | "gate" | "plan" {
 	if (step.kind === "code") return "code";
 	if (step.gate !== undefined) return "gate";
 	if (step.plan !== undefined) return "plan";
@@ -17,7 +17,7 @@ function contractKind(step: ExecutionPlanStep): "agent" | "code" | "gate" | "pla
 function projectedStep(step: ExecutionPlanStep): Record<string, unknown> {
 	return {
 		id: step.id,
-		kind: contractKind(step),
+		kind: playbookKind(step),
 		...(step.kind === "agent" ? { agent: step.agentId } : { command: step.commandId }),
 		...(step.kind === "agent" && step.gate !== undefined
 			? { gate: { path: step.gate.path, command: step.gate.commandId } }
@@ -33,16 +33,16 @@ function projectedStep(step: ExecutionPlanStep): Record<string, unknown> {
 	};
 }
 
-export function runFleetGraph(args: ReadonlyArray<string>): number {
+export function runPlaybookGraph(args: ReadonlyArray<string>): number {
 	const json = args.includes("--json");
 	const name = args.find((arg) => !arg.startsWith("-"));
 	const unknown = args.find((arg, index) => (arg.startsWith("-") && arg !== "--json") || index > 1);
 	if (name === undefined || unknown !== undefined) {
-		process.stderr.write("clio-coder fleet: graph: usage: clio-coder fleet graph <name> [--json]\n");
+		process.stderr.write("clio-coder playbook: graph: usage: clio-coder playbook graph <name> [--json]\n");
 		return 2;
 	}
 	try {
-		const { plan } = inspectFleet(name);
+		const { plan } = inspectPlaybook(name);
 		const byId = new Map(plan.steps.map((step) => [step.id, step]));
 		const waves = plan.waves.map((ids, index) => ({
 			wave: index + 1,
@@ -57,7 +57,7 @@ export function runFleetGraph(args: ReadonlyArray<string>): number {
 			repair: loop.repairStepIds.map((id) => projectedStep(byId.get(id) as ExecutionPlanStep)),
 		}));
 		if (json) {
-			process.stdout.write(`${JSON.stringify({ fleet: name, planHash: plan.hash, waves, loops }, null, 2)}\n`);
+			process.stdout.write(`${JSON.stringify({ playbook: name, planHash: plan.hash, waves, loops }, null, 2)}\n`);
 			return 0;
 		}
 		for (const wave of waves) {
@@ -96,7 +96,7 @@ export function runFleetGraph(args: ReadonlyArray<string>): number {
 		}
 		return 0;
 	} catch (error) {
-		process.stderr.write(`clio-coder fleet: ${error instanceof Error ? error.message : String(error)}\n`);
+		process.stderr.write(`clio-coder playbook: ${error instanceof Error ? error.message : String(error)}\n`);
 		return 1;
 	}
 }

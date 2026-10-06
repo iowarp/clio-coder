@@ -22,7 +22,7 @@ export async function libraryOracle(cwd: string, env: NodeJS.ProcessEnv) {
 			).stdout,
 		);
 	const [recipes, packages, agents, extensions, verifiers] = await Promise.all([
-		run(["library", "recipes", "--json"]),
+		run(["library", "components", "--json"]),
 		run(["library", "list", "--json"]),
 		run(["agents", "--json"]),
 		run(["extensions", "list", "--all", "--json"]),

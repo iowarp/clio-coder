@@ -16,7 +16,7 @@ import { parse } from "yaml";
 import { loadManifestFromRoot } from "../src/domains/extensions/index.js";
 import { fetchPluginSource, type PluginSource, parsePluginGithubSource } from "../src/domains/plugins/catalog.js";
 import {
-	isLibraryResourceKind,
+	isLibraryComponentKind,
 	LIBRARY_PROVIDES_LIMITS,
 	type LibraryProvidedResource,
 } from "../src/domains/resources/library-types.js";
@@ -74,19 +74,20 @@ export function buildRegistryRow(
 	// Hints are the validator's actual parsed runtime names, never component
 	// ids or display titles. Ancillary scripts/resources stay manifest metadata.
 	const provides: LibraryProvidedResource[] = result.validation.resources
-		.flatMap((resource) =>
-			(isLibraryResourceKind(resource.kind) || resource.kind === "extension") && resource.valid
-				? [
-						{
-							kind: resource.kind,
-							name: resource.name,
-							...(resource.description
-								? { description: resource.description.slice(0, LIBRARY_PROVIDES_LIMITS.description) }
-								: {}),
-						},
-					]
-				: [],
-		)
+		.flatMap((resource): LibraryProvidedResource[] => {
+			// A local binding carries the narrowing into the object literal.
+			const kind = resource.kind;
+			if (!(isLibraryComponentKind(kind) || kind === "extension") || !resource.valid) return [];
+			return [
+				{
+					kind,
+					name: resource.name,
+					...(resource.description
+						? { description: resource.description.slice(0, LIBRARY_PROVIDES_LIMITS.description) }
+						: {}),
+				},
+			];
+		})
 		.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name))
 		.slice(0, LIBRARY_PROVIDES_LIMITS.entries);
 	// An extension row names the plugin it serves, so a plugin and its extension pair without reading package trees.

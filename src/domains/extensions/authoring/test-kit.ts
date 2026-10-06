@@ -169,6 +169,9 @@ export async function createExtensionTestHost(
 			);
 		},
 		observe(event) {
+			// The real host moves the runtime's snapshot before it delivers a workspace event.
+			if (event.event === "workspace_enter") snapshot.activeWorkspace = event.workspace;
+			else if (event.event === "workspace_leave") snapshot.activeWorkspace = null;
 			return request(
 				"observe",
 				registration.observers.get(event.event),
@@ -214,6 +217,11 @@ export async function createExtensionTestHost(
 				RUNTIME_V2_LIMITS.observationMs,
 				(value) => parseInterviewNext(value, declaration),
 			);
+		},
+		leave() {
+			const workspace = snapshot.activeWorkspace;
+			if (workspace === null) return Promise.reject(new Error("no workspace is active"));
+			return host.observe({ event: "workspace_leave", workspace });
 		},
 		tick() {
 			if (declaration.tickMs === undefined) return Promise.reject(new Error("runtime declares no tick"));

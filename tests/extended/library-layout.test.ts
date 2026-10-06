@@ -51,7 +51,7 @@ it("keeps mode and scope controls available on an empty Library tab and visible 
 			fullScreen: true,
 			filterable: true,
 			explicitSearch: true,
-			tabs: ["Skills", "Agents", "Prompts", "Fleets", "Plugins"].map((label) => ({
+			tabs: ["Skills", "Agents", "Prompts", "Playbooks", "Plugins"].map((label) => ({
 				id: label.toLowerCase(),
 				label,
 				items: () => [],

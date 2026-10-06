@@ -31,7 +31,7 @@ test("board and fleet approval share target labels without the observe glyph", (
 				],
 			},
 		],
-		budget: { contractUsd: null, ceilingUsd: 2, currentUsd: 0 },
+		budget: { playbookUsd: null, ceilingUsd: 2, currentUsd: 0 },
 	} as unknown as FleetRunPreview;
 	for (const width of [60, 80, 120, 200]) {
 		for (const expanded of [false, true]) {

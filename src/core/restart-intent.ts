@@ -1,6 +1,6 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { safeResourceWrite } from "../core/safe-resource-write.js";
+import { safeResourceWrite } from "./safe-resource-write.js";
 
 export interface RestartIntent {
 	sessionId: string;

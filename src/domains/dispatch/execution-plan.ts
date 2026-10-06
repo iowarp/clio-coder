@@ -11,7 +11,7 @@ export type ExecutionPlanFailurePolicy = "stop" | "continue";
 /**
  * Membership of one statically unrolled bounded loop.
  *
- * A loop in a fleet contract compiles to `maxAttempts` conditional check nodes
+ * A loop in a playbook compiles to `maxAttempts` conditional check nodes
  * and `maxAttempts - 1` conditional repair nodes. Unrolling rather than
  * interpreting keeps the plan a deterministic hashed DAG whose waves are
  * computed once and whose every attempt owns a separate receipt; the only
@@ -57,7 +57,7 @@ export interface ExecutionPlanAgentStep {
 	 * contract declares no boundary at all and is therefore not enforced.
 	 */
 	writes?: ReadonlyArray<string>;
-	/** Exact per-step route defaults from a version 5 fleet contract. */
+	/** Exact per-step route defaults from a version 5 playbook. */
 	target?: string;
 	profile?: string;
 	/** Resolved inference scheduler bound used when waves are packed. */

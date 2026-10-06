@@ -6,8 +6,8 @@ import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 
 import { runLibraryCommand } from "../../src/cli/library.js";
-import { parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { parseFrontmatter } from "../../src/domains/agents/frontmatter.js";
+import { parsePlaybook } from "../../src/domains/agents/playbook.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import { listInstalledPlugins, readPluginManifest } from "../../src/domains/plugins/index.js";
 import { validateLibraryPackage } from "../../src/domains/resources/library-validation.js";
@@ -81,7 +81,7 @@ describe("library package authoring templates", () => {
 		equal(fleetManifest.manifest?.clio.kind, "playbook");
 		const fleetPath = join(fleetRoot, "playbooks", "pipeline-review.md");
 		ok(existsSync(fleetPath), "pipeline-review.md must exist");
-		const parsedFleet = parseFleetContract(readFileSync(fleetPath, "utf8"), fleetPath);
+		const parsedFleet = parsePlaybook(readFileSync(fleetPath, "utf8"), fleetPath);
 		equal(parsedFleet.name, "pipeline-review");
 		equal(parsedFleet.steps.length, 2);
 		equal(parsedFleet.steps[0]?.id, "inspect-pipeline");
@@ -234,7 +234,7 @@ Fleet instructions.
 			equal(res.valid, false);
 			equal(res.manifestValid, true);
 			equal(res.validation.contentValid, false);
-			ok(res.validation.diagnostics.some((d) => d.code === "ERR_FLEET"));
+			ok(res.validation.diagnostics.some((d) => d.code === "ERR_PLAYBOOK"));
 
 			const cliCode = await runLibraryCommand(["validate", pkgDir, "--json"]);
 			equal(cliCode, 1);

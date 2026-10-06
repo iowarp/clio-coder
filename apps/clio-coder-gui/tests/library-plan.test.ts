@@ -13,7 +13,7 @@ import {
 	type Package,
 	type Plan,
 	type PlanStep,
-	recipeSentence,
+	componentSentence,
 	stepTitle,
 } from "../client/pages/library-plan.js";
 
@@ -124,10 +124,10 @@ test("disk, recipe admission and the headline stay separate facts", () => {
 	);
 	assert.equal(diskSentence(outcome()), "Nothing was read back from disk.");
 	assert.equal(
-		recipeSentence(outcome({ verification: verified })),
-		"1 of 2 recipes admitted. Held back: b (untrusted).",
+		componentSentence(outcome({ verification: verified })),
+		"1 of 2 components admitted. Held back: b (untrusted).",
 	);
-	assert.equal(recipeSentence(outcome({ operation: "remove" })), "Its recipes are no longer offered.");
+	assert.equal(componentSentence(outcome({ operation: "remove" })), "Its components are no longer offered.");
 	assert.deepEqual(outcomeHeadline(outcome()), { text: "Installed skill:demo in your user library", tone: "success" });
 	assert.equal(outcomeHeadline(outcome({ error: { code: "verification", message: "m", next: "n" } })).tone, "warn");
 	assert.equal(outcomeHeadline(outcome({ status: "failed" })).text, "Could not install skill:demo in your user library");
