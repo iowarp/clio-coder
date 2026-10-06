@@ -15,6 +15,7 @@ import { ceilChars } from "../session/context-accounting.js";
 import { DEMO_GUIDANCE } from "./demo-guidance.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
+import { modelGuidanceFragmentId } from "./model-guidance.js";
 import type { ProjectPreloadClass } from "./preload.js";
 
 /**
@@ -943,6 +944,11 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			? 'Load a matching ready skill through gateway(op="call", capability="context", args={scope:"skills",name:"<name>"}); honor its workflow and tool restrictions. Load the next skill only when its step is reached.'
 			: "Suggest matching skills as /skill <name> (in order when several compose), then continue without them; only the operator activates skills.";
 
+	// A model with vendor-published working notes gets them in the runtime
+	// section, which already varies only with the model. A target that cannot
+	// call tools gets none, since the notes are about acting between tool calls.
+	const modelNotesId = session.providerSupportsTools === false ? null : modelGuidanceFragmentId(session.model);
+	const modelNotes = modelNotesId === null ? undefined : table.byId.get(modelNotesId);
 	const userControl = attended ? table.byId.get("operating.user-control") : undefined;
 	// Steering guidance rides the operating contract: the queue delivers several
 	// operator messages at one slot, and the model needs to know how they rank.
@@ -978,7 +984,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 				: "",
 		],
 		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true)],
-		["runtime", renderRuntimeBlock(session)],
+		["runtime", [renderRuntimeBlock(session), modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
 		["tool-contract", renderToolContractBlock(session)],
 		["retrieval-hints", renderRetrievalHintsBlock(session)],
 		["memory", renderMemoryBlock(session.memorySection)],
@@ -1008,6 +1014,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...(skills ? [skills] : []),
 		...(skills && skillInstalls ? [skillInstalls] : []),
 		safety,
+		...(modelNotes ? [modelNotes] : []),
 	];
 	const fragmentManifest: FragmentManifestEntry[] = baseFragments.map((f) => ({
 		id: f.id,
