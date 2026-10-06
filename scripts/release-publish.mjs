@@ -319,13 +319,12 @@ function requireFastForward(commit) {
 	run("git", ["merge-base", "--is-ancestor", "origin/main", commit], { stdio: "pipe" });
 }
 
+// The by-tag endpoint never returns a draft, and the draft this job creates has
+// no git tag until it is published, so look the release up by its tag name in
+// the list. The 0.6.2-rc.1 run crashed on that null right after creating its draft.
 function existingRelease(tag) {
-	try {
-		return api(`repos/${repository}/releases/tags/${tag}`);
-	} catch (error) {
-		if (String(error.stderr).includes("404")) return null;
-		throw error;
-	}
+	const releases = api(`repos/${repository}/releases?per_page=100`);
+	return releases.find((release) => release.tag_name === tag) ?? null;
 }
 
 function tagCommit(tag) {
