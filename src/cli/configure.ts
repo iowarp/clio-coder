@@ -11,7 +11,7 @@ import {
 } from "../core/config.js";
 import type { OutputStyle, PanesSettings, SmoothStreaming, TuiMode, WorkerPermissionMode } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
-import { getAtPath } from "../core/session-routing.js";
+import { getAtPath, resolveMemoryRoute } from "../core/session-routing.js";
 import { formatControlValue, orderSettingsEntries, type SettingControl } from "../core/settings-controls.js";
 import {
 	resolveSettingsSection,
@@ -1461,14 +1461,18 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 	context: {
 		fields: () => {
 			const settings = readSettings();
+			const memoryRoute = resolveMemoryRoute(settings);
 			return [
 				["Auto-compaction", onOff(settings.context.compaction.auto)],
 				["Compaction threshold", String(settings.context.compaction.threshold)],
 				["Compaction model", settings.context.compaction.model ?? "(chat model)"],
 				["Working-set eviction", onOff(settings.context.workingSet.enabled)],
 				["Tool result cap (bytes)", String(settings.context.toolResultMaxBytes)],
-				["Memory target", settings.context.memory.target ?? "(rules only)"],
-				["Memory model", settings.context.memory.model ?? "(target default)"],
+				[
+					"Memory target",
+					`${memoryRoute.source === "chat" ? "Chat route (no memory model set): " : ""}${memoryRoute.target ?? "(unset)"}`,
+				],
+				["Memory model", memoryRoute.model ?? (memoryRoute.source === "chat" ? "(unset)" : "(target default)")],
 				["Proactive memory", onOff(settings.context.memory.enabled)],
 			];
 		},
@@ -1476,7 +1480,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			{
 				label: "Choose the proactive-memory model",
 				controlPath: "context.memory.target",
-				hint: "optional; choose Rules only to avoid a second model call",
+				hint: "optional; with no memory model set, memory uses the chat route",
 				run: async (io) => assignTarget(io, "memory"),
 			},
 		],

@@ -296,7 +296,10 @@ for (const unavailable of ["available", "down", "missing-model", "missing-creden
 		);
 		settings.context.memory.target = null;
 		settings.context.memory.model = null;
-		assert.equal(createBackgroundMemoryModelClient(providers, settings, 1000, null), null, "unset role stays rules-only");
+		const chatRoute = createBackgroundMemoryModelClient(providers, settings, 1000, null);
+		assert.ok(chatRoute, "unset memory route uses the chat route");
+		assert.equal(chatRoute.targetId, "chat");
+		assert.equal(chatRoute.wireModelId, "chat-model");
 	});
 }
 

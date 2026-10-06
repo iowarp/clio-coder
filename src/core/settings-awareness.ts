@@ -109,7 +109,7 @@ export function settingsAwareness(
 				defaultModel: target.defaultModel ?? null,
 			})),
 			note:
-				"These are configured routes, not backend health or a guarantee of a particular dispatch. Shadow helpers use fleet routing; do not substitute the chat model for the fleet default. Agent/profile bindings, explicit requests, recipe requirements and admission can affect a run. Null means not explicitly configured, not inheritance from chat; a null compaction model uses the chat route, and a null memory target means rules-only memory." +
+				"These are configured routes, not backend health or a guarantee of a particular dispatch. Shadow helpers use fleet routing; do not substitute the chat model for the fleet default. Agent/profile bindings, explicit requests, recipe requirements and admission can affect a run. Null means not explicitly configured; a null compaction model uses the chat route. When no memory target and model are set, the memory tier uses the active chat route because no memory model is set. context.memory.enabled: false turns proactive memory off." +
 				(provenance
 					? " source says where each active route comes from: session = applied for this session only and not saved; user = saved user settings; project = this workspace's .clio-coder settings; built-in = default; chat = follows the chat route. saved is the saved route a session override hides; when absent, the active route is the saved one. fleetDefault is the worker route, never the saved chat route."
 					: ""),

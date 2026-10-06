@@ -119,8 +119,9 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"orchestrator.thinkingLevel": "How much reasoning the chat model uses before answering.",
 	"orchestrator.target": "Connection that answers in chat.",
 	"orchestrator.model": "Chat model override; unset uses the connection default.",
-	"background.target": "Connection for optional model-backed memory. Leave blank to use rules only.",
-	"background.model": "Model used to update task memory when a memory connection is chosen.",
+	"background.target": "Connection for task memory. With no memory connection or model set, memory uses the chat route.",
+	"background.model":
+		"Dedicated task-memory model. With no memory route set, memory uses chat because no memory model is set.",
 	"memory.intervention.enabled": "Allow Clio to update task memory as work progresses.",
 	"memory.intervention.everyNTools": "Maximum number of tool uses between memory updates.",
 	"memory.intervention.windowSteps": "How many recent steps Clio considers when updating memory.",

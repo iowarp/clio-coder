@@ -97,7 +97,7 @@ for (const role of ["chat", "fleet", "memory"] as const) {
 	});
 }
 
-test("memory offers Rules only even when no eligible connections exist", async (t) => {
+test("memory offers the chat route even when no eligible connections exist", async (t) => {
 	const home = await isolateClioEnv("clio-configure-rules-");
 	t.after(() => home.restore());
 	registerBuiltinRuntimes(getRuntimeRegistry());
@@ -106,7 +106,7 @@ test("memory offers Rules only even when no eligible connections exist", async (
 			rl: {
 				async choose(label, choices) {
 					assert.equal(label, "Proactive memory connection");
-					assert.deepEqual(choices, ["Rules only · no background model call"]);
+					assert.deepEqual(choices, ["Chat route · no memory model set"]);
 					const first = choices[0];
 					assert.ok(first);
 					return first;

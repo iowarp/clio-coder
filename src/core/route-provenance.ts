@@ -7,7 +7,7 @@
  */
 
 import type { ClioSettings } from "./config.js";
-import { getAtPath } from "./session-routing.js";
+import { getAtPath, resolveMemoryRoute } from "./session-routing.js";
 import type { SettingsOrigin } from "./settings-layers.js";
 
 /** `chat` means the route is unset and follows the chat route. */
@@ -43,6 +43,10 @@ export interface RouteProvenance {
 
 /** A route's own fields, under the names the settings projection shows. */
 export function routeFields(route: RouteName, settings: Readonly<ClioSettings>): Record<string, unknown> {
+	if (route === "memory") {
+		const { target, model } = resolveMemoryRoute(settings);
+		return { target, model };
+	}
 	const fields: Record<string, unknown> = {};
 	for (const path of ROUTE_PATHS[route])
 		fields[path.slice(path.lastIndexOf(".") + 1)] = getAtPath(settings, path) ?? null;
@@ -54,6 +58,7 @@ function savedSourceFor(
 	saved: Readonly<ClioSettings>,
 	originOf: (path: string) => SettingsOrigin,
 ): RouteSource {
+	if (route === "memory" && resolveMemoryRoute(saved).source === "chat") return "chat";
 	if (route === "compaction" && (saved.context.compaction.model ?? null) === null) return "chat";
 	let top: SettingsOrigin = "built-in";
 	for (const path of ROUTE_PATHS[route]) {
@@ -78,7 +83,12 @@ export function resolveRouteProvenance(
 			(path) => (getAtPath(effective, path) ?? null) !== (getAtPath(saved, path) ?? null),
 		);
 		savedSources[route] = savedSource;
-		active[route] = overridden ? "session" : savedSource;
+		active[route] =
+			route === "memory" && resolveMemoryRoute(effective).source === "chat"
+				? "chat"
+				: overridden
+					? "session"
+					: savedSource;
 		if (overridden) savedRoutes[route] = routeFields(route, saved);
 	}
 	return { active, saved: savedSources, savedRoutes };
@@ -87,5 +97,9 @@ export function resolveRouteProvenance(
 /** One prompt line; recomputed per compile so it never depends on a summary. */
 export function formatRouteSources(active: Readonly<Record<RouteName, RouteSource>>): string {
 	const label = (source: RouteSource): string => (source === "chat" ? "=chat" : source);
-	return `Routes: ${ROUTE_NAMES.map((route) => `${route} ${label(active[route])}`).join(", ")}.`;
+	return `Routes: ${ROUTE_NAMES.map((route) =>
+		route === "memory" && active[route] === "chat"
+			? "memory =chat (no memory model set)"
+			: `${route} ${label(active[route])}`,
+	).join(", ")}.`;
 }

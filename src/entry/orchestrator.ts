@@ -33,6 +33,7 @@ import {
 	mergeRoutingPatchIntoSettings,
 	planResumedRouting,
 	type RoutingPatch,
+	resolveMemoryRoute,
 	restoreRoutingFields,
 	routingChangeNotices,
 	routingPatchForId,
@@ -506,7 +507,7 @@ const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
  */
 interface BackgroundMemoryRoute {
 	client: TaskMemoryModelClient;
-	selection: "dedicated" | "chat-fallback";
+	selection: "dedicated" | "chat-default" | "chat-fallback";
 	fallbackReason?: string;
 	targetId: string;
 	wireModelId: string;
@@ -528,9 +529,24 @@ export function createBackgroundMemoryModelClient(
 	fallbackOnly = false,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 ): BackgroundMemoryRoute | null {
-	const configuredTarget = settings.context.memory.target?.trim();
-	const configuredModel = settings.context.memory.model?.trim();
+	if (!settings.context.memory.enabled) return null;
+	const memoryRoute = resolveMemoryRoute(settings);
+	const configuredTarget = memoryRoute.target?.trim();
+	const configuredModel = memoryRoute.model?.trim();
 	if (!configuredTarget || !configuredModel) return null;
+	if (memoryRoute.source === "chat") {
+		if (fallbackOnly) return null;
+		return prepareBackgroundMemoryRoute(
+			providers,
+			configuredTarget,
+			configuredModel,
+			timeoutMs,
+			bus,
+			"chat-default",
+			settings.targets,
+			admitModelFlow,
+		);
+	}
 	const chatTarget = settings.chat.target?.trim();
 	const chatModel = settings.chat.model?.trim();
 	const sameRoute = configuredTarget === chatTarget && configuredModel === chatModel;
@@ -2390,13 +2406,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			})
 			.catch(reportMemoryStoreFailure("history lessons not recorded"));
 	};
-	const memoryRouteConfigured = (): boolean => {
-		const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
-		return memory.enabled && Boolean(memory.target?.trim()) && Boolean(memory.model?.trim());
+	const memoryRouteAvailable = (): boolean => {
+		const settings = effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings();
+		const route = resolveMemoryRoute(settings);
+		return settings.context.memory.enabled && Boolean(route.target?.trim()) && Boolean(route.model?.trim());
 	};
 	memoryGuardian = createMemoryGuardian({
 		// A headless run exits after its turn, so there is no idle time to use.
-		enabled: () => options.headless === undefined && memoryRouteConfigured(),
+		enabled: () => options.headless === undefined && memoryRouteAvailable(),
 		isForegroundActive: () => isChatStreaming(),
 		live: memoryIntervention,
 		scopeKey: () => `${session?.current()?.id ?? ""}\u0000${memoryWorkspaceRoot()}`,
@@ -4025,10 +4042,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
-	// A configured memory model runs the LLM tier; otherwise the rules tier answers.
 	const taskMemoryTier = (): "llm" | "rules" => {
-		const memory = getCurrentSettings().context.memory;
-		return memory.target && memory.model ? "llm" : "rules";
+		return memoryRouteAvailable() ? "llm" : "rules";
 	};
 
 	// One context-init runner for the TUI and ACP hosts.
@@ -4864,6 +4879,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return {
 				enabled: settings.context.memory.enabled,
 				tier: taskMemoryTier(),
+				route: resolveMemoryRoute(settings),
 				size: taskMemoryBankSize(bank),
 				bank,
 				...projectTaskMemoryActivity(
