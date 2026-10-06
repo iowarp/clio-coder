@@ -76,6 +76,8 @@ export interface OperatorRuntimeV2Options {
 
 /** Observations a slow runtime may fall behind by before the oldest is dropped. */
 const OBSERVATION_BACKLOG = 64;
+/** How long a closing session waits for runtimes to take session_close, so a stuck handler cannot hold a reload or the exit. */
+const SESSION_CLOSE_MS = 1000;
 
 function identity(entry: InstalledExtension): string {
 	return `${entry.id}:${entry.scope}:${entry.provenance?.canonicalRoot}:${entry.provenance?.contentDigest}`;
@@ -164,14 +166,6 @@ function visibleTo(event: ExtensionObservationV2, access: ReadonlyArray<string>)
 		const { text: _text, ...rest } = event;
 		return rest;
 	}
-	if (event.event === "tool_end") {
-		const { args, result, ...rest } = event;
-		return {
-			...rest,
-			...(args !== undefined && access.includes("tool-args") ? { args } : {}),
-			...(result !== undefined && access.includes("tool-results") ? { result } : {}),
-		};
-	}
 	return event;
 }
 
@@ -220,6 +214,8 @@ export class OperatorExtensionRuntimeV2 {
 	private sessionId: string | null | undefined;
 	private restoreWorkspace = false;
 	private closed = false;
+	/** True between a delivered session_open and its session_close, so every open is paired once. */
+	private opened = false;
 	private reloading = false;
 	private queued = false;
 	private reloadTask: Promise<OperatorReloadResult> | undefined;
@@ -468,6 +464,7 @@ export class OperatorExtensionRuntimeV2 {
 			const key = contextKey(context);
 			const list = this.list();
 			this.inventory = list;
+			if (reason !== "startup") await this.closeSession(reason);
 			// Every instance restarts; state and the picture are host-held, so nothing is lost but in-flight work.
 			this.retireAll(reason);
 			await Promise.all(this.retired);
@@ -565,6 +562,7 @@ export class OperatorExtensionRuntimeV2 {
 						plugin: servedPlugin(current.find((entry) => entry.id === id && isApiV2(entry)) ?? process.extension),
 					});
 				for (const process of staged.values()) if (this.current(process)) this.arm(process, context.workspace);
+				this.opened = true;
 				this.observe({ event: "session_open", reason });
 				const active = this.surface.activeWorkspace;
 				if (active) this.observeOne(active.extensionId, { event: "workspace_enter", workspace: active.workspaceId });
@@ -1059,6 +1057,31 @@ export class OperatorExtensionRuntimeV2 {
 		}
 	}
 
+	/**
+	 * Tells the runtimes that declared session_close the session they served is
+	 * ending, before their processes are retired. Delivery skips the queue so
+	 * retirement cannot drop it, and its answer is not applied.
+	 */
+	private async closeSession(reason: "exit" | "reload" | "session-change"): Promise<void> {
+		if (!this.opened) return;
+		this.opened = false;
+		const event: ExtensionObservationV2 = { event: "session_close", reason };
+		const sends = [...this.processes.values()]
+			.filter(
+				(process) => process.state === "ready" && subscribes(process, event.event) && !this.fenced(process.extension.id),
+			)
+			.map((process) => process.observe(event).catch(() => undefined));
+		if (sends.length === 0) return;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		await Promise.race([
+			Promise.all(sends),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, SESSION_CLOSE_MS);
+			}),
+		]);
+		clearTimeout(timer);
+	}
+
 	/** Operator cancel aborts operator requests; the runtimes keep serving. */
 	cancel(): void {
 		for (const controller of this.operatorRequests) controller.abort();
@@ -1068,6 +1091,7 @@ export class OperatorExtensionRuntimeV2 {
 		this.closed = true;
 		this.lifetime++;
 		this.cancel();
+		await this.closeSession("exit");
 		this.retireAll("session-closed");
 		await this.reloadTask;
 		await Promise.allSettled([...this.starting.values()]);

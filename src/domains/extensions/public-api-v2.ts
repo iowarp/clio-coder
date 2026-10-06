@@ -80,10 +80,6 @@ export type ExtensionObservationV2 =
 			tool: string;
 			outcome: "ok" | "error" | "blocked";
 			durationMs: number;
-			/** access: tool-args */
-			args?: unknown;
-			/** access: tool-results */
-			result?: string;
 	  }
 	| { event: "permission_requested"; tool: string }
 	| { event: "permission_resolved"; tool: string; decision: "allowed" | "denied" }
