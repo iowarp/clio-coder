@@ -278,6 +278,10 @@ export async function runMiddlewareAsyncRegistrations(
 	for (const registration of registrations) {
 		if (registration.evaluateAsync === undefined || !registration.hooks.includes(input.hook)) continue;
 		if (options.include && !options.include(registration)) continue;
+		// The registry awaits these per tool call with a real tool name. The
+		// batch-end after_tool observation carries none, and an extension hook
+		// without a `tools:` filter must not see it as a call of its own.
+		if (registration.awaited === true && isToolHook(input.hook) && input.toolName === undefined) continue;
 		if (registration.toolNames !== undefined) {
 			if (input.toolName === undefined || !registration.toolNames.includes(input.toolName)) continue;
 		}
@@ -299,6 +303,10 @@ export async function runMiddlewareAsyncRegistrations(
 		if (emitted.length > 0) ruleIds.push(registration.id);
 	}
 	return { hook: input.hook, input: cloneHookInput(input), effects, ruleIds };
+}
+
+function isToolHook(hook: MiddlewareHook): boolean {
+	return hook === "before_tool" || hook === "after_tool";
 }
 
 function emitDiagnostic(sink: MiddlewareDiagnosticSink, diagnostic: MiddlewareDiagnostic): void {
