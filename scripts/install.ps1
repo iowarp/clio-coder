@@ -226,6 +226,7 @@ function Install-ClioCoder {
 		$manifestPath = Join-Path $installRoot "install.json"
 		$old = if (Test-Path -LiteralPath $manifestPath) { Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json } else { $null }
 		$previous = if ($old -and $old.current -and (Test-Path -LiteralPath $old.current)) { $old.current } else { "" }
+		$npmCli = Join-Path $runtimeDir "node_modules\npm\bin\npm-cli.js"
 		if (-not $Options.Package -and $spec -in @("latest", "beta", "dev")) {
 			$tagsFile = Join-Path $work "dist-tags.json"
 			$tags = & $node $npmCli view $PackageName dist-tags --json
@@ -241,7 +242,6 @@ function Install-ClioCoder {
 		}
 		$staging = Join-Path $installRoot "versions\.staging-$PID"
 		New-Item -ItemType Directory -Force -Path (Join-Path $staging "lib") | Out-Null
-		$npmCli = Join-Path $runtimeDir "node_modules\npm\bin\npm-cli.js"
 		$npmArgs = @($npmCli, "install", "--prefix", (Join-Path $staging "lib"), "--no-save", "--loglevel=error")
 		if (-not $Options.IncludeClaudeSdk) { $npmArgs += "--omit=optional" } else { $npmArgs += "--include=optional" }
 		$npmArgs += $installSpec
