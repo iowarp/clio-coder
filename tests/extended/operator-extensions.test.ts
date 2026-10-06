@@ -5,6 +5,7 @@ import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
+import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
 import { ExtensionRuntimeProcess } from "../../src/domains/extensions/runtime-process.js";
 import {
@@ -20,6 +21,8 @@ import {
 	removeExtension,
 } from "../../src/domains/extensions/state.js";
 import { isLoadableExtension } from "../../src/domains/extensions/types.js";
+import { installPlugin } from "../../src/domains/plugins/state.js";
+import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { ExtensionPanelView } from "../../src/interactive/overlays/extension-panel.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
@@ -750,4 +753,60 @@ test("empty startup reload reports structured readiness and its origin to the UI
 	} finally {
 		await runtime.dispose();
 	}
+});
+
+test("a served plugin's prompt is a plain prompt until its extension is installed and in effect", async (t) => {
+	const env = await isolateClioEnv("clio-coder-takeover-test-");
+	const cwd = path.join(env.dir, "workspace");
+	mkdirSync(cwd);
+	const library = path.resolve(import.meta.dirname, "../../library");
+	ok(installPlugin(path.join(library, "plugins/materio"), { cwd, scope: "user" }).plugin);
+	const prompts = () => loadPromptTemplates({ cwd });
+	let turns = 0;
+	const shown: string[] = [];
+	const ctx = {
+		get operatorExtensions() {
+			return runtime;
+		},
+		listPrompts: () => ({ items: prompts().items, diagnostics: [] }),
+		expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, prompts()),
+		submitChat: () => {
+			turns++;
+		},
+		runLocalOperation: (operation: () => Promise<void>) => void operation(),
+		showExtensionOutput: (command: string) => shown.push(command),
+		render: () => {},
+		notice: () => {},
+	} as unknown as SlashCommandContext;
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => path.join(env.dir, "state"),
+	});
+	t.after(async () => {
+		await runtime.dispose();
+		env.restore();
+	});
+	const names = () => prompts().items.map((prompt) => prompt.name);
+	ok(names().includes("materio:status"), "the plugin alone provides the prompt");
+
+	// Plugin alone: no runtime exists, and the name expands as an ordinary prompt template.
+	equal((await runtime.reload("startup")).status, "committed");
+	deepStrictEqual(runtime.entries(), []);
+	deepStrictEqual(runtime.commands(names()), []);
+	equal(dispatchSlashCommand(parseSlashCommand("/materio:status"), ctx), "accepted");
+	equal(turns, 1);
+	deepStrictEqual(shown, []);
+
+	// With its extension installed and running, the same name routes to the runtime command.
+	ok(installExtension(path.join(library, "extensions/materio"), { cwd, scope: "user" }).extension);
+	equal((await runtime.reload()).status, "committed");
+	equal(runtime.entries().find((entry) => entry.id === "materio")?.state, "ready");
+	const takeover = runtime.commands(names()).find((row) => row.invocation === "materio:status");
+	ok(takeover?.available && takeover.replaces === "prompt", JSON.stringify(takeover));
+	equal(dispatchSlashCommand(parseSlashCommand("/materio:status"), ctx), "accepted");
+	for (let waited = 0; shown.length === 0 && waited < 10_000; waited += 50) await delay(50);
+	equal(turns, 1, "the takeover must not also send the prompt to the model");
+	deepStrictEqual(shown, ["materio:status"]);
 });
