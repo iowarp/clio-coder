@@ -263,11 +263,14 @@ first launch. Neither installer asks you to configure delegation peers
 before your primary model is set up. Upgrading preserves settings and
 credentials; reinstalling the package alone does not reset them.
 
-A returning user whose home already exists but whose saved chat route is
-missing or unusable is not sent back through configure when a route can be
-detected; the contract is in [configuration and targets](configuration-and-targets.md),
-and the code is [detect-chat-routes.ts](../../src/cli/detect-chat-routes.ts). A new
-home starts `clio-coder configure`.
+A returning user whose home already exists but has no saved chat route is not
+sent back through configure when a route can be detected; the contract is in
+[configuration and targets](configuration-and-targets.md), and the code is
+[detect-chat-routes.ts](../../src/cli/detect-chat-routes.ts). A saved chat route
+that cannot be used is kept: with no model or a runtime that cannot drive the main
+agent, startup exits 2 and names `clio-coder configure`, and with a missing
+credential the session opens with that route unavailable. A new home starts
+`clio-coder configure`.
 
 ---
 
