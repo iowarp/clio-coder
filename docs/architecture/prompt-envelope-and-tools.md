@@ -3,8 +3,8 @@
 Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 
 Main sessions attach a small coordinator surface (read, bash, edit, write,
-verify, ask_user, gateway and dispatch) and discover other tools, recipes, and
-workflows progressively through the gateway. Workers keep their recipe execution surfaces. The compiler receives registered
+verify, ask_user, gateway and dispatch) and discover other tools, agents, and
+playbooks progressively through the gateway. Workers keep their recipe execution surfaces. The compiler receives registered
 builtin presence separately from attached schemas so it can teach reachable
 gateway capabilities without claiming those tools are attached. Lazy MCP tool
 registration does not change this builtin presence input or the stable prefix.
@@ -75,7 +75,7 @@ when the tool is, the same rule the Fleet block follows.
 
 `identity.docs-routing` does not depend on `context`, and tool hints cannot
 establish tool availability. The Tool Contract independently describes agent,
-prompt, fleet, and package discovery through `clio_library` when `gateway` and
+prompt, playbook, and package discovery through `clio_library` when `gateway` and
 that capability are admitted and the scope permits workflow discovery, so
 disabling skill discovery alone does not hide the rest of the library. Catalog
 reads activate and install nothing.
@@ -122,7 +122,7 @@ task-shaped discovery. It carries four parts, each rendered only for what the su
 - The turn-ending contract, only where an operator can answer an `ask_user` interview.
 - Usage notes: the registry's one-sentence discovery hints for mapped builtins.
 
-The fleet roster is not preloaded. `dispatch(list=true)` and describe deliver per-recipe and per-capability detail at their step, and the SSH node inventory appears only as a dynamic fragment when nodes are configured. A headless prompt leaves seven operator-facing capabilities out of the map and notes; see [Prompt Compilation](prompt-compilation.md#headless-main-prompt).
+The fleet roster is not preloaded. `dispatch(list=true)` and describe deliver per-agent and per-capability detail at their step, and the SSH node inventory appears only as a dynamic fragment when nodes are configured. A headless prompt leaves seven operator-facing capabilities out of the map and notes; see [Prompt Compilation](prompt-compilation.md#headless-main-prompt).
 
 Worker prompts render the Tool Contract as base lines plus one optional guidance sentence per admitted tool, sourced from the tool registry (`ToolMetadata.promptHint` in [registry.ts](../../src/tools/registry.ts), assigned in [builtin-tool-catalog.ts](../../src/tools/builtin-tool-catalog.ts) and [core-bootstrap.ts](../../src/tools/core-bootstrap.ts)). The base lines state that the attached schemas are the worker's complete tool surface, list the admitted canonical tools, and say that persona and bound-skill instructions never add tools. A hint carries only a decision-local call shape that the tool's own description cannot. Hints are deduplicated, sorted, and render only for tools on the admitted surface, so a hint can never manufacture a tool. Removing a tool from the surface removes its hint with no compiler change. Adding a hint is a deliberate prompt-text change.
 
