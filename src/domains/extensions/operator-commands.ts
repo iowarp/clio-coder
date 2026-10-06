@@ -11,6 +11,8 @@ export interface ExtensionCommandRow {
 	/** The served plugin's prompt name, owned by this command while its runtime is available. */
 	replaces?: "prompt";
 	reason?: string;
+	/** Unavailable only until a reload settles; a takeover refuses meanwhile instead of handing its prompt to the model. */
+	transient?: true;
 }
 export function extensionInvocation(id: string, command: string): string {
 	return `ext:${id}:${command}`;

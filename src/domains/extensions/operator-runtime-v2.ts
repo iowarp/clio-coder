@@ -74,6 +74,33 @@ function identity(entry: InstalledExtension): string {
 function contextKey(context: RuntimeContext): string {
 	return JSON.stringify(context);
 }
+class SessionBusyWhileStaging extends Error {
+	constructor() {
+		super("session became busy while staging; reload queued until idle");
+	}
+}
+/**
+ * The TUI has no session id until its first turn. That id arriving does not
+ * revoke a running generation: its tools, hooks and commands keep answering,
+ * and the generation is replaced at the next idle boundary, which moves what it
+ * kept in memory under the new session. Revoking it at once tore every runtime
+ * down in the middle of the first turn, so a gate that fails closed refused the
+ * model's writes and the turn's first runtime tool call failed.
+ */
+function adoptsSession(previous: string, now: RuntimeContext): boolean {
+	try {
+		const before = JSON.parse(previous) as Partial<RuntimeContext>;
+		return (
+			before.sessionId === null && now.sessionId !== null && before.workspace === now.workspace && before.mode === now.mode
+		);
+	} catch {
+		// An unreadable key is a different context.
+		return false;
+	}
+}
+function sameContext(key: string, now: RuntimeContext): boolean {
+	return key === contextKey(now) || adoptsSession(key, now);
+}
 function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -326,16 +353,20 @@ export class OperatorExtensionRuntimeV2 {
 	reconcile(): void {
 		if (this.closed || (!this.queued && !this.reloading && this.processes.size === 0 && this.deferred.size === 0)) return;
 		let context: string;
+		let adopts = false;
 		let list: InstalledExtension[];
 		try {
-			context = contextKey(this.context());
+			const now = this.context();
+			context = contextKey(now);
+			adopts = this.activeContext !== undefined && adoptsSession(this.activeContext, now);
 			list = this.list();
 		} catch {
 			context = "unavailable";
 			list = [];
 		}
 		this.inventory = list;
-		if (this.activeContext !== undefined && context !== this.activeContext) {
+		if (adopts) this.queued = true;
+		else if (this.activeContext !== undefined && context !== this.activeContext) {
 			this.invalidateContext();
 			this.activeContext = context;
 		}
@@ -417,7 +448,7 @@ export class OperatorExtensionRuntimeV2 {
 					}
 				}),
 			);
-			if (this.closed || lifetime !== this.lifetime || key !== contextKey(this.context()))
+			if (this.closed || lifetime !== this.lifetime || !sameContext(key, this.context()))
 				throw new Error("session or workspace changed while staging runtimes");
 			const current = this.list();
 			if (
@@ -427,7 +458,7 @@ export class OperatorExtensionRuntimeV2 {
 				throw new Error("extension installations changed while staging; reload again");
 			if (!this.options.isIdle()) {
 				this.queued = true;
-				throw new Error("session became busy while staging; reload queued until idle");
+				throw new SessionBusyWhileStaging();
 			}
 			// The TUI has no session id until its first turn, and that turn's session
 			// inherits what was open before it, as its state does (spawn).
@@ -468,7 +499,7 @@ export class OperatorExtensionRuntimeV2 {
 					}
 				}),
 			);
-			if (this.closed || lifetime !== this.lifetime || key !== contextKey(this.context()))
+			if (this.closed || lifetime !== this.lifetime || !sameContext(key, this.context()))
 				throw new Error("session or workspace changed during runtime activation");
 			if (context.mode === "interactive") {
 				for (const [id, process] of staged)
@@ -497,11 +528,15 @@ export class OperatorExtensionRuntimeV2 {
 				this.retire(process, "reload-rejected");
 			this.processes.clear();
 			this.deferred.clear();
-			result = {
-				status: this.generation === next ? "committed" : "rejected",
-				generation: this.generation,
-				message: `${this.generation === next ? "Extensions reloaded with errors: " : "Extension reload failed: "}${message(error)}`,
-			};
+			result =
+				error instanceof SessionBusyWhileStaging
+					? // A turn began while the new generation staged. Nothing failed: the reload is queued and runs at the next idle boundary.
+						{ status: "deferred", generation: this.generation, message: error.message }
+					: {
+							status: this.generation === next ? "committed" : "rejected",
+							generation: this.generation,
+							message: `${this.generation === next ? "Extensions reloaded with errors: " : "Extension reload failed: "}${message(error)}`,
+						};
 		}
 		this.changed();
 		try {
@@ -556,6 +591,7 @@ export class OperatorExtensionRuntimeV2 {
 					const process = this.processes.get(entry.id);
 					const failure = this.failures.get(entry.id) ?? process?.failure;
 					const muted = this.fenced(entry.id);
+					const settling = this.reloading || this.queued;
 					const available =
 						!muted &&
 						entry.loadable &&
@@ -569,7 +605,7 @@ export class OperatorExtensionRuntimeV2 {
 								? `muted for this session; /extensions unmute ${entry.id} restores it`
 								: !entry.loadable
 									? "installation is not enabled and eligible"
-									: this.reloading
+									: settling
 										? "runtime reload in progress"
 										: "runtime not ready; reload extensions"));
 					const row: ExtensionCommandRow = {
@@ -581,6 +617,9 @@ export class OperatorExtensionRuntimeV2 {
 						generation: this.generation,
 						available,
 						...(reason ? { reason } : {}),
+						...(!available && settling && failure === undefined && !muted && entry.loadable
+							? { transient: true as const }
+							: {}),
 					};
 					// A takeover needs the served plugin in effect and its prompt still listed;
 					// otherwise the plain prompt (or nothing) answers that name.
@@ -647,7 +686,7 @@ export class OperatorExtensionRuntimeV2 {
 			if (
 				controller.signal.aborted ||
 				lifetime !== this.lifetime ||
-				key !== contextKey(this.context()) ||
+				!sameContext(key, this.context()) ||
 				!this.current(process)
 			)
 				throw new Error("extension result belongs to a revoked runtime or session");

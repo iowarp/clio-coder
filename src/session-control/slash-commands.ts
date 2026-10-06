@@ -3089,9 +3089,21 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// for one that is loaded made the whole foreign prompt surface unreachable.
 		const runtime = ctx.operatorExtensions;
 		const promptNames = (ctx.listPrompts?.().items ?? []).map((prompt) => prompt.name);
-		const replacement = runtime
-			?.commands(promptNames)
-			.find((row) => row.invocation === command.token && row.replaces === "prompt" && row.available);
+		const takeovers = (runtime?.commands(promptNames) ?? []).filter(
+			(row) => row.invocation === command.token && row.replaces === "prompt",
+		);
+		const replacement = takeovers.find((row) => row.available);
+		// A takeover whose runtime is only restarting is not an absent extension: handing its prompt
+		// to the model would answer with a model turn the operator did not ask for. Refuse and keep the draft.
+		const settling = takeovers.find((row) => !row.available && row.transient === true);
+		if (settling) {
+			ctx.notice(
+				"warn",
+				`/${command.token}: ${settling.reason ?? "extension runtime is restarting"}; send it again in a moment`,
+			);
+			ctx.render?.();
+			return "rejected";
+		}
 		const expansion = replacement ? undefined : ctx.expandPromptTemplate?.(command.text);
 		if (expansion?.expanded === true) {
 			ctx.submitChat(command.text);
