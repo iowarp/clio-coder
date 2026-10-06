@@ -106,7 +106,8 @@ import {
 } from "../domains/session/entries.js";
 import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
-import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
+import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
+import type { RetrySettings } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
@@ -181,6 +182,7 @@ import {
 } from "./turn-queues.js";
 import {
 	createTurnRecovery,
+	recoveryAttemptHasOutput,
 	type RetryStatusEvent,
 	reclassifyStallAbort,
 	rewriteStallAbortMessage,
@@ -2959,7 +2961,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							// watchdog's abort retries and an operator cancel still does not.
 							const failure = reclassifyStallAbort(state, settled);
 							recovery.ensureFailureVisibleAndPersisted(failure);
-							await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, failure);
+							await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, failure, agentRuntime.agent.state.messages.slice(machineMessageStart));
 						}
 					}
 				} catch (err) {
@@ -2970,7 +2972,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const overflow = toContextOverflowError(err);
 					if (!overflow) {
 						const message = state.toolProseAbortReason ?? (err instanceof Error ? err.message : String(err));
-						if (isRetryableErrorMessage(message)) {
+						const classification = classifyRecoveryFailure({
+							message,
+							runtimeId: agentRuntime.runtimeId,
+							contextOverflow: false,
+							hasAttemptOutput: recoveryAttemptHasOutput(agentRuntime.agent.state.messages.slice(machineMessageStart)),
+							cause: err,
+							...(typeof err === "object" && err !== null && "status" in err ? { status: err.status } : {}),
+						});
+						if (isRetryableRecoveryFailure(classification)) {
 							const failureMessage = {
 								role: "assistant",
 								content: [{ type: "text", text: "" }],
@@ -2982,7 +2992,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								stopReason: "error",
 								errorMessage: message,
 								message: failureMessage,
-							});
+							}, undefined, classification);
 							return;
 						}
 						emitNotice(operatorFacingEngineError(message));
