@@ -10,8 +10,9 @@ install  Install the pane multiplexer Clio drives. This is an alias for
          \`clio-coder tools install herdr\`; the toolchain command is where every
          pinned external program is managed, and \`clio-coder tools status herdr\`
          explains which copy Clio would run. With --if-missing nothing is
-         downloaded when a usable copy already resolves, which is how the
-         installer provisions the workspace without duplicating your own herdr.
+         downloaded when a usable copy already resolves or when you declined the
+         workspace, which is how the installer and background updates provision
+         it without duplicating your own herdr or reversing your answer.
 workspace
          The remembered answer to "open Clio Coder in a workspace?", which bare
          \`clio-coder\` asks once. on accepts, off declines, ask forgets the
@@ -64,6 +65,14 @@ export async function runPanesCommand(argv: ReadonlyArray<string> = []): Promise
 		if (resolution.binaryPath !== null) {
 			process.stdout.write(
 				`herdr ${resolution.version ?? resolution.entry?.version ?? ""} already resolves at ${resolution.binaryPath}; nothing downloaded\n`,
+			);
+			return 0;
+		}
+		// A remembered no outlives every update; `panes workspace on` and plain `panes install` are the ways back.
+		const { readWorkspaceConsent } = await import("./workspace-consent.js");
+		if ((await readWorkspaceConsent())?.decision === "declined") {
+			process.stdout.write(
+				"workspace declined earlier; nothing downloaded (`clio-coder panes workspace on` turns workspaces on)\n",
 			);
 			return 0;
 		}
