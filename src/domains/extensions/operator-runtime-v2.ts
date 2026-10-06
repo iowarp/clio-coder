@@ -73,6 +73,19 @@ type ApiV2Extension = LoadableExtension & { runtimeV2: NonNullable<LoadableExten
 function isApiV2(entry: InstalledExtension): entry is ApiV2Extension {
 	return isLoadableExtension(entry) && entry.runtimeV2 !== undefined;
 }
+/** Why a listed package is not running, from its own flags, with the command that changes it. */
+function inactiveReason(entry: InstalledExtension): string | undefined {
+	if (entry.muted) return `muted for this session; /extensions unmute ${entry.id} restores it`;
+	if (entry.consentPending) return "waiting for your approval of its capability envelope; /extensions dev asks again";
+	if (entry.overriddenBy) return `shadowed by the ${entry.overriddenBy} copy`;
+	if (entry.trustBlocked) return "project extensions in this workspace are not trusted";
+	if (!entry.valid)
+		return entry.diagnostics.find((diagnostic) => diagnostic.type === "error")?.message ?? "invalid package";
+	if (!entry.compatible) return "not compatible with this Clio version";
+	if (!entry.enabled) return "disabled";
+	return undefined;
+}
+
 /** A package that only answers commands has nothing to do until the operator asks. */
 function startsOnDemand(entry: ApiV2Extension): boolean {
 	const declared = entry.runtimeV2;
@@ -574,7 +587,8 @@ export class OperatorExtensionRuntimeV2 {
 				const reason =
 					this.failures.get(entry.id) ??
 					current?.failure ??
-					(!current && this.deferred.has(entry.id) ? "starts on first command" : undefined);
+					(!current && this.deferred.has(entry.id) ? "starts on first command" : undefined) ??
+					(current ? undefined : inactiveReason(entry));
 				const status = current?.state === "ready" ? this.surface.entry(entry.id)?.status : undefined;
 				return {
 					id: entry.id,
