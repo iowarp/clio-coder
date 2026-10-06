@@ -242,7 +242,29 @@ export interface AttestedToolIdentityInput {
  * whose registry resolved a different tool set is refused rather than run.
  */
 export function attestedToolSignature(input: AttestedToolIdentityInput): string {
-	const registry = createWorkerToolRegistry();
+	if (!input.toolsSupported || input.allowedTools.length === 0) {
+		return toolSignatureOf(input.helperResult === true && input.toolsSupported ? [INTERNAL_HELPER_RESULT_TOOL] : []);
+	}
+	// This private registry only projects names. Preserve canonical registration
+	// and extension verification without compiling an unused policy; executable
+	// worker registries still construct their safety contract eagerly.
+	let safety: SafetyContract | undefined;
+	const resolveSafety = (): SafetyContract => (safety ??= createWorkerSafety());
+	const registry = createWorkerToolRegistry(undefined, {
+		classify: (call) => resolveSafety().classify(call),
+		evaluate: (call, posture) => resolveSafety().evaluate(call, posture),
+		observeLoop: (key, now) => resolveSafety().observeLoop(key, now),
+		get scopes() {
+			return resolveSafety().scopes;
+		},
+		isSubset: (worker, orchestrator) => resolveSafety().isSubset(worker, orchestrator),
+		get policy() {
+			return resolveSafety().policy!;
+		},
+		get audit() {
+			return resolveSafety().audit;
+		},
+	});
 	return toolSignatureOf([
 		...effectiveToolNames({
 			registry,
