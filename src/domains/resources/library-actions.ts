@@ -46,6 +46,7 @@ import {
 } from "./library.js";
 import { type LibraryCopyState, libraryCopyState, readLibraryInventory } from "./library-inventory.js";
 import {
+	libraryNamespace,
 	libraryPackageBaseDir,
 	listInstalledLibraryPackages as listInstalledPlugins,
 	observeLibraryCopy,
@@ -225,6 +226,15 @@ function copyOf(
 	);
 }
 
+/**
+ * Whether a copy competes for the identity's name. A plugin and the extension
+ * that serves it share a name and never compete (the shipped Materio pair), so
+ * the peer, winner and survivor of a step are always read within one namespace.
+ */
+function competes(item: Pick<InstalledPlugin, "id" | "kind">, identity: LibraryPackageIdentity): boolean {
+	return item.id === identity.name && libraryNamespace(item.kind) === libraryNamespace(identity.kind);
+}
+
 function observe(
 	cwd: string,
 	scope: PluginScope,
@@ -268,7 +278,7 @@ function expectedFor(
 
 function stateAfterInstall(entries: ReadonlyArray<InstalledPlugin>, identity: LibraryPackageIdentity) {
 	const peer = entries.find(
-		(item) => item.id === identity.name && item.scope === peerOf(identity.scope) && item.valid && item.compatible,
+		(item) => competes(item, identity) && item.scope === peerOf(identity.scope) && item.valid && item.compatible,
 	);
 	if (identity.scope === "user" && peer) {
 		return {
@@ -477,7 +487,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 						refusal += `. Inspect local changes first; to replace from the recorded source and preserve changed files in a recovery backup, run clio-coder library update ${identity.ref} --${copy.scope} --force`;
 				} else if (missing.length)
 					refusal = `library_requirement_missing: ${missing.join(", ")}; install or enable those first`;
-				const winner = entries.find((item) => item.id === identity.name && item.effective);
+				const winner = entries.find((item) => competes(item, identity) && item.effective);
 				effectiveAfter = winner
 					? {
 							scope: winner.scope,
@@ -494,6 +504,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 					scope: identity.scope,
 					id: identity.name,
 					operation: request.operation,
+					kind: identity.kind,
 				});
 				dependents = { newlyBroken: projection.newlyBroken, preexisting: projection.preexisting };
 				if (projection.newlyBroken.length)
@@ -507,7 +518,7 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 				if (request.operation === "disable")
 					fallbackNote =
 						survivor && survivor.scope === identity.scope
-							? survivor.overriddenBy || entries.some((item) => item.id === identity.name && item.scope !== identity.scope)
+							? survivor.overriddenBy || entries.some((item) => competes(item, identity) && item.scope !== identity.scope)
 								? `the disabled ${identity.scope} copy still shadows the ${peerOf(identity.scope)} copy; removal would reveal it`
 								: "no other copy exists; nothing falls back"
 							: "another copy is already effective";
@@ -661,7 +672,7 @@ export function verifyLibraryStep(
 					...(resource.reason ? { reason: resource.reason } : {}),
 				});
 	}
-	const effective = entries.find((item) => item.id === identity.name && item.effective);
+	const effective = entries.find((item) => competes(item, identity) && item.effective);
 	return {
 		evidence,
 		tree,

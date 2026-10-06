@@ -25,6 +25,7 @@ import {
 } from "../plugins/index.js";
 import {
 	extensionLibraryCopy,
+	installedCopiesNamed,
 	libraryPackageBaseDir,
 	listInstalledLibraryPackages as listInstalledPlugins,
 	readLibraryInstallRecord,
@@ -189,10 +190,10 @@ export function resolveInstalledLibraryEntry(
 	ref: string,
 	options: LibraryScopeOptions = {},
 ): LibraryEntry & { scope: PluginScope } {
-	const copies = listInstalledPlugins(options.cwd ?? process.cwd(), { ...options, all: true })
-		.filter((item) => (ref.includes(":") ? `${item.kind ?? "plugin"}:${item.id}` === ref : item.id === ref))
-		.sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project"));
-	const item = copies[0];
+	const item = installedCopiesNamed(
+		listInstalledPlugins(options.cwd ?? process.cwd(), { ...options, all: true }),
+		ref,
+	)[0];
 	if (!item) throw new Error(`package not installed: ${ref}`);
 	const saved = readLibraryInstallRecord(item.id, { ...options, scope: item.scope }, item.kind);
 	return {

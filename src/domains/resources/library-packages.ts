@@ -75,6 +75,38 @@ export function listInstalledLibraryPackages(
 			.map(extensionLibraryCopy),
 	];
 }
+/**
+ * Plugin-format packages share one id space per scope; a standalone extension
+ * has its own directory and never competes with a plugin of the same name.
+ */
+export function libraryNamespace(kind: LibraryEntryKind | undefined): "extension" | "plugin" {
+	return kind === "extension" ? "extension" : "plugin";
+}
+/** The source id the loaders and the inventory carry for a copy's own resources. */
+export function libraryCopySourceId(copy: {
+	kind?: LibraryEntryKind | undefined;
+	scope: PluginScope;
+	name: string;
+}): string {
+	return `${libraryNamespace(copy.kind)}:${copy.scope}:${copy.name}`;
+}
+/**
+ * The installed copies a ref names, project scope first. `kind:name` is exact.
+ * A bare name that both a plugin-format package and an extension carry is
+ * refused with both refs, as install refuses an ambiguous catalog name.
+ */
+export function installedCopiesNamed<T extends Pick<LibraryInstalledPackage, "id" | "kind" | "scope">>(
+	copies: ReadonlyArray<T>,
+	ref: string,
+): T[] {
+	const exact = ref.includes(":");
+	const named = copies.filter((item) => (exact ? `${item.kind ?? "plugin"}:${item.id}` === ref : item.id === ref));
+	if (!exact && new Set(named.map((item) => libraryNamespace(item.kind))).size > 1) {
+		const refs = [...new Set(named.map((item) => `${item.kind ?? "plugin"}:${item.id}`))].sort();
+		throw new Error(`ambiguous package: ${ref}; use ${refs.join(" or ")}`);
+	}
+	return named.sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project"));
+}
 export function libraryPackageBaseDir(kind: LibraryEntryKind, scope: PluginScope, cwd: string): string {
 	return kind === "extension" ? extensionBaseDir(scope, cwd) : pluginBaseDir(scope, cwd);
 }
