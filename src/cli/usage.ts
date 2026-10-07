@@ -248,10 +248,16 @@ function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
 }
 
 /** Existing numeric accumulators sum known contributions; the report retains missing coverage. */
-function reportedUsageTotals(totals: UsageTotals, rows: ReadonlyArray<OutOfTurnUsageRow>) {
+function reportedUsageTotals(totals: UsageTotals, rows: ReadonlyArray<OutOfTurnUsageRow>, missingSessionCalls = 0) {
 	const failedCompaction = summarizeFailedCompactionUsage(rows);
-	if (failedCompaction.calls === 0) return totals;
-	const reported: Record<string, unknown> = { ...totals, knownSubtotals: true, failedCompaction };
+	const missingTokenCalls = rows.filter((row) => row.usage.totalTokens === null).length + missingSessionCalls;
+	if (failedCompaction.calls === 0 && missingTokenCalls === 0) return totals;
+	const reported: Record<string, unknown> = {
+		...totals,
+		knownSubtotals: true,
+		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
+		...(failedCompaction.calls > 0 ? { failedCompaction } : {}),
+	};
 	for (const [field, missing] of Object.entries(failedCompaction.unobservedUsageCalls)) {
 		const key = field === "reasoning" ? "reasoningTokens" : field;
 		if (missing > 0 && reported[key] === 0) reported[key] = null;
@@ -571,11 +577,12 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	// session store is gone can still have recorded out-of-turn spend, and
 	// dropping those rows would report money that was spent as nothing at all.
 	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
-	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows);
+	const missingSessionCalls = sessions.reduce((sum, session) => sum + session.estimatedUsageCalls, 0);
+	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows, missingSessionCalls);
 	const failedCompaction = summarizeFailedCompactionUsage(outOfTurnRows);
 	const allRecordedTokens = usageTotals.totalTokens + workerUsage.totalTokens;
 	const missingTokenCalls =
-		sessions.reduce((sum, session) => sum + session.estimatedUsageCalls, 0) +
+		missingSessionCalls +
 		outOfTurnRows.filter((row) => row.usage.totalTokens === null).length +
 		workerUsage.missingTokenRuns;
 	const usageRows = [...usageByModel.values()].sort(
@@ -817,7 +824,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			);
 		}
 		out(
-			`  ${failedCompaction.calls > 0 ? "known reported/estimated" : "provider-reported"} cost in window: ${typeof reportedTotals.costUsd === "number" ? `$${reportedTotals.costUsd.toFixed(4)}` : "unknown"}`,
+			`  ${missingTokenCalls > 0 ? "known cost subtotal" : "reported/estimated cost"} in window: ${typeof reportedTotals.costUsd === "number" ? `$${reportedTotals.costUsd.toFixed(4)}${missingTokenCalls > 0 ? " +?" : ""}` : "unknown"}`,
 		);
 	}
 	if (usageRows.length > 0) {
@@ -857,7 +864,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							usageAmount(reported.cacheRead),
 							usageAmount(reported.reasoningTokens),
 							usageAmount(reported.totalTokens),
-							typeof reported.costUsd === "number" ? `$${reported.costUsd.toFixed(4)}` : "unknown",
+							typeof reported.costUsd === "number"
+								? `$${reported.costUsd.toFixed(4)}${"missingTokenCalls" in reported && typeof reported.missingTokenCalls === "number" ? " +?" : ""}`
+								: "unknown",
 						];
 					}),
 				]),

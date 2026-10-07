@@ -1064,6 +1064,8 @@ describe("production compaction controls", () => {
 		ok(tokens);
 		strictEqual(tokens.totalTokens, null);
 		strictEqual(tokens.costUsd, null);
+		strictEqual(tokens.knownSubtotals, true);
+		strictEqual(tokens.missingTokenCalls, 1);
 		strictEqual(tokens.failedCompaction.erroredCalls, 1);
 		strictEqual(tokens.failedCompaction.unobservedUsageCalls.totalTokens, 1);
 		strictEqual(tokens.failedCompactionCalls, 1);
