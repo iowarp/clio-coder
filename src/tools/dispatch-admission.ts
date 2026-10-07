@@ -375,6 +375,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			agent: resolution.agentId,
 			task: request.task,
 			...(request.briefing !== undefined ? { briefing: request.briefing } : {}),
+			...(request.record !== undefined ? { record: request.record } : {}),
 			...(request.context ? { context: structuredClone(request.context) } : {}),
 			...(request.contextSeed ? { workerContext: structuredClone(request.contextSeed.provenance) } : {}),
 			...(request.worktree === true
@@ -667,6 +668,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							{
 								agentId: gateDeciderAgentId(reviewResult.review.reviewer),
 								...(base.budget === undefined ? {} : { budget: base.budget }),
+								...(base.record === undefined ? {} : { record: base.record }),
 								executionRole: "reviewer",
 								task: renderDispatchReviewerTask(base.task, subject.runId, cycle, base.intent),
 								systemPrompt: REVIEWER_GATE_PROMPT,
@@ -703,6 +705,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 						{
 							agentId: gateDeciderAgentId(compete.judge?.agent),
 							...(base.budget === undefined ? {} : { budget: base.budget }),
+							...(base.record === undefined ? {} : { record: base.record }),
 							executionRole: "judge",
 							task: `Plan-time capability check for the ${compete.candidates}-candidate judge.`,
 							systemPrompt: JUDGE_GATE_PROMPT,
@@ -776,6 +779,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					const judgeRequest: DispatchRequest = {
 						agentId: council.judge?.agent ?? base.agentId,
 						...(base.budget === undefined ? {} : { budget: base.budget }),
+						...(base.record === undefined ? {} : { record: base.record }),
 						executionRole: "judge",
 						task: "Plan-time capability check for council synthesis.",
 						systemPrompt: COUNCIL_JUDGE_PROMPT,

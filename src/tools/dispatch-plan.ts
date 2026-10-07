@@ -63,6 +63,7 @@ export type DispatchPlanAuthorityGrant = null | {
 };
 
 export interface DispatchPlanTaskView {
+	record?: boolean;
 	agent: string;
 	/** Exact bounded task being approved, sanitized only when rendered. */
 	task: string;
@@ -147,6 +148,7 @@ export interface ResolvedDispatchPlanArtifact {
 			Pick<
 				DispatchPlanTaskView,
 				| "briefing"
+				| "record"
 				| "context"
 				| "workerContext"
 				| "worktree"
@@ -189,6 +191,7 @@ export function withResolvedPlanTaskPin(
 	if (task.workerContext !== undefined && request.contextSeed?.provenance.contentHash !== task.workerContext.contentHash)
 		throw new Error("worker context: admitted seed no longer matches the plan");
 	const {
+		record: _record,
 		briefing: _briefing,
 		context: _context,
 		contextSeed: _contextSeed,
@@ -203,6 +206,7 @@ export function withResolvedPlanTaskPin(
 	return {
 		...base,
 		agentId: task.agent,
+		...(task.record !== undefined ? { record: task.record } : {}),
 		...(task.context ? { context: structuredClone(task.context) } : {}),
 		...(task.workerContext && request.contextSeed ? { contextSeed: structuredClone(request.contextSeed) } : {}),
 		executionRole: task.executionRole,
@@ -355,6 +359,8 @@ function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 			agentDecision: null,
 			wave: null,
 		};
+		const capture = "record" in record ? record.record : args.record;
+		if (typeof capture === "boolean") view.record = capture;
 		const briefing = "briefing" in record ? str(record.briefing) : str(args.briefing);
 		if (briefing !== undefined) view.briefing = briefing;
 		const worktree = "worktree" in record ? record.worktree : args.worktree;
@@ -462,6 +468,7 @@ function renderPlanText(
 				`    council label=${safeField(task.council.label)} color=${safeField(task.council.color ?? "none")} round=${task.council.round} rounds=${task.council.rounds} synthesis=${task.council.synthesis}`,
 			);
 		}
+		if (task.record === true) lines.push("    record=true (bounded redacted display asciicast)");
 		if (task.worktree === true)
 			lines.push(
 				`    worktree=true apply=${task.apply ?? "merge"} destination=${safeField(task.worktreeDestination ?? "unresolved")}`,
@@ -539,6 +546,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"agent",
 		"task",
 		"briefing",
+		"record",
 		"context",
 		"workerContext",
 		"worktree",
@@ -621,6 +629,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	if (value.nodeKind === "local" && value.nodeHost !== undefined) return false;
 	if (value.briefing !== undefined && (typeof value.briefing !== "string" || value.briefing.trim().length === 0))
 		return false;
+	if (value.record !== undefined && typeof value.record !== "boolean") return false;
 	if (value.worktree !== undefined && value.worktree !== true) return false;
 	if (value.apply !== undefined && value.apply !== "merge" && value.apply !== "preserve") return false;
 	if (value.apply !== undefined && value.worktree !== true) return false;
@@ -869,6 +878,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			agent: task.agent.trim(),
 			task: task.task.trim(),
 			...(task.briefing !== undefined ? { briefing: task.briefing.trim() } : {}),
+			...(task.record !== undefined ? { record: task.record } : {}),
 			...(task.context !== undefined ? { context: parseWorkerContextPolicy(task.context) } : {}),
 			...(task.workerContext !== undefined ? { workerContext: structuredClone(task.workerContext) } : {}),
 			...(task.worktree === true

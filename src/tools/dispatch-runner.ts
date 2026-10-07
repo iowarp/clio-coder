@@ -474,6 +474,7 @@ function successNote(receipt: RunReceipt): string | null {
 }
 
 interface CompletedRun {
+	recording?: import("../domains/dispatch/index.js").RecordingReference;
 	readOnly?: boolean;
 	receipt: RunReceipt;
 	receiptPath: string | null;
@@ -513,6 +514,7 @@ function completeRun(
 		readOnly,
 		receipt,
 		receiptPath: envelope?.receiptPath ?? null,
+		...(envelope?.recording !== undefined ? { recording: envelope.recording } : {}),
 		summary,
 		integrity:
 			envelope === null
@@ -686,7 +688,7 @@ export function formatDispatchOutput(
 						? "(no receipt-sealed assistant text captured)"
 						: "(worker text withheld because receipt integrity failed)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
 				`  ${workerTextLabel(trustStatus)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(receipt, trustStatus, answerText).map((notice) => `  ${notice}`),
@@ -751,7 +753,7 @@ function dispatchDetails(
 		// renders details can show the board without re-reading the store.
 		...(board !== null ? { agentLedgerBoard: board } : {}),
 		...(transition !== null ? { scoutTransition: transition } : {}),
-		runs: runs.map(({ receipt, receiptPath, summary, integrity, readOnly }) => {
+		runs: runs.map(({ receipt, receiptPath, summary, integrity, readOnly, recording }) => {
 			// Additive provenance keys only; folded in when the receipt carries the
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
@@ -763,6 +765,7 @@ function dispatchDetails(
 				agentId: receipt.agentId,
 				exitCode: receipt.exitCode,
 				receiptPath,
+				...(recording !== undefined ? { recording } : {}),
 				eventCount: summary.count,
 				// The dispatch restriction is visible beside the receipt integrity
 				// result. Historical receipts may still encode read-only as a level.
@@ -990,6 +993,7 @@ async function runReviewGated(
 			const reviewerRequest: DispatchRequest = {
 				agentId: gateDeciderAgentId(review.reviewer),
 				...(base.budget === undefined ? {} : { budget: base.budget }),
+				...(base.record === undefined ? {} : { record: base.record }),
 				executionRole: "reviewer",
 				task: renderDispatchReviewerTask(base.task, builder.receipt.runId, cycle, base.intent),
 				systemPrompt: REVIEWER_GATE_PROMPT,
@@ -1595,6 +1599,7 @@ async function runCompete(
 			const judgeRequest: DispatchRequest = {
 				agentId: gateDeciderAgentId(compete.judge?.agent),
 				...(base.budget === undefined ? {} : { budget: base.budget }),
+				...(base.record === undefined ? {} : { record: base.record }),
 				executionRole: "judge",
 				task: renderCompeteJudgeTask(base.task, worktrees, stats, candidateRuns),
 				// Candidate prose and receipt locators are evidence, not inferred authority.
@@ -2251,6 +2256,7 @@ async function runCouncil(
 		const judgeRequest: DispatchRequest = {
 			agentId: council.judge?.agent ?? base.agentId,
 			...(base.budget === undefined ? {} : { budget: base.budget }),
+			...(base.record === undefined ? {} : { record: base.record }),
 			executionRole: "judge",
 			task: `Synthesize the council answers for this task:\n\n${base.task}`,
 			briefing: boundedCouncilBriefing(

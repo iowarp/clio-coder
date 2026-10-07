@@ -51,7 +51,7 @@ import { formatDispatchHumanOutput } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--read-only] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio-coder run [flags] "<task>"
 
@@ -64,6 +64,7 @@ Flags:
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
   --autonomy <level>        main-agent autonomy: default|yolo
   --read-only              restrict --agent dispatch to read-only tools
+  --record                 save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
   --no-delegate            forbid main-agent dispatch for this task and its continuations
@@ -194,6 +195,7 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 	return (
 		parsed.readOnly ||
+		parsed.record === true ||
 		parsed.agentProfile !== undefined ||
 		parsed.agentRuntime !== undefined ||
 		parsed.toolProfile !== undefined ||
@@ -606,6 +608,7 @@ async function runDispatch(
 		requestOrigin: "user",
 	};
 	if (parsed.readOnly) dispatchReq.readOnly = true;
+	if (parsed.record === true) dispatchReq.record = true;
 	if (parsed.agentProfile) dispatchReq.workerProfile = parsed.agentProfile;
 	if (parsed.agentRuntime) dispatchReq.workerRuntime = parsed.agentRuntime;
 	if (parsed.target) dispatchReq.target = parsed.target;
@@ -728,10 +731,13 @@ async function runDispatch(
 			cleanupSteer = undefined;
 		}
 		if (parsed.json) {
-			writeAgentFrame({ type: "receipt", receipt });
+			const recording = dispatch.getRun(receipt.runId)?.recording;
+			writeAgentFrame({ type: "receipt", receipt, ...(recording !== undefined ? { recording } : {}) });
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 			process.stdout.write(formatDispatchHumanOutput(answer, receipt));
+			const recording = dispatch.getRun(receipt.runId)?.recording;
+			if (recording) process.stderr.write(`Recording manifest (relative to Clio state): ${recording.manifestPath}\n`);
 		}
 
 		process.off("SIGINT", onSignal);

@@ -169,6 +169,10 @@ function dispatchRequestFromArgs(
 				}
 			: {}),
 	};
+	if (args.record !== undefined) {
+		if (typeof args.record !== "boolean") return { ok: false, message: "record must be a boolean" };
+		request.record = args.record;
+	}
 	if (args.context !== undefined) {
 		try {
 			request.context = parseWorkerContextPolicy(args.context);
@@ -298,6 +302,8 @@ export function dispatchRequestsFromArgs(
 	if (Object.hasOwn(args, "task") && Object.hasOwn(args, "tasks")) {
 		return { ok: false, message: "dispatch: pass either task for one run or tasks for a batch, not both" };
 	}
+	if (args.record !== undefined && typeof args.record !== "boolean")
+		return { ok: false, message: "dispatch: record must be a boolean" };
 	const tasks = args.tasks;
 	if (!Array.isArray(tasks) || tasks.length === 0) {
 		return {
