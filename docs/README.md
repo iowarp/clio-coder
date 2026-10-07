@@ -73,6 +73,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Context windows, token accounting, single-threshold compaction, prefix caching, project handbooks, and the codemap | [Context Engine](architecture/context-engine.md) |
 | Codemap, bounded orientation, current project evidence, and artifact compatibility | [Project Context](architecture/project-context.md) |
 | Choose compaction and recover interrupted handoffs | [Context Continuity](guide/context-continuity.md) |
+| Index code, scientific artifacts, memory, evidence, and recorded work by meaning | [Semantic Context Beta](guide/semantic-context.md) |
 | Non-destructive working-set eviction, markers, and recall | [Context Working Set](architecture/context-working-set.md) |
 | Session ledgers, branches, checkpoints, resume, and recovery | [Session Lifecycle](architecture/session-lifecycle.md) |
 | Proactive task memory, interventions, and handoffs | [Proactive Memory](guide/proactive-memory.md) |

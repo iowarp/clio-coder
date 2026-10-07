@@ -364,5 +364,43 @@ export async function statusSemantic(options: SemanticAppOptions) {
 /** Explicit operator canary: returned recipe must be persisted before use as a new profile. */
 export async function qualifySemantic(options: SemanticAppOptions): Promise<EmbeddingProfile> {
 	const app = await openSemanticApp(options);
-	return qualifyEmbeddingProfile(app.service, app.profile);
+	const qualified = await qualifyEmbeddingProfile(app.service, app.profile);
+	const image = {
+		kind: "image" as const,
+		data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+		mimeType: "image/png" as const,
+	};
+	const wav = Buffer.alloc(44 + 3200);
+	wav.write("RIFF", 0);
+	wav.writeUInt32LE(wav.length - 8, 4);
+	wav.write("WAVEfmt ", 8);
+	wav.writeUInt32LE(16, 16);
+	wav.writeUInt16LE(1, 20);
+	wav.writeUInt16LE(1, 22);
+	wav.writeUInt32LE(16_000, 24);
+	wav.writeUInt32LE(32_000, 28);
+	wav.writeUInt16LE(2, 32);
+	wav.writeUInt16LE(16, 34);
+	wav.write("data", 36);
+	wav.writeUInt32LE(3200, 40);
+	for (let i = 0; i < 1600; i++)
+		wav.writeInt16LE(Math.round(1000 * Math.sin((2 * Math.PI * 440 * i) / 16_000)), 44 + i * 2);
+	const audio = { kind: "audio" as const, data: wav.toString("base64"), mimeType: "audio/wav" as const };
+	const inputs: EmbeddingInput[] = [];
+	if (app.config.modalities.includes("image")) inputs.push(image);
+	if (app.config.modalities.includes("audio")) inputs.push(audio);
+	if (app.config.modalities.includes("mixed")) {
+		if (!app.config.modalities.includes("image") && !app.config.modalities.includes("audio"))
+			throw new Error("Mixed embedding qualification requires image or audio to be enabled");
+		inputs.push({
+			kind: "mixed",
+			parts: [
+				{ kind: "text", text: "scientific delayed oscillation" },
+				...(app.config.modalities.includes("image") ? [image] : []),
+				...(app.config.modalities.includes("audio") ? [audio] : []),
+			],
+		});
+	}
+	if (inputs.length) await app.service.embed({ inputs, task: "document", profile: qualified, priority: "foreground" });
+	return qualified;
 }

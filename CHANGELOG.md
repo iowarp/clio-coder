@@ -2,6 +2,12 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased — 0.6.2-rc.3 candidate
+
+- Add an opt-in EmbeddingGemma 2 Q8 service and persistent semantic context index for code, scientific inboxes, approved memory, evidence, and recorded dispatch output. The agent and CLI receive bounded, attributed search results; exact profile identities isolate vector spaces, and an explicit offline command reembeds old canonical records under a new profile.
+- Add explicit local or SSH worker recording as a bounded asciicast side channel with redacted evidence exports. Add a checksum-pinned asciinema installer and a previewed user-level fleet provisioning command.
+- Keep background indexing disabled by default. PDF text, notebook outputs, images, and mono 16 kHz WAV audio are supported; GIF/video sampling and scanned PDF OCR remain visible unsupported source states. See the [semantic context beta guide](docs/guide/semantic-context.md).
+
 ## 0.6.2-rc.2 - 2026-10-06
 
 Clio Coder 0.6.2-rc.2 fixes the Materio lab flow and the release publisher, both found while shipping 0.6.2-rc.1. Everything else is as described for 0.6.2-rc.1 below.
