@@ -8,10 +8,12 @@ import type { MemoryPromptOptions, MemoryRecord } from "../memory/index.js";
 import { selectMemoryForPrompt } from "../memory/index.js";
 import type { CompiledPathPolicy } from "../safety/index.js";
 import { evaluatePathPolicy } from "../safety/index.js";
+import { FrameDecoderUnavailable, sampleMediaFrames } from "./frames.js";
 import { sourceHash } from "./storage.js";
 import type { SemanticInput, SemanticLocation, SemanticRecord } from "./types.js";
 
 export const SEMANTIC_EXTRACTION_VERSION = "semantic-v1";
+export const SEMANTIC_FRAME_EXTRACTION_VERSION = "semantic-frames-v1-1s-512px";
 export interface ExtractionLimits {
 	maxFiles: number;
 	maxFileBytes: number;
@@ -67,7 +69,8 @@ export interface InboxOptions extends ExtractionOptions {
 		path: string,
 		options: { maxPages: number; maxBytes: number; signal?: AbortSignal },
 	) => Promise<readonly { page: number; text: string }[]>;
-	/** Sampler must enforce the supplied duration and piece limits; it preserves exact timestamps. */
+	/** Optional qualified sampler override. Empty GIF/video output falls back to bounded PNG frames.
+	 * Samplers must enforce the supplied duration/piece limits and preserve exact timestamps. */
 	mediaSampler?: (
 		path: string,
 		options: { maxSeconds: number; maxPieces: number; signal?: AbortSignal },
@@ -126,7 +129,10 @@ function piece(
 		text,
 		input,
 		location,
-		extractionVersion: SEMANTIC_EXTRACTION_VERSION,
+		extractionVersion:
+			input.kind === "image" && (base.mediaType.startsWith("video/") || base.mediaType === "image/gif")
+				? SEMANTIC_FRAME_EXTRACTION_VERSION
+				: SEMANTIC_EXTRACTION_VERSION,
 	};
 }
 function textPieces(
@@ -366,15 +372,30 @@ export async function extractInbox(
 				file.mediaType.startsWith("video/") ||
 				file.mediaType === "image/gif"
 			) {
-				if (!options.mediaSampler) {
+				const frames = file.mediaType.startsWith("video/") || file.mediaType === "image/gif";
+				if (frames && !options.modalities?.includes("image")) {
+					result.sources.push({
+						path: file.path,
+						state: "unsupported",
+						reason: "Frame sampling requires a qualified image backend; raw video is unsupported",
+					});
+					continue;
+				}
+				if (!frames && !options.mediaSampler) {
 					result.sources.push({ path: file.path, state: "unsupported", reason: "No qualified bounded media sampler" });
 					continue;
 				}
-				const samples = await options.mediaSampler(file.path, {
+				const samplerOptions = {
 					maxSeconds: limits.maxMediaSeconds,
 					maxPieces: Math.min(limits.maxPieces - result.records.length, 64),
 					...(options.signal ? { signal: options.signal } : {}),
-				});
+				};
+				let samples = (await options.mediaSampler?.(file.path, samplerOptions)) ?? [];
+				if (frames && samples.length === 0)
+					samples = await sampleMediaFrames(file.path, bytes, {
+						...samplerOptions,
+						maxBytes: Math.min(limits.maxFileBytes, Math.floor(limits.maxTotalBytes * 0.7)),
+					});
 				if (samples.length === 0) {
 					result.sources.push({
 						path: file.path,
@@ -427,7 +448,7 @@ export async function extractInbox(
 			options.signal?.throwIfAborted();
 			result.sources.push({
 				path: file.path,
-				state: "failed",
+				state: error instanceof FrameDecoderUnavailable ? "unsupported" : "failed",
 				reason: error instanceof Error ? error.message : String(error),
 			});
 		}

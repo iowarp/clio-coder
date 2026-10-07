@@ -18,6 +18,7 @@ export {
 	extractRecording,
 	previewInbox,
 	SEMANTIC_EXTRACTION_VERSION,
+	SEMANTIC_FRAME_EXTRACTION_VERSION,
 } from "./ingestion.js";
 export type { SemanticIndexOptions } from "./service.js";
 export { SemanticIndex } from "./service.js";

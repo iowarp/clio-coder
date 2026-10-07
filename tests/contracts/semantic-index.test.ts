@@ -225,7 +225,9 @@ test("inboxes require explicit roots, honor ignores/protection, preserve noteboo
 	assert(extracted.records.some((r) => r.location.cell === 0 && r.location.output === 0 && r.input.kind === "image"));
 	assert(extracted.records.every((r) => r.runId === "run-7"));
 	assert(!extracted.records.some((r) => r.path.endsWith("secret.txt")));
-	assert.equal(extracted.sources.find((s) => s.path.endsWith("movie.mp4"))?.state, "unsupported");
+	const invalidMovie = extracted.sources.find((s) => s.path.endsWith("movie.mp4"));
+	assert.match(invalidMovie?.reason ?? "", /Frame decoding failed|requires ffmpeg/);
+	assert(["failed", "unsupported"].includes(invalidMovie?.state ?? ""));
 	const sampled = await extractInbox(registration, {
 		modalities: ["image"],
 		pdfPages: async () => [],
