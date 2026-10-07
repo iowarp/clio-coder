@@ -820,6 +820,14 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 			`WorkerSpec.onPermission ${String(spec.onPermission ?? "deny")} disagrees with the permit allowance (expected ${expectedMode})`,
 		);
 	}
+	// Escalate parks a call until a decision arrives. Dispatch admission refuses
+	// it for a runtime that cannot park; a document built outside admission must
+	// not run under it either, because that runtime would quietly deny instead.
+	if (expectedMode === "escalate" && enforcement.grantPauseResume !== true) {
+		throw new Error(
+			"WorkerSpec.onPermission escalate needs a runtime that can park a call for a decision, but permit.ceiling.enforcement.grantPauseResume is false",
+		);
+	}
 	// A main-authority permit parks asks only for a decision bound to this attempt.
 	const escalation = spec.escalation as { grant?: unknown } | undefined;
 	if (asks === "main" && authority === "main" && escalation?.grant === undefined) {
