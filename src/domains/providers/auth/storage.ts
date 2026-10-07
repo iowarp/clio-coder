@@ -76,6 +76,7 @@ export class AuthStorageDamagedError extends Error {
 
 export interface AuthTarget {
 	providerId: string;
+	requiredCredentialType?: AuthCredential["type"];
 	/**
 	 * Target id scoping runtime overrides. Absent for runtime-only targets
 	 * (e.g. the auth-selector list of connectable providers) because those do
@@ -263,6 +264,7 @@ export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuth
 		providerId,
 		targetId: target.id,
 		runtimeAuth: runtime.auth,
+		...(runtime.auth === "api-key" && !target.auth?.oauthProfile ? { requiredCredentialType: "api_key" as const } : {}),
 	};
 	const explicitEnvVar = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
 	if (explicitEnvVar) authTarget.explicitEnvVar = explicitEnvVar;
@@ -273,6 +275,7 @@ export function resolveRuntimeAuthTarget(runtime: RuntimeDescriptor): AuthTarget
 	const target: AuthTarget = {
 		providerId: runtime.oauthProviderId ?? runtime.id,
 		runtimeAuth: runtime.auth,
+		...(runtime.auth === "api-key" ? { requiredCredentialType: "api_key" as const } : {}),
 	};
 	if (runtime.credentialsEnvVar) target.explicitEnvVar = runtime.credentialsEnvVar;
 	return target;
@@ -298,6 +301,8 @@ export function authNotRequiredStatus(providerId: string): AuthStatus {
 export class AuthStorage {
 	private data: AuthStorageData = {};
 	private damage: string | null = null;
+	private writeDamage: string | null = null;
+	private readonly failedOAuth = new Map<string, OAuthCredential>();
 	private runtimeOverrides = new Map<string, string>();
 	private fallbackResolver?: (providerId: string) => string | undefined;
 
@@ -310,7 +315,7 @@ export class AuthStorage {
 			const content = this.backend.read ? this.backend.read() : this.backend.withLock((current) => ({ result: current }));
 			const read = readStorageData(content);
 			this.data = read.data;
-			this.damage = read.damage;
+			this.damage = read.damage ?? this.writeDamage;
 		} catch (error) {
 			this.data = emptyData();
 			this.damage = error instanceof Error ? `it could not be read: ${error.message}` : "it could not be read";
@@ -345,6 +350,8 @@ export class AuthStorage {
 			// snapshot only once that write has committed, as OAuth refresh does.
 			this.data = committed;
 			this.damage = null;
+			this.writeDamage = null;
+			this.failedOAuth.delete(providerId);
 		} catch (error) {
 			// A write that failed for a reason the damage refusal does not cover: a
 			// lock that could not be taken, a read-only config dir, a full disk.
@@ -353,10 +360,12 @@ export class AuthStorage {
 			// damageReason() is the channel `clio-coder auth` and `clio-coder doctor` read.
 			if (error instanceof AuthStorageDamagedError) throw error;
 			this.damage = error instanceof Error ? `it could not be written: ${error.message}` : "it could not be written";
+			this.writeDamage = this.damage;
 		}
 	}
 
 	get(providerId: string): AuthCredential | undefined {
+		this.reload();
 		return this.data[providerId];
 	}
 
@@ -378,6 +387,7 @@ export class AuthStorage {
 	}
 
 	listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }> {
+		this.reload();
 		return Object.entries(this.data)
 			.map(([providerId, credential]) => ({
 				providerId,
@@ -388,6 +398,7 @@ export class AuthStorage {
 	}
 
 	hasStored(providerId: string): boolean {
+		this.reload();
 		return providerId in this.data;
 	}
 
@@ -419,6 +430,7 @@ export class AuthStorage {
 		providerId: string,
 		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean },
 	): AuthStatus {
+		this.reload();
 		if (opts?.targetId && this.runtimeOverrides.has(opts.targetId)) {
 			return {
 				providerId,
@@ -440,12 +452,15 @@ export class AuthStorage {
 			};
 		}
 		if (stored?.type === "oauth") {
+			const failed = this.failedOAuth.get(providerId);
+			const refreshFailed =
+				failed?.access === stored.access && failed.refresh === stored.refresh && failed.expires === stored.expires;
 			return {
 				providerId,
-				available: true,
+				available: !refreshFailed,
 				credentialType: "oauth",
 				source: "stored-oauth",
-				detail: providerId,
+				detail: refreshFailed ? this.oauthFailureDetail(providerId) : providerId,
 			};
 		}
 
@@ -487,7 +502,24 @@ export class AuthStorage {
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
 		if (target.targetId) args.targetId = target.targetId;
-		return this.status(target.providerId, args);
+		return this.forAuthTarget(target, this.status(target.providerId, args));
+	}
+
+	private oauthFailureDetail(providerId: string): string {
+		return `OAuth credential could not be refreshed. Run clio-coder auth login ${providerId} again.`;
+	}
+
+	private forAuthTarget<T extends AuthStatus>(target: AuthTarget, resolution: T): T {
+		const required = target.runtimeAuth === "oauth" ? "oauth" : target.requiredCredentialType;
+		if (required && resolution.credentialType !== null && resolution.credentialType !== required) {
+			const { apiKey: _key, ...status } = resolution as T & { apiKey?: string };
+			return {
+				...status,
+				available: false,
+				detail: `Credential '${target.providerId}' requires ${required === "oauth" ? "OAuth" : "an API key"}; the stored credential is ${resolution.credentialType}. Select the intended login.`,
+			} as T;
+		}
+		return resolution;
 	}
 
 	private async refreshOAuthCredentialWithLock(
@@ -531,6 +563,8 @@ export class AuthStorage {
 		// and persistence from making memory advertise a token disk never received.
 		if (latestData) this.data = latestData;
 		this.damage = null;
+		this.writeDamage = null;
+		this.failedOAuth.delete(providerId);
 		return result;
 	}
 
@@ -538,6 +572,7 @@ export class AuthStorage {
 		providerId: string,
 		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
 	): Promise<AuthResolution> {
+		this.reload();
 		if (opts?.targetId) {
 			const override = this.runtimeOverrides.get(opts.targetId);
 			if (override) {
@@ -570,13 +605,14 @@ export class AuthStorage {
 			if (!provider) {
 				return {
 					providerId,
-					available: true,
+					available: false,
 					credentialType: "oauth",
 					source: "stored-oauth",
-					detail: providerId,
+					detail: `No OAuth flow is registered for '${providerId}'.`,
 				};
 			}
 			if (Date.now() < stored.expires) {
+				this.failedOAuth.delete(providerId);
 				return {
 					providerId,
 					available: true,
@@ -618,12 +654,13 @@ export class AuthStorage {
 					};
 				}
 			}
+			this.failedOAuth.set(providerId, stored);
 			return {
 				providerId,
-				available: true,
+				available: false,
 				credentialType: "oauth",
 				source: "stored-oauth",
-				detail: providerId,
+				detail: this.oauthFailureDetail(providerId),
 			};
 		}
 
@@ -662,7 +699,7 @@ export class AuthStorage {
 		};
 	}
 
-	resolveForTarget(
+	async resolveForTarget(
 		target: AuthTarget,
 		opts?: { includeFallback?: boolean; signal?: AbortSignal },
 	): Promise<AuthResolution> {
@@ -676,7 +713,7 @@ export class AuthStorage {
 		if (opts?.signal !== undefined) args.signal = opts.signal;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
 		if (target.targetId) args.targetId = target.targetId;
-		return this.resolveApiKey(target.providerId, args);
+		return this.forAuthTarget(target, await this.resolveApiKey(target.providerId, args));
 	}
 
 	async login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<void> {

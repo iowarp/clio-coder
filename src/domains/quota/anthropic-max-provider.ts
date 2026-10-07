@@ -3,7 +3,7 @@
  * spends when it runs a native turn.
  *
  * Unlike `claude-code`, this credential belongs to Clio: it is the OAuth
- * record its own auth storage persists under the `anthropic` provider id.
+ * record its own auth storage persists under the `anthropic-max` provider id.
  * The adapter reads the stored credential without triggering a refresh,
  * because a quota read must never mutate an authentication record.
  *
@@ -20,7 +20,7 @@ import type { QuotaProvider, UsageSnapshot } from "./types.js";
 export const ANTHROPIC_MAX_QUOTA_PROVIDER_ID = "anthropic-max";
 
 /** The provider id Clio's auth storage files an Anthropic OAuth credential under. */
-const AUTH_PROVIDER_ID = "anthropic";
+const AUTH_PROVIDER_ID = "anthropic-max";
 const DISPLAY_NAME = "Anthropic Max";
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -105,13 +105,13 @@ export function createAnthropicMaxQuotaProvider(options: AnthropicMaxQuotaOption
 					"expired",
 					credentials.hasRefreshToken
 						? "Clio's Anthropic token expired; the next turn refreshes it"
-						: "Run clio-coder auth login anthropic again",
+						: "Run clio-coder auth login anthropic-max again",
 				);
 			}
 
 			const usage = await fetchAnthropicUsage(credentials.accessToken, { fetch: doFetch, timeoutMs });
 			if (usage.status !== "ok") {
-				return snapshot(usage.status, usage.message ?? "Run clio-coder auth login anthropic again", {
+				return snapshot(usage.status, usage.message ?? "Run clio-coder auth login anthropic-max again", {
 					retryAfterSeconds: usage.retryAfterSeconds,
 				});
 			}

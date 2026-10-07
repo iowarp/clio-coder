@@ -57,6 +57,7 @@ import type { AgentProduct } from "../domains/agents/spec.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
+import { openAuthStorage } from "../domains/providers/auth/index.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type {
 	CapabilityFlags,
@@ -128,6 +129,7 @@ import {
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
+import { registerClioOAuthProviders } from "./oauth.js";
 import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
@@ -168,6 +170,9 @@ export interface WorkerRunInput {
 	wireModelId: string;
 	modelCapabilities?: Partial<CapabilityFlags>;
 	apiKey?: string;
+	/** Local Clio credential owner; remote workers receive only the resolved access credential. */
+	authProfile?: string;
+	credentialExpiresAt?: number;
 	thinkingLevel?: ThinkingLevel;
 	/** JSON Schema enforced by the native llama.cpp request payload. */
 	responseSchema?: Record<string, unknown>;
@@ -1209,7 +1214,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			tools,
 			messages: inheritedMessages,
 		},
-		getApiKey: async () => input.apiKey,
+		getApiKey: async () => {
+			if (!input.authProfile) return input.apiKey;
+			registerClioOAuthProviders();
+			const resolved = await openAuthStorage().resolveApiKey(input.authProfile, {
+				includeFallback: false,
+				...(input.signal ? { signal: input.signal } : {}),
+			});
+			if (!resolved.available || !resolved.apiKey) {
+				throw new Error(resolved.detail ?? `Credential '${input.authProfile}' is unavailable. Log in again.`);
+			}
+			return resolved.apiKey;
+		},
 	};
 	// Providers derive prompt-cache affinity (openai-codex prompt_cache_key,
 	// session headers) from the session ID. Without one every worker call

@@ -23,7 +23,7 @@ export interface RuntimeBootMetadata {
 export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> = [
 	{ id: "alcf", kind: "http", tier: "cloud", auth: "oauth" },
 	{ id: "anthropic", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "ANTHROPIC_API_KEY" },
-	{ id: "anthropic-max", kind: "http", tier: "cloud", auth: "oauth", oauthProviderId: "anthropic" },
+	{ id: "anthropic-max", kind: "http", tier: "cloud", auth: "oauth" },
 	{ id: "bedrock", kind: "http", tier: "cloud", auth: "aws-sdk" },
 	{ id: "deepseek", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "DEEPSEEK_API_KEY" },
 	{ id: "google", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "GOOGLE_API_KEY" },

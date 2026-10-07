@@ -256,6 +256,8 @@ async function main(): Promise<number> {
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
 	if (spec.sessionId) input.sessionId = spec.sessionId;
 	if (spec.apiKey) input.apiKey = spec.apiKey;
+	if (spec.authProfile) input.authProfile = spec.authProfile;
+	if (spec.credentialExpiresAt !== undefined) input.credentialExpiresAt = spec.credentialExpiresAt;
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.runtimeResolution) input.runtimeResolution = spec.runtimeResolution;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;

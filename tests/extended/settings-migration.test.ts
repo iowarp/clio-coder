@@ -16,6 +16,7 @@ import settingsV2, {
 	SETTINGS_V2_MIGRATION_ID,
 	SettingsV2CollisionError,
 } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
+import claudeSubscription from "../../src/domains/lifecycle/migrations/2026-10-07-claude-subscription.js";
 import {
 	listMigrations,
 	readMigrationManifestResult,
@@ -29,6 +30,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 const PLAYBOOKS_MIGRATION_ID = "2026-10-06-playbooks-and-packages";
 const ACP_ADAPTERS_MIGRATION_ID = "2026-10-07-acp-adapters";
+const CLAUDE_SUBSCRIPTION_MIGRATION_ID = "2026-10-07-claude-subscription";
 const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..", "..");
 
 describe("settings and migration boundary", () => {
@@ -45,6 +47,55 @@ describe("settings and migration boundary", () => {
 	});
 
 	afterEach(() => scratch.restore());
+
+	it("moves only the old subscription credential, preserves comments, and does not overwrite a second login", async () => {
+		const credentials = join(scratch.dir, "config", "credentials.yaml");
+		const oauth =
+			"type: oauth\n    access: sk-ant-oat01-original\n    refresh: original-refresh\n    expires: 9999999999999\n    updatedAt: 2026-10-07T00:00:00Z";
+		writeFileSync(
+			credentials,
+			`version: 2\nentries:\n  # subscription account\n  anthropic:\n    ${oauth}\n  openai:\n    type: api_key\n    key: keep-me\n    updatedAt: 2026-10-07T00:00:00Z\n`,
+		);
+		writeFileSync(
+			settingsFile,
+			"version: 2\ntargets:\n  - id: subscription\n    runtime: anthropic-max\n    auth:\n      oauthProfile: anthropic\n",
+		);
+		const moved = await claudeSubscription.up(stateDir);
+		strictEqual(moved?.changed.length, 2);
+		const contents = readFileSync(credentials, "utf8");
+		const parsed = parseYaml(contents);
+		strictEqual(parsed.entries.anthropic, undefined);
+		strictEqual(parsed.entries["anthropic-max"].access, "sk-ant-oat01-original");
+		strictEqual(parsed.entries.openai.key, "keep-me");
+		ok(contents.includes("# subscription account"));
+		strictEqual(statSync(credentials).mode & 0o777, 0o600);
+		strictEqual(parseYaml(readFileSync(settingsFile, "utf8")).targets[0].auth.oauthProfile, "anthropic-max");
+		const again = await claudeSubscription.up(stateDir);
+		deepStrictEqual(again?.changed, []);
+		strictEqual(readFileSync(credentials, "utf8"), contents);
+
+		writeFileSync(
+			credentials,
+			`version: 2\nentries:\n  anthropic:\n    ${oauth}\n  anthropic-max:\n    ${oauth.replace("original", "other")}\n`,
+		);
+		const conflict = readFileSync(credentials, "utf8");
+		const selectedProfile =
+			"version: 2\ntargets:\n  - id: subscription\n    runtime: anthropic-max\n    auth:\n      oauthProfile: anthropic\n";
+		writeFileSync(settingsFile, selectedProfile);
+		const report = await claudeSubscription.up(stateDir);
+		strictEqual(report?.attention.length, 1);
+		strictEqual(readFileSync(credentials, "utf8"), conflict);
+		strictEqual(
+			readFileSync(settingsFile, "utf8"),
+			selectedProfile,
+			"conflicting logins never redirect an explicit account selection",
+		);
+
+		writeFileSync(credentials, "version: 2\nentries:\n  anthropic:\n    type: api_key\n    key: paid-api-key\n");
+		const apiOnly = readFileSync(credentials, "utf8");
+		deepStrictEqual((await claudeSubscription.up(stateDir))?.changed, []);
+		strictEqual(readFileSync(credentials, "utf8"), apiOnly);
+	});
 
 	it("ships a strict current settings document", () => {
 		const defaults = validateSettings(parseYaml(DEFAULT_SETTINGS_YAML));
@@ -294,7 +345,13 @@ targets:
 	it("orders migrations before strict readers and records each migration once", async () => {
 		const ids = listMigrations().map((migration) => migration.id);
 		const retiredPanes = "2026-09-01-retire-panes-knobs";
-		deepStrictEqual(ids, [SETTINGS_V2_MIGRATION_ID, retiredPanes, PLAYBOOKS_MIGRATION_ID, ACP_ADAPTERS_MIGRATION_ID]);
+		deepStrictEqual(ids, [
+			SETTINGS_V2_MIGRATION_ID,
+			retiredPanes,
+			PLAYBOOKS_MIGRATION_ID,
+			ACP_ADAPTERS_MIGRATION_ID,
+			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
+		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
 		const first = await runPending(stateDir);
@@ -306,7 +363,7 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(stateDir, "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");

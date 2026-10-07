@@ -13,9 +13,12 @@ import type {
 	SDKUserMessage,
 	ThinkingConfig,
 } from "@anthropic-ai/claude-agent-sdk";
-
+import { withClaudeCredential } from "../../core/claude-environment.js";
+import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { resolveClaudeLaunchCredential } from "../../domains/providers/auth/index.js";
 import { mainGrantsUnavailable } from "../../domains/safety/worker-permit.js";
+import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -48,8 +51,39 @@ function buildClaudeSdkPrompt(input: WorkerRunInput): string {
 	return parts.join("\n\n");
 }
 
-async function* oneSdkUserMessage(message: SDKUserMessage): AsyncIterable<SDKUserMessage> {
-	yield message;
+class ClaudeSdkInput implements AsyncIterableIterator<SDKUserMessage> {
+	private readonly messages: SDKUserMessage[] = [];
+	private waiter: ((result: IteratorResult<SDKUserMessage>) => void) | undefined;
+	private closed = false;
+
+	[Symbol.asyncIterator](): AsyncIterableIterator<SDKUserMessage> {
+		return this;
+	}
+
+	next(): Promise<IteratorResult<SDKUserMessage>> {
+		const message = this.messages.shift();
+		if (message) return Promise.resolve({ value: message, done: false });
+		if (this.closed) return Promise.resolve({ value: undefined, done: true });
+		return new Promise((resolve) => {
+			this.waiter = resolve;
+		});
+	}
+
+	push(message: SDKUserMessage): boolean {
+		if (this.closed) return false;
+		const waiter = this.waiter;
+		this.waiter = undefined;
+		if (waiter) waiter({ value: message, done: false });
+		else this.messages.push(message);
+		return true;
+	}
+
+	close(): void {
+		this.closed = true;
+		this.messages.length = 0;
+		this.waiter?.({ value: undefined, done: true });
+		this.waiter = undefined;
+	}
 }
 
 function effortForThinking(level: WorkerRunInput["thinkingLevel"] | undefined): EffortLevel | undefined {
@@ -250,7 +284,7 @@ function buildAssistantMessage(input: {
 		provider: "anthropic",
 		model: input.model,
 		usage,
-		stopReason: stopReasonFor(input.result, input.aborted),
+		stopReason: input.errorMessage && !input.aborted ? "error" : stopReasonFor(input.result, input.aborted),
 		timestamp: Date.now(),
 	} as AgentMessage & { role: "assistant" };
 	if (input.responseModel !== undefined) message.responseModel = input.responseModel;
@@ -503,13 +537,21 @@ function buildPreToolUseHook(input: PermissionGateInput): HookCallback {
 
 export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const abortController = new AbortController();
+	const prompt = new ClaudeSdkInput();
+	prompt.push(sdkUserTextMessage(buildClaudeSdkPrompt(input), true));
+	let pendingTurns = 1;
+	let finished = false;
+	let authFailure: string | undefined;
+	let stopExpiryWatch = (): void => {};
 	let queryHandle: ReturnType<typeof query> | null = null;
 	let aborted = false;
 	let permissionFailure = false;
 	let budgetFailure = false;
 
 	const abort = (): void => {
+		if (finished || aborted) return;
 		aborted = true;
+		prompt.close();
 		abortController.abort();
 		void queryHandle?.interrupt().catch(() => {});
 		queryHandle?.close();
@@ -629,7 +671,24 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			// here with a typed diagnostic naming the package and the install
 			// command, and lands in the catch below as an ordinary run failure.
 			const { query } = await loadClaudeAgentSdk();
-			queryHandle = query({ prompt: buildClaudeSdkPrompt(input), options });
+			const credential = input.authProfile
+				? await resolveClaudeLaunchCredential(
+						input.target.auth ?? { oauthProfile: input.authProfile },
+						{},
+						{ signal: abortController.signal },
+					)
+				: null;
+			abortController.signal.throwIfAborted();
+			options.env = withClaudeCredential(options.env ?? {}, credential?.apiKey ?? input.apiKey);
+			const executable = process.env.CLAUDE_CODE_EXECUTABLE ?? findExecutableOnPath("claude");
+			if (executable) options.pathToClaudeCodeExecutable = executable;
+			stopExpiryWatch = watchCredentialExpiry(credential?.expiresAt ?? input.credentialExpiresAt, () => {
+				authFailure =
+					"Clio's Claude subscription access token expired. Start a new assignment to refresh it; this run was stopped without replaying its work.";
+				abort();
+			});
+			abortController.signal.throwIfAborted();
+			queryHandle = query({ prompt, options });
 			for await (const sdkMessage of queryHandle) {
 				if (sdkMessage.type === "system" && (sdkMessage as { subtype?: string }).subtype === "init") {
 					const init = sdkMessage as { model?: string; session_id?: string; uuid?: string };
@@ -654,9 +713,16 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 				}
 				if (sdkMessage.type === "result") {
 					result = sdkMessage;
+					pendingTurns--;
+					if (pendingTurns <= 0 || resultError(result)) {
+						prompt.close();
+						break;
+					}
 				}
 			}
-			const error = resultError(result);
+			const error =
+				authFailure ??
+				(resultError(result) || (!result && !aborted ? "Claude Agent SDK ended without a terminal result." : ""));
 			const finalText = streamState.text || resultText(result) || error;
 			const finalMessage = buildAssistantMessage({
 				model: streamState.model,
@@ -673,9 +739,9 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			emit({ type: "agent_end", messages } as AgentEvent);
 			if (permissionFailure) return { messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			if (budgetFailure) return { messages, exitCode: 1 };
-			return { messages, exitCode: finalMessage.stopReason === "error" ? 1 : 0 };
+			return { messages, exitCode: aborted || finalMessage.stopReason === "error" ? 1 : 0 };
 		} catch (error) {
-			const messageText = error instanceof Error ? error.message : String(error);
+			const messageText = authFailure ?? (error instanceof Error ? error.message : String(error));
 			const finalMessage = buildAssistantMessage({
 				model: streamState.model,
 				text: messageText,
@@ -691,6 +757,10 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			if (!aborted) process.stderr.write(`[worker:claude-sdk] ${messageText}\n`);
 			return { messages, exitCode: 1 };
 		} finally {
+			finished = true;
+			prompt.close();
+			stopExpiryWatch();
+			input.signal?.removeEventListener("abort", abort);
 			queryHandle?.close();
 		}
 	})();
@@ -700,14 +770,10 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		abort,
 		async steer(text: string): Promise<boolean> {
 			const trimmed = text.trim();
-			const activeQuery = queryHandle;
-			if (trimmed.length === 0 || activeQuery === null) return false;
-			try {
-				await activeQuery.streamInput(oneSdkUserMessage(sdkUserTextMessage(trimmed, true)));
-				return true;
-			} catch {
-				return false;
-			}
+			if (trimmed.length === 0 || finished || aborted) return false;
+			if (!prompt.push(sdkUserTextMessage(trimmed, true))) return false;
+			pendingTurns++;
+			return true;
 		},
 	};
 }

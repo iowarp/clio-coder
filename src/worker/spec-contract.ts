@@ -121,6 +121,9 @@ interface WorkerSpecFields {
 	modelCapabilities?: Partial<CapabilityFlags>;
 	sessionId?: string;
 	apiKey?: string;
+	/** Only local Clio workers may re-resolve this credential profile. */
+	authProfile?: string;
+	credentialExpiresAt?: number;
 	thinkingLevel?: ThinkingLevel;
 	/** JSON Schema enforced on the llama.cpp chat-completions request. */
 	responseSchema?: Record<string, unknown>;
@@ -935,6 +938,8 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readString(spec.wireModelId, "WorkerSpec.wireModelId");
 	readOptionalString(spec, "sessionId", "WorkerSpec");
 	readOptionalString(spec, "apiKey", "WorkerSpec");
+	readOptionalString(spec, "authProfile", "WorkerSpec");
+	readOptionalNumber(spec, "credentialExpiresAt", "WorkerSpec");
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
 	// A misspelled sampling policy must not silently restore the server defaults that varied handbooks.
 	readOptionalEnum(spec, "sampling", "WorkerSpec", ["deterministic"] as const);

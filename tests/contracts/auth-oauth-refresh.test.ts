@@ -123,8 +123,9 @@ describe("contracts/auth OAuth refresh", () => {
 		const storage = open();
 		const resolved = await storage.resolveApiKey("alcf");
 		strictEqual(resolved.apiKey, undefined);
-		strictEqual(resolved.available, true);
+		strictEqual(resolved.available, false);
 		strictEqual(resolved.source, "stored-oauth");
+		strictEqual(storage.status("alcf").available, false);
 		strictEqual(readFileSync(path, "utf8"), before);
 	});
 
@@ -186,7 +187,7 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(storage.damageReason(), null);
 		deepStrictEqual(
 			storage.getOAuthProviders().map((p) => p.id),
-			["alcf", "anthropic", "github-copilot", "openai-codex"],
+			["alcf", "anthropic-max", "github-copilot", "openai-codex"],
 		);
 	});
 
@@ -196,7 +197,7 @@ describe("contracts/auth OAuth refresh", () => {
 			[
 				"version: 2",
 				"entries:",
-				"  anthropic:",
+				"  anthropic-max:",
 				"    type: oauth",
 				"    access: sk-ant-oat01-old",
 				"    refresh: refresh-old",
@@ -212,7 +213,7 @@ describe("contracts/auth OAuth refresh", () => {
 				{ status: 200, headers: { "content-type": "application/json" } },
 			);
 		}) as typeof fetch;
-		const resolved = await open().resolveApiKey("anthropic");
+		const resolved = await open().resolveApiKey("anthropic-max");
 		strictEqual(resolved.apiKey, "sk-ant-oat01-new");
 		strictEqual(calls.length, 1);
 		ok(calls[0]?.url.includes("oauth/token"), calls[0]?.url);

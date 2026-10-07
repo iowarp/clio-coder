@@ -132,7 +132,7 @@
 		"smol-toml": "1.8.0"
 	},
 	"devDependencies": {
-		"@anthropic-ai/claude-agent-sdk": "0.3.186",
+		"@anthropic-ai/claude-agent-sdk": "0.3.292",
 		"@biomejs/biome": "2.5.1",
 		"@types/node": "24.12.2",
 		"@vscode/tree-sitter-wasm": "0.3.1",

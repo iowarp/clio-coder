@@ -104,7 +104,7 @@ it("tells the operator to sign in again when no refresh token is stored", async 
 	const snapshot = await stale.fetch();
 
 	assert.equal(snapshot.status, "expired");
-	assert.equal(snapshot.message, "Run clio-coder auth login anthropic again");
+	assert.equal(snapshot.message, "Run clio-coder auth login anthropic-max again");
 });
 
 it("reports an absent credential without a network call", async () => {
@@ -125,7 +125,7 @@ it("maps a rejected token to expired with adapter-specific advice", async () => 
 	const snapshot = await provider(fetch).fetch();
 
 	assert.equal(snapshot.status, "expired");
-	assert.equal(snapshot.message, "Run clio-coder auth login anthropic again");
+	assert.equal(snapshot.message, "Run clio-coder auth login anthropic-max again");
 });
 
 it("carries Retry-After through from a rate-limited usage read", async () => {

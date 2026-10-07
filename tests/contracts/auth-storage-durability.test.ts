@@ -8,7 +8,7 @@
  * logged in), and the obvious recovery of logging in again taking the file from
  * 211 bytes to 112 with only the new entry left.
  */
-import { ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +19,10 @@ import {
 	AuthStorage,
 	type AuthStorageBackend,
 	AuthStorageDamagedError,
+	resolveRuntimeAuthTarget,
 } from "../../src/domains/providers/auth/storage.js";
+import anthropicRuntime from "../../src/domains/providers/runtimes/cloud/anthropic.js";
+import subscriptionRuntime from "../../src/domains/providers/runtimes/cloud/anthropic-max.js";
 
 describe("contracts/auth storage durability", () => {
 	let root: string;
@@ -40,6 +43,50 @@ describe("contracts/auth storage durability", () => {
 		storage.setApiKey("openai", "sk-not-a-real-key-openai");
 		return readFileSync(path, "utf8");
 	}
+
+	it("sees another process's re-login and logout without waiting for token expiry", async () => {
+		const writer = open();
+		writer.set("anthropic-max", {
+			type: "oauth",
+			access: "sk-ant-oat01-old",
+			refresh: "refresh-old",
+			expires: Date.now() + 3_600_000,
+			updatedAt: "2026-10-07T00:00:00Z",
+		});
+		const running = open();
+		writer.set("anthropic-max", {
+			type: "oauth",
+			access: "sk-ant-oat01-new",
+			refresh: "refresh-new",
+			expires: Date.now() + 3_600_000,
+			updatedAt: "2026-10-07T01:00:00Z",
+		});
+		strictEqual((await running.resolveApiKey("anthropic-max")).apiKey, "sk-ant-oat01-new");
+		writer.logout("anthropic-max");
+		strictEqual((await running.resolveApiKey("anthropic-max")).apiKey, undefined);
+		strictEqual(running.status("anthropic-max").available, false);
+	});
+
+	it("keeps subscription and API-key logins separate and refuses the wrong credential kind", async () => {
+		const storage = open();
+		const subscription = resolveRuntimeAuthTarget(subscriptionRuntime);
+		const api = resolveRuntimeAuthTarget(anthropicRuntime);
+		strictEqual(subscription.providerId, "anthropic-max");
+		strictEqual(api.providerId, "anthropic");
+		storage.set(subscription.providerId, {
+			type: "oauth",
+			access: "sk-ant-oat01-subscription",
+			refresh: "refresh",
+			expires: Date.now() + 3_600_000,
+			updatedAt: "2026-10-07T00:00:00Z",
+		});
+		storage.setApiKey(api.providerId, "separate-api-key");
+		strictEqual((await storage.resolveForTarget(subscription)).apiKey, "sk-ant-oat01-subscription");
+		strictEqual((await storage.resolveForTarget(api)).apiKey, "separate-api-key");
+		storage.setApiKey(subscription.providerId, "wrong-kind");
+		strictEqual((await storage.resolveForTarget(subscription)).apiKey, undefined);
+		strictEqual(storage.statusForTarget(subscription).available, false);
+	});
 
 	it("refuses to write over a store that is not valid YAML, and loses no bytes", () => {
 		const original = storeTwoKeys();
@@ -198,9 +245,9 @@ describe("contracts/auth storage durability", () => {
 		const storage = new AuthStorage(backend);
 		const before = storage.get("mistral");
 		storage.setApiKey("mistral", "sk-not-a-real-key-replacement");
-		strictEqual(storage.get("mistral"), before, "a failed replacement retains the committed key");
+		deepStrictEqual(storage.get("mistral"), before, "a failed replacement retains the committed key");
 		storage.remove("mistral");
-		strictEqual(storage.get("mistral"), before, "a failed removal retains the committed key");
+		deepStrictEqual(storage.get("mistral"), before, "a failed removal retains the committed key");
 		strictEqual(storage.listStored().length, 2);
 		strictEqual((await storage.resolveApiKey("mistral")).apiKey, "sk-not-a-real-key-mistral");
 		ok(storage.damageReason()?.includes("no space left on device"));

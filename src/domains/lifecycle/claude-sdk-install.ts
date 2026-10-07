@@ -8,7 +8,7 @@ import { findExecutableOnPath } from "../toolchain/resolve.js";
 import { inspectInstallation } from "./install-method.js";
 
 export const CLAUDE_AGENT_SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
-export const CLAUDE_AGENT_SDK_VERSION = "0.3.186";
+export const CLAUDE_AGENT_SDK_VERSION = "0.3.292";
 export const CLAUDE_AGENT_SDK_INSTALL_COMMAND = "clio-coder tools install claude-sdk";
 
 export interface ClaudeSdkInstallOptions {
