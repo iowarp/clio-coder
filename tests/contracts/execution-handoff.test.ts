@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { describe, it } from "node:test";
 import type { ExecutionHandoff } from "../../src/domains/dispatch/execution-handoff.js";
 import {
+	abbreviateHandoffText,
 	EXECUTION_HANDOFF_MAX_ITEMS,
 	EXECUTION_HANDOFF_MAX_TEXT_BYTES,
 	executionHandoffTextBytes,
@@ -86,6 +87,16 @@ describe("execution handoff projection", () => {
 		ok(projected[0].output.startsWith("x😀é中"));
 		ok(projected[0].output.endsWith("😀é中"));
 		match(projected[0].output, /\[clio: \d+ of \d+ bytes omitted/u);
+	});
+
+	it("keeps pipeline input's head and tail and names the previous step when its run is unknown", () => {
+		const text = `head finding\n${"x".repeat(EXECUTION_HANDOFF_MAX_TEXT_BYTES)}\nverdict: revise`;
+		const excerpt = abbreviateHandoffText(text, EXECUTION_HANDOFF_MAX_TEXT_BYTES, null);
+		ok(excerpt.startsWith("head finding\n"));
+		ok(excerpt.endsWith("\nverdict: revise"));
+		ok(Buffer.byteLength(excerpt, "utf8") <= EXECUTION_HANDOFF_MAX_TEXT_BYTES);
+		match(excerpt, /the coordinator retains the full output of the previous step\]\n/u);
+		strictEqual(abbreviateHandoffText("short", EXECUTION_HANDOFF_MAX_TEXT_BYTES, null), "short");
 	});
 
 	it("rejects seventeen predecessors during compilation and projection", () => {
