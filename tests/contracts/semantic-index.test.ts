@@ -3,12 +3,15 @@ import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { CODEWIKI_VERSION, writeCodewiki } from "../../src/domains/context/index.js";
+import type { EvidenceInspectable } from "../../src/domains/evidence/index.js";
 import type { MemoryRecord } from "../../src/domains/memory/index.js";
 import { canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/index.js";
 import type { SemanticEmbed, SemanticProfile, SemanticRecord } from "../../src/domains/semantic/index.js";
 import {
+	embeddingProfileToSemanticProfile,
 	extractInbox,
 	extractProjectSources,
+	extractRecording,
 	previewInbox,
 	SemanticIndex,
 	semanticProfileKey,
@@ -24,6 +27,7 @@ afterEach(() => isolated.restore());
 const profile: SemanticProfile = {
 	id: "fixture",
 	dimensions: 2,
+	profileIdentity: sourceHash("fixture-profile"),
 	identity: { checkpoint: "fixture-sha", canary: "fixture-canary", recipe: "unit-text-v1" },
 };
 function record(id: string, text = id): SemanticRecord {
@@ -58,6 +62,10 @@ test("generations reload unchanged vectors, refresh changed/deleted records and 
 	const reopened = new SemanticIndex(options);
 	assert.equal((await reopened.refresh([record("a"), record("b")])).embedded, 0);
 	assert.equal(calls.length, 1);
+	assert.equal(
+		(await reopened.refresh([{ ...record("a"), updatedAt: "2026-10-07T01:00:00Z" }, record("b")])).embedded,
+		0,
+	);
 	assert.equal((await reopened.refresh([record("a", "changed checkpoint retry")])).embedded, 1);
 	assert.equal(reopened.searchVector("b", undefined, { projectId: "project-a" }).hits.length, 0);
 	const manifest = JSON.parse(readFileSync(join(reopened.storage.directory, "manifest.json"), "utf8"));
@@ -67,12 +75,19 @@ test("generations reload unchanged vectors, refresh changed/deleted records and 
 	assert.deepEqual(generation.tombstones, ["b"]);
 	const otherProfile = new SemanticIndex({
 		...options,
-		profile: { ...profile, identity: { ...profile.identity, checkpoint: "new-model" } },
+		profile: {
+			...profile,
+			profileIdentity: sourceHash("other-profile"),
+			identity: { ...profile.identity, checkpoint: "new-model" },
+		},
 	});
 	assert.equal(otherProfile.status().generation, null);
 	assert.notEqual(otherProfile.profileKey, reopened.profileKey);
 	assert.equal((await otherProfile.reembed(reopened.canonicalRecords())).embedded, 1);
-	assert.throws(() => reopened.searchVector("a", [1, 0], { projectId: "project-b" }), /ownership/);
+	assert.throws(
+		() => reopened.searchVector("a", { profileKey: reopened.profileKey, vector: [1, 0] }, { projectId: "project-b" }),
+		/ownership/,
+	);
 });
 
 test("interrupted jobs retain complete generation and resume checkpoint without redundant calls", async () => {
@@ -264,7 +279,57 @@ test("project extraction uses typed codemap/wiki and excludes unapproved or fore
 			{ ...memory, id: "foreign", repository: { kind: "canonical-path" as const, key: "/foreign" } },
 		],
 	};
-	const result = await extractProjectSources(options);
+	const bundle: EvidenceInspectable = {
+		overview: {
+			version: 1,
+			evidenceId: "e1",
+			source: { kind: "run", runId: "run-7" },
+			generatedAt: "2026-10-07T00:00:00Z",
+			runIds: ["run-7"],
+			sessionId: null,
+			statuses: [],
+			startedAt: null,
+			endedAt: null,
+			tasks: ["previous checkpoint failure"],
+			cwds: [root],
+			agentIds: [],
+			targetIds: [],
+			runtimeIds: [],
+			modelIds: [],
+			totals: {
+				runs: 1,
+				receipts: 0,
+				toolCalls: 0,
+				toolErrors: 0,
+				blockedToolCalls: 0,
+				sessionEntries: 0,
+				auditRows: 0,
+				toolEvents: 0,
+				linkedToolEvents: 0,
+				protectedArtifacts: 0,
+				tokens: 0,
+				costUsd: 0,
+				wallTimeMs: 0,
+			},
+			tags: [],
+			files: [],
+		},
+		findings: [{ id: "f1", severity: "warn", tag: "unknown", runId: "run-7", message: "checkpoint corrected" }],
+		trustStatus: { version: 1, evidenceId: "e1", projection: "historical_format", runs: [] },
+	};
+	const result = await extractProjectSources({
+		...options,
+		evidence: [
+			{ bundle, directory: root, redactedTranscript: "redacted warning segment" },
+			{
+				bundle: { ...bundle, overview: { ...bundle.overview, evidenceId: "foreign-evidence", cwds: [isolated.dir] } },
+				directory: isolated.dir,
+			},
+		],
+	});
+	assert(result.records.some((r) => r.path.endsWith("findings.json") && r.runId === "run-7"));
+	assert(result.records.some((r) => r.path.endsWith("transcript.md")));
+	assert(!result.records.some((r) => r.sourceId.includes("foreign-evidence")));
 	assert(
 		result.records.some((r) => r.kind === "code" && r.location.line === 2 && r.text.includes("recover")),
 		JSON.stringify(result),
@@ -279,4 +344,110 @@ test("project extraction uses typed codemap/wiki and excludes unapproved or fore
 	assert.notEqual((await extractProjectSources(options)).records.find((r) => r.kind === "code")?.contentHash, prior);
 	rmSync(join(root, "retry.ts"));
 	assert(!(await extractProjectSources(options)).records.some((r) => r.kind === "code"));
+});
+
+test("recording ingestion verifies hashes, strips controls and locates redacted output timestamps", async () => {
+	const root = join(isolated.dir, "evidence");
+	mkdirSync(root);
+	const path = join(root, "run-7.cast");
+	const text = `${[
+		JSON.stringify({ version: 2, width: 80, height: 24 }),
+		JSON.stringify([0.5, "i", "keyboard secret"]),
+		JSON.stringify([1.5, "o", "\u001b[31mwarning at checkpoint\u001b[0m"]),
+		JSON.stringify([4.2, "o", "corrected retry; passing command"]),
+	].join("\n")}\n`;
+	writeFileSync(path, text);
+	const source = {
+		root,
+		path,
+		projectId: "project-a",
+		runId: "run-7",
+		sha256: sourceHash(text),
+		redacted: true as const,
+	};
+	const result = extractRecording(source);
+	assert.equal(result.records.length, 2);
+	assert.equal(result.records[0]?.location.startSeconds, 1.5);
+	assert.equal(result.records[0]?.text, "warning at checkpoint");
+	assert(result.records.every((r) => r.runId === "run-7" && !r.text.includes("keyboard")));
+	assert.throws(() => extractRecording({ ...source, sha256: "wrong" }), /checksum/);
+	assert.throws(() => extractRecording({ ...source, path: join(isolated.dir, "outside.cast") }), /unredacted|protected/);
+	const index = new SemanticIndex({ projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir });
+	await index.refreshExtracted(result);
+	assert.equal(
+		index.searchVector("warning", undefined, { projectId: "project-a", runId: "run-7" }).hits[0]?.location.startSeconds,
+		1.5,
+	);
+});
+
+test("failed or truncated extraction cannot delete old records; query profiles remain isolated", async () => {
+	const index = new SemanticIndex({ projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir });
+	await index.refresh([record("keep")]);
+	await assert.rejects(index.refreshExtracted({ records: [], sources: [], truncated: true }), /Incomplete/);
+	await assert.rejects(
+		index.refreshExtracted({ records: [], sources: [{ path: "unreadable", state: "failed" }], truncated: false }),
+		/Incomplete/,
+	);
+	assert.equal(index.searchVector("keep", undefined, { projectId: "project-a" }).hits[0]?.id, "keep");
+	assert.throws(
+		() => index.searchVector("keep", { profileKey: "another-768-space", vector: [1, 0] }, { projectId: "project-a" }),
+		/profile/,
+	);
+});
+
+test("persisted daily work budget and foreground yield survive reopening", async () => {
+	const calls: string[][] = [];
+	const options = {
+		projectId: "project-a",
+		profile,
+		embed: fixtureEmbed(calls),
+		cacheDir: isolated.dir,
+		limits: { maxEmbeddingsPerDay: 1 },
+	};
+	const index = new SemanticIndex(options);
+	assert.equal((await index.refresh([record("a")], { shouldYield: () => true })).embedded, 0);
+	assert.equal(calls.length, 0);
+	assert.equal((await index.refresh([record("a")])).complete, true);
+	assert.equal((await new SemanticIndex(options).refresh([record("a"), record("b")])).embedded, 0);
+	assert.equal(calls.length, 1);
+	assert.deepEqual(new SemanticIndex(options).status().pending, ["b"]);
+});
+
+test("generation corruption is detected before records or vectors can be disclosed", async () => {
+	const options = { projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir };
+	const index = new SemanticIndex(options);
+	await index.refresh([record("original")]);
+	const manifest = JSON.parse(readFileSync(join(index.storage.directory, "manifest.json"), "utf8"));
+	const path = join(index.storage.directory, `generation-${manifest.generation}.json`);
+	const generation = JSON.parse(readFileSync(path, "utf8"));
+	generation.records[0].text = "tampered";
+	writeFileSync(path, JSON.stringify(generation));
+	assert.throws(() => new SemanticIndex(options), /checksum/);
+});
+
+test("provider bridge preserves the exact provider-owned profile identity without re-hashing", async () => {
+	const providerProfile = {
+		id: "embeddinggemma-2-q8-768",
+		dimensions: 2,
+		model: "fixture-model",
+		assetIdentity: "fixture-checkpoint",
+		canaryFingerprint: "fixture-canary",
+		documentPrefix: "title: none | text: ",
+	};
+	const responseProfileIdentity = sourceHash("provider-owned-canonical-profile-recipe");
+	const converted = embeddingProfileToSemanticProfile(providerProfile, responseProfileIdentity);
+	assert.equal(semanticProfileKey(converted), responseProfileIdentity);
+	assert.deepEqual(converted.identity, providerProfile);
+	const index = new SemanticIndex({
+		projectId: "project-a",
+		profile: converted,
+		cacheDir: isolated.dir,
+		embed: async () => ({ profileKey: responseProfileIdentity, vectors: [[1, 0]] }),
+	});
+	assert.equal(index.profileKey, responseProfileIdentity);
+	assert.equal((await index.refresh([record("bridge")])).complete, true);
+	assert.equal(
+		new SemanticIndex({ projectId: "project-a", profile: converted, cacheDir: isolated.dir }).status().vectors,
+		1,
+	);
 });

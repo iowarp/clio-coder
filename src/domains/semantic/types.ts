@@ -5,7 +5,8 @@ export interface SemanticProfile {
 	dimensions: number;
 	/** Configured asset hashes, projector, quantization, pooling, prefixes, normalization,
 	 * preprocessing/extraction recipe and canary fingerprint belong in this identity. */
-	identity: Readonly<Record<string, string>>;
+	profileIdentity: string;
+	identity: Readonly<Record<string, unknown>>;
 }
 
 export type SemanticInput =
@@ -57,6 +58,7 @@ export interface SemanticLimits {
 	batchSize: number;
 	maxEmbeddingsPerDay: number;
 	queryTimeoutMs: number;
+	documentTimeoutMs: number;
 	searchBudgetMs: number;
 }
 

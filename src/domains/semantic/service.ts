@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioCacheDir } from "../../core/xdg.js";
+import type { ExtractionResult } from "./ingestion.js";
 import type { Checkpoint, Generation } from "./storage.js";
 import {
 	DEFAULT_SEMANTIC_LIMITS,
@@ -96,6 +97,7 @@ export class SemanticIndex {
 		for (const r of records) {
 			if (
 				!r.id ||
+				["__proto__", "constructor", "prototype"].includes(r.id) ||
 				ids.has(r.id) ||
 				r.projectId !== this.options.projectId ||
 				!r.sourceId ||
@@ -119,6 +121,12 @@ export class SemanticIndex {
 		}
 	}
 
+	async refreshExtracted(result: ExtractionResult, options: SemanticRefreshOptions = {}) {
+		if (result.truncated || result.sources.some((source) => source.state === "failed"))
+			throw new Error("Incomplete semantic extraction; retain the last complete generation and retry");
+		return this.refresh(result.records, options);
+	}
+
 	async refresh(records: readonly SemanticRecord[], options: SemanticRefreshOptions = {}) {
 		return this.runRefresh(records, options, false);
 	}
@@ -135,6 +143,7 @@ export class SemanticIndex {
 			async () => {
 				options.signal?.throwIfAborted();
 				this.generation = this.storage.load(this.options.projectId, this.profileKey);
+				this.storage.pruneGenerations(this.generation?.generation ?? null);
 				const snapshotHash = sourceHash(JSON.stringify([force, records]));
 				const prior = this.checkpoint();
 				const day = new Date().toISOString().slice(0, 10);
@@ -191,7 +200,9 @@ export class SemanticIndex {
 							options.signal,
 						);
 						batch.forEach((record, i) => {
-							cp.vectors[record.id] = result[i]!;
+							const vector = result[i];
+							if (!vector) throw new Error("Missing semantic embedding");
+							cp.vectors[record.id] = vector;
 							delete cp.failed[record.id];
 						});
 						embedded += batch.length;
@@ -240,20 +251,31 @@ export class SemanticIndex {
 	): Promise<number[][]> {
 		if (!this.options.embed) throw new Error("Semantic embedder unavailable");
 		const controller = new AbortController();
-		const forward = () => controller.abort(signal?.reason);
+		let rejectCancelled: ((reason?: unknown) => void) | undefined;
+		const cancelled = new Promise<never>((_, reject) => {
+			rejectCancelled = reject;
+		});
+		const forward = () => {
+			controller.abort(signal?.reason);
+			rejectCancelled?.(signal?.reason ?? new Error("Semantic embedding cancelled"));
+		};
 		signal?.addEventListener("abort", forward, { once: true });
 		if (signal?.aborted) forward();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const timeout = new Promise<never>((_, reject) => {
-				timer = setTimeout(() => {
-					controller.abort();
-					reject(new Error("Semantic embedding timeout"));
-				}, this.limits.queryTimeoutMs);
+				timer = setTimeout(
+					() => {
+						controller.abort();
+						reject(new Error("Semantic embedding timeout"));
+					},
+					task === "query" ? this.limits.queryTimeoutMs : this.limits.documentTimeoutMs,
+				);
 			});
 			const result = await Promise.race([
 				this.options.embed(inputs, { task, profile: structuredClone(this.profile), signal: controller.signal }),
 				timeout,
+				cancelled,
 			]);
 			signal?.throwIfAborted();
 			if (result.profileKey !== this.profileKey || result.vectors.length !== inputs.length)
@@ -272,7 +294,7 @@ export class SemanticIndex {
 			const vector = this.options.embed
 				? (await this.embed([{ kind: "text", text: query }], "query", signal))[0]
 				: undefined;
-			return this.searchVector(query, vector, filters);
+			return this.searchVector(query, vector ? { profileKey: this.profileKey, vector } : undefined, filters);
 		} catch (error) {
 			signal?.throwIfAborted();
 			return {
@@ -287,10 +309,19 @@ export class SemanticIndex {
 		if (query.length > this.limits.maxTextChars) throw new Error("Semantic query size limit exceeded");
 	}
 
-	searchVector(query: string, vector: readonly number[] | undefined, filters: SemanticFilters): SemanticSearchResult {
+	searchVector(
+		query: string,
+		embedding: { profileKey: string; vector: readonly number[] } | undefined,
+		filters: SemanticFilters,
+	): SemanticSearchResult {
 		this.assertSearch(query, filters);
+		if (embedding && embedding.profileKey !== this.profileKey) throw new Error("Semantic query profile mismatch");
+		const vector = embedding?.vector;
 		if (vector) validateVector(vector, this.profile.dimensions);
-		const limit = Number.isFinite(filters.limit) ? Math.max(1, Math.min(20, Math.floor(filters.limit!))) : 5;
+		const limit =
+			filters.limit !== undefined && Number.isFinite(filters.limit)
+				? Math.max(1, Math.min(20, Math.floor(filters.limit)))
+				: 5;
 		const start = performance.now();
 		const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [])].slice(0, 64);
 		const memories = new Set(filters.eligibleMemoryIds ?? []);
@@ -305,7 +336,7 @@ export class SemanticIndex {
 				record.projectId !== filters.projectId ||
 				(record.scope === "global" && !filters.includeGlobal) ||
 				(record.visibility === "private" && !filters.includePrivate) ||
-				(record.kind === "memory" && !memories.has(record.memoryId!)) ||
+				(record.kind === "memory" && !memories.has(record.memoryId ?? "")) ||
 				(filters.kinds && !filters.kinds.includes(record.kind)) ||
 				(filters.visibility && !filters.visibility.includes(record.visibility)) ||
 				(filters.runId && record.runId !== filters.runId) ||
@@ -318,7 +349,7 @@ export class SemanticIndex {
 			const text = `${record.path}\n${record.text}`.toLowerCase();
 			const lexical = terms.length ? terms.filter((term) => text.includes(term)).length / terms.length : 0;
 			const stored = this.generation?.vectors[record.id];
-			const semantic = vector && stored ? vector.reduce((sum, value, i) => sum + value * stored[i]!, 0) : 0;
+			const semantic = vector && stored ? vector.reduce((sum, value, i) => sum + value * (stored[i] ?? 0), 0) : 0;
 			if (!exact && lexical <= 0 && semantic <= 0) continue;
 			hits.push({
 				id: record.id,

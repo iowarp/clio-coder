@@ -12,6 +12,7 @@ export const DEFAULT_SEMANTIC_LIMITS: SemanticLimits = {
 	batchSize: 16,
 	maxEmbeddingsPerDay: 10_000,
 	queryTimeoutMs: 5_000,
+	documentTimeoutMs: 30_000,
 	searchBudgetMs: 100,
 };
 
@@ -22,19 +23,30 @@ export function sourceHash(content: string | Uint8Array): string {
 export function semanticProfileKey(profile: SemanticProfile): string {
 	if (!profile.id || !Number.isSafeInteger(profile.dimensions) || profile.dimensions < 1 || profile.dimensions > 8192)
 		throw new Error("Invalid semantic profile identity or dimensions");
-	if (!Object.keys(profile.identity).length || Object.values(profile.identity).some((v) => typeof v !== "string" || !v))
-		throw new Error("Semantic profile needs an explicit configured asset/recipe identity");
-	return sourceHash(
-		JSON.stringify([
-			profile.id,
-			profile.dimensions,
-			Object.entries(profile.identity).sort(([a], [b]) => a.localeCompare(b)),
-		]),
-	);
+	if (!/^[a-f0-9]{64}$/.test(profile.profileIdentity))
+		throw new Error("Semantic profile requires the embedder's exact SHA-256 recipe identity");
+	return profile.profileIdentity;
+}
+
+/** Preserve the provider-owned recipe identity verbatim; this domain never re-hashes it. */
+export function embeddingProfileToSemanticProfile<T extends { id: string; dimensions: number }>(
+	profile: T,
+	profileIdentity: string,
+): SemanticProfile {
+	const result: SemanticProfile = {
+		id: profile.id,
+		dimensions: profile.dimensions,
+		profileIdentity,
+		identity: structuredClone(Object.fromEntries(Object.entries(profile))),
+	};
+	semanticProfileKey(result);
+	return result;
 }
 
 export function recordFingerprint(record: SemanticRecord): string {
-	return sourceHash(JSON.stringify(record));
+	return sourceHash(
+		JSON.stringify([record.extractionVersion, record.input, record.input.kind === "text" ? null : record.contentHash]),
+	);
 }
 
 export function validateVector(vector: readonly number[], dimensions: number): void {
@@ -87,7 +99,7 @@ export class SemanticStorage {
 		safeResourceWrite(join(this.directory, name), text, { mode: 0o600 });
 	}
 
-	load(projectId: string, profileKey: string): Generation | null {
+	load(projectId: string, profileKey: string, attempts = 2): Generation | null {
 		const manifest = this.read<{
 			version: number;
 			projectId: string;
@@ -103,7 +115,19 @@ export class SemanticStorage {
 			!/^[a-f0-9-]+$/.test(manifest.generation)
 		)
 			throw new Error("Semantic manifest identity mismatch");
-		const data = this.read<Generation>(`generation-${manifest.generation}.json`);
+		let data: Generation | null;
+		try {
+			data = this.read<Generation>(`generation-${manifest.generation}.json`);
+		} catch (error) {
+			const current = this.read<{ generation: string }>("manifest.json");
+			if (attempts > 0 && current?.generation !== manifest.generation)
+				return this.load(projectId, profileKey, attempts - 1);
+			throw error;
+		}
+		if (!data && attempts > 0) {
+			const current = this.read<{ generation: string }>("manifest.json");
+			if (current?.generation !== manifest.generation) return this.load(projectId, profileKey, attempts - 1);
+		}
 		if (
 			!data ||
 			sourceHash(JSON.stringify(data)) !== manifest.sha256 ||

@@ -5,6 +5,7 @@ export type {
 	InboxOptions,
 	InboxRegistration,
 	ProjectSourcesOptions,
+	RecordingSource,
 	SampledMediaPiece,
 	SourceState,
 } from "./ingestion.js";
@@ -14,12 +15,19 @@ export {
 	extractInbox,
 	extractPdfPages,
 	extractProjectSources,
+	extractRecording,
 	previewInbox,
 	SEMANTIC_EXTRACTION_VERSION,
 } from "./ingestion.js";
 export type { SemanticIndexOptions } from "./service.js";
 export { SemanticIndex } from "./service.js";
-export { DEFAULT_SEMANTIC_LIMITS, SEMANTIC_FORMAT, semanticProfileKey, sourceHash } from "./storage.js";
+export {
+	DEFAULT_SEMANTIC_LIMITS,
+	embeddingProfileToSemanticProfile,
+	SEMANTIC_FORMAT,
+	semanticProfileKey,
+	sourceHash,
+} from "./storage.js";
 export type {
 	SemanticEmbed,
 	SemanticFilters,

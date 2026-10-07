@@ -1,7 +1,8 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { runCommandVector } from "../../core/safe-exec.js";
-import { codemapPath, readCodewiki, readWikiPage, wikiDir } from "../context/index.js";
+import { codemapPath, readCodewiki, wikiDir } from "../context/index.js";
 import type { EvidenceInspectable } from "../evidence/index.js";
 import type { MemoryPromptOptions, MemoryRecord } from "../memory/index.js";
 import { selectMemoryForPrompt } from "../memory/index.js";
@@ -87,7 +88,7 @@ function within(root: string, path: string): boolean {
 }
 function protectedName(path: string): boolean {
 	return (
-		/(^|[/\\])(\.env(?:\..*)?|\.ssh|\.aws|\.gnupg|\.git|node_modules|\.venv|credentials?(?:\.[^/\\]+)?|secrets?(?:\.[^/\\]+)?|id_rsa|id_ed25519)([/\\]|$)/i.test(
+		/(^|[/\\])(\.env(?:\..*)?|\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.git|node_modules|\.venv|credentials?(?:\.[^/\\]+)?|secrets?(?:\.[^/\\]+)?|id_rsa|id_ed25519)([/\\]|$)/i.test(
 			path,
 		) || /\.(pem|key|p12|pfx)$/i.test(path)
 	);
@@ -104,7 +105,7 @@ function allowed(root: string, path: string, options: ExtractionOptions): boolea
 	return within(root, realpathSync(path));
 }
 function secretContent(text: string): boolean {
-	return /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b|(?:api[_-]?key|password|access[_-]?token|client[_-]?secret)\s*[=:]\s*["']?[^\s"']{8,}/i.test(
+	return /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{20,})\b|(?:api[_-]?key|password|access[_-]?token|auth[_-]?token|authorization|_auth|client[_-]?secret)\s*[=:]\s*["']?[^\s"']{8,}/i.test(
 		text,
 	);
 }
@@ -205,6 +206,7 @@ export async function previewInbox(registration: InboxRegistration, options: Ext
 	const files: { path: string; bytes: number; mediaType: string }[] = [];
 	const sources: SourceState[] = [];
 	let totalBytes = 0;
+	let truncated = scan.truncated;
 	for (const path of scan.paths) {
 		options.signal?.throwIfAborted();
 		try {
@@ -214,6 +216,7 @@ export async function previewInbox(registration: InboxRegistration, options: Ext
 			}
 			const bytes = statSync(path).size;
 			if (bytes > limits.maxFileBytes || totalBytes + bytes > limits.maxTotalBytes) {
+				truncated = true;
 				sources.push({ path, state: "skipped", reason: "File or total byte budget" });
 				continue;
 			}
@@ -228,7 +231,7 @@ export async function previewInbox(registration: InboxRegistration, options: Ext
 		sources,
 		totalBytes,
 		estimatedPieces: files.reduce((sum, file) => sum + Math.max(1, Math.ceil(file.bytes / limits.maxTextChars)), 0),
-		truncated: scan.truncated,
+		truncated,
 	};
 }
 
@@ -289,6 +292,7 @@ export async function extractInbox(
 	const limits = limitsFor(options);
 	const preview = await previewInbox(registration, options);
 	const result: ExtractionResult = { records: [], sources: [...preview.sources], truncated: preview.truncated };
+	let retainedBytes = 0;
 	for (const file of preview.files) {
 		options.signal?.throwIfAborted();
 		if (result.records.length >= limits.maxPieces) {
@@ -307,6 +311,7 @@ export async function extractInbox(
 				visibility: registration.scope === "global" ? ("global" as const) : ("project" as const),
 				path: file.path,
 				contentHash: sourceHash(bytes),
+				updatedAt: statSync(file.path).mtime.toISOString(),
 				mediaType: file.mediaType,
 				...(registration.runId ? { runId: registration.runId } : {}),
 				...(registration.experimentId ? { experimentId: registration.experimentId } : {}),
@@ -396,7 +401,15 @@ export async function extractInbox(
 			}
 			const remaining = limits.maxPieces - result.records.length;
 			if (records.length > remaining) result.truncated = true;
-			result.records.push(...records.slice(0, remaining));
+			for (const record of records.slice(0, remaining)) {
+				const size = Buffer.byteLength(JSON.stringify(record));
+				if (retainedBytes + size > limits.maxTotalBytes) {
+					result.truncated = true;
+					break;
+				}
+				retainedBytes += size;
+				result.records.push(record);
+			}
 			result.sources.push({ path: file.path, state: "ready" });
 		} catch (error) {
 			options.signal?.throwIfAborted();
@@ -479,23 +492,45 @@ export async function extractProjectSources(options: ProjectSourcesOptions): Pro
 		contentHash: hash,
 		mediaType: "text/plain",
 	});
+	let extractedBytes = 0;
+	let readBytes = 0;
+	const admitRead = (path: string) => {
+		const size = statSync(path).size;
+		if (size > limits.maxFileBytes || readBytes + size > limits.maxTotalBytes) {
+			result.truncated = true;
+			return false;
+		}
+		readBytes += size;
+		return true;
+	};
 	const add = (records: SemanticRecord[]) => {
+		records = records.filter((record) => {
+			const size = Buffer.byteLength(JSON.stringify(record));
+			if (extractedBytes + size > limits.maxTotalBytes) {
+				result.truncated = true;
+				return false;
+			}
+			extractedBytes += size;
+			return true;
+		});
 		if (result.records.length + records.length > limits.maxPieces) result.truncated = true;
 		result.records.push(...records.slice(0, Math.max(0, limits.maxPieces - result.records.length)));
 	};
 	const mapPath = codemapPath(root);
 	try {
-		if (allowed(root, mapPath, options) && statSync(mapPath).size <= limits.maxFileBytes) {
+		if (allowed(root, mapPath, options) && admitRead(mapPath)) {
 			const map = readCodewiki(root);
+			if (!map) throw new Error("Invalid codemap; refusing an incomplete extraction snapshot");
+			if (map.files.length > limits.maxFiles) result.truncated = true;
 			for (const file of (map?.files ?? []).slice(0, limits.maxFiles)) {
 				options.signal?.throwIfAborted();
 				const path = resolve(root, file.path);
 				try {
-					if (!allowed(root, path, options) || statSync(path).size > limits.maxFileBytes) continue;
+					if (!allowed(root, path, options) || !admitRead(path)) continue;
 					const text = readFileSync(path, "utf8");
 					if (secretContent(text)) continue;
 					const hash = sourceHash(text);
-					const base = baseFor(path, `code:${file.id}`, "code", hash);
+					const base = { ...baseFor(path, `code:${file.id}`, "code", hash), updatedAt: statSync(path).mtime.toISOString() };
 					add(textPieces(base, `${file.path}\n${file.summary ?? ""}`, limits));
 					const lines = text.split("\n");
 					for (const symbol of (map?.symbols ?? []).filter((s) => s.fileId === file.id)) {
@@ -535,13 +570,15 @@ export async function extractProjectSources(options: ProjectSourcesOptions): Pro
 			const scan = await discover(wiki, options, limits);
 			result.truncated ||= scan.truncated;
 			for (const path of scan.paths.filter((p) => p.endsWith(".md"))) {
-				if (!allowed(root, path, options) || statSync(path).size > limits.maxFileBytes) continue;
+				if (!allowed(root, path, options) || !admitRead(path)) continue;
 				const text = readFileSync(path, "utf8");
-				const doc = readWikiPage({ pagePath: relative(wiki, path), content: text });
 				add(
 					textPieces(
-						baseFor(path, `wiki:${relative(wiki, path)}`, "wiki", sourceHash(text)),
-						`${doc.metadata.title}\n${doc.metadata.summary}\n${doc.body}`,
+						{
+							...baseFor(path, `wiki:${relative(wiki, path)}`, "wiki", sourceHash(text)),
+							updatedAt: statSync(path).mtime.toISOString(),
+						},
+						text,
 						limits,
 					),
 				);
@@ -576,13 +613,117 @@ export async function extractProjectSources(options: ProjectSourcesOptions): Pro
 			})
 		)
 			continue;
-		const text = [...overview.tasks, ...findings.map((f) => f.message), entry.redactedTranscript ?? ""].join("\n");
-		const base = {
-			...baseFor(join(entry.directory, "overview.json"), `evidence:${overview.evidenceId}`, "evidence", sourceHash(text)),
+		const common = {
 			updatedAt: overview.generatedAt,
-			...(overview.runIds.length === 1 ? { runId: overview.runIds[0]! } : {}),
+			...(overview.runIds.length === 1 && overview.runIds[0] ? { runId: overview.runIds[0] } : {}),
 		};
-		add(textPieces(base, text, limits));
+		const addSurface = (name: string, text: string, location: SemanticLocation = {}) => {
+			const base = {
+				...baseFor(join(entry.directory, name), `evidence:${overview.evidenceId}:${name}`, "evidence", sourceHash(text)),
+				...common,
+			};
+			add(textPieces(base, text, limits, location));
+		};
+		addSurface("overview.json", overview.tasks.join("\n"));
+		for (const [index, finding] of findings.entries()) {
+			const base = {
+				...baseFor(
+					join(entry.directory, "findings.json"),
+					`evidence:${overview.evidenceId}:finding:${finding.id}`,
+					"evidence",
+					sourceHash(finding.message),
+				),
+				updatedAt: overview.generatedAt,
+				...(finding.runId ? { runId: finding.runId } : {}),
+			};
+			add(textPieces(base, finding.message, limits, { output: index }));
+		}
+		if (entry.redactedTranscript) addSurface("transcript.md", entry.redactedTranscript);
 	}
+	options.signal?.throwIfAborted();
 	return result;
+}
+
+export interface RecordingSource {
+	projectId: string;
+	runId: string;
+	root: string;
+	path: string;
+	sha256: string;
+	/** Only evidence-exported, redacted recordings are admitted. Never pass raw run state. */
+	redacted: true;
+}
+
+/** A cast is timed terminal output; no image/video understanding is implied. */
+export function extractRecording(source: RecordingSource, options: ExtractionOptions = {}): ExtractionResult {
+	const limits = limitsFor(options);
+	const root = realpathSync(source.root);
+	const path = resolve(source.path);
+	if (
+		source.redacted !== true ||
+		!source.projectId ||
+		!source.runId ||
+		!allowed(root, path, options) ||
+		statSync(path).size > Math.min(limits.maxFileBytes, limits.maxTotalBytes)
+	)
+		throw new Error("Recording source is unredacted, protected or exceeds its byte budget");
+	const bytes = readFileSync(path);
+	if (sourceHash(bytes) !== source.sha256) throw new Error("Recording checksum mismatch");
+	const lines = bytes.toString("utf8").trimEnd().split("\n");
+	const header = JSON.parse(lines.shift() ?? "null") as { version?: number } | null;
+	if (header?.version !== 2) throw new Error("Only strict asciicast v2 recordings are supported");
+	const records: SemanticRecord[] = [];
+	let previous = -1;
+	let truncated = false;
+	const base = {
+		sourceId: `recording:${source.runId}`,
+		kind: "recording" as const,
+		projectId: source.projectId,
+		scope: "project" as const,
+		visibility: "project" as const,
+		path,
+		contentHash: source.sha256,
+		mediaType: "application/x-asciicast",
+		runId: source.runId,
+	};
+	for (const [index, line] of lines.entries()) {
+		options.signal?.throwIfAborted();
+		const event = JSON.parse(line) as unknown;
+		if (
+			!Array.isArray(event) ||
+			event.length !== 3 ||
+			typeof event[0] !== "number" ||
+			!Number.isFinite(event[0]) ||
+			event[0] < previous ||
+			event[0] < 0 ||
+			typeof event[1] !== "string" ||
+			typeof event[2] !== "string"
+		)
+			throw new Error("Malformed asciicast event or timestamps");
+		previous = event[0];
+		if (event[0] > limits.maxMediaSeconds || records.length >= limits.maxPieces) {
+			truncated = true;
+			break;
+		}
+		if (event[1] !== "o") continue;
+		const text = Array.from(stripVTControlCharacters(event[2]))
+			.filter((char) => {
+				const code = char.codePointAt(0) ?? 0;
+				return code === 9 || code === 10 || (code >= 32 && code !== 127);
+			})
+			.join("");
+		if (!text.trim() || secretContent(text)) continue;
+		for (const record of textPieces({ ...base, sourceId: `${base.sourceId}:event:${index}` }, text, limits, {
+			startSeconds: event[0],
+			endSeconds: event[0],
+			frame: index,
+		})) {
+			if (records.length >= limits.maxPieces) {
+				truncated = true;
+				break;
+			}
+			records.push(record);
+		}
+	}
+	return { records, sources: [{ path, state: "ready" }], truncated };
 }
