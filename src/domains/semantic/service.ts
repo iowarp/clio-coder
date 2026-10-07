@@ -366,8 +366,32 @@ export class SemanticIndex {
 			});
 		}
 		hits.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+		// An unfiltered cross-source question needs room for both the implementation
+		// and its precedent. Repeated evidence bundles can otherwise consume every
+		// slot ahead of a relevant code symbol. Exact IDs always keep priority.
+		let selected = hits.slice(0, limit);
+		if (!filters.kinds && limit >= 5 && hits.length > limit) {
+			const diverse: SemanticHit[] = hits.filter((hit) => hit.method === "exact").slice(0, limit);
+			const threshold = (hits[0]?.score ?? 0) * 0.8;
+			for (const [kind, quota] of [
+				["memory", 1],
+				["wiki", 1],
+				["code", 2],
+			] as const) {
+				for (const hit of hits
+					.filter((candidate) => candidate.kind === kind && candidate.score >= threshold)
+					.slice(0, quota)) {
+					if (diverse.length < limit && !diverse.some((entry) => entry.id === hit.id)) diverse.push(hit);
+				}
+			}
+			for (const hit of hits) {
+				if (diverse.length >= limit) break;
+				if (!diverse.some((entry) => entry.id === hit.id)) diverse.push(hit);
+			}
+			selected = diverse.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+		}
 		return {
-			hits: hits.slice(0, limit),
+			hits: selected,
 			generation: this.generation?.generation ?? null,
 			profileKey: this.profileKey,
 			indexedAt: this.generation?.createdAt ?? null,

@@ -281,7 +281,9 @@ export async function refreshSemantic(options: SemanticAppOptions, signal?: Abor
 
 export async function reembedSemantic(options: SemanticAppOptions, signal?: AbortSignal) {
 	const app = await openSemanticApp(options);
-	return app.index.reembed(undefined, signal ? { signal } : {});
+	const records = app.index.canonicalRecords();
+	if (records.length === 0) return refreshSemantic(options, signal);
+	return app.index.reembed(records, signal ? { signal } : {});
 }
 
 export async function searchSemantic(

@@ -451,3 +451,37 @@ test("provider bridge preserves the exact provider-owned profile identity withou
 		1,
 	);
 });
+
+test("cross-source results retain implementation and precedent when evidence bundles repeat", async () => {
+	const index = new SemanticIndex({ projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir });
+	const evidence = Array.from({ length: 8 }, (_, i) => ({
+		...record(`evidence-${i}`, "checkpoint retry"),
+		kind: "evidence" as const,
+	}));
+	await index.refresh([
+		...evidence,
+		{ ...record("wiki", "checkpoint retry"), kind: "wiki" },
+		{ ...record("memory", "checkpoint retry"), kind: "memory", memoryId: "m" },
+		{ ...record("code-one", "checkpoint fence"), kind: "code" },
+		{ ...record("code-two", "retry batch"), kind: "code" },
+	]);
+	const result = index.searchVector(
+		"checkpoint retry",
+		{ profileKey: index.profileKey, vector: [1, 0] },
+		{
+			projectId: "project-a",
+			eligibleMemoryIds: ["m"],
+			limit: 5,
+		},
+	);
+	assert.equal(result.hits.length, 5);
+	assert.deepEqual(
+		result.hits
+			.filter((hit) => hit.kind === "code")
+			.map((hit) => hit.id)
+			.sort(),
+		["code-one", "code-two"],
+	);
+	assert.ok(result.hits.some((hit) => hit.kind === "memory"));
+	assert.ok(result.hits.some((hit) => hit.kind === "wiki"));
+});
