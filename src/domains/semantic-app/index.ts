@@ -122,7 +122,14 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 	});
 	const allowedMediaRoots = config.inboxes
 		.filter((inbox) => inbox.scope === "global" || inbox.project === projectId)
-		.map((inbox) => realpathSync(inbox.root));
+		.flatMap((inbox) => {
+			try {
+				return [realpathSync(inbox.root)];
+			} catch {
+				// A removed inbox is reported by refresh; an existing generation stays searchable.
+				return [];
+			}
+		});
 	const pathPolicy = createSafetyPolicyEngine({ cwd: projectId });
 	const profileIdentity = embeddingProfileIdentity(profile);
 	const index = new SemanticIndex({
@@ -333,7 +340,13 @@ export async function searchSemantic(
 	filters: Omit<SemanticFilters, "projectId"> = {},
 	signal?: AbortSignal,
 ) {
-	const app = await openSemanticApp(options);
+	let app: Awaited<ReturnType<typeof openSemanticApp>>;
+	try {
+		app = await openSemanticApp(options);
+	} catch (error) {
+		if (!(error instanceof Error) || !error.message.startsWith("Semantic target authentication unavailable")) throw error;
+		app = await openSemanticApp({ ...options, offline: true });
+	}
 	const policy = createSafetyPolicyEngine({ cwd: app.projectId });
 	const records = loadMemoryRecordsSync(clioDataDir());
 	const eligibleMemoryIds = eligibleSemanticMemory(records, {
