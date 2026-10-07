@@ -121,13 +121,19 @@ const DispatchBudgetPhaseSchema = Type.Object(
 
 const DispatchBudgetSchema = Type.Object(
 	{
-		toolCalls: Type.Integer({ minimum: 1, description: "Tool-call phase boundary." }),
-		readReserve: Type.Integer({ minimum: 0, description: "Tail reserve for read calls." }),
+		toolCalls: Type.Integer({
+			minimum: 1,
+			description: "Planning estimate; native workers stop at a hard tool-call ceiling.",
+		}),
+		readReserve: Type.Integer({
+			minimum: 0,
+			description: "Read tail; native scout, provenance and context-bootstrap runs only.",
+		}),
 		retryRevision: Type.Optional(DispatchBudgetPhaseSchema),
 	},
 	{
 		additionalProperties: false,
-		description: "Advisory call counts, never a hard stop. retryRevision estimates a retry.",
+		description: "Estimates, not stop points; only the native ceiling is hard. retryRevision estimates a retry.",
 	},
 );
 

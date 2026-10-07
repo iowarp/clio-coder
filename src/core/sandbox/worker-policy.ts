@@ -124,7 +124,12 @@ export function workerSandboxLine(spec: WorkerSandboxSpec | undefined, availabil
 			? `Shell sandbox: unavailable (${availability.reason ?? "no backend"}); shell and verification commands are refused.`
 			: `Shell sandbox: unavailable (${availability.reason ?? "no backend"}); commands run unsandboxed.`;
 	}
-	const writes = spec.writableRoots.length === 0 ? "only a private /tmp" : "only your writable roots and a private /tmp";
+	// Seatbelt has no private mount: its profile admits the shared system temp
+	// directories, and the profile is unverified on macOS (seatbelt.ts), so the
+	// worker is told both instead of being promised bubblewrap's isolation.
+	const seatbelt = availability.backend === "seatbelt";
+	const tmp = seatbelt ? "the shared temp directories" : "a private /tmp";
+	const writes = spec.writableRoots.length === 0 ? `only ${tmp}` : `only your writable roots and ${tmp}`;
 	// bwrap binds a missing exact-file root with --bind-try, which skips it, so
 	// a command can never create that file. The native write tool can, inside
 	// the same boundary, so the worker is told to seed the file with it first.
@@ -133,5 +138,6 @@ export function workerSandboxLine(spec: WorkerSandboxSpec | undefined, availabil
 		missing.length === 0
 			? ""
 			: ` These write-root files do not exist yet and shell commands cannot create them, so create each with the write tool before any command writes to it: ${missing.join(", ")}.`;
-	return `Shell sandbox: ${availability.backend}. Commands you run can write ${writes}; .git and .clio-coder stay read-only; network is ${spec.network ? "allowed" : "off"}.${seed}`;
+	const backend = seatbelt ? "seatbelt (experimental, unverified macOS profile)" : availability.backend;
+	return `Shell sandbox: ${backend}. Commands you run can write ${writes}; .git and .clio-coder stay read-only; network is ${spec.network ? "allowed" : "off"}.${seed}`;
 }

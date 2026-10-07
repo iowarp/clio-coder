@@ -2538,7 +2538,7 @@ function bashCwdArg(args: Record<string, unknown> | undefined): string | undefin
 
 const DELETE_TARGET_RULE_ID = "delete-outside-workspace";
 const DELETE_TARGET_RULE_DESCRIPTION =
-	"deletes a path outside the workspace, the workspace root or its .git, or a path named only at run time; any spelling of the same delete is refused";
+	"deletes a path outside the workspace, the workspace root or its .git, or a path named only at run time, through rm, rmdir, unlink or find however quoted or wrapped";
 
 function pathArg(args: Record<string, unknown> | undefined): string | null {
 	if (!args) return null;
