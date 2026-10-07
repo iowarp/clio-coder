@@ -156,7 +156,6 @@ export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
 export type { CastOutputEvent, RecordingManifest, RecordingReference } from "./recording.js";
 export {
-	parseRecordingCast,
 	parseRecordingManifest,
 	readRunRecording,
 	recordingReference,

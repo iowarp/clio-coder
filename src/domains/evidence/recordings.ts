@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { RecordingManifest, RunEnvelope } from "../dispatch/index.js";
-import { parseRecordingCast, readRunRecording } from "../dispatch/index.js";
-import { createRedactionTally, redactSecretSegments, redactSecretsDeep, redactSecretsText } from "./redact.js";
+import { readRunRecording } from "../dispatch/index.js";
+import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 
 /** Export only canonical, validated, redacted display recordings; failures remain visible metadata. */
 export function exportEvidenceRecordings(
@@ -24,21 +23,11 @@ export function exportEvidenceRecordings(
 				manifest.error = "capture was not finalized; process interruption or run still active";
 			}
 			if (source.cast !== null) {
-				const frames = parseRecordingCast(source.cast);
-				const tally = createRedactionTally();
-				const text = redactSecretSegments(
-					frames.map((frame) => frame[2]),
-					tally,
-				);
-				const header = source.cast.slice(0, source.cast.indexOf("\n"));
-				const cast = `${header}\n${frames.map((frame, i) => JSON.stringify([frame[0], "o", text[i]])).join("\n")}${frames.length ? "\n" : ""}`;
-				parseRecordingCast(cast);
+				// readRunRecording verified this cast against the checksum of its redacted write; a second
+				// pass re-matches its own [redacted:assignment] markers and inflates redactionCount.
 				manifest.castPath = `recordings/${run.id}.cast`;
-				manifest.bytes = Buffer.byteLength(cast);
-				manifest.sha256 = createHash("sha256").update(cast).digest("hex");
-				manifest.redactionCount += tally.count;
 				mkdirSync(join(directory, "recordings"), { recursive: true, mode: 0o700 });
-				safeResourceWrite(join(directory, manifest.castPath), cast, { mode: 0o600 });
+				safeResourceWrite(join(directory, manifest.castPath), source.cast, { mode: 0o600 });
 			}
 			manifests.push(redactSecretsDeep(manifest, createRedactionTally()));
 		} catch (error) {
