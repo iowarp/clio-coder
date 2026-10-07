@@ -77,6 +77,27 @@ describe("self-knowledge in the session prompt", () => {
 		doesNotMatch(codeNavToolSurface.description, /scope=docs/);
 		match(codeNavToolSurface.description, /clio_docs/);
 	});
+
+	it("offers a bounded semantic lookup only when the opt-in tool is reachable", () => {
+		const guidance = /try one bounded context\(scope=semantic\) query early/;
+		match(compileSession("safety.default", { semanticSearchAvailable: true }), guidance);
+		doesNotMatch(compileSession("safety.default"), guidance);
+		doesNotMatch(
+			compileSession("safety.default", { semanticSearchAvailable: true, toolNames: [ToolNames.Gateway] }),
+			guidance,
+		);
+		doesNotMatch(
+			compileSession("safety.default", { semanticSearchAvailable: true, providerSupportsTools: false }),
+			guidance,
+		);
+		doesNotMatch(
+			compileSession("safety.default", {
+				semanticSearchAvailable: true,
+				turnConstraints: { mode: "answer" },
+			}),
+			guidance,
+		);
+	});
 });
 
 describe("code_nav source=clio", () => {

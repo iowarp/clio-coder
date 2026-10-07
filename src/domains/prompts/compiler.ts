@@ -61,6 +61,8 @@ export interface SessionPromptInputs {
 	routeSources?: Readonly<Record<RouteName, RouteSource>>;
 	contextWindow?: number | null;
 	providerSupportsTools?: boolean | null;
+	/** The opt-in semantic index is enabled for this run and context is reachable. */
+	semanticSearchAvailable?: boolean;
 	/** Model-stable thinking guidance from local-model quirks (changes only on model change). */
 	thinkingGuidance?: string | null;
 	/** Canonical names on the frozen direct-tool surface, rendered as a compact harness inventory. */
@@ -745,6 +747,11 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	return [
 		"# Retrieval Hints",
 		"Repository details not included above must be fetched, never invented; compact CLIO-CODER.md instructions may be preloaded.",
+		...(inputs.semanticSearchAvailable && sessionHasContext(inputs)
+			? [
+					"When a request connects unfamiliar code behavior, older memory or evidence, or scientific artifacts across media, try one bounded context(scope=semantic) query early. It returns candidate locations, not verified facts. Inspect the original source with read, code_nav, evidence, or an artifact reader before citing it or claiming how a result was produced. If the index is unavailable or misses, continue with the ordinary tools.",
+				]
+			: []),
 	].join("\n");
 }
 
@@ -817,7 +824,7 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
 	skills: "pinned",
 	safety: "pinned",
 	"tool-contract": "pinned",
-	"retrieval-hints": "pinned",
+	"retrieval-hints": "turn",
 	"harness-awareness": "pinned",
 	"project-context": "session",
 	memory: "turn",

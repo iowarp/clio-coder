@@ -2109,6 +2109,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(deps.getRouteSources ? { routeSources: deps.getRouteSources() } : {}),
 				contextWindow,
 				providerSupportsTools: runtimeSupportsTools(agentRuntime),
+				semanticSearchAvailable: settings.context.semantic.enabled === true,
 				toolNames,
 				// Builtin presence gates prompt guidance. Learning an MCP schema
 				// mid-turn changes discovery results, not the immutable prefix.
