@@ -2,6 +2,15 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## 0.6.2-rc.2 - 2026-10-06
+
+Clio Coder 0.6.2-rc.2 fixes the Materio lab flow and the release publisher, both found while shipping 0.6.2-rc.1. Everything else is as described for 0.6.2-rc.1 below.
+
+### Fixes
+
+- Materio confirm cards no longer fail on long drafts. A draft too long for the card is saved whole to `.research/drafts/<form>.md` and the card shows an excerpt, so `define-virtual-lab` and `define-research-tasks` can publish their documents. The corrections field starts at `none`, which accepts the draft, because Clio's interview refuses an empty answer. A workflow template longer than an option allows shows a shortened name with the full description beside it. The Materio extension is now 0.2.1.
+- The release workflow finds the draft GitHub release it has just created, so a release no longer stops after uploading its assets.
+
 ## 0.6.2-rc.1 - 2026-10-06
 
 Clio Coder 0.6.2-rc.1 is the release candidate for 0.6.2, published on the `beta` channel. Clio Coder 0.6.2 separates plugins from extensions. A plugin is an Agent Plugin that carries content; an extension is Clio code that runs in its own sandboxed process, declares everything it may do, and loads only after you approve those capabilities, with Materio and WTF-P as the first plugin and extension pairs. Fleet contracts are now playbooks, authored with `clio-coder playbook`, and the upgrade converts an existing home and each workspace once. Proactive memory runs on the chat route when it has no route of its own, within that route's cost, quota or speed budget, and reviews repository activity between turns. Library lifecycles leave receipts, extension and package activity is attributed in sessions and traces, `/loop` schedules turns and command polls, `/reload` and `/restart` apply changes in place, and the desktop app gains an integrated window title, Manage context and a denser layout.

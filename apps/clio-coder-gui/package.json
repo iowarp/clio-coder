@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder-gui",
-	"version": "0.6.2-rc.1",
+	"version": "0.6.2-rc.2",
 	"private": true,
 	"type": "module",
 	"scripts": {
