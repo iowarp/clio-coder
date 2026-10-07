@@ -396,7 +396,7 @@ A `dispatch.completed` or `dispatch.failed` frame carries `_meta["clio-coder/rec
 | `outcome` | The receipt outcome, or null. |
 | `contract` | Result-contract conformance: `pass`, `fail`, `not-reached`, `unmeasured` (the run had no typed contract), or null when the receipt is silent. |
 | `contractKind` | `debugger-report`, `verifier-report`, `research-report`, `world-knowledge-report`, `scout-report`, or null. |
-| `trust` | The artifact-integrity word the footer prints (`seal retired` for a retired seal version), or null when the receipt could not be authenticated against its ledger row. |
+| `trust` | The artifact-integrity word the footer prints (`seal retired` for a retired seal version), or null when the receipt could not be verified against its ledger row. |
 | `validation` | The footer's validation clause, or null. |
 | `tokens`, `elapsedMs` | The receipt's `tokenCount` and elapsed time, or null when the receipt lacks the field. A peer that reported no usage seals `tokenCount: 0`. |
 | `placement` | `{mode: "current" or "worktree", branch?, changedPaths?}` for an external peer run, otherwise null. |

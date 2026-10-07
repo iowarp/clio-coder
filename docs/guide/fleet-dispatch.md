@@ -1007,7 +1007,7 @@ Three synthesis modes are available:
 | --- | --- | --- |
 | `none` | Returns the final member answers directly. | No |
 | `vote` | Deterministic majority tally over structured `verdict` fields. | No |
-| `judge` | Runs one additional read-only judge against all final answers. The judge runs the call's own agent unless `judge.agent` names another recipe. | Yes, one |
+| `judge` | Runs one additional read-only judge against all final answers. The judge defaults to `oracle`, or to `researcher` when the call's own agent is `oracle`, so by default the judge is never the call's own recipe. Set `judge.agent` to choose another. | Yes, one |
 
 Every member run seals a receipt, a judge receipt points backward to every final
 member receipt through gate provenance, and the approval artifact names each
@@ -1039,8 +1039,8 @@ which no answering member carried a verdict reports `no_verdict_field`.
 
 Every orchestration shape compiles to one strict ExecutionPlan v4 DAG with
 stable task ids, explicit dependencies, requested and approved authority,
-capacity-bounded waves, stop/continue semantics, and authenticated structured
-handoffs. The scheduler performs whole-plan preflight and reservation before
+capacity-bounded waves, stop/continue semantics, and structured
+handoffs bound to receipt digests. The scheduler performs whole-plan preflight and reservation before
 the first worker spawns. A missing authority grant is an admission failure.
 
 A plan-scale dispatch call maps to an approval ask at the `default` autonomy
@@ -1304,7 +1304,7 @@ plan approval or existing yolo authority.
 
 ### Route history and settled labels
 
-Each settled dispatch writes one record to `route-history.json` in the state directory ([route-history.ts](../../src/domains/dispatch/route-history.ts)). The file is version 3, keyed by terminal receipt digest, and keeps the newest 4,096 records. A file of another version is renamed aside as `route-history.json.v<N>.<timestamp>.retired`, never read, and the store starts empty. A record holds the route identity, the execution role, `qualityLabel` (`pass`, `fail` or `unmeasured`, from independent evidence only), `reliability` (`success`, `failure`, or `neutral` for operator cancels, policy denials and permission refusals), `firstPass`, completed cost and phase timing, cache use, source digests and `settledAt`. The route observer refines `qualityLabel` when later gate evidence authenticates.
+Each settled dispatch writes one record to `route-history.json` in the state directory ([route-history.ts](../../src/domains/dispatch/route-history.ts)). The file is version 3, keyed by terminal receipt digest, and keeps the newest 4,096 records. A file of another version is renamed aside as `route-history.json.v<N>.<timestamp>.retired`, never read, and the store starts empty. A record holds the route identity, the execution role, `qualityLabel` (`pass`, `fail` or `unmeasured`, from independent evidence only), `reliability` (`success`, `failure`, or `neutral` for operator cancels, policy denials and permission refusals), `firstPass`, completed cost and phase timing, cache use, source digests and `settledAt`. The route observer refines `qualityLabel` when later gate evidence verifies.
 
 Independent quality evidence arrives late or never, so every record also carries `settled`, the receipt's own verdict from `routeSettledLabel`:
 
@@ -1316,7 +1316,7 @@ Independent quality evidence arrives late or never, so every record also carries
 | `failure` | The outcome is `failed` with neither of the above. |
 | An outcome | Any other receipt outcome, unchanged: `timed_out`, `stalled`, `canceled`, `denied_by_policy` or `spawn_failed`. |
 
-A record written without the label receives one from its receipt when the observer next reconciles it. The label is a lowercase token. `clio-coder fleet view <runId>` prints it on a `settled` line once the receipt authenticates ([Model, cost and settled label in `fleet view`](#model-cost-and-settled-label-in-fleet-view)). It is also readable in `route-history.json` and in the `outcome` lines of the route observer log, and the receipt's `outcome` and `outcomeDetail` (shown by `fleet view`) and `outcomeCode` (in the receipt file) are the per-run source it is derived from. No `evidence` or `trace` command prints it. Adaptive routing does not read `settled`: route estimates and readiness use `qualityLabel` and `reliability`, so the label cannot change a route choice. Routing on it needs a recorded decision first.
+A record written without the label receives one from its receipt when the observer next reconciles it. The label is a lowercase token. `clio-coder fleet view <runId>` prints it on a `settled` line once the receipt verifies ([Model, cost and settled label in `fleet view`](#model-cost-and-settled-label-in-fleet-view)). It is also readable in `route-history.json` and in the `outcome` lines of the route observer log, and the receipt's `outcome` and `outcomeDetail` (shown by `fleet view`) and `outcomeCode` (in the receipt file) are the per-run source it is derived from. No `evidence` or `trace` command prints it. Adaptive routing does not read `settled`: route estimates and readiness use `qualityLabel` and `reliability`, so the label cannot change a route choice. Routing on it needs a recorded decision first.
 
 ## Assignments, attempts, and failover
 
@@ -1440,7 +1440,7 @@ step's success.
 
 ## Receipts
 
-Receipts carry exactly one current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 20`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical evidence reader: a lower version is reported as retired, is not migrated, and is never read as evidence; a malformed or future version is invalid. The fleet provenance fields covered by the digest
+Receipts carry exactly one current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 20`), whose unkeyed digest covers the complete receipt and reconstructible ledger provenance surface. There is no historical evidence reader: a lower version is reported as retired, is not migrated, and is never read as evidence; a malformed or future version is invalid. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id).
@@ -1476,7 +1476,7 @@ include:
   remove) and `information_flow_blocked`. Every code suppresses automatic retry.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and
-  readiness evidence, and authenticated quality sources.
+  readiness evidence, and digest-covered quality sources.
 - `effectiveFailover`: the retry mode that actually governed a worker run;
   a run without dispatch failover omits it.
 - `resultContract`: inside `quality`, the admitted contract identity and its `pass`, `fail`, or
@@ -1504,7 +1504,7 @@ basis unknown/not applicable). A read-only Scout can therefore report `receipt_i
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_implicated|not_requested`.
 A host-executed successful check projects onto canonical validation grounding as
-authenticated validator evidence. Briefing provenance and
+host-observed validator evidence. Briefing provenance and
 bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
 
@@ -1530,10 +1530,10 @@ typed quality, and validation grounding project onto validation grounding;
 gate decisions project onto independent review; briefing and project context
 project onto context provenance. A receipt does not contain independent-review or
 completion-evidence outcomes merely because it is sealed. Those axes remain
-`absent` until an authenticated gate artifact or finish assessment is composed.
-Integrity authenticates the recorded artifact; provenance identifies its
+`absent` until a verified gate artifact or finish assessment is composed.
+Integrity checks the recorded artifact against its digest; provenance identifies its
 sources. Validation, review, and authorship are represented by their respective
-observations and authenticated identities.
+observations and recorded identities.
 
 Gate references point backward: a reviewer references the builder it reviewed, a
 revise builder references the reviewer whose findings it received, and a judge
@@ -1773,10 +1773,10 @@ Every inspection command reads durable state only, so it works from a second ter
 | `clio-coder fleet status [--json] [--all]` | The admission state (`open`, or `draining` with the deadline, requesting PID and request time), each running or stale row with its node, heartbeat (`alive`, `stale` or `dead`, from the recorded worker PID), attempt, depth, elapsed time and cost, the budget envelope lines, and totals for tokens, cost and runtime. The owning process writes live token counts and cost to the ledger on each reconciler tick, about once a second. The retry queue lives in the owning process, so `retrying` is always empty here. |
 | `clio-coder fleet inspect --json [--all]` | A bounded projection for hosts: the newest 8 runs with their 32 newest journal events, evidence state (`pending`, `verified`, `failed`, `unavailable`) and outcome, up to 4 fleet roots with 24 steps each, and the topology of up to 4 councils (seated members, rounds, synthesis kind and judge run, never the answers). Text is sanitized and width-bounded. `--json` is required. |
 | `clio-coder fleet decisions --json [--all]` | The newest 8 sealed review and compete gate decisions, each with at most 6 subject runs, the decider run and a closed-set reason. It reports `available: false` when no gate has ever run, plus `truncated` and an `unverifiable` count. `--json` is required. |
-| `clio-coder fleet view <runId> [--follow] [--json] [--all]` | One run's ledger entry, event journal transcript and sealed receipt, with the receipt authenticated against its ledger envelope before any field is shown. A unique id prefix resolves. Once the receipt authenticates, the snapshot adds `model`, `cost` and `settled` lines ([below](#model-cost-and-settled-label-in-fleet-view)). `--follow` (or `-f`) tails the journal in an alternate screen until the terminal line and stays open until `q`; without a TTY it prints a snapshot. `--json` prints the snapshot as JSON, including the authenticated receipt. |
+| `clio-coder fleet view <runId> [--follow] [--json] [--all]` | One run's ledger entry, event journal transcript and sealed receipt, with the receipt verified against its ledger envelope before any field is shown. A unique id prefix resolves. Once the receipt verifies, the snapshot adds `model`, `cost` and `settled` lines ([below](#model-cost-and-settled-label-in-fleet-view)). `--follow` (or `-f`) tails the journal in an alternate screen until the terminal line and stays open until `q`; without a TTY it prints a snapshot. `--json` prints the snapshot as JSON, including the verified receipt. |
 | `clio-coder fleet view --watch <selection-file> [--dock-taps <file>] [--all]` | The workers dashboard that the workers dock runs ([Workers dock and dashboard](#workers-dock-and-dashboard)). `--watch` does not take a run id or `--follow`, and `--dock-taps` is valid only with `--watch`. |
 | `clio-coder fleet view <fleetRootId> [--all]` | The step index of a fleet run: one line per step with its run id and outcome. Pass one of those run ids back to see that step. |
-| `clio-coder fleet verify <runId> --json` | Re-authenticates one run's sealed receipt right now and reports `state` (`pending`, `verified`, `failed` or `unavailable`), a closed-set `reason` when it did not authenticate, and the five trust axes. Exit 1 for an unknown run. |
+| `clio-coder fleet verify <runId> --json` | Re-verifies one run's sealed receipt right now and reports `state` (`pending`, `verified`, `failed` or `unavailable`), a closed-set `reason` when it did not verify, and the five trust axes. Exit 1 for an unknown run. |
 | `clio-coder fleet cancel <runId> [--json] [--reason <text>]` | Cancels one running run from any terminal. |
 | `clio-coder fleet drain [--json]`, `clio-coder fleet resume [--json]` | Close or reopen durable dispatch admission (see [Placement and process-safe admission](#placement-and-process-safe-admission)). |
 
@@ -1786,7 +1786,7 @@ The `view` transcript comes from `<state>/runs/<runId>/events.ndjson`, which the
 
 ### Model, cost and settled label in `fleet view`
 
-When the receipt authenticates, the snapshot adds three lines after `evidence`:
+When the receipt verifies, the snapshot adds three lines after `evidence`:
 
 | Line | Content |
 | --- | --- |
@@ -1794,11 +1794,11 @@ When the receipt authenticates, the snapshot adds three lines after `evidence`:
 | `cost` | `$<usd to four decimals>` and the receipt's `costProvenance`, or `not recorded` and `provenance not recorded`. |
 | `settled` | The receipt's label from `routeSettledLabel`, the value route history stores ([Route history and settled labels](#route-history-and-settled-labels)). |
 
-A receipt that fails authentication prints `RECEIPT INTEGRITY FAILED` and its reason on the `evidence` line, and none of these three lines. The route a run was dispatched on is configuration. Only the provider's report says which model answered, so `not observed` means Clio Coder captured no report for that call. It never means the requested model served it.
+A receipt that fails verification prints `RECEIPT INTEGRITY FAILED` and its reason on the `evidence` line, and none of these three lines. The route a run was dispatched on is configuration. Only the provider's report says which model answered, so `not observed` means Clio Coder captured no report for that call. It never means the requested model served it.
 
 Calls over the `openai-codex-responses`, `openai-responses` and `azure-openai-responses` APIs read `response.model` from the provider's lifecycle events ([responses-model-id.ts](../../src/engine/apis/responses-model-id.ts)). A response that names a model records `responseModelIdObservation: reported` with that id, a response object without one records `not-reported`, and a call that produced no response object records `not-observed`. The observation is stored per call in session usage and in the receipt's `upstreamResponses`.
 
-`fleet view <runId> --json` prints one JSON object: `runId`, `agentId`, `model`, `target`, `node`, `phase`, `startedAt`, `elapsedMs`, `task`, the bounded `transcript` and `transcriptTruncated`, `journalPresent` and `journalPath`, `evidence`, `receiptPath`, `outcome`, `outcomeDetail`, `terminal`, `journalUnavailableReason` and `agentLedgerBoard` when they apply, and the full `receipt` only when it authenticated against its ledger row. The snapshot has no `settled` field. The label derives from the receipt's outcome fields.
+`fleet view <runId> --json` prints one JSON object: `runId`, `agentId`, `model`, `target`, `node`, `phase`, `startedAt`, `elapsedMs`, `task`, the bounded `transcript` and `transcriptTruncated`, `journalPresent` and `journalPath`, `evidence`, `receiptPath`, `outcome`, `outcomeDetail`, `terminal`, `journalUnavailableReason` and `agentLedgerBoard` when they apply, and the full `receipt` only when it verified against its ledger row. The snapshot has no `settled` field. The label derives from the receipt's outcome fields.
 
 ## Route observer
 
@@ -1831,7 +1831,7 @@ declines with a `will-not-fit` notice instead of stranding the configured model.
 Use `clio-coder playbook validate <name>` and `clio-coder playbook graph <name>` for
 model-free playbook checks. An operator with configured targets can then run
 the playbook explicitly with `clio-coder fleet run <name>` and retain its
-receipts; `clio-coder fleet verify <runId> --json` re-authenticates a sealed receipt
+receipts; `clio-coder fleet verify <runId> --json` re-verifies a sealed receipt
 afterwards. [Topologies](#topologies) explains reviewer gates and verification
 commands. Live fleet execution requires an operator.
 
@@ -1871,7 +1871,7 @@ For an independent helper task, use `detach:true` and continue useful work; coll
 
 The Scout recipe instructs the model to return structured findings with source paths and exact lines checked against live reads. A search hit alone does not establish a citation. Grounding counts the spans a read returned and the lines a grep result showed, whether the call was direct or a settled step of a gateway chain; a pending, failed or refused step grounds nothing, and a chain step cut to its share of the aggregate grounds only the lines that survived the cut. On repair, unsupported findings should be removed rather than moved to convenient range endpoints. Inline delivery and schema conformance do not establish semantic citation accuracy.
 
-Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, and the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
+Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, and, for native workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Claude SDK runs in advisory mode have no tool-call ceiling, and subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own receipt and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
 

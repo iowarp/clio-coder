@@ -39,7 +39,7 @@ Clio Coder records what a session and its workers did in a small set of local, d
 
 The filter splits on whitespace and requires every token to match, case-insensitively, against the artifact id, `category:id`, category, title, description, run id, session id, correlation id, tool name, backing path, and search text. A `<category>:<value>` filter, such as `receipt:abc1234`, restricts the list to that category and selects the artifact whose id matches the value exactly when one does. A bare `transcript`, `task-ledger`, `workspace`, `protected-artifact`, `compaction`, `prompt-manifest`, `system-prompt`, or `audit` selects that whole category. `/view <id-or-filter>` opens the viewer with that filter applied.
 
-`/view verify <runId>` runs [receipt verification](#receipt-integrity-verification) without opening the viewer and posts the verdict as a notice. A retired seal posts a warning that names the versions. A tampered or unreadable receipt posts an error.
+`/view verify <runId>` runs [receipt verification](#receipt-integrity-verification) without opening the viewer and posts the verdict as a notice. A retired seal posts a warning that names the versions. A receipt that fails verification or cannot be read posts an error.
 
 ## Trace retention and state usage
 
@@ -150,7 +150,7 @@ The observation is stored in two places.
 - **Session ledger.** Each assistant message payload carries `responseModelIdObservation`, so a resumed session folds the same states into `/usage` and `clio-coder usage report`.
 - **Dispatch receipt.** `upstreamResponses[]` holds one entry per worker assistant message, sealed under the integrity digest ([Receipt Fields for Dispatch Provenance](#receipt-fields-for-dispatch-provenance)).
 
-Usage accounting attributes a call to the reported model when the state is `reported`, to `unknown` when it is `not-reported`, and otherwise to the differing response model or the requested model. A Codex session therefore groups its tokens under the id the provider reported. The `/usage` model block prints the per-state call counts on its `response model id observation` row. `clio-coder fleet view <runId>` prints the requested model next to the reported model for each call once the receipt authenticates ([fleet-dispatch.md](../guide/fleet-dispatch.md)).
+Usage accounting attributes a call to the reported model when the state is `reported`, to `unknown` when it is `not-reported`, and otherwise to the differing response model or the requested model. A Codex session therefore groups its tokens under the id the provider reported. The `/usage` model block prints the per-state call counts on its `response model id observation` row. `clio-coder fleet view <runId>` prints the requested model next to the reported model for each call once the receipt verifies ([fleet-dispatch.md](../guide/fleet-dispatch.md)).
 
 ---
 
@@ -335,14 +335,14 @@ With no causes the panel prints `none` under `## Top failure causes`.
 
 ## Receipt Integrity Verification
 
-Pressing `v` on a selected receipt or running `/view verify <runId>` performs cryptographic integrity checks:
+Pressing `v` on a selected receipt or running `/view verify <runId>` runs the receipt consistency check:
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json` and compares the shared fields. The first field that differs fails the check as `ledger mismatch: <field>`.
-3. **Verify Integrity**: Recomputes the SHA-256 digest over the strict v20 receipt and reconstructible ledger fields (`RUN_RECEIPT_INTEGRITY_VERSION` in [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts)). The digest covers every current field, including dispatch intent path provenance, resolved path scope, steering, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance. Receipts below v20 are reported as retired and are never read as evidence or migrated. Malformed, tampered, unversioned, or future-version receipts fail verification; there is no historical receipt reader.
+3. **Verify Integrity**: Recomputes the SHA-256 digest over the strict v20 receipt and reconstructible ledger fields (`RUN_RECEIPT_INTEGRITY_VERSION` in [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts)). The digest covers every current field, including dispatch intent path provenance, resolved path scope, steering, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance. Receipts below v20 are reported as retired and are never read as evidence or migrated. Malformed, unversioned, or future-version receipts fail verification, as does a receipt edited without recomputing its digest; there is no historical receipt reader. The digest is unkeyed SHA-256 and the dispatching process computes it, so a receipt and ledger row rewritten together with a recomputed digest still verify. It is a consistency check, not a signature.
 4. **Report Result**: The viewer reports `ok` or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only. Recovery does not read a receipt whose run the ledger already holds or whose file is older than the ledger's horizon, so it never quarantines one of those ([Cold-start work](architecture.md#cold-start-work)).
 
-`clio-coder fleet verify <runId> --json` re-authenticates a receipt from the command line with the same check and reports a closed set of failure reasons ([fleet-verify.ts](../../src/cli/fleet-verify.ts)).
+`clio-coder fleet verify <runId> --json` re-verifies a receipt from the command line with the same check and reports a closed set of failure reasons ([fleet-verify.ts](../../src/cli/fleet-verify.ts)).
 
 ---
 
@@ -355,9 +355,9 @@ Receipt integrity verification and evidence verification are independent.
 against the ledger envelope; merely finding an embedded digest is not enough.
 `evidence_verification=<verified|unverified|not_applicable|unknown>/<basis>`
 describes validation evidence inside that verified receipt. Likewise,
-`briefing` authenticates parent-supplied dispatch data, while
-`project_context` authenticates the separately rendered bounded project
-message. Model-facing dispatch and collect output name all four concepts
+`briefing` records a byte count and hash of parent-supplied dispatch data, while
+`project_context` records the tier, size and hash of the separately rendered
+bounded project message. Model-facing dispatch and collect output name all four concepts
 separately and never substitute one hash for another.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences), `clio-coder evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`, including `trust`, the bounded canonical trust projection described in [evidence-and-memory.md](evidence-and-memory.md). A timed-out or denied escalation also raises an `escalation` finding in the bundle.
@@ -423,7 +423,7 @@ The escalation counters appear together and only when `escalationRequested` is p
 
 `RunReceiptFacts` carries, each only when known: `outcome`, `outcomeCode`, `exitCode`, `failureMessage`, `mergeDetail`, `tokenCount`, `durationMs` (from `startedAt` and `endedAt`), `toolCalls`, per-tool `toolCounts`, `changedPaths`, `placement`, the result-contract conformance (`pass`, `fail`, `not-reached`, or `unmeasured` for an untyped run) and its `contractKind`, and the answer `text`. An external runtime reports no tokens of its own, so the fact is omitted rather than shown as zero.
 
-`trust` is a canonical trust status computed by reading the receipt back against its ledger row in `runs.json`. It is present only when both could be read, so a surface that shows it shows an authenticated verdict and never the sealing process's own claim.
+`trust` is a canonical trust status computed by reading the receipt back against its ledger row in `runs.json`. It is present only when both could be read, so a surface that shows it shows a verified verdict and never the sealing process's own claim.
 
 Failure is data, not an exception. A missing or corrupt receipt returns `null`, and surfaces show `receipt unavailable`. The replay reader, used when a resumed transcript renders a run, falls back to the run's ledger row. It distinguishes a run still going in another process (`stillRunning`), a run the ledger closed early before it could seal a receipt (`abandonedDetail`, the row's own explanation), and a run whose evidence is gone.
 
@@ -466,7 +466,7 @@ A clean interactive exit prints a branded session summary according to `interfac
 | `clio-coder trace code-steps <rootId>` | `<stateDir>/code-steps/` | Deterministic fleet code-step records. |
 | `clio-coder usage report` | ledgers, receipts, out-of-turn rows, audit rows, evidence index, memory | [Cross-Session Usage Facts](#cross-session-usage-facts). |
 | `clio-coder evidence build\|inspect\|list\|inventory` | evidence bundles and the run ledger | `build` takes `--run <runId>` or `--session <sessionId>`, `inspect` takes an evidence id and `--json`, and `inventory` requires `--json`. The bundle contract is in [evidence-and-memory.md](evidence-and-memory.md). |
-| `clio-coder fleet status\|inspect\|view\|verify` | the run ledger, event journal, and receipts | `inspect --json` is a bounded recent-run projection, `view <runId>` follows one run from a second terminal and, once the receipt authenticates, shows the requested and provider-reported model, the cost with its provenance and the settled label, and `verify <runId> --json` re-authenticates a receipt. See [fleet-dispatch.md](../guide/fleet-dispatch.md). |
+| `clio-coder fleet status\|inspect\|view\|verify` | the run ledger, event journal, and receipts | `inspect --json` is a bounded recent-run projection, `view <runId>` follows one run from a second terminal and, once the receipt verifies, shows the requested and provider-reported model, the cost with its provenance and the settled label, and `verify <runId> --json` re-verifies a receipt. See [fleet-dispatch.md](../guide/fleet-dispatch.md). |
 | `clio-coder doctor` | state directory, latest session | The `state storage` and `cache telemetry` rows. |
 
 ---

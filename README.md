@@ -407,6 +407,14 @@ recognized checks, and requests permission for unfamiliar commands and outward
 actions. Approval cards name the tool, target, effect, and requester; Bash
 approvals describe the command's consequence. **Yolo** removes ordinary approval
 prompts while protected paths, hard blocks, and damage-control rules still apply.
+Those rules recognize commands by their text and arguments. A delete outside the
+workspace through `rm`, `rmdir`, `unlink` or `find` (`-exec rm`, `-delete`) is
+refused however it is quoted or wrapped, including dequoted arguments, `command`,
+`env` and `sudo` prefixes, `timeout`, `xargs` and `find -exec` wrappers, `sh -c`
+and command substitutions. The same effect through an interpreter (`python -c`
+with `shutil.rmtree`), `eval`, a command name held in a variable, or another
+program such as `tar --remove-files` is not recognized and runs at Yolo, and
+main-agent commands have no OS sandbox.
 In the terminal, `Ctrl+G` then `y` toggles the session's autonomy.
 
 Project plugins and extensions stay unloaded until approved with
@@ -414,15 +422,23 @@ Project plugins and extensions stay unloaded until approved with
 An ignored project copy does not shadow your own trusted copy. Review project
 safety grants with `clio-coder config trust safety`.
 
-**Worker boundaries.** Each dispatched worker receives an immutable permit for
-its tools, asks, and Git allowance. Native worker commands use an OS sandbox
-when `safety.sandbox: auto` finds a backend: bubblewrap on Linux or Seatbelt on
-macOS. Writes are confined to the worker's roots and private scratch space;
-`.git` and `.clio-coder` remain read-only to those commands. Network is off
-unless the worker holds `web_fetch` or `safety.sandboxNetwork` is enabled.
-Set `safety.sandbox: required` to refuse commands when no backend is available.
-Main-agent commands are not OS-sandboxed. External agents that manage their own
-tool loop require `trustedUnmediated: true` for write-capable work.
+**Worker boundaries.** Each worker Clio runs on a configured target (native,
+Claude SDK, or CLI subprocess) receives an immutable permit for its tools, asks,
+and Git allowance, and the worker refuses a spec whose fields disagree with that
+permit. An ACP delegation peer runs its own tool loop: its receipt records the
+permit Clio would have applied, but Clio enforces only the permission requests
+the peer chooses to send, under the agent's `toolGovernance`. Native worker
+commands use an OS sandbox when `safety.sandbox: auto` finds a backend. On Linux
+that is bubblewrap. On macOS it is an experimental `sandbox-exec` (Seatbelt)
+profile that has not been tested on macOS. Writes are confined to the worker's
+roots and scratch space, which is a private `/tmp` under bubblewrap and the
+shared system temp directories under Seatbelt. `.git` and `.clio-coder` remain
+read-only to those commands. Network is off unless the worker holds `web_fetch`
+or `safety.sandboxNetwork` is enabled. Set `safety.sandbox: required` to refuse
+commands when no backend is available. Main-agent commands, CLI subprocess and
+Claude SDK workers, and ACP peers are not OS-sandboxed. A CLI subprocess target,
+or an ACP peer with `toolGovernance: agent-managed`, needs
+`trustedUnmediated: true` for write-capable work.
 
 **Information flow (advanced and opt-in).** Rules in `.clio-coder/safety.yaml`
 can restrict named paths or tool content to approved model recipients. Those
