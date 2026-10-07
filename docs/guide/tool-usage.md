@@ -29,8 +29,10 @@ Main Clio Coder sessions attach a small basic surface: `read`, `bash`, `edit`,
 `write`, `verify`, `ask_user` and `gateway`, plus `dispatch` when delegation is
 wired. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
 execution and observation tools. Ordinary dispatch has a compact attached
-schema; `gateway(op="describe", capability="dispatch")` returns its canonical
-schema for advanced composition. The attached schema accepts `tasks` arrays with
+schema; `gateway(op="describe", capability="dispatch")` returns that schema plus
+an `advanced` block with the canonical fields it omits, such as `candidates`,
+`judge`, `members` and `review`. The direct dispatch call accepts those fields.
+The attached schema accepts `tasks` arrays with
 string assignments, task objects, or both; canonical validation still checks every
 call. Clio handles trivial local changes directly when delegation adds no value and
 delegates substantial work or explicit delegation requests.
@@ -489,7 +491,7 @@ Receipt integrity, worker evidence, orchestrator verification, parent briefing, 
 
 ### Compact schema in the main session
 
-The main session attaches a compact schema (`coordinatorDispatchParameters` in [dispatch-schema.ts](../../src/tools/dispatch-schema.ts)) instead of the canonical one, so the permanent surface stays small. Its fields are `node`, `target`, `model`, `list`, `agent`, `task`, `tasks` (strings, or objects with `node`, `agent`, `task`, `briefing`, `intent`), `intent` (`read_roots`, `write_roots`, `expected_outputs`, `verification`), `briefing`, `mode`, `worktree` (only `true`) and `detach`. `mode` is a plain string there so the compete and council modes that `describe` teaches are not refused by the compact schema. `gateway(op="describe", capability="dispatch")` returns the canonical schema, and canonical validation checks every call whichever schema the model saw.
+The main session attaches a compact schema (`coordinatorDispatchParameters` in [dispatch-schema.ts](../../src/tools/dispatch-schema.ts)) instead of the canonical one, so the permanent surface stays small. Its fields are `node`, `target`, `model`, `list`, `agent`, `task`, `tasks` (strings, or objects with `node`, `agent`, `task`, `briefing`, `intent`), `intent` (`read_roots`, `write_roots`, `expected_outputs`, `verification`), `briefing`, `mode`, `worktree` (only `true`) and `detach`. `mode` is a plain string there so the compete and council modes that `describe` teaches are not refused by the compact schema, and its description points the model at describe. `gateway(op="describe", capability="dispatch")` returns the attached schema as `parameters` and the canonical fields the attached schema omits, plus the canonical `mode`, as `advanced`. Canonical validation checks every call whichever schema the model saw.
 
 The canonical schema is composed once per session from the fleet. The council block (`roster`, `members`, `synthesis`, `rounds`) is advertised only when `fleet.rosters` names at least one roster. The compete block (`candidates`, `judge`, `apply_winner`) is always advertised. The adaptive routing fields (`routing.posture`, `minimumQuality`, `locality`, `failover`) are advertised only when `fleet.adaptiveRouting` configures roles, postures or agent roles. Admission reads every field regardless, so a call that sends a field the schema did not advertise is still honored.
 

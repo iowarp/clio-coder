@@ -89,10 +89,11 @@ export function coordinatorDispatchParameters() {
 		briefing: Type.Optional(Type.String({ description: "Relevant parent evidence, separate from instructions." })),
 		// A plain string: this schema is checked before the canonical one, so an
 		// enum here would refuse the compete and council modes describe teaches.
+		// The last clause is the only cue that those modes exist at all.
 		mode: Type.Optional(
 			Type.String({
 				description:
-					"parallel: independent tasks; sequential: ordered tasks; pipeline: tasks consuming the previous result.",
+					"parallel: independent tasks; sequential: ordered tasks; pipeline: tasks consuming the previous result. compete, council and review: gateway describe dispatch.",
 			}),
 		),
 		worktree: Type.Optional(Type.Literal(true)),
