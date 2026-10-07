@@ -23,6 +23,8 @@ export interface RunSamplingArgs {
 export type RunJsonEventsMode = "full" | "terminal";
 
 export interface RunCliArgs {
+	/** Explicit display capture for --agent dispatch; omitted preserves the default. */
+	record?: boolean;
 	constraints?: TurnConstraints;
 	help: boolean;
 	json: boolean;
@@ -89,6 +91,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		};
 		if (arg === "--help" || arg === "-h") {
 			parsed.help = true;
+			continue;
+		}
+		if (arg === "--record") {
+			parsed.record = true;
 			continue;
 		}
 		if (arg === "--json") {

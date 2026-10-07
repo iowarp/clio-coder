@@ -263,6 +263,12 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 					: MODE_DESCRIPTION.neither;
 	return Type.Object({
 		list: Type.Optional(Type.Boolean({ description: "List the agent roster instead of dispatching." })),
+		record: Type.Optional(
+			Type.Boolean({
+				description:
+					"Opt in to a bounded redacted worker-display asciicast, including SSH runs. Default off; per-task overrides allowed. Evidence exposes the recording manifest.",
+			}),
+		),
 		from_scout: Type.Optional(
 			Type.Object(
 				{
@@ -290,6 +296,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 					// tokens advertising them twice).
 					Type.Object({
 						task: Type.String({ description: "The assignment, with expected output and constraints." }),
+						record: Type.Optional(Type.Boolean({ description: "Override the shared recording choice for this task." })),
 						context: Type.Optional(WorkerContextSchema),
 						briefing: Type.Optional(
 							Type.String({ description: `Per-task parent context, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.` }),

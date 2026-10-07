@@ -271,6 +271,8 @@ export interface RunJsonOpaqueWorkerEventFrame {
 
 /** The sealed receipt, always the last frame of a `run --agent --json` stream. */
 export interface RunJsonReceiptFrame {
+	/** Display-only reference relative to the Clio state root; outside receipt authority. */
+	recording?: import("../../domains/dispatch/index.js").RecordingReference;
 	type: "receipt";
 	receipt: RunReceipt;
 }
