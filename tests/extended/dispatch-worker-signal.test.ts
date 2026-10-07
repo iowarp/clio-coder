@@ -4,7 +4,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { approvedIdentityForSpec, CONTROL_FRAME_PREFIX } from "../../src/domains/dispatch/worker-protocol.js";
+import {
+	approvedIdentityForSpec,
+	CONTROL_FRAME_PREFIX,
+	WORKER_PROTOCOL_VERSION,
+} from "../../src/domains/dispatch/worker-protocol.js";
 import { type SpawnedWorker, spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
 import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -27,7 +31,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     announced = true;
     const unknown = { known: false };
     const attestation = {
-      ...identity, protocolVersion: 1, pid: process.pid,
+      ...identity, protocolVersion: ${WORKER_PROTOCOL_VERSION}, pid: process.pid,
       processGroupId: process.pid, host: "owned-fixture",
       resources: { labels: [], cpuCount: unknown, totalMemoryBytes: unknown,
         freeMemoryBytes: unknown, gpuCount: unknown, vramBytes: unknown, residentModels: unknown }
@@ -36,6 +40,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   const command = JSON.parse(line);
+  if (command.type === "admit") return;
   process.stderr.write(command.stderrChars > 0 ? "x".repeat(command.stderrChars) + "\\n" : "", () => {
     if (command.signal) process.kill(process.pid, command.signal);
     else process.exit(0);

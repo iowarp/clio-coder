@@ -30,6 +30,7 @@ export type {
 	AgentLedgerDeltaFrame,
 	AgentLedgerEntry,
 	AgentLedgerPort,
+	WorkerAdmitFrame,
 	WorkerAttestation,
 	WorkerControlFrame,
 	WorkerGrantRequestFrame,
@@ -54,6 +55,7 @@ export {
 	parseBulkFrame,
 	parseControlFrame,
 	toolSignatureOf,
+	WORKER_ANNOUNCE_DEADLINE_MS,
 	WORKER_BULK_FRAME_MAX_BYTES,
 	WORKER_CONTROL_FRAME_MAX_BYTES,
 	WORKER_EVENT_QUEUE_MAX_FRAMES,
@@ -96,6 +98,8 @@ export type AttestationVerdict = { ok: true } | { ok: false; reason: string };
  * plan. This is a full-field comparison rather than a spot check: a worker
  * that resolved a different endpoint, model, runtime, or tool surface than the
  * plan approved must not reach a model, whatever else it announced correctly.
+ * The verdict holds because the worker waits for the `admit` frame, which
+ * `worker-spawn.ts` writes only after this returns ok.
  */
 export function verifyWorkerAttestation(
 	attestation: WorkerAttestation,
@@ -180,8 +184,8 @@ function workerSpecDigestOf(spec: unknown): string {
  */
 export class WorkerChannelFailure extends Error {
 	readonly failureClass = "node-channel" as const;
-	readonly operation: "steer" | "permission_decision" | "spec" | "ledger_delta";
-	constructor(operation: "steer" | "permission_decision" | "spec" | "ledger_delta", detail: string) {
+	readonly operation: "steer" | "permission_decision" | "spec" | "ledger_delta" | "admit";
+	constructor(operation: "steer" | "permission_decision" | "spec" | "ledger_delta" | "admit", detail: string) {
 		super(`worker control channel failure during ${operation}: ${detail}`);
 		this.name = "WorkerChannelFailure";
 		this.operation = operation;

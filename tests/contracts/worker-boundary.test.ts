@@ -1,6 +1,11 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
@@ -8,12 +13,22 @@ import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
 import {
 	approvedIdentityForSpec,
+	CONTROL_FRAME_PREFIX,
 	computeSettingsFingerprint,
 	createBoundedEventQueue,
+	isControlLine,
+	parseControlFrame,
 	verifyWorkerAttestation,
+	type WorkerAttestation,
 } from "../../src/domains/dispatch/worker-protocol.js";
-import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import {
+	type SpawnedWorker,
+	type SpawnedWorkerResult,
+	spawnWorkerProcess,
+	type WorkerSpec,
+} from "../../src/domains/dispatch/worker-spawn.js";
 import { mergeCapabilities } from "../../src/domains/providers/capabilities.js";
+import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { workerPermissionCacheKey } from "../../src/engine/worker-runtime.js";
@@ -29,6 +44,7 @@ import {
 import { createOrderedSteerHandler } from "../../src/worker/stdin-demux.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function recipe() {
@@ -299,5 +315,203 @@ describe("worker boundary", () => {
 		deepStrictEqual(accepted, [1, 3]);
 		strictEqual(rejected.length, 1);
 		ok(rejected[0]?.includes("does not accept"));
+	});
+});
+
+const WORKER_ENTRY = fileURLToPath(new URL("../../src/worker/entry.ts", import.meta.url));
+
+async function waitFor(check: () => boolean, timeoutMs: number): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (check()) return true;
+		await sleep(25);
+	}
+	return check();
+}
+
+/** One OpenAI-compatible endpoint that counts every request a worker sends it. */
+async function withModelFixture(run: (url: string, requests: () => number) => Promise<void>): Promise<void> {
+	let requests = 0;
+	const server = createServer(async (req, res) => {
+		await readRequestBody(req);
+		requests += 1;
+		res.setHeader("content-type", "text/event-stream");
+		const chunk = {
+			model: "fixture",
+			choices: [{ index: 0, delta: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+		};
+		res.end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, () => requests);
+	} finally {
+		await closeServer(server);
+	}
+}
+
+/** The spec production dispatch writes for a scout routed to the fixture endpoint. */
+async function dispatchedWorkerSpec(url: string, cwd: string): Promise<WorkerSpec> {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	settings.targets = [{ id: "fixture", runtime: "litellm", url, defaultModel: "fixture" }];
+	settings.fleet.default.target = "fixture";
+	settings.fleet.default.model = "fixture";
+	let captured: WorkerSpec | undefined;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
+		spawnWorker(spec) {
+			captured = spec;
+			throw new Error("worker spec captured");
+		},
+	});
+	await bundle.extension.start();
+	try {
+		await rejects(
+			bundle.contract.dispatch({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: "Inspect the fixture.",
+				cwd,
+				requestOrigin: "internal",
+				resultContractOverride: { kind: "provenance-report" },
+			}),
+			/worker spec captured/u,
+		);
+	} finally {
+		await bundle.extension.stop?.();
+	}
+	ok(captured);
+	return captured;
+}
+
+/** The real worker entry, driven by the test instead of the orchestrator's channel. */
+function startWorkerEntry(spec: WorkerSpec, cwd: string) {
+	const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), WORKER_ENTRY], {
+		cwd,
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	const seen: { stdout: string; stderr: string; announce: WorkerAttestation | null } = {
+		stdout: "",
+		stderr: "",
+		announce: null,
+	};
+	let pending = "";
+	child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+		seen.stdout += chunk;
+	});
+	child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+		seen.stderr += chunk;
+		pending += chunk;
+		for (let index = pending.indexOf("\n"); index >= 0; index = pending.indexOf("\n")) {
+			const line = pending.slice(0, index);
+			pending = pending.slice(index + 1);
+			if (!isControlLine(line)) continue;
+			const frame = parseControlFrame(line);
+			if (frame.ok && frame.value.kind === "announce") seen.announce = frame.value.attestation;
+		}
+	});
+	const exit = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+	child.stdin.write(`${JSON.stringify(spec)}\n`);
+	const stop = async (): Promise<void> => {
+		child.stdin.end();
+		const exited = await Promise.race([exit.then(() => true), sleep(10_000).then(() => false)]);
+		if (!exited) child.kill("SIGKILL");
+		await exit;
+	};
+	return { child, seen, exit, stop };
+}
+
+describe("worker admission", () => {
+	it("starts no model run until the orchestrator admits the attested digest", { timeout: 90_000 }, async () => {
+		const env = await isolateClioEnv("clio-worker-admission-");
+		try {
+			await withModelFixture(async (url, requests) => {
+				const spec = await dispatchedWorkerSpec(url, env.dir);
+				const worker = startWorkerEntry(spec, env.dir);
+				try {
+					ok(await waitFor(() => worker.seen.announce !== null, 45_000), worker.seen.stderr);
+					strictEqual(worker.seen.announce?.specDigest, approvedIdentityForSpec(spec).specDigest);
+					// Without the gate the run starts in the announce's own tick.
+					await sleep(500);
+					deepStrictEqual({ stdout: worker.seen.stdout, requests: requests() }, { stdout: "", requests: 0 });
+					worker.child.stdin.write(`${JSON.stringify({ type: "admit", specDigest: worker.seen.announce?.specDigest })}\n`);
+					ok(await waitFor(() => worker.seen.stdout.length > 0 && requests() > 0, 30_000), worker.seen.stderr);
+				} finally {
+					await worker.stop();
+				}
+			});
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("exits unadmitted with code 2 on a wrong digest or a closed channel", { timeout: 90_000 }, async () => {
+		const env = await isolateClioEnv("clio-worker-unadmitted-");
+		try {
+			await withModelFixture(async (url, requests) => {
+				const spec = await dispatchedWorkerSpec(url, env.dir);
+				await Promise.all(
+					(["wrong digest", "closed channel"] as const).map(async (answer) => {
+						const worker = startWorkerEntry(spec, env.dir);
+						try {
+							ok(await waitFor(() => worker.seen.announce !== null, 45_000), worker.seen.stderr);
+							if (answer === "closed channel") worker.child.stdin.end();
+							else worker.child.stdin.write(`${JSON.stringify({ type: "admit", specDigest: "0".repeat(64) })}\n`);
+							strictEqual(await worker.exit, 2, `${answer}: ${worker.seen.stderr}`);
+							match(worker.seen.stderr, /\[worker\] not admitted: /u, answer);
+							strictEqual(worker.seen.stdout, "", answer);
+						} finally {
+							await worker.stop();
+						}
+					}),
+				);
+				strictEqual(requests(), 0);
+			});
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("admits an accepted announce on stdin and refuses a peer that never announces", { timeout: 15_000 }, async () => {
+		const spec = {
+			specVersion: 1,
+			settingsFingerprint: "a".repeat(64),
+			runtimeId: "fixture",
+			target: { id: "fixture", url: "http://127.0.0.1:1" },
+			wireModelId: "fixture",
+			allowedTools: [],
+		} as unknown as WorkerSpec;
+		const approved = approvedIdentityForSpec(spec);
+		// Heartbeats on a fixed interval, announces only when told to, and echoes
+		// the first stdin line after the spec before it exits.
+		const child = `
+const [prefix, identity, mode] = process.argv.slice(1);
+setInterval(() => process.stderr.write(prefix + JSON.stringify({ kind: "heartbeat" }) + "\\n"), 25);
+let lines = 0;
+require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  lines += 1;
+  if (lines === 1 && mode === "announce") {
+    const unknown = { known: false };
+    const attestation = { ...JSON.parse(identity), protocolVersion: ${WORKER_PROTOCOL_VERSION}, pid: process.pid,
+      processGroupId: process.pid, host: "fixture", resources: { labels: [], cpuCount: unknown,
+      totalMemoryBytes: unknown, freeMemoryBytes: unknown, gpuCount: unknown, vramBytes: unknown, residentModels: unknown } };
+    process.stderr.write(prefix + JSON.stringify({ kind: "announce", attestation }) + "\\n");
+  } else if (lines === 2) {
+    process.stderr.write("received " + line + "\\n", () => process.exit(0));
+  }
+});
+`;
+		const run = (mode: "announce" | "silent") =>
+			spawnWorkerProcess(process.execPath, ["-e", child, CONTROL_FRAME_PREFIX, JSON.stringify(approved), mode], spec, {
+				announceDeadlineMs: mode === "silent" ? 300 : 10_000,
+			}).promise;
+		const [admitted, silent] = await Promise.all([run("announce"), run("silent")]);
+		strictEqual(admitted.exitCode, 0, admitted.stderrTail);
+		ok(
+			admitted.stderrTail?.includes(`received ${JSON.stringify({ type: "admit", specDigest: approved.specDigest })}`),
+			admitted.stderrTail,
+		);
+		strictEqual(silent.exitCode, 1, silent.stderrTail);
+		match(silent.stderrTail ?? "", /did not announce its route identity within 300 ms/u);
 	});
 });

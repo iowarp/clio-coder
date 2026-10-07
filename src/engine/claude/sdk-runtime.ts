@@ -536,6 +536,15 @@ function buildPreToolUseHook(input: PermissionGateInput): HookCallback {
 }
 
 export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
+	// Escalation parks a call until a decision arrives, and the SDK permission
+	// callback cannot park. Dispatch admission already refuses escalate for this
+	// runtime; a run built outside it is refused here instead of running under a
+	// deny posture nobody chose.
+	if (input.onPermission === "escalate") {
+		throw new Error(
+			"claude-sdk worker: onPermission escalate is unsupported on the Claude SDK runtime because its permission callback cannot park a call for a decision; use deny or fail",
+		);
+	}
 	const abortController = new AbortController();
 	const prompt = new ClaudeSdkInput();
 	prompt.push(sdkUserTextMessage(buildClaudeSdkPrompt(input), true));
@@ -571,9 +580,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
 			: {}),
 	});
-	// Escalation needs the native registry park loop and an operator on the
-	// worker's stdin; the Claude SDK path has neither, so it collapses the
-	// escalate posture to the non-stall deny fallback.
+	// Escalate was refused above, so only deny and fail reach the gate.
 	const onPermission: "deny" | "fail" = input.onPermission === "fail" ? "fail" : "deny";
 	// The admitted surface (already narrowed by any tool_profile) is the
 	// authoritative allowlist. The mediation gate denies out-of-profile calls;

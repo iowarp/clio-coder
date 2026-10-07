@@ -35,6 +35,13 @@ export interface WorkerStdinDemux {
 	 * Single handler; a second registration replaces the first.
 	 */
 	onLedgerDelta(handler: (entries: ReadonlyArray<AgentLedgerEntry>) => void): void;
+	/**
+	 * Resolve once the orchestrator's `admit` frame (`{"type":"admit","specDigest":"..."}`)
+	 * names `expectedDigest`. Rejects on a different or missing digest, on the
+	 * channel closing first, and after `timeoutMs`. Steers and permission
+	 * decisions that arrive while this waits stay buffered for their handlers.
+	 */
+	awaitAdmission(expectedDigest: string, timeoutMs: number): Promise<void>;
 	/** Post-spec lines that were not valid steer or permission-decision messages. */
 	droppedLineCount(): number;
 	/**
@@ -145,6 +152,35 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let channelCloseHandler: (() => void) | null = null;
 	let channelCloseDelivered = false;
 	let channelClosedAfterSpec = false;
+	// Undefined until an admit frame arrives; null when it carried no usable digest.
+	let admittedDigest: string | null | undefined;
+	let admission: {
+		expected: string;
+		resolve: () => void;
+		reject: (err: Error) => void;
+		timer: ReturnType<typeof setTimeout>;
+	} | null = null;
+
+	function admissionVerdict(expected: string): Error | null {
+		if (admittedDigest === null || admittedDigest === undefined) {
+			return new Error("the admit frame carried no spec digest");
+		}
+		if (admittedDigest !== expected) {
+			return new Error(
+				`the admit frame names spec digest ${admittedDigest.slice(0, 12)}, but this worker attested ${expected.slice(0, 12)}`,
+			);
+		}
+		return null;
+	}
+
+	function finishAdmission(error: Error | null): void {
+		const wait = admission;
+		if (wait === null) return;
+		admission = null;
+		clearTimeout(wait.timer);
+		if (error === null) wait.resolve();
+		else wait.reject(error);
+	}
 
 	function deliverChannelClose(): void {
 		if (channelCloseDelivered || channelCloseHandler === null) return;
@@ -245,6 +281,17 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			deliverLedgerDelta(entries);
 			return;
 		}
+		if (typeof value === "object" && value !== null && (value as { type?: unknown }).type === "admit") {
+			// Only the first verdict counts; a repeat cannot revoke or re-grant it.
+			if (admittedDigest !== undefined) {
+				droppedLines += 1;
+				return;
+			}
+			const digest = (value as { specDigest?: unknown }).specDigest;
+			admittedDigest = typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest) ? digest : null;
+			if (admission !== null) finishAdmission(admissionVerdict(admission.expected));
+			return;
+		}
 		droppedLines += 1;
 	}
 
@@ -318,6 +365,7 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				return;
 			}
 			channelClosedAfterSpec = true;
+			finishAdmission(new Error("the control channel closed before the orchestrator admitted this worker"));
 			deliverChannelClose();
 		},
 		readSpec(): Promise<WorkerSpec> {
@@ -349,6 +397,23 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				const batch = pendingLedgerDeltas.shift();
 				if (batch !== undefined) handler(batch);
 			}
+		},
+		awaitAdmission(expectedDigest: string, timeoutMs: number): Promise<void> {
+			if (admission !== null) return Promise.reject(new Error("admission is already being awaited"));
+			if (admittedDigest !== undefined) {
+				const error = admissionVerdict(expectedDigest);
+				return error === null ? Promise.resolve() : Promise.reject(error);
+			}
+			if (closed) {
+				return Promise.reject(new Error("the control channel closed before the orchestrator admitted this worker"));
+			}
+			return new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(
+					() => finishAdmission(new Error(`no admit frame arrived within ${timeoutMs} ms of the announce`)),
+					timeoutMs,
+				);
+				admission = { expected: expectedDigest, resolve, reject, timer };
+			});
 		},
 		droppedLineCount(): number {
 			return droppedLines;

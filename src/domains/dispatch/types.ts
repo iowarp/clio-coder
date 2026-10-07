@@ -955,9 +955,10 @@ export interface RunReceipt {
 	/**
 	 * Route and node identity attested by the worker process that executed the
 	 * run. Attestation is still verified at spawn (`worker-spawn.ts`), and a
-	 * drifting peer never runs. Only builds before 0.5.6 sealed this projection
-	 * into the receipt, where nothing read it; the integrity digest still covers
-	 * it so those receipts verify.
+	 * drifting peer never reaches a model, because the worker waits for the
+	 * `admit` frame written only after verification. Only builds before 0.5.6
+	 * sealed this projection into the receipt, where nothing read it; the
+	 * integrity digest still covers it so those receipts verify.
 	 */
 	attestation?: RunReceiptAttestation;
 	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */

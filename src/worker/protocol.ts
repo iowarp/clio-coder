@@ -13,6 +13,10 @@ import { isFlowRestrictionSet } from "../core/flow-restrictions.js";
  *     cancellation acknowledgements. A bulk flood cannot delay it,
  *     and unmarked stderr stays free-form operator diagnostics.
  *
+ * Worker stdin carries the orchestrator's side: the spec line first, then
+ * the `admit` verdict on the announce, steers, permission decisions and
+ * ledger deltas. The worker starts no model run until `admit` arrives.
+ *
  * Every lane has an explicit byte limit that is enforced on the raw line
  * before JSON parsing, so an oversized or adversarial frame costs a length
  * comparison rather than a parse.
@@ -37,8 +41,12 @@ export const INTERNAL_HELPER_RESULT_KINDS = [
 	"context-handbook",
 ] as const;
 
-/** Current wire protocol. A peer announcing anything else is not executed. */
-export const WORKER_PROTOCOL_VERSION = 1;
+/**
+ * Current wire protocol. A peer announcing anything else is not executed.
+ * Version 2 holds the model run until the orchestrator's `admit` frame; a
+ * version 1 worker would start without waiting, so it is refused.
+ */
+export const WORKER_PROTOCOL_VERSION = 2;
 
 /** Marker that promotes one stderr line into the structured control lane. */
 export const CONTROL_FRAME_PREFIX = "@clio-control/1 ";
@@ -56,6 +64,32 @@ export const WORKER_STDIN_QUEUE_MAX_BYTES = 4 * 1024 * 1024;
 
 /** Orchestrator event-queue ceiling, in frames, before display frames drop. */
 export const WORKER_EVENT_QUEUE_MAX_FRAMES = 4096;
+
+/**
+ * How long the orchestrator waits, from writing the spec, for an attestation
+ * verdict. A worker held for admission produces no bulk output, so the
+ * bulk-triggered grace never starts for it; this bound refuses a peer that
+ * heartbeats but never announces. It covers a cold module load, a busy node,
+ * and an SSH connect (whose own default ConnectTimeout is 10 s).
+ */
+export const WORKER_ANNOUNCE_DEADLINE_MS = 60_000;
+
+/**
+ * How long an announced worker waits for `admit` before it exits unadmitted.
+ * The orchestrator answers in the same tick it verifies the announce, so this
+ * covers one round trip on a slow channel and nothing else.
+ */
+export const WORKER_ADMISSION_WAIT_MS = 30_000;
+
+/**
+ * Stdin frame the orchestrator writes once it accepts an announce. It names the
+ * spec digest the orchestrator approved, and the worker checks it against the
+ * digest it attested before it starts the run.
+ */
+export interface WorkerAdmitFrame {
+	type: "admit";
+	specDigest: string;
+}
 
 /**
  * One observable resource value. Unknown is a distinct state, never a zero or
@@ -87,8 +121,9 @@ export const WORKER_RESIDENT_MODEL_MAX = 64;
 
 /**
  * Route and node identity attested by the process that will execute the run.
- * The orchestrator compares every field against the approved plan before the
- * worker is allowed to reach a model.
+ * The orchestrator compares every field against the approved plan, and the
+ * worker starts no model run until the orchestrator's `admit` frame names the
+ * spec digest it attested here.
  */
 export interface WorkerAttestation {
 	protocolVersion: typeof WORKER_PROTOCOL_VERSION;
@@ -419,6 +454,27 @@ export function endpointIdentityHash(url: string | undefined): string {
 /** Digest of one WorkerSpec document, computed identically on both ends. */
 export function workerSpecDigest(spec: unknown): string {
 	return sha256Hex(`clio-coder.workerSpec:${canonicalJson(spec)}`);
+}
+
+/**
+ * Digest of a worker permit's authority: its version, ceiling, allowance and
+ * trust opt-in, never its own digest field. The host seals it and the worker
+ * recomputes it, so the computation lives here rather than in the safety
+ * domain the worker may not value-import.
+ */
+export function workerPermitDigest(permit: {
+	version: number;
+	ceiling: unknown;
+	allowance: unknown;
+	trustedUnmediated?: true;
+}): string {
+	const payload = {
+		version: permit.version,
+		ceiling: permit.ceiling,
+		allowance: permit.allowance,
+		...(permit.trustedUnmediated === true ? { trustedUnmediated: true } : {}),
+	};
+	return sha256Hex(`clio-coder.workerPermit:${canonicalJson(payload)}`);
 }
 
 /** Stable signature of the effective tool surface a worker will expose. */
