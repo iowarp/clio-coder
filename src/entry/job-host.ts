@@ -24,6 +24,8 @@ export interface JobHostDeps {
 	attended: boolean;
 	safety: SafetyContract;
 	autonomy(): AutonomyLevel;
+	/** The session's test-runner consent is owed; a job command is admitted as its direct call would be. */
+	sessionCodeConsentPending?(): boolean;
 	createSession(): void;
 	notice(text: string): void;
 	store?: JobStore;
@@ -109,6 +111,9 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		constraints: () => chat?.jobConstraints?.() ?? chat?.currentTurnConstraints?.(),
 		safety: deps.safety,
 		autonomy: deps.autonomy,
+		...(deps.sessionCodeConsentPending !== undefined
+			? { sessionCodeConsentPending: deps.sessionCodeConsentPending }
+			: {}),
 		hostRefusal,
 		trustRefusal: (): string | null => {
 			for (const surface of ["safety", "settings", "hooks", "extensions", "plugins"] as const) {

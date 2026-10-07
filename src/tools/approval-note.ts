@@ -21,7 +21,9 @@
  * are conditional: a model told to "say" the approval narrated it at the end of
  * every reply (v0.6.0 flywheel s3, s6). Every wording states the scope the
  * registry already enforces: the grant covers this call and nothing else, so
- * the model cannot read it as standing permission for a later one.
+ * the model cannot read it as standing permission for a later one. The
+ * session's test-runner consent is the one exception: approving it also lets
+ * later test runners run (#377 follow-up), and its note says so.
  *
  * A call the System One gate parked also carries the gate's reason. The rail
  * id says which rail asked, but a gate park is a judgment of this command and
@@ -30,6 +32,7 @@
  */
 
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 
 /** Prefix for a grant a person gave. */
 export const OPERATOR_APPROVAL_NOTE_PREFIX = "[operator approval]";
@@ -47,6 +50,8 @@ export interface ApprovalNoteInput {
 }
 
 const SCOPE = "The grant covers this call only; another call still needs its own approval.";
+const SESSION_CONSENT_SCOPE =
+	"The grant also lets test runners run without asking for the rest of this session; any other call still needs its own approval.";
 
 /**
  * The gate's sentences run about 110 characters plus a build id. The bound is
@@ -76,19 +81,20 @@ function railClause(input: ApprovalNoteInput): string {
 export function approvalNote(input: ApprovalNoteInput): string {
 	const rail = railClause(input);
 	const call = `this ${input.actionClass} call`;
+	const scope = input.ruleId?.trim() === SESSION_CODE_CONSENT_RULE_ID ? SESSION_CONSENT_SCOPE : SCOPE;
 	switch (input.requestedBy) {
 		case "tool:one_shot":
-			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}. ${SCOPE} If you describe how this call ran, say the operator approved it, never that it ran without a prompt.`;
+			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}. ${scope} If you describe how this call ran, say the operator approved it, never that it ran without a prompt.`;
 		case "escalation:operator":
-			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}, through a forwarded worker escalation. ${SCOPE} If you describe how this call ran, say the operator approved it, never that it ran without a prompt.`;
+			return `${OPERATOR_APPROVAL_NOTE_PREFIX} The operator approved ${call} once${rail}, through a forwarded worker escalation. ${scope} If you describe how this call ran, say the operator approved it, never that it ran without a prompt.`;
 		case "acp-client":
-			return `${APPROVAL_NOTE_PREFIX} The connected ACP client approved ${call} once${rail}. ${SCOPE} Say the client was asked and granted it, and do not claim this session's operator approved it.`;
+			return `${APPROVAL_NOTE_PREFIX} The connected ACP client approved ${call} once${rail}. ${scope} Say the client was asked and granted it, and do not claim this session's operator approved it.`;
 		case "grant:main":
-			return `${APPROVAL_NOTE_PREFIX} The main agent granted ${call} once${rail}, through its grant broker. ${SCOPE} Say the main agent approved it, and do not claim the operator was asked.`;
+			return `${APPROVAL_NOTE_PREFIX} The main agent granted ${call} once${rail}, through its grant broker. ${scope} Say the main agent approved it, and do not claim the operator was asked.`;
 		case "escalation:remembered":
-			return `${APPROVAL_NOTE_PREFIX} ${capitalize(call)} ran under a remembered escalation decision${rail}, not a new ask. ${SCOPE} Do not say anyone was asked for this call.`;
+			return `${APPROVAL_NOTE_PREFIX} ${capitalize(call)} ran under a remembered escalation decision${rail}, not a new ask. ${scope} Do not say anyone was asked for this call.`;
 		default:
-			return `${APPROVAL_NOTE_PREFIX} ${capitalize(call)} was released by '${input.requestedBy}'${rail}. ${SCOPE} Name that source rather than claiming an operator was asked.`;
+			return `${APPROVAL_NOTE_PREFIX} ${capitalize(call)} was released by '${input.requestedBy}'${rail}. ${scope} Name that source rather than claiming an operator was asked.`;
 	}
 }
 

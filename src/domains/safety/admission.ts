@@ -12,6 +12,7 @@ import { autonomyCallInputs } from "./autonomy-inputs.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
 import { classifyBashGit } from "./git-policy.js";
+import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 import type { WorkerGitAllowance } from "./worker-permit.js";
 
 /**
@@ -25,7 +26,8 @@ import type { WorkerGitAllowance } from "./worker-permit.js";
  *   1. the safety net over every effect: any hard block wins;
  *   2. hard permit limits: read-only, tool scope, skill surface, git_destructive;
  *   3. confirmation obligations the net or the tool raises;
- *   4. autonomy (main) or the worker's standing allowance, Git included;
+ *   4. autonomy (main, with an attended session's test-runner consent) or the
+ *      worker's standing allowance, Git included;
  *   5. a matching authorization, which clears only what it is allowed to clear.
  */
 
@@ -98,6 +100,13 @@ export interface AdmissionInput {
 	/** Autonomy inputs a tool declares for itself: ask_user exposure, plan-scale dispatch. */
 	autonomyExtra?: { exposure?: AutonomyExposure; dispatchPlanScale?: boolean };
 	/**
+	 * Main principal at default only. True when an attended session has written
+	 * or edited a file and the operator has not yet consented to test runners
+	 * this session, so a net-tagged test runner asks once instead of running.
+	 * The host decides attended; a headless run never sets it.
+	 */
+	sessionCodeConsentPending?: boolean;
+	/**
 	 * The worker's Git context (Phase C). Read for the worker principal only;
 	 * absent means the permit's allowance is `inspect` and no task worktree is
 	 * attested, so every Git mutation asks.
@@ -148,7 +157,7 @@ export type AdmissionDenyCode =
 	| "skill_surface"
 	| "git_destructive";
 
-export type AdmissionAskSource = "safety-net" | "tool-confirmation" | "autonomy" | "git-policy";
+export type AdmissionAskSource = "safety-net" | "tool-confirmation" | "autonomy" | "git-policy" | "session-consent";
 
 export type AdmissionDisposition =
 	| {
@@ -399,7 +408,17 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		}
 		const inputs = autonomyCallInputs(effect, effectDecision, input.autonomyExtra ?? {});
 		const disposition = mapAutonomy(level, effectDecision.classification.actionClass, inputs.options);
-		if (disposition === "allow") continue;
+		if (disposition === "allow") {
+			if (
+				principal === "main" &&
+				level === "default" &&
+				input.sessionCodeConsentPending === true &&
+				effectDecision.policy?.runsWorkspaceCode === true
+			) {
+				return sessionCodeConsentAsk(call.tool, effectDecision, level);
+			}
+			continue;
+		}
 		// Step 5 for a main grant: it discharges only the ordinary worker ask.
 		if (disposition === "ask" && mainAuthorized && autonomyAuthority === "main") continue;
 		const ask: SafetyDecision = {
@@ -427,6 +446,52 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 		};
 	}
 	return { kind: "allow", decision: primary, authorized: mainAuthorized };
+}
+
+/**
+ * The once-per-session ask before a test runner runs code the session wrote.
+ * It carries its own rail id and a policy in ask form, so the card shows why it
+ * asks and the grant names the rail; an operator approval re-admits the call
+ * at step 3 and the host records the consent.
+ */
+function sessionCodeConsentAsk(tool: string, netDecision: SafetyDecision, level: AutonomyLevel): AdmissionDisposition {
+	const detail =
+		"This test command runs repository code, including files this session wrote or edited. Approve once to allow test runners for the rest of this session.";
+	const ask: SafetyDecision = {
+		kind: "ask",
+		classification: netDecision.classification,
+		confirmationRuleId: SESSION_CODE_CONSENT_RULE_ID,
+		rejection: {
+			short: `${tool} needs approval: a test runner after this session wrote or edited files`,
+			detail,
+			hints: [
+				"Approving runs this call and lets test runners run without asking for the rest of this session.",
+				"A denial leaves consent ungiven, so the next test runner asks again.",
+			],
+		},
+		...(netDecision.policy !== undefined
+			? {
+					policy: {
+						...netDecision.policy,
+						kind: "ask" as const,
+						ruleId: SESSION_CODE_CONSENT_RULE_ID,
+						reasonCode: SESSION_CODE_CONSENT_RULE_ID,
+						reasons: [detail, ...netDecision.policy.reasons],
+					},
+				}
+			: {}),
+	};
+	return {
+		kind: "ask",
+		source: "session-consent",
+		approvalAuthority: "operator",
+		reason: ask.rejection.short,
+		decision: ask,
+		netDecision,
+		level,
+		exposure: "local",
+		readOutsideWorkspace: false,
+	};
 }
 
 type WorkerGitObligation =

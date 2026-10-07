@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import type { SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
@@ -15,6 +16,10 @@ import {
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
 import type { ValidationCommandLabel } from "../../src/domains/safety/protected-artifacts.js";
 import { detectValidationCommand, VALIDATION_COMMAND_LABELS } from "../../src/domains/safety/protected-artifacts.js";
+import { createSessionCodeConsent } from "../../src/domains/safety/session-code-consent.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { bashTool } from "../../src/tools/bash.js";
+import { createRegistry, type PermissionRequiredMeta } from "../../src/tools/registry.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -213,5 +218,81 @@ describe("test runner vocabulary (#377)", () => {
 		strictEqual(decision.execRecognition, "recognized");
 		strictEqual(disposition(policy, "cd build && ctest --output-on-failure", "default"), "allow");
 		notStrictEqual(disposition(policy, "cd .. && ctest", "default"), "allow");
+	});
+
+	it("asks an attended main session once before a test runner after the session wrote a file", async () => {
+		for (const command of ["pytest -q tests", "cd build && ctest", "PYTHONPATH=src python3 -m pytest -q"]) {
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).runsWorkspaceCode, true, command);
+		}
+		strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command: "git status" } }).runsWorkspaceCode, undefined);
+
+		const safety = createWorkerSafety({ cwd: scratch });
+		const pytest = { tool: ToolNames.Bash, args: { command: "pytest -q tests", cwd: scratch } };
+		const ask = evaluateAdmission({
+			principal: "main",
+			effects: [pytest],
+			safety,
+			autonomy: "default",
+			sessionCodeConsentPending: true,
+		});
+		strictEqual(ask.kind === "ask" && `${ask.source}:${ask.approvalAuthority}`, "session-consent:operator");
+		// Headless never passes the flag; yolo and workers are unchanged.
+		for (const unchanged of [
+			evaluateAdmission({ principal: "main", effects: [pytest], safety, autonomy: "default" }),
+			evaluateAdmission({
+				principal: "main",
+				effects: [pytest],
+				safety,
+				autonomy: "yolo",
+				sessionCodeConsentPending: true,
+			}),
+			evaluateAdmission({ principal: "worker", effects: [pytest], safety, sessionCodeConsentPending: true }),
+		]) {
+			strictEqual(unchanged.kind, "allow");
+		}
+
+		const consent = createSessionCodeConsent();
+		const registry = createRegistry({ safety, autonomy: () => "default", sessionCodeConsent: consent });
+		let runs = 0;
+		registry.register({
+			...bashTool,
+			run: async () => {
+				runs += 1;
+				return { kind: "ok", output: "ran" };
+			},
+		});
+		const asks: PermissionRequiredMeta[] = [];
+		let answer: "deny" | "grant" = "deny";
+		registry.onPermissionRequired((_call, decision, meta) => {
+			asks.push(meta);
+			if (answer === "deny") registry.cancelParkedCall(meta.requestId, "denied in this contract");
+			else
+				setImmediate(() => {
+					void registry.resumeParkedCalls({
+						actionClass: decision.classification.actionClass,
+						requestId: meta.requestId,
+						requestedBy: "tool:one_shot",
+					});
+				});
+		});
+		strictEqual((await registry.invoke(pytest)).kind, "ok", "nothing written yet: runs as #377 allows");
+		consent.noteWrite();
+		strictEqual((await registry.invoke(pytest)).kind, "blocked");
+		strictEqual((await registry.invoke(pytest)).kind, "blocked", "a denial leaves consent ungiven");
+		answer = "grant";
+		const approved = await registry.invoke(pytest);
+		strictEqual(approved.kind, "ok");
+		ok(JSON.stringify(approved).includes("test runners run without asking for the rest of this session"));
+		strictEqual((await registry.invoke(pytest)).kind, "ok");
+		deepStrictEqual(
+			asks.map((meta) => meta.axis),
+			["net:session-code-consent", "net:session-code-consent", "net:session-code-consent"],
+		);
+		strictEqual(runs, 3);
+		// A new session starts over.
+		consent.reset();
+		consent.noteWrite();
+		strictEqual((await registry.invoke(pytest)).kind, "ok");
+		strictEqual(asks.length, 4);
 	});
 });
