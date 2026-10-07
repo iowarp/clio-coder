@@ -26,8 +26,8 @@ export interface ContextSemanticDeps {
 	loadSearch(): Promise<ContextSemanticSearch>;
 }
 
-export const SEMANTIC_TOOL_MAX_QUERY_CHARS = 2000;
-export const SEMANTIC_TOOL_TIMEOUT_MS = 6000;
+const SEMANTIC_TOOL_MAX_QUERY_CHARS = 2000;
+const SEMANTIC_TOOL_TIMEOUT_MS = 6000;
 const KINDS: readonly SemanticSourceKind[] = ["code", "wiki", "memory", "evidence", "inbox", "recording"];
 const ARGUMENTS = new Set(["scope", "query", "limit", "kinds", "run_id", "media_type", "after", "before"]);
 const UNAVAILABLE =
@@ -69,7 +69,8 @@ function parseRequest(args: Record<string, unknown>): ContextSemanticRequest | s
 			return `Semantic ${name} must be an ISO date or timestamp.`;
 		const canonical = new Date(value).toISOString();
 		if (canonical.slice(0, 10) !== value.slice(0, 10)) return `Semantic ${name} must use a valid UTC date.`;
-		dates[name] = canonical;
+		// A date-only upper bound includes its whole UTC day.
+		dates[name] = name === "before" && !value.includes("T") ? `${value}T23:59:59.999Z` : canonical;
 	}
 	if (dates.after && dates.before && dates.after > dates.before) return "Semantic after must not follow before.";
 	return {
@@ -108,7 +109,6 @@ export async function runSemanticScope(
 	}, SEMANTIC_TOOL_TIMEOUT_MS);
 	commitObservationReservation(reservation);
 	try {
-		if (!deps.isEnabled()) return semanticUnavailable();
 		if (options?.signal?.aborted) {
 			controller.abort();
 			return { kind: "error", message: "context: semantic search cancelled" };

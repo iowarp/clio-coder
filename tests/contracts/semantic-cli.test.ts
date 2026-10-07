@@ -108,8 +108,8 @@ it("parses semantic pins, inbox operations and bounded search filters", () => {
 				kinds: ["inbox", "code"],
 				project: "p",
 				run: "r",
-				since: "2026-10-01",
-				until: "2026-10-07",
+				since: "2026-10-01T00:00:00.000Z",
+				until: "2026-10-07T23:59:59.999Z",
 				mediaType: "image/png",
 			},
 		},
@@ -204,10 +204,22 @@ it("delegates operations with settings APIs, renders JSON and removes signal lis
 			execute: async (_request, context) => {
 				process.emit("SIGINT");
 				assert.equal(context.signal.aborted, true);
-				return null;
+				throw context.signal.reason;
 			},
 		}),
 		130,
+	);
+	assert.equal(getEventListeners(process, "SIGINT").length, before);
+	// A save that completed before the interrupt reports its result instead of a cancellation.
+	assert.equal(
+		await runSemanticCommand(["inbox", "add", "science", "--id", "lab"], {
+			...dependencies,
+			execute: async () => {
+				process.emit("SIGINT");
+				return { indexed: false };
+			},
+		}),
+		0,
 	);
 	assert.equal(getEventListeners(process, "SIGINT").length, before);
 });

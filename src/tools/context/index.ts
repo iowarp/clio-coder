@@ -50,7 +50,7 @@ import { listDocsCorpus, searchDocs } from "./docs-engine.js";
 import type { ContextSemanticDeps } from "./semantic.js";
 import { runSemanticScope, semanticUnavailable } from "./semantic.js";
 
-export type { ContextSemanticDeps, ContextSemanticRequest, ContextSemanticSearch } from "./semantic.js";
+export type { ContextSemanticRequest } from "./semantic.js";
 
 import { contextToolSurface } from "./surface.js";
 
@@ -949,17 +949,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 			if (scope === "budget" && Object.keys(args).some((key) => key !== "scope")) {
 				return { kind: "error", message: 'context: scope="budget" accepts only scope; it inspects the current request.' };
 			}
-			if (scope === "semantic") {
-				try {
-					if (!deps.semantic?.isEnabled()) return semanticUnavailable();
-				} catch {
-					// A missing or invalid settings snapshot cannot enable this opt-in capability.
-					return {
-						kind: "error",
-						message: "context: semantic search settings are unavailable. Use code_nav, grep, or evidence.",
-					};
-				}
-			}
+			if (scope === "semantic" && !deps.semantic?.isEnabled()) return semanticUnavailable();
 			const selfCap =
 				scope === "semantic"
 					? 16 * 1024

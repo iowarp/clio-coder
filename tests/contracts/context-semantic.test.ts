@@ -111,7 +111,7 @@ test("enabled searches load lazily and forward only narrowed filters, trusted cw
 		runId: "run-7",
 		mediaType: "text/plain",
 		after: "2026-10-01T00:00:00.000Z",
-		before: "2026-10-07T00:00:00.000Z",
+		before: "2026-10-07T23:59:59.999Z",
 	});
 	assert.equal(searched.kind, "ok");
 	if (searched.kind === "ok") {

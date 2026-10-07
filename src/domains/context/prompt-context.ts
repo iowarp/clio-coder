@@ -1,5 +1,4 @@
 import { statSync } from "node:fs";
-import { readSettings } from "../../core/config.js";
 import { detectProjectTypeHint } from "../session/workspace/project-type.js";
 import {
 	loadProjectClioMd,
@@ -51,14 +50,6 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		pieces.push(fragment);
 		supportFragments.push(fragment);
 	};
-	try {
-		if (readSettings().context.semantic.enabled)
-			addSupport(
-				"<semantic-context>Opt-in semantic search is available through context(scope=semantic,query=...). For questions that connect code, scientific artifacts, prior approved memory, or evidence, use it to locate bounded candidates, then inspect the original files and receipts before answering. A gateway-only surface calls gateway(op=call,capability=context,args={scope:semantic,query:...}). Similarity is not proof.</semantic-context>",
-			);
-	} catch {
-		// Invalid or unavailable settings cannot advertise an opt-in capability.
-	}
 	const warnings: string[] = [];
 	const loadedClioMd = loadProjectClioMd(cwd);
 	const clioMd: ParsedClioMd | null = loadedClioMd.value;
