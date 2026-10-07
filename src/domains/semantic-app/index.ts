@@ -17,6 +17,7 @@ import {
 	qualifyEmbeddingProfile,
 } from "../providers/embedding/index.js";
 import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
+import { createSafetyPolicyEngine } from "../safety/policy-engine.js";
 import {
 	type ExtractionResult,
 	eligibleSemanticMemory,
@@ -56,12 +57,21 @@ function within(root: string, path: string): boolean {
 	);
 }
 
-async function providerInput(input: SemanticInput, allowedRoots: readonly string[]): Promise<EmbeddingInput> {
+async function providerInput(
+	input: SemanticInput,
+	allowedRoots: readonly string[],
+	allowsPath: (path: string) => boolean,
+): Promise<EmbeddingInput> {
 	if (input.kind === "text") return input;
 	if (input.kind === "video") throw new Error("Video embedding requires a qualified sampler and transport");
 	const canonicalPath = await realpath(input.path);
 	const source = await lstat(input.path);
-	if (source.isSymbolicLink() || !source.isFile() || !allowedRoots.some((root) => within(root, canonicalPath)))
+	if (
+		source.isSymbolicLink() ||
+		!source.isFile() ||
+		!allowedRoots.some((root) => within(root, canonicalPath)) ||
+		!allowsPath(canonicalPath)
+	)
 		throw new Error("Semantic media path is outside registered sources or changed to a symlink");
 	if (source.size > 8 * 1024 * 1024) throw new Error("Semantic media source exceeds 8 MiB");
 	const bytes = input.dataBase64 ? Buffer.from(input.dataBase64, "base64") : await readFile(canonicalPath);
@@ -111,6 +121,7 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 	const allowedMediaRoots = config.inboxes
 		.filter((inbox) => inbox.scope === "global" || inbox.project === projectId)
 		.map((inbox) => realpathSync(inbox.root));
+	const pathPolicy = createSafetyPolicyEngine({ cwd: projectId });
 	const profileIdentity = embeddingProfileIdentity(profile);
 	const index = new SemanticIndex({
 		projectId,
@@ -118,7 +129,9 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 		...(!options.offline
 			? {
 					embed: async (inputs: readonly SemanticInput[], request: { task: "query" | "document"; signal?: AbortSignal }) => {
-						const converted = await Promise.all(inputs.map((input) => providerInput(input, allowedMediaRoots)));
+						const converted = await Promise.all(
+							inputs.map((input) => providerInput(input, allowedMediaRoots, (path) => pathPolicy.readablePath(path))),
+						);
 						const response = await service.embed({
 							inputs: converted,
 							profile,
@@ -185,11 +198,14 @@ export async function previewSemanticInbox(options: SemanticAppOptions, id: stri
 	const projectId = realpathSync(options.projectRoot);
 	const inbox = registeredInboxes(configured(settings), projectId).find((entry) => entry.id === id);
 	if (!inbox) throw new Error(`Semantic inbox ${id} is not registered for this project`);
-	return previewInbox(inbox);
+	const policy = createSafetyPolicyEngine({ cwd: projectId });
+	return previewInbox(inbox, { allowPath: (path) => policy.readablePath(path) });
 }
 
 export async function refreshSemantic(options: SemanticAppOptions, signal?: AbortSignal) {
 	const app = await openSemanticApp(options);
+	const policy = createSafetyPolicyEngine({ cwd: app.projectId });
+	const allowPath = (path: string) => policy.readablePath(path);
 	const records = loadMemoryRecordsSync(clioDataDir());
 	const memoryEligibility = { activeRepository: canonicalMemoryRepositoryIdentity(app.projectId) };
 	const evidence: Array<{
@@ -256,6 +272,7 @@ export async function refreshSemantic(options: SemanticAppOptions, signal?: Abor
 			memoryRecords: records,
 			memoryEligibility,
 			evidence,
+			allowPath,
 			...(signal ? { signal } : {}),
 		}),
 	];
@@ -263,6 +280,7 @@ export async function refreshSemantic(options: SemanticAppOptions, signal?: Abor
 	for (const inbox of registeredInboxes(app.config, app.projectId)) {
 		snapshots.push(
 			await extractInbox(inbox, {
+				allowPath,
 				modalities: app.config.modalities.filter(
 					(value): value is "image" | "audio" => value === "image" || value === "audio",
 				),
@@ -293,11 +311,21 @@ export async function searchSemantic(
 	signal?: AbortSignal,
 ) {
 	const app = await openSemanticApp(options);
+	const policy = createSafetyPolicyEngine({ cwd: app.projectId });
 	const records = loadMemoryRecordsSync(clioDataDir());
 	const eligibleMemoryIds = eligibleSemanticMemory(records, {
 		activeRepository: canonicalMemoryRepositoryIdentity(app.projectId),
 	}).map((record) => record.id);
-	return app.index.search(query, { ...filters, projectId: app.projectId, eligibleMemoryIds }, signal);
+	return app.index.search(
+		query,
+		{
+			...filters,
+			projectId: app.projectId,
+			eligibleMemoryIds,
+			allowsPath: (path) => policy.readablePath(path),
+		},
+		signal,
+	);
 }
 
 export async function statusSemantic(options: SemanticAppOptions) {

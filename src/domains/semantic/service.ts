@@ -337,6 +337,7 @@ export class SemanticIndex {
 				(record.scope === "global" && !filters.includeGlobal) ||
 				(record.visibility === "private" && !filters.includePrivate) ||
 				(record.kind === "memory" && !memories.has(record.memoryId ?? "")) ||
+				(record.kind !== "memory" && filters.allowsPath?.(record.path) === false) ||
 				(filters.kinds && !filters.kinds.includes(record.kind)) ||
 				(filters.visibility && !filters.visibility.includes(record.visibility)) ||
 				(filters.runId && record.runId !== filters.runId) ||
