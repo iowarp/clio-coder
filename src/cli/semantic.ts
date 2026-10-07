@@ -220,7 +220,8 @@ export function parseSemanticArgs(
 						new Date(`${date.slice(0, 10)}T00:00:00Z`).toISOString().slice(0, 10) !== date.slice(0, 10)
 					)
 						throw new Error(`--${key} requires a valid ISO date`);
-					dates[key] = date;
+					// The index compares canonical UTC strings, and a date-only --until includes its whole UTC day.
+					dates[key] = key === "until" && !date.includes("T") ? `${date}T23:59:59.999Z` : new Date(date).toISOString();
 				}
 			}
 			if (dates.since && dates.until && Date.parse(dates.since) > Date.parse(dates.until))

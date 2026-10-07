@@ -69,7 +69,8 @@ function parseRequest(args: Record<string, unknown>): ContextSemanticRequest | s
 			return `Semantic ${name} must be an ISO date or timestamp.`;
 		const canonical = new Date(value).toISOString();
 		if (canonical.slice(0, 10) !== value.slice(0, 10)) return `Semantic ${name} must use a valid UTC date.`;
-		dates[name] = canonical;
+		// A date-only upper bound includes its whole UTC day.
+		dates[name] = name === "before" && !value.includes("T") ? `${value}T23:59:59.999Z` : canonical;
 	}
 	if (dates.after && dates.before && dates.after > dates.before) return "Semantic after must not follow before.";
 	return {
