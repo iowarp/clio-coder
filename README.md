@@ -404,7 +404,9 @@ finetunes are no longer packaged.
 
 **Approvals and trust.** The default policy admits workspace reads, edits, and
 recognized checks, and requests permission for unfamiliar commands and outward
-actions. Approval cards name the tool, target, effect, and requester; Bash
+actions. In an attended session, the first test runner after Clio writes or
+edits a file asks once, because it executes that code; approving covers the rest
+of the session. Approval cards name the tool, target, effect, and requester; Bash
 approvals describe the command's consequence. **Yolo** removes ordinary approval
 prompts while protected paths, hard blocks, and damage-control rules still apply.
 Those rules recognize commands by their text and arguments. A delete outside the
@@ -424,11 +426,12 @@ safety grants with `clio-coder config trust safety`.
 
 **Worker boundaries.** Each worker Clio runs on a configured target (native,
 Claude SDK, or CLI subprocess) receives an immutable permit for its tools, asks,
-and Git allowance, and the worker refuses a spec whose fields disagree with that
-permit. An ACP delegation peer runs its own tool loop: its receipt records the
-permit Clio would have applied, but Clio enforces only the permission requests
-the peer chooses to send, under the agent's `toolGovernance`. Native worker
-commands use an OS sandbox when `safety.sandbox: auto` finds a backend. On Linux
+and Git allowance. The worker refuses a permit whose digest does not match it
+or a spec whose tools or fields exceed it, and it starts no model call until the
+host admits its attestation. An ACP delegation peer runs its own tool loop: its
+receipt records the permit Clio would have applied, but Clio enforces only the
+permission requests the peer chooses to send, under the agent's
+`toolGovernance`. Native worker commands use an OS sandbox when `safety.sandbox: auto` finds a backend. On Linux
 that is bubblewrap. On macOS it is an experimental `sandbox-exec` (Seatbelt)
 profile that has not been tested on macOS. Writes are confined to the worker's
 roots and scratch space, which is a private `/tmp` under bubblewrap and the
