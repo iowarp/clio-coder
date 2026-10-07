@@ -47,6 +47,11 @@ import {
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { truncateHead } from "../truncate.js";
 import { listDocsCorpus, searchDocs } from "./docs-engine.js";
+import type { ContextSemanticDeps } from "./semantic.js";
+import { runSemanticScope, semanticUnavailable } from "./semantic.js";
+
+export type { ContextSemanticDeps, ContextSemanticRequest, ContextSemanticSearch } from "./semantic.js";
+
 import { contextToolSurface } from "./surface.js";
 
 /**
@@ -58,6 +63,7 @@ import { contextToolSurface } from "./surface.js";
  * unchanged from the absorbed read_skill tool), scope=library reads the bounded
  * body-free recipe catalog (see ./library.ts), scope=recall readmits an
  * evicted tool-result body by ref and records the `contextRecall` entry.
+ * scope=semantic explicitly searches the optional index for bounded source locators.
  */
 
 const DEFAULT_TREE_ENTRIES = 50;
@@ -83,6 +89,8 @@ export interface ContextSessionDeps {
 }
 
 export interface ContextToolDeps {
+	/** Host-owned settings gate and lazy ownership-scoped search bridge. */
+	semantic?: ContextSemanticDeps;
 	/** Refreshes this run's native budget; absent for external/worker registries. */
 	getContextBudget?: BudgetProvider;
 	/** Live session view, including overrides. Omit when no authoritative settings snapshot exists. */
@@ -930,17 +938,34 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 				scope !== "settings" &&
 				scope !== "skills" &&
 				scope !== "recall" &&
-				scope !== "budget"
+				scope !== "budget" &&
+				scope !== "semantic"
 			) {
 				return {
 					kind: "error",
-					message: `context: scope must be workspace, settings, skills, recall, or budget; got '${scope}'`,
+					message: `context: scope must be workspace, settings, skills, recall, budget, or semantic; got '${scope}'`,
 				};
 			}
 			if (scope === "budget" && Object.keys(args).some((key) => key !== "scope")) {
 				return { kind: "error", message: 'context: scope="budget" accepts only scope; it inspects the current request.' };
 			}
-			const selfCap = scope === "skills" ? OBSERVE_SELF_CAPS.contextSkills : OBSERVE_SELF_CAPS.contextWorkspace;
+			if (scope === "semantic") {
+				try {
+					if (!deps.semantic?.isEnabled()) return semanticUnavailable();
+				} catch {
+					// A missing or invalid settings snapshot cannot enable this opt-in capability.
+					return {
+						kind: "error",
+						message: "context: semantic search settings are unavailable. Use code_nav, grep, or evidence.",
+					};
+				}
+			}
+			const selfCap =
+				scope === "semantic"
+					? 16 * 1024
+					: scope === "skills"
+						? OBSERVE_SELF_CAPS.contextSkills
+						: OBSERVE_SELF_CAPS.contextWorkspace;
 			// Reserved before any scope handler runs, so an exhausted pool answers
 			// with the notice and no scope does its work for nothing.
 			const reservation = reserveObservation(selfCap, options);
@@ -948,11 +973,14 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 				return observationBudgetExhausted({
 					tool: ToolNames.Context,
 					unit: scope === "skills" ? "entries" : "results",
-					...(scope === "budget" ? { format: "json" as const } : {}),
+					...(scope === "budget" || scope === "semantic" ? { format: "json" as const } : {}),
 					reservation,
 					subject: `scope=${scope}`,
 					hint: "Continue in a follow-up turn.",
 				});
+			}
+			if (scope === "semantic" && deps.semantic) {
+				return runSemanticScope(deps.semantic, args, cwdFromDeps(deps), reservation, options);
 			}
 			if (scope === "settings") {
 				if (!deps.getSettings)

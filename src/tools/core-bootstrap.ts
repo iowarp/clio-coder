@@ -23,6 +23,7 @@ import { builtin, gatewayPromptHint } from "./builtin-tool-catalog.js";
 import { codeNavToolSurface } from "./codewiki/code-nav-surface.js";
 import { createConfigureClioTool } from "./configure-clio.js";
 import { type ConsultDeps, createConsultTool } from "./consult.js";
+import type { ContextSemanticDeps } from "./context/semantic.js";
 import { contextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { createDecideTool } from "./decide.js";
@@ -50,6 +51,8 @@ import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js"
 import { writeTool } from "./write.js";
 
 export interface CoreToolBootstrapDeps {
+	/** Host override for semantic search; the default ownership-scoped bridge stays lazy behind the live settings gate. */
+	semantic?: ContextSemanticDeps;
 	/** Native session accounting only. Worker registries do not inherit it. */
 	getContextBudget?: BudgetProvider;
 	getSettings?: () => Readonly<ClioSettings>;
@@ -200,7 +203,30 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 			{ path: "src/tools/codewiki/code-nav.ts", scope: "core" },
 		),
 	});
+	const semantic: ContextSemanticDeps = deps.semantic ?? {
+		isEnabled: () => {
+			// Older/worker settings snapshots do not carry this opt-in setting.
+			const context = deps.getSettings?.().context as { semantic?: { enabled?: boolean } } | undefined;
+			return context?.semantic?.enabled === true;
+		},
+		loadSearch: async () => {
+			if (!semantic.isEnabled()) throw new Error("Semantic search is disabled");
+			const { searchSemantic } = await import("../domains/semantic-app/index.js");
+			return (request, context) => {
+				if (!semantic.isEnabled()) throw new Error("Semantic search is disabled");
+				const { query, ...filters } = request;
+				const settings = deps.getSettings?.();
+				return searchSemantic(
+					{ projectRoot: context.cwd, ...(settings ? { settings } : {}) },
+					query,
+					filters,
+					context.signal,
+				);
+			};
+		},
+	};
 	const skillToolDeps = {
+		semantic,
 		...(deps.getContextBudget ? { getContextBudget: deps.getContextBudget } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.getRouteProvenance ? { getRouteProvenance: deps.getRouteProvenance } : {}),
