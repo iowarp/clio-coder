@@ -92,6 +92,8 @@ export interface SemanticHit {
 	score: number;
 	method: "hybrid" | "lexical" | "exact" | "semantic";
 	mediaType: string;
+	/** Existing evidence tool bundle id, for host-authorized inspection of XDG evidence. */
+	evidenceId?: string;
 	runId?: string;
 	experimentId?: string;
 }

@@ -527,3 +527,24 @@ test("broad artifact search follows source links without repeating pages from on
 		new Set(["manifest", "note", "code", "notebook", "plot"]),
 	);
 });
+
+test("evidence candidates carry an inspectable bundle identity", async () => {
+	const index = new SemanticIndex({ projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir });
+	await index.refresh([
+		{
+			...record("historical", "checkpoint incident"),
+			sourceId: "evidence:run-history:transcript.md",
+			kind: "evidence",
+			path: join(isolated.dir, "evidence", "run-history", "transcript.md"),
+		},
+		{
+			...record("cast", "warning corrected"),
+			sourceId: "recording:worker-1",
+			kind: "recording",
+			path: join(isolated.dir, "evidence", "run-worker", "worker.cast"),
+		},
+	]);
+	const hits = index.searchVector("checkpoint warning", undefined, { projectId: "project-a" }).hits;
+	assert.equal(hits.find((hit) => hit.kind === "evidence")?.evidenceId, "run-history");
+	assert.equal(hits.find((hit) => hit.kind === "recording")?.evidenceId, "run-worker");
+});

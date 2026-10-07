@@ -315,6 +315,31 @@ test("bridge scope and current memory eligibility protect results; registry path
 	assert.equal(appends, 0);
 });
 
+test("evidence candidates tell the agent which authorized bundle to inspect", async () => {
+	const tool = createContextTool({
+		getCwd: () => isolated.dir,
+		semantic: {
+			isEnabled: () => true,
+			loadSearch: async () => async () =>
+				result([
+					{
+						...hit("historical"),
+						kind: "evidence",
+						evidenceId: "run-history",
+						path: join(isolated.dir, "evidence", "run-history", "transcript.md"),
+					},
+				]),
+		},
+	});
+	const searched = await tool.run({ scope: "semantic", query: "checkpoint" }, { allowsObservationPath: () => true });
+	assert.equal(searched.kind, "ok");
+	if (searched.kind === "ok") {
+		const payload = JSON.parse(searched.output);
+		assert.equal(payload.hits[0].evidenceId, "run-history");
+		assert.match(payload.followUp, /evidence\(mode=inspect,id=hit\.evidenceId\)/);
+	}
+});
+
 test("tool projects only bounded candidate fields and preserves valid JSON when output is capped", async () => {
 	const hits = Array.from({ length: 20 }, (_, i) => ({
 		...hit(`candidate-${i}`),

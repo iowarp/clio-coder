@@ -147,6 +147,7 @@ export async function runSemanticScope(
 				score: hit.score,
 				method: hit.method,
 				mediaType: hit.mediaType,
+				...(hit.evidenceId ? { evidenceId: hit.evidenceId } : {}),
 				...(hit.runId ? { runId: hit.runId } : {}),
 				...(hit.experimentId ? { experimentId: hit.experimentId } : {}),
 			}));
@@ -159,7 +160,7 @@ export async function runSemanticScope(
 			truncated: result.truncated || result.hits.length > request.limit,
 			...(result.fallbackReason ? { fallbackReason: result.fallbackReason.slice(0, 256) } : {}),
 			followUp:
-				"These candidates locate sources. Inspect originals with read, code_nav, evidence or artifact readers before making claims; similarity does not establish correctness.",
+				"These candidates locate sources. Inspect originals before making claims: for evidence or recording hits call evidence(mode=inspect,id=hit.evidenceId); direct reads of XDG evidence paths may be blocked. Use read, code_nav or artifact readers for other sources. Similarity does not establish correctness.",
 		};
 		const totalHitCount = hits.length;
 		const fullOutput = JSON.stringify(payload);

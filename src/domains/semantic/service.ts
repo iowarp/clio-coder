@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioCacheDir } from "../../core/xdg.js";
@@ -353,6 +353,12 @@ export class SemanticIndex {
 			const stored = this.generation?.vectors[record.id];
 			const semantic = vector && stored ? vector.reduce((sum, value, i) => sum + value * (stored[i] ?? 0), 0) : 0;
 			if (!exact && lexical <= 0 && semantic <= 0) continue;
+			const evidenceId =
+				record.kind === "evidence"
+					? /^evidence:([^:]+):/.exec(record.sourceId)?.[1]
+					: record.kind === "recording"
+						? basename(dirname(record.path))
+						: undefined;
 			hits.push({
 				id: record.id,
 				sourceId: record.sourceId,
@@ -363,6 +369,7 @@ export class SemanticIndex {
 				score: (exact ? 2 : 0) + lexical * 0.35 + Math.max(0, semantic) * 0.65,
 				method: exact ? "exact" : vector ? (lexical ? "hybrid" : "semantic") : "lexical",
 				mediaType: record.mediaType,
+				...(evidenceId ? { evidenceId } : {}),
 				...(record.runId ? { runId: record.runId } : {}),
 				...(record.experimentId ? { experimentId: record.experimentId } : {}),
 			});
