@@ -5,6 +5,7 @@ import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../cor
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
+import type { ConfigContract } from "../config/contract.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
 import { describeValidationContract, loadValidationContract } from "../safety/index.js";
 import { createSemanticBackgroundRefresh } from "../semantic-app/background.js";
@@ -202,7 +203,9 @@ export function createContextBundle(
 	let stopping = false;
 	let startupHints: string[] = [];
 	const contextState = createContextStateReader();
-	const semanticBackground = createSemanticBackgroundRefresh();
+	const semanticBackground = createSemanticBackgroundRefresh(() =>
+		_context.getContract<ConfigContract>("config")?.get(),
+	);
 	const onStart = (): void => {
 		lastCwd = process.cwd();
 		void ensureCodewikiFresh(lastCwd)

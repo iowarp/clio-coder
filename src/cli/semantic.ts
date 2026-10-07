@@ -352,9 +352,15 @@ export async function executeSemanticRequest(
 			throw new Error("Inbox is not registered for this project");
 		context.updateSettings((draft) => {
 			const current = semanticConfiguration(draft);
-			current.inboxes = current.inboxes.filter(
+			const kept = current.inboxes.filter(
 				(inbox) => !(inbox.id === request.id && (inbox.scope === "global" || inbox.project === projectRoot)),
 			);
+			// The check above reads the layered view, but only the user file is editable here.
+			if (kept.length === current.inboxes.length)
+				throw new Error(
+					`Inbox ${request.id} is not in the user settings file; remove it from the project settings layer that defines it`,
+				);
+			current.inboxes = kept;
 		});
 		return { removed: request.id, refreshRequired: true };
 	}
