@@ -371,6 +371,14 @@ export async function extractInbox(
 					maxPieces: Math.min(limits.maxPieces - result.records.length, 64),
 					...(options.signal ? { signal: options.signal } : {}),
 				});
+				if (samples.length === 0) {
+					result.sources.push({
+						path: file.path,
+						state: "unsupported",
+						reason: "No qualified bounded sampler for this format",
+					});
+					continue;
+				}
 				for (const [i, sample] of samples.slice(0, 64).entries()) {
 					if (
 						sample.input.kind === "text" ||
