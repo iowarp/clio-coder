@@ -458,6 +458,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
 };
 const STRUCTURED = new Set([
+	"context.semantic.inboxes",
 	"fleet.profiles",
 	"fleet.rosters",
 	"fleet.agentProfiles",
@@ -475,6 +476,30 @@ const OPTIONAL_STRINGS = new Set([
 	"context.compaction.systemPrompt",
 ]);
 const EXTRA_HELP: Record<string, [string, string]> = {
+	"context.semantic.enabled": [
+		"Semantic search",
+		"Make the optional project search index available to Clio after pinning a qualified embedding route.",
+	],
+	"context.semantic.target": ["Embedding connection", "Target id of the qualified embedding route."],
+	"context.semantic.model": ["Embedding model", "Exact model id served by the embedding target."],
+	"context.semantic.assetIdentity": ["Embedding asset identity", "GGUF SHA-256 or a visible unverified operator label."],
+	"context.semantic.projectorIdentity": [
+		"Embedding projector identity",
+		"Projector SHA-256 or operator label when using image or audio inputs.",
+	],
+	"context.semantic.canaryFingerprint": [
+		"Embedding canary fingerprint",
+		"Fixed canary result from semantic configure --qualify; a changed fingerprint selects a new index space.",
+	],
+	"context.semantic.modalities": ["Indexed media types", "Select text, image, audio, or mixed after qualification."],
+	"context.semantic.background": [
+		"Refresh semantic index in background",
+		"Schedule bounded refresh at session start and after code map changes.",
+	],
+	"context.semantic.inboxes": [
+		"Artifact inboxes",
+		"Registered source folders. Prefer semantic inbox preview/add/remove for guided changes.",
+	],
 	"integrations.music.enabled": [
 		"Music pane",
 		"Allow /music to open cliamp in a docked pane and play focus radio. Needs Herdr panes and cliamp; off by default.",

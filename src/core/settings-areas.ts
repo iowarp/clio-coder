@@ -100,7 +100,7 @@ export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly stri
 	chat: ["Replies", "Alerts", "Recovery"],
 	agents: ["Agent routes", "Automatic routing", "Before Clio answers"],
 	fleet: ["Default worker", "Profiles", "Capacity & placement", "Limits & retries", "Run history"],
-	context: ["Compaction", "Context cleanup", "Proactive memory"],
+	context: ["Compaction", "Context cleanup", "Proactive memory", "Semantic search"],
 	workspace: ["Files pane", "Task copies", "Git"],
 	safety: ["Autonomy", "Worker approvals", "External agents", "Review", "Spending & tool limits"],
 	interface: ["Transcript", "Guidance", "Panes"],
@@ -219,6 +219,16 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "context.memory.model":
 		case "context.memory.cadenceToolCalls":
 			return place("context", "Proactive memory");
+		case "context.semantic.enabled":
+		case "context.semantic.target":
+		case "context.semantic.model":
+		case "context.semantic.assetIdentity":
+		case "context.semantic.projectorIdentity":
+		case "context.semantic.canaryFingerprint":
+		case "context.semantic.modalities":
+		case "context.semantic.background":
+		case "context.semantic.inboxes":
+			return place("context", "Semantic search");
 		case "safety.autonomy":
 		case "safetyNet":
 			return place("safety", "Autonomy");

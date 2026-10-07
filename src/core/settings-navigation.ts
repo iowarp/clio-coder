@@ -95,6 +95,7 @@ export function settingsGroupForPath(path: string): string {
 	if (path.startsWith("chat.retry")) return "Recovery";
 	if (path.startsWith("chat.")) return "Model & responses";
 	if (path.startsWith("context.memory")) return "Proactive memory";
+	if (path.startsWith("context.semantic")) return "Semantic search";
 	if (path.startsWith("context.compaction")) return "Compaction";
 	if (path.startsWith("context.workingSet")) return "Context cleanup";
 	if (path.startsWith("context.")) return "Context limits";
