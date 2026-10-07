@@ -1,4 +1,5 @@
 import type { Api, Model } from "../../../engine/types.js";
+import type { EmbeddingInput } from "../embedding/types.js";
 import type { CapabilityFlags } from "./capability-flags.js";
 import type { ContextWindowSlots } from "./context-window-slots.js";
 import type {
@@ -278,6 +279,8 @@ export interface RuntimeDescriptor {
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;
 	complete?(target: TargetDescriptor, opts: CompleteOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
 	infill?(target: TargetDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
+	/** Typed transport seam; profile/prefix/vector policy lives in the public embedding service. */
+	embedInputs?(target: TargetDescriptor, inputs: readonly EmbeddingInput[], ctx: ProbeContext): Promise<EmbedResult>;
 	embed?(target: TargetDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult>;
 	rerank?(target: TargetDescriptor, query: string, documents: string[], ctx: ProbeContext): Promise<RerankResult>;
 	/**
