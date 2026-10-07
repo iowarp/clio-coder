@@ -22,13 +22,11 @@ export function createEmbeddingService(options: { route: EmbeddingRoute }): Embe
 				throw new EmbeddingError("invalid-input", "Embedding batch size exceeds bounds");
 			const sources = request.inputs.map((input, index) => {
 				const bytes = validateInput(input, route);
-				if (bytes > 8 * 1024 * 1024)
-					throw new EmbeddingError("invalid-input", "Embedding input exceeds byte limit");
+				if (bytes > 8 * 1024 * 1024) throw new EmbeddingError("invalid-input", "Embedding input exceeds byte limit");
 				return { index, kind: input.kind, bytes };
 			});
 			const inputBytes = sources.reduce((sum, source) => sum + source.bytes, 0);
-			if (inputBytes > 16 * 1024 * 1024)
-				throw new EmbeddingError("invalid-input", "Embedding batch exceeds byte limit");
+			if (inputBytes > 16 * 1024 * 1024) throw new EmbeddingError("invalid-input", "Embedding batch exceeds byte limit");
 			const timeoutMs = request.timeoutMs ?? 30000;
 			if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 300000)
 				throw new EmbeddingError("invalid-input", "Embedding timeout must be between 0 and 300000ms");
