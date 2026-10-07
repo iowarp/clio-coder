@@ -67,7 +67,8 @@ function persistState(
  * Rebuild the codewiki when it is missing or the working tree has drifted since
  * the last full index. Runs once at session start (catches branch switches, git
  * pulls, and out-of-session edits). Skips projects that were never indexed so we
- * never index an arbitrary directory unprompted. This is the only place a
+ * never index an arbitrary directory unprompted, and resolves false for them so
+ * the semantic background refresh skips them too. This is the only place a
  * session reconciles the index with the tree: in-session edits arrive through
  * `noteFileChanges`, and stop() deliberately does no indexing at all.
  *
@@ -77,9 +78,9 @@ function persistState(
  * screen and keystrokes queued silently. `void` on the promise never helped,
  * because nothing inside it awaited.
  */
-async function ensureCodewikiFresh(cwd: string): Promise<void> {
+async function ensureCodewikiFresh(cwd: string): Promise<boolean> {
 	const state = readClioState(cwd);
-	if (!state && !existsSync(codewikiPath(cwd))) return;
+	if (!state && !existsSync(codewikiPath(cwd))) return false;
 	const indexedAt = new Date().toISOString();
 	await coordinateCodewikiWrite(
 		cwd,
@@ -98,6 +99,7 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 				persistState(workspace, fingerprint, indexedAt, readClioState(workspace), codewiki, codewiki.language),
 		},
 	);
+	return true;
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
@@ -209,7 +211,9 @@ export function createContextBundle(
 	const onStart = (): void => {
 		lastCwd = process.cwd();
 		void ensureCodewikiFresh(lastCwd)
-			.then(() => semanticBackground.schedule(lastCwd))
+			.then((indexed) => {
+				if (indexed) semanticBackground.schedule(lastCwd);
+			})
 			.catch(() => {
 				// Indexing is best-effort; a failed refresh must not block session start.
 			});
