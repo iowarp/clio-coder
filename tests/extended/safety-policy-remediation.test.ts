@@ -155,6 +155,35 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 		join(audit, "s1-permissions.jsonl"),
 		`${["requested", "requested", "granted", "denied"].map((status, index) => JSON.stringify({ kind: "permission", status, ts: new Date().toISOString(), correlationId: `s1-${index}` })).join("\n")}\n`,
 	);
+	const receipts = join(clioStateDir(), "receipts");
+	mkdirSync(receipts, { recursive: true });
+	for (const [name, usage] of [
+		[
+			"measured",
+			{
+				tokenCount: 130,
+				inputTokenCount: 100,
+				outputTokenCount: 20,
+				cacheReadTokenCount: 10,
+				cacheWriteTokenCount: 0,
+				costUsd: 0.02,
+				costProvenance: "known",
+			},
+		],
+		["missing", { tokenCount: 0, costUsd: 0, costProvenance: "unknown", externalTelemetry: { tokenUsage: "missing" } }],
+	] as const) {
+		writeFileSync(
+			join(receipts, `${name}.json`),
+			JSON.stringify({
+				runId: name,
+				endedAt: new Date().toISOString(),
+				targetId: "worker-target",
+				wireModelId: "worker-model",
+				agentAudience: name === "measured" ? "shadow" : "internal",
+				...usage,
+			}),
+		);
+	}
 	const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
 	const child = spawnSync(
 		process.execPath,
@@ -173,4 +202,8 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 		.split("\n")
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
+	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.knownSubtotal, 130);
+	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.missingTokenCalls, 1);
+	assert.equal(rows.find((row) => row.fact === "worker-model-usage")?.runs, 2);
+	assert.equal(rows.find((row) => row.fact === "worker-audience-usage" && row.audience === "shadow")?.totalTokens, 130);
 });

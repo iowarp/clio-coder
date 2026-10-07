@@ -66,6 +66,67 @@ interface UsageReceipt {
 	sessionId: string | null;
 	toolStats: Array<{ tool: string; count: number; ok: number; errors: number; blocked: number }>;
 	skillActivations: string[];
+	targetId: string;
+	modelId: string;
+	audience: string;
+	tokenCount: number | null;
+	inputTokenCount: number | null;
+	outputTokenCount: number | null;
+	cacheReadTokenCount: number | null;
+	cacheWriteTokenCount: number | null;
+	reasoningTokenCount: number | null;
+	costUsd: number | null;
+	missingTokenUsage: boolean;
+}
+
+interface WorkerUsageTotals {
+	runs: number;
+	missingTokenRuns: number;
+	missingBreakdownRuns: number;
+	unpricedRuns: number;
+	totalTokens: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	reasoningTokens: number;
+	knownCostUsd: number;
+}
+
+function emptyWorkerUsageTotals(): WorkerUsageTotals {
+	return {
+		runs: 0,
+		missingTokenRuns: 0,
+		missingBreakdownRuns: 0,
+		unpricedRuns: 0,
+		totalTokens: 0,
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		reasoningTokens: 0,
+		knownCostUsd: 0,
+	};
+}
+
+function addWorkerReceipt(totals: WorkerUsageTotals, receipt: UsageReceipt): void {
+	totals.runs += 1;
+	if (receipt.missingTokenUsage) totals.missingTokenRuns += 1;
+	if (
+		receipt.inputTokenCount === null ||
+		receipt.outputTokenCount === null ||
+		receipt.cacheReadTokenCount === null ||
+		receipt.cacheWriteTokenCount === null
+	)
+		totals.missingBreakdownRuns += 1;
+	if (receipt.costUsd === null) totals.unpricedRuns += 1;
+	totals.totalTokens += receipt.tokenCount ?? 0;
+	totals.input += receipt.inputTokenCount ?? 0;
+	totals.output += receipt.outputTokenCount ?? 0;
+	totals.cacheRead += receipt.cacheReadTokenCount ?? 0;
+	totals.cacheWrite += receipt.cacheWriteTokenCount ?? 0;
+	totals.reasoningTokens += receipt.reasoningTokenCount ?? 0;
+	totals.knownCostUsd += receipt.costUsd ?? 0;
 }
 
 interface SessionUsage {
@@ -78,6 +139,7 @@ interface SessionUsage {
 	entriesInWindow: number;
 	/** Completed API calls this session recorded in the window, one per call. */
 	usageCalls: LedgerUsageCall[];
+	estimatedUsageCalls: number;
 	/** Backend prompt-cache facts persisted on assistant calls in the window. */
 	promptCache: PromptCacheTelemetry;
 }
@@ -353,6 +415,23 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const receipts = (await readReceipts(stateDir, windowStart, now, diagnostics)).filter(
 		(receipt) => repoRunIds === null || repoRunIds.has(receipt.runId),
 	);
+	const workerUsage = emptyWorkerUsageTotals();
+	const workerUsageByModel = new Map<string, { targetId: string; modelId: string; totals: WorkerUsageTotals }>();
+	const workerUsageByAudience = new Map<string, WorkerUsageTotals>();
+	for (const receipt of receipts) {
+		addWorkerReceipt(workerUsage, receipt);
+		const audience = workerUsageByAudience.get(receipt.audience) ?? emptyWorkerUsageTotals();
+		addWorkerReceipt(audience, receipt);
+		workerUsageByAudience.set(receipt.audience, audience);
+		const key = `${receipt.targetId}::${receipt.modelId}`;
+		const model = workerUsageByModel.get(key) ?? {
+			targetId: receipt.targetId,
+			modelId: receipt.modelId,
+			totals: emptyWorkerUsageTotals(),
+		};
+		addWorkerReceipt(model.totals, receipt);
+		workerUsageByModel.set(key, model);
+	}
 	const sessions = await readSessions(stateDir, windowStart, now, repoHash, diagnostics);
 	const harnessActions = sessions.reduce((total, session) => total + session.harnessActions, 0);
 	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
@@ -494,6 +573,11 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
 	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows);
 	const failedCompaction = summarizeFailedCompactionUsage(outOfTurnRows);
+	const allRecordedTokens = usageTotals.totalTokens + workerUsage.totalTokens;
+	const missingTokenCalls =
+		sessions.reduce((sum, session) => sum + session.estimatedUsageCalls, 0) +
+		outOfTurnRows.filter((row) => row.usage.totalTokens === null).length +
+		workerUsage.missingTokenRuns;
 	const usageRows = [...usageByModel.values()].sort(
 		(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.providerId.localeCompare(b.providerId),
 	);
@@ -629,6 +713,27 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				});
 			}
 		}
+		if (usageMeasurable || presence.receiptsPresent) {
+			emit({
+				kind: "fact",
+				fact: "all-recorded-tokens",
+				knownSubtotal: allRecordedTokens,
+				sessionAndSideCallTokens: usageTotals.totalTokens,
+				workerRunTokens: workerUsage.totalTokens,
+				missingTokenCalls,
+			});
+		}
+		if (presence.receiptsPresent) {
+			emit({ kind: "fact", fact: "worker-tokens", ...workerUsage });
+			for (const [audience, totals] of workerUsageByAudience) {
+				emit({ kind: "fact", fact: "worker-audience-usage", audience, ...totals });
+			}
+			for (const row of [...workerUsageByModel.values()].sort(
+				(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.targetId.localeCompare(b.targetId),
+			)) {
+				emit({ kind: "fact", fact: "worker-model-usage", targetId: row.targetId, modelId: row.modelId, ...row.totals });
+			}
+		}
 		for (const [tool, totals] of topTools) emit({ kind: "fact", fact: "top-tool", tool, ...totals });
 		for (const [shape, count] of topShapes) {
 			emit({ kind: "fact", fact: "bash-shape", shape, count, sessions: shapeSessions.get(shape)?.size ?? 0 });
@@ -680,9 +785,14 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		`  permission decisions: ${permissions.requested} requested, ${permissions.granted} granted, ${permissions.denied} denied, ${permissions.expired} expired; approval rate ${permissions.approvalRate === null ? "n/a" : `${(permissions.approvalRate * 100).toFixed(1)}%`}`,
 	);
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
+	if (usageMeasurable || presence.receiptsPresent) {
+		out(
+			`  all recorded tokens in window: ${allRecordedTokens} known subtotal (session and side calls ${usageTotals.totalTokens}, worker runs ${workerUsage.totalTokens}; ${missingTokenCalls} calls missing token usage)`,
+		);
+	}
 	if (usageMeasurable) {
 		out(
-			`  tokens in window: ${usageAmount(reportedTotals.totalTokens)} over ${usageTotals.apiCalls} model calls (input ${usageAmount(reportedTotals.input)}, output ${usageAmount(reportedTotals.output)}, cache read ${usageAmount(reportedTotals.cacheRead)}, cache write ${usageAmount(reportedTotals.cacheWrite)}, reasoning ${usageAmount(reportedTotals.reasoningTokens)})`,
+			`  session and side-call tokens in window: ${usageAmount(reportedTotals.totalTokens)} over ${usageTotals.apiCalls} model calls (input ${usageAmount(reportedTotals.input)}, output ${usageAmount(reportedTotals.output)}, cache read ${usageAmount(reportedTotals.cacheRead)}, cache write ${usageAmount(reportedTotals.cacheWrite)}, reasoning ${usageAmount(reportedTotals.reasoningTokens)})`,
 		);
 		if (hasLabelledCall(callOrigins)) {
 			// Only printed when a labelled call is in the window. Over an archive
@@ -750,6 +860,35 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							typeof reported.costUsd === "number" ? `$${reported.costUsd.toFixed(4)}` : "unknown",
 						];
 					}),
+				]),
+			),
+		);
+	}
+	if (workerUsage.runs > 0) {
+		out("");
+		out(
+			`  worker runs: ${workerUsage.runs}, ${workerUsage.missingTokenRuns} missing token usage, ${workerUsage.missingBreakdownRuns} missing input/output/cache breakdown, ${workerUsage.unpricedRuns} unpriced`,
+		);
+		out(
+			`  worker known subtotals: input ${workerUsage.input}, output ${workerUsage.output}, cache read ${workerUsage.cacheRead}, cache write ${workerUsage.cacheWrite}, reasoning ${workerUsage.reasoningTokens}, cost $${workerUsage.knownCostUsd.toFixed(4)}`,
+		);
+		out(
+			`  worker audiences: ${[...workerUsageByAudience].map(([audience, totals]) => `${audience} ${totals.runs} runs / ${totals.totalTokens} known tokens`).join(", ")}`,
+		);
+		process.stdout.write(
+			indent(
+				formatColumns([
+					["worker target", "model", "runs", "tokens", "missing usage", "known cost"],
+					...[...workerUsageByModel.values()]
+						.sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || a.targetId.localeCompare(b.targetId))
+						.map((row) => [
+							row.targetId,
+							row.modelId,
+							String(row.totals.runs),
+							String(row.totals.totalTokens),
+							String(row.totals.missingTokenRuns),
+							`$${row.totals.knownCostUsd.toFixed(4)}${row.totals.unpricedRuns > 0 ? " +?" : ""}`,
+						]),
 				]),
 			),
 		);
@@ -973,6 +1112,29 @@ async function readReceipts(
 			sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : null,
 			toolStats,
 			skillActivations,
+			targetId: typeof parsed.targetId === "string" ? parsed.targetId : "unknown",
+			modelId: typeof parsed.wireModelId === "string" ? parsed.wireModelId : "unknown",
+			audience:
+				parsed.agentAudience === "base" ||
+				parsed.agentAudience === "shadow" ||
+				parsed.agentAudience === "internal" ||
+				parsed.agentAudience === "custom"
+					? parsed.agentAudience
+					: "unknown",
+			tokenCount: nonnegativeNumberOrNull(parsed.tokenCount),
+			inputTokenCount: nonnegativeNumberOrNull(parsed.inputTokenCount),
+			outputTokenCount: nonnegativeNumberOrNull(parsed.outputTokenCount),
+			cacheReadTokenCount: nonnegativeNumberOrNull(parsed.cacheReadTokenCount),
+			cacheWriteTokenCount: nonnegativeNumberOrNull(parsed.cacheWriteTokenCount),
+			reasoningTokenCount: nonnegativeNumberOrNull(parsed.reasoningTokenCount),
+			costUsd:
+				parsed.costProvenance === "known" || parsed.costProvenance === "known_free" || parsed.costProvenance === "estimated"
+					? nonnegativeNumberOrNull(parsed.costUsd)
+					: null,
+			missingTokenUsage:
+				nonnegativeNumberOrNull(parsed.tokenCount) === null ||
+				(isRecord(parsed.externalTelemetry) && parsed.externalTelemetry.tokenUsage !== "provider-reported") ||
+				(parsed.tokenCount === 0 && Array.isArray(parsed.upstreamResponses) && parsed.upstreamResponses.length > 0),
 		});
 	}
 	return receipts;
@@ -1021,6 +1183,14 @@ async function readSessions(
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
 			usageCalls: ledgerUsageCalls(accountingEntries),
+			estimatedUsageCalls: accountingEntries.filter(
+				(entry) =>
+					entry.kind === "message" &&
+					entry.role === "assistant" &&
+					isRecord(entry.payload) &&
+					isRecord(entry.payload.usage) &&
+					entry.payload.usage.estimated === true,
+			).length,
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
 		};
 		for (const entry of parsedEntries.entries) {
@@ -1171,6 +1341,10 @@ function maybeJsonRecord(value: unknown): Record<string, unknown> | null {
 
 function numberOr0(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function nonnegativeNumberOrNull(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
