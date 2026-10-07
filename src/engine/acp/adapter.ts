@@ -9,6 +9,7 @@ import { resolveCostProvenance } from "../../domains/providers/types/cost-proven
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
+import { withInstalledCodex } from "./codex-launch.js";
 import { AcpTimeoutError } from "./errors.js";
 import { AcpEventMapper } from "./event-mapper.js";
 import { AcpToolMediator } from "./tool-mediator.js";
@@ -311,6 +312,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			}),
 		);
 	}
+	transportOptions.env = withInstalledCodex(input.agent, transportOptions.cwd ?? input.cwd, transportOptions.env);
 	if (input.terminationGraceMs !== undefined) transportOptions.terminationGraceMs = input.terminationGraceMs;
 	if (input.terminationWaitMs !== undefined) transportOptions.terminationWaitMs = input.terminationWaitMs;
 	const transport = createStdioTransport(input.agent.command, input.agent.args ?? [], transportOptions);

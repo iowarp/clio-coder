@@ -28,6 +28,7 @@ import { createShareArchive, planShareImport } from "../../src/domains/share/arc
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const PLAYBOOKS_MIGRATION_ID = "2026-10-06-playbooks-and-packages";
+const ACP_ADAPTERS_MIGRATION_ID = "2026-10-07-acp-adapters";
 const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..", "..");
 
 describe("settings and migration boundary", () => {
@@ -293,7 +294,7 @@ targets:
 	it("orders migrations before strict readers and records each migration once", async () => {
 		const ids = listMigrations().map((migration) => migration.id);
 		const retiredPanes = "2026-09-01-retire-panes-knobs";
-		deepStrictEqual(ids, [SETTINGS_V2_MIGRATION_ID, retiredPanes, PLAYBOOKS_MIGRATION_ID]);
+		deepStrictEqual(ids, [SETTINGS_V2_MIGRATION_ID, retiredPanes, PLAYBOOKS_MIGRATION_ID, ACP_ADAPTERS_MIGRATION_ID]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
 		const first = await runPending(stateDir);
@@ -305,7 +306,7 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(stateDir, "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
