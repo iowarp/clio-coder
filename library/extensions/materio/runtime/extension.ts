@@ -815,17 +815,35 @@ const FORM_FILES: Record<string, string> = {
 function textQuestion(id: string, label: string, initial?: string): InterviewQuestion {
 	return { id, label, kind: "text", ...(initial === undefined ? {} : { initial }) };
 }
+// Clio caps an option value and label at 120 characters; a longer template
+// description keeps its full text in the option detail.
+const OPTION_LIMIT = 120;
+function clipOption(text: string): string {
+	return text.length <= OPTION_LIMIT ? text : `${text.slice(0, OPTION_LIMIT - 1)}…`;
+}
 function choice(id: string, label: string, values: string[], initial?: string): InterviewQuestion {
 	return {
 		id,
 		label,
 		kind: "single",
-		options: values.map((value) => ({ value, label: value })),
+		options: values.map((value) => {
+			const short = clipOption(value);
+			return { value: short, label: short, ...(short === value ? {} : { detail: clipIntro(value) }) };
+		}),
 		...(initial === undefined ? {} : { initial }),
 	};
 }
+// Clio rejects an interview intro longer than 2000 characters.
+const INTRO_LIMIT = 2000;
+function clipIntro(text: string): string {
+	return text.length <= INTRO_LIMIT ? text : `${text.slice(0, INTRO_LIMIT - 1)}…`;
+}
 function step(key: string, questions: InterviewQuestion[], context?: string): InterviewStep {
-	return { key, questions, ...(context ? { intro: { t: "text", text: context, wrap: "wrap" } as View } : {}) };
+	return {
+		key,
+		questions,
+		...(context ? { intro: { t: "text", text: clipIntro(context), wrap: "wrap" } as View } : {}),
+	};
 }
 function assumptionsSteps(tasks: Task[]): InterviewStep[] {
 	const labels: Record<string, string[]> = {
@@ -879,14 +897,21 @@ async function startForm(input: Record<string, unknown>, ctx: ExtensionContextV2
 		if (form === "upload-data") throw new Error("Upload-data owns its confirmation in the collection form.");
 		const draft = stringInput(input, "draft");
 		if (form === "define-research-tasks") validateWorkflowDraft(ctx, draft);
+		let shown = `${context}\n\n${draft}`;
+		if (shown.length > INTRO_LIMIT) {
+			const saved = `drafts/${form}.md`;
+			writeResearch(ctx.snapshot.workspace, saved, draft);
+			const note = `\n\n… Full draft saved for review: .research/${saved}`;
+			shown = `${shown.slice(0, INTRO_LIMIT - note.length)}${note}`;
+		}
 		steps = [
 			step(
 				"confirm",
 				[
 					choice("decision", "Save this proposed document, or return corrections?", ["accept", "revise"], "revise"),
-					textQuestion("corrections", "Corrections or follow-up answers (leave empty to accept)", ""),
+					textQuestion("corrections", "Corrections or follow-up answers (none to accept)", "none"),
 				],
-				`${context}\n\n${draft}`,
+				shown,
 			),
 		];
 	} else if (stage === "select") {
@@ -1153,7 +1178,7 @@ async function answerForm(answer: InterviewAnswer, ctx: ExtensionContextV2): Pro
 	const file = FORM_FILES[form] as string;
 	if (stage === "confirm") {
 		const confirmed = session.answers.confirm;
-		if (confirmed?.decision !== "accept" || confirmed.corrections !== "")
+		if (confirmed?.decision !== "accept" || !/^(|none|no|n\/a|-)$/i.test(String(confirmed.corrections ?? "").trim()))
 			return {
 				done: true,
 				text: "Revision requested; no files changed. Revise the draft with these answers and reopen confirmation.",
