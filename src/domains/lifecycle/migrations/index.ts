@@ -37,6 +37,7 @@ import { withStateFileLock } from "../../../core/state-file-lock.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
 import playbooksAndPackages from "./2026-10-06-playbooks-and-packages.js";
+import acpAdapters from "./2026-10-07-acp-adapters.js";
 import { REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
 /** What a migration tells the operator: what it changed, and what still needs them. */
@@ -83,7 +84,12 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 // migrations (`2026-08-18-lmstudio-runtime-id`, `2026-09-18-ollama-runtime-id`)
 // were retired with the legacy naming layer. Homes that recorded their ids keep
 // them in the manifest; an id with no registered migration is inert.
-const REGISTRY: ReadonlyArray<Migration> = Object.freeze([settingsV2, retirePanesKnobs, playbooksAndPackages]);
+const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
+	settingsV2,
+	retirePanesKnobs,
+	playbooksAndPackages,
+	acpAdapters,
+]);
 
 // A fresh home records REGISTERED_MIGRATION_IDS as already applied. An id
 // registered here but missing there would be recorded for no home, and one
