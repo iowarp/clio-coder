@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import type { WorkerPermissionMode } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnDelegatesTool } from "../../core/turn-constraints.js";
+import { workerPermitDigest } from "../../worker/protocol.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import type { RuntimeEnforcement } from "../providers/index.js";
 import { classify } from "./action-classifier.js";
@@ -218,33 +218,6 @@ export interface WorkerPermitInput {
 	runtime: { id: string; targetId: string; enforcement: RuntimeEnforcement; trustedUnmediated: boolean };
 }
 
-function canonical(value: unknown): string {
-	if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-	if (value !== null && typeof value === "object") {
-		const entries = Object.entries(value as Record<string, unknown>)
-			.filter(([, entry]) => entry !== undefined)
-			.sort(([left], [right]) => left.localeCompare(right));
-		return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`).join(",")}}`;
-	}
-	return JSON.stringify(value);
-}
-
-function workerPermitDigest(
-	ceiling: WorkerPermitCeiling,
-	allowance: WorkerPermitAllowance,
-	trustedUnmediated: boolean,
-): string {
-	const payload = {
-		version: WORKER_PERMIT_VERSION,
-		ceiling,
-		allowance,
-		...(trustedUnmediated ? { trustedUnmediated } : {}),
-	};
-	return createHash("sha256")
-		.update(`clio-coder.workerPermit:${canonical(payload)}`, "utf8")
-		.digest("hex");
-}
-
 /**
  * Resolve the immutable permit for one attempt. Narrowing only narrows: a
  * request for a wider allowance than the recipe and settings give is an
@@ -328,7 +301,12 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 			writeRoots: Object.freeze([...ceiling.writeRoots]),
 		}),
 		allowance: Object.freeze(allowance),
-		digest: workerPermitDigest(ceiling, allowance, unmediatedWrite),
+		digest: workerPermitDigest({
+			version: WORKER_PERMIT_VERSION,
+			ceiling,
+			allowance,
+			...(unmediatedWrite ? { trustedUnmediated: true as const } : {}),
+		}),
 	});
 }
 

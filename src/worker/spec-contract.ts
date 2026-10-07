@@ -24,7 +24,7 @@ import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js
 import type { WorkerPermit } from "../domains/safety/worker-permit.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { parseWorkerContextSeed } from "./context-seed.js";
-import { INTERNAL_HELPER_RESULT_KINDS } from "./protocol.js";
+import { INTERNAL_HELPER_RESULT_KINDS, workerPermitDigest } from "./protocol.js";
 
 /**
  * Current attested, budget-bearing dispatch document emitted by this release.
@@ -799,7 +799,7 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	}
 	readEnum(enforcement.toolNarrowing, "WorkerSpec.permit.ceiling.enforcement.toolNarrowing", ["exact", "none"] as const);
 	readEnum(ceiling.capabilityClass, "WorkerSpec.permit.ceiling.capabilityClass", PERMIT_CAPABILITY_CLASSES);
-	readStringArray(ceiling.tools, "WorkerSpec.permit.ceiling.tools");
+	const ceilingTools = new Set(readStringArray(ceiling.tools, "WorkerSpec.permit.ceiling.tools"));
 	if (typeof ceiling.readOnly !== "boolean") throw new Error("WorkerSpec.permit.ceiling.readOnly must be a boolean");
 	const roots = readStringArray(ceiling.writeRoots, "WorkerSpec.permit.ceiling.writeRoots");
 	const allowance = readRecord(permit.allowance, "WorkerSpec.permit.allowance");
@@ -832,6 +832,25 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	if (specRoots.length !== roots.length || specRoots.some((root, index) => root !== roots[index])) {
 		throw new Error("WorkerSpec.writeRoots disagree with the permit ceiling");
 	}
+	// The host builds the ceiling from the same admitted surface it writes as
+	// allowedTools, so a tool outside it means the document was edited after
+	// admission; the ceiling is the bound nothing grants past.
+	const outside = readStringArray(spec.allowedTools, "WorkerSpec.allowedTools").filter(
+		(tool) => !ceilingTools.has(tool),
+	);
+	if (outside.length > 0) {
+		throw new Error(`WorkerSpec.allowedTools exceed the permit ceiling: ${outside.join(", ")}`);
+	}
+	// Admission and the receipt name the permit by this digest. Recomputing it
+	// here keeps a permit edited after sealing from running under authority no
+	// receipt records.
+	const sealed = workerPermitDigest({
+		version: 1,
+		ceiling,
+		allowance,
+		...(permit.trustedUnmediated === true ? { trustedUnmediated: true as const } : {}),
+	});
+	if (sealed !== digest) throw new Error("WorkerSpec.permit.digest does not match the permit");
 }
 
 const WORKER_SANDBOX_KEYS = new Set([

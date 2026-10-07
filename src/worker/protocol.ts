@@ -456,6 +456,27 @@ export function workerSpecDigest(spec: unknown): string {
 	return sha256Hex(`clio-coder.workerSpec:${canonicalJson(spec)}`);
 }
 
+/**
+ * Digest of a worker permit's authority: its version, ceiling, allowance and
+ * trust opt-in, never its own digest field. The host seals it and the worker
+ * recomputes it, so the computation lives here rather than in the safety
+ * domain the worker may not value-import.
+ */
+export function workerPermitDigest(permit: {
+	version: number;
+	ceiling: unknown;
+	allowance: unknown;
+	trustedUnmediated?: true;
+}): string {
+	const payload = {
+		version: permit.version,
+		ceiling: permit.ceiling,
+		allowance: permit.allowance,
+		...(permit.trustedUnmediated === true ? { trustedUnmediated: true } : {}),
+	};
+	return sha256Hex(`clio-coder.workerPermit:${canonicalJson(payload)}`);
+}
+
 /** Stable signature of the effective tool surface a worker will expose. */
 export function toolSignatureOf(names: ReadonlyArray<string>): string {
 	return sha256Hex(`clio-coder.tools:${[...names].sort().join(",")}`);
