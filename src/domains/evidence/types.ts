@@ -84,6 +84,8 @@ export interface EvidenceDecision {
 }
 
 export interface EvidenceOverview {
+	/** Display artifacts locate activity; sealed receipts retain authority. */
+	recordings?: import("../dispatch/index.js").RecordingManifest[];
 	/** Recorded arguments resolved from authenticated receipts on the linked active session path. */
 	decisions?: EvidenceDecision[];
 	version: 1;

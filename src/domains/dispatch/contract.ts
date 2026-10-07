@@ -40,6 +40,8 @@ export interface ResolvedVerificationCheck {
 }
 
 export interface DispatchRequest extends JobSpec {
+	/** Opt-in bounded redacted display-event asciicast; never a PTY around worker NDJSON. */
+	record?: boolean;
 	/** Generated context needs stable local sampling across identical runs. */
 	sampling?: "deterministic";
 	/** Epoch ms when exploration ends and the worker must take its terminal round. */

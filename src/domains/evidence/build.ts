@@ -32,6 +32,7 @@ import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js";
+import { exportEvidenceRecordings } from "./recordings.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
@@ -210,7 +211,21 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		renderTranscript(overview, redactedRunSources, sessionLinks, trustStatusRaw, findings),
 		tally,
 	);
-	const finalOverview: EvidenceOverview = { ...overview, redactionCount: tally.count };
+	const recordings = exportEvidenceRecordings(
+		options.stateDir,
+		directory,
+		runSources.map((source) => source.envelope),
+	);
+	const finalOverview: EvidenceOverview = {
+		...overview,
+		redactionCount: tally.count,
+		...(recordings.length
+			? {
+					recordings,
+					files: [...overview.files, ...recordings.flatMap((recording) => (recording.castPath ? [recording.castPath] : []))],
+				}
+			: {}),
+	};
 	await writeEvidenceFiles(
 		directory,
 		finalOverview,

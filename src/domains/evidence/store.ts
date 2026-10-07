@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
-import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/index.js";
+import { type GateDecisionArtifact, parseRecordingManifest, verifyGateDecisionArtifact } from "../dispatch/index.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import { hasRunProvenance, type RunProvenanceView, runProvenanceFromUnknown } from "./provenance.js";
@@ -233,6 +233,7 @@ function parseOverview(value: unknown, source: string): EvidenceOverview {
 		tags,
 		files,
 		...(redactionCount === undefined ? {} : { redactionCount }),
+		...(value.recordings === undefined ? {} : { recordings: readRecordings(value.recordings) }),
 		...(value.decisions === undefined ? {} : { decisions: readDecisions(value.decisions, `${source}.decisions`) }),
 	};
 }
@@ -351,4 +352,9 @@ function readDecisions(value: unknown, source: string): NonNullable<EvidenceOver
 			record: entry.record,
 		};
 	});
+}
+
+function readRecordings(value: unknown): NonNullable<EvidenceOverview["recordings"]> {
+	if (!Array.isArray(value) || value.length > 10000) throw new Error("invalid evidence recordings");
+	return value.map(parseRecordingManifest);
 }

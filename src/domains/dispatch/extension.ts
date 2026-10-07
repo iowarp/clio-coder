@@ -334,6 +334,7 @@ import {
 	typedValidationFactsFromVerifyCalls,
 	verifyCheckIdentity,
 } from "./receipt-findings.js";
+import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
@@ -362,6 +363,7 @@ import {
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
 import { reduceRouteQuality } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
+import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
@@ -5515,6 +5517,8 @@ export function createDispatchBundle(
 				promptSignature: lifecycle.promptSignature,
 				toolSignature: lifecycle.toolSignature,
 			});
+			if (req.record === true)
+				ledgerRef.update(envelope.id, { recording: recordingJournal.start(envelope.id, LOCAL_RUN_NODE) });
 			runIdForPermissionAudit = envelope.id;
 			lineage = lineageFor(req, envelope.id);
 			if (req.lineage === undefined) {
@@ -7074,6 +7078,10 @@ export function createDispatchBundle(
 				promptSignature: lifecycle.promptSignature,
 				toolSignature: lifecycle.toolSignature,
 			});
+			if (req.record === true)
+				ledgerRef.update(envelope.id, {
+					recording: recordingJournal.start(envelope.id, placement?.node ?? LOCAL_RUN_NODE),
+				});
 			runIdForPermissionAudit = envelope.id;
 			if (grantAttempt !== undefined) grantRunFallbacks.set(envelope.id, spec.escalation?.fallback ?? "deny");
 			lineage = lineageFor(req, envelope.id);
@@ -9032,6 +9040,7 @@ export function createDispatchBundle(
 		return receipt;
 	}
 
+	const recordingJournal = createRecordingJournal();
 	let journalBridge: RunEventJournalBridge | null = null;
 
 	const extension: DomainExtension = {
@@ -9040,7 +9049,25 @@ export function createDispatchBundle(
 			// domain's own progress and terminal channels, so it covers a run
 			// whose caller iterates the handle itself (every operator path) as
 			// well as one drained by the dispatch tool's event registry.
-			if (options?.journalRunEvents === true) journalBridge = attachRunEventJournalBridge(context.bus);
+			journalBridge = attachRunEventJournalBridge(context.bus, {
+				acceptRun: (runId) => options?.journalRunEvents === true || recordingJournal.accepts(runId),
+				journal: {
+					open(id, agent) {
+						if (options?.journalRunEvents === true) defaultRunEventJournal().open(id, agent);
+					},
+					append(id, entry) {
+						recordingJournal.append(id, entry);
+						if (options?.journalRunEvents === true) defaultRunEventJournal().append(id, entry);
+					},
+					receipt(id, receipt) {
+						if (options?.journalRunEvents === true) defaultRunEventJournal().receipt(id, receipt);
+					},
+					terminal(id, outcome, detail) {
+						recordingJournal.terminal(id, outcome, detail);
+						if (options?.journalRunEvents === true) defaultRunEventJournal().terminal(id, outcome, detail);
+					},
+				},
+			});
 			// Phase D revocation: a pending grant never outlives its owner. A
 			// session that parks or ends and a main turn the operator cancels
 			// revoke what they hold; a run's own exit and abort revoke at the run.
@@ -9140,6 +9167,7 @@ export function createDispatchBundle(
 				// After drain(), so the last run's terminal line is written before the
 				// bridge stops listening.
 				journalBridge?.stop();
+				recordingJournal.stop();
 				journalBridge = null;
 				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
 				grantBroker.dispose();

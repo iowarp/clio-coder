@@ -95,6 +95,8 @@ export interface RunEventJournalBridge {
 }
 
 export interface AttachRunEventJournalBridgeOptions {
+	/** Skip projection when neither history nor explicit recording needs this run. */
+	acceptRun?: (runId: string) => boolean;
 	/** Sink override; defaults to the process-wide journal. */
 	journal?: RunEventJournalSink;
 	/** Monotonic clock for the coalescing window; tests pin it. */
@@ -290,7 +292,7 @@ export function attachRunEventJournalBridge(
 	 */
 	const seal = (outcome: string, detail: string | null | undefined, payload: unknown): void => {
 		const identity = runIdentity(payload);
-		if (identity === null) return;
+		if (identity === null || options.acceptRun?.(identity.runId) === false) return;
 		ensureOpen(identity.runId, identity.agentId);
 		flushText(identity.runId);
 		feeds.delete(identity.runId);
@@ -303,7 +305,7 @@ export function attachRunEventJournalBridge(
 	const unsubscribes = [
 		bus.on(BusChannels.DispatchProgress, (payload: DispatchProgressPayload) => {
 			const identity = runIdentity(payload);
-			if (identity === null) return;
+			if (identity === null || options.acceptRun?.(identity.runId) === false) return;
 			const { runId } = identity;
 			const event = payload.event;
 			const delta = workerTextDelta(event);

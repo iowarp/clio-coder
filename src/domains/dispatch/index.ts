@@ -117,6 +117,8 @@ export type {
 	FleetRunPreviewWave,
 } from "./fleet-run-preview.js";
 export { compileFleetRunPreview, fleetRouteResolver } from "./fleet-run-preview.js";
+export type { FleetToolInstallPlan } from "./fleet-tool-install.js";
+export { describeFleetToolInstall, executeFleetToolInstall, prepareFleetToolInstall } from "./fleet-tool-install.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,
@@ -152,6 +154,8 @@ export {
 } from "./intent-compatibility.js";
 export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
+export type { CastOutputEvent, RecordingManifest, RecordingReference } from "./recording.js";
+export { parseRecordingCast, parseRecordingManifest, readRunRecording, recordingReference } from "./recording.js";
 export { createRouteHistoryStore } from "./route-history.js";
 export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.js";
 export { reduceRouteQuality } from "./route-quality.js";
