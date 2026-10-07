@@ -106,6 +106,7 @@ interface Capture {
 	startMs: number;
 	frames: CastOutputEvent[];
 	bytes: number;
+	truncated: boolean;
 }
 
 /** Bounded in-memory display capture; only fully redacted text is ever written to disk. */
@@ -234,6 +235,7 @@ export function createRecordingJournal(
 				startMs: nowMs(),
 				frames: [],
 				bytes: 0,
+				truncated: false,
 			};
 			captures.set(runId, capture);
 			try {
@@ -257,8 +259,18 @@ export function createRecordingJournal(
 			);
 			const frame: CastOutputEvent = [Math.min(elapsed, duration) / 1000, "o", text];
 			const bytes = Buffer.byteLength(JSON.stringify(frame)) + 1;
-			if (elapsed > duration || capture.bytes + bytes > cap - 512 || capture.frames.length >= 10000) {
+			if (capture.truncated || elapsed > duration || capture.bytes + bytes > cap - 512 || capture.frames.length >= 10000) {
 				capture.manifest.droppedFrames += 1;
+				if (!capture.truncated) {
+					// Text flushes mid-token, so the kept tail can end in a secret's head too short for
+					// any redaction pattern. Trim that trailing word, and keep dropping so no later frame
+					// resumes inside the dropped one.
+					capture.truncated = true;
+					for (const kept of [...capture.frames].reverse()) {
+						kept[2] = kept[2].replace(/\S+$/u, "");
+						if (kept[2] !== "") break;
+					}
+				}
 				return;
 			}
 			capture.bytes += bytes;
