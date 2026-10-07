@@ -349,16 +349,37 @@ export async function searchSemantic(
 	}
 	const policy = createSafetyPolicyEngine({ cwd: app.projectId });
 	const records = loadMemoryRecordsSync(clioDataDir());
-	const eligibleMemoryIds = eligibleSemanticMemory(records, {
+	const evidenceRoot = join(clioDataDir(), "evidence");
+	const inboxRoots = registeredInboxes(app.config, app.projectId).flatMap((inbox) => {
+		try {
+			return [realpathSync(inbox.root)];
+		} catch {
+			return [];
+		}
+	});
+	const eligibleMemories = eligibleSemanticMemory(records, {
 		activeRepository: canonicalMemoryRepositoryIdentity(app.projectId),
-	}).map((record) => record.id);
+	});
+	const eligibleMemoryHashes = new Map(
+		eligibleMemories.map((record) => [record.id, sourceHash(JSON.stringify(record))]),
+	);
 	return app.index.search(
 		query,
 		{
 			...filters,
 			projectId: app.projectId,
-			eligibleMemoryIds,
+			eligibleMemoryIds: eligibleMemories.map((record) => record.id),
 			allowsPath: (path) => policy.readablePath(path),
+			allowsRecord: (record) => {
+				if (record.kind === "memory") return record.contentHash === eligibleMemoryHashes.get(record.memoryId ?? "");
+				const roots =
+					record.kind === "evidence" || record.kind === "recording"
+						? [evidenceRoot]
+						: record.kind === "inbox"
+							? inboxRoots
+							: [app.projectId];
+				return roots.some((root) => within(root, record.path));
+			},
 		},
 		signal,
 	);

@@ -143,6 +143,15 @@ test("scope, visibility and current memory eligibility precede scoring; fallback
 		0,
 	);
 	assert.equal(offline.searchVector("checkpoint", undefined, { projectId: "project-a", limit: 1 }).hits.length, 1);
+	assert.deepEqual(
+		(
+			await offline.search("checkpoint", {
+				projectId: "project-a",
+				allowsRecord: (candidate) => candidate.id === "local",
+			})
+		).hits.map((hit) => hit.id),
+		["local"],
+	);
 	await assert.rejects(index.refresh([{ ...record("foreign"), projectId: "foreign" }]), /foreign/);
 });
 

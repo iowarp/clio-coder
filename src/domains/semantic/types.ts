@@ -66,6 +66,8 @@ export interface SemanticFilters {
 	projectId: string;
 	/** Host-owned path gate applied before scoring; never derive it from model tool arguments. */
 	allowsPath?: (path: string) => boolean;
+	/** Host-owned source gate, for checking a cached locator against current roots. */
+	allowsRecord?: (record: SemanticRecord) => boolean;
 	includeGlobal?: boolean;
 	kinds?: readonly SemanticSourceKind[];
 	runId?: string;
