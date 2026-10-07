@@ -3,7 +3,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { JUDGE_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
+import {
+	COMPETE_STANCES,
+	competePresentationOrder,
+	competeStanceFor,
+	JUDGE_GATE_PROMPT,
+} from "../../src/domains/dispatch/gate-role-prompts.js";
 import type { RunReceiptOutput } from "../../src/domains/dispatch/types.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
@@ -59,6 +64,33 @@ it("delivers distinct sealed inline explanations with identity even when both tr
 	}
 	match(task, /Unchanged source trees do not establish a tie/);
 	match(JUDGE_GATE_PROMPT, /inline answers and citations/);
+});
+
+it("orders candidates and stances by group hash while each record keeps its own ordinal", () => {
+	const four = [1, 2, 3, 4].map((index) => ({ index, branch: `candidate/${index}`, path: `/repo/candidate-${index}` }));
+	const runs = four.map((candidate) => run(candidate.index, `answer ${candidate.index}`));
+	const orders = new Set<string>();
+	const firstStances = new Set<string>();
+	for (const group of ["compete-a", "compete-b", "compete-c", "compete-d", "compete-e", "compete-f"]) {
+		const order = competePresentationOrder(group, four.length);
+		deepStrictEqual(order, competePresentationOrder(group, four.length), "the group id alone reproduces the order");
+		deepStrictEqual([...order].sort(), [0, 1, 2, 3]);
+		orders.add(order.join(","));
+		const data = records(renderCompeteJudgeTask("Compare answers", four, [], runs, order));
+		deepStrictEqual(
+			data.map((item) => item.candidate),
+			order.map((position) => position + 1),
+		);
+		for (const item of data) {
+			strictEqual(item.branch, `candidate/${item.candidate}`);
+			strictEqual(item.output.text, `answer ${item.candidate}`);
+		}
+		const stances = four.map((candidate) => competeStanceFor(group, candidate.index));
+		strictEqual(new Set(stances).size, COMPETE_STANCES.length, "candidates in one compete never share a stance");
+		firstStances.add(stances[0] as string);
+	}
+	ok(orders.size > 1, "reading order varies across groups");
+	ok(firstStances.size > 1, "candidate 1 does not always carry the same stance");
 });
 
 it("keeps malicious candidate prose inside its JSON evidence record", () => {

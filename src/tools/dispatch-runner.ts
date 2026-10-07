@@ -42,9 +42,9 @@ import {
 	stagePendingGateOutput,
 } from "../domains/dispatch/gate-decisions.js";
 import {
-	COMPETE_STANCES,
 	COUNCIL_JUDGE_PROMPT,
-	type CompeteStance,
+	competePresentationOrder,
+	competeStanceFor,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
@@ -1297,8 +1297,6 @@ interface CompeteOutcome {
 	group: string;
 	winner: { index: number; branch: string; applied: boolean } | null;
 	needsDecision?: string;
-	/** Rendered board the candidates and the judge shared, null when empty. */
-	board?: string | null;
 }
 
 interface OwnedCompeteRun {
@@ -1360,12 +1358,10 @@ async function runCompete(
 	// preserved, and malformed crash leftovers remain untouched.
 	recoverCleanupReadyCompeteGroups(requestedRoot);
 	const group = newGateGroupId("compete");
-	// Candidates run concurrently and the judge reads what they contributed, so
-	// the board reaches the judge with corroboration and dispute labels instead
-	// of only per-candidate output.
-	const ledgerId = newGateGroupId("ledger");
-	const ledger = { id: ledgerId, sequence: 0 };
-	await openAgentLedger(ledgerId);
+	// Compete opens no agent ledger. A shared board let candidates read each
+	// other's live posts, which correlates attempts that are meant to be
+	// independent, and its runId-grouped entries told the judge which candidate
+	// wrote what. The judge sees only sealed receipt evidence.
 	let ownership: CompeteGroupOwnership | null = null;
 	const worktrees: CandidateWorktree[] = [];
 	const runs: CompletedRun[] = [];
@@ -1539,8 +1535,7 @@ async function runCompete(
 							cycle: worktree.index,
 							...(worktree.provenance ? { worktree: worktree.provenance } : {}),
 						},
-						ledger,
-						competeStance: COMPETE_STANCES[(worktree.index - 1) % COMPETE_STANCES.length] as CompeteStance,
+						competeStance: competeStanceFor(group, worktree.index),
 					};
 					return admitOwnedRun(
 						withResolvedPlanTaskPin(
@@ -1596,7 +1591,13 @@ async function runCompete(
 				agentId: gateDeciderAgentId(compete.judge?.agent),
 				...(base.budget === undefined ? {} : { budget: base.budget }),
 				executionRole: "judge",
-				task: renderCompeteJudgeTask(base.task, worktrees, stats, candidateRuns),
+				task: renderCompeteJudgeTask(
+					base.task,
+					worktrees,
+					stats,
+					candidateRuns,
+					competePresentationOrder(group, worktrees.length),
+				),
 				// Candidate prose and receipt locators are evidence, not inferred authority.
 				// Read-only execution is enforced by the role/autonomy, not empty write roots.
 				intent: narrowDispatchIntentToReadOnly(
@@ -1619,7 +1620,6 @@ async function runCompete(
 					cycle: 1,
 					subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
 				},
-				ledger,
 				...(compete.judge?.model !== undefined ? { model: compete.judge.model } : {}),
 				...(compete.judge?.target !== undefined ? { target: compete.judge.target } : {}),
 				...(compete.judge?.node !== undefined ? { node: compete.judge.node } : {}),
@@ -1777,10 +1777,6 @@ async function runCompete(
 	}
 	const finalizationErrors: unknown[] = [];
 	await Promise.allSettled(ownedRuns.map((run) => run.settlement));
-	// Every worker has settled, so no further post can be admitted. The board is
-	// read here, on the way past, for the model that started the compete.
-	await closeAgentLedger(ledgerId);
-	const board = renderAgentLedgerBoard(ledgerId, ledgerProjectionFor(deps, ledgerId));
 	finalizationErrors.push(...abortErrors);
 
 	// Losers are always cleaned; the winner's worktree and branch survive
@@ -1835,7 +1831,7 @@ async function runCompete(
 	}
 	if (primaryError !== null) throw primaryError;
 	if (outcome === null) throw new Error("compete lifecycle produced no outcome");
-	return { ...outcome, board };
+	return outcome;
 }
 
 /**
@@ -2034,10 +2030,9 @@ function competeResult(
 	autonomy: AutonomyLevel,
 	maxOutputBytes: number,
 ): ToolResult {
-	const board = outcome.board ?? null;
-	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes, board);
+	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes);
 	const details: ToolResultDetails = {
-		...dispatchDetails(deps, "compete", outcome.runs, board),
+		...dispatchDetails(deps, "compete", outcome.runs),
 		compete: {
 			group: outcome.group,
 			winner: outcome.winner,
