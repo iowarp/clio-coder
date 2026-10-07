@@ -89,7 +89,8 @@ async function providerInput(
 	return { kind: "audio", data: bytes.toString("base64"), mimeType: input.mimeType as "audio/wav" };
 }
 
-export async function openSemanticApp(options: SemanticAppOptions) {
+/** Route, profile and service only; extension embeds and qualification never need the index. */
+async function openSemanticRoute(options: SemanticAppOptions) {
 	const settings = options.settings ?? readSettings();
 	const config = configured(settings);
 	const projectId = realpathSync(options.projectRoot);
@@ -120,6 +121,12 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 			...(authToken ? { authToken } : {}),
 		},
 	});
+	return { profile, profileIdentity: embeddingProfileIdentity(profile), projectId, config, target, service };
+}
+
+export async function openSemanticApp(options: SemanticAppOptions) {
+	const route = await openSemanticRoute(options);
+	const { config, projectId, profile, profileIdentity, service } = route;
 	const allowedMediaRoots = config.inboxes
 		.filter((inbox) => inbox.scope === "global" || inbox.project === projectId)
 		.flatMap((inbox) => {
@@ -131,7 +138,6 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 			}
 		});
 	const pathPolicy = createSafetyPolicyEngine({ cwd: projectId });
-	const profileIdentity = embeddingProfileIdentity(profile);
 	const index = new SemanticIndex({
 		projectId,
 		profile: embeddingProfileToSemanticProfile(profile, profileIdentity),
@@ -153,7 +159,7 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 				}
 			: {}),
 	});
-	return { index, profile, profileIdentity, projectId, config, target, service };
+	return { ...route, index };
 }
 
 /** Host-owned extension bridge. The extension sees vectors and profile identity, never target credentials. */
@@ -162,7 +168,7 @@ export async function embedForExtension(
 	request: ExtensionEmbeddingRequest,
 	signal: AbortSignal,
 ) {
-	const app = await openSemanticApp(options);
+	const app = await openSemanticRoute(options);
 	if (request.expectedProfileIdentity && request.expectedProfileIdentity !== app.profileIdentity)
 		throw new Error("Embedding profile changed; re-embed saved vectors before comparing them");
 	return app.service.embed({
@@ -387,6 +393,8 @@ export async function searchSemantic(
 		{
 			...filters,
 			projectId: app.projectId,
+			// User-scope inboxes and global memories are stamped global; roots and eligibility below still gate them.
+			includeGlobal: true,
 			eligibleMemoryIds: eligibleMemories.map((record) => record.id),
 			allowsPath: (path) => policy.readablePath(path),
 			allowsRecord: (record) => {
@@ -416,7 +424,7 @@ export async function statusSemantic(options: SemanticAppOptions) {
 
 /** Explicit operator canary: returned recipe must be persisted before use as a new profile. */
 export async function qualifySemantic(options: SemanticAppOptions): Promise<EmbeddingProfile> {
-	const app = await openSemanticApp(options);
+	const app = await openSemanticRoute(options);
 	const qualified = await qualifyEmbeddingProfile(app.service, app.profile);
 	const image = {
 		kind: "image" as const,
