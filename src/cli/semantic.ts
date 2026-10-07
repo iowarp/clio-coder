@@ -490,8 +490,9 @@ export async function runSemanticCommand(argv: readonly string[], dependencies: 
 		const context = await (dependencies.loadContext ?? defaultContext)();
 		const execute = dependencies.execute ?? (await defaultExecutor());
 		controller.signal.throwIfAborted();
+		// A resolved execute already committed its effect, such as a saved configure, so only a
+		// rejection reports cancellation.
 		const result = await execute(parsed.request, { ...context, signal: controller.signal });
-		controller.signal.throwIfAborted();
 		out(`${JSON.stringify(result ?? null, null, parsed.json ? undefined : 2)}\n`);
 		if (semanticOperationIncomplete(result)) {
 			errorOut(

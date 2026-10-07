@@ -204,10 +204,22 @@ it("delegates operations with settings APIs, renders JSON and removes signal lis
 			execute: async (_request, context) => {
 				process.emit("SIGINT");
 				assert.equal(context.signal.aborted, true);
-				return null;
+				throw context.signal.reason;
 			},
 		}),
 		130,
+	);
+	assert.equal(getEventListeners(process, "SIGINT").length, before);
+	// A save that completed before the interrupt reports its result instead of a cancellation.
+	assert.equal(
+		await runSemanticCommand(["inbox", "add", "science", "--id", "lab"], {
+			...dependencies,
+			execute: async () => {
+				process.emit("SIGINT");
+				return { indexed: false };
+			},
+		}),
+		0,
 	);
 	assert.equal(getEventListeners(process, "SIGINT").length, before);
 });
