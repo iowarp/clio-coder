@@ -353,7 +353,7 @@ test("recording ingestion verifies hashes, strips controls and locates redacted 
 	const text = `${[
 		JSON.stringify({ version: 2, width: 80, height: 24 }),
 		JSON.stringify([0.5, "i", "keyboard secret"]),
-		JSON.stringify([1.5, "o", "\u001b[31mwarning at checkpoint\u001b[0m"]),
+		JSON.stringify([1.5, "o", "\u001b[31mwarning at checkpoint; password=[redacted:assignment]\u001b[0m"]),
 		JSON.stringify([4.2, "o", "corrected retry; passing command"]),
 	].join("\n")}\n`;
 	writeFileSync(path, text);
@@ -368,7 +368,7 @@ test("recording ingestion verifies hashes, strips controls and locates redacted 
 	const result = extractRecording(source);
 	assert.equal(result.records.length, 2);
 	assert.equal(result.records[0]?.location.startSeconds, 1.5);
-	assert.equal(result.records[0]?.text, "warning at checkpoint");
+	assert.equal(result.records[0]?.text, "warning at checkpoint; password=[redacted:assignment]");
 	assert(result.records.every((r) => r.runId === "run-7" && !r.text.includes("keyboard")));
 	assert.throws(() => extractRecording({ ...source, sha256: "wrong" }), /checksum/);
 	assert.throws(() => extractRecording({ ...source, path: join(isolated.dir, "outside.cast") }), /unredacted|protected/);

@@ -105,8 +105,12 @@ function allowed(root: string, path: string, options: ExtractionOptions): boolea
 	return within(root, realpathSync(path));
 }
 function secretContent(text: string): boolean {
+	// Evidence has already replaced secret values with these placeholders. Scan
+	// the remaining text for any unredacted value without discarding the useful
+	// warning or failure on the same terminal frame.
+	const unredacted = text.replace(/\[redacted:[a-z-]+\]/gi, "x");
 	return /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{20,})\b|(?:api[_-]?key|password|access[_-]?token|auth[_-]?token|authorization|_auth|client[_-]?secret)\s*[=:]\s*["']?[^\s"']{8,}/i.test(
-		text,
+		unredacted,
 	);
 }
 function piece(
