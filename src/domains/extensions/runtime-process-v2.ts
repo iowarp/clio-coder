@@ -6,11 +6,13 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
+import type { EmbeddingResponse } from "../providers/embedding/types.js";
 import { resolveExtensionEntrypoint } from "./command-schema.js";
 import { parseExtensionManifest } from "./discovery.js";
 import { extensionContentDigestWithCapture } from "./integrity.js";
 import type { ExtensionRuntimeDeclarationV2 } from "./manifest-v2.js";
 import type {
+	ExtensionEmbeddingRequest,
 	ExtensionHookEvent,
 	ExtensionHookResult,
 	ExtensionObservationV2,
@@ -49,6 +51,8 @@ export interface RuntimeProcessV2Options {
 	keyValue: ExtensionKeyValueHost;
 	/** The directory the `store` write root names. */
 	storeDir: string;
+	/** A host-owned, consent-gated service; no credentials or route objects cross IPC. */
+	embed?: (request: ExtensionEmbeddingRequest, signal: AbortSignal) => Promise<EmbeddingResponse>;
 	onState?: () => void;
 }
 
@@ -115,7 +119,7 @@ const REPLY_FIELDS: Record<string, readonly string[]> = {
 	result: ["id", "output"],
 	error: ["id", "error"],
 	fatal: ["error"],
-	call: ["id", "op", "key", "value", "ifVersion"],
+	call: ["id", "op", "key", "value", "ifVersion", "request", "parentRequestId"],
 };
 
 function sameNames(value: unknown, expected: readonly string[]): boolean {
@@ -139,6 +143,7 @@ export class ExtensionRuntimeProcessV2 {
 	readonly staged: Promise<void>;
 	private child: ChildProcess;
 	private pending = new Map<string, Pending>();
+	private embeddingCalls = new Map<string, { controller: AbortController; parentRequestId: string }>();
 	private stageResolve!: () => void;
 	private stageReject!: (error: Error) => void;
 	private activeResolve: (() => void) | undefined;
@@ -322,9 +327,40 @@ export class ExtensionRuntimeProcessV2 {
 		return pending;
 	}
 	/** State and store live here, so a reload swaps the process and loses nothing. */
-	private serveCall(m: Record<string, unknown>): void {
+	private async serveCall(m: Record<string, unknown>): Promise<void> {
 		const reply = (body: Record<string, unknown>): void => this.send({ kind: "returned", id: m.id, ...body });
 		try {
+			if (m.op === "embed") {
+				if (typeof m.id !== "string" || typeof m.parentRequestId !== "string" || !this.pending.has(m.parentRequestId))
+					throw new Error("embedding call has no active parent request");
+				if (!this.declaration.services?.embedding || !this.options.embed)
+					throw new Error("embedding service is not declared or available");
+				if (this.embeddingCalls.size >= 4) throw new Error("embedding service is busy");
+				const request = m.request;
+				if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("invalid embedding request");
+				const typed = request as Record<string, unknown>;
+				if (
+					(typed.task !== "query" && typed.task !== "document") ||
+					!Array.isArray(typed.inputs) ||
+					typed.inputs.length < 1 ||
+					typed.inputs.length > 8 ||
+					(typed.expectedProfileIdentity !== undefined && typeof typed.expectedProfileIdentity !== "string")
+				)
+					throw new Error("invalid embedding request");
+				const controller = new AbortController();
+				this.embeddingCalls.set(m.id, { controller, parentRequestId: m.parentRequestId });
+				const timer = setTimeout(() => controller.abort(), 30_000);
+				try {
+					const response = await this.options.embed(typed as unknown as ExtensionEmbeddingRequest, controller.signal);
+					if (controller.signal.aborted) throw new Error("embedding request cancelled or timed out");
+					if (this.state !== "ready" || !this.pending.has(m.parentRequestId)) return;
+					reply({ value: response });
+				} finally {
+					clearTimeout(timer);
+					this.embeddingCalls.delete(m.id);
+				}
+				return;
+			}
 			const [scope, verb] = String(m.op).split(".");
 			if ((scope !== "state" && scope !== "store") || typeof m.id !== "string") throw new Error("unsupported host call");
 			if (!(scope === "state" ? this.declaration.state.session : this.declaration.state.store))
@@ -408,7 +444,7 @@ export class ExtensionRuntimeProcessV2 {
 			}
 			if (this.state !== "ready") throw new Error("unexpected runtime IPC message");
 			if (m.kind === "call") {
-				this.serveCall(m);
+				void this.serveCall(m);
 				return;
 			}
 			if (m.kind !== "result" && m.kind !== "error") throw new Error("unexpected runtime IPC message");
@@ -451,6 +487,7 @@ export class ExtensionRuntimeProcessV2 {
 			const id = randomUUID();
 			const abandon = (error: Error): void => {
 				if (!this.settle(id)) return;
+				for (const call of this.embeddingCalls.values()) if (call.parentRequestId === id) call.controller.abort();
 				this.send({ kind: "cancel", id });
 				reject(error);
 			};
@@ -535,6 +572,7 @@ export class ExtensionRuntimeProcessV2 {
 		this.stageReject(error);
 		this.activeReject?.(error);
 		this.rejectAll(error);
+		for (const call of this.embeddingCalls.values()) call.controller.abort();
 		this.notifyState();
 		this.send({ kind: "dispose", reason });
 		this.stopPromise = (async () => {

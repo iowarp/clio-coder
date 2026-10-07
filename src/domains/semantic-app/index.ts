@@ -6,6 +6,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { type ClioSettings, readSettings } from "../../core/config.js";
 import { clioCacheDir, clioDataDir } from "../../core/xdg.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/index.js";
+import type { ExtensionEmbeddingRequest } from "../extensions/public-api-v2.js";
 import { canonicalMemoryRepositoryIdentity, loadMemoryRecordsSync } from "../memory/index.js";
 import { openAuthStorage, resolveAuthTarget } from "../providers/auth/index.js";
 import {
@@ -154,6 +155,25 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 			: {}),
 	});
 	return { index, profile, profileIdentity, projectId, config, target, service };
+}
+
+/** Host-owned extension bridge. The extension sees vectors and profile identity, never target credentials. */
+export async function embedForExtension(
+	options: SemanticAppOptions,
+	request: ExtensionEmbeddingRequest,
+	signal: AbortSignal,
+) {
+	const app = await openSemanticApp(options);
+	if (request.expectedProfileIdentity && request.expectedProfileIdentity !== app.profileIdentity)
+		throw new Error("Embedding profile changed; re-embed saved vectors before comparing them");
+	return app.service.embed({
+		inputs: request.inputs,
+		task: request.task,
+		profile: app.profile,
+		signal,
+		priority: "foreground",
+		timeoutMs: 25_000,
+	});
 }
 
 function registeredInboxes(config: ClioSettings["context"]["semantic"], projectId: string): InboxRegistration[] {

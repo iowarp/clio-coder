@@ -569,6 +569,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let operatorPanelValid: (() => boolean) | undefined;
 	const operatorExtensions = deps.extensions
 		? new OperatorExtensions({
+				embed: async (request, signal, workspace) => {
+					const { embedForExtension } = await import("../domains/semantic-app/index.js");
+					return embedForExtension({ projectRoot: workspace }, request, signal);
+				},
 				context: () => ({
 					workspace: process.cwd(),
 					sessionId: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,

@@ -28,6 +28,7 @@ export function envelopeLines(envelope: ExtensionCapabilityEnvelope): string[] {
 					`Kept by the host: ${list([...(envelope.state.session ? ["session state"] : []), ...(envelope.state.store ? ["cross-session store"] : [])])}`,
 				]
 			: []),
+		...(envelope.services?.embedding ? ["Host services: embedding requests to the configured model"] : []),
 		`Events: ${list([...envelope.events, ...(envelope.tickMs !== undefined ? [`tick ${envelope.tickMs / 1000}s`] : [])])}`,
 		`Hooks: ${list(hooks)}`,
 		`Tools: ${list(envelope.tools.map((tool) => `${tool.name} (${tool.actionClass})`))}`,

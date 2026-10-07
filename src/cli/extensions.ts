@@ -293,6 +293,10 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 		return 1;
 	}
 	const runtime = new OperatorExtensions({
+		embed: async (request, signal, workspace) => {
+			const { embedForExtension } = await import("../domains/semantic-app/index.js");
+			return embedForExtension({ projectRoot: workspace }, request, signal);
+		},
 		context: () => ({ workspace: process.cwd(), sessionId: null, mode: "headless" }),
 		isIdle: () => true,
 		onlyId: id,

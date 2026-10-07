@@ -1,3 +1,4 @@
+import type { EmbeddingResponse } from "../providers/embedding/types.js";
 import type { ExtensionCommandRow, PromptRef } from "./operator-commands.js";
 import {
 	OperatorExtensionRuntime,
@@ -8,6 +9,7 @@ import {
 import { type ExtensionHookOutcome, OperatorExtensionRuntimeV2 } from "./operator-runtime-v2.js";
 import type { ExtensionObservation, ExtensionOutput } from "./public-api.js";
 import type {
+	ExtensionEmbeddingRequest,
 	ExtensionHookEvent,
 	ExtensionObservationV2,
 	ExtensionOutputV2,
@@ -24,6 +26,7 @@ export type OperatorCommandOutput = (ExtensionOutput & { api: 1 }) | (ExtensionO
 
 export interface OperatorExtensionsOptions extends OperatorRuntimeOptions {
 	stateDir?: () => string;
+	embed?: (request: ExtensionEmbeddingRequest, signal: AbortSignal, workspace: string) => Promise<EmbeddingResponse>;
 	/** False for an extension the operator muted; see `OperatorRuntimeV2Options.admits`. */
 	admits?: (extensionId: string) => boolean;
 	surface?: ExtensionSurfaceModel;
@@ -53,7 +56,7 @@ export class OperatorExtensions {
 		const forward = (result: OperatorReloadResult, reason: ReloadReason): void => {
 			if (this.combining === 0) options.onReload?.(result, reason);
 		};
-		const { stateDir, surface, admits, onReload: _onReload, frozenTools, commitHooks, ...shared } = options;
+		const { stateDir, surface, admits, embed, onReload: _onReload, frozenTools, commitHooks, ...shared } = options;
 		this.v1 = new OperatorExtensionRuntime({
 			...shared,
 			...(frozenTools ? { frozenTools } : {}),
@@ -65,6 +68,7 @@ export class OperatorExtensions {
 			...(stateDir ? { stateDir } : {}),
 			...(surface ? { surface } : {}),
 			...(admits ? { admits } : {}),
+			...(embed ? { embed } : {}),
 			reserved: () =>
 				this.v1
 					.entries()

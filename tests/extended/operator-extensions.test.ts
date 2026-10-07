@@ -10,6 +10,7 @@ import { bindPackageActivitySink, flushPackageActivities } from "../../src/core/
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
+import { envelopeLines } from "../../src/domains/extensions/envelope-review.js";
 import { extensionInvocation, promptRefs } from "../../src/domains/extensions/operator-commands.js";
 import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
@@ -20,6 +21,7 @@ import {
 	parseExtensionOutput,
 	parseExtensionRuntime,
 } from "../../src/domains/extensions/runtime-schema.js";
+import { capabilityEnvelope } from "../../src/domains/extensions/runtime-schema-v2.js";
 import {
 	disableExtension,
 	enableExtension,
@@ -978,4 +980,67 @@ test("a net:false runtime cannot reach loopback, reports its backend, and gets e
 		backend: sandboxAvailability().backend,
 		network: "blocked",
 	});
+});
+
+test("a declared extension can request host embeddings without seeing the route", async (t) => {
+	const script = [
+		"export default api => {",
+		'  api.handle("probe", async (_args, ctx) => {',
+		'    if (!ctx.embed) return { text: "unavailable" };',
+		'    const result = await ctx.embed({ inputs: [{ kind: "text", text: "lab observation" }], task: "query", expectedProfileIdentity: "profile-1" });',
+		"    return { text: JSON.stringify({ identity: result.profileIdentity, dimensions: result.dimensions }) };",
+		"  });",
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		api: 2,
+		commands: [{ name: "probe", description: "Use a host embedding", timeoutMs: 10_000 }],
+		ui: [],
+		services: { embedding: true },
+	});
+	ok(f.extension.runtimeV2);
+	match(envelopeLines(capabilityEnvelope(f.extension.runtimeV2)).join("\n"), /Host services: embedding requests/);
+	let calls = 0;
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: f.cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => path.join(f.env.dir, "state"),
+		embed: async (request, _signal, workspace) => {
+			calls++;
+			equal(workspace, f.cwd);
+			deepStrictEqual(request, {
+				inputs: [{ kind: "text", text: "lab observation" }],
+				task: "query",
+				expectedProfileIdentity: "profile-1",
+			});
+			return { profileIdentity: "profile-1", dimensions: 768, vectors: [Array(768).fill(0)], model: "test" } as never;
+		},
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	const output = await runtime.invoke(extensionInvocation("lab_status.v1", "probe"), "");
+	deepStrictEqual(JSON.parse(String(output.text)), { identity: "profile-1", dimensions: 768 });
+	equal(calls, 1);
+});
+
+test("an undeclared extension cannot reach the host embedding callback", async (t) => {
+	const f = await fixture(
+		t,
+		'export default api => api.handle("probe", (_args, ctx) => ({ text: String(ctx.embed === undefined) }));',
+		{ api: 2, commands: [{ name: "probe", description: "Check absence", timeoutMs: 10_000 }], ui: [] },
+	);
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: f.cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => path.join(f.env.dir, "state"),
+		embed: async () => {
+			throw new Error("host callback must not run");
+		},
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	const output = await runtime.invoke(extensionInvocation("lab_status.v1", "probe"), "");
+	equal(output.text, "true");
 });

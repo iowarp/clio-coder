@@ -6,6 +6,8 @@
  * host should show. Nothing is pushed, so a reload is a process swap and a
  * handler can be tested by calling it.
  */
+
+import type { EmbeddingInput, EmbeddingResponse, EmbeddingTask } from "../providers/embedding/types.js";
 import type { ExtensionRuntimeSnapshot, ExtensionStatus, ExtensionTone } from "./public-api.js";
 import type { View, ViewTone } from "./view.js";
 
@@ -269,6 +271,13 @@ export interface ExtensionKeyValue {
 	keys(): Promise<string[]>;
 }
 
+export interface ExtensionEmbeddingRequest {
+	inputs: readonly EmbeddingInput[];
+	task: EmbeddingTask;
+	/** Reject if the live profile differs from the one used for saved vectors. */
+	expectedProfileIdentity?: string;
+}
+
 export interface ExtensionContextV2 {
 	readonly snapshot: Readonly<ExtensionRuntimeSnapshotV2>;
 	readonly requestId: string;
@@ -279,6 +288,8 @@ export interface ExtensionContextV2 {
 	readonly state: ExtensionKeyValue;
 	/** This extension, across sessions on this machine. */
 	readonly store: ExtensionKeyValue;
+	/** Present only when runtime.services.embedding is declared and approved. Uses Clio's configured profile. */
+	readonly embed?: (request: ExtensionEmbeddingRequest) => Promise<EmbeddingResponse>;
 }
 
 type MaybePromise<T> = T | Promise<T>;

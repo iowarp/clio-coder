@@ -31,6 +31,7 @@ function send(message) {
 }
 function call(op, payload) {
 	if (disposing || !process.connected) return Promise.reject(new Error("runtime is disposing"));
+	if (calls.size >= MAX_CONCURRENT) return Promise.reject(new Error("too many host service calls"));
 	const id = `call-${++callSequence}`;
 	return new Promise((resolve, reject) => {
 		calls.set(id, { resolve, reject });
@@ -131,6 +132,9 @@ async function serve(message) {
 		options,
 		state,
 		store,
+		...(declaration.services?.embedding
+			? { embed: (request) => call("embed", { request, parentRequestId: message.id }) }
+			: {}),
 	});
 	const input =
 		message.kind === "command" ? message.args : message.kind === "tool" ? message.input : Object.freeze(message.event);

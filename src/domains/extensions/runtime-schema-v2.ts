@@ -354,6 +354,7 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 		"access",
 		"permissions",
 		"state",
+		"services",
 		"config",
 	]);
 	if (raw.api !== 2) fail("runtime.api", "must be 2");
@@ -365,6 +366,7 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 	);
 	if (new Set(watch).size !== watch.length) fail("runtime.watch", "lists a glob twice");
 	const state = record(raw.state ?? {}, "runtime.state", ["session", "store"]);
+	const services = record(raw.services ?? {}, "runtime.services", ["embedding"]);
 	const declaration: ExtensionRuntimeDeclarationV2 = {
 		api: 2,
 		entrypoint,
@@ -381,6 +383,7 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 			session: flag(state.session, "runtime.state.session", false),
 			store: flag(state.store, "runtime.state.store", false),
 		},
+		services: { embedding: flag(services.embedding, "runtime.services.embedding", false) },
 		config: parseConfig(raw.config),
 	};
 
@@ -417,6 +420,7 @@ export function capabilityEnvelope(
 		commands: declaration.commands.map((command) => command.name),
 		...(takesOver.length > 0 ? { takesOver } : {}),
 		...(declaration.state.session || declaration.state.store ? { state: declaration.state } : {}),
+		...(declaration.services?.embedding ? { services: declaration.services } : {}),
 		events: declaration.events,
 		...(declaration.tickMs !== undefined ? { tickMs: declaration.tickMs } : {}),
 		watch: declaration.watch,
@@ -497,6 +501,8 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 		"keeps host state",
 		(["session", "store"] as const).filter((kind) => next.state?.[kind] === true && approved.state?.[kind] !== true),
 	);
+	if (next.services?.embedding && !approved.services?.embedding)
+		growth.push("may request embeddings from the configured model");
 	push("new events", added(approved.events, next.events));
 	if (next.tickMs !== undefined && approved.tickMs === undefined) growth.push("a timer");
 	else if (next.tickMs !== undefined && approved.tickMs !== undefined && next.tickMs < approved.tickMs)

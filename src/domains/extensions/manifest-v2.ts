@@ -86,6 +86,8 @@ export interface ExtensionRuntimeDeclarationV2 {
 	access: ExtensionContentAccess[];
 	permissions: ExtensionPermissionsDeclaration;
 	state: { session: boolean; store: boolean };
+	/** Host services reachable over the extension IPC only after operator consent. */
+	services?: { embedding: boolean };
 	config: ExtensionConfigField[];
 }
 
@@ -106,6 +108,7 @@ export type ExtensionCapabilityEnvelope = Pick<
 	 * store. Absent when it keeps neither, which keeps those digests stable.
 	 */
 	state?: ExtensionRuntimeDeclarationV2["state"];
+	services?: { embedding: boolean };
 	tools: Array<Pick<ExtensionRuntimeToolDeclaration, "name" | "actionClass">>;
 	workspaces: Array<Pick<ExtensionWorkspaceDeclaration, "id" | "regions" | "board" | "keys">>;
 };
