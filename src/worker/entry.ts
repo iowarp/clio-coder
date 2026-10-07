@@ -55,7 +55,12 @@ import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { createWorkerAgentLedgerPort } from "./ledger-mirror.js";
 import { drainStdout, emitEvent } from "./ndjson.js";
-import { endpointIdentityHash, WORKER_PROTOCOL_VERSION, workerSpecDigest } from "./protocol.js";
+import {
+	endpointIdentityHash,
+	WORKER_ADMISSION_WAIT_MS,
+	WORKER_PROTOCOL_VERSION,
+	workerSpecDigest,
+} from "./protocol.js";
 import { observeHostIdentity, observeWorkerResourceFacts } from "./resource-facts.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
 import { validateRehydratedWorkerRuntime, type WorkerSpec } from "./spec-contract.js";
@@ -93,9 +98,12 @@ function announcedProcessGroupId(): number | null {
 /**
  * Attest this process, this node, and the route identity it resolved, on the
  * control lane, before any model call. The orchestrator compares every field
- * against the plan it approved and kills a drifting peer instead of running it.
+ * against the plan it approved and either kills a drifting peer or answers
+ * with `admit`; the caller holds the run until that answer names the returned
+ * spec digest.
  */
-function announceWorker(spec: WorkerSpec, input: WorkerRunInput): void {
+function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
+	const specDigest = workerSpecDigest(spec);
 	emitControlFrame({
 		kind: "announce",
 		attestation: {
@@ -105,7 +113,7 @@ function announceWorker(spec: WorkerSpec, input: WorkerRunInput): void {
 			processGroupId: announcedProcessGroupId(),
 			host: observeHostIdentity(),
 			settingsFingerprint: spec.settingsFingerprint,
-			specDigest: workerSpecDigest(spec),
+			specDigest,
 			runtimeId: spec.runtimeId,
 			targetId: spec.target.id,
 			endpointIdentityHash: endpointIdentityHash(spec.target.url),
@@ -121,6 +129,7 @@ function announceWorker(spec: WorkerSpec, input: WorkerRunInput): void {
 			resources: observeWorkerResourceFacts(configuredNodeLabels()),
 		},
 	});
+	return specDigest;
 }
 
 async function main(): Promise<number> {
@@ -264,7 +273,18 @@ async function main(): Promise<number> {
 	// Attest after the runtime is rehydrated and the run input is fully
 	// resolved, so the announced identity describes the run that is about to
 	// start, and strictly before startWorkerRun reaches a model.
-	announceWorker(spec, input);
+	const attestedDigest = announceWorker(spec, input);
+	// Announcing is not admission: the orchestrator may still refuse this
+	// identity, so no model call may happen before its admit arrives. Steers
+	// and permission decisions that land meanwhile stay queued in the demux,
+	// and the heartbeat keeps the stall watchdog fed through the wait.
+	try {
+		await demux.awaitAdmission(attestedDigest, WORKER_ADMISSION_WAIT_MS);
+	} catch (err) {
+		process.stderr.write(`[worker] not admitted: ${err instanceof Error ? err.message : String(err)}\n`);
+		stopHeartbeat();
+		return 2;
+	}
 	// Slim streaming events before NDJSON serialization: pi's message_update
 	// carries the full cumulative message twice (top-level + assistantMessageEvent
 	// .partial), which reserializes quadratically on stdout. No worker-stdout
