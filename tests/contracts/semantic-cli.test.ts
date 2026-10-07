@@ -41,6 +41,22 @@ it("parses semantic pins, inbox operations and bounded search filters", () => {
 		id: "lab",
 		scope: "project",
 	});
+	assert.equal(
+		parseSemanticArgs(
+			["configure", "--target", "embed", "--model", "gemma", "--asset-identity", "hash", "--background"],
+			cwd,
+		).request.command,
+		"configure",
+	);
+	assert.equal(
+		(
+			parseSemanticArgs(
+				["configure", "--target", "embed", "--model", "gemma", "--asset-identity", "hash", "--background"],
+				cwd,
+			).request as { background?: boolean }
+		).background,
+		true,
+	);
 	assert.deepEqual(parseSemanticArgs(["inbox", "preview", "science"], cwd).request, {
 		command: "inbox-preview",
 		root: resolve(cwd, "science"),

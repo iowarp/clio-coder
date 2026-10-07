@@ -7,6 +7,7 @@ import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
 import { describeValidationContract, loadValidationContract } from "../safety/index.js";
+import { createSemanticBackgroundRefresh } from "../semantic-app/background.js";
 import { readSessionEntriesForId } from "../session/archive-readers.js";
 import type { SessionContract } from "../session/contract.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
@@ -201,11 +202,14 @@ export function createContextBundle(
 	let stopping = false;
 	let startupHints: string[] = [];
 	const contextState = createContextStateReader();
+	const semanticBackground = createSemanticBackgroundRefresh();
 	const onStart = (): void => {
 		lastCwd = process.cwd();
-		void ensureCodewikiFresh(lastCwd).catch(() => {
-			// Indexing is best-effort; a failed refresh must not block session start.
-		});
+		void ensureCodewikiFresh(lastCwd)
+			.then(() => semanticBackground.schedule(lastCwd))
+			.catch(() => {
+				// Indexing is best-effort; a failed refresh must not block session start.
+			});
 		startupHints = collectStartupHints(lastCwd, options);
 		if (process.env.CLIO_CODER_INTERACTIVE === "1") return;
 		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
@@ -250,6 +254,7 @@ export function createContextBundle(
 								codewiki,
 								codewiki.language,
 							);
+							semanticBackground.schedule(committedWorkspace);
 						},
 					},
 				);
@@ -267,6 +272,7 @@ export function createContextBundle(
 		},
 		async stop() {
 			stopping = true;
+			await semanticBackground.stop();
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
 			// Everything the session changed already went through noteFileChanges,

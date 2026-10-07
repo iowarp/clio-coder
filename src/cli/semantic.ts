@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { ClioSettings, updateSettings } from "../core/config.js";
 
 export const SEMANTIC_HELP = `clio-coder semantic configure --target <id> --model <id> --asset-identity <identity>
-                            [--projector-identity <identity>] [--modality text|image|audio|mixed ...] [--qualify]
+                            [--projector-identity <identity>] [--modality text|image|audio|mixed ...] [--qualify] [--background]
 clio-coder semantic inbox add <root> --id <id> [--scope project|user]
 clio-coder semantic inbox list
 clio-coder semantic inbox remove <id>
@@ -44,6 +44,7 @@ export type SemanticCliRequest =
 			profile?: string;
 			modalities?: Array<"text" | "image" | "audio" | "mixed">;
 			qualify: boolean;
+			background?: boolean;
 	  }
 	| { command: "inbox-add"; root: string; id: string; scope: "project" | "user" }
 	| { command: "inbox-list" }
@@ -80,7 +81,7 @@ interface Dependencies {
 }
 
 const FLAGS: Readonly<Record<SemanticCliRequest["command"], readonly string[]>> = {
-	configure: ["target", "model", "asset-identity", "projector-identity", "profile", "modality", "qualify"],
+	configure: ["target", "model", "asset-identity", "projector-identity", "profile", "modality", "qualify", "background"],
 	"inbox-add": ["id", "scope"],
 	"inbox-list": [],
 	"inbox-remove": [],
@@ -106,6 +107,7 @@ export function parseSemanticArgs(
 	let json = false;
 	let rebuild = false;
 	let qualify = false;
+	let background = false;
 	let literal = false;
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i] ?? "";
@@ -131,6 +133,11 @@ export function parseSemanticArgs(
 		if (flag === "qualify") {
 			if (qualify) throw new Error("Duplicate --qualify");
 			qualify = true;
+			continue;
+		}
+		if (flag === "background") {
+			if (background) throw new Error("Duplicate --background");
+			background = true;
 			continue;
 		}
 		if (flag === "rebuild") {
@@ -171,6 +178,7 @@ export function parseSemanticArgs(
 				model: required("model"),
 				assetIdentity: required("asset-identity"),
 				qualify,
+				...(background ? { background } : {}),
 				...(values.has("modality")
 					? { modalities: values.get("modality") as Array<"text" | "image" | "audio" | "mixed"> }
 					: {}),
@@ -314,7 +322,7 @@ export async function executeSemanticRequest(
 			projectorIdentity: request.projectorIdentity ?? null,
 			canaryFingerprint: null,
 			modalities,
-			background: false,
+			background: request.background === true,
 			inboxes: config?.inboxes ?? [],
 		};
 		const proposed = structuredClone(context.settings);
