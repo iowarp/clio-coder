@@ -736,7 +736,10 @@ export interface RunReceiptSafetySummary {
 	};
 	/** Worker runtime limitations. Worker receipts always carry it; main-agent receipts omit it. */
 	runtimeLimitations?: ReadonlyArray<string>;
-	/** The immutable permit a native, SDK or subprocess worker ran under. Main-agent and ACP receipts omit it. */
+	/**
+	 * The immutable permit a native, SDK or subprocess worker ran under. An ACP
+	 * receipt carries a record-only one; main-agent receipts omit it.
+	 */
 	permit?: {
 		version: number;
 		digest: string;
@@ -756,6 +759,15 @@ export interface RunReceiptSafetySummary {
 			readOnly: boolean;
 			writeRoots: ReadonlyArray<string>;
 			enforcement: RuntimeEnforcement;
+		};
+		/**
+		 * Present only on ACP delegation receipts. The peer runs its own tools and
+		 * Clio answers only the permission requests it sends, so this permit
+		 * records the intended ceiling and Clio enforced none of it.
+		 */
+		recordOnly?: {
+			mediation: "peer-asks-only";
+			toolGovernance: "clio-coder-policy" | "agent-managed" | "deny-all";
 		};
 	};
 	/**

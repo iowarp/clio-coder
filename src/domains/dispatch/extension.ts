@@ -178,8 +178,10 @@ import {
 	recordToolExecutionEffects,
 } from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
+import type { RecordOnlyWorkerPermit } from "../safety/worker-permit.js";
 import {
 	mainGrantsUnavailable,
+	recordOnlyAcpPermit,
 	resolveWorkerPermit,
 	type WorkerPermit,
 	workerPermissionModeForPermit,
@@ -2063,7 +2065,9 @@ function resolveDispatchPermitOnce(
 	});
 }
 
-function receiptPermitSummary(permit: WorkerPermit): NonNullable<NonNullable<RunReceiptDraft["safety"]>["permit"]> {
+function receiptPermitSummary(
+	permit: WorkerPermit | RecordOnlyWorkerPermit,
+): NonNullable<NonNullable<RunReceiptDraft["safety"]>["permit"]> {
 	return {
 		version: permit.version,
 		digest: permit.digest,
@@ -2079,6 +2083,7 @@ function receiptPermitSummary(permit: WorkerPermit): NonNullable<NonNullable<Run
 			writeRoots: [...permit.ceiling.writeRoots],
 			enforcement: { ...permit.ceiling.enforcement },
 		},
+		...("recordOnly" in permit ? { recordOnly: { ...permit.recordOnly } } : {}),
 	};
 }
 
@@ -5793,6 +5798,16 @@ export function createDispatchBundle(
 						workspaceMutationPossible: true,
 					},
 					runtimeLimitations: lifecycle.runtimeLimitations,
+					// Clio cannot hold a peer to a permit, so the receipt states the
+					// intended one and marks it record-only (operator decision).
+					permit: receiptPermitSummary(
+						recordOnlyAcpPermit({
+							readOnly: req.readOnly === true,
+							toolGovernance: lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy",
+							trustedUnmediated:
+								lifecycle.agentConfig.toolGovernance === "agent-managed" && lifecycle.agentConfig.trustedUnmediated === true,
+						}),
+					),
 				},
 				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
 				delegation: {

@@ -551,6 +551,14 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 		strictEqual(receipt.runtimeKind, "acp-delegation");
 		strictEqual(receipt.autonomy, "default");
 		strictEqual(receipt.safety?.toolTelemetry?.workspaceMutationPossible, true);
+		// Clio cannot hold a peer to a permit, so the sealed one is marked record-only.
+		deepStrictEqual(receipt.safety?.permit?.recordOnly, {
+			mediation: "peer-asks-only",
+			toolGovernance: "clio-coder-policy",
+		});
+		strictEqual(receipt.safety?.permit?.capabilityClass, "workspace-edit");
+		strictEqual(receipt.safety?.permit?.asks, "deny");
+		strictEqual(receipt.safety?.permit?.ceiling?.enforcement.perCallMediation, false);
 		deepStrictEqual(receipt.lineage, childLineage);
 		deepStrictEqual(journal.envelopes.get(receipt.runId)?.lineage, childLineage);
 		deepStrictEqual(completed, childLineage);
