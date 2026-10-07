@@ -144,3 +144,35 @@ it("rejects malformed responses and cancels transport without retrying", async (
 	release();
 	assert.equal(calls, 9);
 });
+
+it("qualifies fixed canaries and rejects changed spaces despite equal dimensions", async () => {
+	const { qualifyEmbeddingProfile } = await import("../../src/domains/providers/embedding/index.js");
+	const profile = embeddingGemma2Q8Profile({ model: "gemma", assetIdentity: "operator-pin" });
+	let vectors = [
+		[0.6, 0.8],
+		[0.8, 0.6],
+	];
+	const service = {
+		embed: async () => ({
+			vectors,
+			profile,
+			profileIdentity: embeddingProfileIdentity(profile),
+			dimensions: 2,
+			model: "gemma",
+			sources: [],
+			usage: { inputItems: 2, inputBytes: 0 },
+			warnings: [],
+		}),
+	};
+	const qualified = await qualifyEmbeddingProfile(service, profile);
+	assert.equal(qualified.canaryFingerprint?.length, 64);
+	assert.deepEqual(await qualifyEmbeddingProfile(service, qualified), qualified);
+	vectors = [
+		[0.8, 0.6],
+		[0.6, 0.8],
+	];
+	await assert.rejects(
+		qualifyEmbeddingProfile(service, qualified),
+		(e: unknown) => e instanceof EmbeddingError && e.code === "profile-mismatch",
+	);
+});

@@ -132,10 +132,15 @@ export function createEmbeddingService(options: {
 						inputBytes,
 						...(result.tokensUsed !== undefined ? { tokens: result.tokensUsed } : {}),
 					},
-					warnings:
-						profile.canaryFingerprint === null
-							? ["Embedding asset identity is operator-pinned; canary fingerprint has not been qualified"]
-							: [],
+					warnings: [
+						...(!/^sha256:[a-f0-9]{64}$/i.test(profile.assetIdentity)
+							? ["Embedding asset identity is operator-pinned; GGUF/checkpoint hash is unverified"]
+							: []),
+						...(profile.projectorIdentity !== null && !/^sha256:[a-f0-9]{64}$/i.test(profile.projectorIdentity)
+							? ["Embedding projector hash is unverified"]
+							: []),
+						...(profile.canaryFingerprint === null ? ["Embedding canary fingerprint has not been qualified"] : []),
+					],
 				};
 			} catch (error) {
 				if (controller.signal.aborted) throw new EmbeddingError(abortCode, `Embedding ${abortCode}`);

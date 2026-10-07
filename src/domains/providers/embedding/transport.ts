@@ -56,12 +56,21 @@ export async function embedOpenAIInputs(
 	const rows = data.data;
 	if (
 		rows.length !== inputs.length ||
-		rows.some((row) => !Number.isInteger(row.index) || (row.index ?? -1) < 0 || (row.index ?? 0) >= rows.length) ||
+		rows.some(
+			(row) =>
+				!row ||
+				typeof row !== "object" ||
+				!Number.isInteger(row.index) ||
+				(row.index ?? -1) < 0 ||
+				(row.index ?? 0) >= rows.length,
+		) ||
 		new Set(rows.map((row) => row.index)).size !== rows.length
 	)
 		throw new EmbeddingError("invalid-response", "Embedding response indices/count do not match request");
 	const vectors = [...rows].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((row) => row.embedding ?? []);
 	const tokens = data.usage?.total_tokens ?? data.usage?.prompt_tokens;
+	if (tokens !== undefined && (!Number.isInteger(tokens) || tokens < 0))
+		throw new EmbeddingError("invalid-response", "Embedding usage must be a nonnegative integer");
 	return {
 		vectors,
 		model: data.model,

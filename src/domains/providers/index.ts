@@ -53,6 +53,7 @@ export {
 	embeddingCanaryFingerprint,
 	embeddingGemma2Q8Profile,
 	embeddingProfileIdentity,
+	qualifyEmbeddingProfile,
 } from "./embedding/index.js";
 export {
 	backgroundMemoryAdmissionLimit,
