@@ -609,7 +609,9 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 	const ledgerTokens = run.tokenCount > 0 ? run.tokenCount : undefined;
 	const tokens = isLive(state) ? (fold.tokens ?? ledgerTokens) : (receipt?.tokens ?? ledgerTokens ?? fold.tokens);
 	const cost =
-		run.endedAt === null ? null : formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance));
+		run.endedAt === null
+			? null
+			: formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary));
 	const lastText = lastProse(fold);
 	const rootRunId = run.lineage?.rootRunId;
 	return {

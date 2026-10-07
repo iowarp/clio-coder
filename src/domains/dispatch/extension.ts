@@ -9,6 +9,7 @@ import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
+import { aggregateCostAmounts, type CostAmount } from "../observability/cost.js";
 import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
@@ -3878,7 +3879,7 @@ export function createDispatchBundle(
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
 	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
-	const finalizedCosts: Array<{ usd: number; provenance: import("../providers/index.js").CostProvenance }> = [];
+	const finalizedCosts: CostAmount[] = [];
 
 	function workersMaxRetries(settings: EffectiveSettings = getEffectiveSettings()): number {
 		const value = settings?.fleet?.retry.maxRetries;
@@ -3936,7 +3937,13 @@ export function createDispatchBundle(
 		finalizedTotals.outputTokens += receipt.outputTokenCount ?? 0;
 		finalizedTotals.totalTokens += receipt.tokenCount;
 		finalizedTotals.costUsd += receipt.costUsd;
-		finalizedCosts.push({ usd: receipt.costUsd, provenance: receipt.costProvenance ?? "unknown" });
+		finalizedCosts.push({
+			usd: receipt.costUsd,
+			provenance: receipt.costProvenance ?? "unknown",
+			apiCalls: receipt.apiCalls ?? 1,
+			missingTokenCalls: receipt.missingTokenCalls ?? 0,
+			...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
+		});
 		const startMs = Date.parse(receipt.startedAt);
 		const endMs = Date.parse(receipt.endedAt);
 		if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
@@ -9361,7 +9368,12 @@ export function createDispatchBundle(
 			totals.outputTokens += meter.outputTokens;
 			totals.totalTokens += totalTokens;
 			totals.costUsd += costUsd;
-			costAmounts.push({ usd: costUsd, provenance: costProvenance });
+			costAmounts.push({
+				usd: costUsd,
+				provenance: costProvenance,
+				apiCalls: meter.apiCalls ?? 1,
+				missingTokenCalls: meter.missingTokenCalls ?? 0,
+			});
 			totals.runtimeSeconds += elapsedMs / 1000;
 		}
 		const retrying = [...retryQueue.values()].map((entry) => ({
@@ -9372,21 +9384,12 @@ export function createDispatchBundle(
 			dueAt: new Date(entry.dueAt).toISOString(),
 			reason: entry.reason,
 		}));
-		const knownUsd = costAmounts.reduce((sum, amount) => sum + (amount.provenance === "unknown" ? 0 : amount.usd), 0);
-		const cost = {
-			knownUsd,
-			hasEstimated: costAmounts.some((amount) => amount.provenance === "estimated"),
-			hasUnknown: costAmounts.some((amount) => amount.provenance === "unknown"),
-			allKnownFree: costAmounts.length > 0 && costAmounts.every((amount) => amount.provenance === "known_free"),
-			// Zero priced calls is not a cost of zero; every renderer reads this to
-			// decide whether it has anything to say at all.
-			calls: costAmounts.length,
-		};
+		const cost = aggregateCostAmounts(costAmounts);
 		return {
 			generatedAt: new Date(tickNow).toISOString(),
 			running,
 			retrying,
-			totals: { ...totals, cost },
+			totals: { ...totals, costUsd: cost.knownUsd, cost },
 		};
 	}
 

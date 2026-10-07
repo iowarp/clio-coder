@@ -69,7 +69,7 @@ function agentCard(
 	if (workload.length) lines.push(...field("Work", workload.join(" · ")));
 	const timing: string[] = [];
 	if (row.ttftMs !== null) timing.push(`first token ${formatCompactMs(row.ttftMs)}`);
-	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
+	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary));
 	if (cost) timing.push(cost);
 	if (!compact && timing.length) lines.push(...field("Timing", timing.join(" · ")));
 	if (!compact && row.budget)

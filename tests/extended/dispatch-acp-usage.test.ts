@@ -198,6 +198,7 @@ for (const scenario of [
 			if (scenario.name === "Clio metadata costUsd with estimated provenance") {
 				strictEqual(receipt.apiCalls, 3);
 				strictEqual(receipt.missingTokenCalls, 1);
+				strictEqual(bundle.contract.snapshot().totals.cost?.knownUsd, 0.02);
 				deepStrictEqual(receipt.costSummary, {
 					knownUsd: 0.02,
 					hasEstimated: true,

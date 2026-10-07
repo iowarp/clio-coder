@@ -12,6 +12,7 @@ import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/w
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
 import { trustStateWord } from "../domains/evidence/trust-projection.js";
 import type { ObservabilityContract, ObservabilityRunSummary } from "../domains/observability/contract.js";
+import type { CostAggregate } from "../domains/observability/cost.js";
 import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { WorkerAction, WorkerProgressSnapshot } from "../domains/observability/worker-progress.js";
@@ -88,6 +89,7 @@ export interface DispatchBoardRow {
 	costUsd: number;
 	/** Pricing truth for costUsd; a progress event that omits it reads as unknown. */
 	costProvenance?: CostProvenance;
+	costSummary?: CostAggregate;
 	inputTokens: number;
 	outputTokens: number;
 	ttftMs: number | null;
@@ -612,7 +614,8 @@ function renderDispatchCard(
 	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance)) ?? COST_NOT_MEASURED;
+	const cost =
+		formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary)) ?? COST_NOT_MEASURED;
 	const detail = terminalDetail(row);
 
 	const presentation = dispatchStatusPresentation(row.status, {
@@ -783,7 +786,8 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance)) ?? COST_NOT_MEASURED;
+	const cost =
+		formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary)) ?? COST_NOT_MEASURED;
 
 	const dot = dotSep(theme);
 	const presentation = dispatchStatusPresentation(row.status, {
@@ -1258,6 +1262,7 @@ function toRow(entry: ObservabilityRunSummary, now: number): DispatchBoardRow {
 		tokenCount: entry.tokens.total,
 		costUsd: entry.costUsd,
 		...(entry.costProvenance !== undefined ? { costProvenance: entry.costProvenance } : {}),
+		...(entry.costSummary ? { costSummary: entry.costSummary } : {}),
 		inputTokens: entry.tokens.input,
 		outputTokens: entry.tokens.output,
 		ttftMs: entry.ttftMs ?? null,

@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 /**
  * Reactive observability projection. Folds the dispatch and evidence bus
  * channels plus the session cost tracker into a single bounded
@@ -414,6 +415,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		summary.tokens.output = num(payload.outputTokenCount, summary.tokens.output);
 		summary.costUsd = num(payload.costUsd, summary.costUsd);
 		summary.costProvenance = resolveCostProvenance(payload.costProvenance, summary.costProvenance);
+		if (payload.costSummary !== undefined) summary.costSummary = payload.costSummary as CostAggregate;
 	}
 
 	function pushNotice(
@@ -615,12 +617,13 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			if (type === "message_end" && !isTerminal(summary.status)) {
 				const message = (event.message ?? {}) as { role?: unknown; usage?: Record<string, unknown> };
 				if (message.role === "assistant" && message.usage) {
-					const input = num(message.usage.input, 0) + num(message.usage.cacheRead, 0);
-					const output = num(message.usage.output, 0);
+					const usage = normalizeTokenUsage(message.usage);
+					const input = usage.input + usage.cacheRead + usage.cacheWrite;
+					const output = usage.output;
 					summary.tokens.input += input;
 					summary.tokens.output += output;
-					summary.tokens.total += input + output + num(message.usage.cacheWrite, 0);
-					summary.lastContextTokens = input + output + num(message.usage.cacheWrite, 0);
+					summary.tokens.total += usage.totalTokens;
+					summary.lastContextTokens = input + output;
 				}
 			}
 			// A worker's agent_end settles its displayed progress; only a terminal

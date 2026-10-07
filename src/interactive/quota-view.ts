@@ -214,7 +214,8 @@ export function renderWorkerUsage(
 	];
 	if (!rows.length) out.push("", "No worker invocations recorded.");
 	for (const row of rows) {
-		const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance)) ?? "cost not reported";
+		const cost =
+			formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary)) ?? "cost not reported";
 		const status = dispatchStatusPresentation(row.status);
 		out.push(
 			"",

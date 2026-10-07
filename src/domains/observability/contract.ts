@@ -87,6 +87,7 @@ export interface ObservabilityRunSummary {
 	};
 	costUsd: number;
 	costProvenance: CostProvenance;
+	costSummary?: CostAggregate;
 	outcomeDetail?: string | null;
 	/** The landed bundle, which the board links to by id. */
 	evidence?: { evidenceId: string } | null;

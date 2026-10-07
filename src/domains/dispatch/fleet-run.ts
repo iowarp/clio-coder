@@ -100,6 +100,7 @@ export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	 * no model ran, so the zero is something code observed rather than missed.
 	 */
 	costProvenance: CostProvenance;
+	costSummary?: CostAggregate;
 	/** The sealed agent receipt when this was an agent step. */
 	receipt?: RunReceipt;
 	/** The durable code-step record when this was a deterministic step. */
@@ -413,6 +414,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			replayed: true,
 		};
 		input.onStepDispatched?.(event);
+		const replayedCostSummary = receiptsByStep.get(stepId)?.costSummary;
 		input.onStepSettled?.({
 			...event,
 			succeeded: true,
@@ -421,6 +423,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			// A replay whose receipt no longer exists on disk has no cost claim at
 			// all, which is `unknown` rather than a zero the projection invented.
 			costProvenance: receiptsByStep.get(stepId)?.costProvenance ?? "unknown",
+			...(replayedCostSummary ? { costSummary: replayedCostSummary } : {}),
 			result: replayedResult,
 		});
 		await fileStepAttempt(replayedResult.terminalRunId);
@@ -772,11 +775,12 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							terminalRunId: receipt.runId,
 							costUsd: receipt.costUsd,
 							costProvenance: receipt.costProvenance,
+							...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
 							receipt,
 							...(failureReason !== undefined ? { failureReason } : {}),
 						});
 						notice(
-							`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=${renderCostAmount(receipt.costUsd, receipt.costProvenance)}`,
+							`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=${renderCostAmount(receipt.costUsd, receipt.costProvenance, receipt.costSummary)}`,
 						);
 						return {
 							stepId: step.id,
@@ -1022,7 +1026,13 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		result,
 		receipts,
 		totalCost: aggregateCostAmounts(
-			receipts.map((receipt) => ({ usd: receipt.costUsd, provenance: receipt.costProvenance })),
+			receipts.map((receipt) => ({
+				usd: receipt.costUsd,
+				provenance: receipt.costProvenance,
+				apiCalls: receipt.apiCalls ?? 1,
+				missingTokenCalls: receipt.missingTokenCalls ?? 0,
+				...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
+			})),
 		),
 		requiredStepCount: required.length,
 		succeededStepCount,

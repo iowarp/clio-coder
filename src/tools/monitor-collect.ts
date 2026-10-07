@@ -147,7 +147,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	const run = row.run;
 	const lines = run
 		? [
-				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
+				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 			]
 		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; receipt may still exist)`];
 	if (row.assignmentId !== null) {

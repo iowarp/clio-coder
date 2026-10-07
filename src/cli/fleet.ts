@@ -480,7 +480,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
 					else {
 						process.stdout.write(
-							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance)}\n`,
+							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,
 						);
 					}
 					return;
@@ -663,6 +663,7 @@ function statusSnapshot(all = false): {
 				// Absent on pre-provenance ledger rows, which readers must treat as
 				// unknown; `renderCostAmount` normalizes it rather than assuming free.
 				costProvenance: row.costProvenance,
+				costSummary: row.costSummary,
 				node: row.node?.id ?? "local",
 			};
 		});
@@ -670,14 +671,19 @@ function statusSnapshot(all = false): {
 	// Folded rather than summed: a ledger of runs nobody priced totals to an
 	// absent cost claim, not to zero dollars.
 	const cost = aggregateCostAmounts(
-		rows.map((row) => ({ usd: row.costUsd, provenance: normalizeCostProvenance(row.costProvenance) })),
+		rows.map((row) => ({
+			usd: row.costUsd,
+			provenance: normalizeCostProvenance(row.costProvenance),
+			apiCalls: row.apiCalls ?? 1,
+			missingTokenCalls: row.missingTokenCalls ?? 0,
+			...(row.costSummary ? { costSummary: row.costSummary } : {}),
+		})),
 	);
 	for (const row of rows) {
 		const split = rowTokenSplit(row);
 		totals.inputTokens += split.input;
 		totals.outputTokens += split.output;
 		totals.totalTokens += row.tokenCount;
-		totals.costUsd += row.costUsd;
 		const startedMs = Date.parse(row.startedAt);
 		const endedMs = row.endedAt !== null ? Date.parse(row.endedAt) : nowMs;
 		if (Number.isFinite(startedMs) && Number.isFinite(endedMs)) {
@@ -691,7 +697,7 @@ function statusSnapshot(all = false): {
 		admission: admissionStatus(capacityDrain(nowMs)),
 		running,
 		retrying: [],
-		totals: { ...totals, cost },
+		totals: { ...totals, costUsd: cost.knownUsd, cost },
 	};
 }
 
@@ -716,7 +722,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 		for (const row of snapshot.running) {
 			const lineage = row.lineage as { attempt: number; depth: number };
 			process.stdout.write(
-				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  ${renderCostAmount(row.costUsd as number, row.costProvenance as CostProvenance | undefined)}\n`,
+				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  ${renderCostAmount(row.costUsd as number, row.costProvenance as CostProvenance | undefined, row.costSummary as CostAggregate | undefined)}\n`,
 			);
 			const budget = row.budget as RunToolBudgetEnvelope | null;
 			if (budget !== null) {

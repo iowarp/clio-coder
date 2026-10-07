@@ -200,7 +200,7 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 		`state: ${run.status}${run.outcome ? ` outcome=${run.outcome}` : ""}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind} node=${run.node?.id ?? "local"}${reroutes}`,
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
-		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}`,
+		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}`,
 	];
 	if (run.council !== undefined || run.gate?.role === "synthesis") {
 		lines.push(

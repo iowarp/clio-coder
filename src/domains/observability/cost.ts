@@ -105,8 +105,12 @@ export function formatCostAggregate(cost: CostAggregate | null | undefined): str
  */
 export const COST_NOT_MEASURED = "not measured";
 
-export function costAggregateForAmount(usd: number, provenance: CostProvenance | undefined): CostAggregate {
-	return aggregateCostAmounts([{ usd, provenance: normalizeCostProvenance(provenance) }]);
+export function costAggregateForAmount(
+	usd: number,
+	provenance: CostProvenance | undefined,
+	costSummary?: CostAggregate,
+): CostAggregate {
+	return costSummary ?? aggregateCostAmounts([{ usd, provenance: normalizeCostProvenance(provenance) }]);
 }
 
 /**
@@ -126,8 +130,12 @@ export function renderCostAggregate(cost: CostAggregate | null | undefined): str
  * the provenance on the floor and turns unpriced work into a measured `$0.0000`,
  * which is a claim nobody made.
  */
-export function renderCostAmount(usd: number, provenance: CostProvenance | undefined): string {
-	return renderCostAggregate(costAggregateForAmount(usd, provenance));
+export function renderCostAmount(
+	usd: number,
+	provenance: CostProvenance | undefined,
+	costSummary?: CostAggregate,
+): string {
+	return renderCostAggregate(costAggregateForAmount(usd, provenance, costSummary));
 }
 
 export interface UsageBreakdown {
