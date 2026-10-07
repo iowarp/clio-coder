@@ -494,3 +494,36 @@ test("cross-source results retain implementation and precedent when evidence bun
 	assert.ok(result.hits.some((hit) => hit.kind === "memory"));
 	assert.ok(result.hits.some((hit) => hit.kind === "wiki"));
 });
+
+test("broad artifact search follows source links without repeating pages from one file", async () => {
+	const index = new SemanticIndex({ projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir });
+	const artifact = (id: string, path: string, text: string, sourceId = id): SemanticRecord => ({
+		...record(id, text),
+		sourceId,
+		kind: "inbox",
+		path,
+	});
+	await index.refresh([
+		artifact("readme", "README.md", "A delayed oscillation occurred in an experiment"),
+		artifact(
+			"manifest",
+			"run-manifest.json",
+			"delayed oscillation plot run EXP-17: phase_echo.py exp17.ipynb exp17_delayed.png lab_notes.pdf",
+		),
+		artifact("note-page-2", "lab_notes.pdf", "delayed oscillation plot: phase_echo.py exp17_delayed.png", "note"),
+		artifact("note-page-1", "lab_notes.pdf", "calibration plot", "note"),
+		artifact("code", "phase_echo.py", "integrate the echo after the lag"),
+		artifact("notebook", "exp17.ipynb", "notebook cell output"),
+		artifact("plot", "exp17_delayed.png", "plot image"),
+		artifact("decoy", "flat_noise.py", "control run noise"),
+	]);
+	const result = index.searchVector(
+		"find the delayed oscillation plot",
+		{ profileKey: index.profileKey, vector: [1, 0] },
+		{ projectId: "project-a", limit: 5 },
+	);
+	assert.deepEqual(
+		new Set(result.hits.map((hit) => hit.sourceId)),
+		new Set(["manifest", "note", "code", "notebook", "plot"]),
+	);
+});

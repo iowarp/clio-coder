@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioCacheDir } from "../../core/xdg.js";
@@ -368,27 +368,56 @@ export class SemanticIndex {
 			});
 		}
 		hits.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+		// High-ranking source records often carry exact links to the code, plot,
+		// notebook or note that produced an observation. Keep those linked sources
+		// in the candidate set so the agent can inspect the originals together.
+		if (!filters.kinds && hits.length > limit) {
+			const anchors = hits.slice(0, 3);
+			const names = hits.map((hit) => ({ hit, name: basename(hit.path) })).filter(({ name }) => name.length >= 6);
+			for (const hit of hits) {
+				if (hit.method === "exact") continue;
+				const name = basename(hit.path);
+				if (name.length < 6) continue;
+				const mentions = anchors.filter(
+					(anchor) => anchor.sourceId !== hit.sourceId && anchor.excerpt.includes(name),
+				).length;
+				hit.score += Math.min(2, mentions) * 0.25;
+				if (anchors.includes(hit)) {
+					const linked = new Set(
+						names
+							.filter(
+								({ hit: candidate, name: candidateName }) =>
+									candidate.sourceId !== hit.sourceId && hit.excerpt.includes(candidateName),
+							)
+							.map(({ hit: candidate }) => candidate.sourceId),
+					);
+					hit.score += Math.min(2, linked.size) * 0.1;
+				}
+			}
+			hits.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+		}
 		// An unfiltered cross-source question needs room for both the implementation
 		// and its precedent. Repeated evidence bundles can otherwise consume every
 		// slot ahead of a relevant code symbol. Exact IDs always keep priority.
 		let selected = hits.slice(0, limit);
 		if (!filters.kinds && limit >= 5 && hits.length > limit) {
 			const diverse: SemanticHit[] = hits.filter((hit) => hit.method === "exact").slice(0, limit);
-			const threshold = (hits[0]?.score ?? 0) * 0.8;
+			const topScore = hits[0]?.score ?? 0;
 			for (const [kind, quota] of [
 				["memory", 1],
 				["wiki", 1],
 				["code", 2],
 			] as const) {
+				const threshold = topScore * (kind === "code" ? 0.8 : 0.5);
 				for (const hit of hits
 					.filter((candidate) => candidate.kind === kind && candidate.score >= threshold)
 					.slice(0, quota)) {
-					if (diverse.length < limit && !diverse.some((entry) => entry.id === hit.id)) diverse.push(hit);
+					if (diverse.length < limit && !diverse.some((entry) => entry.path === hit.path)) diverse.push(hit);
 				}
 			}
 			for (const hit of hits) {
 				if (diverse.length >= limit) break;
-				if (!diverse.some((entry) => entry.id === hit.id)) diverse.push(hit);
+				if (!diverse.some((entry) => entry.path === hit.path)) diverse.push(hit);
 			}
 			selected = diverse.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 		}
