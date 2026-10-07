@@ -68,6 +68,11 @@ it("parses semantic pins, inbox operations and bounded search filters", () => {
 		command: "reembed",
 		profile: "q8",
 	});
+	assert.deepEqual(parseSemanticArgs(["reembed", "--profile", "q8", "--from", "a".repeat(64)], cwd).request, {
+		command: "reembed",
+		profile: "q8",
+		from: "a".repeat(64),
+	});
 	assert.deepEqual(parseSemanticArgs([], cwd).request, { command: "status" });
 	assert.deepEqual(
 		parseSemanticArgs(

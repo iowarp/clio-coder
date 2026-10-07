@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { type ClioSettings, readSettings } from "../../core/config.js";
-import { clioDataDir } from "../../core/xdg.js";
+import { clioCacheDir, clioDataDir } from "../../core/xdg.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/index.js";
 import { canonicalMemoryRepositoryIdentity, loadMemoryRecordsSync } from "../memory/index.js";
 import { openAuthStorage, resolveAuthTarget } from "../providers/auth/index.js";
@@ -31,7 +31,9 @@ import {
 	type SemanticFilters,
 	SemanticIndex,
 	type SemanticInput,
+	sourceHash,
 } from "../semantic/index.js";
+import { SemanticStorage } from "../semantic/storage.js";
 
 export interface SemanticAppOptions {
 	projectRoot: string;
@@ -301,6 +303,27 @@ export async function reembedSemantic(options: SemanticAppOptions, signal?: Abor
 	const app = await openSemanticApp(options);
 	const records = app.index.canonicalRecords();
 	if (records.length === 0) return refreshSemantic(options, signal);
+	return app.index.reembed(records, signal ? { signal } : {});
+}
+
+/** Manual offline bridge between two exact profile namespaces. Only canonical records cross; vectors never do. */
+export async function reembedSemanticFrom(
+	options: SemanticAppOptions,
+	oldProfileIdentity: string,
+	signal?: AbortSignal,
+) {
+	if (!/^[a-f0-9]{64}$/.test(oldProfileIdentity))
+		throw new Error("Old semantic profile identity must be a SHA-256 recipe key");
+	const app = await openSemanticApp(options);
+	if (oldProfileIdentity === app.profileIdentity) return reembedSemantic(options, signal);
+	const oldDirectory = join(clioCacheDir(), "semantic", sourceHash(app.projectId), oldProfileIdentity);
+	const oldStorage = new SemanticStorage(oldDirectory, Math.floor(app.index.limits.maxBytes / 3));
+	const generation = oldStorage.load(app.projectId, oldProfileIdentity);
+	if (!generation) throw new Error("No complete generation exists for the old profile in this project");
+	const policy = createSafetyPolicyEngine({ cwd: app.projectId });
+	const records = generation.records.filter((record) => record.kind === "memory" || policy.readablePath(record.path));
+	if (records.length !== generation.records.length)
+		throw new Error("Old generation includes sources no longer readable under the current project policy");
 	return app.index.reembed(records, signal ? { signal } : {});
 }
 

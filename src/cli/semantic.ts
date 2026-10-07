@@ -9,7 +9,7 @@ clio-coder semantic inbox list
 clio-coder semantic inbox remove <id>
 clio-coder semantic inbox preview <root>
 clio-coder semantic refresh [--rebuild]
-clio-coder semantic reembed --profile <id>
+clio-coder semantic reembed --profile <id> [--from <old-profile-sha256>]
 clio-coder semantic search <query> [--limit <1..20>] [filters]
 clio-coder semantic status
 clio-coder semantic qualify
@@ -51,7 +51,7 @@ export type SemanticCliRequest =
 	| { command: "inbox-remove"; id: string }
 	| { command: "inbox-preview"; root: string }
 	| { command: "refresh"; rebuild: boolean }
-	| { command: "reembed"; profile: string }
+	| { command: "reembed"; profile: string; from?: string }
 	| {
 			command: "search";
 			query: string;
@@ -87,7 +87,7 @@ const FLAGS: Readonly<Record<SemanticCliRequest["command"], readonly string[]>> 
 	"inbox-remove": [],
 	"inbox-preview": [],
 	refresh: ["rebuild"],
-	reembed: ["profile"],
+	reembed: ["profile", "from"],
 	search: ["limit", "kind", "project", "run", "since", "until", "media-type"],
 	status: [],
 	qualify: [],
@@ -204,7 +204,7 @@ export function parseSemanticArgs(
 			break;
 		case "reembed":
 			none();
-			request = { command, profile: required("profile") };
+			request = { command, profile: required("profile"), ...(get("from") ? { from: get("from") as string } : {}) };
 			break;
 		case "search": {
 			const rawLimit = get("limit") ?? "5";
@@ -272,6 +272,7 @@ export interface SemanticCliBridge {
 	previewSemanticInbox(options: AppOptions, id: string): Promise<unknown>;
 	refreshSemantic(options: AppOptions, signal?: AbortSignal): Promise<unknown>;
 	reembedSemantic(options: AppOptions, signal?: AbortSignal): Promise<unknown>;
+	reembedSemanticFrom?(options: AppOptions, oldProfileIdentity: string, signal?: AbortSignal): Promise<unknown>;
 	searchSemantic(
 		options: AppOptions,
 		query: string,
@@ -407,6 +408,11 @@ export async function executeSemanticRequest(
 			throw new Error(
 				"--profile must match the explicitly configured profile id or exact identity; configure a new recipe before offline reembedding",
 			);
+		if (request.from) {
+			if (!/^[a-f0-9]{64}$/.test(request.from)) throw new Error("--from requires the old SHA-256 profile identity");
+			if (!bridge.reembedSemanticFrom) throw new Error("Offline profile transfer is unavailable in this build");
+			return bridge.reembedSemanticFrom(options, request.from, context.signal);
+		}
 		return bridge.reembedSemantic(options, context.signal);
 	}
 	if (request.command === "search") {
