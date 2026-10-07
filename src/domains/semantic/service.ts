@@ -357,7 +357,7 @@ export class SemanticIndex {
 				record.kind === "evidence"
 					? /^evidence:([^:]+):/.exec(record.sourceId)?.[1]
 					: record.kind === "recording"
-						? basename(dirname(record.path))
+						? basename(basename(dirname(record.path)) === "recordings" ? dirname(dirname(record.path)) : dirname(record.path))
 						: undefined;
 			hits.push({
 				id: record.id,

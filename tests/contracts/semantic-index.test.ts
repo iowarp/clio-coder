@@ -543,7 +543,7 @@ test("evidence candidates carry an inspectable bundle identity", async () => {
 			...record("cast", "warning corrected"),
 			sourceId: "recording:worker-1",
 			kind: "recording",
-			path: join(isolated.dir, "evidence", "run-worker", "worker.cast"),
+			path: join(isolated.dir, "evidence", "run-worker", "recordings", "worker.cast"),
 		},
 	]);
 	const hits = index.searchVector("checkpoint warning", undefined, { projectId: "project-a" }).hits;
