@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { createRuntimeRegistration } from "./runtime-registration.mjs";
 
 const PROTOCOL = 2;
-// The host enforces the same bounds; these only fail an extension early with a clearer message.
+// The host bounds requests and embeddings itself; these only fail an extension early with a clearer message.
 const MAX_CONCURRENT = 8;
 
 const commands = new Map();

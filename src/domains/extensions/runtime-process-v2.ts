@@ -311,6 +311,7 @@ export class ExtensionRuntimeProcessV2 {
 		this.kill("SIGKILL");
 	}
 	private rejectAll(error: Error): void {
+		for (const call of this.embeddingCalls.values()) call.controller.abort();
 		const pending = [...this.pending.values()];
 		this.pending.clear();
 		for (const entry of pending) {
@@ -324,6 +325,8 @@ export class ExtensionRuntimeProcessV2 {
 		if (!pending) return undefined;
 		this.pending.delete(id);
 		pending.cleanup();
+		// An embed outliving its request must still answer, or the child's call slot never frees.
+		for (const call of this.embeddingCalls.values()) if (call.parentRequestId === id) call.controller.abort();
 		return pending;
 	}
 	/** State and store live here, so a reload swaps the process and loses nothing. */
@@ -335,6 +338,7 @@ export class ExtensionRuntimeProcessV2 {
 					throw new Error("embedding call has no active parent request");
 				if (!this.declaration.services?.embedding || !this.options.embed)
 					throw new Error("embedding service is not declared or available");
+				if (this.embeddingCalls.has(m.id)) throw new Error("duplicate embedding call id");
 				if (this.embeddingCalls.size >= 4) throw new Error("embedding service is busy");
 				const request = m.request;
 				if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("invalid embedding request");
@@ -353,7 +357,6 @@ export class ExtensionRuntimeProcessV2 {
 				try {
 					const response = await this.options.embed(typed as unknown as ExtensionEmbeddingRequest, controller.signal);
 					if (controller.signal.aborted) throw new Error("embedding request cancelled or timed out");
-					if (this.state !== "ready" || !this.pending.has(m.parentRequestId)) return;
 					reply({ value: response });
 				} finally {
 					clearTimeout(timer);
@@ -487,7 +490,6 @@ export class ExtensionRuntimeProcessV2 {
 			const id = randomUUID();
 			const abandon = (error: Error): void => {
 				if (!this.settle(id)) return;
-				for (const call of this.embeddingCalls.values()) if (call.parentRequestId === id) call.controller.abort();
 				this.send({ kind: "cancel", id });
 				reject(error);
 			};
@@ -572,7 +574,6 @@ export class ExtensionRuntimeProcessV2 {
 		this.stageReject(error);
 		this.activeReject?.(error);
 		this.rejectAll(error);
-		for (const call of this.embeddingCalls.values()) call.controller.abort();
 		this.notifyState();
 		this.send({ kind: "dispose", reason });
 		this.stopPromise = (async () => {
