@@ -143,18 +143,22 @@ function textPieces(
 ): SemanticRecord[] {
 	if (secretContent(text)) return [];
 	const records: SemanticRecord[] = [];
+	// Count lines and bytes per chunk; rescanning the prefix made an 8 MiB file quadratic.
+	let line = location.line ?? 1;
+	let byte = 0;
 	for (let offset = 0; offset < text.length && records.length < limits.maxPieces; offset += limits.maxTextChars) {
 		const chunk = text.slice(offset, offset + limits.maxTextChars);
-		const line = (location.line ?? 1) + (text.slice(0, offset).match(/\n/g)?.length ?? 0);
 		records.push(
 			piece(
 				base,
 				`text:${location.cell ?? ""}:${location.output ?? ""}:${location.page ?? ""}:${offset}`,
 				chunk,
 				{ kind: "text", text: chunk },
-				{ ...location, line, byte: Buffer.byteLength(text.slice(0, offset)) },
+				{ ...location, line, byte },
 			),
 		);
+		line += chunk.split("\n").length - 1;
+		byte += Buffer.byteLength(chunk);
 	}
 	return records;
 }
@@ -555,18 +559,27 @@ export async function extractProjectSources(options: ProjectSourcesOptions): Pro
 			const map = readCodewiki(root);
 			if (!map) throw new Error("Invalid codemap; refusing an incomplete extraction snapshot");
 			if (map.files.length > limits.maxFiles) result.truncated = true;
-			for (const file of (map?.files ?? []).slice(0, limits.maxFiles)) {
+			const symbolsByFile = new Map<string, typeof map.symbols>();
+			for (const symbol of map.symbols) {
+				const list = symbolsByFile.get(symbol.fileId);
+				if (list) list.push(symbol);
+				else symbolsByFile.set(symbol.fileId, [symbol]);
+			}
+			for (const file of map.files.slice(0, limits.maxFiles)) {
 				options.signal?.throwIfAborted();
 				const path = resolve(root, file.path);
 				try {
 					if (!allowed(root, path, options) || !admitRead(path)) continue;
 					const text = readFileSync(path, "utf8");
-					if (secretContent(text)) continue;
+					if (secretContent(text)) {
+						result.sources.push({ path, state: "skipped", reason: "Credential-shaped content" });
+						continue;
+					}
 					const hash = sourceHash(text);
 					const base = { ...baseFor(path, `code:${file.id}`, "code", hash), updatedAt: statSync(path).mtime.toISOString() };
 					add(textPieces(base, `${file.path}\n${file.summary ?? ""}`, limits));
 					const lines = text.split("\n");
-					for (const symbol of (map?.symbols ?? []).filter((s) => s.fileId === file.id)) {
+					for (const symbol of symbolsByFile.get(file.id) ?? []) {
 						const excerpt =
 							`${symbol.name}\n${symbol.sig ?? ""}\n${lines.slice(Math.max(0, symbol.line - 4), symbol.line + 20).join("\n")}`.slice(
 								0,
@@ -589,12 +602,8 @@ export async function extractProjectSources(options: ProjectSourcesOptions): Pro
 			}
 		}
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-			result.sources.push({
-				path: mapPath,
-				state: "failed",
-				reason: error instanceof Error ? error.message : String(error),
-			});
+		// A failed codemap cannot say which code records went stale, so the refresh keeps the last generation.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
 	// Discover only the established wiki source tree, retaining the same symlink and protection gates.
 	const wiki = wikiDir(root);

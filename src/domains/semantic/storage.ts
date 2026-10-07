@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { SemanticLimits, SemanticProfile, SemanticRecord } from "./types.js";
 
-export const SEMANTIC_FORMAT = 1;
+export const SEMANTIC_FORMAT = 2;
 export const DEFAULT_SEMANTIC_LIMITS: SemanticLimits = {
 	maxRecords: 10_000,
 	maxBytes: 64 * 1024 * 1024,
@@ -49,36 +49,78 @@ export function recordFingerprint(record: SemanticRecord): string {
 	);
 }
 
-export function validateVector(vector: readonly number[], dimensions: number): void {
-	if (!Array.isArray(vector) || vector.length !== dimensions || vector.some((v) => !Number.isFinite(v)))
-		throw new Error("Semantic vector has invalid dimensions or non-finite values");
-	const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-	if (Math.abs(norm - 1) > 0.001) throw new Error("Semantic vector must be nonzero and L2 normalized");
+export function validateVector(vector: ArrayLike<number>, dimensions: number): void {
+	if (vector.length !== dimensions) throw new Error("Semantic vector has invalid dimensions or non-finite values");
+	let norm = 0;
+	for (let i = 0; i < vector.length; i++) {
+		const value = vector[i] ?? Number.NaN;
+		if (!Number.isFinite(value)) throw new Error("Semantic vector has invalid dimensions or non-finite values");
+		norm += value * value;
+	}
+	if (Math.abs(Math.sqrt(norm) - 1) > 0.001) throw new Error("Semantic vector must be nonzero and L2 normalized");
+}
+
+/** Float32 base64 keeps a 768d vector near 4 KiB; JSON doubles took 16 KiB and capped a generation near 1,300 records. */
+export function encodeVector(vector: ArrayLike<number>): string {
+	return Buffer.from(Float32Array.from(vector).buffer).toString("base64");
+}
+
+export function decodeVector(encoded: string, dimensions: number): Float32Array {
+	const bytes = Buffer.from(encoded, "base64");
+	if (bytes.length !== dimensions * 4) throw new Error("Semantic vector has invalid dimensions or non-finite values");
+	const vector = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length));
+	validateVector(vector, dimensions);
+	return vector;
+}
+
+/** Text records embed their own text; storing it again as input would double every generation. */
+function compactRecord(record: SemanticRecord): unknown {
+	return record.input.kind === "text" && record.input.text === record.text
+		? { ...record, input: { kind: "text" } }
+		: record;
+}
+
+function expandRecord(record: SemanticRecord): SemanticRecord {
+	return record.input.kind === "text" && record.input.text === undefined
+		? { ...record, input: { kind: "text", text: record.text } }
+		: record;
+}
+
+/** Bytes a record adds to a generation file, for trimming before any embedding is spent. */
+export function storedRecordBytes(record: SemanticRecord, dimensions: number): number {
+	return (
+		Buffer.byteLength(JSON.stringify(compactRecord(record))) + record.id.length + Math.ceil((dimensions * 4) / 3) * 4 + 8
+	);
 }
 
 export interface Generation {
-	version: 1;
+	version: typeof SEMANTIC_FORMAT;
 	projectId: string;
 	profileKey: string;
 	profile: SemanticProfile;
 	generation: string;
 	createdAt: string;
 	records: SemanticRecord[];
-	vectors: Record<string, number[]>;
+	/** Encoded vectors by record ID. */
+	vectors: Record<string, string>;
 	tombstones: string[];
 }
 
 export interface Checkpoint {
-	version: 1;
+	version: typeof SEMANTIC_FORMAT;
 	projectId: string;
 	profileKey: string;
 	snapshotHash: string;
-	vectors: Record<string, number[]>;
+	/** Encoded vectors by record fingerprint, so finished work survives source edits and line shifts. */
+	vectors: Record<string, string>;
 	pending: string[];
 	failed: Record<string, string>;
 	day: string;
 	spent: number;
 }
+
+/** The TUI reopens the index for every search; reparsing and rehashing a 20 MiB generation took about 180 ms. */
+let lastLoaded: { key: string; data: Generation } | undefined;
 
 export class SemanticStorage {
 	constructor(
@@ -87,10 +129,15 @@ export class SemanticStorage {
 	) {}
 
 	read<T>(name: string): T | null {
+		const text = this.readText(name);
+		return text === null ? null : (JSON.parse(text) as T);
+	}
+
+	private readText(name: string): string | null {
 		const path = join(this.directory, name);
 		if (!existsSync(path)) return null;
 		if (statSync(path).size > this.maxBytes) throw new Error("Semantic storage byte limit exceeded");
-		return JSON.parse(readFileSync(path, "utf8")) as T;
+		return readFileSync(path, "utf8");
 	}
 
 	write(name: string, value: unknown): void {
@@ -107,36 +154,43 @@ export class SemanticStorage {
 			generation: string;
 			sha256: string;
 		}>("manifest.json");
-		if (!manifest) return null;
+		// An older format is derived data the next refresh replaces, not a reason to fail status or search.
+		if (!manifest || manifest.version !== SEMANTIC_FORMAT) return null;
 		if (
-			manifest.version !== SEMANTIC_FORMAT ||
 			manifest.projectId !== projectId ||
 			manifest.profileKey !== profileKey ||
 			!/^[a-f0-9-]+$/.test(manifest.generation)
 		)
 			throw new Error("Semantic manifest identity mismatch");
-		let data: Generation | null;
+		const stamp = statSync(join(this.directory, `generation-${manifest.generation}.json`), { throwIfNoEntry: false });
+		const key = `${this.directory}\0${manifest.sha256}\0${stamp?.size}\0${stamp?.mtimeMs}`;
+		if (stamp && lastLoaded?.key === key) return lastLoaded.data;
+		let text: string | null;
 		try {
-			data = this.read<Generation>(`generation-${manifest.generation}.json`);
+			text = this.readText(`generation-${manifest.generation}.json`);
 		} catch (error) {
 			const current = this.read<{ generation: string }>("manifest.json");
 			if (attempts > 0 && current?.generation !== manifest.generation)
 				return this.load(projectId, profileKey, attempts - 1);
 			throw error;
 		}
-		if (!data && attempts > 0) {
+		if (text === null && attempts > 0) {
 			const current = this.read<{ generation: string }>("manifest.json");
 			if (current?.generation !== manifest.generation) return this.load(projectId, profileKey, attempts - 1);
 		}
+		// Hash the bytes as written; re-serializing a parsed 20 MiB generation per load cost more than the parse.
+		if (text === null || sourceHash(text) !== manifest.sha256)
+			throw new Error("Semantic generation checksum or identity mismatch");
+		const data = JSON.parse(text) as Generation;
 		if (
-			!data ||
-			sourceHash(JSON.stringify(data)) !== manifest.sha256 ||
 			data.projectId !== projectId ||
 			data.profileKey !== profileKey ||
 			data.generation !== manifest.generation ||
 			semanticProfileKey(data.profile) !== profileKey
 		)
 			throw new Error("Semantic generation checksum or identity mismatch");
+		data.records = data.records.map(expandRecord);
+		lastLoaded = { key, data };
 		return data;
 	}
 
@@ -149,14 +203,16 @@ export class SemanticStorage {
 	}
 
 	commit(data: Generation): void {
-		this.write(`generation-${data.generation}.json`, data);
+		const text = JSON.stringify({ ...data, records: data.records.map(compactRecord) });
+		if (Buffer.byteLength(text) > this.maxBytes) throw new Error("Semantic storage byte limit exceeded");
+		safeResourceWrite(join(this.directory, `generation-${data.generation}.json`), text, { mode: 0o600 });
 		// The manifest is the only visibility switch; interruption leaves the old complete generation readable.
 		this.write("manifest.json", {
 			version: SEMANTIC_FORMAT,
 			projectId: data.projectId,
 			profileKey: data.profileKey,
 			generation: data.generation,
-			sha256: sourceHash(JSON.stringify(data)),
+			sha256: sourceHash(text),
 		});
 	}
 }

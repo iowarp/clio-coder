@@ -254,16 +254,7 @@ test("bridge scope and current memory eligibility protect results; registry path
 		projectId: "project-a",
 		profile,
 		cacheDir: isolated.dir,
-		embed: async () => ({
-			profileKey: profile.profileIdentity,
-			vectors: [
-				[1, 0],
-				[1, 0],
-				[1, 0],
-				[1, 0],
-				[1, 0],
-			],
-		}),
+		embed: async (inputs) => ({ profileKey: profile.profileIdentity, vectors: inputs.map(() => [1, 0]) }),
 	});
 	const record = (id: string): SemanticRecord => ({
 		...hit(id),

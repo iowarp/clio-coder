@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioCacheDir } from "../../core/xdg.js";
@@ -7,10 +7,14 @@ import type { ExtractionResult } from "./ingestion.js";
 import type { Checkpoint, Generation } from "./storage.js";
 import {
 	DEFAULT_SEMANTIC_LIMITS,
+	decodeVector,
+	encodeVector,
 	recordFingerprint,
+	SEMANTIC_FORMAT,
 	SemanticStorage,
 	semanticProfileKey,
 	sourceHash,
+	storedRecordBytes,
 	validateVector,
 } from "./storage.js";
 import type {
@@ -23,7 +27,22 @@ import type {
 	SemanticRecord,
 	SemanticRefreshOptions,
 	SemanticSearchResult,
+	SemanticSourceKind,
 } from "./types.js";
+
+/** Explicit sources survive a budget trim before code, which code_nav and the codewiki already cover. */
+const TRIM_ORDER: Record<SemanticSourceKind, number> = {
+	memory: 0,
+	evidence: 1,
+	recording: 2,
+	inbox: 3,
+	wiki: 4,
+	code: 5,
+};
+/** Embeddings charged ahead of use, so the checkpoint is rewritten per reservation instead of per batch. */
+const CHARGE_AHEAD = 256;
+/** Decoded vectors for a loaded generation, shared by every index that reopens it. */
+const decodedVectors = new WeakMap<Generation, Map<string, Float32Array>>();
 
 export interface SemanticIndexOptions {
 	projectId: string;
@@ -37,7 +56,8 @@ export class SemanticIndex {
 	readonly profileKey: string;
 	readonly limits: SemanticLimits;
 	readonly storage: SemanticStorage;
-	private generation: Generation | null;
+	private generation: Generation | null = null;
+	private vectors = new Map<string, Float32Array>();
 	private checkpointState: Checkpoint | null = null;
 	private readonly profile: SemanticProfile;
 
@@ -52,12 +72,21 @@ export class SemanticIndex {
 			join(options.cacheDir ?? clioCacheDir(), "semantic", sourceHash(options.projectId), this.profileKey),
 			Math.floor(this.limits.maxBytes / 3),
 		);
-		this.generation = this.storage.load(options.projectId, this.profileKey);
-		this.checkpointState = this.checkpoint();
-		if (this.generation) {
-			this.validateRecords(this.generation.records);
-			for (const vector of Object.values(this.generation.vectors)) validateVector(vector, this.profile.dimensions);
+		this.adopt(this.storage.load(options.projectId, this.profileKey));
+		this.checkpoint();
+	}
+
+	private adopt(generation: Generation | null): void {
+		if (generation) this.validateRecords(generation.records);
+		let vectors = generation ? decodedVectors.get(generation) : undefined;
+		if (!vectors) {
+			vectors = new Map();
+			for (const [id, encoded] of Object.entries(generation?.vectors ?? {}))
+				vectors.set(id, decodeVector(encoded, this.profile.dimensions));
+			if (generation) decodedVectors.set(generation, vectors);
 		}
+		this.generation = generation;
+		this.vectors = vectors;
 	}
 
 	canonicalRecords(): SemanticRecord[] {
@@ -72,20 +101,16 @@ export class SemanticIndex {
 			generation: this.generation?.generation ?? null,
 			indexedAt: this.generation?.createdAt ?? null,
 			records: this.generation?.records.length ?? 0,
-			vectors: Object.keys(this.generation?.vectors ?? {}).length,
+			vectors: this.vectors.size,
 			pending: checkpoint?.pending ?? [],
 			failed: checkpoint?.failed ?? {},
 		};
 	}
 
 	private checkpoint(): Checkpoint | null {
-		const checkpoint = this.storage.read<Checkpoint>("checkpoint.json");
-		if (
-			checkpoint &&
-			(checkpoint.version !== 1 ||
-				checkpoint.projectId !== this.options.projectId ||
-				checkpoint.profileKey !== this.profileKey)
-		)
+		const stored = this.storage.read<Checkpoint>("checkpoint.json");
+		const checkpoint = stored?.version === SEMANTIC_FORMAT ? stored : null;
+		if (checkpoint && (checkpoint.projectId !== this.options.projectId || checkpoint.profileKey !== this.profileKey))
 			throw new Error("Semantic checkpoint identity mismatch");
 		this.checkpointState = checkpoint;
 		return checkpoint;
@@ -121,10 +146,31 @@ export class SemanticIndex {
 		}
 	}
 
+	/**
+	 * A failed source keeps its previous records, and a snapshot over the record or byte budget keeps the
+	 * highest-priority records that fit. Either way the refresh still commits and reports what it left out.
+	 */
 	async refreshExtracted(result: ExtractionResult, options: SemanticRefreshOptions = {}) {
-		if (result.truncated || result.sources.some((source) => source.state === "failed"))
-			throw new Error("Incomplete semantic extraction; retain the last complete generation and retry");
-		return this.refresh(result.records, options);
+		const failed = result.sources.filter((source) => source.state === "failed").map((source) => source.path);
+		const ids = new Set(result.records.map((record) => record.id));
+		const carried = (this.generation?.records ?? []).filter(
+			(record) =>
+				!ids.has(record.id) && failed.some((path) => record.path === path || record.path.startsWith(`${path}${sep}`)),
+		);
+		const budget = this.storage.maxBytes - 4096;
+		let bytes = 0;
+		let truncated = result.truncated;
+		const kept: SemanticRecord[] = [];
+		for (const record of [...carried, ...result.records].sort((a, b) => TRIM_ORDER[a.kind] - TRIM_ORDER[b.kind])) {
+			const size = storedRecordBytes(record, this.profile.dimensions);
+			if (kept.length >= this.limits.maxRecords || bytes + size > budget) {
+				truncated = true;
+				continue;
+			}
+			bytes += size;
+			kept.push(record);
+		}
+		return { ...(await this.refresh(kept, options)), truncated, carried: carried.length };
 	}
 
 	async refresh(records: readonly SemanticRecord[], options: SemanticRefreshOptions = {}) {
@@ -136,108 +182,125 @@ export class SemanticIndex {
 	}
 
 	private async runRefresh(input: readonly SemanticRecord[], options: SemanticRefreshOptions, force: boolean) {
-		const records = structuredClone([...input]).sort((a, b) => a.id.localeCompare(b.id));
+		// Code-unit order: localeCompare follows LANG, so the TUI and the CLI hashed different snapshots.
+		const records = structuredClone([...input]).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 		this.validateRecords(records);
 		return withStateFileLock(
 			join(this.storage.directory, "manifest.json"),
 			async () => {
 				options.signal?.throwIfAborted();
-				this.generation = this.storage.load(this.options.projectId, this.profileKey);
+				this.adopt(this.storage.load(this.options.projectId, this.profileKey));
 				this.storage.pruneGenerations(this.generation?.generation ?? null);
 				const snapshotHash = sourceHash(JSON.stringify([force, records]));
 				const prior = this.checkpoint();
 				const day = new Date().toISOString().slice(0, 10);
-				const cp: Checkpoint =
-					prior?.snapshotHash === snapshotHash
-						? prior
-						: {
-								version: 1,
-								projectId: this.options.projectId,
-								profileKey: this.profileKey,
-								snapshotHash,
-								vectors: {},
-								pending: [],
-								failed: {},
-								day,
-								spent: prior?.day === day ? prior.spent : 0,
-							};
-				this.checkpointState = cp;
-				if (cp.day !== day) {
-					cp.day = day;
-					cp.spent = 0;
-				}
-				const previous = new Map(this.generation?.records.map((r) => [r.id, r]) ?? []);
-				if (!force)
-					for (const record of records) {
-						const old = previous.get(record.id);
-						const vector = this.generation?.vectors[record.id];
-						if (old && vector && recordFingerprint(old) === recordFingerprint(record)) cp.vectors[record.id] = vector;
+				const fingerprints = new Map(records.map((r) => [r.id, recordFingerprint(r)]));
+				const wanted = new Set(fingerprints.values());
+				const vectors: Record<string, string> = {};
+				// Generation vectors go first, so an unchanged snapshot reproduces the committed generation exactly.
+				if (!force && this.generation)
+					for (const old of this.generation.records) {
+						const fingerprint = recordFingerprint(old);
+						const vector = this.generation.vectors[old.id];
+						if (vector && wanted.has(fingerprint)) vectors[fingerprint] ??= vector;
 					}
-				for (const vector of Object.values(cp.vectors)) validateVector(vector, this.profile.dimensions);
-				let remaining = records.filter((r) => !Object.hasOwn(cp.vectors, r.id));
+				if (prior && (!force || prior.snapshotHash === snapshotHash))
+					for (const [fingerprint, vector] of Object.entries(prior.vectors))
+						if (wanted.has(fingerprint) && !Object.hasOwn(vectors, fingerprint)) {
+							decodeVector(vector, this.profile.dimensions);
+							vectors[fingerprint] = vector;
+						}
+				const cp: Checkpoint = {
+					version: SEMANTIC_FORMAT,
+					projectId: this.options.projectId,
+					profileKey: this.profileKey,
+					snapshotHash,
+					vectors,
+					pending: [],
+					failed: prior?.snapshotHash === snapshotHash ? prior.failed : {},
+					day,
+					spent: prior?.day === day ? prior.spent : 0,
+				};
+				this.checkpointState = cp;
+				const missing = () => records.filter((r) => !Object.hasOwn(cp.vectors, fingerprints.get(r.id) ?? ""));
+				let remaining = missing();
 				cp.pending = remaining.map((r) => r.id);
-				this.storage.write("checkpoint.json", cp);
-				let embedded = 0;
 				const requestedBudget = options.maxEmbeddings ?? this.limits.maxEmbeddingsPerDay;
 				if (!Number.isSafeInteger(requestedBudget) || requestedBudget < 0)
 					throw new Error("Invalid semantic embedding budget");
-				while (remaining.length) {
-					options.signal?.throwIfAborted();
-					const count = Math.min(
-						this.limits.batchSize,
-						requestedBudget - embedded,
-						this.limits.maxEmbeddingsPerDay - cp.spent,
-					);
-					if (count <= 0 || options.shouldYield?.() || !this.options.embed) break;
-					const batch = remaining.slice(0, count);
-					cp.spent += batch.length;
-					// Charge before the network call: a crash cannot reset the persisted daily work budget.
-					this.storage.write("checkpoint.json", cp);
-					try {
-						const result = await this.embed(
-							batch.map((r) => r.input),
-							"document",
-							options.signal,
-						);
-						batch.forEach((record, i) => {
-							const vector = result[i];
-							if (!vector) throw new Error("Missing semantic embedding");
-							cp.vectors[record.id] = vector;
-							delete cp.failed[record.id];
-						});
-						embedded += batch.length;
-					} catch (error) {
-						for (const record of batch) cp.failed[record.id] = error instanceof Error ? error.message : String(error);
-						this.storage.write("checkpoint.json", cp);
+				let embedded = 0;
+				let charged = 0;
+				try {
+					while (remaining.length) {
 						options.signal?.throwIfAborted();
-						break;
+						if (options.shouldYield?.() || !this.options.embed) break;
+						if (charged === 0) {
+							charged = Math.max(
+								0,
+								Math.min(CHARGE_AHEAD, requestedBudget - embedded, this.limits.maxEmbeddingsPerDay - cp.spent),
+							);
+							if (charged === 0) break;
+							cp.spent += charged;
+							// Charge before the network call: a crash cannot reset the persisted daily work budget.
+							this.storage.write("checkpoint.json", cp);
+						}
+						const batch: SemanticRecord[] = [];
+						for (const record of remaining) {
+							if (batch.length >= Math.min(this.limits.batchSize, charged)) break;
+							if (!batch.some((entry) => fingerprints.get(entry.id) === fingerprints.get(record.id))) batch.push(record);
+						}
+						try {
+							const result = await this.embed(
+								batch.map((r) => r.input),
+								"document",
+								options.signal,
+							);
+							batch.forEach((record, i) => {
+								const vector = result[i];
+								if (!vector) throw new Error("Missing semantic embedding");
+								cp.vectors[fingerprints.get(record.id) ?? ""] = encodeVector(vector);
+								delete cp.failed[record.id];
+							});
+							embedded += batch.length;
+							charged -= batch.length;
+						} catch (error) {
+							for (const record of batch) cp.failed[record.id] = error instanceof Error ? error.message : String(error);
+							options.signal?.throwIfAborted();
+							break;
+						}
+						remaining = missing();
 					}
-					remaining = records.filter((r) => !Object.hasOwn(cp.vectors, r.id));
+				} finally {
+					cp.spent -= charged;
 					cp.pending = remaining.map((r) => r.id);
 					this.storage.write("checkpoint.json", cp);
 				}
 				if (remaining.length) return { complete: false, embedded, ...this.status() };
 				options.signal?.throwIfAborted();
-				const live = new Set(records.map((r) => r.id));
-				const next: Generation = {
-					version: 1,
-					projectId: this.options.projectId,
-					profileKey: this.profileKey,
-					profile: this.profile,
-					generation: randomUUID(),
-					createdAt: new Date().toISOString(),
-					records,
-					vectors: cp.vectors,
-					tombstones: [...previous.keys()].filter((id) => !live.has(id)),
-				};
-				this.storage.pruneGenerations(this.generation?.generation ?? null);
-				this.storage.commit(next);
-				this.generation = next;
+				const nextVectors = Object.fromEntries(records.map((r) => [r.id, cp.vectors[fingerprints.get(r.id) ?? ""] ?? ""]));
+				const unchanged =
+					!force && this.generation !== null && JSON.stringify(records) === JSON.stringify(this.generation.records);
+				if (!unchanged) {
+					const live = new Set(records.map((r) => r.id));
+					const next: Generation = {
+						version: SEMANTIC_FORMAT,
+						projectId: this.options.projectId,
+						profileKey: this.profileKey,
+						profile: this.profile,
+						generation: randomUUID(),
+						createdAt: new Date().toISOString(),
+						records,
+						vectors: nextVectors,
+						tombstones: (this.generation?.records ?? []).map((r) => r.id).filter((id) => !live.has(id)),
+					};
+					this.storage.commit(next);
+					this.adopt(next);
+				}
 				cp.pending = [];
 				cp.failed = {};
 				cp.vectors = {};
 				this.storage.write("checkpoint.json", cp);
-				this.storage.pruneGenerations(next.generation);
+				this.storage.pruneGenerations(this.generation?.generation ?? null);
 				return { complete: true, embedded, ...this.status() };
 			},
 			{ ...(options.signal ? { signal: options.signal } : {}), timeoutMs: 1000 },
@@ -291,9 +354,10 @@ export class SemanticIndex {
 	async search(query: string, filters: SemanticFilters, signal?: AbortSignal): Promise<SemanticSearchResult> {
 		this.assertSearch(query, filters);
 		try {
-			const vector = this.options.embed
-				? (await this.embed([{ kind: "text", text: query }], "query", signal))[0]
-				: undefined;
+			const vector =
+				this.options.embed && this.generation?.records.length
+					? (await this.embed([{ kind: "text", text: query }], "query", signal))[0]
+					: undefined;
 			return this.searchVector(query, vector ? { profileKey: this.profileKey, vector } : undefined, filters);
 		} catch (error) {
 			signal?.throwIfAborted();
@@ -325,6 +389,16 @@ export class SemanticIndex {
 		const start = performance.now();
 		const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [])].slice(0, 64);
 		const memories = new Set(filters.eligibleMemoryIds ?? []);
+		// Many records share a path, and readablePath resolves symlinks on every call.
+		const pathAllowed = new Map<string, boolean>();
+		const allowsPath = (path: string) => {
+			let allowed = pathAllowed.get(path);
+			if (allowed === undefined) {
+				allowed = filters.allowsPath?.(path) !== false;
+				pathAllowed.set(path, allowed);
+			}
+			return allowed;
+		};
 		const hits: SemanticHit[] = [];
 		let truncated = false;
 		for (const record of this.generation?.records ?? []) {
@@ -337,21 +411,22 @@ export class SemanticIndex {
 				(record.scope === "global" && !filters.includeGlobal) ||
 				(record.visibility === "private" && !filters.includePrivate) ||
 				(record.kind === "memory" && !memories.has(record.memoryId ?? "")) ||
-				filters.allowsRecord?.(record) === false ||
-				(record.kind !== "memory" && filters.allowsPath?.(record.path) === false) ||
 				(filters.kinds && !filters.kinds.includes(record.kind)) ||
 				(filters.visibility && !filters.visibility.includes(record.visibility)) ||
 				(filters.runId && record.runId !== filters.runId) ||
 				(filters.mediaType && record.mediaType !== filters.mediaType) ||
 				(filters.after && (!record.updatedAt || record.updatedAt < filters.after)) ||
-				(filters.before && (!record.updatedAt || record.updatedAt > filters.before))
+				(filters.before && (!record.updatedAt || record.updatedAt > filters.before)) ||
+				filters.allowsRecord?.(record) === false ||
+				(record.kind !== "memory" && !allowsPath(record.path))
 			)
 				continue;
 			const exact = query.length > 0 && [record.id, record.sourceId, record.path].includes(query);
 			const text = `${record.path}\n${record.text}`.toLowerCase();
 			const lexical = terms.length ? terms.filter((term) => text.includes(term)).length / terms.length : 0;
-			const stored = this.generation?.vectors[record.id];
-			const semantic = vector && stored ? vector.reduce((sum, value, i) => sum + value * (stored[i] ?? 0), 0) : 0;
+			const stored = this.vectors.get(record.id);
+			let semantic = 0;
+			if (vector && stored) for (let i = 0; i < stored.length; i++) semantic += (vector[i] ?? 0) * (stored[i] ?? 0);
 			if (!exact && lexical <= 0 && semantic <= 0) continue;
 			const evidenceId =
 				record.kind === "evidence"

@@ -391,13 +391,45 @@ test("recording ingestion verifies hashes, strips controls and locates redacted 
 	);
 });
 
-test("failed or truncated extraction cannot delete old records; query profiles remain isolated", async () => {
+test("failed sources keep old records, oversized snapshots commit by priority; query profiles remain isolated", async () => {
 	const index = new SemanticIndex({ projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir });
-	await index.refresh([record("keep")]);
-	await assert.rejects(index.refreshExtracted({ records: [], sources: [], truncated: true }), /Incomplete/);
-	await assert.rejects(
-		index.refreshExtracted({ records: [], sources: [{ path: "unreadable", state: "failed" }], truncated: false }),
-		/Incomplete/,
+	await index.refresh([record("keep"), record("gone")]);
+	const failed = await index.refreshExtracted({
+		records: [],
+		sources: [{ path: "keep.ts", state: "failed" }],
+		truncated: false,
+	});
+	assert.equal(failed.carried, 1);
+	assert.deepEqual(
+		index.canonicalRecords().map((r) => r.id),
+		["keep"],
+	);
+	const truncated = await index.refreshExtracted({
+		records: [record("keep"), record("new")],
+		sources: [],
+		truncated: true,
+	});
+	assert.equal(truncated.complete, true);
+	assert.equal(truncated.truncated, true);
+	assert.equal(truncated.records, 2);
+	// One record fits the byte budget; memory outranks code when a snapshot is trimmed.
+	const small = new SemanticIndex({
+		projectId: "project-b",
+		profile,
+		embed: fixtureEmbed([]),
+		cacheDir: isolated.dir,
+		limits: { maxBytes: 3 * (4096 + 500) },
+	});
+	const memory = { ...record("memory"), projectId: "project-b", kind: "memory" as const, memoryId: "m" };
+	const trimmed = await small.refreshExtracted({
+		records: [{ ...record("code"), projectId: "project-b" }, memory],
+		sources: [],
+		truncated: false,
+	});
+	assert.equal(trimmed.truncated, true);
+	assert.deepEqual(
+		small.canonicalRecords().map((r) => r.id),
+		["memory"],
 	);
 	assert.equal(index.searchVector("keep", undefined, { projectId: "project-a" }).hits[0]?.id, "keep");
 	assert.throws(
