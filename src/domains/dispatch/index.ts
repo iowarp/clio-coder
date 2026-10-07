@@ -159,7 +159,6 @@ export {
 	parseRecordingCast,
 	parseRecordingManifest,
 	readRunRecording,
-	recordingPlaybackTool,
 	recordingReference,
 } from "./recording.js";
 export { createRouteHistoryStore } from "./route-history.js";

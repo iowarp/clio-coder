@@ -2,12 +2,11 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { resolveClioDirs, stateRootRemoved } from "../../core/xdg.js";
 import { createRedactionTally, redactSecretSegments } from "../evidence/index.js";
-import type { ToolResolution } from "../toolchain/index.js";
-import { installRemedy, resolveToolBinary } from "../toolchain/index.js";
 import type { RunEventJournalSink } from "./run-event-journal.js";
 import type { RunNodeIdentity } from "./types.js";
 
@@ -34,11 +33,6 @@ export interface RecordingManifest {
 	error?: string;
 }
 export type CastOutputEvent = [number, "o", string];
-/** Playback is optional: generating a native side-channel cast needs no external executable. */
-export function recordingPlaybackTool(): { resolution: ToolResolution; remedy: string | null } {
-	const resolution = resolveToolBinary("asciinema");
-	return { resolution, remedy: resolution.source === "none" ? installRemedy("asciinema") : null };
-}
 
 export function recordingReference(runId: string): RecordingReference {
 	assertSafeId(runId, "run");
@@ -126,13 +120,12 @@ export function createRecordingJournal(
 	} = {},
 ): RecordingJournal {
 	const captures = new Map<string, Capture>();
-	let playbackChecked = false;
 	const root = options.stateDir ?? resolveClioDirs().state;
 	const cap = Math.max(1024, Math.min(options.maxBytes ?? RECORDING_MAX_BYTES, RECORDING_MAX_BYTES));
 	const duration = Math.max(0, Math.min(options.maxDurationMs ?? RECORDING_MAX_DURATION_MS, RECORDING_MAX_DURATION_MS));
 	const nowMs = options.nowMs ?? (() => performance.now());
 	const now = options.now ?? (() => new Date());
-	const warn = options.warn ?? ((text: string) => process.stderr.write(`[clio-coder:recording] ${text}\n`));
+	const warn = options.warn ?? ((text: string) => writeDiagnostic(`[clio-coder:recording] ${text}`));
 	const persist = (capture: Capture): void => {
 		if (stateRootRemoved()) throw new Error("state root removed");
 		assertRecordingDirectory(root, capture.manifest.runId);
@@ -219,17 +212,6 @@ export function createRecordingJournal(
 		},
 		start(runId, node) {
 			const reference = recordingReference(runId);
-			if (!playbackChecked) {
-				playbackChecked = true;
-				try {
-					const playback = recordingPlaybackTool();
-					if (playback.remedy) warn(`native capture needs no external tool; for playback install with ${playback.remedy}`);
-				} catch (error) {
-					warn(
-						`playback discovery failed: ${error instanceof Error ? error.message : String(error)}; native capture continues`,
-					);
-				}
-			}
 			if (captures.has(runId)) return reference;
 			if (captures.size >= 16) finish(captures.keys().next().value as string, "capture_capacity");
 			const capture: Capture = {
