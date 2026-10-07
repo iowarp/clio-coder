@@ -5,8 +5,8 @@ import type { WorkerSettings } from "../../server/worker/protocol.js";
 
 export { PINNED_TOOLS };
 export function fixtureOptions(settings: WorkerSettings = {}) {
-	const original = PINNED_TOOLS[0];
-	if (!original) throw new Error("Tool registry is empty.");
+	const original = PINNED_TOOLS.find((tool) => tool.id === "herdr");
+	if (!original) throw new Error("Herdr pin is missing from the tool registry.");
 	const bytes = Buffer.from(`#!/bin/sh\nprintf 'herdr ${original.version}\\n'\n`);
 	const doc = Buffer.from("Fabricated fixture license; no upstream executable is downloaded.\n");
 	const url = "https://fixture.invalid/herdr";
@@ -26,7 +26,7 @@ export function fixtureOptions(settings: WorkerSettings = {}) {
 		documents: [{ name: "LICENSE", url: docUrl, sha256: createHash("sha256").update(doc).digest("hex") }],
 	};
 	return {
-		pins: [entry, ...PINNED_TOOLS.slice(1)],
+		pins: PINNED_TOOLS.map((tool) => (tool.id === "herdr" ? entry : tool)),
 		fetcher: async (requested: string) => {
 			await setTimeout(settings.installDelayMs ?? 30);
 			if (settings.failInstall) throw new Error("Injected download failure with private-stderr-sentinel");
