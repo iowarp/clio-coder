@@ -16,7 +16,7 @@ import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
-import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
+import type { CostProvenance, RuntimeEnforcement, RuntimeTargetSnapshot } from "../providers/index.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
@@ -747,6 +747,16 @@ export interface RunReceiptSafetySummary {
 		executeAutonomy?: "yolo";
 		/** The operator's trustedUnmediated opt-in let an unmediated runtime take write-capable work. */
 		trustedUnmediated?: true;
+		/**
+		 * The permit's hard ceiling. Absent on receipts sealed before it was
+		 * recorded, so those still digest exactly as they did.
+		 */
+		ceiling?: {
+			tools: ReadonlyArray<string>;
+			readOnly: boolean;
+			writeRoots: ReadonlyArray<string>;
+			enforcement: RuntimeEnforcement;
+		};
 	};
 	/**
 	 * Effective OS sandbox for the worker's own commands. Present only on

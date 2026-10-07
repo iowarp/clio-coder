@@ -2073,6 +2073,12 @@ function receiptPermitSummary(permit: WorkerPermit): NonNullable<NonNullable<Run
 		approvalAuthority: permit.allowance.approvalAuthority,
 		...(permit.allowance.executeAutonomy !== undefined ? { executeAutonomy: permit.allowance.executeAutonomy } : {}),
 		...(permit.trustedUnmediated === true ? { trustedUnmediated: true as const } : {}),
+		ceiling: {
+			tools: [...permit.ceiling.tools],
+			readOnly: permit.ceiling.readOnly,
+			writeRoots: [...permit.ceiling.writeRoots],
+			enforcement: { ...permit.ceiling.enforcement },
+		},
 	};
 }
 
