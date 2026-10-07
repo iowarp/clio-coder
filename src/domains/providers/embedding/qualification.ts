@@ -6,7 +6,6 @@ import { EmbeddingError } from "./types.js";
 export async function qualifyEmbeddingProfile(
 	service: EmbeddingService,
 	profile: EmbeddingProfile,
-	signal?: AbortSignal,
 ): Promise<EmbeddingProfile> {
 	const result = await service.embed({
 		inputs: [
@@ -15,7 +14,6 @@ export async function qualifyEmbeddingProfile(
 		],
 		task: "query",
 		profile,
-		...(signal ? { signal } : {}),
 	});
 	const fingerprint = embeddingCanaryFingerprint(result.vectors);
 	if (profile.canaryFingerprint !== null && profile.canaryFingerprint !== fingerprint)

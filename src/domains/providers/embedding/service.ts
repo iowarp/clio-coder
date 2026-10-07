@@ -9,57 +9,33 @@ import { embedOpenAIInputs } from "./transport.js";
 import type { EmbeddingInput, EmbeddingRequest, EmbeddingRoute, EmbeddingService } from "./types.js";
 import { EmbeddingError } from "./types.js";
 
-export function createEmbeddingService(options: {
-	route: EmbeddingRoute;
-	maxBatchItems?: number;
-	maxInputBytes?: number;
-	maxBatchBytes?: number;
-	timeoutMs?: number;
-}): EmbeddingService {
+export function createEmbeddingService(options: { route: EmbeddingRoute }): EmbeddingService {
 	let busy = false;
 	const route = structuredClone(options.route);
 	return {
 		async embed(request: EmbeddingRequest) {
 			const profile = structuredClone(request.profile);
 			if (request.signal?.aborted) throw new EmbeddingError("cancelled", "Embedding cancelled");
-			if (
-				profile.model !== route.model ||
-				!profile.assetIdentity.trim() ||
-				!profile.id.trim() ||
-				!Number.isInteger(profile.dimensions) ||
-				profile.dimensions < 1 ||
-				profile.dimensions > 65536 ||
-				profile.normalization !== "l2" ||
-				/f16|float16/i.test(profile.quantization)
-			)
-				throw new EmbeddingError(
-					"profile-mismatch",
-					"Embedding profile requires pinned identity, valid dimensions and non-float16 inference",
-				);
 			if (request.task !== "query" && request.task !== "document")
 				throw new EmbeddingError("invalid-input", "Unknown embedding task");
-			if (request.inputs.length < 1 || request.inputs.length > (options.maxBatchItems ?? 32))
+			if (request.inputs.length < 1 || request.inputs.length > 32)
 				throw new EmbeddingError("invalid-input", "Embedding batch size exceeds bounds");
 			const sources = request.inputs.map((input, index) => {
 				const bytes = validateInput(input, route);
-				if (bytes > (options.maxInputBytes ?? 8 * 1024 * 1024))
+				if (bytes > 8 * 1024 * 1024)
 					throw new EmbeddingError("invalid-input", "Embedding input exceeds byte limit");
 				return { index, kind: input.kind, bytes };
 			});
 			const inputBytes = sources.reduce((sum, source) => sum + source.bytes, 0);
-			if (inputBytes > (options.maxBatchBytes ?? 16 * 1024 * 1024))
+			if (inputBytes > 16 * 1024 * 1024)
 				throw new EmbeddingError("invalid-input", "Embedding batch exceeds byte limit");
-			const timeoutMs = request.timeoutMs ?? options.timeoutMs ?? 30000;
+			const timeoutMs = request.timeoutMs ?? 30000;
 			if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 300000)
 				throw new EmbeddingError("invalid-input", "Embedding timeout must be between 0 and 300000ms");
-			const key = route.admissionKey ?? canonicalEndpointKey(route.target);
+			const key = canonicalEndpointKey(route.target);
 			if (!key) throw new EmbeddingError("invalid-input", "Embedding route requires a scheduler identity");
 			const background = request.priority === "background";
-			if (
-				busy ||
-				(background &&
-					[key, ...(route.foregroundKeys ?? [])].some((candidate) => (foregroundStreamUsage()[candidate] ?? 0) > 0))
-			)
+			if (busy || (background && (foregroundStreamUsage()[key] ?? 0) > 0))
 				throw new EmbeddingError("paused", "Embedding admission paused for active inference");
 			const controller = new AbortController();
 			let abortCode: "cancelled" | "timeout" | "paused" = "cancelled";
@@ -70,17 +46,15 @@ export function createEmbeddingService(options: {
 				controller.abort();
 			}, timeoutMs);
 			busy = true;
-			const releases = background
-				? [...new Set([key, ...(route.foregroundKeys ?? [])])].map((schedulerKey) =>
-						registerBackgroundStream(schedulerKey, {
-							limit: 1,
-							preempt: () => {
-								abortCode = "paused";
-								controller.abort();
-							},
-						}),
-					)
-				: [registerForegroundStream(key)];
+			const release = background
+				? registerBackgroundStream(key, {
+						limit: 1,
+						preempt: () => {
+							abortCode = "paused";
+							controller.abort();
+						},
+					})
+				: registerForegroundStream(key);
 			try {
 				const prefix = request.task === "query" ? profile.queryPrefix : profile.documentPrefix;
 				const inputs = request.inputs.map(
@@ -96,7 +70,7 @@ export function createEmbeddingService(options: {
 				);
 				const result = await embedOpenAIInputs({ ...route.target, defaultModel: route.model }, inputs, {
 					httpTimeoutMs: timeoutMs,
-					credentialsPresent: new Set(route.target.auth?.apiKeyEnvVar ? [route.target.auth.apiKeyEnvVar] : []),
+					credentialsPresent: new Set(),
 					signal: controller.signal,
 					...(route.authToken ? { authToken: route.authToken } : {}),
 				});
@@ -106,8 +80,6 @@ export function createEmbeddingService(options: {
 						"profile-mismatch",
 						`Returned embedding model ${result.model} differs from ${route.model}`,
 					);
-				if (result.dimensions !== profile.dimensions || result.vectors.length !== inputs.length)
-					throw new EmbeddingError("invalid-response", "Embedding count or dimensions mismatch");
 				const vectors = result.vectors.map((vector) => {
 					if (
 						!Array.isArray(vector) ||
@@ -148,19 +120,22 @@ export function createEmbeddingService(options: {
 			} finally {
 				clearTimeout(timer);
 				request.signal?.removeEventListener("abort", abort);
-				for (const release of releases) release();
+				release();
 				busy = false;
 			}
 		},
 	};
 }
 
+const PART_KINDS = new Set<string>(["text", "image", "audio"]);
+
 function validateInput(input: EmbeddingInput, route: EmbeddingRoute): number {
 	if (input.kind === "video" || !route.modalities.includes(input.kind))
 		throw new EmbeddingError("unsupported", `Embedding modality ${input.kind} is not qualified on this route`);
 	if (input.kind === "mixed") {
-		if (input.parts.length < 1 || input.parts.length > 64)
-			throw new EmbeddingError("invalid-input", "Mixed input requires 1..64 ordered parts");
+		// Extension JSON is untyped, and a nested mixed part would reach the transport as malformed audio.
+		if (input.parts.length < 1 || input.parts.length > 64 || input.parts.some((part) => !PART_KINDS.has(part.kind)))
+			throw new EmbeddingError("invalid-input", "Mixed input requires 1..64 ordered text, image or audio parts");
 		return input.parts.reduce((sum, part) => sum + validateInput(part, route), 0);
 	}
 	if (input.kind === "text") {

@@ -118,7 +118,6 @@ export async function openSemanticApp(options: SemanticAppOptions) {
 			model: config.model,
 			modalities: config.modalities,
 			...(authToken ? { authToken } : {}),
-			admissionKey: target.url ?? target.id,
 		},
 	});
 	const allowedMediaRoots = config.inboxes

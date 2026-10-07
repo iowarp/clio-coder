@@ -1,5 +1,4 @@
 import type { Api, Model } from "../../../../engine/types.js";
-import { embedOpenAIInputs } from "../../embedding/transport.js";
 
 import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
@@ -57,7 +56,6 @@ function flattenNativeEmbedding(entry: NativeEmbeddingItem): number[] {
 
 const llamacppEmbedRuntime: RuntimeDescriptor = {
 	id: "llamacpp-embed",
-	embedInputs: embedOpenAIInputs,
 	displayName: "llama.cpp (embeddings)",
 	kind: "http",
 	tier: "local-native",

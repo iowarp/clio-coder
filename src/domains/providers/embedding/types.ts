@@ -46,10 +46,6 @@ export interface EmbeddingRoute {
 	model: string;
 	/** Explicit qualified modalities; text is required. Video is intentionally unsupported. */
 	modalities: readonly ("text" | "image" | "audio" | "mixed")[];
-	/** Physical scheduler key when a gateway fronts a one-resident-model router. */
-	admissionKey?: string;
-	/** Additional scheduler keys whose foreground work must prevent background embedding. */
-	foregroundKeys?: readonly string[];
 	authToken?: string;
 }
 export interface EmbeddingService {

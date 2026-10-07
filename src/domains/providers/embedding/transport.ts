@@ -29,6 +29,10 @@ export async function embedOpenAIInputs(
 ): Promise<EmbedResult> {
 	if (!target.url || !target.defaultModel)
 		throw new EmbeddingError("invalid-input", "Embedding target requires URL and pinned model");
+	// fetch echoes a URL's userinfo in its error, and that text reaches extensions and the index checkpoint.
+	const parsed = new URL(target.url);
+	if (parsed.username || parsed.password)
+		throw new EmbeddingError("invalid-input", "Embedding target URL must not contain credentials");
 	const root = target.url.replace(/\/+$/, "").replace(/\/v1$/, "");
 	const envName = target.auth?.apiKeyEnvVar;
 	const token = ctx.authToken ?? (envName && ctx.credentialsPresent.has(envName) ? process.env[envName] : undefined);
