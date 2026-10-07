@@ -1,3 +1,4 @@
+import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
@@ -1010,6 +1011,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			let publicEvent = enrichedEvent;
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
+				const usage = enrichedEvent.message.usage as unknown as Record<string, unknown> | undefined;
+				if (usage) {
+					usage.costProvenance =
+						(usage.clioExternal as { cost?: string } | undefined)?.cost === "provider-reported"
+							? "known"
+							: localRuntime.runtimeResolution.costProvenance;
+					usage.callInvoked = apiCallStartedAt !== null || normalizeTokenUsage(usage).observed;
+					usage.targetId = localRuntime.targetId;
+				}
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
 					enrichedEvent.message as unknown as Record<string, unknown>,
 				);
@@ -1093,13 +1103,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant") {
 				const completed = sumRunUsage([enrichedEvent.message]);
-				if (completed.hadUsage && Number.isFinite(completed.costUsd) && completed.costUsd > 0) {
+				if (!deps.observability && completed.hadUsage && Number.isFinite(completed.costUsd) && completed.costUsd > 0) {
 					unsettledSpendUsd += completed.costUsd;
 				}
 			}
-			if (enrichedEvent.type === "agent_end" && deps.observability) {
-				const summary = sumRunUsage(enrichedEvent.messages);
-				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
+			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant" && deps.observability) {
+				const summary = sumRunUsage([enrichedEvent.message]);
+				const rawUsage = enrichedEvent.message.usage as unknown as Record<string, unknown>;
+				const reported = normalizeTokenUsage(rawUsage ?? {});
+				if (summary.hadUsage && (apiCallStartedAt !== null || reported.observed)) {
 					deps.observability.recordTokens(
 						localRuntime.targetId,
 						attributedModelId(
@@ -1107,25 +1119,30 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							localRuntime.wireModelId,
 							summary.lastDifferingResponseModelId,
 						),
-						summary.tokens,
-						summary.costUsd,
+						reported.totalTokens,
+						rawUsage.estimated === true ? 0 : summary.costUsd,
 						{
-							input: summary.input,
-							output: summary.output,
-							cacheRead: summary.cacheRead,
-							cacheWrite: summary.cacheWrite,
+							input: reported.input,
+							output: reported.output,
+							cacheRead: reported.cacheRead,
+							cacheWrite: reported.cacheWrite,
 							...(summary.cacheWrite1h === undefined ? {} : { cacheWrite1h: summary.cacheWrite1h }),
-							reasoningTokens: summary.reasoning,
-							totalTokens: summary.tokens,
+							reasoningTokens: reported.reasoning,
+							totalTokens: reported.totalTokens,
 							apiCalls: summary.apiCalls,
+							...(!reported.observed ? { missingTokenCalls: 1 } : {}),
 						},
-						localRuntime.runtimeResolution.costProvenance,
+						rawUsage.estimated === true
+							? "unknown"
+							: (rawUsage.costProvenance as AgentRuntime["runtimeResolution"]["costProvenance"]),
 						{
 							requestedModelIds: [localRuntime.wireModelId],
 							responseModelIdObservationCounts: summary.responseModelIdObservationCounts,
 						},
 					);
 				}
+			}
+			if (enrichedEvent.type === "agent_end" && deps.observability) {
 				const timing = generationTiming.snapshot(eventClock);
 				const generated = generationTiming.output();
 				if (generated.outputTokens > 0 && timing) {

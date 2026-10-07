@@ -23,6 +23,9 @@ export const LiveUsage = Type.Object(
 					cacheWrite: count,
 					reasoning: count,
 					totalTokens: count,
+					calls: Type.Optional(count),
+					missingTokenCalls: Type.Optional(count),
+					hasEstimatedCost: Type.Optional(Type.Boolean()),
 					costUsd: Type.Number({ minimum: 0 }),
 					costProvenance: Type.Union([
 						Type.Literal("known"),

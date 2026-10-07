@@ -1,9 +1,4 @@
-/**
- * The out-of-turn usage store writes only the fields `clio-coder usage report`
- * reads. `sessionId`, `timing`, `promptCache` and `usage.costProvenance` had no
- * reader, so new rows omit them, while rows an earlier build wrote with them
- * still parse.
- */
+/** Session replay reads ownership and pricing provenance; unused timing/cache fields stay omitted. */
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,12 +11,12 @@ import { outOfTurnUsagePath, readOutOfTurnUsageRows } from "../../src/domains/ob
 const scratch = mkdtempSync(join(tmpdir(), "clio-coder-out-of-turn-fields-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const UNREAD = ["sessionId", "timing", "promptCache"];
+const UNREAD = ["timing", "promptCache"];
 
 function assertOnlyReadFields(row: Record<string, unknown>): void {
 	for (const key of UNREAD) equal(key in row, false, `${key} must not be written`);
 	const usage = row.usage as Record<string, unknown>;
-	equal("costProvenance" in usage, false, "usage.costProvenance must not be written");
+	ok("costProvenance" in usage, "pricing provenance must survive persistence");
 }
 
 it("background-memory rows carry no unread fields", () => {
@@ -38,10 +33,12 @@ it("background-memory rows carry no unread fields", () => {
 			costUsd: 0,
 			costProvenance: "known_free",
 		},
-		{ repoIdentity: "repo-1" },
+		{ repoIdentity: "repo-1", sessionId: "session-1" },
 	);
 	assertOnlyReadFields(row as unknown as Record<string, unknown>);
 	equal(row.repoIdentity, "repo-1");
+	equal(row.sessionId, "session-1");
+	equal(row.usage.costProvenance, "known_free");
 	equal(row.usage.totalTokens, 16);
 });
 
@@ -95,5 +92,7 @@ it("rows an earlier build wrote with the retired fields still parse", () => {
 	equal(row.repoIdentity, "repo-1");
 	equal(row.usage.totalTokens, 4);
 	equal(row.usage.costUsd, 0.001);
+	equal(row.sessionId, "session-1");
+	equal(row.usage.costProvenance, "known");
 	assertOnlyReadFields(row as unknown as Record<string, unknown>);
 });

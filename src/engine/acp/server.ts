@@ -6,6 +6,9 @@ import {
 	readContextOperation,
 } from "../../core/context-operation.js";
 import type { JobRecord } from "../../core/job-types.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
+import type { CostAggregate } from "../../domains/observability/cost.js";
+import { accumulateCostAmount, emptyCostAggregate } from "../../domains/observability/cost.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
@@ -163,7 +166,7 @@ import {
 	projectFleetPreview,
 } from "./fleet-run.js";
 import type { AcpLiveTelemetry } from "./live-telemetry.js";
-import { ACP_WORKSPACE_META_KEY, createAcpLiveTelemetry, turnUsageMeta } from "./live-telemetry.js";
+import { ACP_WORKSPACE_META_KEY, createAcpLiveTelemetry, sessionUsageTotals, turnUsageMeta } from "./live-telemetry.js";
 import {
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_SWITCH_TURN_METHOD,
@@ -703,6 +706,7 @@ interface AcpAgentAttribution {
 }
 
 interface AcpServerUsage {
+	costSummary?: CostAggregate;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -712,6 +716,8 @@ interface AcpServerUsage {
 	costUsd: number;
 	costProvenance: CostProvenance;
 	costProvenanceObserved: boolean;
+	apiCalls?: number;
+	missingTokenCalls?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1234,27 +1240,23 @@ function costTotal(usage: Record<string, unknown>): number {
 }
 
 export function mergeUsage(into: AcpServerUsage, usage: unknown): void {
-	if (!isRecord(usage)) return;
-	const input =
-		finite(usage.input) + finite(usage.inputTokens) + finite(usage.input_tokens) + finite(usage.prompt_tokens);
-	const output =
-		finite(usage.output) + finite(usage.outputTokens) + finite(usage.output_tokens) + finite(usage.completion_tokens);
-	const cacheRead = finite(usage.cacheRead) + finite(usage.cacheReadTokens) + finite(usage.cache_read_tokens);
-	const cacheWrite = finite(usage.cacheWrite) + finite(usage.cacheWriteTokens) + finite(usage.cache_write_tokens);
-	const reasoning = finite(usage.reasoning) + finite(usage.reasoningTokens) + finite(usage.reasoning_tokens);
+	if (!isRecord(usage) || usage.callInvoked === false) return;
+	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens, observed } = normalizeTokenUsage(usage);
 	into.input += input;
 	into.output += output;
 	into.cacheRead += cacheRead;
 	into.cacheWrite += cacheWrite;
 	into.reasoning += reasoning;
-	// Same fallback sumRunUsage uses: prefer the provider's own total, otherwise
-	// sum the four merged categories for this message (reasoning excluded,
-	// matching sumRunUsage, since a provider that reports reasoning separately
-	// still counts it inside output for billing).
-	const explicitTotal = finite(usage.totalTokens) + finite(usage.total_tokens);
-	into.totalTokens += explicitTotal > 0 ? explicitTotal : input + output + cacheRead + cacheWrite;
-	into.costUsd += costTotal(usage);
-	const provenance = resolveCostProvenance(usage.costProvenance, "unknown");
+	into.totalTokens += totalTokens;
+	into.apiCalls = (into.apiCalls ?? 0) + 1;
+	if (!observed) into.missingTokenCalls = (into.missingTokenCalls ?? 0) + 1;
+	if (usage.estimated !== true) into.costUsd += costTotal(usage);
+	const provenance = usage.estimated !== true ? resolveCostProvenance(usage.costProvenance, "unknown") : "unknown";
+	into.costSummary = accumulateCostAmount(into.costSummary ?? emptyCostAggregate(), {
+		usd: usage.estimated === true ? 0 : costTotal(usage),
+		provenance,
+		missingTokenCalls: observed ? 0 : 1,
+	});
 	if (!into.costProvenanceObserved) into.costProvenance = provenance;
 	else if (into.costProvenance === "unknown" || provenance === "unknown") into.costProvenance = "unknown";
 	else if (into.costProvenance === "estimated" || provenance === "estimated") into.costProvenance = "estimated";
@@ -3676,6 +3678,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		cwd: canonicalCwd,
 		...(options.contextLedger !== undefined ? { contextLedger: options.contextLedger } : {}),
 		...(options.usage !== undefined ? { sessionUsage: () => options.usage?.session() ?? EMPTY_SESSION_USAGE } : {}),
+		...(options.usage?.subscribe ? { subscribeUsage: options.usage.subscribe } : {}),
 		...(options.plan !== undefined ? { plan: options.plan } : {}),
 		...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
 		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
@@ -4454,6 +4457,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw error;
 		}
 		const id = meta?.id ?? randomUUID();
+		options.usage?.resetSession?.(id);
 		if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
 			await options.mcpCapabilities?.detachClientServers();
 			throw new AcpRequestError(-32603, "session creation failed", { code: "internal_error" });
@@ -6608,12 +6612,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// provider failure or an operator cancellation.
 		if (active.toolCallLimitReached) {
 			settleOpenToolCalls(options.transport, session.id, active, "tool call limit exceeded");
-			return promptResponse("max_turn_requests", active);
+			return promptResponse("max_turn_requests", active, options.usage?.session());
 		}
 		// Operator cancellation takes precedence over ordinary turn outcomes.
 		if (active.cancelled) {
 			settleOpenToolCalls(options.transport, session.id, active, "cancelled");
-			return promptResponse("cancelled", active);
+			return promptResponse("cancelled", active, options.usage?.session());
 		}
 		// The empty-success defect: Clio refused to start the turn, the notice
 		// carrying the reason has no ACP equivalent, and nothing else in the turn
@@ -6644,7 +6648,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}
 			throw new AcpRequestError(-32603, ACP_TURN_FAILED_MESSAGE, { code: "turn_failed" });
 		}
-		return promptResponse(active.stopReason, active);
+		return promptResponse(active.stopReason, active, options.usage?.session());
 	});
 
 	const detachInterviews = options.interviews?.attach({
@@ -6689,11 +6693,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 }
 
 /** PromptResponse is `{ stopReason, _meta? }`; usage is not an ACP v1 field. */
-function promptResponse(stopReason: string, active: ActivePrompt): AcpPromptResponse {
+function promptResponse(
+	stopReason: string,
+	active: ActivePrompt,
+	session?: ReturnType<AcpUsageSource["session"]>,
+): AcpPromptResponse {
 	return {
 		stopReason,
 		_meta: {
-			[ACP_USAGE_META_KEY]: turnUsageMeta(active.usage),
+			[ACP_USAGE_META_KEY]: {
+				...turnUsageMeta(active.usage),
+				...(session ? { session: sessionUsageTotals(session) } : {}),
+			},
 			[ACP_TURN_META_KEY]: {
 				...(active.model ? { model: active.model } : {}),
 				...(active.ttftMs !== undefined ? { ttftMs: active.ttftMs } : {}),

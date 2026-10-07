@@ -3,8 +3,10 @@ import type { ClioSettings } from "../core/config.js";
 import { canonicalEndpointUrl } from "../core/endpoint-key.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
 import { observeCacheDeployment } from "../domains/providers/cache-deployment.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
+import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { type PrewarmRoundResult, runPrewarmRound } from "../engine/prewarm.js";
 import { recordStartupDiagnostic } from "../session-control/startup-diagnostics.js";
 
@@ -13,7 +15,7 @@ interface StartupPreparation {
 	providers: ProvidersContract;
 	signal: AbortSignal;
 	isBusy: () => boolean;
-	recordWarm?: (target: string, model: string, result: PrewarmRoundResult) => void;
+	recordWarm?: (target: string, model: string, result: PrewarmRoundResult, costProvenance: CostProvenance) => void;
 	/** Test seams; production always uses the normal engine and deployment checks. */
 	observe?: typeof observeCacheDeployment;
 	warm?: typeof runPrewarmRound;
@@ -69,7 +71,7 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 	} finally {
 		release();
 	}
-	input.recordWarm?.(target.id, modelId, result);
+	input.recordWarm?.(target.id, modelId, result, resolveEffectivePricing(target, runtime, modelId).provenance);
 	recordStartupDiagnostic({
 		kind: "worker-warm",
 		target: target.id,

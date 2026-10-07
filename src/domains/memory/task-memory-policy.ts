@@ -94,6 +94,7 @@ export interface TaskMemoryStepUsage {
 	cacheWrite: number;
 	reasoning: number;
 	totalTokens: number;
+	missingTokenCalls?: number;
 	costUsd: number;
 	costProvenance: CostProvenance;
 	/** Wall time of the model call itself, measured by the client. */

@@ -149,6 +149,19 @@ test("S1-05 config inspect --json exposes effective compiled metadata", () => {
 });
 test("S1-06 usage report reads permission audit rows and emits measured rate", async () => {
 	const { clioStateDir } = await import("../../src/core/xdg.js");
+	const { createSafeEventBus } = await import("../../src/core/event-bus.js");
+	const { createSessionBundle } = await import("../../src/domains/session/extension.js");
+	const { contract: session } = createSessionBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+	const meta = session.create({ cwd: root, target: "chat", model: "chat-model" });
+	session.append({
+		parentId: null,
+		kind: "assistant",
+		payload: {
+			text: "done",
+			usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.03 }, costProvenance: "known" },
+		},
+	});
+	session.flushAppends?.();
 	const audit = join(clioStateDir(), "audit");
 	mkdirSync(audit, { recursive: true });
 	writeFileSync(
@@ -184,6 +197,20 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 			}),
 		);
 	}
+	writeFileSync(
+		join(receipts, "main-mirror.json"),
+		JSON.stringify({
+			runId: "main-mirror",
+			agentId: "main-agent",
+			sessionId: meta.id,
+			endedAt: new Date().toISOString(),
+			targetId: "chat",
+			wireModelId: "chat-model",
+			tokenCount: 150,
+			costUsd: 0.03,
+			costProvenance: "known",
+		}),
+	);
 	const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
 	const child = spawnSync(
 		process.execPath,
@@ -202,8 +229,8 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 		.split("\n")
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
-	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.knownSubtotal, 130);
+	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.knownSubtotal, 280);
 	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.missingTokenCalls, 1);
-	assert.equal(rows.find((row) => row.fact === "worker-model-usage")?.runs, 2);
+	assert.equal(rows.find((row) => row.fact === "worker-model-usage" && row.targetId === "worker-target")?.runs, 2);
 	assert.equal(rows.find((row) => row.fact === "worker-audience-usage" && row.audience === "shadow")?.totalTokens, 130);
 });

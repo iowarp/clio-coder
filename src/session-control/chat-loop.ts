@@ -1756,7 +1756,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * is in flight, so the admission decision is made once here.
 	 */
 	type OutOfTurnPreparation =
-		| { ok: true; runtime: AgentRuntime; apiKey: string | undefined }
+		| { ok: true; runtime: AgentRuntime; apiKey: string | undefined; origin: ReturnType<SessionContract["current"]> }
 		| { ok: false; reason: string };
 
 	const prepareOutOfTurnRound = async (
@@ -1765,6 +1765,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		silent = false,
 	): Promise<OutOfTurnPreparation> => {
 		if (state.streaming) return { ok: false, reason: inFlightRefusal };
+		const origin = deps.session?.current() ?? null;
 		let agentRuntime: AgentRuntime | null;
 		try {
 			agentRuntime = turnRuntime.ensureRuntime({ silent });
@@ -1786,7 +1787,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						await deps.providers.auth.resolveForTarget(resolution.target, resolution.runtime, signal ? { signal } : undefined)
 					).apiKey
 				: LOCAL_SIDE_QUESTION_API_KEY;
-			return { ok: true, runtime: agentRuntime, apiKey };
+			if ((deps.session?.current()?.id ?? null) !== (origin?.id ?? null))
+				return { ok: false, reason: "session changed before the request" };
+			return { ok: true, runtime: agentRuntime, apiKey, origin };
 		} catch (err) {
 			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 		}
@@ -1827,6 +1830,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		runtime: AgentRuntime,
 		usage: SideQuestionResult["usage"],
 		label: CostEntryLabel,
+		origin: ReturnType<SessionContract["current"]> = deps.session?.current() ?? null,
 	): void =>
 		recordOutOfTurnUsageFor(
 			{
@@ -1836,6 +1840,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			},
 			usage,
 			label,
+			origin,
 		);
 
 	const recordOutOfTurnUsageFor = (
@@ -1846,31 +1851,34 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		usage: SideQuestionResult["usage"],
 		label: CostEntryLabel,
+		origin: ReturnType<SessionContract["current"]> = deps.session?.current() ?? null,
 	): void => {
-		if (!usage) return;
-		const costProvenance = runtime.costProvenance;
-		deps.observability?.recordTokens(
-			runtime.targetId,
-			runtime.wireModelId,
-			usage.totalTokens,
-			usage.costUsd,
-			{
-				input: usage.input,
-				output: usage.output,
-				cacheRead: usage.cacheRead,
-				cacheWrite: usage.cacheWrite,
-				...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-				reasoningTokens: usage.reasoning,
-				totalTokens: usage.totalTokens,
-				apiCalls: 1,
-			},
-			costProvenance,
-			undefined,
-			label,
-		);
-		const meta = deps.session?.current() ?? null;
+		const costProvenance = usage ? runtime.costProvenance : "unknown";
+		if ((deps.session?.current()?.id ?? null) === (origin?.id ?? null))
+			deps.observability?.recordTokens(
+				runtime.targetId,
+				runtime.wireModelId,
+				usage?.totalTokens ?? 0,
+				usage?.costUsd ?? 0,
+				{
+					input: usage?.input ?? 0,
+					output: usage?.output ?? 0,
+					cacheRead: usage?.cacheRead ?? 0,
+					cacheWrite: usage?.cacheWrite ?? 0,
+					...(usage?.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage?.cacheWrite1h }),
+					reasoningTokens: usage?.reasoning ?? 0,
+					totalTokens: usage?.totalTokens ?? 0,
+					apiCalls: 1,
+					...(!usage ? { missingTokenCalls: 1 } : {}),
+				},
+				costProvenance,
+				undefined,
+				label,
+			);
+		const meta = origin;
 		writeOutOfTurnUsageRow({
 			label,
+			sessionId: meta?.id ?? null,
 			// The identity the session ledger is filed under, so `usage report
 			// --repo` selects these rows with the same hash it selects ledgers with.
 			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
@@ -1878,14 +1886,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			target: runtime.targetId,
 			attributedModelId: runtime.wireModelId,
 			usage: {
-				input: usage.input,
-				output: usage.output,
-				cacheRead: usage.cacheRead,
-				cacheWrite: usage.cacheWrite,
-				...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-				reasoning: usage.reasoning,
-				totalTokens: usage.totalTokens,
-				costUsd: usage.costUsd,
+				costProvenance,
+				input: usage?.input ?? null,
+				output: usage?.output ?? null,
+				cacheRead: usage?.cacheRead ?? null,
+				cacheWrite: usage?.cacheWrite ?? null,
+				...(usage?.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage?.cacheWrite1h }),
+				reasoning: usage?.reasoning ?? null,
+				totalTokens: usage?.totalTokens ?? null,
+				costUsd: usage?.costUsd ?? null,
 			},
 		});
 	};
@@ -2073,8 +2082,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRuntime.toolTelemetry,
 			);
 		},
-		recordUsage: (runtime, usage: Usage | null) => {
-			recordOutOfTurnUsage(runtime, sideQuestionUsage(usage), "prewarm");
+		recordUsage: (runtime, usage: Usage | null, origin) => {
+			recordOutOfTurnUsage(runtime, sideQuestionUsage(usage), "prewarm", origin);
 		},
 		...(deps.runPrewarm ? { runPrewarm: deps.runPrewarm } : {}),
 		...(deps.abortPrewarmOnSubmit === undefined ? {} : { abortRoundOnSubmit: deps.abortPrewarmOnSubmit }),
@@ -2191,9 +2200,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if ((deps.admitRuntimeFlow?.(destination) ?? null) !== null) return;
 			const endpointKey = canonicalEndpointKey(resolved.target);
 			const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+			const origin = deps.session?.current() ?? null;
 			let result: SideQuestionResult;
 			try {
 				result = await draftRound({
+					onUsage: (usage) => recordOutOfTurnUsageFor(resolved, usage, "side-question", origin),
 					admitFlow: () => deps.admitRuntimeFlow?.(destination) ?? null,
 					model: resolved.model,
 					messages: [],
@@ -2212,7 +2223,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} finally {
 				release();
 			}
-			recordOutOfTurnUsageFor(resolved, result.usage, "side-question");
 			if (result.aborted) return;
 			const verdicts = parseTriageAnswer(
 				result.text,
@@ -3453,6 +3463,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					sideQuestionRound({
+						onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only: runSideQuestion copies before appending its own
@@ -3467,7 +3478,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} catch (err) {
 				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
-			recordOutOfTurnUsage(prepared.runtime, result.usage, "side-question");
 			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
 		},
 
@@ -3496,6 +3506,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								samplingTemperature,
 								(sampling) =>
 									draftRound({
+										onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,
 										// Read-only, exactly as the side-question round treats it.
@@ -3511,7 +3522,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								options.signal,
 							),
 						);
-						recordOutOfTurnUsage(prepared.runtime, result.usage, "side-question");
 						return draftCandidateFromText(result.text);
 					} catch (err) {
 						return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
@@ -3538,6 +3548,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					handoffRound({
+						onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "handoff", prepared.origin),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only, exactly as the side-question round treats it.
@@ -3554,7 +3565,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} catch (err) {
 				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
-			recordOutOfTurnUsage(prepared.runtime, result.usage, "handoff");
 			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
 		},
 

@@ -10,8 +10,12 @@ import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
 import { summarizeFailedCompactionUsage } from "../domains/observability/compaction-usage.js";
+import type { CostAggregate } from "../domains/observability/cost.js";
+import { accumulateCostAmount, emptyCostAggregate, renderCostAggregate } from "../domains/observability/cost.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
 import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
+import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
+import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { loadSkills } from "../domains/resources/index.js";
 import {
 	foldPromptCacheTelemetry,
@@ -44,7 +48,6 @@ Flags:
 `;
 
 const DEFAULT_WINDOW_DAYS = 30;
-const RECEIPT_CAP = 1000;
 const USAGE_WINDOW_FUTURE_SKEW_MS = 5_000;
 
 /** Linkage/bookkeeping tags that are not failure causes. */
@@ -58,6 +61,12 @@ const NON_FAILURE_TAGS = new Set([
 ]);
 
 interface UsageReceipt {
+	costSummary?: CostAggregate;
+	cwd: string | null;
+	usageSessionId: string | null;
+	apiCalls: number;
+	missingTokenCalls: number;
+	costProvenance: CostProvenance;
 	runId: string;
 	agentId: string;
 	task: string;
@@ -80,6 +89,9 @@ interface UsageReceipt {
 }
 
 interface WorkerUsageTotals {
+	apiCalls: number;
+	missingTokenCalls: number;
+	cost: CostAggregate;
 	runs: number;
 	missingTokenRuns: number;
 	missingBreakdownRuns: number;
@@ -96,6 +108,9 @@ interface WorkerUsageTotals {
 function emptyWorkerUsageTotals(): WorkerUsageTotals {
 	return {
 		runs: 0,
+		apiCalls: 0,
+		missingTokenCalls: 0,
+		cost: emptyCostAggregate(),
 		missingTokenRuns: 0,
 		missingBreakdownRuns: 0,
 		unpricedRuns: 0,
@@ -111,6 +126,15 @@ function emptyWorkerUsageTotals(): WorkerUsageTotals {
 
 function addWorkerReceipt(totals: WorkerUsageTotals, receipt: UsageReceipt): void {
 	totals.runs += 1;
+	totals.apiCalls += receipt.apiCalls;
+	totals.missingTokenCalls += receipt.missingTokenCalls;
+	totals.cost = accumulateCostAmount(totals.cost, {
+		usd: receipt.costUsd ?? 0,
+		...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
+		provenance: receipt.costProvenance,
+		apiCalls: receipt.apiCalls,
+		missingTokenCalls: receipt.missingTokenCalls,
+	});
 	if (receipt.missingTokenUsage) totals.missingTokenRuns += 1;
 	if (
 		receipt.inputTokenCount === null ||
@@ -139,13 +163,13 @@ interface SessionUsage {
 	entriesInWindow: number;
 	/** Completed API calls this session recorded in the window, one per call. */
 	usageCalls: LedgerUsageCall[];
-	estimatedUsageCalls: number;
 	/** Backend prompt-cache facts persisted on assistant calls in the window. */
 	promptCache: PromptCacheTelemetry;
 }
 
 /** Per-call usage folded over one grouping (a model, or the whole window). */
 interface UsageTotals {
+	cost: CostAggregate;
 	apiCalls: number;
 	input: number;
 	output: number;
@@ -159,6 +183,7 @@ interface UsageTotals {
 
 function emptyUsageTotals(): UsageTotals {
 	return {
+		cost: emptyCostAggregate(),
 		apiCalls: 0,
 		input: 0,
 		output: 0,
@@ -244,6 +269,8 @@ function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
 		reasoningTokens: row.usage.reasoning ?? 0,
 		totalTokens: row.usage.totalTokens ?? 0,
 		costUsd: row.usage.costUsd ?? 0,
+		costProvenance: row.usage.costProvenance ?? "unknown",
+		missingTokenCalls: row.usage.totalTokens === null ? 1 : 0,
 	};
 }
 
@@ -278,7 +305,13 @@ function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
 	if (call.cacheWrite1h !== undefined) totals.cacheWrite1h = (totals.cacheWrite1h ?? 0) + call.cacheWrite1h;
 	totals.reasoningTokens += call.reasoningTokens;
 	totals.totalTokens += call.totalTokens;
-	totals.costUsd += call.costUsd;
+	totals.cost = accumulateCostAmount(totals.cost, {
+		usd: call.costUsd,
+		provenance: call.costProvenance ?? (call.costUsd > 0 ? "estimated" : "unknown"),
+		apiCalls: call.apiCalls ?? 1,
+		missingTokenCalls: call.missingTokenCalls ?? 0,
+	});
+	totals.costUsd = totals.cost.knownUsd;
 }
 
 /**
@@ -418,13 +451,24 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const repoHash = repoPath === undefined ? undefined : cwdHash(repoPath);
 	const repoRunIds = repoPath === undefined ? null : await runIdsForCwd(stateDir, repoPath, diagnostics);
 
+	const sessions = await readSessions(stateDir, windowStart, now, repoHash, diagnostics);
+	const repoSessions =
+		repoHash === undefined
+			? null
+			: new Set((await listSessionLedgerRefs(stateDir, repoHash)).map((ref) => ref.sessionId));
 	const receipts = (await readReceipts(stateDir, windowStart, now, diagnostics)).filter(
-		(receipt) => repoRunIds === null || repoRunIds.has(receipt.runId),
+		(receipt) =>
+			repoRunIds === null ||
+			receipt.cwd === repoPath ||
+			repoRunIds.has(receipt.runId) ||
+			(receipt.sessionId !== null && repoSessions?.has(receipt.sessionId)),
 	);
 	const workerUsage = emptyWorkerUsageTotals();
 	const workerUsageByModel = new Map<string, { targetId: string; modelId: string; totals: WorkerUsageTotals }>();
 	const workerUsageByAudience = new Map<string, WorkerUsageTotals>();
+	const meteredSessions = new Set(sessions.filter((row) => row.usageCalls.length > 0).map((row) => row.sessionId));
 	for (const receipt of receipts) {
+		if (receipt.usageSessionId !== null && meteredSessions.has(receipt.usageSessionId)) continue;
 		addWorkerReceipt(workerUsage, receipt);
 		const audience = workerUsageByAudience.get(receipt.audience) ?? emptyWorkerUsageTotals();
 		addWorkerReceipt(audience, receipt);
@@ -438,7 +482,6 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		addWorkerReceipt(model.totals, receipt);
 		workerUsageByModel.set(key, model);
 	}
-	const sessions = await readSessions(stateDir, windowStart, now, repoHash, diagnostics);
 	const harnessActions = sessions.reduce((total, session) => total + session.harnessActions, 0);
 	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
 	// Side questions and handoff rounds append nothing to the session ledger by
@@ -577,14 +620,27 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	// session store is gone can still have recorded out-of-turn spend, and
 	// dropping those rows would report money that was spent as nothing at all.
 	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
-	const missingSessionCalls = sessions.reduce((sum, session) => sum + session.estimatedUsageCalls, 0);
+	const missingSessionCalls = sessions.reduce(
+		(sum, session) => sum + session.usageCalls.reduce((missing, call) => missing + (call.missingTokenCalls ?? 0), 0),
+		0,
+	);
 	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows, missingSessionCalls);
 	const failedCompaction = summarizeFailedCompactionUsage(outOfTurnRows);
 	const allRecordedTokens = usageTotals.totalTokens + workerUsage.totalTokens;
 	const missingTokenCalls =
 		missingSessionCalls +
 		outOfTurnRows.filter((row) => row.usage.totalTokens === null).length +
-		workerUsage.missingTokenRuns;
+		workerUsage.missingTokenCalls;
+	const allCost: CostAggregate = {
+		knownUsd: usageTotals.cost.knownUsd + workerUsage.cost.knownUsd,
+		calls: usageTotals.cost.calls + workerUsage.cost.calls,
+		hasEstimated: usageTotals.cost.hasEstimated || workerUsage.cost.hasEstimated,
+		hasUnknown: usageTotals.cost.hasUnknown || workerUsage.cost.hasUnknown,
+		allKnownFree:
+			(usageTotals.cost.calls === 0 || usageTotals.cost.allKnownFree) &&
+			(workerUsage.cost.calls === 0 || workerUsage.cost.allKnownFree) &&
+			usageTotals.cost.calls + workerUsage.cost.calls > 0,
+	};
 	const usageRows = [...usageByModel.values()].sort(
 		(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.providerId.localeCompare(b.providerId),
 	);
@@ -725,6 +781,13 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				kind: "fact",
 				fact: "all-recorded-tokens",
 				knownSubtotal: allRecordedTokens,
+				input: usageTotals.input + workerUsage.input,
+				output: usageTotals.output + workerUsage.output,
+				cacheRead: usageTotals.cacheRead + workerUsage.cacheRead,
+				cacheWrite: usageTotals.cacheWrite + workerUsage.cacheWrite,
+				reasoningTokens: usageTotals.reasoningTokens + workerUsage.reasoningTokens,
+				apiCalls: allCost.calls,
+				cost: allCost,
 				sessionAndSideCallTokens: usageTotals.totalTokens,
 				workerRunTokens: workerUsage.totalTokens,
 				missingTokenCalls,
@@ -793,6 +856,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	);
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
 	if (usageMeasurable || presence.receiptsPresent) {
+		out(`  all recorded cost in window: ${renderCostAggregate(allCost)} (${allCost.calls} recorded model calls)`);
 		out(
 			`  all recorded tokens in window: ${allRecordedTokens} known subtotal (session and side calls ${usageTotals.totalTokens}, worker runs ${workerUsage.totalTokens}; ${missingTokenCalls} calls missing token usage)`,
 		);
@@ -805,7 +869,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			// Only printed when a labelled call is in the window. Over an archive
 			// with none, these three lines would say nothing the line above does
 			// not already say, and their absence keeps the older output intact.
-			out(`  turns in window: ${turnsOf(callOrigins)}`);
+			out(`  conversation and compaction calls in window: ${turnsOf(callOrigins)}`);
 			if (callOrigins.sideQuestions > 0) out(`  side questions in window: ${callOrigins.sideQuestions}`);
 			if (callOrigins.handoffs > 0) out(`  handoffs in window: ${callOrigins.handoffs}`);
 			if (callOrigins.prewarms > 0) out(`  pre-warms in window: ${callOrigins.prewarms}`);
@@ -824,7 +888,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			);
 		}
 		out(
-			`  ${missingTokenCalls > 0 ? "known cost subtotal" : "reported/estimated cost"} in window: ${typeof reportedTotals.costUsd === "number" ? `$${reportedTotals.costUsd.toFixed(4)}${missingTokenCalls > 0 ? " +?" : ""}` : "unknown"}`,
+			`  ${missingTokenCalls > 0 ? "known cost subtotal" : "reported/estimated cost"} in window: ${renderCostAggregate(usageTotals.cost)}`,
 		);
 	}
 	if (usageRows.length > 0) {
@@ -864,9 +928,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							usageAmount(reported.cacheRead),
 							usageAmount(reported.reasoningTokens),
 							usageAmount(reported.totalTokens),
-							typeof reported.costUsd === "number"
-								? `$${reported.costUsd.toFixed(4)}${"missingTokenCalls" in reported && typeof reported.missingTokenCalls === "number" ? " +?" : ""}`
-								: "unknown",
+							renderCostAggregate(row.totals.cost),
 						];
 					}),
 				]),
@@ -879,7 +941,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			`  worker runs: ${workerUsage.runs}, ${workerUsage.missingTokenRuns} missing token usage, ${workerUsage.missingBreakdownRuns} missing input/output/cache breakdown, ${workerUsage.unpricedRuns} unpriced`,
 		);
 		out(
-			`  worker known subtotals: input ${workerUsage.input}, output ${workerUsage.output}, cache read ${workerUsage.cacheRead}, cache write ${workerUsage.cacheWrite}, reasoning ${workerUsage.reasoningTokens}, cost $${workerUsage.knownCostUsd.toFixed(4)}`,
+			`  worker known subtotals: input ${workerUsage.input}, output ${workerUsage.output}, cache read ${workerUsage.cacheRead}, cache write ${workerUsage.cacheWrite}, reasoning ${workerUsage.reasoningTokens}, cost ${renderCostAggregate(workerUsage.cost)}`,
 		);
 		out(
 			`  worker audiences: ${[...workerUsageByAudience].map(([audience, totals]) => `${audience} ${totals.runs} runs / ${totals.totalTokens} known tokens`).join(", ")}`,
@@ -896,7 +958,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							String(row.totals.runs),
 							String(row.totals.totalTokens),
 							String(row.totals.missingTokenRuns),
-							`$${row.totals.knownCostUsd.toFixed(4)}${row.totals.unpricedRuns > 0 ? " +?" : ""}`,
+							renderCostAggregate(row.totals.cost),
 						]),
 				]),
 			),
@@ -1065,22 +1127,7 @@ async function readReceipts(
 	} catch {
 		return [];
 	}
-	if (files.length > RECEIPT_CAP) {
-		const withTimes: Array<{ name: string; mtimeMs: number }> = [];
-		for (const name of files) {
-			try {
-				withTimes.push({ name, mtimeMs: (await stat(join(root, name))).mtimeMs });
-			} catch {
-				diagnostics.malformedReceipts += 1;
-			}
-		}
-		withTimes.sort((a, b) => b.mtimeMs - a.mtimeMs);
-		const kept = withTimes.slice(0, RECEIPT_CAP);
-		process.stderr.write(
-			`clio-coder usage: receipt cap: reading newest ${RECEIPT_CAP} of ${files.length} receipts; oldest ${files.length - RECEIPT_CAP} truncated\n`,
-		);
-		files = kept.map((entry) => entry.name);
-	}
+
 	const receipts: UsageReceipt[] = [];
 	for (const name of files) {
 		let parsed: unknown;
@@ -1112,8 +1159,34 @@ async function readReceipts(
 		const skillActivations = Array.isArray(parsed.skillActivations)
 			? parsed.skillActivations.flatMap((entry) => (isRecord(entry) && typeof entry.name === "string" ? [entry.name] : []))
 			: [];
+		const unverifiedTokens =
+			isRecord(parsed.externalTelemetry) && parsed.externalTelemetry.tokenUsage !== "provider-reported";
 		receipts.push({
 			runId: parsed.runId,
+			...(isRecord(parsed.costSummary) &&
+			nonnegativeNumberOrNull(parsed.costSummary.knownUsd) !== null &&
+			typeof parsed.costSummary.hasEstimated === "boolean" &&
+			typeof parsed.costSummary.hasUnknown === "boolean" &&
+			typeof parsed.costSummary.allKnownFree === "boolean" &&
+			nonnegativeNumberOrNull(parsed.costSummary.calls) !== null
+				? { costSummary: parsed.costSummary as unknown as CostAggregate }
+				: {}),
+			cwd: typeof parsed.cwd === "string" ? parsed.cwd : null,
+			usageSessionId:
+				parsed.agentId === "main-agent" && typeof parsed.sessionId === "string"
+					? parsed.sessionId
+					: isRecord(parsed.delegation) && typeof parsed.delegation.acpSessionId === "string"
+						? parsed.delegation.acpSessionId
+						: null,
+			apiCalls: nonnegativeNumberOrNull(parsed.apiCalls) ?? 1,
+			missingTokenCalls:
+				nonnegativeNumberOrNull(parsed.missingTokenCalls) ??
+				(nonnegativeNumberOrNull(parsed.tokenCount) === null ||
+				parsed.tokenCount === 0 ||
+				(isRecord(parsed.externalTelemetry) && parsed.externalTelemetry.tokenUsage !== "provider-reported")
+					? 1
+					: 0),
+			costProvenance: resolveCostProvenance(parsed.costProvenance, "unknown"),
 			agentId: typeof parsed.agentId === "string" ? parsed.agentId : "unknown",
 			task: typeof parsed.task === "string" ? parsed.task : "",
 			startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : parsed.endedAt,
@@ -1130,12 +1203,12 @@ async function readReceipts(
 				parsed.agentAudience === "custom"
 					? parsed.agentAudience
 					: "unknown",
-			tokenCount: nonnegativeNumberOrNull(parsed.tokenCount),
-			inputTokenCount: nonnegativeNumberOrNull(parsed.inputTokenCount),
-			outputTokenCount: nonnegativeNumberOrNull(parsed.outputTokenCount),
-			cacheReadTokenCount: nonnegativeNumberOrNull(parsed.cacheReadTokenCount),
-			cacheWriteTokenCount: nonnegativeNumberOrNull(parsed.cacheWriteTokenCount),
-			reasoningTokenCount: nonnegativeNumberOrNull(parsed.reasoningTokenCount),
+			tokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.tokenCount),
+			inputTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.inputTokenCount),
+			outputTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.outputTokenCount),
+			cacheReadTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.cacheReadTokenCount),
+			cacheWriteTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.cacheWriteTokenCount),
+			reasoningTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.reasoningTokenCount),
 			costUsd:
 				parsed.costProvenance === "known" || parsed.costProvenance === "known_free" || parsed.costProvenance === "estimated"
 					? nonnegativeNumberOrNull(parsed.costUsd)
@@ -1192,14 +1265,6 @@ async function readSessions(
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
 			usageCalls: ledgerUsageCalls(accountingEntries),
-			estimatedUsageCalls: accountingEntries.filter(
-				(entry) =>
-					entry.kind === "message" &&
-					entry.role === "assistant" &&
-					isRecord(entry.payload) &&
-					isRecord(entry.payload.usage) &&
-					entry.payload.usage.estimated === true,
-			).length,
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
 		};
 		for (const entry of parsedEntries.entries) {

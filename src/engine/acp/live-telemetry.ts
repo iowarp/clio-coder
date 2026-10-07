@@ -48,6 +48,9 @@ export function turnUsageMeta(usage: AcpTurnUsage) {
 		totalTokens: usage.totalTokens,
 		costUsd: usage.costUsd,
 		costProvenance: usage.costProvenance,
+		...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
+		...(usage.apiCalls !== undefined ? { apiCalls: usage.apiCalls } : {}),
+		...(usage.missingTokenCalls ? { missingTokenCalls: usage.missingTokenCalls } : {}),
 	};
 }
 
@@ -135,6 +138,7 @@ function projectAcpPlan(plan: TaskBoardSnapshot | null) {
 const EMPTY_PLAN_SIGNATURE = JSON.stringify(projectAcpPlan(null));
 
 interface SessionTotals {
+	costSummary: AcpCostAggregate;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -144,6 +148,8 @@ interface SessionTotals {
 	costUsd: number;
 	costProvenance: CostProvenance;
 	calls: number;
+	missingTokenCalls?: number;
+	hasEstimatedCost?: boolean;
 }
 
 const count = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0);
@@ -154,16 +160,12 @@ function provenanceOf(cost: AcpCostAggregate): CostProvenance {
 	return cost.allKnownFree ? "known_free" : "known";
 }
 
-/** Same lattice `mergeUsage` folds a turn with: unknown beats estimated beats known beats free. */
-function combineProvenance(a: CostProvenance, b: CostProvenance): CostProvenance {
-	if (a === "unknown" || b === "unknown") return "unknown";
-	if (a === "estimated" || b === "estimated") return "estimated";
-	if (a === "known" || b === "known") return "known";
-	return "known_free";
-}
-
-function sessionBaseline(session: { cost: AcpCostAggregate; rows: ReadonlyArray<AcpUsageRow> }): SessionTotals {
+export function sessionUsageTotals(session: {
+	cost: AcpCostAggregate;
+	rows: ReadonlyArray<AcpUsageRow>;
+}): SessionTotals {
 	const totals: SessionTotals = {
+		costSummary: session.cost,
 		input: 0,
 		output: 0,
 		cacheRead: 0,
@@ -173,8 +175,10 @@ function sessionBaseline(session: { cost: AcpCostAggregate; rows: ReadonlyArray<
 		costUsd: count(session.cost.knownUsd),
 		costProvenance: provenanceOf(session.cost),
 		calls: count(session.cost.calls),
+		...(session.cost.hasEstimated ? { hasEstimatedCost: true } : {}),
 	};
 	for (const row of session.rows) {
+		if (row.missingTokenCalls) totals.missingTokenCalls = (totals.missingTokenCalls ?? 0) + row.missingTokenCalls;
 		totals.input += count(row.input);
 		totals.output += count(row.output);
 		totals.cacheRead += count(row.cacheRead);
@@ -186,11 +190,12 @@ function sessionBaseline(session: { cost: AcpCostAggregate; rows: ReadonlyArray<
 }
 
 export interface AcpLiveTelemetryDeps {
+	subscribeUsage?: (listener: () => void) => () => void;
 	notify(sessionId: string, update: Record<string, unknown>): void;
 	/** The one session this process hosts, or null between sessions. */
 	sessionId(): string | null;
 	contextLedger?: () => ContextLedger;
-	/** The cost ledger the `/usage` view folds; read once per turn as the baseline the turn adds to. */
+	/** The cost ledger the `/usage` view folds; read after each model response including auxiliary calls. */
 	sessionUsage?: () => { cost: AcpCostAggregate; rows: ReadonlyArray<AcpUsageRow> };
 	plan?: () => TaskBoardSnapshot | null;
 	workspace?: (cwd: string) => Promise<WorkspaceSnapshot>;
@@ -215,8 +220,9 @@ export interface AcpLiveTelemetry {
 
 export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelemetry {
 	let usageSignature: string | null = null;
+	let accountingSignature: string | null = null;
 	let planSignature = EMPTY_PLAN_SIGNATURE;
-	let turn: { usage: AcpTurnUsage; baseline: SessionTotals | null } | null = null;
+	let turn: { usage: AcpTurnUsage } | null = null;
 	let pendingUsage: ReturnType<typeof setImmediate> | null = null;
 	let workspaceView: AcpWorkspaceView | null = null;
 	let workspaceSignature: string | null = null;
@@ -239,29 +245,10 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			return null;
 		}
 		const context = projectContextLedger(ledger);
-		const baseline =
-			turn === null ? (deps.sessionUsage === undefined ? null : sessionBaseline(deps.sessionUsage())) : turn.baseline;
-		let session: SessionTotals | null = baseline;
-		if (baseline !== null && turn !== null) {
-			const live = turn.usage;
-			session = {
-				input: baseline.input + live.input,
-				output: baseline.output + live.output,
-				cacheRead: baseline.cacheRead + live.cacheRead,
-				cacheWrite: baseline.cacheWrite + live.cacheWrite,
-				reasoning: baseline.reasoning + live.reasoning,
-				totalTokens: baseline.totalTokens + live.totalTokens,
-				costUsd: baseline.costUsd + live.costUsd,
-				costProvenance: !live.costProvenanceObserved
-					? baseline.costProvenance
-					: baseline.calls === 0
-						? live.costProvenance
-						: combineProvenance(baseline.costProvenance, live.costProvenance),
-				calls: baseline.calls,
-			};
-		}
+		const session = deps.sessionUsage === undefined ? null : sessionUsageTotals(deps.sessionUsage());
+		accountingSignature = JSON.stringify(session);
 		// ACP `cost` is a plain amount, so an unknown price stays absent rather than reading as zero.
-		const knownCost = session !== null && (session.calls > 0 || turn?.usage.costProvenanceObserved === true);
+		const knownCost = session !== null && session.calls > 0;
 		return {
 			sessionUpdate: "usage_update",
 			used: context.usedTokens,
@@ -285,6 +272,9 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 									totalTokens: session.totalTokens,
 									costUsd: session.costUsd,
 									costProvenance: session.costProvenance,
+									calls: session.calls,
+									...(session.missingTokenCalls ? { missingTokenCalls: session.missingTokenCalls } : {}),
+									...(session.hasEstimatedCost ? { hasEstimatedCost: true } : {}),
 								},
 				},
 			},
@@ -358,6 +348,15 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 	// The session/new response waits on this probe; starting it at construction usually has it landed by then.
 	void refreshWorkspace();
 
+	const unsubscribeUsage = deps.subscribeUsage?.(() => {
+		if (disposed || !deps.sessionUsage || deps.sessionId() === null || pendingUsage !== null) return;
+		if (JSON.stringify(sessionUsageTotals(deps.sessionUsage())) === accountingSignature) return;
+		pendingUsage = setImmediate(() => {
+			pendingUsage = null;
+			flushUsage(true);
+		});
+	});
+
 	return {
 		bind(replay) {
 			usageSignature = null;
@@ -368,7 +367,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			flushPlan(replay);
 		},
 		turnStarted(usage) {
-			turn = { usage, baseline: deps.sessionUsage === undefined ? null : sessionBaseline(deps.sessionUsage()) };
+			turn = { usage };
 		},
 		modelResponded() {
 			if (pendingUsage !== null || deps.contextLedger === undefined) return;
@@ -408,6 +407,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		},
 		dispose() {
 			disposed = true;
+			unsubscribeUsage?.();
 			if (pendingUsage !== null) clearImmediate(pendingUsage);
 			pendingUsage = null;
 		},

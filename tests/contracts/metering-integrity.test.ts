@@ -213,9 +213,9 @@ describe("contracts/metering integrity", () => {
 		strictEqual(resolveReservedOutputTokens(null), 32_768);
 	});
 
-	it("reseeds reported spend including aborted calls, while ignoring unobserved placeholders", () => {
+	it("reseeds reported spend including aborted calls, with missing-call coverage for placeholders and estimates", () => {
 		let resets = 0;
-		const recorded: Array<{ provider: string; model: string; tokens: number }> = [];
+		const recorded: Array<{ provider: string; model: string; tokens: number; missing: number }> = [];
 		const completed = {
 			input: 100,
 			output: 20,
@@ -229,7 +229,8 @@ describe("contracts/metering integrity", () => {
 				resetSession: () => {
 					resets += 1;
 				},
-				recordTokens: (provider, model, tokens) => recorded.push({ provider, model, tokens }),
+				recordTokens: (provider, model, tokens, _cost, breakdown) =>
+					recorded.push({ provider, model, tokens, missing: breakdown?.missingTokenCalls ?? 0 }),
 			},
 			[
 				assistant("unobserved", "aborted", {
@@ -254,8 +255,10 @@ describe("contracts/metering integrity", () => {
 
 		strictEqual(resets, 1);
 		deepStrictEqual(recorded, [
-			{ provider: "local-cluster", model: "model-a", tokens: 150 },
-			{ provider: "local-cluster", model: "model-a", tokens: 150 },
+			{ provider: "local-cluster", model: "model-a", tokens: 0, missing: 1 },
+			{ provider: "local-cluster", model: "model-a", tokens: 150, missing: 0 },
+			{ provider: "local-cluster", model: "model-a", tokens: 0, missing: 1 },
+			{ provider: "local-cluster", model: "model-a", tokens: 150, missing: 0 },
 		]);
 	});
 });

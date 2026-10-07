@@ -70,6 +70,7 @@ function serializeCanonical(value: unknown): string {
  */
 export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	runId: true,
+	cwd: true,
 	agentId: true,
 	executionRole: true,
 	agentAudience: true,
@@ -109,6 +110,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	exitCode: true,
 	failureMessage: true,
 	tokenCount: true,
+	apiCalls: true,
+	missingTokenCalls: true,
+	costSummary: true,
 	inputTokenCount: true,
 	outputTokenCount: true,
 	cacheReadTokenCount: true,
@@ -219,6 +223,9 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 		sessionId: envelope.sessionId,
 		cwd: envelope.cwd,
 		tokenCount: envelope.tokenCount,
+		...(envelope.costSummary ? { costSummary: envelope.costSummary } : {}),
+		...(envelope.apiCalls === undefined ? {} : { apiCalls: envelope.apiCalls }),
+		...(envelope.missingTokenCalls === undefined ? {} : { missingTokenCalls: envelope.missingTokenCalls }),
 		cacheReadTokenCount: envelope.cacheReadTokenCount,
 		cacheWriteTokenCount: envelope.cacheWriteTokenCount,
 		cacheWrite1hTokenCount: envelope.cacheWrite1hTokenCount,
@@ -375,6 +382,8 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		["endedAt", receipt.endedAt, envelope.endedAt],
 		["exitCode", receipt.exitCode, envelope.exitCode],
 		["tokenCount", receipt.tokenCount, envelope.tokenCount],
+		["apiCalls", receipt.apiCalls ?? null, envelope.apiCalls ?? null],
+		["missingTokenCalls", receipt.missingTokenCalls ?? null, envelope.missingTokenCalls ?? null],
 		["cacheReadTokenCount", receipt.cacheReadTokenCount ?? 0, envelope.cacheReadTokenCount ?? 0],
 		["cacheWriteTokenCount", receipt.cacheWriteTokenCount ?? 0, envelope.cacheWriteTokenCount ?? 0],
 		["cacheWrite1hTokenCount", receipt.cacheWrite1hTokenCount ?? 0, envelope.cacheWrite1hTokenCount ?? 0],
@@ -392,6 +401,8 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 	for (const [field, receiptValue, ledgerValue] of sharedFields) {
 		if (!Object.is(receiptValue, ledgerValue)) return field;
 	}
+	if (canonicalJson(receipt.costSummary ?? null) !== canonicalJson(envelope.costSummary ?? null)) return "costSummary";
+	if (receipt.cwd !== undefined && receipt.cwd !== envelope.cwd) return "cwd";
 	if (canonicalJson(receipt.briefing ?? null) !== canonicalJson(envelope.briefing ?? null)) return "briefing";
 	if (canonicalJson(receipt.workerContext ?? null) !== canonicalJson(envelope.workerContext ?? null))
 		return "workerContext";

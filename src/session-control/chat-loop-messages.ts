@@ -393,6 +393,7 @@ export function createAskUserToolPolicy(
 }
 
 export interface RunUsageSummary {
+	missingTokenCalls?: number;
 	tokens: number;
 	costUsd: number;
 	input: number;

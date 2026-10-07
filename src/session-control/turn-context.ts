@@ -1186,7 +1186,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const recordCompactionUsage = (agentRuntime: AgentRuntime, result: CompactResult): void => {
 		const usage = result.usage;
 		if (!usage || !deps.observability) return;
-		if (usage.totalTokens <= 0 && usage.cost.total <= 0) return;
 		deps.observability.recordTokens(
 			usage.targetId ?? agentRuntime.targetId,
 			usage.modelId ?? agentRuntime.wireModelId,
@@ -1201,12 +1200,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				reasoningTokens: usage.reasoning,
 				totalTokens: usage.totalTokens,
 				apiCalls: Math.max(1, Math.round(usage.apiCalls)),
+				...(usage.missingTokenCalls ? { missingTokenCalls: usage.missingTokenCalls } : {}),
 			},
-			usage.targetId === undefined && usage.modelId === undefined
-				? agentRuntime.runtimeResolution.costProvenance
-				: usage.cost.total > 0
-					? "estimated"
-					: "unknown",
+			usage.costProvenance ?? agentRuntime.runtimeResolution.costProvenance,
+			undefined,
+			"compaction",
 		);
 	};
 

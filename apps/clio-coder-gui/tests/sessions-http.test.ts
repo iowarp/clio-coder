@@ -94,6 +94,7 @@ test("workspace and session routes stream one complete turn with recorded usage 
 		cacheRead: 13,
 		cacheWrite: 14,
 		reasoning: 15,
+		totalTokens: 50,
 		costUsd: 0.001,
 	});
 	const turnEvents = events.filter((event) => event.type.startsWith("turn."));

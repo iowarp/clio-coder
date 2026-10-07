@@ -78,17 +78,20 @@ const TOKEN_BARS: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const ORIGINS: ReadonlyArray<readonly [string, string]> = [
-	["turns", "Turns"],
+	["turns", "Conversation and compaction calls"],
 	["sideQuestions", "Side questions"],
 	["handoffs", "Handoffs"],
 	["prewarms", "Pre-warms"],
 	["backgroundMemorySteps", "Background memory steps"],
 	["failedCompactionCalls", "Failed compaction calls"],
+	["systemOneCalls", "System One calls"],
 ];
 
 /** These four are read out of the report by name; everything else keeps its wire shape. */
 const CLAIMED = new Set([
 	"tokens",
+	"all-recorded-tokens",
+	"worker-model-usage",
 	"sessions",
 	"dispatch-runs",
 	"session-store-missing",
@@ -160,7 +163,14 @@ export function usageView(report: UsageReport): UsageView {
 	}));
 	const first = (name: string) => rows.find((row) => row.name === name)?.values;
 	const all = (name: string) => rows.filter((row) => row.name === name);
-	const tokens = first("tokens") ?? {};
+	const sessionTokens = first("tokens") ?? {};
+	const overall = first("all-recorded-tokens");
+	const workers = first("worker-tokens");
+	const tokens = overall ?? sessionTokens;
+	const cost = tokens.cost as
+		| { knownUsd?: number; hasEstimated?: boolean; hasUnknown?: boolean; calls?: number }
+		| undefined;
+	const missing = number(overall?.missingTokenCalls ?? sessionTokens.missingTokenCalls) ?? 0;
 
 	const missingStores: string[] = [];
 	for (const [name, subject] of [
@@ -178,7 +188,7 @@ export function usageView(report: UsageReport): UsageView {
 		return { label, value: count.toLocaleString("en-US") };
 	};
 
-	const totalTokens = number(tokens.totalTokens);
+	const totalTokens = number(overall?.knownSubtotal ?? tokens.totalTokens);
 	const apiCalls = number(tokens.apiCalls);
 	const headline: UsageFigure[] = [
 		{
@@ -186,7 +196,21 @@ export function usageView(report: UsageReport): UsageView {
 			value: formatTokens(totalTokens),
 			...(apiCalls === null ? {} : { note: `${apiCalls.toLocaleString("en-US")} API calls` }),
 		},
-		{ label: "Cost", value: formatCost(number(tokens.costUsd)), note: "Recorded cost, never a GUI estimate" },
+		{
+			label: "Cost",
+			value: cost
+				? cost.calls === 0 || (cost.hasUnknown && !cost.knownUsd)
+					? "—"
+					: `${cost.hasEstimated ? "~" : ""}${formatCost(number(cost.knownUsd))}${cost.hasUnknown ? " +?" : ""}`
+				: formatCost(number(tokens.costUsd)),
+			note: cost?.hasUnknown
+				? "Known subtotal; some calls are unpriced"
+				: cost?.hasEstimated
+					? "Includes estimated prices"
+					: cost
+						? "Recorded prices"
+						: "Historical cost; pricing provenance unavailable",
+		},
 		store("sessions", "session-store-missing", "Sessions"),
 		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
 	];
@@ -200,10 +224,15 @@ export function usageView(report: UsageReport): UsageView {
 	}));
 
 	const origins = ORIGINS.flatMap(([key, label]) => {
-		const value = number(tokens[key]);
+		const value = number(sessionTokens[key]);
 		return value === null ? [] : [{ label, value: value.toLocaleString("en-US") }];
 	});
 
+	if (workers)
+		origins.push({
+			label: "Worker calls",
+			value: (number(workers.apiCalls) ?? number(workers.runs) ?? 0).toLocaleString("en-US"),
+		});
 	const leftover = tablesOf(rows.filter((row) => !CLAIMED.has(row.name)));
 	return {
 		window: `from ${formatDay(report.from)} through ${formatDay(report.to)}`,
@@ -211,15 +240,15 @@ export function usageView(report: UsageReport): UsageView {
 		bars,
 		barsCaveat: BARS_CAVEAT,
 		knownSubtotals:
-			tokens.knownSubtotals === true
-				? "These amounts include known contributions only. Some calls in this window reported no usage at all, and a field with nothing observed reads as not recorded rather than zero."
+			missing > 0 || sessionTokens.knownSubtotals === true
+				? `${missing > 0 ? `${missing.toLocaleString("en-US")} recorded calls are missing token usage. ` : ""}Token amounts are known subtotals; missing usage is not zero. Reports cover retained local records, not provider invoices.`
 				: null,
 		origins,
 		originsNote: origins.length
-			? "Calls are split by what asked for them. A turn is ordinary conversation."
+			? "Calls are split by what asked for them; a tool loop can make several conversation calls. Worker calls include shadow and internal helpers."
 			: "No side question, handoff, pre-warm or background memory step was recorded in this window, so every recorded call belongs to a turn.",
 		missingStores,
-		models: all("model-usage"),
+		models: [...all("model-usage"), ...all("worker-model-usage")],
 		skillsActivated: all("skill-activated"),
 		skillsDormant: all("skill-never-activated").flatMap((row) => {
 			const name = text(row.values.skill);

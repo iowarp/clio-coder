@@ -19,6 +19,7 @@ import {
 	responseFormatFor,
 	responseSchemaDialectFor,
 } from "../core/response-schema.js";
+import { normalizeTokenUsage } from "../core/token-split.js";
 import { stream } from "../engine/ai.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import type { AgentMessage, EngineModel, Usage } from "../engine/types.js";
@@ -63,6 +64,7 @@ export interface SideQuestionInput {
 	maxTokens?: number;
 	/** Streamed answer text, delivered as the provider produces it. */
 	onDelta?: (partialText: string) => void;
+	onUsage?: (usage: SideQuestionUsage | null) => void;
 	/**
 	 * Information-flow admission of this send: the block reason, or null. The
 	 * round sends the session's history, so it is judged like a turn would be.
@@ -97,7 +99,6 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	temperature?: number;
 	/** Optional host admission and accounting apply to each attempt, including a schema retry. */
 	beforeRequest?: () => Promise<void>;
-	onUsage?: (usage: SideQuestionUsage | null) => void;
 }
 
 export interface SideQuestionResult {
@@ -119,19 +120,17 @@ function positive(value: unknown): number {
 export function sideQuestionUsage(raw: unknown): SideQuestionUsage | null {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
 	const usage = raw as Partial<Usage> & { reasoning?: number };
-	const input = positive(usage.input);
-	const output = positive(usage.output);
-	const cacheRead = positive(usage.cacheRead);
-	const cacheWrite = positive(usage.cacheWrite);
-	const totalTokens = positive(usage.totalTokens) || input + output + cacheRead + cacheWrite;
-	if (totalTokens === 0) return null;
+	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens, observed } = normalizeTokenUsage(
+		raw as Record<string, unknown>,
+	);
+	if (!observed) return null;
 	return {
 		input,
 		output,
 		cacheRead,
 		cacheWrite,
 		...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: positive(usage.cacheWrite1h) }),
-		reasoning: positive(usage.reasoning),
+		reasoning,
 		totalTokens,
 		costUsd: positive(usage.cost?.total),
 	};
@@ -219,36 +218,43 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 		],
 	};
 
-	const events = stream(
-		input.model,
-		context as unknown as Parameters<typeof stream>[1],
-		options as unknown as Parameters<typeof stream>[2],
-	);
-
 	let text = "";
-	for await (const event of events) {
-		if (event.type === "text_delta") {
-			// A diffusion frame carries the whole answer so far; the shared partial
-			// can already hold the next frame appended to it.
-			text = readDiffusionFrame(event)?.text ?? textFromMessage(event.partial);
-			input.onDelta?.(text);
-			continue;
-		}
-		if (event.type === "done") {
-			const answer = textFromMessage(event.message).trim();
-			const usage = sideQuestionUsage((event.message as { usage?: unknown }).usage);
-			input.onUsage?.(usage);
-			return { text: answer, usage, aborted: false };
-		}
-		if (event.type === "error") {
-			const failed = event.error as { stopReason?: unknown; usage?: unknown; errorMessage?: unknown };
-			const usage = sideQuestionUsage(failed.usage);
-			input.onUsage?.(usage);
-			if (event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true) {
-				return { text: text.trim(), usage, aborted: true };
+	let observed = false;
+	try {
+		const events = stream(
+			input.model,
+			context as unknown as Parameters<typeof stream>[1],
+			options as unknown as Parameters<typeof stream>[2],
+		);
+
+		for await (const event of events) {
+			if (event.type === "text_delta") {
+				// A diffusion frame carries the whole answer so far; the shared partial
+				// can already hold the next frame appended to it.
+				text = readDiffusionFrame(event)?.text ?? textFromMessage(event.partial);
+				input.onDelta?.(text);
+				continue;
 			}
-			throw new Error(typeof failed.errorMessage === "string" ? failed.errorMessage : "side question failed");
+			if (event.type === "done") {
+				const answer = textFromMessage(event.message).trim();
+				const usage = sideQuestionUsage((event.message as { usage?: unknown }).usage);
+				observed = true;
+				input.onUsage?.(usage);
+				return { text: answer, usage, aborted: false };
+			}
+			if (event.type === "error") {
+				const failed = event.error as { stopReason?: unknown; usage?: unknown; errorMessage?: unknown };
+				const usage = sideQuestionUsage(failed.usage);
+				observed = true;
+				input.onUsage?.(usage);
+				if (event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true) {
+					return { text: text.trim(), usage, aborted: true };
+				}
+				throw new Error(typeof failed.errorMessage === "string" ? failed.errorMessage : "side question failed");
+			}
 		}
+	} finally {
+		if (!observed) input.onUsage?.(null);
 	}
 	return { text: text.trim(), usage: null, aborted: input.signal?.aborted === true };
 }

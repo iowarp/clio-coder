@@ -361,6 +361,9 @@ export interface AcpPromptResponse {
 }
 
 export interface AcpDelegationUsage {
+	costSummary?: AcpCostAggregate;
+	apiCalls?: number;
+	missingTokenCalls?: number;
 	/** A valid peer token field was present, including an explicit zero. */
 	tokensReported: boolean;
 	inputTokens: number;
@@ -1293,6 +1296,9 @@ export type AcpFleetPreview =
 	| { status: "refused"; name: string; diagnostics: string[] };
 
 export interface AcpTurnUsage {
+	costSummary?: AcpCostAggregate;
+	apiCalls?: number;
+	missingTokenCalls?: number;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -1383,6 +1389,10 @@ export interface AcpUsageRow {
 	prewarms: number;
 	backgroundMemory: number;
 	systemOne?: number;
+	failedCompaction?: number;
+	workers?: number;
+	compactions?: number;
+	missingTokenCalls?: number;
 	cost: AcpCostAggregate;
 }
 
@@ -1455,17 +1465,40 @@ export interface AcpCommandResult {
 	lines: string[];
 }
 
+const usageMetaFields = {
+	costSummary: Type.Optional(
+		Type.Object(
+			{
+				knownUsd: Type.Number({ minimum: 0 }),
+				hasEstimated: Type.Boolean(),
+				hasUnknown: Type.Boolean(),
+				allKnownFree: Type.Boolean(),
+				calls: Type.Integer({ minimum: 0 }),
+			},
+			closed,
+		),
+	),
+	apiCalls: Type.Optional(Type.Integer({ minimum: 0 })),
+	missingTokenCalls: Type.Optional(Type.Integer({ minimum: 0 })),
+	input: Type.Integer({ minimum: 0 }),
+	output: Type.Integer({ minimum: 0 }),
+	cacheRead: Type.Integer({ minimum: 0 }),
+	cacheWrite: Type.Integer({ minimum: 0 }),
+	reasoning: Type.Integer({ minimum: 0 }),
+	totalTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+	costUsd: Type.Optional(Type.Number({ minimum: 0 })),
+	costProvenance: Type.Optional(
+		Type.Union([Type.Literal("known"), Type.Literal("known_free"), Type.Literal("estimated"), Type.Literal("unknown")]),
+	),
+};
 export const AcpUsageMetaSchema = Type.Object(
 	{
-		input: Type.Integer({ minimum: 0 }),
-		output: Type.Integer({ minimum: 0 }),
-		cacheRead: Type.Integer({ minimum: 0 }),
-		cacheWrite: Type.Integer({ minimum: 0 }),
-		reasoning: Type.Integer({ minimum: 0 }),
-		totalTokens: Type.Optional(Type.Integer({ minimum: 0 })),
-		costUsd: Type.Optional(Type.Number({ minimum: 0 })),
-		costProvenance: Type.Optional(
-			Type.Union([Type.Literal("known"), Type.Literal("known_free"), Type.Literal("estimated"), Type.Literal("unknown")]),
+		...usageMetaFields,
+		session: Type.Optional(
+			Type.Object(
+				{ ...usageMetaFields, calls: Type.Integer({ minimum: 0 }), hasEstimatedCost: Type.Optional(Type.Boolean()) },
+				closed,
+			),
 		),
 	},
 	closed,
@@ -2067,6 +2100,7 @@ export const AcpSessionUsageSchema = Type.Object(
 			{
 				cost: wireUsageCost,
 				tokens: wireUsageCount,
+				missingTokenCalls: Type.Optional(wireUsageCount),
 				rows: Type.Array(
 					Type.Object(
 						{
@@ -2074,6 +2108,7 @@ export const AcpSessionUsageSchema = Type.Object(
 							model: wireUsageText,
 							runs: wireUsageCount,
 							calls: wireUsageCount,
+							missingTokenCalls: Type.Optional(wireUsageCount),
 							tokens: Type.Object(
 								{
 									input: wireUsageCount,
@@ -2091,6 +2126,10 @@ export const AcpSessionUsageSchema = Type.Object(
 									handoffs: wireUsageCount,
 									prewarms: wireUsageCount,
 									backgroundMemory: wireUsageCount,
+									systemOne: Type.Optional(wireUsageCount),
+									failedCompaction: Type.Optional(wireUsageCount),
+									workers: Type.Optional(wireUsageCount),
+									compactions: Type.Optional(wireUsageCount),
 								},
 								closed,
 							),

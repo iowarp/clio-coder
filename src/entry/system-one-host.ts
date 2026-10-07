@@ -87,13 +87,27 @@ export function createSystemOneRequestAdmission(deps: {
 		}
 		return (usage) => {
 			if (usage === null) {
+				if (deps.currentSession() === session) {
+					deps.observability?.recordTokens(
+						targetId,
+						model,
+						0,
+						0,
+						{ apiCalls: 1, missingTokenCalls: 1 },
+						"unknown",
+						undefined,
+						"system-one",
+					);
+				}
 				appendOutOfTurnUsageRow(deps.stateDir, {
 					label: "system-one",
+					sessionId: session,
 					repoIdentity,
 					timestamp: new Date().toISOString(),
 					target: targetId,
 					attributedModelId: model,
 					usage: {
+						costProvenance: "unknown",
 						input: null,
 						output: null,
 						cacheRead: null,
@@ -142,11 +156,13 @@ export function createSystemOneRequestAdmission(deps: {
 			}
 			appendOutOfTurnUsageRow(deps.stateDir, {
 				label: "system-one",
+				sessionId: session,
 				repoIdentity,
 				timestamp: new Date().toISOString(),
 				target: targetId,
 				attributedModelId: model,
 				usage: {
+					costProvenance: pricing.provenance,
 					input: usage.input,
 					output: usage.output,
 					cacheRead,

@@ -445,7 +445,12 @@ export function SessionOverview({
 					<dl className="pane-usage-stats">
 						<div>
 							<dt>Tokens</dt>
-							<dd title={`${spend.tokens.toLocaleString("en-US")} tokens`}>{compactCount(spend.tokens)}</dd>
+							<dd title={`${spend.tokens.toLocaleString("en-US")} tokens`}>
+								{compactCount(spend.tokens)}
+								{spend.missingTokenCalls
+									? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"})`
+									: ""}
+							</dd>
 						</div>
 						<div>
 							<dt>Cost</dt>

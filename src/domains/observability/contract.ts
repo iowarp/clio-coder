@@ -146,10 +146,10 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	/** Running session cost log entries. */
 	costEntries(): ReadonlyArray<CostEntry>;
 	/** Reset the running session token and cost totals. */
-	resetSession(): void;
+	resetSession(sessionId?: string | null): void;
 	/**
 	 * Record a token count. Used by dispatch glue, diags, and the chat loop's
-	 * `agent_end` handler. `breakdown` is optional for call sites (dispatch
+	 * `message_end` handler. `breakdown` is optional for call sites (dispatch
 	 * bus payloads) that only know the total token count; callers with a
 	 * pi-ai `Usage` object should pass the full breakdown so the snapshot's
 	 * session tokens can surface input/output/reasoning separately.
@@ -167,6 +167,7 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 		},
 		/** Marks a priced call that was not an ordinary turn, such as a `/btw` side question. */
 		label?: CostEntryLabel,
+		costSummary?: CostAggregate,
 	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;

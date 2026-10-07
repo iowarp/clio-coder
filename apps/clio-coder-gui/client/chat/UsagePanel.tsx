@@ -46,7 +46,10 @@ export const UsagePanel = memo(function UsagePanel({
 	const totals = live
 		? [
 				{ label: "Cost", value: live.cost ?? "Unpriced" },
-				{ label: "Tokens", value: live.tokens.toLocaleString("en-US") },
+				{
+					label: "Tokens",
+					value: `${live.tokens.toLocaleString("en-US")}${live.missingTokenCalls ? ` +? (${live.missingTokenCalls} call${live.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
+				},
 			]
 		: usage.data
 			? usageTotals(usage.data)

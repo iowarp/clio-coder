@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createCostTracker } from "../../src/domains/observability/cost.js";
+import { aggregateCostEntries } from "../../src/domains/observability/cost-rows.js";
 import type { ContextLedger } from "../../src/domains/session/context-ledger.js";
 import { projectContextLedger } from "../../src/engine/acp/context-ledger.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
@@ -143,6 +145,8 @@ test("a long turn streams usage_update per model response with the meter rising 
 	let close: () => void = () => {};
 	let onEvent: (event: unknown) => void = () => {};
 	let used = 1000;
+	const costs = createCostTracker();
+	costs.accumulate("fixture", "baseline", 0, 1, { apiCalls: 2 }, "known");
 	const transport: AcpJsonRpcPeerTransport = {
 		closed: false,
 		request: async () => ({}) as never,
@@ -173,8 +177,8 @@ test("a long turn streams usage_update per model response with the meter rising 
 		contextLedger: () => ({ ...LEDGER, usedTokens: used }),
 		usage: {
 			session: () => ({
-				cost: { knownUsd: 1, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 2 },
-				rows: [],
+				cost: costs.sessionCost(),
+				rows: aggregateCostEntries(costs.entries()),
 			}),
 			quota: async () => [],
 		},
@@ -182,12 +186,19 @@ test("a long turn streams usage_update per model response with the meter rising 
 			submit: async () => {
 				for (const text of ["one", "two", "three"]) {
 					used += 4000;
+					costs.accumulate("fixture", "main", 170, 0.25, { input: 100, output: 20, cacheRead: 50, apiCalls: 1 }, "known");
+					if (text === "two") {
+						costs.accumulate("fixture", "decision", 60, 0.1, { input: 40, output: 20 }, "estimated", undefined, "system-one");
+						costs.accumulate("fixture", "memory", 0, 0, { missingTokenCalls: 1 }, "unknown", undefined, "background-memory");
+					}
 					onEvent({ type: "message_end", message: response(text) });
 					await new Promise((resolve) => setImmediate(resolve));
 				}
 				// A burst in one tick is one frame.
 				used += 4000;
+				costs.accumulate("fixture", "main", 170, 0.25, { input: 100, output: 20, cacheRead: 50 }, "known");
 				onEvent({ type: "message_end", message: response("four") });
+				costs.accumulate("fixture", "main", 170, 0.25, { input: 100, output: 20, cacheRead: 50 }, "known");
 				onEvent({ type: "message_end", message: response("five") });
 			},
 			cancel: () => {},
@@ -222,19 +233,31 @@ test("a long turn streams usage_update per model response with the meter rising 
 	assert.equal(frames[0]?._meta["clio-coder/context"]?.compactionThreshold, 0.8);
 	const last = frames.at(-1);
 	const { session, ...turn } = last?._meta["clio-coder/usage"] ?? {};
-	assert.deepEqual(turn, result._meta["clio-coder/usage"]);
+	const { session: replySession, ...replyTurn } = result._meta["clio-coder/usage"] as Record<string, unknown>;
+	assert.deepEqual(turn, replyTurn);
+	assert.deepEqual((replySession as { costSummary: unknown }).costSummary, {
+		knownUsd: 2.35,
+		hasEstimated: true,
+		hasUnknown: true,
+		allKnownFree: false,
+		calls: 9,
+	});
 	assert.equal((turn as { output: number }).output, 100);
 	assert.deepEqual(session, {
-		input: 500,
-		output: 100,
+		input: 540,
+		output: 120,
 		cacheRead: 250,
 		cacheWrite: 0,
 		reasoning: 0,
-		totalTokens: 850,
-		costUsd: 2.25,
-		costProvenance: "known",
+		totalTokens: 910,
+		costUsd: 2.35,
+		costProvenance: "unknown",
+		calls: 9,
+		missingTokenCalls: 1,
+		hasEstimatedCost: true,
 	});
-	assert.deepEqual(last?.cost, { amount: 2.25, currency: "USD" });
+	assert.deepEqual(frames[0]?.cost, { amount: 1.25, currency: "USD" });
+	assert.equal(last?.cost, undefined);
 	close();
 	await served;
 });

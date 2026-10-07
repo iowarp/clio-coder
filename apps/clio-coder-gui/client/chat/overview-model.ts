@@ -8,6 +8,9 @@ import type { SessionSnapshot } from "../../contracts/sessions.js";
 export interface TaskOverview {
 	readonly turns: number;
 	readonly tokens: number;
+	readonly missingTokenCalls: number;
+	readonly hasEstimatedCost: boolean;
+	readonly hasUnknownCost: boolean;
 	readonly costUsd: number | null;
 	readonly elapsedMs: number;
 	readonly running: boolean;
@@ -22,13 +25,26 @@ export function taskOverview(turns: SessionSnapshot["turns"], nowMs: number): Ta
 	let tokens = 0;
 	let cost = 0;
 	let costSeen = false;
+	let missingTokenCalls = 0;
+	let hasEstimatedCost = false;
+	let hasUnknownCost = false;
 	let elapsed = 0;
 	let running = false;
 	for (const turn of turns) {
 		if (turn.usage) {
-			tokens += turn.usage.input + turn.usage.output;
-			if (turn.usage.costUsd !== undefined) {
-				cost += turn.usage.costUsd;
+			tokens +=
+				turn.usage.totalTokens ?? turn.usage.input + turn.usage.output + turn.usage.cacheRead + turn.usage.cacheWrite;
+			missingTokenCalls += turn.usage.missingTokenCalls ?? 0;
+			hasEstimatedCost ||=
+				turn.usage.costSummary?.hasEstimated ??
+				(turn.usage.costProvenance === "estimated" || turn.usage.costProvenance === undefined);
+			hasUnknownCost ||=
+				turn.usage.costSummary?.hasUnknown ??
+				(turn.usage.costProvenance === "unknown" ||
+					turn.usage.costUsd === undefined ||
+					(turn.usage.missingTokenCalls ?? 0) > 0);
+			if (turn.usage.costSummary || (turn.usage.costUsd !== undefined && turn.usage.costProvenance !== "unknown")) {
+				cost += turn.usage.costSummary?.knownUsd ?? turn.usage.costUsd ?? 0;
 				costSeen = true;
 			}
 		}
@@ -41,7 +57,16 @@ export function taskOverview(turns: SessionSnapshot["turns"], nowMs: number): Ta
 			elapsed += nowMs > 0 ? Math.max(0, nowMs - start) : 0;
 		}
 	}
-	return { turns: turns.length, tokens, costUsd: costSeen ? cost : null, elapsedMs: elapsed, running };
+	return {
+		turns: turns.length,
+		tokens,
+		missingTokenCalls,
+		hasEstimatedCost,
+		hasUnknownCost,
+		costUsd: costSeen ? cost : null,
+		elapsedMs: elapsed,
+		running,
+	};
 }
 
 /** 842 → "842", 12 400 → "12.4K", 1 250 000 → "1.3M". */

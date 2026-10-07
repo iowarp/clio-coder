@@ -306,6 +306,24 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(live, /1,234 tokens/);
 		match(live, /\$0.25/);
 		doesNotMatch(live, /no token usage recorded/);
+		costs.accumulate("fixture", "model-a", 100, 0.01, { input: 100, apiCalls: 2 }, "estimated", undefined, "worker");
+		costs.accumulate(
+			"fixture",
+			"model-a",
+			0,
+			0,
+			{ apiCalls: 1, missingTokenCalls: 1 },
+			"unknown",
+			undefined,
+			"system-one",
+		);
+		frame?.handleInput?.("3");
+		const combined = scrolled();
+		match(combined, /worker calls.*2/);
+		match(combined, /conversation calls.*1/);
+		match(combined, /System One.*1/);
+		match(combined, /1 call; token amounts are known subtotals/);
+
 		quota = [
 			{
 				providerId: "antigravity",

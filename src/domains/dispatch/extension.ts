@@ -1,6 +1,7 @@
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
@@ -442,6 +443,9 @@ import {
 import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from "./write-boundary.js";
 
 interface RunTokenMeter {
+	apiCalls?: number;
+	missingTokenCalls?: number;
+	totalTokens?: number;
 	inputTokens: number;
 	outputTokens: number;
 	cacheReadTokens: number;
@@ -465,7 +469,7 @@ function meterCostProvenance(
 	costUsd: number,
 ): EffectivePricing["provenance"] {
 	if (base === "known_free") return base;
-	if (meter.tokenUsageMissing === true) return "unknown";
+	if (meter.tokenUsageMissing === true && costUsd === 0) return "unknown";
 	return base === "unknown" && costUsd > 0 ? "estimated" : base;
 }
 
@@ -672,28 +676,37 @@ function accumulateNativeUsage(
 	usage: Record<string, unknown>,
 	pricing: EffectivePricing["rates"],
 ): void {
-	const count = (value: unknown): number =>
-		typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
-	const call: RunTokenMeter = {
-		inputTokens: count(usage.input),
-		outputTokens: count(usage.output),
-		cacheReadTokens: count(usage.cacheRead),
-		cacheWriteTokens: count(usage.cacheWrite),
-		reasoningTokens: extractReasoningTokenCount(usage),
-	};
 	const external = isRecord(usage.clioExternal) ? usage.clioExternal : null;
+	const normalized = normalizeTokenUsage({
+		...usage,
+		estimated: usage.estimated === true || (external !== null && external.tokenUsage !== "provider-reported"),
+	});
+	const call: RunTokenMeter = {
+		inputTokens: normalized.input,
+		outputTokens: normalized.output,
+		cacheReadTokens: normalized.cacheRead,
+		cacheWriteTokens: normalized.cacheWrite,
+		reasoningTokens: normalized.reasoning,
+	};
+	meter.apiCalls = (meter.apiCalls ?? 0) + 1;
+	meter.totalTokens = (meter.totalTokens ?? 0) + normalized.totalTokens;
+	if (!normalized.observed) {
+		meter.missingTokenCalls = (meter.missingTokenCalls ?? 0) + 1;
+		meter.tokenUsageMissing = true;
+	}
 	// External CLIs such as Codex and agy fill cost with a placeholder zero and
 	// say so with cost: "missing"; that zero must not beat the target's rates.
 	const reported = isRecord(usage.cost) && external?.cost !== "missing" ? usage.cost.total : undefined;
-	if (external !== null && external.tokenUsage === "missing") meter.tokenUsageMissing = true;
 	// An SDK total is already priced with per-call tiers, service tier
 	// and cache-write lifetime. Never reprice it from an aggregate token count.
 	// Retain the target-rate fallback only for workers that omit calculated
 	// cost. Zero remains zero; its provenance still comes from the target.
 	const callCost =
-		typeof reported === "number" && Number.isFinite(reported) && reported >= 0
+		typeof reported === "number" && Number.isFinite(reported) && reported >= 0 && usage.estimated !== true
 			? reported
-			: calculateUsageCostUsd(call, pricing);
+			: normalized.observed
+				? calculateUsageCostUsd(call, pricing)
+				: 0;
 	meter.costUsd = (meter.costUsd ?? 0) + callCost;
 	meter.inputTokens += call.inputTokens;
 	meter.outputTokens += call.outputTokens;
@@ -749,39 +762,6 @@ function toolSignature(tools: ReadonlyArray<ToolName>): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function finitePositive(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function nestedFinitePositive(record: Record<string, unknown>, path: readonly string[]): number | undefined {
-	let cursor: unknown = record;
-	for (const key of path) {
-		if (!isRecord(cursor)) return undefined;
-		cursor = cursor[key];
-	}
-	return finitePositive(cursor);
-}
-
-function extractReasoningTokenCount(usage: unknown): number {
-	if (!isRecord(usage)) return 0;
-	const direct =
-		finitePositive(usage.reasoningTokens) ?? finitePositive(usage.reasoning_tokens) ?? finitePositive(usage.reasoning);
-	if (direct !== undefined) return direct;
-	const paths: ReadonlyArray<readonly string[]> = [
-		["outputDetails", "reasoningTokens"],
-		["output_details", "reasoning_tokens"],
-		["output_tokens_details", "reasoning_tokens"],
-		["completion_tokens_details", "reasoning_tokens"],
-		["completionTokensDetails", "reasoningTokens"],
-		["details", "reasoningTokens"],
-	];
-	for (const path of paths) {
-		const value = nestedFinitePositive(usage, path);
-		if (value !== undefined) return value;
-	}
-	return 0;
 }
 
 function readStringOrNull(value: unknown): string | null {
@@ -4493,7 +4473,8 @@ export function createDispatchBundle(
 			// Finalizers keep active entries while persisting their sealed receipt.
 			if (!row || row.endedAt !== null) continue;
 			const meter = run.meter;
-			const tokenCount = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
+			const tokenCount =
+				meter.totalTokens ?? meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
 			const costUsd = calculateUsageCostUsd(meter, run.pricing);
 			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
 			if (
@@ -5469,11 +5450,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
 				const u = event.message.usage;
-				tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
-				tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
-				tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
-				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
-				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+				accumulateNativeUsage(tokenMeter, u, null);
 				const requestedModelId = readStringOrNull(event.message.model);
 				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
 				const differingResponseModelId = readStringOrNull(event.message.responseModel);
@@ -5730,7 +5707,8 @@ export function createDispatchBundle(
 			}
 			const tokenCount = adapterReportedUsage
 				? usage.totalTokens
-				: tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
+				: (tokenMeter.totalTokens ??
+					tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens);
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const init = result.delegation.initialize;
 			const agentInfo = init?.agentInfo;
@@ -5739,6 +5717,7 @@ export function createDispatchBundle(
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
 			return {
 				runId: envelope.id,
+				cwd: envelope.cwd,
 				agentId: req.agentId,
 				executionRole: envelope.executionRole,
 				requestOrigin: lifecycle.requestOrigin,
@@ -5775,6 +5754,9 @@ export function createDispatchBundle(
 						: result.exitCode,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
+				apiCalls: (adapterReportedUsage ? usage.apiCalls : tokenMeter.apiCalls) ?? 1,
+				missingTokenCalls:
+					(adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? (tokenCount === 0 ? 1 : 0),
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
 				cacheReadTokenCount: tokenMeter.cacheReadTokens,
@@ -5784,6 +5766,7 @@ export function createDispatchBundle(
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd: usage.costUsd,
+				...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
 				costProvenance: usage.costProvenance ?? "unknown",
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
@@ -5875,6 +5858,9 @@ export function createDispatchBundle(
 				outcomeDetail: receipt.outcomeDetail ?? null,
 				lineage: publishedLineage(lineage, hostRun),
 				tokenCount: receipt.tokenCount,
+				sessionId: receipt.sessionId,
+				...(receipt.apiCalls === undefined ? {} : { apiCalls: receipt.apiCalls }),
+				...(receipt.missingTokenCalls === undefined ? {} : { missingTokenCalls: receipt.missingTokenCalls }),
 				inputTokenCount: receipt.inputTokenCount ?? 0,
 				outputTokenCount: receipt.outputTokenCount ?? 0,
 				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
@@ -5883,6 +5869,7 @@ export function createDispatchBundle(
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
 				costUsd: receipt.costUsd,
 				costProvenance: receipt.costProvenance ?? "unknown",
+				...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
@@ -6048,10 +6035,13 @@ export function createDispatchBundle(
 					exitCode: receiptDraft.exitCode,
 					sessionId: receiptDraft.sessionId,
 					tokenCount: receiptDraft.tokenCount,
+					...(receiptDraft.apiCalls === undefined ? {} : { apiCalls: receiptDraft.apiCalls }),
+					...(receiptDraft.missingTokenCalls === undefined ? {} : { missingTokenCalls: receiptDraft.missingTokenCalls }),
 					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
 					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
 					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
+					...(receiptDraft.costSummary ? { costSummary: receiptDraft.costSummary } : {}),
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					cacheReadTokenCount: receiptDraft.cacheReadTokenCount ?? 0,
@@ -7390,6 +7380,7 @@ export function createDispatchBundle(
 			const costUsd = calculateUsageCostUsd(tokenMeter, lifecycle.target.effectivePricing.rates);
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const tokenCount =
+				tokenMeter.totalTokens ??
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			const finalToolStats = snapshotToolStats(toolStats);
@@ -7408,6 +7399,7 @@ export function createDispatchBundle(
 						: "complete";
 			return {
 				runId: envelope.id,
+				cwd: envelope.cwd,
 				agentId: req.agentId,
 				executionRole: envelope.executionRole,
 				agentAudience: lifecycle.agentAudience,
@@ -7456,6 +7448,8 @@ export function createDispatchBundle(
 				outcomeDetail: finalOutcomeDetail,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
+				apiCalls: tokenMeter.apiCalls ?? 1,
+				missingTokenCalls: tokenMeter.missingTokenCalls ?? (tokenCount === 0 ? 1 : 0),
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
 				cacheReadTokenCount: tokenMeter.cacheReadTokens,
@@ -7566,6 +7560,9 @@ export function createDispatchBundle(
 				outcomeDetail: receipt.outcomeDetail ?? null,
 				lineage: publishedLineage(lineage, hostRun),
 				tokenCount: receipt.tokenCount,
+				sessionId: receipt.sessionId,
+				...(receipt.apiCalls === undefined ? {} : { apiCalls: receipt.apiCalls }),
+				...(receipt.missingTokenCalls === undefined ? {} : { missingTokenCalls: receipt.missingTokenCalls }),
 				inputTokenCount: receipt.inputTokenCount ?? 0,
 				outputTokenCount: receipt.outputTokenCount ?? 0,
 				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
@@ -7574,6 +7571,7 @@ export function createDispatchBundle(
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
 				costUsd: receipt.costUsd,
 				costProvenance: receipt.costProvenance ?? "unknown",
+				...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
@@ -8149,10 +8147,13 @@ export function createDispatchBundle(
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					tokenCount: receiptDraft.tokenCount,
+					...(receiptDraft.apiCalls === undefined ? {} : { apiCalls: receiptDraft.apiCalls }),
+					...(receiptDraft.missingTokenCalls === undefined ? {} : { missingTokenCalls: receiptDraft.missingTokenCalls }),
 					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
 					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
 					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
+					...(receiptDraft.costSummary ? { costSummary: receiptDraft.costSummary } : {}),
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					...(receiptDraft.cacheReadTokenCount !== undefined
@@ -9329,7 +9330,8 @@ export function createDispatchBundle(
 				}
 			}
 			const meter = run.meter;
-			const totalTokens = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
+			const totalTokens =
+				meter.totalTokens ?? meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
 			const costUsd = calculateUsageCostUsd(meter, run.pricing);
 			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
 			const startedMs = Date.parse(run.startedAt);

@@ -52,7 +52,6 @@ export { ObservabilityManifest } from "./manifest.js";
 export type { OutOfTurnUsage, OutOfTurnUsageReadResult, OutOfTurnUsageRow } from "./out-of-turn-usage.js";
 export {
 	appendOutOfTurnUsageRow,
-	MAX_OUT_OF_TURN_USAGE_ROWS,
 	OUT_OF_TURN_USAGE_DIR,
 	OUT_OF_TURN_USAGE_FILE,
 	outOfTurnUsagePath,

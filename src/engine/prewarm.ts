@@ -80,6 +80,7 @@ export interface PrewarmRoundInput {
 }
 
 export interface PrewarmRoundResult {
+	invoked?: boolean;
 	/** True when the operator submitted (or the session moved) before the round settled. */
 	aborted: boolean;
 	/** Provider usage for the round; null when the backend reported none. */
@@ -178,6 +179,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 	const send = input.streamFn ?? input.agent?.streamFunction ?? streamSimple;
 	const startedAt = performance.now();
 	let firstDeltaAt: number | null = null;
+	let invoked = false;
 	const elapsed = (): number => Math.round(Math.max(0, performance.now() - startedAt));
 	const ttft = (): number | null => (firstDeltaAt === null ? null : Math.round(Math.max(0, firstDeltaAt - startedAt)));
 
@@ -212,8 +214,16 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			throw new Error("pre-warm input estimate exceeds its token budget");
 		}
 		if (input.canSend?.() === false) {
-			return { aborted: true, usage: null, backend: null, timing: { ttftMs: null, apiMs: elapsed() }, errorMessage: null };
+			return {
+				invoked,
+				aborted: true,
+				usage: null,
+				backend: null,
+				timing: { ttftMs: null, apiMs: elapsed() },
+				errorMessage: null,
+			};
 		}
+		invoked = true;
 		const events = await send(model, context, options as unknown as Parameters<typeof streamSimple>[2]);
 		for await (const event of events) {
 			const hasDelta =
@@ -223,6 +233,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			if (firstDeltaAt === null && hasDelta) firstDeltaAt = performance.now();
 			if (event.type === "done") {
 				return {
+					invoked,
 					aborted: false,
 					usage: usageOf(event.message),
 					backend: backendOf(event.message),
@@ -234,6 +245,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 				const failed = event.error as { stopReason?: unknown; errorMessage?: unknown };
 				const aborted = event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true;
 				return {
+					invoked,
 					aborted,
 					usage: usageOf(event.error),
 					backend: backendOf(event.error),
@@ -244,6 +256,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 		}
 	} catch (error) {
 		return {
+			invoked,
 			aborted: input.signal?.aborted === true,
 			usage: null,
 			backend: null,
@@ -252,6 +265,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 		};
 	}
 	return {
+		invoked,
 		aborted: input.signal?.aborted === true,
 		usage: null,
 		backend: null,

@@ -17,23 +17,20 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
  * under `<stateDir>/usage/out-of-turn.jsonl`, carrying the label, the repo
  * identity the session ledger is filed under (so `usage report --repo` filters
  * these rows the same way it filters ledgers), the target and attributed model,
- * and the provider-reported usage. Rows hold only what `usage report` reads.
- * Earlier builds also wrote `sessionId`, `timing`, `promptCache` and
- * `usage.costProvenance`; the reader ignores them.
+ * and the provider-reported usage. Session ownership lets resumed live totals replay these calls, and pricing
+ * provenance prevents a persisted estimate from becoming a reported dollar amount.
  *
  * Writes follow the audit-row conventions: one append-mode `writeSync` per
  * row, so a line lands whole even with concurrent writers, and a failure is
  * logged to stderr rather than thrown back into the interactive path. The file
- * is a bounded ring: once it grows past {@link MAX_OUT_OF_TURN_USAGE_ROWS} the
- * newest rows are rewritten atomically under the shared state-file lock and
- * the oldest are dropped. Reads are tolerant; a malformed line is reported and
- * skipped, never fatal.
+ * remains append-only so cross-session spending is not discarded. Reads are
+ * tolerant; a malformed line is reported and skipped, never fatal.
  */
 
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import type { CostEntryLabel } from "./cost.js";
 
 /** Directory under the state dir that holds cross-session usage side-cars. */
@@ -42,19 +39,9 @@ export const OUT_OF_TURN_USAGE_DIR = "usage";
 /** Filename of the out-of-turn usage ledger inside {@link OUT_OF_TURN_USAGE_DIR}. */
 export const OUT_OF_TURN_USAGE_FILE = "out-of-turn.jsonl";
 
-/** Cap on retained rows. Matches the dispatch runs ledger and evidence index default. */
-export const MAX_OUT_OF_TURN_USAGE_ROWS = 1000;
-
-/**
- * How many appends this process makes between bound checks. Counting rows means
- * reading the file, and an out-of-turn round is rare enough that paying that on
- * the first append of a process and periodically after it keeps the ring bounded
- * without reading a megabyte per side question.
- */
-const BOUND_CHECK_INTERVAL = 64;
-
 /** Provider-reported usage for one out-of-turn call. */
 export interface OutOfTurnUsage {
+	costProvenance?: CostProvenance;
 	input: number | null;
 	output: number | null;
 	cacheRead: number | null;
@@ -67,6 +54,7 @@ export interface OutOfTurnUsage {
 
 /** One priced model call that was billed beside a session rather than inside it. */
 export interface OutOfTurnUsageRow {
+	sessionId?: string | null;
 	label: CostEntryLabel;
 	/** The cwd hash the session ledger is filed under, so `--repo` can filter these rows. */
 	repoIdentity: string | null;
@@ -92,8 +80,6 @@ export interface OutOfTurnUsageReadResult {
 export function outOfTurnUsagePath(stateDir: string): string {
 	return join(stateDir, OUT_OF_TURN_USAGE_DIR, OUT_OF_TURN_USAGE_FILE);
 }
-
-let appendsSinceBoundCheck = BOUND_CHECK_INTERVAL;
 
 /**
  * Append one out-of-turn call. Optional bookkeeping keeps its existing diagnostic
@@ -124,35 +110,6 @@ export function appendOutOfTurnUsageRow(
 		writeDiagnostic(`[clio-coder:usage] out-of-turn usage row not written: ${messageOf(error)}\n`);
 		return;
 	}
-	appendsSinceBoundCheck += 1;
-	if (appendsSinceBoundCheck < BOUND_CHECK_INTERVAL) return;
-	appendsSinceBoundCheck = 0;
-	try {
-		boundOutOfTurnUsageFile(path);
-	} catch (error) {
-		writeDiagnostic(`[clio-coder:usage] out-of-turn usage ring not bounded: ${messageOf(error)}\n`);
-	}
-}
-
-/**
- * Rewrite the file down to the newest {@link MAX_OUT_OF_TURN_USAGE_ROWS} lines
- * when it has grown past the cap. Held under the state-file lock so a concurrent
- * appender cannot lose a row into the rename, and written through
- * `safeResourceWrite` so a crash mid-rewrite leaves the previous file intact.
- */
-function boundOutOfTurnUsageFile(path: string): void {
-	withStateFileLockSync(path, () => {
-		let raw: string;
-		try {
-			raw = readFileSync(path, "utf8");
-		} catch {
-			return;
-		}
-		const lines = raw.split("\n").filter((line) => line.trim().length > 0);
-		if (lines.length <= MAX_OUT_OF_TURN_USAGE_ROWS) return;
-		const kept = lines.slice(-MAX_OUT_OF_TURN_USAGE_ROWS);
-		safeResourceWrite(path, `${kept.join("\n")}\n`, { encoding: "utf8" });
-	});
 }
 
 /**
@@ -217,10 +174,10 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	// Coercing both away read a failed or aborted prewarm back as a completed
 	// call that cost nothing. Rows written before either field keep reading as
 	// they always did, because a number parses the same either way.
-	const keepsOutcome = label === "failed-compaction" || label === "prewarm";
-	const reading = keepsOutcome || label === "system-one" ? nullableNumber : numberOr0;
+	const reading = nullableNumber;
 	return {
 		label,
+		...(typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}),
 		repoIdentity: typeof value.repoIdentity === "string" ? value.repoIdentity : null,
 		timestamp: value.timestamp,
 		target: typeof value.target === "string" && value.target.length > 0 ? value.target : "unknown",
@@ -229,6 +186,10 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 				? value.attributedModelId
 				: "unknown",
 		usage: {
+			costProvenance: resolveCostProvenance(
+				usage.costProvenance,
+				typeof usage.costUsd === "number" && usage.costUsd > 0 ? "estimated" : "unknown",
+			),
 			input: reading(usage.input),
 			output: reading(usage.output),
 			cacheRead: reading(usage.cacheRead),
@@ -238,16 +199,12 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 			totalTokens: reading(usage.totalTokens),
 			costUsd: reading(usage.costUsd),
 		},
-		...(keepsOutcome && callOutcome !== undefined ? { callOutcome } : {}),
+		...(callOutcome !== undefined ? { callOutcome } : {}),
 	};
 }
 
 function nullableNumber(value: unknown): number | null {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function numberOr0(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

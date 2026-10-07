@@ -13,8 +13,8 @@
  * every surface's accounting, which is the same thing the tools/interactive
  * boundary rule exists to prevent.
  *
- * Failed/aborted calls with reported usage still consumed resources. Skip
- * only all-zero SDK placeholders, whose accounting was never observed.
+ * Failed and aborted calls still consumed resources. Missing provider counts
+ * contribute to coverage, without adding estimates to the token subtotal.
  */
 
 import {
@@ -22,6 +22,10 @@ import {
 	type ResponseModelIdObservation,
 	responseModelIdObservationFromRecord,
 } from "../../core/response-model-id.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
+import type { CostEntryLabel } from "../observability/cost.js";
+import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
 
 /** One completed assistant API call, as the ledger recorded it. */
@@ -43,25 +47,21 @@ export interface LedgerUsageCall {
 	costUsd: number;
 	/** API calls this row accounts for. Absent means one, which is every message row. */
 	apiCalls?: number;
+	missingTokenCalls?: number;
+	label?: CostEntryLabel;
+	costProvenance?: CostProvenance;
 }
 
 /** The target and model a session ran under before any modelChange row. */
 export interface SessionUsageDefaults {
 	target?: string | null;
 	model?: string | null;
+	sessionId?: string | null;
 }
 
 function numberAt(source: Record<string, unknown>, key: string): number {
 	const value = source[key];
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-function reasoningTokensOf(usage: Record<string, unknown>): number {
-	const direct = numberAt(usage, "reasoning") || numberAt(usage, "reasoningTokens");
-	if (direct > 0) return direct;
-	const details = usage.outputTokensDetails ?? usage.completionTokensDetails;
-	if (details && typeof details === "object") return numberAt(details as Record<string, unknown>, "reasoningTokens");
-	return 0;
 }
 
 function stringAt(source: Record<string, unknown>, ...keys: string[]): string | null {
@@ -98,7 +98,7 @@ export function ledgerUsageCalls(
 		// in `clio-coder usage report`.
 		if (entry?.kind === "compactionSummary") {
 			const usage = entry.usage;
-			if (!usage || usage.totalTokens <= 0) continue;
+			if (!usage) continue;
 			calls.push({
 				providerId: usage.targetId ?? currentTarget ?? "unknown",
 				attributedModelId: usage.modelId ?? currentModel ?? "unknown",
@@ -112,6 +112,9 @@ export function ledgerUsageCalls(
 				reasoningTokens: usage.reasoning,
 				totalTokens: usage.totalTokens,
 				costUsd: usage.cost.total,
+				label: "compaction",
+				...(usage.missingTokenCalls ? { missingTokenCalls: usage.missingTokenCalls } : {}),
+				costProvenance: resolveCostProvenance(usage.costProvenance, usage.cost.total > 0 ? "estimated" : "unknown"),
 				// A split turn runs two summarization streams under one entry; the
 				// provider served that many calls even though one row records them.
 				apiCalls: Math.max(1, Math.round(usage.apiCalls)),
@@ -132,25 +135,18 @@ export function ledgerUsageCalls(
 		const rawUsage = record.usage;
 		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) continue;
 		const usage = rawUsage as Record<string, unknown>;
-		// CLB-2: interrupted character estimates remain on their message and
-		// turn receipt. Provider usage totals must retain the same provenance
-		// after a resume as they had before it.
-		if (usage.estimated === true) continue;
-		const input = numberAt(usage, "input");
-		const output = numberAt(usage, "output");
-		const cacheRead = numberAt(usage, "cacheRead");
-		const cacheWrite = numberAt(usage, "cacheWrite");
-		const totalTokens = numberAt(usage, "totalTokens") || input + output + cacheRead + cacheWrite;
-		// An all-zero usage block is a call that never reported anything. Adding it
-		// would inflate the call count while contributing no tokens.
-		if (totalTokens === 0) continue;
+		if (usage.callInvoked === false) continue;
+		const { input, output, cacheRead, cacheWrite, totalTokens, reasoning, observed } = normalizeTokenUsage(usage);
 		const cost = usage.cost;
-		const costUsd = cost && typeof cost === "object" ? numberAt(cost as Record<string, unknown>, "total") : 0;
+		const costUsd =
+			usage.estimated !== true && cost && typeof cost === "object"
+				? numberAt(cost as Record<string, unknown>, "total")
+				: 0;
 		const requestedModelId = currentModel ?? stringAt(record, "model") ?? "unknown";
 		const differingResponseModelId = stringAt(record, "responseModel");
 		const responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
 		calls.push({
-			providerId: currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
+			providerId: stringAt(usage, "targetId") ?? currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
 			attributedModelId: attributedModelId(responseModelIdObservation, requestedModelId, differingResponseModelId),
 			requestedModelId,
 			responseModelIdObservation,
@@ -159,9 +155,14 @@ export function ledgerUsageCalls(
 			cacheRead,
 			cacheWrite,
 			...(typeof usage.cacheWrite1h === "number" ? { cacheWrite1h: numberAt(usage, "cacheWrite1h") } : {}),
-			reasoningTokens: reasoningTokensOf(usage),
+			reasoningTokens: reasoning,
 			totalTokens,
 			costUsd,
+			costProvenance:
+				usage.estimated !== true
+					? resolveCostProvenance(usage.costProvenance, costUsd > 0 ? "estimated" : "unknown")
+					: "unknown",
+			...(!observed ? { missingTokenCalls: 1 } : {}),
 		});
 	}
 	return calls;

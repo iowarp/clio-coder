@@ -28,6 +28,7 @@ import {
 	type Usage,
 } from "@earendil-works/pi-ai";
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
+import { normalizeTokenUsage } from "../core/token-split.js";
 import {
 	completeEngineSimple,
 	engineStream,
@@ -80,6 +81,7 @@ export interface EngineTextCompletionResult {
 		reasoning: number;
 		totalTokens: number;
 		costUsd: number;
+		missingTokenCalls?: number;
 	};
 	/** Backend prefill and prediction facts when the serving runtime reported them. */
 	backend: BackendCompletionTimings | null;
@@ -100,32 +102,42 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			...(input.thinkingLevel === "off" ? {} : { reasoning: input.thinkingLevel }),
 			...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
 		},
-	);
+	).catch((error: unknown) => {
+		input.onUsage?.({
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoning: 0,
+				totalTokens: 0,
+				costUsd: 0,
+				missingTokenCalls: 1,
+			},
+			backend: null,
+		});
+		throw error;
+	});
 	const failed = response.stopReason === "error" || response.stopReason === "aborted";
-	if (failed && !response.usage) {
-		throw new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
-	}
+	const usage = response.usage ?? emptyUsage();
 	const observation: Pick<EngineTextCompletionResult, "usage" | "backend"> = {
 		usage: {
-			input: response.usage.input,
-			output: response.usage.output,
-			cacheRead: response.usage.cacheRead,
-			cacheWrite: response.usage.cacheWrite,
-			...(response.usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: response.usage.cacheWrite1h }),
-			reasoning: response.usage.reasoning ?? 0,
-			totalTokens: response.usage.totalTokens,
-			costUsd: response.usage.cost.total,
+			input: usage.input,
+			output: usage.output,
+			cacheRead: usage.cacheRead,
+			cacheWrite: usage.cacheWrite,
+			...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
+			reasoning: usage.reasoning ?? 0,
+			totalTokens: usage.totalTokens,
+			costUsd: usage.cost.total,
+			...(!normalizeTokenUsage(usage as unknown as Record<string, unknown>).observed ? { missingTokenCalls: 1 } : {}),
 		},
 		backend: response.backendTimings ?? null,
 	};
-	// Pi synthesizes all-zero usage for failures with no provider accounting.
-	// Do not turn that placeholder into a measured zero-spend call.
-	if (!failed || Object.values(observation.usage).some((value) => Number.isFinite(value) && value > 0)) {
-		try {
-			input.onUsage?.(observation);
-		} catch {
-			// Accounting observers cannot change completion success/error behavior.
-		}
+	try {
+		input.onUsage?.(observation);
+	} catch {
+		// Accounting observers cannot change completion success/error behavior.
 	}
 	if (failed) {
 		throw new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
@@ -135,8 +147,8 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			.filter((block): block is Extract<(typeof response.content)[number], { type: "text" }> => block.type === "text")
 			.map((block) => block.text)
 			.join(""),
-		inputTokens: response.usage.input,
-		outputTokens: response.usage.output,
+		inputTokens: usage.input,
+		outputTokens: usage.output,
 		...observation,
 	};
 }

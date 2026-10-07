@@ -89,7 +89,19 @@ export const SessionSummary = Type.Object(
 export type SessionSummary = Static<typeof SessionSummary>;
 export const Usage = Type.Pick(
 	AcpUsageMetaSchema,
-	["input", "output", "cacheRead", "cacheWrite", "reasoning", "costUsd"],
+	[
+		"input",
+		"output",
+		"cacheRead",
+		"cacheWrite",
+		"reasoning",
+		"totalTokens",
+		"costUsd",
+		"costProvenance",
+		"costSummary",
+		"apiCalls",
+		"missingTokenCalls",
+	],
 	{ additionalProperties: false },
 );
 export type Usage = Static<typeof Usage>;

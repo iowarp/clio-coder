@@ -69,8 +69,9 @@ export function useSessionUsage(client: Client, sessionId: string, settled: numb
 }
 
 export interface Spend {
+	missingTokenCalls?: number;
 	readonly tokens: number;
-	/** "$0.42", "~$0.42" when estimated, "$0.42+" when some calls are unpriced; null when nothing is priced. */
+	/** "$0.42", "~$0.42" when estimated, "$0.42 +?" when some calls are unpriced; null when nothing is priced. */
 	readonly cost: string | null;
 	/** Clio's accounting covers side questions and handoffs; the turn sums cover only the transcript. */
 	readonly source: "clio" | "turns";
@@ -92,30 +93,49 @@ export function sessionSpend(turns: Turns, usage: SessionUsage | undefined, live
 		const cost =
 			totals.costProvenance === "unknown"
 				? totals.costUsd > 0
-					? `${dollars(totals.costUsd)}+`
+					? `${totals.hasEstimatedCost ? "~" : ""}${dollars(totals.costUsd)} +?`
 					: null
 				: `${totals.costProvenance === "estimated" ? "~" : ""}${dollars(totals.costUsd)}`;
-		return { tokens: totals.totalTokens, cost, source: "clio" };
+		return {
+			tokens: totals.totalTokens,
+			cost,
+			source: "clio",
+			...(totals.missingTokenCalls ? { missingTokenCalls: totals.missingTokenCalls } : {}),
+		};
 	}
 	if (usage) {
 		const cost = usage.session.cost;
 		const priced =
-			cost.calls === 0
+			cost.calls === 0 || (cost.unknown && cost.knownUsd === 0)
 				? null
 				: cost.free
 					? "$0.00"
-					: `${cost.estimated ? "~" : ""}${dollars(cost.knownUsd)}${cost.unknown ? "+" : ""}`;
-		return { tokens: usage.session.tokens, cost: priced, source: "clio" };
+					: `${cost.estimated ? "~" : ""}${dollars(cost.knownUsd)}${cost.unknown ? " +?" : ""}`;
+		return {
+			tokens: usage.session.tokens,
+			cost: priced,
+			source: "clio",
+			...(usage.session.missingTokenCalls ? { missingTokenCalls: usage.session.missingTokenCalls } : {}),
+		};
 	}
 	const overview = taskOverview(turns, 0);
 	return {
 		tokens: overview.tokens,
-		cost: overview.costUsd !== null && overview.costUsd > 0 ? dollars(overview.costUsd) : null,
+		cost:
+			overview.costUsd !== null && overview.costUsd > 0
+				? `${overview.hasEstimatedCost ? "~" : ""}${dollars(overview.costUsd)}${overview.hasUnknownCost ? " +?" : ""}`
+				: null,
+		...(overview.missingTokenCalls ? { missingTokenCalls: overview.missingTokenCalls } : {}),
 		source: "turns",
 	};
 }
 
 export function spendLine(spend: Spend): string | null {
-	const parts = [spend.tokens > 0 ? `${compactCount(spend.tokens)} tokens` : null, spend.cost].filter(Boolean);
+	const parts = [
+		spend.tokens > 0 || spend.missingTokenCalls
+			? `${compactCount(spend.tokens)} tokens${spend.missingTokenCalls ? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`
+			: null,
+		spend.cost,
+	].filter(Boolean);
 	return parts.length > 0 ? parts.join(" · ") : null;
 }

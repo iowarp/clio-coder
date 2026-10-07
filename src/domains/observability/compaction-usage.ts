@@ -7,6 +7,7 @@ import type { BackgroundMemoryUsageSink } from "./background-memory-usage.js";
 import { appendOutOfTurnUsageRow, type OutOfTurnUsage, type OutOfTurnUsageRow } from "./out-of-turn-usage.js";
 
 export interface CompactionUsageOrigin {
+	sessionId?: string;
 	stateDir: string;
 	repoIdentity: string;
 	target: string;
@@ -51,18 +52,15 @@ export function recordFailedCompactionCalls(
 		const usage = observedUsage(call);
 		const row: OutOfTurnUsageRow = {
 			label: "failed-compaction",
+			...(origin.sessionId === undefined ? {} : { sessionId: origin.sessionId }),
 			callOutcome: call.outcome,
 			repoIdentity: origin.repoIdentity,
 			timestamp: call.timestamp,
 			target: origin.target,
 			attributedModelId: origin.model,
-			// Provenance labels the live `/usage` entry below; no reader of the
-			// durable row reads it, so the row does not carry it.
-			usage: storedUsage(usage),
+			usage,
 		};
 		appendOutOfTurnUsageRow(origin.stateDir, row, { required: true });
-		// Do not create a measured-zero live entry for a wholly unobserved call.
-		if (!Object.values(storedUsage(usage)).some((value) => typeof value === "number" && value > 0)) continue;
 		observability?.recordTokens(
 			origin.target,
 			origin.model,
@@ -77,17 +75,13 @@ export function recordFailedCompactionCalls(
 				reasoningTokens: usage.reasoning ?? 0,
 				totalTokens: usage.totalTokens ?? 0,
 				apiCalls: 1,
+				...(usage.totalTokens === null ? { missingTokenCalls: 1 } : {}),
 			},
 			usage.costProvenance,
 			undefined,
 			"failed-compaction",
 		);
 	}
-}
-
-function storedUsage(usage: OutOfTurnUsage & { costProvenance: CostProvenance }): OutOfTurnUsage {
-	const { costProvenance: _costProvenance, ...stored } = usage;
-	return stored;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

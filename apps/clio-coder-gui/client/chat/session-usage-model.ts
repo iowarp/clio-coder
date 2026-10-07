@@ -17,7 +17,8 @@ function dollars(value: number): string {
 export function costText(cost: Cost): string {
 	if (cost.calls === 0) return "Nothing recorded yet";
 	if (cost.free) return "$0.00, every call free";
-	if (cost.unknown) return `${dollars(cost.knownUsd)} known, some calls unpriced`;
+	if (cost.unknown && cost.knownUsd === 0) return "Cost not measured";
+	if (cost.unknown) return `${cost.estimated ? "about " : ""}${dollars(cost.knownUsd)} subtotal, some calls unpriced`;
 	if (cost.estimated) return `about ${dollars(cost.knownUsd)}`;
 	return dollars(cost.knownUsd);
 }
@@ -25,7 +26,10 @@ export function costText(cost: Cost): string {
 export function usageTotals(usage: SessionUsage): Array<{ label: string; value: string }> {
 	return [
 		{ label: "Cost", value: costText(usage.session.cost) },
-		{ label: "Tokens", value: tokens(usage.session.tokens) },
+		{
+			label: "Tokens",
+			value: `${tokens(usage.session.tokens)}${usage.session.missingTokenCalls ? ` +? (${tokens(usage.session.missingTokenCalls)} call${usage.session.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
+		},
 		{ label: "Model calls", value: tokens(usage.session.cost.calls) },
 	];
 }
@@ -40,6 +44,11 @@ export function usageRows(usage: SessionUsage) {
 			...counted(row.beside.handoffs, "handoff round", "handoff rounds"),
 			...counted(row.beside.prewarms, "pre-warm", "pre-warms"),
 			...counted(row.beside.backgroundMemory, "memory step", "memory steps"),
+			...counted(row.beside.systemOne ?? 0, "System One call", "System One calls"),
+			...counted(row.beside.failedCompaction ?? 0, "failed compaction call", "failed compaction calls"),
+			...counted(row.beside.compactions ?? 0, "compaction call", "compaction calls"),
+			...counted(row.beside.workers ?? 0, "worker call", "worker calls"),
+			...counted(row.missingTokenCalls ?? 0, "call missing token usage", "calls missing token usage"),
 		];
 		const cache = row.tokens.cacheRead + row.tokens.cacheWrite;
 		return {

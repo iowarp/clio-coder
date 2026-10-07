@@ -615,7 +615,18 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput)));
 	}
 	const total = cumulativeTokens(options.sessionTokens);
-	rows.push(total > 0 ? styledKv("totals", theme.fg("counter", `Σ${formatFooterTokens(total)}`)) : statusRow(null));
+	const missing = options.sessionTokens?.missingTokenCalls ?? 0;
+	rows.push(
+		total > 0 || missing > 0
+			? styledKv(
+					"totals",
+					theme.fg(
+						"counter",
+						`Σ${formatFooterTokens(total)}${missing > 0 ? ` +? (${missing} call${missing === 1 ? "" : "s"})` : ""}`,
+					),
+				)
+			: statusRow(null),
+	);
 	// Null until something has actually been priced, and an absent row is the
 	// only honest rendering of that. See formatCostAggregate.
 	const cost = formatCostAggregate(options.sessionCost);

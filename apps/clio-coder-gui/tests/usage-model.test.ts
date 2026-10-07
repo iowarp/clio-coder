@@ -61,16 +61,30 @@ test("a field with nothing observed reads as not recorded, and zero reads as zer
 	const by = new Map(view.bars.map((bar) => [bar.label, bar.value]));
 	assert.equal(by.get("Cache write"), "0");
 	assert.equal(by.get("Reasoning"), "not recorded");
-	assert.match(String(view.knownSubtotals), /known contributions only/u);
+	assert.match(String(view.knownSubtotals), /known subtotals/u);
 });
 
-test("the headline names the cost as recorded, never as an estimate", () => {
-	const view = usageView(report([{ name: "tokens", values: tokens }]));
+test("the headline includes worker totals and marks partial estimated costs", () => {
+	const view = usageView(
+		report([
+			{ name: "tokens", values: tokens },
+			{
+				name: "all-recorded-tokens",
+				values: {
+					knownSubtotal: 2850,
+					apiCalls: 14,
+					missingTokenCalls: 1,
+					cost: { knownUsd: 0.03, calls: 14, hasEstimated: true, hasUnknown: true },
+				},
+			},
+		]),
+	);
 	const by = new Map(view.headline.map((figure) => [figure.label, figure]));
-	assert.equal(by.get("Tokens")?.value, "2,450");
-	assert.equal(by.get("Tokens")?.note, "12 API calls");
-	assert.equal(by.get("Cost")?.value, "$0.02");
-	assert.equal(by.get("Cost")?.note, "Recorded cost, never a GUI estimate");
+	assert.equal(by.get("Tokens")?.value, "2,850");
+	assert.equal(by.get("Tokens")?.note, "14 API calls");
+	assert.equal(by.get("Cost")?.value, "~$0.03 +?");
+	assert.equal(by.get("Cost")?.note, "Known subtotal; some calls are unpriced");
+	assert.match(view.knownSubtotals ?? "", /1 recorded calls are missing token usage/u);
 });
 
 test("a missing store reads as a dash and says what a dash means", () => {
@@ -97,9 +111,9 @@ test("the origin split appears only when something out of turn was recorded", ()
 	const split = usageView(report([{ name: "tokens", values: { ...tokens, turns: 9, sideQuestions: 2, handoffs: 1 } }]));
 	assert.deepEqual(
 		split.origins.map((origin) => `${origin.label}:${origin.value}`),
-		["Turns:9", "Side questions:2", "Handoffs:1"],
+		["Conversation and compaction calls:9", "Side questions:2", "Handoffs:1"],
 	);
-	assert.match(split.originsNote, /A turn is ordinary conversation/u);
+	assert.match(split.originsNote, /several conversation calls/u);
 });
 
 test("models and skills keep the report's order and nothing else is dropped", () => {

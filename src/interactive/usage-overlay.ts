@@ -31,7 +31,7 @@ function sumRows(
 ): Omit<
 	CostRow,
 	"providerId" | "attributedModelId" | "requestedModelIds" | "responseModelIdObservationCounts" | "cost"
-> & { systemOne: number } {
+> & { systemOne: number; workers: number; compactions: number; missingTokenCalls: number } {
 	return rows.reduce(
 		(acc, row) => ({
 			runs: acc.runs + row.runs,
@@ -48,6 +48,9 @@ function sumRows(
 			backgroundMemory: acc.backgroundMemory + row.backgroundMemory,
 			failedCompaction: acc.failedCompaction + row.failedCompaction,
 			systemOne: acc.systemOne + (row.systemOne ?? 0),
+			workers: acc.workers + (row.workers ?? 0),
+			compactions: acc.compactions + (row.compactions ?? 0),
+			missingTokenCalls: acc.missingTokenCalls + (row.missingTokenCalls ?? 0),
 		}),
 		{
 			runs: 0,
@@ -64,6 +67,9 @@ function sumRows(
 			backgroundMemory: 0,
 			failedCompaction: 0,
 			systemOne: 0,
+			workers: 0,
+			compactions: 0,
+			missingTokenCalls: 0,
 		},
 	);
 }
@@ -135,18 +141,30 @@ function summaryBlock(
 			: [];
 	return kvBlock([
 		[
-			"turns",
+			"conversation calls",
 			formatTokens(
-				totals.runs -
+				totals.apiCalls -
 					totals.sideQuestions -
 					totals.handoffs -
 					totals.prewarms -
 					totals.backgroundMemory -
 					totals.failedCompaction -
-					totals.systemOne,
+					totals.systemOne -
+					totals.workers -
+					totals.compactions,
 			),
 		],
 		["model calls", formatTokens(totals.apiCalls)],
+		...((totals.workers ?? 0) > 0 ? [["worker calls", formatTokens(totals.workers ?? 0)] as const] : []),
+		...((totals.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(totals.compactions ?? 0)] as const] : []),
+		...((totals.missingTokenCalls ?? 0) > 0
+			? [
+					[
+						"missing token usage",
+						`${formatTokens(totals.missingTokenCalls ?? 0)} call${totals.missingTokenCalls === 1 ? "" : "s"}; token amounts are known subtotals`,
+					] as const,
+				]
+			: []),
 		...(totals.sideQuestions > 0 ? [["side questions", formatTokens(totals.sideQuestions)] as const] : []),
 		...(totals.handoffs > 0 ? [["handoffs", formatTokens(totals.handoffs)] as const] : []),
 		...(totals.prewarms > 0 ? [["pre-warms", formatTokens(totals.prewarms)] as const] : []),
@@ -178,18 +196,30 @@ function modelBlock(row: CostRow): string[] {
 		["requested model ids", row.requestedModelIds.join(", ")],
 		["response model id observation", responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts)],
 		[
-			"turns",
+			"conversation calls",
 			formatTokens(
-				row.runs -
+				row.apiCalls -
 					row.sideQuestions -
 					row.handoffs -
 					row.prewarms -
 					row.backgroundMemory -
 					row.failedCompaction -
-					(row.systemOne ?? 0),
+					(row.systemOne ?? 0) -
+					(row.workers ?? 0) -
+					(row.compactions ?? 0),
 			),
 		],
 		["model calls", formatTokens(row.apiCalls)],
+		...((row.workers ?? 0) > 0 ? [["worker calls", formatTokens(row.workers ?? 0)] as const] : []),
+		...((row.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(row.compactions ?? 0)] as const] : []),
+		...((row.missingTokenCalls ?? 0) > 0
+			? [
+					[
+						"missing token usage",
+						`${formatTokens(row.missingTokenCalls ?? 0)} call${row.missingTokenCalls === 1 ? "" : "s"}; token amounts are known subtotals`,
+					] as const,
+				]
+			: []),
 		...(row.sideQuestions > 0 ? [["side questions", formatTokens(row.sideQuestions)] as const] : []),
 		...(row.handoffs > 0 ? [["handoffs", formatTokens(row.handoffs)] as const] : []),
 		...(row.prewarms > 0 ? [["pre-warms", formatTokens(row.prewarms)] as const] : []),

@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 
 import { isSkillActivation, type PendingSkillToolPolicy, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
+import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { AUTONOMY_EXPOSURES, type AutonomyExposure } from "../safety/autonomy.js";
 import type {
 	ContinuityCheckpointPayload,
@@ -124,6 +125,8 @@ export type CompactionTrigger = "auto" | "force" | "overflow";
  * `usage` carries and the ledger usage fold reads both from one place.
  */
 export interface CompactionUsage {
+	missingTokenCalls?: number;
+	costProvenance?: CostProvenance;
 	/** Executing route; absent on legacy checkpoints that used the active chat model. */
 	targetId?: string;
 	/** Requested wire model ID, not a verified physical backend identity. */

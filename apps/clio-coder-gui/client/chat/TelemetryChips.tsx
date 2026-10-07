@@ -79,7 +79,7 @@ export const TelemetryChips = memo(function TelemetryChips({
 					<span>{Math.round(meter.percent)}%</span>
 				</button>
 			) : null}
-			{spend.cost || spend.tokens > 0 ? (
+			{spend.cost || spend.tokens > 0 || spend.missingTokenCalls ? (
 				<button
 					id={spendId}
 					type="button"
@@ -88,7 +88,12 @@ export const TelemetryChips = memo(function TelemetryChips({
 					title={spend.source === "clio" ? "Clio's accounting for this chat" : "Summed from this chat's turns"}
 					onClick={() => onOpen("usage", spendId)}
 				>
-					<span className="wb-chip__tokens">{compactCount(spend.tokens)} tok</span>
+					<span className="wb-chip__tokens">
+						{compactCount(spend.tokens)} tok
+						{spend.missingTokenCalls
+							? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"})`
+							: ""}
+					</span>
 					{spend.cost ? <span>{spend.cost}</span> : null}
 				</button>
 			) : null}

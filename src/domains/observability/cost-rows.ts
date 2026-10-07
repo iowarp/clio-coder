@@ -32,6 +32,9 @@ export interface CostRow {
 	backgroundMemory: number;
 	failedCompaction: number;
 	systemOne?: number;
+	workers?: number;
+	compactions?: number;
+	missingTokenCalls?: number;
 	cost: CostAggregate;
 }
 
@@ -46,6 +49,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 		}
 	>();
 	for (const entry of entries) {
+		const calls = entry.apiCalls ?? 1;
 		const key = `${entry.providerId}::${entry.attributedModelId}`;
 		const existing = grouped.get(key);
 		if (existing) {
@@ -57,12 +61,16 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			existing.row.cacheWrite += entry.cacheWrite;
 			existing.row.reasoningTokens += entry.reasoningTokens;
 			existing.row.apiCalls += entry.apiCalls ?? 1;
-			if (entry.label === "side-question") existing.row.sideQuestions += 1;
-			if (entry.label === "handoff") existing.row.handoffs += 1;
-			if (entry.label === "prewarm") existing.row.prewarms += 1;
-			if (entry.label === "background-memory") existing.row.backgroundMemory += 1;
-			if (entry.label === "failed-compaction") existing.row.failedCompaction += 1;
-			if (entry.label === "system-one") existing.row.systemOne = (existing.row.systemOne ?? 0) + 1;
+			if (entry.label === "side-question") existing.row.sideQuestions += calls;
+			if (entry.label === "handoff") existing.row.handoffs += calls;
+			if (entry.label === "prewarm") existing.row.prewarms += calls;
+			if (entry.label === "background-memory") existing.row.backgroundMemory += calls;
+			if (entry.label === "failed-compaction") existing.row.failedCompaction += calls;
+			if (entry.label === "system-one") existing.row.systemOne = (existing.row.systemOne ?? 0) + calls;
+			if (entry.label === "worker") existing.row.workers = (existing.row.workers ?? 0) + calls;
+			if (entry.label === "compaction") existing.row.compactions = (existing.row.compactions ?? 0) + calls;
+			if (entry.missingTokenCalls)
+				existing.row.missingTokenCalls = (existing.row.missingTokenCalls ?? 0) + entry.missingTokenCalls;
 			for (const requestedModelId of entry.requestedModelIds) existing.requestedModelIds.add(requestedModelId);
 			addResponseModelIdObservationCounts(
 				existing.responseModelIdObservationCounts,
@@ -83,12 +91,15 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				cacheWrite: entry.cacheWrite,
 				reasoningTokens: entry.reasoningTokens,
 				apiCalls: entry.apiCalls ?? 1,
-				sideQuestions: entry.label === "side-question" ? 1 : 0,
-				handoffs: entry.label === "handoff" ? 1 : 0,
-				prewarms: entry.label === "prewarm" ? 1 : 0,
-				backgroundMemory: entry.label === "background-memory" ? 1 : 0,
-				failedCompaction: entry.label === "failed-compaction" ? 1 : 0,
-				...(entry.label === "system-one" ? { systemOne: 1 } : {}),
+				sideQuestions: entry.label === "side-question" ? calls : 0,
+				handoffs: entry.label === "handoff" ? calls : 0,
+				prewarms: entry.label === "prewarm" ? calls : 0,
+				backgroundMemory: entry.label === "background-memory" ? calls : 0,
+				failedCompaction: entry.label === "failed-compaction" ? calls : 0,
+				...(entry.label === "system-one" ? { systemOne: calls } : {}),
+				...(entry.label === "worker" ? { workers: calls } : {}),
+				...(entry.label === "compaction" ? { compactions: calls } : {}),
+				...(entry.missingTokenCalls ? { missingTokenCalls: entry.missingTokenCalls } : {}),
 			},
 			requestedModelIds: new Set(entry.requestedModelIds),
 			responseModelIdObservationCounts: { ...entry.responseModelIdObservationCounts },
@@ -99,7 +110,15 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 		...row,
 		requestedModelIds: [...requestedModelIds].sort(),
 		responseModelIdObservationCounts,
-		cost: aggregateCostAmounts(entries.map((entry) => ({ usd: entry.usd, provenance: entry.provenance }))),
+		cost: aggregateCostAmounts(
+			entries.map((entry) => ({
+				usd: entry.usd,
+				...(entry.costSummary ? { costSummary: entry.costSummary } : {}),
+				provenance: entry.provenance,
+				apiCalls: entry.apiCalls ?? 1,
+				missingTokenCalls: entry.missingTokenCalls ?? 0,
+			})),
+		),
 	}));
 	rows.sort((a, b) => {
 		if (a.providerId !== b.providerId) return a.providerId < b.providerId ? -1 : 1;

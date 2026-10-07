@@ -19,8 +19,22 @@ describe("ACP server usage accumulator carries cost and a combined total", () =>
 
 	it("prefers an explicit totalTokens over the derived sum", () => {
 		const usage = emptyUsage();
-		mergeUsage(usage, { input: 10, output: 5, cacheRead: 1, cacheWrite: 1, totalTokens: 100 });
+		mergeUsage(usage, {
+			input: 10,
+			input_tokens: 10,
+			prompt_tokens: 10,
+			output: 5,
+			output_tokens: 5,
+			cacheRead: 1,
+			cacheReadTokens: 1,
+			cacheWrite: 1,
+			totalTokens: 100,
+			total_tokens: 100,
+		});
 		strictEqual(usage.totalTokens, 100);
+		strictEqual(usage.input, 10);
+		strictEqual(usage.output, 5);
+		strictEqual(usage.apiCalls, 1);
 	});
 
 	it("falls back to input+output+cacheRead+cacheWrite when no total is reported, excluding reasoning like sumRunUsage does", () => {
@@ -42,6 +56,10 @@ describe("ACP server usage accumulator carries cost and a combined total", () =>
 		mergeUsage(usage, { input: 1, output: 1 });
 		mergeUsage(usage, { input: 1, output: 1, cost: "not-an-object" });
 		mergeUsage(usage, { input: 1, output: 1, cost: { total: "not-a-number" } });
+		strictEqual(usage.costUsd, 0);
+		mergeUsage(usage, { input: 500, output: 20, totalTokens: 520, estimated: true, cost: { total: 1 } });
+		strictEqual(usage.totalTokens, 6);
+		strictEqual(usage.missingTokenCalls, 1);
 		strictEqual(usage.costUsd, 0);
 	});
 });

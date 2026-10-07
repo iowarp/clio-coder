@@ -1,11 +1,14 @@
 import { performance } from "node:perf_hooks";
+import { Value } from "typebox/value";
 import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import {
 	DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS,
 	DEFAULT_DELEGATION_TURN_TIMEOUT_MS,
 	type DelegationAgentConfig,
 } from "../../core/defaults.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
+import { accumulateCostAmount, emptyCostAggregate } from "../../domains/observability/cost.js";
 import { isBuiltinClaudeAcp } from "../../domains/providers/auth/index.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
@@ -23,7 +26,7 @@ import {
 	type StdioTransportOptions,
 } from "./transport.js";
 import type { AcpDelegationResult, AcpDelegationUsage, AcpInitializeResponse, AcpPromptResponse } from "./types.js";
-import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY } from "./types.js";
+import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY, AcpUsageMetaSchema } from "./types.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
 
@@ -206,10 +209,6 @@ export function emptyUsage(): AcpDelegationUsage {
 	};
 }
 
-function finite(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
 /** Presence matters: an explicit zero must not fall back to another observation. */
 function nonnegative(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -217,44 +216,53 @@ function nonnegative(value: unknown): number | undefined {
 
 export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
 	if (!isRecord(raw)) return;
-	const tokensReported = [
-		raw.input,
-		raw.inputTokens,
-		raw.input_tokens,
-		raw.output,
-		raw.outputTokens,
-		raw.output_tokens,
-		raw.cacheRead,
-		raw.cacheReadTokens,
-		raw.cache_read_tokens,
-		raw.cacheWrite,
-		raw.cacheWriteTokens,
-		raw.cache_write_tokens,
-		raw.reasoning,
-		raw.reasoningTokens,
-		raw.reasoning_tokens,
-		raw.totalTokens,
-		raw.total_tokens,
-	].some((value) => nonnegative(value) !== undefined);
+	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens, observed } = normalizeTokenUsage(raw);
+	const tokensReported =
+		raw.estimated !== true &&
+		[
+			raw.totalTokens,
+			raw.total_tokens,
+			raw.input,
+			raw.inputTokens,
+			raw.input_tokens,
+			raw.output,
+			raw.outputTokens,
+			raw.output_tokens,
+			raw.prompt_tokens,
+			raw.completion_tokens,
+			raw.cacheRead,
+			raw.cacheReadTokens,
+			raw.cache_read_tokens,
+			raw.cacheWrite,
+			raw.cacheWriteTokens,
+			raw.cache_write_tokens,
+		].some((value) => nonnegative(value) !== undefined);
 	into.tokensReported ||= tokensReported;
-	const input = finite(raw.input) + finite(raw.inputTokens) + finite(raw.input_tokens);
-	const output = finite(raw.output) + finite(raw.outputTokens) + finite(raw.output_tokens);
-	const cacheRead = finite(raw.cacheRead) + finite(raw.cacheReadTokens) + finite(raw.cache_read_tokens);
-	const cacheWrite = finite(raw.cacheWrite) + finite(raw.cacheWriteTokens) + finite(raw.cache_write_tokens);
 	into.inputTokens += input;
 	into.outputTokens += output;
 	into.cacheReadTokens += cacheRead;
 	into.cacheWriteTokens += cacheWrite;
-	into.reasoningTokens += finite(raw.reasoning) + finite(raw.reasoningTokens) + finite(raw.reasoning_tokens);
-	// Prefer the peer's explicit total, including zero,
-	// otherwise sum the four billed categories (reasoning excluded, since a peer
-	// that reports it separately still counts it inside output).
-	const explicitTotal = nonnegative(raw.totalTokens) ?? nonnegative(raw.total_tokens);
-	into.totalTokens += explicitTotal ?? input + output + cacheRead + cacheWrite;
+	into.reasoningTokens += reasoning;
+	into.totalTokens += totalTokens;
+	into.apiCalls = (into.apiCalls ?? 0) + (nonnegative(raw.apiCalls) ?? 1);
+	into.missingTokenCalls = (into.missingTokenCalls ?? 0) + (nonnegative(raw.missingTokenCalls) ?? (observed ? 0 : 1));
 	// Clio metadata uses costUsd; legacy message usage uses cost.total. These
 	// are alternate representations of one amount, never additive sources.
 	const cost = (isRecord(raw.cost) ? nonnegative(raw.cost.total) : undefined) ?? nonnegative(raw.costUsd);
-	into.costUsd += cost ?? 0;
+	into.costUsd += raw.estimated === true ? 0 : (cost ?? 0);
+	const summary = Value.Check(AcpUsageMetaSchema.properties.costSummary, raw.costSummary) ? raw.costSummary : undefined;
+	into.costSummary = accumulateCostAmount(into.costSummary ?? emptyCostAggregate(), {
+		usd: raw.estimated === true ? 0 : (cost ?? 0),
+		provenance:
+			raw.estimated === true
+				? "unknown"
+				: cost === undefined
+					? "unknown"
+					: resolveCostProvenance(raw.costProvenance, "unknown"),
+		apiCalls: nonnegative(raw.apiCalls) ?? 1,
+		missingTokenCalls: nonnegative(raw.missingTokenCalls) ?? (observed ? 0 : 1),
+		...(summary ? { costSummary: summary } : {}),
+	});
 	if (tokensReported || cost !== undefined) {
 		const provenance = cost === undefined ? "unknown" : resolveCostProvenance(raw.costProvenance, "unknown");
 		const previous = into.costProvenance;
@@ -523,10 +531,12 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				? (promptResponse._meta as Record<string, unknown>)[ACP_USAGE_META_KEY]
 				: undefined;
 			if (metaUsage !== undefined) {
-				mergeUsage(usage, metaUsage);
+				// This adapter creates one fresh peer session and submits one prompt.
+				// Clio's session subtotal includes that peer's helpers and workers.
+				const session = isRecord(metaUsage) && isRecord(metaUsage.session) ? metaUsage.session : null;
+				mergeUsage(usage, session ? { ...session, apiCalls: session.calls } : metaUsage);
 			} else {
-				mergeUsage(usage, promptResponse?.usage);
-				mergeUsage(usage, promptResponse?.tokenUsage);
+				mergeUsage(usage, promptResponse?.usage ?? promptResponse?.tokenUsage);
 			}
 			const reportedFailure =
 				authFailure ??

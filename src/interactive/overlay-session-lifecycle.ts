@@ -95,9 +95,13 @@ export interface OverlaySessionLifecycle {
  * same `/usage` bucket the live path writes to. Without it a single target read
  * as two providers, one under the target id and one under the runtime name.
  */
-function sessionUsageDefaults(session: SessionContract): { target?: string | null; model?: string | null } {
-	const meta = session.current() as { target?: string | null; model?: string | null } | null | undefined;
-	return { target: meta?.target ?? null, model: meta?.model ?? null };
+function sessionUsageDefaults(session: SessionContract): {
+	target?: string | null;
+	model?: string | null;
+	sessionId?: string | null;
+} {
+	const meta = session.current();
+	return { target: meta?.target ?? null, model: meta?.model ?? null, sessionId: meta?.id ?? null };
 }
 
 function restorePriorSessionOrReopen(

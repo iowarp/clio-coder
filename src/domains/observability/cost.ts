@@ -17,8 +17,11 @@ import type { ResponseModelIdObservationCounts } from "../../core/response-model
 import { type CostProvenance, normalizeCostProvenance } from "../providers/index.js";
 
 export interface CostAmount {
+	costSummary?: CostAggregate;
 	usd: number;
 	provenance: CostProvenance;
+	apiCalls?: number;
+	missingTokenCalls?: number;
 }
 
 export interface CostAggregate {
@@ -48,21 +51,23 @@ export function costWasMeasured(cost: CostAggregate | null | undefined): cost is
 	return cost !== null && cost !== undefined && cost.calls > 0;
 }
 
-function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount, first: boolean): CostAggregate {
+export function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount): CostAggregate {
+	const first = aggregate.calls === 0;
 	return {
-		knownUsd: aggregate.knownUsd + (amount.provenance === "unknown" ? 0 : amount.usd),
-		hasEstimated: aggregate.hasEstimated || amount.provenance === "estimated",
-		hasUnknown: aggregate.hasUnknown || amount.provenance === "unknown",
-		allKnownFree: amount.provenance === "known_free" && (first || aggregate.allKnownFree),
-		calls: aggregate.calls + 1,
+		knownUsd: aggregate.knownUsd + (amount.costSummary?.knownUsd ?? (amount.provenance === "unknown" ? 0 : amount.usd)),
+		hasEstimated: aggregate.hasEstimated || (amount.costSummary?.hasEstimated ?? amount.provenance === "estimated"),
+		hasUnknown:
+			aggregate.hasUnknown ||
+			(amount.costSummary?.hasUnknown ?? amount.provenance === "unknown") ||
+			((amount.missingTokenCalls ?? 0) > 0 && amount.provenance !== "known_free"),
+		allKnownFree:
+			(amount.costSummary?.allKnownFree ?? amount.provenance === "known_free") && (first || aggregate.allKnownFree),
+		calls: aggregate.calls + (amount.apiCalls ?? 1),
 	};
 }
 
 export function aggregateCostAmounts(amounts: ReadonlyArray<CostAmount>): CostAggregate {
-	return amounts.reduce(
-		(aggregate, amount, index) => accumulateCostAmount(aggregate, amount, index === 0),
-		emptyCostAggregate(),
-	);
+	return amounts.reduce((aggregate, amount) => accumulateCostAmount(aggregate, amount), emptyCostAggregate());
 }
 
 function formatUsdAmount(value: number): string {
@@ -87,7 +92,8 @@ export function formatCostAggregate(cost: CostAggregate | null | undefined): str
 	if (!costWasMeasured(cost)) return null;
 	if (cost.allKnownFree) return "$0.00 local";
 	// Partly priced still says what it knows, with the `+?` marking the rest.
-	if (cost.hasUnknown) return cost.knownUsd > 0 ? `${formatUsdAmount(cost.knownUsd)} +?` : null;
+	if (cost.hasUnknown)
+		return cost.knownUsd > 0 ? `${cost.hasEstimated ? "~" : ""}${formatUsdAmount(cost.knownUsd)} +?` : null;
 	if (cost.hasEstimated) return `~${formatUsdAmount(cost.knownUsd)} est`;
 	return formatUsdAmount(cost.knownUsd);
 }
@@ -133,6 +139,7 @@ export interface UsageBreakdown {
 	reasoningTokens: number;
 	totalTokens: number;
 	apiCalls?: number;
+	missingTokenCalls?: number;
 }
 
 /**
@@ -146,9 +153,12 @@ export type CostEntryLabel =
 	| "prewarm"
 	| "background-memory"
 	| "failed-compaction"
-	| "system-one";
+	| "system-one"
+	| "worker"
+	| "compaction";
 
 export interface CostEntry {
+	costSummary?: CostAggregate;
 	providerId: string;
 	attributedModelId: string;
 	requestedModelIds: string[];
@@ -162,6 +172,7 @@ export interface CostEntry {
 	cacheWrite: number;
 	reasoningTokens: number;
 	apiCalls?: number;
+	missingTokenCalls?: number;
 	/** Absent on an ordinary turn's call. */
 	label?: CostEntryLabel;
 }
@@ -179,6 +190,7 @@ export interface CostTracker {
 			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
 		},
 		label?: CostEntryLabel,
+		costSummary?: CostAggregate,
 	): number;
 	sessionTotal(): number;
 	sessionCost(): CostAggregate;
@@ -193,10 +205,10 @@ function emptyBreakdown(): UsageBreakdown {
 
 export function createCostTracker(): CostTracker {
 	const log: CostEntry[] = [];
-	let total = 0;
+	let aggregate = emptyCostAggregate();
 	const totals = emptyBreakdown();
 	return {
-		accumulate(providerId, attributedModelId, tokens, usd, breakdown, costProvenance, modelIdFacts, label) {
+		accumulate(providerId, attributedModelId, tokens, usd, breakdown, costProvenance, modelIdFacts, label, costSummary) {
 			const resolvedUsd = usd ?? 0;
 			const provenance = normalizeCostProvenance(costProvenance);
 			const input = breakdown?.input ?? 0;
@@ -205,6 +217,7 @@ export function createCostTracker(): CostTracker {
 			const cacheWrite = breakdown?.cacheWrite ?? 0;
 			const reasoningTokens = breakdown?.reasoningTokens ?? 0;
 			const apiCalls = breakdown?.apiCalls;
+			const missingTokenCalls = breakdown?.missingTokenCalls ?? 0;
 			log.push({
 				providerId,
 				attributedModelId,
@@ -220,15 +233,23 @@ export function createCostTracker(): CostTracker {
 				tokens,
 				usd: resolvedUsd,
 				provenance,
+				...(costSummary ? { costSummary } : {}),
 				input,
 				output,
 				cacheRead,
 				cacheWrite,
 				reasoningTokens,
 				...(apiCalls !== undefined ? { apiCalls } : {}),
+				...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
 				...(label !== undefined ? { label } : {}),
 			});
-			total += resolvedUsd;
+			aggregate = accumulateCostAmount(aggregate, {
+				usd: resolvedUsd,
+				provenance,
+				apiCalls: apiCalls ?? 1,
+				missingTokenCalls,
+				...(costSummary ? { costSummary } : {}),
+			});
 			totals.input += input;
 			totals.output += output;
 			totals.cacheRead += cacheRead;
@@ -236,13 +257,15 @@ export function createCostTracker(): CostTracker {
 			if (breakdown?.cacheWrite1h !== undefined) totals.cacheWrite1h = (totals.cacheWrite1h ?? 0) + breakdown.cacheWrite1h;
 			totals.reasoningTokens += reasoningTokens;
 			totals.totalTokens += tokens;
+			totals.apiCalls = (totals.apiCalls ?? 0) + (apiCalls ?? 1);
+			if (missingTokenCalls > 0) totals.missingTokenCalls = (totals.missingTokenCalls ?? 0) + missingTokenCalls;
 			return resolvedUsd;
 		},
 		sessionTotal() {
-			return total;
+			return aggregate.knownUsd;
 		},
 		sessionCost() {
-			return aggregateCostAmounts(log.map((entry) => ({ usd: entry.usd, provenance: entry.provenance })));
+			return { ...aggregate };
 		},
 		sessionTokens() {
 			return { ...totals };
@@ -252,7 +275,7 @@ export function createCostTracker(): CostTracker {
 		},
 		reset() {
 			log.length = 0;
-			total = 0;
+			aggregate = emptyCostAggregate();
 			totals.input = 0;
 			totals.output = 0;
 			totals.cacheRead = 0;
@@ -260,6 +283,8 @@ export function createCostTracker(): CostTracker {
 			delete totals.cacheWrite1h;
 			totals.reasoningTokens = 0;
 			totals.totalTokens = 0;
+			delete totals.apiCalls;
+			delete totals.missingTokenCalls;
 		},
 	};
 }

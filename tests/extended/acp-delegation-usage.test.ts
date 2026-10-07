@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { emptyUsage, mergeUsage } from "../../src/engine/acp/adapter.js";
@@ -12,8 +12,20 @@ describe("ACP delegation usage accumulator carries cost and a combined total", (
 
 	it("takes an explicit total and cost from the peer when present", () => {
 		const usage = emptyUsage();
-		mergeUsage(usage, { input: 10, output: 5, cacheRead: 1, cacheWrite: 1, totalTokens: 100, cost: { total: 0.0123 } });
+		mergeUsage(usage, {
+			input: 10,
+			input_tokens: 10,
+			output: 5,
+			outputTokens: 5,
+			cacheRead: 1,
+			cacheWrite: 1,
+			totalTokens: 100,
+			total_tokens: 100,
+			cost: { total: 0.0123 },
+		});
 		strictEqual(usage.totalTokens, 100);
+		strictEqual(usage.inputTokens, 10);
+		strictEqual(usage.outputTokens, 5);
 		strictEqual(usage.costUsd, 0.0123);
 	});
 
@@ -104,5 +116,12 @@ describe("ACP usage presence and provenance", () => {
 		strictEqual(usage.costProvenance, "unknown");
 		strictEqual(usage.totalTokens, 10);
 		strictEqual(usage.costUsd, 0.03);
+		deepStrictEqual(usage.costSummary, {
+			knownUsd: 0.03,
+			hasEstimated: true,
+			hasUnknown: true,
+			allKnownFree: false,
+			calls: 4,
+		});
 	});
 });

@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+
 /**
  * Observability domain wire-up. Listens to the dispatch bus channels and folds
  * their payloads into the session cost tracker, the projection and the trace
@@ -7,13 +8,17 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
  * bundle landed.
  */
 
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
+import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
+import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
 import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
@@ -61,8 +66,13 @@ function recordDispatchCost(cost: ReturnType<typeof createCostTracker>, payload:
 			...(payload.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1h: payload.cacheWrite1hTokenCount }),
 			reasoningTokens: payload.reasoningTokenCount ?? 0,
 			totalTokens: payload.tokenCount,
+			apiCalls: payload.apiCalls ?? 1,
+			missingTokenCalls: payload.missingTokenCalls ?? (payload.tokenCount === 0 ? 1 : 0),
 		},
 		payload.costProvenance,
+		undefined,
+		"worker",
+		payload.costSummary,
 	);
 }
 
@@ -144,6 +154,15 @@ export function createObservabilityBundle(
 	options: ObservabilityBundleOptions = {},
 ): DomainBundle<ObservabilityContract> {
 	const cost = createCostTracker();
+	let sessionId: string | null | undefined;
+	const recordedRuns = new Set<string>();
+	const recordRun = (payload: DispatchTerminalLike): void => {
+		if (sessionId !== undefined && payload.sessionId !== undefined && payload.sessionId !== sessionId) return;
+		if (payload.runId && recordedRuns.has(payload.runId)) return;
+		if (!payload.lineage) return;
+		if (payload.runId) recordedRuns.add(payload.runId);
+		recordDispatchCost(cost, payload);
+	};
 	const trace: DispatchTraceMirror =
 		options.dispatchTrace === false
 			? { enqueue: () => {}, enqueueSessionTurn: () => {}, flush: async () => {}, close: async () => {} }
@@ -197,7 +216,7 @@ export function createObservabilityBundle(
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchCompleted, (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
-					recordDispatchCost(cost, payload);
+					recordRun(payload);
 					// Kick off the heavy forensic build without blocking the bus.
 					// buildAndIndexEvidence swallows all failures; stop() flushes it.
 					if (typeof payload.runId === "string" && payload.runId.length > 0) {
@@ -208,7 +227,7 @@ export function createObservabilityBundle(
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchFailed, (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
-					recordDispatchCost(cost, payload);
+					recordRun(payload);
 					// A failed run is never a first-pass success; still build the
 					// bundle so its failure-cause tags exist for the index.
 					if (typeof payload.runId === "string" && payload.runId.length > 0 && dispatchHasEvidenceLedger(payload)) {
@@ -238,13 +257,90 @@ export function createObservabilityBundle(
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
 		costEntries: () => cost.entries(),
-		resetSession() {
+		resetSession(nextSessionId) {
+			sessionId = nextSessionId;
 			cost.reset();
+			recordedRuns.clear();
+			if (sessionId) {
+				for (const row of readOutOfTurnUsageRows(clioStateDir()).rows) {
+					if (row.sessionId !== sessionId) continue;
+					cost.accumulate(
+						row.target,
+						row.attributedModelId,
+						row.usage.totalTokens ?? 0,
+						row.usage.costUsd ?? 0,
+						{
+							input: row.usage.input ?? 0,
+							output: row.usage.output ?? 0,
+							cacheRead: row.usage.cacheRead ?? 0,
+							cacheWrite: row.usage.cacheWrite ?? 0,
+							...(row.usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: row.usage.cacheWrite1h ?? 0 }),
+							reasoningTokens: row.usage.reasoning ?? 0,
+							missingTokenCalls: row.usage.totalTokens === null ? 1 : 0,
+						},
+						row.usage.costProvenance,
+						undefined,
+						row.label,
+					);
+				}
+				const receiptsDir = join(clioStateDir(), "receipts");
+				for (const name of existsSync(receiptsDir) ? readdirSync(receiptsDir) : []) {
+					if (!name.endsWith(".json")) continue;
+					let run: RunReceipt;
+					try {
+						run = JSON.parse(readFileSync(join(receiptsDir, name), "utf8")) as RunReceipt;
+					} catch (error) {
+						writeDiagnostic(`[clio-coder:usage] cannot read receipt ${name}: ${String(error)}\n`);
+						continue;
+					}
+					if (!run || run.sessionId !== sessionId || run.agentId === "main-agent") continue;
+					const unverifiedTokens = run.externalTelemetry && run.externalTelemetry.tokenUsage !== "provider-reported";
+					recordRun({
+						runId: run.runId,
+						sessionId: run.sessionId,
+						lineage: run.lineage,
+						targetId: run.targetId,
+						wireModelId: run.wireModelId,
+						tokenCount: unverifiedTokens ? 0 : run.tokenCount,
+						inputTokenCount: unverifiedTokens ? 0 : run.inputTokenCount,
+						outputTokenCount: unverifiedTokens ? 0 : run.outputTokenCount,
+						cacheReadTokenCount: unverifiedTokens ? 0 : run.cacheReadTokenCount,
+						cacheWriteTokenCount: unverifiedTokens ? 0 : run.cacheWriteTokenCount,
+						cacheWrite1hTokenCount: unverifiedTokens ? 0 : run.cacheWrite1hTokenCount,
+						reasoningTokenCount: unverifiedTokens ? 0 : run.reasoningTokenCount,
+						apiCalls: run.apiCalls,
+						missingTokenCalls: unverifiedTokens ? Math.max(1, run.missingTokenCalls ?? 0) : run.missingTokenCalls,
+						costUsd: run.costUsd,
+						costProvenance: run.costProvenance,
+						costSummary: run.costSummary,
+					});
+				}
+			}
 			latestThroughput = null;
 			projection.refresh();
 		},
-		recordTokens(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts, label) {
-			cost.accumulate(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts, label);
+		recordTokens(
+			providerId,
+			attributedModelId,
+			tokens,
+			costUsd,
+			breakdown,
+			costProvenance,
+			modelIdFacts,
+			label,
+			costSummary,
+		) {
+			cost.accumulate(
+				providerId,
+				attributedModelId,
+				tokens,
+				costUsd,
+				breakdown,
+				costProvenance,
+				modelIdFacts,
+				label,
+				costSummary,
+			);
 			projection.refresh();
 		},
 		recordSessionTurn(sessionTurn) {

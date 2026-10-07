@@ -1,3 +1,4 @@
+import type { CostAggregate } from "../domains/observability/cost.js";
 import type { ContextOperation } from "./context-operation.js";
 import type { JobChangedPayload } from "./job-types.js";
 /**
@@ -692,6 +693,10 @@ export interface DispatchProgressPayload {
  * because the retry-denied emitter has no run to report on.
  */
 export interface DispatchTerminalStats {
+	sessionId?: string | null;
+	apiCalls?: number;
+	missingTokenCalls?: number;
+	costSummary?: CostAggregate;
 	lineage: RunLineage;
 	tokenCount: number;
 	inputTokenCount: number;

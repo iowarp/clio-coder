@@ -44,11 +44,25 @@ for (const scenario of [
 	},
 	{
 		name: "Clio metadata costUsd with estimated provenance",
-		response: meta({ totalTokens: 123, costUsd: 0.02, costProvenance: "estimated" }),
-		total: 123,
-		split: zero,
+		response: meta({
+			totalTokens: 123,
+			costUsd: 0.01,
+			costProvenance: "known",
+			session: {
+				input: 140,
+				output: 10,
+				totalTokens: 150,
+				costUsd: 0.02,
+				costProvenance: "unknown",
+				calls: 3,
+				missingTokenCalls: 1,
+				costSummary: { knownUsd: 0.02, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 3 },
+			},
+		}),
+		total: 150,
+		split: [140, 10, 0, 0, 0],
 		cost: 0.02,
-		provenance: "estimated",
+		provenance: "unknown",
 	},
 	{
 		name: "components seen by both adapter and event meter",
@@ -181,6 +195,17 @@ for (const scenario of [
 				costUsd: scenario.cost,
 				costProvenance: scenario.provenance,
 			});
+			if (scenario.name === "Clio metadata costUsd with estimated provenance") {
+				strictEqual(receipt.apiCalls, 3);
+				strictEqual(receipt.missingTokenCalls, 1);
+				deepStrictEqual(receipt.costSummary, {
+					knownUsd: 0.02,
+					hasEstimated: true,
+					hasUnknown: true,
+					allKnownFree: false,
+					calls: 3,
+				});
+			}
 			strictEqual(envelope.tokenCount, receipt.tokenCount);
 			strictEqual(envelope.costUsd, receipt.costUsd);
 			strictEqual(envelope.costProvenance, receipt.costProvenance);

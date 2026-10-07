@@ -51,6 +51,7 @@ export interface HandoffRepairInput {
 }
 
 export interface HandoffRoundInput {
+	onUsage?: (usage: SideQuestionResult["usage"]) => void;
 	model: EngineModel;
 	/** Read-only. The round copies before appending its own message. */
 	messages: ReadonlyArray<AgentMessage>;

@@ -33,13 +33,16 @@ export function tokensSegment(usage: UsageBreakdown | null | undefined): string 
 	const output = Math.max(0, usage.output ?? 0);
 	const reasoning = Math.max(0, usage.reasoningTokens ?? 0);
 	const total = Math.max(0, usage.totalTokens ?? input + output);
-	if (input + output + reasoning + total === 0) return null;
+	if (input + output + reasoning + total === 0 && !usage.missingTokenCalls) return null;
 	// Session totals are summed from provider usage payloads, so the chip carries
 	// no `≈`. It is built by the same formatter every other reasoning surface
 	// uses rather than by a fourth copy of the marker rule.
 	const reasoningChip = formatReasoningChip({ tokens: reasoning, provenance: "provider" }, formatFooterTokens);
 	const reasoningPart = reasoningChip === null ? "" : ` ${reasoningChip}`;
-	const totalPart = total > 0 ? ` Σ${formatFooterTokens(total)}` : "";
+	const totalPart =
+		total > 0 || usage.missingTokenCalls
+			? ` Σ${formatFooterTokens(total)}${usage.missingTokenCalls ? ` +? (${usage.missingTokenCalls} call${usage.missingTokenCalls === 1 ? "" : "s"})` : ""}`
+			: "";
 	return `${GLYPH.up} ${formatFooterTokens(input)} ${GLYPH.down} ${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
 }
 

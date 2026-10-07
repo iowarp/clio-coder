@@ -845,7 +845,7 @@ function prepareBackgroundMemoryRoute(
 							...completion.usage,
 							targetId,
 							attributedModelId: refined.wireModelId,
-							costProvenance,
+							costProvenance: completion.usage.missingTokenCalls ? "unknown" : costProvenance,
 							durationMs: Date.now() - startedAt,
 							backend: completion.backend,
 						});
@@ -1326,6 +1326,7 @@ async function runCompactionFlow(
 		recordFailedCompactionCalls(
 			{
 				stateDir,
+				sessionId: meta.id,
 				repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
 				target: resolved.targetId,
 				model: resolved.wireModelId,
@@ -1420,6 +1421,13 @@ async function runCompactionFlow(
 	const continuityCarry =
 		settledContinuity.current === null ? null : continuityPayloadFromFold(settledContinuity.current);
 
+	if (result.usage)
+		result.usage = {
+			...result.usage,
+			targetId: resolved.targetId,
+			modelId: resolved.wireModelId,
+			costProvenance: resolved.costProvenance,
+		};
 	const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 		kind: "compactionSummary",
 		turnId: randomUUID(),
@@ -1947,6 +1955,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const observability = result.getContract<ObservabilityContract>("observability");
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
+	observability?.resetSession(session?.current()?.id ?? null);
 	// One durable union of restricted sources per session. Every model send,
 	// mediated outbound call and System One request is judged against it.
 	const flowLedger = createFlowLedger({
@@ -2222,6 +2231,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const meta = session?.current() ?? null;
 		return captureTaskMemoryUsage({
 			stateDir: clioStateDir(),
+			sessionId: meta?.id ?? null,
 			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
 			...(observability === undefined ? {} : { observability }),
 		});
@@ -3774,6 +3784,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return session.readEntries();
 	};
 
+	const reseedUsage = (): void => {
+		const meta = session?.current();
+		if (!meta || !observability || !session) return;
+		reseedSessionUsageFromLedger(
+			observability,
+			readCurrentSessionEntries(),
+			{ target: meta.target, model: meta.model, sessionId: meta.id },
+			session.tree(meta.id).leafId,
+		);
+	};
+	termination.onDrain(bus.on(BusChannels.SessionResumed, reseedUsage));
+	termination.onDrain(bus.on(BusChannels.SessionTurnSwitched, reseedUsage));
+
 	const turnOutcomeCollector = createTurnOutcomeCollector();
 	let outcomeSessionId: string | null = null;
 	const seedOutcomeFromSession = (): void => {
@@ -4257,7 +4280,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					reseedSessionUsageFromLedger(
 						observability,
 						resumedEntries,
-						{ target: resumedMeta.target, model: resumedMeta.model },
+						{ target: resumedMeta.target, model: resumedMeta.model, sessionId: resumedMeta.id },
 						leafTurnId,
 					);
 				}
@@ -4515,6 +4538,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										...(settings.chat.target ? { target: settings.chat.target } : {}),
 										...(settings.chat.model ? { model: settings.chat.model } : {}),
 									});
+									observability?.resetSession(session.current()?.id ?? null);
 									taskBoard.snapshot();
 								},
 								getDecisionBoard: () => decisionBoard.snapshot(),
@@ -4826,6 +4850,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(observability
 					? {
 							usage: {
+								resetSession: (sessionId: string) => observability.resetSession(sessionId),
+								subscribe: (listener: () => void) => observability.subscribe(listener),
 								session: () => ({
 									cost: observability.sessionCostSummary(),
 									rows: aggregateCostEntries(observability.costEntries()),
@@ -5251,6 +5277,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						if (settings.chat.target) input.target = settings.chat.target;
 						if (settings.chat.model) input.model = settings.chat.model;
 						session.create(input);
+						observability?.resetSession(session.current()?.id ?? null);
 						taskBoard.snapshot();
 					},
 					onForkSession: (parentTurnId) => {

@@ -1,4 +1,5 @@
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
+import type { CostAggregate } from "../observability/cost.js";
 import type { FlowRestrictionSet } from "../safety/information-flow.js";
 /**
  * Shared run + receipt types for the dispatch domain.
@@ -541,6 +542,9 @@ export interface RunEnvelope {
 	sessionId: string | null;
 	cwd: string;
 	tokenCount: number;
+	apiCalls?: number;
+	missingTokenCalls?: number;
+	costSummary?: CostAggregate;
 	/** Input/output token split; written at finalization, absent on pre-split ledgers. */
 	inputTokenCount?: number;
 	outputTokenCount?: number;
@@ -940,6 +944,7 @@ export interface RunHostVerification {
 }
 
 export interface RunReceipt {
+	cwd?: string;
 	runId: string;
 	agentId: string;
 	/** Semantic role this attempt's route statistics belong to. */
@@ -1023,6 +1028,9 @@ export interface RunReceipt {
 	exitCode: number;
 	failureMessage?: string;
 	tokenCount: number;
+	apiCalls?: number;
+	missingTokenCalls?: number;
+	costSummary?: CostAggregate;
 	inputTokenCount?: number;
 	outputTokenCount?: number;
 	cacheReadTokenCount?: number;

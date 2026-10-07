@@ -27,6 +27,8 @@ const MAX_TEXT_BYTES = 256;
 /** The quota domain's `UsageSnapshot`, structurally. */
 
 export interface AcpUsageSource {
+	resetSession?: (sessionId: string) => void;
+	subscribe?: (listener: () => void) => () => void;
 	session(): { cost: AcpCostAggregate; rows: ReadonlyArray<AcpUsageRow> };
 	/** Snapshots through the quota service's cache; a provider that fails reports a status, and a throw fails the read. */
 	quota(): Promise<ReadonlyArray<AcpQuotaSnapshot>>;
@@ -60,14 +62,17 @@ function projectCost(cost: AcpCostAggregate) {
 }
 
 export function projectSessionUsage(session: ReturnType<AcpUsageSource["session"]>) {
+	const missingTokenCalls = session.rows.reduce((sum, row) => sum + (row.missingTokenCalls ?? 0), 0);
 	return {
 		cost: projectCost(session.cost),
+		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
 		tokens: session.rows.reduce((total, row) => total + count(row.tokens), 0),
 		rows: session.rows.slice(0, MAX_ROWS).map((row) => ({
 			provider: bounded(row.providerId),
 			model: bounded(row.attributedModelId),
 			runs: count(row.runs),
 			calls: count(row.apiCalls),
+			...(row.missingTokenCalls ? { missingTokenCalls: count(row.missingTokenCalls) } : {}),
 			tokens: {
 				input: count(row.input),
 				output: count(row.output),
@@ -82,6 +87,9 @@ export function projectSessionUsage(session: ReturnType<AcpUsageSource["session"
 				prewarms: count(row.prewarms),
 				backgroundMemory: count(row.backgroundMemory),
 				...((row.systemOne ?? 0) > 0 ? { systemOne: count(row.systemOne ?? 0) } : {}),
+				...(row.failedCompaction ? { failedCompaction: count(row.failedCompaction) } : {}),
+				...(row.workers ? { workers: count(row.workers) } : {}),
+				...(row.compactions ? { compactions: count(row.compactions) } : {}),
 			},
 			cost: projectCost(row.cost),
 		})),

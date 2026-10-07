@@ -162,6 +162,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					captureTaskMemoryUsage({
 						stateDir: join(env.dir, "state"),
 						repoIdentity: origin.cwdHash,
+						sessionId: origin.id,
 						observability: {
 							recordTokens: (_target, _model, tokens) => {
 								live.push(tokens);
@@ -183,12 +184,18 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				await idle;
 				await new Promise<void>((resolve) => setImmediate(resolve));
 				const rows = readOutOfTurnUsageRows(join(env.dir, "state")).rows;
-				assert.equal(rows.length, ending === "no-usage" ? 0 : 1);
+				assert.equal(rows.length, 1);
+				assert.equal(rows[0]?.sessionId, origin.id);
+				if (ending === "no-usage") {
+					assert.equal(rows[0]?.usage.totalTokens, null);
+					assert.equal(rows[0]?.usage.costProvenance, "unknown");
+				}
 				if (ending !== "no-usage") {
 					assert.equal(rows[0]?.repoIdentity, origin.cwdHash);
 					assert.equal(rows[0]?.target, "origin-target");
 					assert.equal(rows[0]?.attributedModelId, "memory-model");
 					assert.deepEqual(rows[0]?.usage, {
+						costProvenance: "unknown",
 						input: 7,
 						output: 3,
 						cacheRead: 5,
@@ -198,7 +205,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 						costUsd: 0.375,
 					});
 				}
-				assert.deepEqual(live, switched || ending === "no-usage" ? [] : [17]);
+				assert.deepEqual(live, switched ? [] : [ending === "no-usage" ? 0 : 17]);
 				const usable = ending === "stop" && !switched;
 				assert.equal(bank.snapshot().knowledge.length, usable ? 1 : 0);
 				assert.equal(reminders.length, usable ? 1 : 0);

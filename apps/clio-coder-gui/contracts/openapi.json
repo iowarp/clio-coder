@@ -15197,6 +15197,10 @@
 													"type": "integer",
 													"minimum": 0
 												},
+												"missingTokenCalls": {
+													"type": "integer",
+													"minimum": 0
+												},
 												"rows": {
 													"type": "array",
 													"items": {
@@ -15216,6 +15220,10 @@
 																"minimum": 0
 															},
 															"calls": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"missingTokenCalls": {
 																"type": "integer",
 																"minimum": 0
 															},
@@ -15267,6 +15275,22 @@
 																		"minimum": 0
 																	},
 																	"backgroundMemory": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"systemOne": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"failedCompaction": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"workers": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"compactions": {
 																		"type": "integer",
 																		"minimum": 0
 																	}
@@ -21157,6 +21181,38 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costSummary": {
+																		"type": "object",
+																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
+																		"properties": {
+																			"knownUsd": {
+																				"type": "number",
+																				"minimum": 0
+																			},
+																			"hasEstimated": {
+																				"type": "boolean"
+																			},
+																			"hasUnknown": {
+																				"type": "boolean"
+																			},
+																			"allKnownFree": {
+																				"type": "boolean"
+																			},
+																			"calls": {
+																				"type": "integer",
+																				"minimum": 0
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"apiCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"missingTokenCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"input": {
 																		"type": "integer",
 																		"minimum": 0
@@ -21177,9 +21233,33 @@
 																		"type": "integer",
 																		"minimum": 0
 																	},
+																	"totalTokens": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"costUsd": {
 																		"type": "number",
 																		"minimum": 0
+																	},
+																	"costProvenance": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "known"
+																			},
+																			{
+																				"type": "string",
+																				"const": "known_free"
+																			},
+																			{
+																				"type": "string",
+																				"const": "estimated"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unknown"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -21807,6 +21887,17 @@
 																"totalTokens": {
 																	"type": "integer",
 																	"minimum": 0
+																},
+																"calls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"missingTokenCalls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"hasEstimatedCost": {
+																	"type": "boolean"
 																},
 																"costUsd": {
 																	"type": "number",
@@ -26075,6 +26166,38 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costSummary": {
+																		"type": "object",
+																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
+																		"properties": {
+																			"knownUsd": {
+																				"type": "number",
+																				"minimum": 0
+																			},
+																			"hasEstimated": {
+																				"type": "boolean"
+																			},
+																			"hasUnknown": {
+																				"type": "boolean"
+																			},
+																			"allKnownFree": {
+																				"type": "boolean"
+																			},
+																			"calls": {
+																				"type": "integer",
+																				"minimum": 0
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"apiCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"missingTokenCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"input": {
 																		"type": "integer",
 																		"minimum": 0
@@ -26095,9 +26218,33 @@
 																		"type": "integer",
 																		"minimum": 0
 																	},
+																	"totalTokens": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"costUsd": {
 																		"type": "number",
 																		"minimum": 0
+																	},
+																	"costProvenance": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "known"
+																			},
+																			{
+																				"type": "string",
+																				"const": "known_free"
+																			},
+																			{
+																				"type": "string",
+																				"const": "estimated"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unknown"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -26725,6 +26872,17 @@
 																"totalTokens": {
 																	"type": "integer",
 																	"minimum": 0
+																},
+																"calls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"missingTokenCalls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"hasEstimatedCost": {
+																	"type": "boolean"
 																},
 																"costUsd": {
 																	"type": "number",
@@ -29578,6 +29736,38 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costSummary": {
+																		"type": "object",
+																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
+																		"properties": {
+																			"knownUsd": {
+																				"type": "number",
+																				"minimum": 0
+																			},
+																			"hasEstimated": {
+																				"type": "boolean"
+																			},
+																			"hasUnknown": {
+																				"type": "boolean"
+																			},
+																			"allKnownFree": {
+																				"type": "boolean"
+																			},
+																			"calls": {
+																				"type": "integer",
+																				"minimum": 0
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"apiCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"missingTokenCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"input": {
 																		"type": "integer",
 																		"minimum": 0
@@ -29598,9 +29788,33 @@
 																		"type": "integer",
 																		"minimum": 0
 																	},
+																	"totalTokens": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"costUsd": {
 																		"type": "number",
 																		"minimum": 0
+																	},
+																	"costProvenance": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "known"
+																			},
+																			{
+																				"type": "string",
+																				"const": "known_free"
+																			},
+																			{
+																				"type": "string",
+																				"const": "estimated"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unknown"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -30228,6 +30442,17 @@
 																"totalTokens": {
 																	"type": "integer",
 																	"minimum": 0
+																},
+																"calls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"missingTokenCalls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"hasEstimatedCost": {
+																	"type": "boolean"
 																},
 																"costUsd": {
 																	"type": "number",
@@ -33045,6 +33270,38 @@
 																	"type": "object",
 																	"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																	"properties": {
+																		"costSummary": {
+																			"type": "object",
+																			"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
+																			"properties": {
+																				"knownUsd": {
+																					"type": "number",
+																					"minimum": 0
+																				},
+																				"hasEstimated": {
+																					"type": "boolean"
+																				},
+																				"hasUnknown": {
+																					"type": "boolean"
+																				},
+																				"allKnownFree": {
+																					"type": "boolean"
+																				},
+																				"calls": {
+																					"type": "integer",
+																					"minimum": 0
+																				}
+																			},
+																			"additionalProperties": false
+																		},
+																		"apiCalls": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"missingTokenCalls": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
 																		"input": {
 																			"type": "integer",
 																			"minimum": 0
@@ -33065,9 +33322,33 @@
 																			"type": "integer",
 																			"minimum": 0
 																		},
+																		"totalTokens": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
 																		"costUsd": {
 																			"type": "number",
 																			"minimum": 0
+																		},
+																		"costProvenance": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "known"
+																				},
+																				{
+																					"type": "string",
+																					"const": "known_free"
+																				},
+																				{
+																					"type": "string",
+																					"const": "estimated"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unknown"
+																				}
+																			]
 																		}
 																	},
 																	"additionalProperties": false
@@ -33695,6 +33976,17 @@
 																	"totalTokens": {
 																		"type": "integer",
 																		"minimum": 0
+																	},
+																	"calls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"missingTokenCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"hasEstimatedCost": {
+																		"type": "boolean"
 																	},
 																	"costUsd": {
 																		"type": "number",
@@ -36759,6 +37051,38 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costSummary": {
+																		"type": "object",
+																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
+																		"properties": {
+																			"knownUsd": {
+																				"type": "number",
+																				"minimum": 0
+																			},
+																			"hasEstimated": {
+																				"type": "boolean"
+																			},
+																			"hasUnknown": {
+																				"type": "boolean"
+																			},
+																			"allKnownFree": {
+																				"type": "boolean"
+																			},
+																			"calls": {
+																				"type": "integer",
+																				"minimum": 0
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"apiCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"missingTokenCalls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"input": {
 																		"type": "integer",
 																		"minimum": 0
@@ -36779,9 +37103,33 @@
 																		"type": "integer",
 																		"minimum": 0
 																	},
+																	"totalTokens": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"costUsd": {
 																		"type": "number",
 																		"minimum": 0
+																	},
+																	"costProvenance": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "known"
+																			},
+																			{
+																				"type": "string",
+																				"const": "known_free"
+																			},
+																			{
+																				"type": "string",
+																				"const": "estimated"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unknown"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -37409,6 +37757,17 @@
 																"totalTokens": {
 																	"type": "integer",
 																	"minimum": 0
+																},
+																"calls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"missingTokenCalls": {
+																	"type": "integer",
+																	"minimum": 0
+																},
+																"hasEstimatedCost": {
+																	"type": "boolean"
 																},
 																"costUsd": {
 																	"type": "number",
@@ -46956,6 +47315,17 @@
 																"type": "integer",
 																"minimum": 0
 															},
+															"calls": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"missingTokenCalls": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"hasEstimatedCost": {
+																"type": "boolean"
+															},
 															"costUsd": {
 																"type": "number",
 																"minimum": 0
@@ -47493,6 +47863,38 @@
 														"type": "object",
 														"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 														"properties": {
+															"costSummary": {
+																"type": "object",
+																"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
+																"properties": {
+																	"knownUsd": {
+																		"type": "number",
+																		"minimum": 0
+																	},
+																	"hasEstimated": {
+																		"type": "boolean"
+																	},
+																	"hasUnknown": {
+																		"type": "boolean"
+																	},
+																	"allKnownFree": {
+																		"type": "boolean"
+																	},
+																	"calls": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															"apiCalls": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"missingTokenCalls": {
+																"type": "integer",
+																"minimum": 0
+															},
 															"input": {
 																"type": "integer",
 																"minimum": 0
@@ -47513,9 +47915,33 @@
 																"type": "integer",
 																"minimum": 0
 															},
+															"totalTokens": {
+																"type": "integer",
+																"minimum": 0
+															},
 															"costUsd": {
 																"type": "number",
 																"minimum": 0
+															},
+															"costProvenance": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "known"
+																	},
+																	{
+																		"type": "string",
+																		"const": "known_free"
+																	},
+																	{
+																		"type": "string",
+																		"const": "estimated"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	}
+																]
 															}
 														},
 														"additionalProperties": false
@@ -48253,6 +48679,38 @@
 												"type": "object",
 												"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 												"properties": {
+													"costSummary": {
+														"type": "object",
+														"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
+														"properties": {
+															"knownUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"hasEstimated": {
+																"type": "boolean"
+															},
+															"hasUnknown": {
+																"type": "boolean"
+															},
+															"allKnownFree": {
+																"type": "boolean"
+															},
+															"calls": {
+																"type": "integer",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
+													"apiCalls": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"missingTokenCalls": {
+														"type": "integer",
+														"minimum": 0
+													},
 													"input": {
 														"type": "integer",
 														"minimum": 0
@@ -48273,9 +48731,33 @@
 														"type": "integer",
 														"minimum": 0
 													},
+													"totalTokens": {
+														"type": "integer",
+														"minimum": 0
+													},
 													"costUsd": {
 														"type": "number",
 														"minimum": 0
+													},
+													"costProvenance": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "known"
+															},
+															{
+																"type": "string",
+																"const": "known_free"
+															},
+															{
+																"type": "string",
+																"const": "estimated"
+															},
+															{
+																"type": "string",
+																"const": "unknown"
+															}
+														]
 													}
 												},
 												"additionalProperties": false

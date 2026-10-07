@@ -1,3 +1,4 @@
+import { normalizeTokenUsage } from "../../../core/token-split.js";
 import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
 /**
  * Compaction orchestration.
@@ -783,19 +784,16 @@ function numberOrZero(value: unknown): number {
 
 /**
  * Fold one summarization call's provider usage into the running total. A split
- * turn runs two calls; both are billed, so both are counted. Returns the
- * accumulator unchanged when the provider reported nothing, so "no usage" stays
- * distinguishable from "a call that cost zero".
+ * turn runs two calls; both are billed, so both are counted. Missing provider
+ * counts stay separate from the known token subtotal.
  */
 function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): CompactionUsage | undefined {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return total;
-	const usage = raw as Partial<Usage> & { reasoning?: number };
-	const input = numberOrZero(usage.input);
-	const output = numberOrZero(usage.output);
-	const cacheRead = numberOrZero(usage.cacheRead);
-	const cacheWrite = numberOrZero(usage.cacheWrite);
-	const totalTokens = numberOrZero(usage.totalTokens) || input + output + cacheRead + cacheWrite;
-	if (totalTokens === 0) return total;
+	const usage = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Partial<Usage> & {
+		reasoning?: number;
+	};
+	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens, observed } = normalizeTokenUsage(
+		usage as Record<string, unknown>,
+	);
 	const base = total ?? {
 		input: 0,
 		output: 0,
@@ -814,10 +812,13 @@ function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): C
 		...(base.cacheWrite1h === undefined && usage.cacheWrite1h === undefined
 			? {}
 			: { cacheWrite1h: (base.cacheWrite1h ?? 0) + numberOrZero(usage.cacheWrite1h) }),
-		reasoning: base.reasoning + numberOrZero(usage.reasoning),
+		reasoning: base.reasoning + reasoning,
 		totalTokens: base.totalTokens + totalTokens,
 		cost: { total: base.cost.total + numberOrZero(usage.cost?.total) },
 		apiCalls: base.apiCalls + 1,
+		...((base.missingTokenCalls ?? 0) + (observed ? 0 : 1) > 0
+			? { missingTokenCalls: (base.missingTokenCalls ?? 0) + (observed ? 0 : 1) }
+			: {}),
 	};
 }
 

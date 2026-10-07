@@ -19,13 +19,15 @@ import {
 	emptyResponseModelIdObservationCounts,
 	type ResponseModelIdObservationCounts,
 } from "../../core/response-model-id.js";
+import type { CostEntryLabel } from "../observability/cost.js";
+import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
 import { ledgerUsageCalls, type SessionUsageDefaults } from "./usage.js";
 
 /** The slice of ObservabilityContract a reseed needs. */
 export interface SessionUsageSink {
-	resetSession(): void;
+	resetSession(sessionId?: string | null): void;
 	recordTokens(
 		providerId: string,
 		attributedModelId: string,
@@ -40,12 +42,14 @@ export interface SessionUsageSink {
 			reasoningTokens: number;
 			totalTokens: number;
 			apiCalls?: number;
+			missingTokenCalls?: number;
 		},
-		costProvenance?: never,
+		costProvenance?: CostProvenance,
 		modelIdFacts?: {
 			requestedModelIds: ReadonlyArray<string>;
 			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
 		},
+		label?: CostEntryLabel,
 	): void;
 }
 
@@ -69,7 +73,7 @@ export function reseedSessionUsageFromLedger(
 	defaults: SessionUsageDefaults = {},
 	activeLeafTurnId?: string | null,
 ): void {
-	sink.resetSession();
+	sink.resetSession(defaults.sessionId);
 	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
 	for (const call of ledgerUsageCalls(scoped, defaults)) {
 		const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
@@ -92,12 +96,14 @@ export function reseedSessionUsageFromLedger(
 				reasoningTokens: call.reasoningTokens,
 				totalTokens: call.totalTokens,
 				apiCalls: call.apiCalls ?? 1,
+				...(call.missingTokenCalls ? { missingTokenCalls: call.missingTokenCalls } : {}),
 			},
-			undefined,
+			call.costProvenance,
 			{
 				requestedModelIds: [call.requestedModelId],
 				responseModelIdObservationCounts,
 			},
+			call.label,
 		);
 	}
 }

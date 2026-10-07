@@ -74,7 +74,7 @@ export interface TurnPrewarmDeps {
 	/** Freeze the session tool surface onto the agent, exactly as a submit does. */
 	applySessionTools: (runtime: AgentRuntime) => void;
 	/** Report the round's provider usage under its own `/usage` label. */
-	recordUsage: (runtime: AgentRuntime, usage: Usage | null) => void;
+	recordUsage: (runtime: AgentRuntime, usage: Usage | null, origin: ReturnType<SessionContract["current"]>) => void;
 	/**
 	 * Claim one in-flight request on the runtime's endpoint for the duration of
 	 * the round, returning the release handle. This is the seam brief 06 (#250)
@@ -247,6 +247,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		const prepared = await deps.prepareRuntime(controller.signal);
 		if (!prepared.ok) return { ran: false, reason: "unresolved" };
 		const runtime = prepared.runtime;
+		const origin = deps.session?.current() ?? null;
 		if (runtime.targetId !== target.id || runtime.wireModelId !== selectedModel || runtime.runtimeId !== target.runtime)
 			return { ran: false, reason: "superseded" };
 		if (
@@ -287,7 +288,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					maxInputTokens: Math.min(256, target.cache.warm.maxInputTokens ?? 256),
 					canSend,
 				});
-				deps.recordUsage(runtime, wake.usage);
+				if (wake.invoked !== false) deps.recordUsage(runtime, wake.usage, origin);
 				recordStartupDiagnostic({
 					kind: "model-wake",
 					target: target.id,
@@ -396,7 +397,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				aborted: result.aborted,
 			});
 		}
-		deps.recordUsage(runtime, result.usage);
+		if (result.invoked !== false) deps.recordUsage(runtime, result.usage, origin);
 		recordStartupDiagnostic({
 			kind: "prompt-warm",
 			target: runtime.targetId,

@@ -12,6 +12,7 @@ import {
 	skillActivationFromToolDetails,
 } from "../../core/skill-activation.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
@@ -35,6 +36,7 @@ import type {
 } from "../../domains/dispatch/types.js";
 import type { CostAmount } from "../../domains/observability/cost.js";
 import { aggregateCostAmounts } from "../../domains/observability/cost.js";
+import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -469,6 +471,7 @@ function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSum
 		cacheWrite: left.cacheWrite + right.cacheWrite,
 		reasoning: left.reasoning + right.reasoning,
 		apiCalls: left.apiCalls + right.apiCalls,
+		missingTokenCalls: (left.missingTokenCalls ?? 0) + (right.missingTokenCalls ?? 0),
 		hadReasoning: left.hadReasoning || right.hadReasoning,
 		hadUsage: left.hadUsage || right.hadUsage,
 		...(left.estimated || right.estimated ? { estimated: true } : {}),
@@ -642,6 +645,9 @@ async function recordHeadlessMainAgentReceipt(input: {
 		lineage,
 		exitCode,
 		tokenCount,
+		apiCalls: usage?.apiCalls ?? 0,
+		missingTokenCalls: usage?.missingTokenCalls ?? 0,
+		costSummary: cost,
 		inputTokenCount,
 		outputTokenCount,
 		cacheReadTokenCount,
@@ -656,6 +662,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls);
 	const receipt: RunReceiptDraft = {
 		runId: envelope.id,
+		cwd: snapshot.cwd,
 		agentId: "main-agent",
 		executionRole: "builder",
 		requestOrigin: "user",
@@ -686,6 +693,9 @@ async function recordHeadlessMainAgentReceipt(input: {
 		exitCode,
 		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
 		tokenCount,
+		apiCalls: usage?.apiCalls ?? 0,
+		missingTokenCalls: usage?.missingTokenCalls ?? 0,
+		costSummary: cost,
 		inputTokenCount,
 		outputTokenCount,
 		cacheReadTokenCount,
@@ -905,10 +915,22 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// (middleware nudges and finish-contract reprompts start new agent
 			// runs), so nothing here may key on the last segment alone.
 			const usageSummary = sumRunUsage([event.message]);
-			if (usageSummary.hadUsage) {
+			const rawUsage = (event.message as { usage?: Record<string, unknown> }).usage ?? {};
+			if (usageSummary.hadUsage && rawUsage.callInvoked !== false) {
+				const reported = normalizeTokenUsage(rawUsage);
+				Object.assign(usageSummary, {
+					...reported,
+					tokens: reported.totalTokens,
+					missingTokenCalls: reported.observed ? 0 : 1,
+					costUsd: rawUsage.estimated === true ? 0 : usageSummary.costUsd,
+				});
 				receiptStats.costAmounts.push({
 					usd: usageSummary.costUsd,
-					provenance: chat.lastRunSnapshot?.()?.costProvenance ?? "unknown",
+					provenance:
+						rawUsage.estimated === true
+							? "unknown"
+							: resolveCostProvenance(rawUsage.costProvenance, chat.lastRunSnapshot?.()?.costProvenance ?? "unknown"),
+					missingTokenCalls: usageSummary.missingTokenCalls ?? 0,
 				});
 				receiptStats.usage = receiptStats.usage === null ? usageSummary : addRunUsage(receiptStats.usage, usageSummary);
 			}

@@ -1425,7 +1425,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (settlement) await settlement;
 		unsent.push(...deps.chat.clearQueuedFollowUps());
 		deps.onNewSession();
-		deps.observability.resetSession();
+		deps.observability.resetSession(deps.session?.current()?.id ?? null);
 		presentation.resetForNewSession();
 		exitSummary.reset();
 		resetTranscript();
@@ -1960,33 +1960,37 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						providers: deps.providers,
 						signal: startupAbort.signal,
 						isBusy,
-						recordWarm: (target, model, result) => {
+						recordWarm: (target, model, result, costProvenance) => {
+							if (result.invoked === false) return;
 							const usage = result.usage;
-							if (usage)
+							if ((deps.session?.current()?.id ?? null) === (startupSession?.id ?? null))
 								deps.observability.recordTokens(
 									target,
 									model,
-									usage.totalTokens,
-									usage.cost.total,
+									usage?.totalTokens ?? 0,
+									usage?.cost.total ?? 0,
 									{
-										input: usage.input,
-										output: usage.output,
-										cacheRead: usage.cacheRead,
-										cacheWrite: usage.cacheWrite,
+										input: usage?.input ?? 0,
+										output: usage?.output ?? 0,
+										cacheRead: usage?.cacheRead ?? 0,
+										cacheWrite: usage?.cacheWrite ?? 0,
 										apiCalls: 1,
+										...(!usage ? { missingTokenCalls: 1 } : {}),
 									},
-									"unknown",
+									usage ? costProvenance : "unknown",
 									undefined,
 									"prewarm",
 								);
 							appendOutOfTurnUsageRow(deps.stateDir, {
 								label: "prewarm",
+								sessionId: startupSession?.id ?? null,
 								repoIdentity: startupSession?.cwdHash ?? null,
 								timestamp: new Date().toISOString(),
 								target,
 								attributedModelId: model,
 								callOutcome: result.aborted ? "aborted" : result.errorMessage ? "error" : "success",
 								usage: {
+									costProvenance: usage ? costProvenance : "unknown",
 									input: usage?.input ?? null,
 									output: usage?.output ?? null,
 									cacheRead: usage?.cacheRead ?? null,

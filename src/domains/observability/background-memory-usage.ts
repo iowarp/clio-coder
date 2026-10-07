@@ -29,6 +29,7 @@ export interface BackgroundMemoryStepUsage {
 	cacheWrite1h?: number;
 	reasoning: number;
 	totalTokens: number;
+	missingTokenCalls?: number;
 	costUsd: number;
 	costProvenance: CostProvenance;
 }
@@ -48,6 +49,7 @@ export interface BackgroundMemoryUsageSink {
 }
 
 export interface RecordBackgroundMemoryStepInput {
+	sessionId?: string | null;
 	usage: BackgroundMemoryStepUsage;
 	stateDir: string;
 	/** The cwd hash the session ledger is filed under, so `usage report --repo` selects it. */
@@ -61,23 +63,25 @@ export interface RecordBackgroundMemoryStepInput {
 /** Build the durable row for one memory step without writing it. */
 export function backgroundMemoryUsageRow(
 	usage: BackgroundMemoryStepUsage,
-	options: { repoIdentity: string | null; now?: Date },
+	options: { repoIdentity: string | null; sessionId?: string | null; now?: Date },
 ): OutOfTurnUsageRow {
 	return {
 		label: "background-memory",
+		...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
 		repoIdentity: options.repoIdentity,
 		timestamp: (options.now ?? new Date()).toISOString(),
 		target: usage.targetId,
 		attributedModelId: usage.attributedModelId,
 		usage: {
-			input: usage.input,
-			output: usage.output,
-			cacheRead: usage.cacheRead,
-			cacheWrite: usage.cacheWrite,
+			costProvenance: usage.costProvenance,
+			input: usage.missingTokenCalls ? null : usage.input,
+			output: usage.missingTokenCalls ? null : usage.output,
+			cacheRead: usage.missingTokenCalls ? null : usage.cacheRead,
+			cacheWrite: usage.missingTokenCalls ? null : usage.cacheWrite,
 			...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-			reasoning: usage.reasoning,
-			totalTokens: usage.totalTokens,
-			costUsd: usage.costUsd,
+			reasoning: usage.missingTokenCalls ? null : usage.reasoning,
+			totalTokens: usage.missingTokenCalls ? null : usage.totalTokens,
+			costUsd: usage.missingTokenCalls ? null : usage.costUsd,
 		},
 	};
 }
@@ -98,6 +102,7 @@ export function recordBackgroundMemoryStep(input: RecordBackgroundMemoryStepInpu
 			reasoningTokens: input.usage.reasoning,
 			totalTokens: input.usage.totalTokens,
 			apiCalls: 1,
+			...(input.usage.missingTokenCalls ? { missingTokenCalls: input.usage.missingTokenCalls } : {}),
 		},
 		input.usage.costProvenance,
 		undefined,
@@ -105,6 +110,7 @@ export function recordBackgroundMemoryStep(input: RecordBackgroundMemoryStepInpu
 	);
 	const row = backgroundMemoryUsageRow(input.usage, {
 		repoIdentity: input.repoIdentity,
+		...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
 		...(input.now === undefined ? {} : { now: input.now }),
 	});
 	(input.appendRow ?? appendOutOfTurnUsageRow)(input.stateDir, row);
