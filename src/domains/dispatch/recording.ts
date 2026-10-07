@@ -6,6 +6,8 @@ import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { resolveClioDirs, stateRootRemoved } from "../../core/xdg.js";
 import { createRedactionTally, redactSecretSegments } from "../evidence/index.js";
+import type { ToolResolution } from "../toolchain/index.js";
+import { installRemedy, resolveToolBinary } from "../toolchain/index.js";
 import type { RunEventJournalSink } from "./run-event-journal.js";
 import type { RunNodeIdentity } from "./types.js";
 
@@ -32,8 +34,15 @@ export interface RecordingManifest {
 	error?: string;
 }
 export type CastOutputEvent = [number, "o", string];
+/** Playback is optional: generating a native side-channel cast needs no external executable. */
+export function recordingPlaybackTool(): { resolution: ToolResolution; remedy: string | null } {
+	const resolution = resolveToolBinary("asciinema");
+	return { resolution, remedy: resolution.source === "none" ? installRemedy("asciinema") : null };
+}
+
 export function recordingReference(runId: string): RecordingReference {
 	assertSafeId(runId, "run");
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) throw new Error("invalid recording run id");
 	return { manifestPath: `runs/${runId}/recording.json` };
 }
 function displayText(text: string): string {
@@ -94,6 +103,7 @@ export function parseRecordingCast(raw: string): CastOutputEvent[] {
 
 export interface RecordingJournal extends RunEventJournalSink {
 	accepts(runId: string): boolean;
+	gap(runId: string, droppedFrames: number): void;
 	start(runId: string, node: RunNodeIdentity): RecordingReference;
 	stop(): void;
 }
@@ -116,6 +126,7 @@ export function createRecordingJournal(
 	} = {},
 ): RecordingJournal {
 	const captures = new Map<string, Capture>();
+	let playbackChecked = false;
 	const root = options.stateDir ?? resolveClioDirs().state;
 	const cap = Math.max(1024, Math.min(options.maxBytes ?? RECORDING_MAX_BYTES, RECORDING_MAX_BYTES));
 	const duration = Math.max(0, Math.min(options.maxDurationMs ?? RECORDING_MAX_DURATION_MS, RECORDING_MAX_DURATION_MS));
@@ -148,7 +159,14 @@ export function createRecordingJournal(
 		captures.delete(runId);
 		capture.manifest.endedAt = now().toISOString();
 		capture.manifest.outcome = outcome;
-		if (capture.manifest.completion === "failed") return;
+		if (capture.manifest.completion === "failed") {
+			try {
+				persist(capture);
+			} catch {
+				/* Start failure was already reported; task finalization must still continue. */
+			}
+			return;
+		}
 		try {
 			const tally = createRedactionTally();
 			const safe = redactSecretSegments(
@@ -173,6 +191,7 @@ export function createRecordingJournal(
 				lines.push(line);
 				usedBytes += Buffer.byteLength(line);
 			}
+			if (nowMs() - capture.startMs > duration && capture.manifest.droppedFrames === 0) capture.manifest.droppedFrames = 1;
 			const incomplete = outcome !== "succeeded" || capture.manifest.droppedFrames > 0;
 			if (capture.manifest.droppedFrames > 0)
 				lines.push(`${JSON.stringify([frames.at(-1)?.[0] ?? 0, "o", "\r\n[capture gap: display frames dropped]\r\n"])}\n`);
@@ -190,11 +209,27 @@ export function createRecordingJournal(
 		}
 	};
 	return {
+		gap(runId, droppedFrames) {
+			const capture = captures.get(runId);
+			if (capture && Number.isSafeInteger(droppedFrames) && droppedFrames > 0)
+				capture.manifest.droppedFrames += droppedFrames;
+		},
 		accepts(runId) {
 			return captures.has(runId);
 		},
 		start(runId, node) {
 			const reference = recordingReference(runId);
+			if (!playbackChecked) {
+				playbackChecked = true;
+				try {
+					const playback = recordingPlaybackTool();
+					if (playback.remedy) warn(`native capture needs no external tool; for playback install with ${playback.remedy}`);
+				} catch (error) {
+					warn(
+						`playback discovery failed: ${error instanceof Error ? error.message : String(error)}; native capture continues`,
+					);
+				}
+			}
 			if (captures.has(runId)) return reference;
 			if (captures.size >= 16) finish(captures.keys().next().value as string, "capture_capacity");
 			const capture: Capture = {

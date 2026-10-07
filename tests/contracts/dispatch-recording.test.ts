@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "n
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
@@ -12,6 +13,8 @@ import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-even
 import { buildEvidence } from "../../src/domains/evidence/build.js";
 import { exportEvidenceRecordings } from "../../src/domains/evidence/recordings.js";
 import { inspectEvidence } from "../../src/domains/evidence/store.js";
+import { makeDispatchBundle } from "../harness/dispatch.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -179,4 +182,67 @@ it("strict reader rejects input capture, environment, terminal controls and nonm
 			`${JSON.stringify({ version: 2, width: 100, height: 30, timestamp: 1, env: { TOKEN: "secret" } })}\n`,
 		),
 	);
+});
+
+it("dispatch preserves the explicit capture option with journal history disabled on local and SSH placement", async () => {
+	for (const placed of [false, true]) {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.nodes = [{ id: node.id, host: node.host, maxWorkers: 1 }];
+		const context = dispatchStubContext({ settings });
+		const originalPath = process.env.PATH;
+		const bin = join(env.dir, "bin");
+		mkdirSync(bin, { recursive: true });
+		writeFileSync(join(bin, "ssh"), "#!/bin/sh\nprintf 'shared=yes\\n'\n", { mode: 0o755 });
+		if (placed) process.env.PATH = `${bin}:${originalPath ?? ""}`;
+		const spawnWorker = () => ({
+			pid: null,
+			heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+			abort() {},
+			promise: Promise.resolve({ exitCode: 0, signal: null, droppedDisplayFrames: placed ? 3 : 0 }),
+			events: (async function* () {
+				yield { type: "text_delta", delta: "warning: preliminary\ncorrection: inspected original\n" };
+				yield {
+					type: "message_end",
+					message: {
+						role: "assistant",
+						stopReason: "stop",
+						content: JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] }),
+					},
+				};
+				yield { type: "agent_end" };
+			})(),
+		});
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker,
+			journalRunEvents: false,
+			...(placed ? { resolveNode: () => ({ node, spawn: spawnWorker }), previewNode: () => ({ node }) } : {}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: "Inspect isolated evidence.",
+				cwd: env.dir,
+				requestOrigin: "internal",
+				record: true,
+				resultContractOverride: { kind: "provenance-report" },
+			});
+			const receipt = await handle.finalPromise;
+			const run = bundle.contract.listRuns().find((run) => run.id === handle.runId);
+			ok(run?.recording);
+			const source = readRunRecording(clioStateDir(), handle.runId);
+			ok(source?.cast);
+			match(source.cast, /warning/);
+			match(source.cast, /correction/);
+			equal(source.manifest.node.kind, placed ? "ssh" : "local");
+			equal(source.manifest.outcome, receipt.outcome);
+			equal(source.manifest.droppedFrames, placed ? 3 : 0);
+			equal(source.manifest.completion, receipt.outcome === "succeeded" && !placed ? "complete" : "incomplete");
+		} finally {
+			await bundle.extension.stop?.();
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+		}
+	}
 });

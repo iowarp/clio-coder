@@ -5876,6 +5876,7 @@ export function createDispatchBundle(
 				// the source stream, whether or not an external consumer ever
 				// subscribed, so a fast peer cannot seal a zero-token receipt.
 				if (!(await awaitEventDrain(eventPump.done))) {
+					recordingJournal.gap(envelope.id, 1);
 					toolTelemetryIngestionErrors += 1;
 					reportDispatchDiagnostic(
 						`run ${envelope.id}`,
@@ -7568,11 +7569,13 @@ export function createDispatchBundle(
 		(async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
+				recordingJournal.gap(envelope.id, result.droppedDisplayFrames ?? 0);
 				// The receipt reads meters the domain pump fills. Finalization
 				// always waits (bounded by the drain grace) for the pump to finish
 				// the source stream, whether or not an external consumer ever
 				// subscribed, so a fast worker cannot seal a zero-token receipt.
 				if (!(await awaitEventDrain(eventPump.done))) {
+					recordingJournal.gap(envelope.id, 1);
 					toolTelemetryIngestionErrors += 1;
 					reportDispatchDiagnostic(
 						`run ${envelope.id}`,
