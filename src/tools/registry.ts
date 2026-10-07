@@ -35,6 +35,8 @@ import {
 } from "../domains/safety/information-flow.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
+import type { SessionCodeConsent } from "../domains/safety/session-code-consent.js";
+import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
 import type { ImageContent } from "../engine/types.js";
 import { withApprovalNote } from "./approval-note.js";
@@ -340,6 +342,13 @@ export interface RegistryDeps {
 	 * the record. Absent in workers.
 	 */
 	observeToolCallGate?: (subject: ToolCallGateSubject, ref: string | undefined) => void;
+	/**
+	 * The attended session's test-runner consent (#377 follow-up). Read on every
+	 * main admission, and granted when the operator approves the consent ask.
+	 * Only an attended registry passes it: a headless run denies every ask and
+	 * keeps #377's allow, and workers never consult it.
+	 */
+	sessionCodeConsent?: Pick<SessionCodeConsent, "pending" | "grant">;
 }
 
 /**
@@ -1171,6 +1180,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
 				...(planScale ? { dispatchPlanScale: true } : {}),
 			},
+			...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
 		});
 		if (admission.kind === "deny" && admission.code === "safety_net") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: admission.reason, decision: admission.decision } };
@@ -1278,6 +1288,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(effectSpec !== undefined
 					? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }
 					: {}),
+				// A host check that runs a test runner owes the same session consent
+				// its direct verify call would ask for.
+				...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
 			});
 			if (
 				admission.kind === "deny" ||
@@ -1637,6 +1650,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					}
 					entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
 					continue;
+				}
+				// The operator approved the session's test-runner consent ask; the
+				// consent covers every later test runner this session.
+				if (
+					grant !== undefined &&
+					(grant.issuer ?? "operator") === "operator" &&
+					entry.decision.kind === "ask" &&
+					entry.decision.confirmationRuleId === SESSION_CODE_CONSENT_RULE_ID
+				) {
+					deps.sessionCodeConsent?.grant();
 				}
 				const approvedOptions: ToolInvokeOptions | undefined =
 					grant === undefined

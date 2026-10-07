@@ -127,6 +127,13 @@ export interface SafetyPolicyDecision {
 	 */
 	execRecognition?: "recognized" | "unrecognized";
 	/**
+	 * Set when a built-in test runner is recognized, alone, behind a workspace
+	 * PYTHONPATH, or as one step of a recognized chain. The runner executes
+	 * repository code the session may have authored, so attended admission asks
+	 * once per session before running it after a write (#377 follow-up).
+	 */
+	runsWorkspaceCode?: true;
+	/**
 	 * Set on an allowed read, ls, grep, or find whose path resolves outside the
 	 * workspace and outside Clio's own readable roots. The net passed; the
 	 * autonomy mapping asks for it in default mode.
@@ -1233,6 +1240,7 @@ function evaluateBashPolicy(
 			reasons: [`matched built-in test runner '${testRunner.id}'`, projectScriptPreview(recognitionCommand, callCwd)],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "recognized",
+			runsWorkspaceCode: true,
 		};
 	}
 	const projectScript = PROJECT_SCRIPT_COMMANDS.find((entry) => entry.re.test(recognitionCommand));
@@ -1268,6 +1276,7 @@ function evaluateBashPolicy(
 			`every step of the command is recognized: ${chain.ruleIds.join(", ")}`,
 			...chain.scriptPreviews,
 		];
+		const runsWorkspaceCode = chain.runsTestRunner ? { runsWorkspaceCode: true as const } : {};
 		if (chain.requiresConfirmation && posture !== "confirmed" && posture !== "yolo") {
 			return {
 				kind: "ask",
@@ -1276,6 +1285,7 @@ function evaluateBashPolicy(
 				reasons: [...chainReasons, "project policy requires confirmation for one step"],
 				policySource: "builtin-command-allowlist",
 				execRecognition: "recognized",
+				...runsWorkspaceCode,
 			};
 		}
 		return {
@@ -1285,6 +1295,7 @@ function evaluateBashPolicy(
 			reasons: chainReasons,
 			policySource: "builtin-command-allowlist",
 			execRecognition: chain.requiresAutonomyApproval ? "unrecognized" : "recognized",
+			...runsWorkspaceCode,
 		};
 	}
 	// Remaining sequencing operators (pipes, ;, redirects, and && chains with an
@@ -1535,6 +1546,8 @@ interface ChainRecognition {
 	requiresConfirmation: boolean;
 	/** Built-in project scripts ask in default and run in yolo. */
 	requiresAutonomyApproval: boolean;
+	/** One step is a built-in test runner, which executes repository code. */
+	runsTestRunner: boolean;
 	scriptPreviews: ReadonlyArray<string>;
 }
 
@@ -2321,11 +2334,18 @@ function recognizeCommandChain(
 		const rule = only === undefined ? null : readOnlyInspectionRule(only, command, callCwd, workspaceRoot, readScope);
 		return rule === null
 			? null
-			: { ruleIds: [rule], requiresConfirmation: false, requiresAutonomyApproval: false, scriptPreviews: [] };
+			: {
+					ruleIds: [rule],
+					requiresConfirmation: false,
+					requiresAutonomyApproval: false,
+					runsTestRunner: false,
+					scriptPreviews: [],
+				};
 	}
 	const ruleIds: string[] = [];
 	let requiresConfirmation = false;
 	let requiresAutonomyApproval = false;
+	let runsTestRunner = false;
 	let chainCwd = callCwd;
 	// Every directory a later step may run in. In a pure && chain a failed cd
 	// stops the chain, so there is exactly one. After `||` or `;` a cd may not
@@ -2378,6 +2398,7 @@ function recognizeCommandChain(
 		const testRunner = TEST_RUNNER_COMMANDS.find((entry) => entry.re.test(rendered));
 		if (testRunner !== undefined) {
 			ruleIds.push(testRunner.id);
+			runsTestRunner = true;
 			continue;
 		}
 		if (projectScript !== undefined) {
@@ -2410,7 +2431,7 @@ function recognizeCommandChain(
 		if (readScope.notes.length === 0) readScope.notes.push(`${quotedStep(rendered)} is not a recognized read-only step`);
 		return null;
 	}
-	return { ruleIds, requiresConfirmation, requiresAutonomyApproval, scriptPreviews };
+	return { ruleIds, requiresConfirmation, requiresAutonomyApproval, runsTestRunner, scriptPreviews };
 }
 
 const GIT_INSPECT_RULE_ID = "builtin:git-inspect";

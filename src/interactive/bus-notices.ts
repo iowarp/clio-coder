@@ -12,7 +12,7 @@ import type {
 	SafetyBlockedPayload,
 } from "../core/bus-events.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
-import { SYSTEM_ONE_GATE_RULE_ID, systemOneGateText } from "../domains/safety/decision-presentation.js";
+import { safetyNetRailText } from "../domains/safety/decision-presentation.js";
 import type { NoticeSource } from "../session-control/notice-source.js";
 import { askAxis } from "./permission-overlay.js";
 
@@ -225,8 +225,7 @@ export function approvalParkedNotice(
 	const actionClass = decision.classification.actionClass;
 	const axis = askAxis(decision);
 	if (axis.kind === "net") {
-		const asker =
-			axis.ruleId === SYSTEM_ONE_GATE_RULE_ID ? systemOneGateText(gateBuild) : `safety-net rail ${axis.ruleId}`;
+		const asker = safetyNetRailText(axis.ruleId, gateBuild);
 		return {
 			level: "warn",
 			text: `[approval] Parked ${tool} (${actionClass}): ${asker} asks for confirmation. Approve once, or Esc to deny this call.`,
