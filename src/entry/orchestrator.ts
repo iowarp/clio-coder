@@ -2615,7 +2615,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// An attended session asks once before a test runner runs code it wrote or
 	// edited (#377 follow-up). The tracker is per session: a park resets it.
 	const sessionCodeConsent = createSessionCodeConsent();
-	bus.on(BusChannels.SessionParked, () => sessionCodeConsent.reset());
+	// A resumed or forked session may already hold files it wrote before this
+	// process saw them, so it starts as written and asks once; the park that
+	// precedes it clears the previous session's consent.
+	bus.on(BusChannels.SessionParked, ({ reason }) => {
+		sessionCodeConsent.reset();
+		if (reason === "fork") sessionCodeConsent.noteWrite();
+	});
+	bus.on(BusChannels.SessionResumed, () => sessionCodeConsent.noteWrite());
 	// One observer feeds both sinks: any successful write makes the next test
 	// runner ask, and the codewiki refreshes the written paths when the context
 	// domain is loaded.
