@@ -58,6 +58,16 @@ export async function executeFleetToolInstall(plan: FleetToolInstallPlan): Promi
 		timeoutMs: 300_000,
 		maxOutputBytes: 128_000,
 	});
-	if (result.exitCode !== 0) throw new Error(`remote asciinema installation failed: ${result.stderr.trim()}`);
+	if (result.exitCode !== 0) {
+		// `tools install --json` reports its own failure as JSON on stdout and leaves stderr empty.
+		let reason = result.stderr.trim() || result.stdout.trim();
+		try {
+			const message = (JSON.parse(result.stdout) as { message?: unknown } | null)?.message;
+			if (typeof message === "string") reason = message;
+		} catch {
+			// Not the install report: ssh or the shell failed first, and its own output is the reason.
+		}
+		throw new Error(`remote asciinema installation failed: ${reason}`);
+	}
 	return result.stdout;
 }
