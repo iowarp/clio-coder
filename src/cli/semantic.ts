@@ -2,7 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ClioSettings, updateSettings } from "../core/config.js";
 
-export const SEMANTIC_HELP = `clio-coder semantic configure --target <id> --model <id> --asset-identity <identity>
+const SEMANTIC_HELP = `clio-coder semantic configure --target <id> --model <id> --asset-identity <identity>
                             [--projector-identity <identity>] [--modality text|image|audio|mixed ...] [--qualify] [--background]
 clio-coder semantic inbox add <root> --id <id> [--scope project|user]
 clio-coder semantic inbox list
@@ -254,19 +254,9 @@ async function defaultContext(): Promise<Omit<SemanticCliContext, "signal">> {
 	return { cwd, settings: readStrictLayeredSettings(cwd).settings, updateSettings };
 }
 
-type Modality = "text" | "image" | "audio" | "mixed";
+type SemanticConfiguration = ClioSettings["context"]["semantic"];
+type Modality = SemanticConfiguration["modalities"][number];
 type SourceKind = "code" | "wiki" | "memory" | "evidence" | "inbox" | "recording";
-interface SemanticConfiguration {
-	enabled: boolean;
-	target: string | null;
-	model: string | null;
-	assetIdentity: string | null;
-	projectorIdentity: string | null;
-	canaryFingerprint: string | null;
-	modalities: Modality[];
-	background: boolean;
-	inboxes: Array<{ id: string; root: string; scope: "project" | "global"; project: string | null }>;
-}
 type AppOptions = { projectRoot: string; settings: ClioSettings };
 export interface SemanticCliBridge {
 	openSemanticApp(options: AppOptions): Promise<{ profile: { id: string }; profileIdentity: string }>;
@@ -291,13 +281,6 @@ export interface SemanticCliBridge {
 	qualifySemantic(options: AppOptions): Promise<{ canaryFingerprint: string | null }>;
 }
 
-function semanticConfiguration(settings: ClioSettings): SemanticConfiguration {
-	return (settings.context as ClioSettings["context"] & { semantic: SemanticConfiguration }).semantic;
-}
-function setSemanticConfiguration(settings: ClioSettings, semantic: SemanticConfiguration): void {
-	(settings.context as ClioSettings["context"] & { semantic: SemanticConfiguration }).semantic = semantic;
-}
-
 export async function executeSemanticRequest(
 	request: SemanticCliRequest,
 	context: SemanticCliContext,
@@ -305,7 +288,7 @@ export async function executeSemanticRequest(
 ): Promise<unknown> {
 	const projectRoot = realpathSync(context.cwd);
 	const options = { projectRoot, settings: context.settings };
-	const config = semanticConfiguration(context.settings);
+	const config = context.settings.context.semantic;
 	context.signal.throwIfAborted();
 	if (request.command === "configure") {
 		const target = context.settings.targets.find((entry) => entry.id === request.target);
@@ -334,23 +317,23 @@ export async function executeSemanticRequest(
 					: null,
 			modalities,
 			background: request.background === true,
-			inboxes: config?.inboxes ?? [],
+			inboxes: config.inboxes,
 		};
 		const proposed = structuredClone(context.settings);
-		setSemanticConfiguration(proposed, next);
+		proposed.context.semantic = next;
 		if (request.qualify) {
 			const qualified = await bridge.qualifySemantic({ projectRoot, settings: proposed });
 			context.signal.throwIfAborted();
 			next.canaryFingerprint = qualified.canaryFingerprint;
 		}
 		const saved = context.updateSettings((draft) => {
-			setSemanticConfiguration(draft, { ...next, inboxes: semanticConfiguration(draft)?.inboxes ?? next.inboxes });
+			draft.context.semantic = { ...next, inboxes: draft.context.semantic.inboxes };
 		});
-		return { configuration: semanticConfiguration(saved), qualified: request.qualify };
+		return { configuration: saved.context.semantic, qualified: request.qualify };
 	}
-	if (request.command === "status" && !config?.enabled)
-		return { enabled: false, configured: false, inboxes: config?.inboxes ?? [] };
-	if (!config?.enabled) throw new Error("Semantic indexing is disabled. Run clio-coder semantic configure first.");
+	if (request.command === "status" && !config.enabled)
+		return { enabled: false, configured: false, inboxes: config.inboxes };
+	if (!config.enabled) throw new Error("Semantic indexing is disabled. Run clio-coder semantic configure first.");
 	if (request.command === "inbox-list")
 		return { inboxes: config.inboxes.filter((inbox) => inbox.scope === "global" || inbox.project === projectRoot) };
 	if (request.command === "inbox-remove") {
@@ -361,7 +344,7 @@ export async function executeSemanticRequest(
 		)
 			throw new Error("Inbox is not registered for this project");
 		context.updateSettings((draft) => {
-			const current = semanticConfiguration(draft);
+			const current = draft.context.semantic;
 			const kept = current.inboxes.filter(
 				(inbox) => !(inbox.id === request.id && (inbox.scope === "global" || inbox.project === projectRoot)),
 			);
@@ -387,12 +370,12 @@ export async function executeSemanticRequest(
 			project: request.command === "inbox-add" && request.scope === "user" ? null : projectRoot,
 		};
 		const proposed = structuredClone(context.settings);
-		setSemanticConfiguration(proposed, { ...config, inboxes: [registration] });
+		proposed.context.semantic = { ...config, inboxes: [registration] };
 		const preview = await bridge.previewSemanticInbox({ projectRoot, settings: proposed }, id);
 		context.signal.throwIfAborted();
 		if (request.command === "inbox-preview") return { preview };
 		context.updateSettings((draft) => {
-			const current = semanticConfiguration(draft);
+			const current = draft.context.semantic;
 			if (current.inboxes.some((inbox) => inbox.id === id)) throw new Error("Inbox id was registered concurrently");
 			current.inboxes.push(registration);
 		});
@@ -403,14 +386,14 @@ export async function executeSemanticRequest(
 		const qualified = await bridge.qualifySemantic(options);
 		context.signal.throwIfAborted();
 		const saved = context.updateSettings((draft) => {
-			const current = semanticConfiguration(draft);
+			const current = draft.context.semantic;
 			if (
 				JSON.stringify([current.target, current.model, current.assetIdentity, current.projectorIdentity]) !== pinnedRecipe
 			)
 				throw new Error("Semantic configuration changed during qualification; qualify the new recipe explicitly");
 			current.canaryFingerprint = qualified.canaryFingerprint;
 		});
-		return { qualified: true, canaryFingerprint: semanticConfiguration(saved).canaryFingerprint };
+		return { qualified: true, canaryFingerprint: saved.context.semantic.canaryFingerprint };
 	}
 	if (request.command === "refresh") {
 		const refreshed = await bridge.refreshSemantic(options, context.signal);

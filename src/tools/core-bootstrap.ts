@@ -204,16 +204,10 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		),
 	});
 	const semantic: ContextSemanticDeps = deps.semantic ?? {
-		isEnabled: () => {
-			// Older/worker settings snapshots do not carry this opt-in setting.
-			const context = deps.getSettings?.().context as { semantic?: { enabled?: boolean } } | undefined;
-			return context?.semantic?.enabled === true;
-		},
+		isEnabled: () => deps.getSettings?.().context.semantic.enabled === true,
 		loadSearch: async () => {
-			if (!semantic.isEnabled()) throw new Error("Semantic search is disabled");
 			const { searchSemantic } = await import("../domains/semantic-app/index.js");
 			return (request, context) => {
-				if (!semantic.isEnabled()) throw new Error("Semantic search is disabled");
 				const { query, ...filters } = request;
 				const settings = deps.getSettings?.();
 				return searchSemantic(

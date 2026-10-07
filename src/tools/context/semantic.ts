@@ -26,8 +26,8 @@ export interface ContextSemanticDeps {
 	loadSearch(): Promise<ContextSemanticSearch>;
 }
 
-export const SEMANTIC_TOOL_MAX_QUERY_CHARS = 2000;
-export const SEMANTIC_TOOL_TIMEOUT_MS = 6000;
+const SEMANTIC_TOOL_MAX_QUERY_CHARS = 2000;
+const SEMANTIC_TOOL_TIMEOUT_MS = 6000;
 const KINDS: readonly SemanticSourceKind[] = ["code", "wiki", "memory", "evidence", "inbox", "recording"];
 const ARGUMENTS = new Set(["scope", "query", "limit", "kinds", "run_id", "media_type", "after", "before"]);
 const UNAVAILABLE =
@@ -109,7 +109,6 @@ export async function runSemanticScope(
 	}, SEMANTIC_TOOL_TIMEOUT_MS);
 	commitObservationReservation(reservation);
 	try {
-		if (!deps.isEnabled()) return semanticUnavailable();
 		if (options?.signal?.aborted) {
 			controller.abort();
 			return { kind: "error", message: "context: semantic search cancelled" };
