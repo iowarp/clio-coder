@@ -322,7 +322,16 @@ export async function executeSemanticRequest(
 			model: request.model,
 			assetIdentity: request.assetIdentity,
 			projectorIdentity: request.projectorIdentity ?? null,
-			canaryFingerprint: null,
+			// The canary is part of the profile identity: an unchanged recipe keeps its namespace and
+			// qualification, while --qualify measures afresh.
+			canaryFingerprint:
+				!request.qualify &&
+				config.target === request.target &&
+				config.model === request.model &&
+				config.assetIdentity === request.assetIdentity &&
+				config.projectorIdentity === (request.projectorIdentity ?? null)
+					? config.canaryFingerprint
+					: null,
 			modalities,
 			background: request.background === true,
 			inboxes: config?.inboxes ?? [],
