@@ -58,6 +58,8 @@ export interface PinnedToolDocument {
 
 /** One row of the pinned table. */
 export interface PinnedTool {
+	/** Distribution/source notice written beside a separately installed program. */
+	notice?: string;
 	id: string;
 	version: string;
 	summary: string;

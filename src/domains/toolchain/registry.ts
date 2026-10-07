@@ -31,6 +31,52 @@ import type { PinnedTool, ToolPlatform } from "./types.js";
  */
 export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 	{
+		id: "asciinema",
+		notice: [
+			"asciinema 3.2.1, https://github.com/asciinema/asciinema/tree/v3.2.1",
+			"Copyright asciinema contributors. Licensed under GNU GPL version 3 or later; see LICENSE.",
+			"Clio invokes asciinema as a separate program. It is downloaded from upstream only on explicit request, not bundled into Clio.",
+			"The exact v3.2.1 release source accompanies this installation in asciinema-3.2.1-source.tar.gz; see README.md and the source for build instructions and dependency licenses.",
+			"Preserve the license and corresponding source when redistributing this program under the GPL.",
+		].join("\n"),
+		version: "3.2.1",
+		summary: "terminal recording and asciicast playback (separate GPL program)",
+		homepage: "https://asciinema.org",
+		license: "GPL-3.0-or-later",
+		binaries: ["asciinema"],
+		primaryBinary: "asciinema",
+		// 3.2.1 --version and output-only v2 playback exercised; older releases unqualified.
+		minimumVersion: "3.2.1",
+		versionArgs: ["--version"],
+		downloads: {
+			"linux-x64": {
+				url: "https://github.com/asciinema/asciinema/releases/download/v3.2.1/asciinema-x86_64-unknown-linux-musl",
+				sha256: "bec9781bc8f297a9d3d74ff60205599507f2abba1183578b8b2f22be4c999214",
+				archive: "raw",
+				binaryMembers: { asciinema: "" },
+				documentMembers: [],
+			},
+		},
+		// User-level download only; retain upstream license, source and source/build information beside the program.
+		documents: [
+			{
+				name: "LICENSE",
+				url: "https://raw.githubusercontent.com/asciinema/asciinema/v3.2.1/LICENSE",
+				sha256: "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+			},
+			{
+				name: "README.md",
+				url: "https://raw.githubusercontent.com/asciinema/asciinema/v3.2.1/README.md",
+				sha256: "8aeeace7213099fd6ad80f717dbe5ff82f9c2a375b9de054f4808e11bfa949eb",
+			},
+			{
+				name: "asciinema-3.2.1-source.tar.gz",
+				url: "https://codeload.github.com/asciinema/asciinema/tar.gz/refs/tags/v3.2.1",
+				sha256: "e7e49a09c664a76afc5bc25ca09871eb090bfbe68a2ddbc72750d3cb215d36f1",
+			},
+		],
+	},
+	{
 		id: "herdr",
 		version: "0.9.3",
 		summary: "terminal multiplexer with an agent-aware socket API; powers Clio panes",
