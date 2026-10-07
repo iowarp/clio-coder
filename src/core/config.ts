@@ -2084,7 +2084,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.context)) issues.add("context", `expected a map, got ${describe(raw.context)}`);
 		else {
 			const context = raw.context;
-			issues.unknownKeys("context", context, ["toolResultMaxBytes", "workingSet", "compaction", "memory"]);
+			issues.unknownKeys("context", context, ["toolResultMaxBytes", "workingSet", "compaction", "memory", "semantic"]);
 			if ("toolResultMaxBytes" in context) {
 				const parsed = expectInteger(issues, "context.toolResultMaxBytes", context.toolResultMaxBytes, { min: 4096 });
 				if (parsed !== undefined) settings.context.toolResultMaxBytes = parsed;
@@ -2220,6 +2220,89 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!(key in memory)) continue;
 						const parsed = expectInteger(issues, `context.memory.${key}`, memory[key], { min });
 						if (parsed !== undefined) settings.context.memory[key] = parsed;
+					}
+				}
+			}
+			if ("semantic" in context) {
+				if (!isPlainObject(context.semantic))
+					issues.add("context.semantic", `expected a map, got ${describe(context.semantic)}`);
+				else {
+					const semantic = context.semantic;
+					issues.unknownKeys("context.semantic", semantic, [
+						"enabled",
+						"target",
+						"model",
+						"assetIdentity",
+						"projectorIdentity",
+						"canaryFingerprint",
+						"modalities",
+						"background",
+						"inboxes",
+					]);
+					for (const key of ["enabled", "background"] as const) {
+						if (!(key in semantic)) continue;
+						const parsed = expectBoolean(issues, `context.semantic.${key}`, semantic[key]);
+						if (parsed !== undefined) settings.context.semantic[key] = parsed;
+					}
+					for (const key of ["target", "model", "assetIdentity", "projectorIdentity", "canaryFingerprint"] as const) {
+						if (!(key in semantic)) continue;
+						if (semantic[key] === null) settings.context.semantic[key] = null;
+						else {
+							const parsed = expectString(issues, `context.semantic.${key}`, semantic[key]);
+							if (parsed !== undefined) settings.context.semantic[key] = parsed;
+						}
+					}
+					if ("modalities" in semantic) {
+						if (!Array.isArray(semantic.modalities) || semantic.modalities.length === 0) {
+							issues.add("context.semantic.modalities", "expected a nonempty list");
+						} else {
+							const modalities = semantic.modalities.map((value, index) =>
+								expectEnum(issues, `context.semantic.modalities[${index}]`, value, [
+									"text",
+									"image",
+									"audio",
+									"mixed",
+								] as const),
+							);
+							if (
+								modalities.every((value) => value !== undefined) &&
+								new Set(modalities).size === modalities.length &&
+								modalities.includes("text")
+							)
+								settings.context.semantic.modalities = modalities as typeof settings.context.semantic.modalities;
+							else issues.add("context.semantic.modalities", "expected unique modalities including text");
+						}
+					}
+					if ("inboxes" in semantic) {
+						if (!Array.isArray(semantic.inboxes)) issues.add("context.semantic.inboxes", "expected a list");
+						else {
+							const inboxes: typeof settings.context.semantic.inboxes = [];
+							const seen = new Set<string>();
+							for (const [index, value] of semantic.inboxes.entries()) {
+								const path = `context.semantic.inboxes[${index}]`;
+								if (!isPlainObject(value)) {
+									issues.add(path, "expected a map");
+									continue;
+								}
+								issues.unknownKeys(path, value, ["id", "root", "scope", "project"]);
+								const id = expectString(issues, `${path}.id`, value.id);
+								const root = expectString(issues, `${path}.root`, value.root);
+								const scope = expectEnum(issues, `${path}.scope`, value.scope, ["project", "global"] as const);
+								const project = value.project === null ? null : expectString(issues, `${path}.project`, value.project);
+								if (id !== undefined && (!/^[a-z][a-z0-9_-]{0,31}$/u.test(id) || seen.has(id)))
+									issues.add(`${path}.id`, "expected a unique lowercase id up to 32 characters");
+								if (root !== undefined && (!isAbsolute(root) || root.includes("\0")))
+									issues.add(`${path}.root`, "expected an absolute path without NUL");
+								if (scope === "project" && (project === undefined || project === null || !isAbsolute(project)))
+									issues.add(`${path}.project`, "project inbox requires an absolute project path");
+								if (scope === "global" && project !== null) issues.add(`${path}.project`, "global inbox requires null project");
+								if (id !== undefined && root !== undefined && scope !== undefined && project !== undefined) {
+									seen.add(id);
+									inboxes.push({ id, root, scope, project });
+								}
+							}
+							settings.context.semantic.inboxes = inboxes;
+						}
 					}
 				}
 			}

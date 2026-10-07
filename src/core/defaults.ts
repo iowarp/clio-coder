@@ -591,11 +591,25 @@ export interface MemorySettings {
 	timeoutMs: number;
 }
 
+/** The optional local semantic index and its explicit ingestion roots. */
+export interface SemanticSettings {
+	enabled: boolean;
+	target: string | null;
+	model: string | null;
+	assetIdentity: string | null;
+	projectorIdentity: string | null;
+	canaryFingerprint: string | null;
+	modalities: Array<"text" | "image" | "audio" | "mixed">;
+	background: boolean;
+	inboxes: Array<{ id: string; root: string; scope: "project" | "global"; project: string | null }>;
+}
+
 export interface ContextSettings {
 	toolResultMaxBytes: number;
 	workingSet: WorkingSetSettings;
 	compaction: DurableCompactionSettings;
 	memory: MemorySettings;
+	semantic: SemanticSettings;
 }
 
 export interface SafetySettings {
@@ -722,6 +736,17 @@ export const DEFAULT_SETTINGS = {
 			maxOutputTokens: 2000,
 			timeoutMs: 60_000,
 		} as MemorySettings,
+		semantic: {
+			enabled: false,
+			target: null,
+			model: null,
+			assetIdentity: null,
+			projectorIdentity: null,
+			canaryFingerprint: null,
+			modalities: ["text"],
+			background: false,
+			inboxes: [],
+		} as SemanticSettings,
 	} as ContextSettings,
 	systemOne: {
 		engines: {},
@@ -900,6 +925,16 @@ context:
     trajectorySteps: 8
     maxOutputTokens: 2000
     timeoutMs: 60000
+  semantic:
+    enabled: false
+    target: null
+    model: null
+    assetIdentity: null
+    projectorIdentity: null
+    canaryFingerprint: null
+    modalities: [text]
+    background: false
+    inboxes: []
 
 # Experimental. System One decision engines stay off until a site is bound to an
 # engine declared here; nothing waits for an engine's answer. Sites, keys and cuts
