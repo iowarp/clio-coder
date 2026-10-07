@@ -13,12 +13,19 @@ export function serverClock(now: () => number = Date.now) {
 	};
 }
 export const clock = serverClock();
-export function formatCost(value: number | null | undefined) {
+export function formatCost(
+	value: number | null | undefined,
+	accounting?: { cost_estimated?: number | null; cost_unknown?: number | null },
+) {
 	if (value == null || !Number.isFinite(value)) return "not recorded";
-	return `$${value.toFixed(value > 0 && value < 0.01 ? 4 : 2)}`;
+	const amount = `$${value.toFixed(value > 0 && value < 0.01 ? 4 : 2)}`;
+	if (!accounting) return amount;
+	if (accounting.cost_estimated == null && accounting.cost_unknown == null) return `${amount} (pricing unknown)`;
+	if (accounting.cost_unknown && value === 0) return "Cost not measured";
+	return `${accounting.cost_estimated ? "about " : ""}${amount}${accounting.cost_unknown ? " subtotal, some calls unpriced" : ""}`;
 }
-export const formatTokens = (value: number | null | undefined) =>
-	value == null ? "not recorded" : value.toLocaleString("en-US");
+export const formatTokens = (value: number | null | undefined, missingTokenCalls?: number | null) =>
+	`${value == null ? "not recorded" : value.toLocaleString("en-US")}${missingTokenCalls ? ` +? (${missingTokenCalls} call${missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`;
 const date = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" });
 const time = new Intl.DateTimeFormat("en-GB", {
 	hourCycle: "h23",

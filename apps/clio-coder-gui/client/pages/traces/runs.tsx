@@ -116,8 +116,8 @@ export function TraceRuns({ client }: { client: Client }) {
 								</small>
 							</div>
 							<div className="trace-spend">
-								<strong>{formatCost(run.total_cost_usd)}</strong>
-								<small>{formatTokens(run.total_tokens)} tokens</small>
+								<strong>{formatCost(run.total_cost_usd, run)}</strong>
+								<small>{formatTokens(run.total_tokens, run.missing_token_calls)} tokens</small>
 							</div>
 						</Link>
 					)),

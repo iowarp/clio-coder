@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { clioStatePath } from "../core/xdg.js";
 import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
 import { codeStepDir, readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
+import { renderCostAggregate } from "../domains/observability/cost.js";
 import {
 	assertTraceSelectOnly,
 	DEFAULT_TRACE_RETENTION_POLICY,
@@ -348,7 +349,7 @@ function printRuns(rows: TraceRunRow[]): void {
 	process.stdout.write("STATUS   SOURCE   STARTED                      TOKENS       COST RUN\n");
 	for (const row of rows) {
 		process.stdout.write(
-			`${row.status.padEnd(8)} ${row.source.padEnd(8)} ${row.started_at.padEnd(28)} ${formatNumber(row.total_tokens).padStart(8)} ${formatCost(row.total_cost_usd).padStart(10)} ${row.run_id}\n`,
+			`${row.status.padEnd(8)} ${row.source.padEnd(8)} ${row.started_at.padEnd(28)} ${formatNumber(row.total_tokens, row.missing_token_calls).padStart(8)} ${formatCost(row.total_cost_usd, row).padStart(10)} ${row.run_id}\n`,
 		);
 	}
 }
@@ -357,7 +358,7 @@ function printPhases(rows: TracePhaseRow[]): void {
 	process.stdout.write("STATUS   TRY OWNER              TOKENS       COST PHASE\n");
 	for (const row of rows) {
 		process.stdout.write(
-			`${row.status.padEnd(8)} ${String(row.attempt + 1).padStart(3)} ${row.owner.slice(0, 18).padEnd(18)} ${formatNumber(row.total_tokens).padStart(8)} ${formatCost(row.total_cost_usd).padStart(10)} ${row.name}\n`,
+			`${row.status.padEnd(8)} ${String(row.attempt + 1).padStart(3)} ${row.owner.slice(0, 18).padEnd(18)} ${formatNumber(row.total_tokens, row.missing_token_calls).padStart(8)} ${formatCost(row.total_cost_usd, row).padStart(10)} ${row.name}\n`,
 		);
 	}
 }
@@ -429,12 +430,20 @@ function missingRunId(command: string): number {
 	return 2;
 }
 
-function formatNumber(value: number | null): string {
-	return value === null ? "—" : value.toLocaleString("en-US");
+function formatNumber(value: number | null, missingTokenCalls?: number | null): string {
+	return `${value === null ? "—" : value.toLocaleString("en-US")}${missingTokenCalls ? ` +? (${missingTokenCalls} missing)` : ""}`;
 }
 
-function formatCost(value: number | null): string {
-	return value === null ? "—" : `$${value.toFixed(value < 0.01 ? 4 : 2)}`;
+function formatCost(value: number | null, row: TraceRunRow | TracePhaseRow): string {
+	if (value === null) return "—";
+	if (row.cost_estimated == null && row.cost_unknown == null) return `$${value.toFixed(4)} (pricing unknown)`;
+	return renderCostAggregate({
+		knownUsd: value,
+		hasEstimated: row.cost_estimated === 1,
+		hasUnknown: row.cost_unknown === 1,
+		allKnownFree: false,
+		calls: row.api_calls ?? 1,
+	});
 }
 
 function jsonBigInt(_key: string, value: unknown): unknown {

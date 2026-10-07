@@ -139,17 +139,18 @@ export function CostPanel({ phase }: { phase: TracePhase }) {
 							["Cache write", phase.cache_write_tokens],
 							["Cache write (1h)", phase.cache_write_1h_tokens ?? null],
 							["Reasoning", phase.reasoning_tokens],
-							["Total", phase.total_tokens],
+							["Total", formatTokens(phase.total_tokens, phase.missing_token_calls)],
 						].map(([label, tokens]) => (
 							<tr key={String(label)}>
 								<th>{label}</th>
-								<td>{formatTokens(tokens as number | null)}</td>
+								<td>{typeof tokens === "string" ? tokens : formatTokens(tokens as number | null)}</td>
 							</tr>
 						))}
 					</tbody>
 				</table>
 			</section>
-			<p>Cost: {formatCost(phase.total_cost_usd)}</p>
+			<p>Cost: {formatCost(phase.total_cost_usd, phase)}</p>
+			{phase.api_calls != null ? <p>Model calls: {phase.api_calls}</p> : null}
 			<p>
 				Context: {formatTokens(phase.context_tokens)} / {formatTokens(phase.context_window)}
 			</p>
@@ -222,6 +223,7 @@ export function ReceiptPanel({
 	full: boolean;
 }) {
 	const r = data.receipt;
+	const costSummary = object(r?.costSummary);
 	return (
 		<section className="trace-panel">
 			<div className="page-heading">
@@ -254,10 +256,27 @@ export function ReceiptPanel({
 						<h3>Spend</h3>
 						<Facts
 							entries={[
-								["cost", formatCost(typeof r.costUsd === "number" ? r.costUsd : null)],
+								[
+									"cost",
+									formatCost(
+										typeof costSummary.knownUsd === "number"
+											? (costSummary.knownUsd as number)
+											: typeof r.costUsd === "number"
+												? r.costUsd
+												: null,
+										{
+											cost_estimated: Number(costSummary.hasEstimated ?? r.costProvenance === "estimated"),
+											cost_unknown: Number(
+												costSummary.hasUnknown ?? !["known", "known_free", "estimated"].includes(String(r.costProvenance)),
+											),
+										},
+									),
+								],
 								...[
 									"costProvenance",
 									"tokenCount",
+									"apiCalls",
+									"missingTokenCalls",
 									"inputTokenCount",
 									"outputTokenCount",
 									"cacheReadTokenCount",

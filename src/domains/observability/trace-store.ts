@@ -25,6 +25,7 @@ import { processAlive, processBirthToken } from "../../core/process-identity.js"
 import { chainStepToolCallId, displayToolCall, gatewayChainSteps, VIA_GATEWAY } from "../../tools/gateway-display.js";
 import { createRedactionTally, redactSecretsText, secretRedactingReplacer } from "../evidence/redact.js";
 import { normalizeCostProvenance } from "../providers/types/cost-provenance.js";
+import { aggregateCostAmounts, type CostAggregate } from "./cost.js";
 
 export const TRACE_SCHEMA_VERSION = 1;
 export const TRACE_DATABASE_FILE = "trace.sqlite";
@@ -223,6 +224,9 @@ export interface SessionTurnUsage {
 	reasoningTokens: number;
 	totalTokens: number;
 	costUsd?: number | null;
+	costSummary?: CostAggregate;
+	apiCalls?: number;
+	missingTokenCalls?: number;
 }
 
 /** Opens the runs/phases pair for one operator turn. */
@@ -306,6 +310,10 @@ export interface TraceRunRow {
 	ended_at: string | null;
 	total_tokens: number | null;
 	total_cost_usd: number | null;
+	cost_estimated?: number | null;
+	cost_unknown?: number | null;
+	api_calls?: number | null;
+	missing_token_calls?: number | null;
 	/** 'dispatch' for a worker run, 'session' for an interactive chat-loop turn. */
 	source: "dispatch" | "session";
 }
@@ -332,6 +340,10 @@ export interface TracePhaseRow {
 	reasoning_tokens: number | null;
 	total_tokens: number | null;
 	total_cost_usd: number | null;
+	cost_estimated?: number | null;
+	cost_unknown?: number | null;
+	api_calls?: number | null;
+	missing_token_calls?: number | null;
 	context_tokens: number | null;
 	context_window: number | null;
 }
@@ -343,6 +355,13 @@ export interface TracePhaseRow {
  * `cache_write_cost_usd`); naming the columns keeps them out of every reader
  * and out of the GUI's closed phase schema.
  */
+const ACCOUNTING_COLUMNS = `json_extract(accounting.payload_json, '$.costSummary.hasEstimated') AS cost_estimated,
+  json_extract(accounting.payload_json, '$.costSummary.hasUnknown') AS cost_unknown,
+  json_extract(accounting.payload_json, '$.apiCalls') AS api_calls,
+  json_extract(accounting.payload_json, '$.missingTokenCalls') AS missing_token_calls`;
+const RUN_ACCOUNTING_JOIN = `LEFT JOIN events AS accounting ON accounting.event_id = runs.run_id ||
+  CASE WHEN runs.assignment_id = 'session' THEN ':turn_end' ELSE ':agent_end' END`;
+
 const PHASE_COLUMNS = [
 	"phase_id",
 	"run_id",
@@ -853,7 +872,16 @@ export class TraceStore {
 		success: boolean,
 		at = new Date().toISOString(),
 	): void {
-		const costUsd = normalizeCostProvenance(input.costProvenance) === "unknown" ? null : (input.costUsd ?? null);
+		const costSummary = aggregateCostAmounts([
+			{
+				usd: input.costUsd ?? 0,
+				provenance: normalizeCostProvenance(input.costProvenance),
+				apiCalls: input.apiCalls ?? 1,
+				missingTokenCalls: input.missingTokenCalls ?? 0,
+				...(input.costSummary ? { costSummary: input.costSummary } : {}),
+			},
+		]);
+		const costUsd = costSummary.hasUnknown && costSummary.knownUsd === 0 ? null : costSummary.knownUsd;
 		this.transaction(() => {
 			const fallbackStartedAt =
 				typeof input.durationMs === "number" ? new Date(Math.max(0, Date.parse(at) - input.durationMs)).toISOString() : at;
@@ -927,7 +955,10 @@ export class TraceStore {
 					outcome: input.outcome,
 					outcomeDetail: input.outcomeDetail,
 					usage: terminalUsage(input),
-					cost: input.costUsd ?? null,
+					cost: costUsd,
+					costSummary,
+					apiCalls: input.apiCalls ?? costSummary.calls,
+					missingTokenCalls: input.missingTokenCalls ?? 0,
 					contextWindow: input.contextWindow ?? null,
 				},
 				tokens: input.tokenCount ?? null,
@@ -1082,7 +1113,14 @@ export class TraceStore {
 				phaseId: input.runId,
 				type: "agent_end",
 				name: input.status,
-				payload: { status: input.status, error: input.error, usage },
+				payload: {
+					status: input.status,
+					error: input.error,
+					usage,
+					costSummary: usage?.costSummary,
+					apiCalls: usage?.apiCalls,
+					missingTokenCalls: usage?.missingTokenCalls,
+				},
 				tokens: usage?.totalTokens ?? null,
 				startedAt: input.at,
 			});
@@ -1191,12 +1229,14 @@ export class TraceReader {
 			throw new Error(`trace database journal mode is ${mode.journal_mode}, expected WAL`);
 		const runColumns = this.db.prepare("PRAGMA table_info(runs)").all() as { name: string }[];
 		this.runsSourceExpr = runColumns.some((column) => column.name === "source")
-			? "*"
-			: `*, CASE WHEN assignment_id = '${SESSION_TRACE_ASSIGNMENT_ID}' THEN 'session' ELSE 'dispatch' END AS source`;
+			? "runs.*"
+			: `runs.*, CASE WHEN runs.assignment_id = '${SESSION_TRACE_ASSIGNMENT_ID}' THEN 'session' ELSE 'dispatch' END AS source`;
 		const phaseColumns = new Set(
 			(this.db.prepare("PRAGMA table_info(phases)").all() as { name: string }[]).map((column) => column.name),
 		);
-		this.phaseColumns = PHASE_COLUMNS.filter((column) => phaseColumns.has(column)).join(", ");
+		this.phaseColumns = PHASE_COLUMNS.filter((column) => phaseColumns.has(column))
+			.map((column) => `phases.${column}`)
+			.join(", ");
 	}
 
 	close(): void {
@@ -1205,7 +1245,9 @@ export class TraceReader {
 
 	runs(limit = 50): TraceRunRow[] {
 		return this.db
-			.prepare(`SELECT ${this.runsSourceExpr} FROM runs ORDER BY started_at DESC LIMIT ?`)
+			.prepare(
+				`SELECT ${this.runsSourceExpr}, ${ACCOUNTING_COLUMNS} FROM runs ${RUN_ACCOUNTING_JOIN} ORDER BY runs.started_at DESC LIMIT ?`,
+			)
 			.all(clampInt(limit, 1, 500)) as unknown as TraceRunRow[];
 	}
 
@@ -1235,7 +1277,7 @@ export class TraceReader {
 		}
 		const rows = this.db
 			.prepare(
-				`SELECT * FROM (SELECT ${this.runsSourceExpr} FROM runs) ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY started_at DESC, run_id DESC LIMIT ?`,
+				`SELECT * FROM (SELECT ${this.runsSourceExpr}, ${ACCOUNTING_COLUMNS} FROM runs ${RUN_ACCOUNTING_JOIN}) ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY started_at DESC, run_id DESC LIMIT ?`,
 			)
 			.all(...args, size + 1) as unknown as TraceRunRow[];
 		const runs = rows.slice(0, size),
@@ -1245,15 +1287,20 @@ export class TraceReader {
 
 	run(runId: string): TraceRunRow | null {
 		return (
-			(this.db.prepare(`SELECT ${this.runsSourceExpr} FROM runs WHERE run_id=?`).get(runId) as unknown as
-				| TraceRunRow
-				| undefined) ?? null
+			(this.db
+				.prepare(
+					`SELECT ${this.runsSourceExpr}, ${ACCOUNTING_COLUMNS} FROM runs ${RUN_ACCOUNTING_JOIN} WHERE runs.run_id=?`,
+				)
+				.get(runId) as unknown as TraceRunRow | undefined) ?? null
 		);
 	}
 
 	phases(runId: string): TracePhaseRow[] {
 		return this.db
-			.prepare(`SELECT ${this.phaseColumns} FROM phases WHERE run_id=? ORDER BY seq, phase_id`)
+			.prepare(`SELECT ${this.phaseColumns}, ${ACCOUNTING_COLUMNS} FROM phases
+        LEFT JOIN events AS accounting ON accounting.event_id = phases.run_id ||
+          CASE WHEN phases.kind = 'session' THEN ':turn_end' ELSE ':agent_end' END
+        WHERE phases.run_id=? ORDER BY seq, phases.phase_id`)
 			.all(runId) as unknown as TracePhaseRow[];
 	}
 

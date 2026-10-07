@@ -7,6 +7,11 @@ test("trace formatting keeps missing spend distinct from zero and adopts server 
 	assert.equal(formatCost(undefined), "not recorded");
 	assert.equal(formatCost(0), "$0.00");
 	assert.equal(formatCost(0.0024), "$0.0024");
+	assert.equal(formatCost(0.25, { cost_estimated: 1, cost_unknown: 1 }), "about $0.25 subtotal, some calls unpriced");
+	assert.equal(formatCost(0.25, { cost_estimated: 0, cost_unknown: 0 }), "$0.25");
+	assert.equal(formatCost(0.25, {}), "$0.25 (pricing unknown)");
+	assert.equal(formatCost(0, { cost_unknown: 1 }), "Cost not measured");
+	assert.equal(formatTokens(24, 1), "24 +? (1 call missing usage)");
 	assert.equal(formatTokens(null), "not recorded");
 	assert.equal(formatTokens(0), "0");
 	assert.match(formatTime("2026-09-11T12:00:00Z"), /^2026-09-11 \d{2}:\d{2}:\d{2}$/);

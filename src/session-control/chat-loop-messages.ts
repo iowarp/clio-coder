@@ -21,6 +21,7 @@ import {
 	responseModelIdObservationFromRecord,
 } from "../core/response-model-id.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
+import { normalizeTokenUsage } from "../core/token-split.js";
 import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { sha256 } from "../domains/prompts/hash.js";
@@ -466,27 +467,19 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 				: null;
 		summary.hadUsage = true;
 		summary.apiCalls += 1;
-		const input = typeof usage.input === "number" ? usage.input : 0;
-		const output = typeof usage.output === "number" ? usage.output : 0;
-		const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
-		const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
-		summary.input += input;
-		summary.output += output;
-		summary.cacheRead += cacheRead;
-		summary.cacheWrite += cacheWrite;
-		if (typeof usage.cacheWrite1h === "number") summary.cacheWrite1h = (summary.cacheWrite1h ?? 0) + usage.cacheWrite1h;
-		const reasoning = extractReasoningTokens(usage);
-		if (reasoning !== null) {
-			summary.reasoning += reasoning;
-			summary.hadReasoning = true;
-		}
-		if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) {
-			summary.tokens += usage.totalTokens;
-		} else {
-			summary.tokens += input + output + cacheRead + cacheWrite;
-		}
+		const reported = normalizeTokenUsage(usage as unknown as Record<string, unknown>);
+		summary.input += reported.input;
+		summary.output += reported.output;
+		summary.cacheRead += reported.cacheRead;
+		summary.cacheWrite += reported.cacheWrite;
+		if (reported.observed && typeof usage.cacheWrite1h === "number")
+			summary.cacheWrite1h = (summary.cacheWrite1h ?? 0) + usage.cacheWrite1h;
+		summary.reasoning += reported.reasoning;
+		summary.hadReasoning ||= reported.observed && extractReasoningTokens(usage) !== null;
+		summary.tokens += reported.totalTokens;
 		const total = usage.cost?.total;
-		if (typeof total === "number") summary.costUsd += total;
+		if ((usage as { estimated?: unknown }).estimated !== true && typeof total === "number" && Number.isFinite(total))
+			summary.costUsd += total;
 	}
 	return summary;
 }

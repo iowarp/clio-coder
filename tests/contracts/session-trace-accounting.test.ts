@@ -14,7 +14,7 @@ import type { AgentMessage } from "../../src/engine/types.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import type { AgentRuntime, ChatTurnState } from "../../src/session-control/turn-state.js";
 
-it("session traces retain tokens but withhold an unpriced total, including mixed-price turns", () => {
+it("session traces retain known subtotals, call coverage, and pricing uncertainty", () => {
 	const scratch = mkdtempSync(join(tmpdir(), "clio-coder-session-trace-cost-"));
 	const path = join(scratch, "trace.sqlite");
 	const store = new TraceStore(path);
@@ -23,7 +23,8 @@ it("session traces retain tokens but withhold an unpriced total, including mixed
 			["unknown", ["unknown"], null],
 			["free", ["known_free"], 0],
 			["priced", ["known", "known"], 0.5],
-			["mixed", ["known", "unknown", "known"], null],
+			["mixed", ["known", "unknown", "known"], 0.5],
+			["estimated", ["estimated"], 0.25],
 		] as const) {
 			let sequence = 0;
 			const session = {
@@ -64,8 +65,9 @@ it("session traces retain tokens but withhold an unpriced total, including mixed
 						output: 2,
 						cacheRead: 0,
 						cacheWrite: 0,
-						totalTokens: 12,
-						cost: { total: provenance === "known" ? 0.25 : 0 },
+						totalTokens: id === "priced" && index === 0 ? 0 : 12,
+						...(id === "mixed" && index === 1 ? { estimated: true } : {}),
+						cost: { total: provenance === "known" || provenance === "estimated" ? 0.25 : 0 },
 					},
 				} as AgentMessage);
 			}
@@ -74,7 +76,11 @@ it("session traces retain tokens but withhold an unpriced total, including mixed
 				const runId = `session:${userTurn}`;
 				strictEqual(reader.run(runId)?.total_cost_usd, expected, id);
 				strictEqual(reader.phases(runId)[0]?.total_cost_usd, expected, id);
-				strictEqual(reader.run(runId)?.total_tokens, prices.length * 12, id);
+				strictEqual(reader.run(runId)?.total_tokens, id === "priced" ? 12 : id === "mixed" ? 24 : prices.length * 12, id);
+				strictEqual(reader.run(runId)?.api_calls, prices.length, id);
+				strictEqual(reader.run(runId)?.missing_token_calls, id === "mixed" ? 1 : 0, id);
+				strictEqual(reader.run(runId)?.cost_estimated, id === "estimated" ? 1 : 0, id);
+				strictEqual(reader.run(runId)?.cost_unknown, id === "unknown" || id === "mixed" ? 1 : 0, id);
 				strictEqual(reader.run(runId)?.status, "success", id);
 			} finally {
 				reader.close();
@@ -97,6 +103,7 @@ it("dispatch traces keep declared costs and withhold amounts with unknown or abs
 			["unpriced-amount", "unknown", 0.25, null],
 			["known", "known", 0.25, 0.25],
 			["free", "known_free", 0, 0],
+			["partial", "unknown", 0.25, 0.25],
 		] as const) {
 			store.finishRun(
 				{
@@ -108,6 +115,13 @@ it("dispatch traces keep declared costs and withhold amounts with unknown or abs
 					tokenCount: 12,
 					costUsd: amount,
 					...(provenance === undefined ? {} : { costProvenance: provenance }),
+					...(id === "partial"
+						? {
+								apiCalls: 3,
+								missingTokenCalls: 1,
+								costSummary: { knownUsd: 0.25, calls: 3, hasEstimated: true, hasUnknown: true, allKnownFree: false },
+							}
+						: {}),
 				} as DispatchCompletedPayload,
 				true,
 			);
@@ -116,6 +130,12 @@ it("dispatch traces keep declared costs and withhold amounts with unknown or abs
 				strictEqual(reader.run(id)?.total_cost_usd, expected, id);
 				strictEqual(reader.phases(id)[0]?.total_cost_usd, expected, id);
 				strictEqual(reader.run(id)?.total_tokens, 12, id);
+				if (id === "partial") {
+					strictEqual(reader.run(id)?.api_calls, 3);
+					strictEqual(reader.run(id)?.missing_token_calls, 1);
+					strictEqual(reader.run(id)?.cost_estimated, 1);
+					strictEqual(reader.run(id)?.cost_unknown, 1);
+				}
 			} finally {
 				reader.close();
 			}

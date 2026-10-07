@@ -8,10 +8,12 @@
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { PackageIdentity } from "../core/package-identity.js";
+import { normalizeTokenUsage } from "../core/token-split.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
+import { aggregateCostAmounts } from "../domains/observability/cost.js";
 import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
-import { normalizeCostProvenance } from "../domains/providers/types/cost-provenance.js";
+import { normalizeCostProvenance, resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
@@ -268,9 +270,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	const accumulateTraceUsage = (message: AgentMessage): void => {
 		if (traceRunId === null) return;
 		const summary = sumRunUsage([message]);
+		const rawUsage = (message as { usage?: Record<string, unknown> }).usage ?? {};
+		if (rawUsage.callInvoked === false) return;
 		usageSources += 1;
-		if (!summary.hadUsage) return;
-		reportedUsageSources += 1;
+		const reported = normalizeTokenUsage(rawUsage);
+		if (reported.observed) reportedUsageSources += 1;
 		const total: SessionTurnUsage = traceUsage ?? {
 			inputTokens: 0,
 			outputTokens: 0,
@@ -280,7 +284,16 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			totalTokens: 0,
 			costUsd: 0,
 		};
-		const pricing = normalizeCostProvenance(state.runtime?.runtimeResolution.costProvenance);
+		const pricing = resolveCostProvenance(
+			rawUsage.costProvenance,
+			normalizeCostProvenance(state.runtime?.runtimeResolution.costProvenance),
+		);
+		const costSummary = aggregateCostAmounts([
+			...(total.costSummary
+				? [{ usd: total.costSummary.knownUsd, provenance: pricing, costSummary: total.costSummary }]
+				: []),
+			{ usd: summary.costUsd, provenance: pricing, apiCalls: 1, missingTokenCalls: reported.observed ? 0 : 1 },
+		]);
 		traceUsage = {
 			inputTokens: total.inputTokens + summary.input,
 			outputTokens: total.outputTokens + summary.output,
@@ -291,9 +304,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				: { cacheWrite1hTokens: (total.cacheWrite1hTokens ?? 0) + (summary.cacheWrite1h ?? 0) }),
 			reasoningTokens: total.reasoningTokens + summary.reasoning,
 			totalTokens: total.totalTokens + summary.tokens,
-			// Engine usage uses zero when pricing is absent. A single unpriced
-			// call makes this turn's total unavailable, even after priced calls.
-			costUsd: total.costUsd === null || pricing === "unknown" ? null : (total.costUsd ?? 0) + summary.costUsd,
+			costUsd: costSummary.hasUnknown && costSummary.knownUsd === 0 ? null : costSummary.knownUsd,
+			costSummary,
+			apiCalls: (total.apiCalls ?? 0) + 1,
+			missingTokenCalls: (total.missingTokenCalls ?? 0) + (reported.observed ? 0 : 1),
 		};
 	};
 

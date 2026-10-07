@@ -40863,6 +40863,46 @@
 															}
 														]
 													},
+													"cost_estimated": {
+														"anyOf": [
+															{
+																"type": "number"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cost_unknown": {
+														"anyOf": [
+															{
+																"type": "number"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"api_calls": {
+														"anyOf": [
+															{
+																"type": "number"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"missing_token_calls": {
+														"anyOf": [
+															{
+																"type": "number"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
 													"source": {
 														"anyOf": [
 															{
@@ -41097,6 +41137,46 @@
 											]
 										},
 										"total_cost_usd": {
+											"anyOf": [
+												{
+													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"cost_estimated": {
+											"anyOf": [
+												{
+													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"cost_unknown": {
+											"anyOf": [
+												{
+													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"api_calls": {
+											"anyOf": [
+												{
+													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"missing_token_calls": {
 											"anyOf": [
 												{
 													"type": "number"
@@ -41410,6 +41490,46 @@
 												]
 											},
 											"total_cost_usd": {
+												"anyOf": [
+													{
+														"type": "number"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"cost_estimated": {
+												"anyOf": [
+													{
+														"type": "number"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"cost_unknown": {
+												"anyOf": [
+													{
+														"type": "number"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"api_calls": {
+												"anyOf": [
+													{
+														"type": "number"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"missing_token_calls": {
 												"anyOf": [
 													{
 														"type": "number"
