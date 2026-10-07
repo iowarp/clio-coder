@@ -37,7 +37,7 @@ export const SYSTEM_ONE_GATE_RULE_ID = "system-one-gate";
  * the grant row share. The build comes from an engine reply, so it is drawn
  * only after the sanitizer a call target takes.
  */
-export function systemOneGateText(build?: string): string {
+function systemOneGateText(build?: string): string {
 	const named = build === undefined ? "" : sanitizeCallTargetText(build);
 	return named === "" ? "System One gate (experimental)" : `System One gate (experimental, ${named})`;
 }
