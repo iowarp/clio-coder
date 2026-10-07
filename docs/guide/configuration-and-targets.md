@@ -209,6 +209,15 @@ explains worker route selection.
 | `context.memory.trajectorySteps` | `8` | next turn |
 | `context.memory.maxOutputTokens` | `2000` | next turn |
 | `context.memory.timeoutMs` | `60000` | next turn |
+| `context.semantic.enabled` | `false` | next turn |
+| `context.semantic.target` | `null` | next turn or semantic CLI request |
+| `context.semantic.model` | `null` | next turn or semantic CLI request |
+| `context.semantic.assetIdentity` | `null` | next turn or semantic CLI request; changing it selects a new index namespace |
+| `context.semantic.projectorIdentity` | `null` | next turn or semantic CLI request; changing it selects a new index namespace |
+| `context.semantic.canaryFingerprint` | `null` | next turn or semantic CLI request; set by qualification |
+| `context.semantic.modalities` | `[text]` | next turn or semantic CLI request |
+| `context.semantic.background` | `false` | next session |
+| `context.semantic.inboxes` | `[]` | next turn or semantic CLI request; explicit registered roots only |
 
 The compaction and memory controls serve different roles. An unset `context.compaction.model` uses active chat; an explicit model must uniquely resolve to an available eligible summary route or fail visibly. `context.compaction.systemPrompt` is a nonempty UTF-8 prompt file, at most 65,536 bytes, read at compaction time and resolved relative to the session workspace.
 

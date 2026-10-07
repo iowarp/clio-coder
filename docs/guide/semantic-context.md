@@ -2,7 +2,7 @@
 
 Clio can keep a local, project-scoped search index for code maps, wiki pages, approved memory, authorized evidence, recorded worker output, and folders you register as artifact inboxes. The index uses a separate embedding target. Search returns source paths and locations; Clio must inspect the original file, code, or receipt before making a claim.
 
-The beta starts disabled. It makes no embedding request or directory scan during ordinary startup until you configure it. Vector generations live in the XDG cache under `semantic/<project-hash>/<profile-identity>/`. Canonical code, memory, and evidence stay in their existing locations. Deleting the cache only removes derived data.
+The beta starts disabled. Semantic indexing makes no embedding request or source scan during ordinary startup until you configure it. Vector generations live in the XDG cache under `semantic/<project-hash>/<profile-identity>/`. Canonical code, memory, and evidence stay in their existing locations. Deleting the cache only removes derived data.
 
 ## Configure the model and an inbox
 

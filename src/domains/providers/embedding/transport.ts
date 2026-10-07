@@ -5,7 +5,7 @@ import type { TargetDescriptor } from "../types/target-descriptor.js";
 import type { EmbeddingInput } from "./types.js";
 import { EmbeddingError } from "./types.js";
 
-export function embeddingWireInput(input: EmbeddingInput): unknown {
+function embeddingWireInput(input: EmbeddingInput): unknown {
 	if (input.kind === "video") throw new EmbeddingError("unsupported", "Video embedding has not been qualified");
 	if (input.kind === "text") return input.text;
 	const parts = input.kind === "mixed" ? input.parts : [input];

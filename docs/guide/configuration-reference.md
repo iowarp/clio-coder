@@ -105,6 +105,15 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.memory.trajectorySteps` | `8` | Integer at least 1. Recent steps considered. | next turn |
 | `context.memory.maxOutputTokens` | `2000` | Integer at least 1. Length cap of one memory note. | next turn |
 | `context.memory.timeoutMs` | `60000` | Integer at least 1. Wait for the memory model. | next turn |
+| `context.semantic.enabled` | `false` | Boolean. Exposes the optional semantic search capability after model pins are configured. | next turn |
+| `context.semantic.target` | `null` | Qualified embedding target id; accepts the llama.cpp embedding or LiteLLM runtime. | next semantic request |
+| `context.semantic.model` | `null` | Exact embedding wire model id. | next semantic request |
+| `context.semantic.assetIdentity` | `null` | GGUF SHA-256 or an explicitly unverified operator asset label. | next semantic request |
+| `context.semantic.projectorIdentity` | `null` | Multimodal projector SHA-256 or operator label. | next semantic request |
+| `context.semantic.canaryFingerprint` | `null` | Fixed text canary fingerprint written by `semantic configure --qualify`. | next semantic request |
+| `context.semantic.modalities` | `[text]` | Enabled subset of `text`, `image`, `audio`, and `mixed`. | next semantic request |
+| `context.semantic.background` | `false` | Boolean. Schedule bounded refresh at session start and after code map changes. | next session |
+| `context.semantic.inboxes` | `[]` | Explicit project or global artifact roots registered with `semantic inbox add`. | next refresh or search |
 | `systemOne.engines` | `{}` | Map of engine name to `{ kind, target, model?, mode?, profile? }`. | next turn |
 | `systemOne.sites` | `{}` | Map of site id to an engine name or `{ engine, timeoutMs?, tasks? }`. A site with no entry is off. | next turn; `systemOne.sites.consult` needs a restart |
 | `systemOne.cuts` | `{}` | Per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. | next turn |
