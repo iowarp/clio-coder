@@ -68,6 +68,7 @@ Usage:
   clio-coder fleet nodes|run|status|view|verify|drain|resume  run playbooks on the fleet, status, verification, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
+  clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
@@ -289,6 +290,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["components", async (subArgs) => (await import("./components.js")).runComponentsCommand(subArgs)],
 	["evidence", async (subArgs) => (await import("./evidence.js")).runEvidenceCommand(subArgs)],
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
+	["semantic", async (subArgs) => (await import("./semantic.js")).runSemanticCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
 	["systemone", async (subArgs) => (await import("./system-one.js")).runSystemOneCommand(subArgs)],
 	["trace", async (subArgs) => (await import("./trace.js")).runTraceCommand(subArgs)],
