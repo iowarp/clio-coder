@@ -389,7 +389,7 @@ test("the session header keeps the route when everything else has to go", () => 
 	}
 	// Wide enough, identity sits next to the wordmark rather than trailing the row.
 	const wide = rows(component, 120)[0] ?? "";
-	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-dev·source)? · dynamo/u);
+	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-(?:dev·source|rc\.\d+|snapshot\.\d{12}\.g[0-9a-f]{7}))? · dynamo/u);
 });
 
 test("the collapsed header drops readiness, latency and onboarding", () => {
