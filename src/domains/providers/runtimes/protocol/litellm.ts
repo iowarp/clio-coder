@@ -1,3 +1,4 @@
+import { embedOpenAIInputs } from "../../embedding/transport.js";
 /**
  * LiteLLM proxy: an OpenAI-compatible gateway that fronts a fleet.
  *
@@ -284,6 +285,7 @@ async function fetchCatalog(base: string, ctx: ProbeContext, headers: Record<str
 
 const litellmRuntime: RuntimeDescriptor = {
 	id: "litellm",
+	embedInputs: embedOpenAIInputs,
 	displayName: "LiteLLM gateway",
 	kind: "http",
 	tier: "protocol",

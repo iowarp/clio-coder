@@ -36,6 +36,24 @@ export { AGENT_ROLE_TOOLS_REQUIRED_REASON, mergeCapabilities, supportsAgentRoleT
 export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 export { credentialsPresent } from "./credentials.js";
 export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
+export type {
+	EmbeddingErrorCode,
+	EmbeddingInput,
+	EmbeddingPart,
+	EmbeddingProfile,
+	EmbeddingRequest,
+	EmbeddingResponse,
+	EmbeddingRoute,
+	EmbeddingService,
+	EmbeddingTask,
+} from "./embedding/index.js";
+export {
+	createEmbeddingService,
+	EmbeddingError,
+	embeddingCanaryFingerprint,
+	embeddingGemma2Q8Profile,
+	embeddingProfileIdentity,
+} from "./embedding/index.js";
 export {
 	backgroundMemoryAdmissionLimit,
 	canonicalEndpointKey,
