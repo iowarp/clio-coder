@@ -164,6 +164,22 @@ export function gateDeciderAgentId(requested: string | undefined): string {
 }
 
 /**
+ * The builtin a council judge defaults to. The self-review rule above applies,
+ * but the verifier cannot sit here: it requires `verify`, which the judge's
+ * `council-read-only` profile does not grant. Oracle is read-only and needs
+ * only `read`, so it fits the profile and differs from the default seat.
+ */
+export const DEFAULT_COUNCIL_JUDGE_AGENT_ID = "oracle";
+const COUNCIL_JUDGE_ALTERNATE_AGENT_ID = "researcher";
+
+/** Resolve a council judge that is never the seated agent unless the caller names it. */
+export function councilJudgeAgentId(requested: string | undefined, seated: string): string {
+	const trimmed = requested?.trim() ?? "";
+	if (trimmed.length > 0) return trimmed;
+	return seated === DEFAULT_COUNCIL_JUDGE_AGENT_ID ? COUNCIL_JUDGE_ALTERNATE_AGENT_ID : DEFAULT_COUNCIL_JUDGE_AGENT_ID;
+}
+
+/**
  * Whether a run's own recipe result contract is its postcondition.
  *
  * A gate decider answers the coordinator's question, not its recipe's. A judge
@@ -176,10 +192,10 @@ export function gateDeciderAgentId(requested: string | undefined): string {
  * `synthesis` is the third decider and belongs here for the same reason.
  * {@link deriveExecutionRole} already resolves it to the `judge` role, and
  * `isBoundedGateRolePrompt` admits it only under the council judge prompt,
- * which asks for `{"verdict","text"}`. A council seats the read-only
- * `researcher` by default, whose recipe declares `research-report`, so leaving
- * the recipe postcondition on the slot sealed a contract failure on every
- * correct synthesis and burned the configured retries reproducing it.
+ * which asks for `{"verdict","text"}`. The default council judge is `oracle`
+ * or `researcher`, whose recipes declare `oracle-report` and `research-report`,
+ * so leaving the recipe postcondition on the slot sealed a contract failure on
+ * every correct synthesis and burned the configured retries reproducing it.
  */
 function appliesRecipeResultContract(gateRole: GateTopologyRole | undefined): boolean {
 	return gateRole !== "reviewer" && gateRole !== "judge" && gateRole !== "synthesis";

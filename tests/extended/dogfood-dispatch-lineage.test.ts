@@ -288,6 +288,10 @@ for (const mode of ["single", "parallel", "review", "compete", "council"] as con
 			strictEqual(f.captured.length, mode === "single" ? 1 : mode === "parallel" || mode === "review" ? 2 : 3);
 			for (const request of f.captured)
 				strictEqual(request.lineage, undefined, "host ancestry cannot change assignment admission");
+			if (mode === "council") {
+				const synthesis = f.captured.find((request) => request.gate?.role === "synthesis");
+				strictEqual(synthesis?.agentId, "oracle", "an unpinned council judge is never the seated agent");
+			}
 			for (const preparation of f.preparations) deepStrictEqual(preparation?.hostRun, hostRun);
 			const journal = readRunJournal(join(env.dir, "state"));
 			ok(journal);

@@ -4,7 +4,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
+import { councilJudgeAgentId, gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
 	COUNCIL_MAX_MEMBERS,
@@ -774,7 +774,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				}
 				if (council.synthesis === "judge") {
 					const judgeRequest: DispatchRequest = {
-						agentId: council.judge?.agent ?? base.agentId,
+						agentId: councilJudgeAgentId(council.judge?.agent, base.agentId),
 						...(base.budget === undefined ? {} : { budget: base.budget }),
 						executionRole: "judge",
 						task: "Plan-time capability check for council synthesis.",

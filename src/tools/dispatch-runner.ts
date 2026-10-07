@@ -21,6 +21,7 @@ import type { AbortReason, DispatchContract, DispatchRequest, WorkerGrantView } 
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import { compileExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import {
+	councilJudgeAgentId,
 	gateDeciderAgentId,
 	gateRouteCorrelation,
 	type RouteCorrelationFacts,
@@ -2244,7 +2245,7 @@ async function runCouncil(
 	} else if (council.synthesis === "judge") {
 		const finalRuns = [...prior.values()];
 		const judgeRequest: DispatchRequest = {
-			agentId: council.judge?.agent ?? base.agentId,
+			agentId: councilJudgeAgentId(council.judge?.agent, base.agentId),
 			...(base.budget === undefined ? {} : { budget: base.budget }),
 			executionRole: "judge",
 			task: `Synthesize the council answers for this task:\n\n${base.task}`,
