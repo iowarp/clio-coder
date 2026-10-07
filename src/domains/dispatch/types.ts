@@ -486,6 +486,8 @@ export interface RunLedgerProjection {
 }
 
 export interface RunEnvelope {
+	/** Display-only state reference, outside sealed receipt authority. */
+	recording?: import("./recording.js").RecordingReference;
 	projection?: RunLedgerProjection;
 	version: 1;
 	id: string;

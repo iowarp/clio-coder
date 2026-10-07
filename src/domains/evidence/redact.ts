@@ -107,3 +107,31 @@ export function secretRedactingReplacer(tally: RedactionTally): (key: string, va
 		});
 	};
 }
+
+/** Redact across display frame boundaries while retaining each frame's timestamp. */
+export function redactSecretSegments(segments: string[], tally: RedactionTally): string[] {
+	const joined = segments.join("");
+	const ranges: { start: number; end: number; kind: string }[] = [];
+	for (const pattern of SECRET_PATTERNS) {
+		for (const match of joined.matchAll(new RegExp(pattern.re.source, pattern.re.flags))) {
+			const start = match.index + (pattern.kind === "assignment" ? (match[1]?.length ?? 0) : 0);
+			ranges.push({ start, end: match.index + match[0].length, kind: pattern.kind });
+			tally.count += 1;
+		}
+	}
+	ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+	let offset = 0;
+	return segments.map((segment) => {
+		const start = offset;
+		offset += segment.length;
+		let cursor = start;
+		let result = "";
+		for (const range of ranges) {
+			if (range.end <= cursor || range.start >= offset) continue;
+			result += joined.slice(cursor, Math.max(cursor, range.start));
+			result += `[redacted:${range.kind}]`;
+			cursor = Math.min(offset, range.end);
+		}
+		return result + joined.slice(cursor, offset);
+	});
+}

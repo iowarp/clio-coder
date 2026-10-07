@@ -10,6 +10,7 @@ export {
 	provenanceCompactSuffix,
 	provenanceTranscriptLines,
 } from "./provenance.js";
+export { createRedactionTally, redactSecretSegments, redactSecretsText } from "./redact.js";
 export type { EvidenceRunProvenance } from "./store.js";
 export {
 	EVIDENCE_FILES,

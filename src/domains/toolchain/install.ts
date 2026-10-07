@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize } from "node:path";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { type ArchiveEntry, readTarGzEntries, readZipEntries } from "./archive.js";
 import { ensureToolchainRoot } from "./paths.js";
 import { currentToolPlatform, findPinnedTool } from "./registry.js";
@@ -204,6 +205,10 @@ export async function installPinnedTool(
 		for (const [name, bytes] of documentBytes) {
 			writeFileSync(join(staging, name), bytes, { mode: 0o644 });
 			documents.push(join(dir, name));
+		}
+		if (entry.notice !== undefined) {
+			safeResourceWrite(join(staging, "NOTICE"), `${entry.notice}\n`, { mode: 0o644 });
+			documents.push(join(dir, "NOTICE"));
 		}
 		writeFileSync(
 			join(staging, "clio-coder-install.json"),
