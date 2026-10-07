@@ -2,17 +2,16 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { resolveClioDirs, stateRootRemoved } from "../../core/xdg.js";
 import { createRedactionTally, redactSecretSegments } from "../evidence/index.js";
-import type { ToolResolution } from "../toolchain/index.js";
-import { installRemedy, resolveToolBinary } from "../toolchain/index.js";
 import type { RunEventJournalSink } from "./run-event-journal.js";
 import type { RunNodeIdentity } from "./types.js";
 
-export const RECORDING_MAX_BYTES = 2 * 1024 * 1024;
-export const RECORDING_MAX_DURATION_MS = 60 * 60 * 1000;
+const RECORDING_MAX_BYTES = 2 * 1024 * 1024;
+const RECORDING_MAX_DURATION_MS = 60 * 60 * 1000;
 export interface RecordingReference {
 	manifestPath: string;
 }
@@ -33,15 +32,9 @@ export interface RecordingManifest {
 	redactionCount: number;
 	error?: string;
 }
-export type CastOutputEvent = [number, "o", string];
-/** Playback is optional: generating a native side-channel cast needs no external executable. */
-export function recordingPlaybackTool(): { resolution: ToolResolution; remedy: string | null } {
-	const resolution = resolveToolBinary("asciinema");
-	return { resolution, remedy: resolution.source === "none" ? installRemedy("asciinema") : null };
-}
+type CastOutputEvent = [number, "o", string];
 
-export function recordingReference(runId: string): RecordingReference {
-	assertSafeId(runId, "run");
+function recordingReference(runId: string): RecordingReference {
 	if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) throw new Error("invalid recording run id");
 	return { manifestPath: `runs/${runId}/recording.json` };
 }
@@ -101,7 +94,7 @@ export function parseRecordingCast(raw: string): CastOutputEvent[] {
 	return events;
 }
 
-export interface RecordingJournal extends RunEventJournalSink {
+interface RecordingJournal extends RunEventJournalSink {
 	accepts(runId: string): boolean;
 	gap(runId: string, droppedFrames: number): void;
 	start(runId: string, node: RunNodeIdentity): RecordingReference;
@@ -112,6 +105,7 @@ interface Capture {
 	startMs: number;
 	frames: CastOutputEvent[];
 	bytes: number;
+	truncated: boolean;
 }
 
 /** Bounded in-memory display capture; only fully redacted text is ever written to disk. */
@@ -126,13 +120,12 @@ export function createRecordingJournal(
 	} = {},
 ): RecordingJournal {
 	const captures = new Map<string, Capture>();
-	let playbackChecked = false;
 	const root = options.stateDir ?? resolveClioDirs().state;
 	const cap = Math.max(1024, Math.min(options.maxBytes ?? RECORDING_MAX_BYTES, RECORDING_MAX_BYTES));
 	const duration = Math.max(0, Math.min(options.maxDurationMs ?? RECORDING_MAX_DURATION_MS, RECORDING_MAX_DURATION_MS));
 	const nowMs = options.nowMs ?? (() => performance.now());
 	const now = options.now ?? (() => new Date());
-	const warn = options.warn ?? ((text: string) => process.stderr.write(`[clio-coder:recording] ${text}\n`));
+	const warn = options.warn ?? ((text: string) => writeDiagnostic(`[clio-coder:recording] ${text}`));
 	const persist = (capture: Capture): void => {
 		if (stateRootRemoved()) throw new Error("state root removed");
 		assertRecordingDirectory(root, capture.manifest.runId);
@@ -219,17 +212,6 @@ export function createRecordingJournal(
 		},
 		start(runId, node) {
 			const reference = recordingReference(runId);
-			if (!playbackChecked) {
-				playbackChecked = true;
-				try {
-					const playback = recordingPlaybackTool();
-					if (playback.remedy) warn(`native capture needs no external tool; for playback install with ${playback.remedy}`);
-				} catch (error) {
-					warn(
-						`playback discovery failed: ${error instanceof Error ? error.message : String(error)}; native capture continues`,
-					);
-				}
-			}
 			if (captures.has(runId)) return reference;
 			if (captures.size >= 16) finish(captures.keys().next().value as string, "capture_capacity");
 			const capture: Capture = {
@@ -252,6 +234,7 @@ export function createRecordingJournal(
 				startMs: nowMs(),
 				frames: [],
 				bytes: 0,
+				truncated: false,
 			};
 			captures.set(runId, capture);
 			try {
@@ -275,8 +258,18 @@ export function createRecordingJournal(
 			);
 			const frame: CastOutputEvent = [Math.min(elapsed, duration) / 1000, "o", text];
 			const bytes = Buffer.byteLength(JSON.stringify(frame)) + 1;
-			if (elapsed > duration || capture.bytes + bytes > cap - 512 || capture.frames.length >= 10000) {
+			if (capture.truncated || elapsed > duration || capture.bytes + bytes > cap - 512 || capture.frames.length >= 10000) {
 				capture.manifest.droppedFrames += 1;
+				if (!capture.truncated) {
+					// Text flushes mid-token, so the kept tail can end in a secret's head too short for
+					// any redaction pattern. Trim that trailing word, and keep dropping so no later frame
+					// resumes inside the dropped one.
+					capture.truncated = true;
+					for (const kept of [...capture.frames].reverse()) {
+						kept[2] = kept[2].replace(/\S+$/u, "");
+						if (kept[2] !== "") break;
+					}
+				}
 				return;
 			}
 			capture.bytes += bytes;

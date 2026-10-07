@@ -730,13 +730,12 @@ async function runDispatch(
 			cleanupSteer();
 			cleanupSteer = undefined;
 		}
+		const recording = parsed.record === true ? dispatch.getRun(receipt.runId)?.recording : undefined;
 		if (parsed.json) {
-			const recording = dispatch.getRun(receipt.runId)?.recording;
 			writeAgentFrame({ type: "receipt", receipt, ...(recording !== undefined ? { recording } : {}) });
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 			process.stdout.write(formatDispatchHumanOutput(answer, receipt));
-			const recording = dispatch.getRun(receipt.runId)?.recording;
 			if (recording) process.stderr.write(`Recording manifest (relative to Clio state): ${recording.manifestPath}\n`);
 		}
 

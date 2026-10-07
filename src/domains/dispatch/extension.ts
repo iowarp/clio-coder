@@ -5629,6 +5629,8 @@ export function createDispatchBundle(
 				...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
 			});
 		} catch (error) {
+			// A capture started above would otherwise keep its manifest at "recording".
+			if (envelope !== undefined) recordingJournal.terminal(envelope.id, "failed");
 			try {
 				acp.kill();
 			} catch (killError) {
@@ -7265,6 +7267,8 @@ export function createDispatchBundle(
 				...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
 			});
 		} catch (error) {
+			// A capture started above would otherwise keep its manifest at "recording".
+			if (envelope !== undefined) recordingJournal.terminal(envelope.id, "failed");
 			try {
 				worker.abort();
 			} catch (abortError) {
