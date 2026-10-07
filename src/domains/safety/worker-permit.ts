@@ -276,7 +276,13 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 	}
 
 	const route = askRouteForMode(input.mode);
-	const baseAsks = input.declared?.asks ?? route.asks;
+	// fleet.permissions.mode is a ceiling. Project recipes load without a trust
+	// gate, so a recipe that routes asks to main under a deny or fail mode would
+	// let a cloned repository turn the operator's refusal into approval cards.
+	// The recipe is capped to the operator's route, not refused; deny and fail
+	// still narrow any mode.
+	const declaredAsks = input.declared?.asks;
+	const baseAsks = declaredAsks === "main" && route.asks !== "main" ? route.asks : (declaredAsks ?? route.asks);
 	const baseGit = input.declared?.git ?? "inspect";
 	const narrowing = input.narrowing ?? {};
 	if (narrowing.git === "worktree" && baseGit !== "worktree") {

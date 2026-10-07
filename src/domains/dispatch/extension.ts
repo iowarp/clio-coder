@@ -2815,8 +2815,10 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// with the spec and the worker enforces it within bounded time. Under the
 	// escalate posture the configured timeout/fallback bounds ride along so the
 	// worker still cannot hang when no operator resolves the ask.
-	// The permit decides the routing: fleet.permissions.mode is only its
-	// default when the recipe declares no asks route.
+	// The permit decides the routing. fleet.permissions.mode is its default
+	// when the recipe declares no asks route and its ceiling when it does: a
+	// recipe can narrow asks to deny or fail but cannot route them to main
+	// under a deny or fail mode.
 	spec.onPermission = workerPermissionModeForPermit(input.permit.allowance);
 	if (spec.onPermission === "escalate") {
 		const escalation = settings?.fleet.permissions.escalation;
