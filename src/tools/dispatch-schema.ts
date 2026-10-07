@@ -223,7 +223,7 @@ const WorkerContextSchema = Type.Union(
 /**
  * `judge` serves both compete and council synthesis, and their defaults
  * differ: compete falls back to the verifier (`gateDeciderAgentId`), a council
- * judge to the call's own agent (`dispatch-admission.ts`).
+ * judge to oracle, or researcher when oracle is seated (`councilJudgeAgentId`).
  */
 function judgeSchema(composition: DispatchSchemaComposition) {
 	const both = composition.compete && composition.council;
@@ -232,10 +232,10 @@ function judgeSchema(composition: DispatchSchemaComposition) {
 			agent: Type.Optional(
 				Type.String({
 					description: both
-						? "Judge recipe id (default: verifier for compete, the call's agent for council)."
+						? "Judge recipe id (default: verifier for compete; oracle for council, researcher if oracle is seated)."
 						: composition.compete
 							? "Judge recipe id (default: verifier)."
-							: "Judge recipe id (default: the call's agent).",
+							: "Judge recipe id (default: oracle, or researcher if oracle is seated).",
 				}),
 			),
 			model: Type.Optional(Type.String()),

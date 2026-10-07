@@ -1,13 +1,17 @@
 /**
  * What the composition root keeps between System One calls.
  *
- * The turn site is asked once, at submit, and nothing waits for it. Its readers
- * (the hint registration, the turn controller, the plan-close registration and
- * the prewarm) take a fitted reading that has already landed when they read,
- * and otherwise behave as if the site were unbound. The turn-end site is asked
- * once per settled turn, detached, and its reading is only recorded beside the
- * turn outcome; the clarification streak keeps the regex reading. The relevance
- * site ranks a catalog when a tool is asked for one.
+ * The turn site is asked once, at submit, without holding up the submit. The
+ * hint registration, the plan-close registration and the prewarm take a fitted
+ * reading that has already landed when they read, and otherwise behave as if
+ * the site were unbound. The turn controller runs before the prompt and usually
+ * before any reading could land, so it alone may wait for one: only when a
+ * reading could change what it decides, and never past the site's deadline or
+ * the operator's cancel. That bounded wait is the only delay the reading can
+ * add before the prompt. The turn-end site is asked once per settled turn,
+ * detached, and its reading is only recorded beside the turn outcome; the
+ * clarification streak keeps the regex reading. The relevance site ranks a
+ * catalog when a tool is asked for one.
  * Everything here degrades to what the harness did before System One existed:
  * an unbound, slow, failed or unfitted site hands back null and the reader
  * keeps its own answer.
@@ -256,6 +260,13 @@ export interface SystemOneHost {
 	hints(): DecisionHintLines | null;
 	/** What the turn controller may act on, or undefined until a fitted reading has landed. */
 	interpretation(): TurnInterpretation | undefined;
+	/**
+	 * `interpretation()` once this turn's reading has landed, or after
+	 * `maxWaitMs`, or when `signal` aborts, whichever comes first. Returns at
+	 * once when no reading is in flight: the site is unbound or shadowed, or the
+	 * reading already settled.
+	 */
+	awaitInterpretation(maxWaitMs: number, signal: AbortSignal): Promise<TurnInterpretation | undefined>;
 	/** The worker a confident forecast says the agent is about to dispatch, or null. */
 	prewarm(): TurnPrewarmPrediction | null;
 	/** Forget this turn's verdict, so a continuation or the next turn cannot read a stale one. */
@@ -335,9 +346,18 @@ function priorOperatorTexts(entries: ReadonlyArray<SessionEntry>, beforeTurnId: 
 	return texts;
 }
 
+interface HeldTurn {
+	id: string;
+	task: string;
+	verdict: Verdict<TurnValue> | null;
+	groupRecipe: string | null;
+	/** Settles when the fitted reading is held or the call settled without one; null when nothing is in flight. */
+	landed: Promise<void> | null;
+}
+
 export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 	const { systemOne } = deps;
-	let turn: { id: string; task: string; verdict: Verdict<TurnValue> | null; groupRecipe: string | null } | null = null;
+	let turn: HeldTurn | null = null;
 	/**
 	 * The operator's recent requests on the active path, newest last, so the
 	 * turn-end site does not reparse the whole ledger every turn. Seeded from the
@@ -395,9 +415,30 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		return earlier;
 	}
 
+	function interpretation(): TurnInterpretation | undefined {
+		const value = turn?.verdict?.value;
+		if (value === undefined) return undefined;
+		return {
+			intent: value.intent,
+			orientation: {
+				wanted: value.acts.orientation,
+				breadth: value.breadth,
+				...(value.orientation !== null ? { probability: value.orientation } : {}),
+			},
+			direction: { requested: value.acts.direction },
+			dispatch: { expected: value.acts.dispatch, ...(value.dispatch !== null ? { probability: value.dispatch } : {}) },
+		};
+	}
+
 	return {
 		readTurn(input) {
-			const held: NonNullable<typeof turn> = { id: input.userTurnId, task: input.task, verdict: null, groupRecipe: null };
+			const held: HeldTurn = {
+				id: input.userTurnId,
+				task: input.task,
+				verdict: null,
+				groupRecipe: null,
+				landed: null,
+			};
 			turn = held;
 			noteOperatorTurn(input.userTurnId, input.request);
 			// Counted and held even unbound: a catalog ranking or a consult later in the
@@ -433,15 +474,27 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 				detached(() => systemOne.run(TURN_SITE, object, { ref: input.userTurnId }));
 				return;
 			}
-			// Nothing waits for the reading. Its readers take it only if it landed
-			// before they read, and only from a fitted build: an unfitted reading's
-			// intent has no cut and once overrode the plan-close regex on its own.
-			// The operator's cancel does not abort it, because the reading is still a
-			// record of the request.
+			// Only the turn controller may wait for the reading, and never past the
+			// site's deadline. Readers take it only from a fitted build: an unfitted
+			// reading's intent has no cut and once overrode the plan-close regex on
+			// its own. The operator's cancel does not abort it, because the reading is
+			// still a record of the request.
+			let markLanded: () => void = () => {};
+			held.landed = new Promise<void>((resolve) => {
+				markLanded = resolve;
+			});
 			detached(async () => {
-				const verdict = await systemOne.run(TURN_SITE, object, { ref: input.userTurnId });
-				if (turn !== held || verdict === null || !verdict.fitted) return;
-				held.verdict = verdict;
+				try {
+					const verdict = await systemOne.run(TURN_SITE, object, { ref: input.userTurnId });
+					if (turn === held && verdict !== null && verdict.fitted) held.verdict = verdict;
+				} finally {
+					// Released before the recipe follow-up, so a waiting controller never
+					// waits for a second call.
+					held.landed = null;
+					markLanded();
+				}
+				const verdict = held.verdict;
+				if (turn !== held || verdict === null) return;
 				// A category was chosen but not its member: one bounded follow-up under
 				// its own deadline picks the recipe to hold, chained here so it never
 				// adds a wait of its own.
@@ -460,19 +513,27 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 
 		hints: () => turn?.verdict?.value.hints ?? null,
 
-		interpretation() {
-			const value = turn?.verdict?.value;
-			if (value === undefined) return undefined;
-			return {
-				intent: value.intent,
-				orientation: {
-					wanted: value.acts.orientation,
-					breadth: value.breadth,
-					...(value.orientation !== null ? { probability: value.orientation } : {}),
-				},
-				direction: { requested: value.acts.direction },
-				dispatch: { expected: value.acts.dispatch, ...(value.dispatch !== null ? { probability: value.dispatch } : {}) },
-			};
+		interpretation,
+
+		async awaitInterpretation(maxWaitMs, signal) {
+			const landed = turn?.landed ?? null;
+			if (landed === null || signal.aborted || !(maxWaitMs > 0)) return interpretation();
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			let onAbort: (() => void) | undefined;
+			try {
+				await Promise.race([
+					landed,
+					new Promise<void>((resolve) => {
+						timer = setTimeout(resolve, maxWaitMs);
+						onAbort = () => resolve();
+						signal.addEventListener("abort", onAbort, { once: true });
+					}),
+				]);
+			} finally {
+				clearTimeout(timer);
+				if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+			}
+			return interpretation();
 		},
 
 		prewarm() {
@@ -492,7 +553,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		clearVerdict() {
 			// A fresh record, so a reading still in flight lands in the one it was
 			// started for and never in what the next continuation reads.
-			if (turn !== null) turn = { id: turn.id, task: turn.task, verdict: null, groupRecipe: null };
+			if (turn !== null) turn = { id: turn.id, task: turn.task, verdict: null, groupRecipe: null, landed: null };
 		},
 
 		task: () => turn?.task ?? "",

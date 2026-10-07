@@ -69,7 +69,7 @@ function harness(overrides: Partial<TurnControlRunnerDeps> = {}, receiptData: un
 		},
 		getTurnConstraints: () => undefined,
 		isContinuation: () => false,
-		readInterpretation: () => interpretation,
+		readInterpretation: async () => interpretation,
 		facts: {
 			turnIndex: () => 0,
 			taskEstablished: () => false,
@@ -125,6 +125,33 @@ test("orientation dispatches read-only from the harness once, renders findings a
 		resumed.seedOrientation(null);
 		await resumed.run(input());
 		assert.equal(h.requests.length, 4);
+	} finally {
+		h.cleanup();
+	}
+});
+test("waits for the turn reading only when it could change the decision", async () => {
+	const waits: boolean[] = [];
+	let release: (value: TurnInterpretation) => void = () => {};
+	const h = harness({
+		readInterpretation: (wait) => {
+			waits.push(wait !== undefined);
+			return wait === undefined ? Promise.resolve(undefined) : new Promise((resolve) => (release = resolve));
+		},
+	});
+	try {
+		const pending = h.runner.run(input());
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(h.requests.length, 0, "nothing is dispatched before the reading lands");
+		release(interpretation);
+		const result = await pending;
+		assert.equal(result.record.producer, "system-one");
+		assert.equal(h.requests.length, 1, "the awaited reading started orientation");
+		await h.runner.run({ ...input(), userTurnId: "u-2", continuation: true });
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.turnControl.workflows = ["detached-collection"];
+		h.deps.getSettings = () => settings;
+		await h.runner.run({ ...input(), userTurnId: "u-3" });
+		assert.deepEqual(waits, [true, false], "a continuation reads nothing and collection alone never waits");
 	} finally {
 		h.cleanup();
 	}
@@ -201,7 +228,7 @@ test("a strict split asking for write authority is refused and only the first Sc
 
 test("direction provides admitted workspace observations without dispatching a worker", async () => {
 	const h = harness({
-		readInterpretation: () => ({
+		readInterpretation: async () => ({
 			...interpretation,
 			orientation: { wanted: false, breadth: null },
 			direction: { requested: true },
@@ -266,7 +293,7 @@ test("collect combines two finished batches on a continuation and durably marks 
 	const h = harness({
 		dispatch,
 		getSettings: () => settings,
-		readInterpretation: () => undefined,
+		readInterpretation: async () => undefined,
 		facts: {
 			turnIndex: () => 2,
 			taskEstablished: () => false,

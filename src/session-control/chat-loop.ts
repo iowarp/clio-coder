@@ -2555,11 +2555,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// Recording an outcome never costs the turn it describes.
 					}
 				}
-				// System One's reading of the request starts here and nothing waits for
-				// it: the hint registration, the controller and the prewarm use it only if
-				// it has landed by the time they read. A continuation turn carries a nudge
-				// rather than the operator's request, so a judgment about it would be a
-				// judgment about the nudge.
+				// System One's reading of the request starts here without holding up the
+				// submit: the hint registration and the prewarm use it only if it has
+				// landed by the time they read, and the turn controller below may wait
+				// for it, never past the turn site's deadline. A continuation turn
+				// carries a nudge rather than the operator's request, so a judgment about
+				// it would be a judgment about the nudge.
 				if (operatorTurn && deps.readTurn) {
 					// What the operator asked last turn, as typed. Without it a correction
 					// such as "actually drop X from that list" has nothing to correct, and

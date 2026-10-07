@@ -275,6 +275,7 @@ import { createSystemOne } from "../domains/system-one/index.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
+import { TURN_SITE } from "../domains/system-one/sites/turn.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -3810,7 +3811,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		isContinuation: () => false,
 		// The turn site answered with acts and a breadth under cuts fitted to the
 		// build that produced them, so an unmeasured model never starts harness work.
-		readInterpretation: () => systemOneHost.interpretation(),
+		// A wait is bounded by the deadline the turn call itself runs under.
+		readInterpretation: async (wait) => {
+			if (wait === undefined) return systemOneHost.interpretation();
+			const binding = getCurrentSettings().systemOne.sites.turn;
+			const bindingTimeoutMs = typeof binding === "object" ? binding.timeoutMs : undefined;
+			return systemOneHost.awaitInterpretation(bindingTimeoutMs ?? TURN_SITE.deadlineMs, wait.signal);
+		},
 		facts: {
 			turnIndex: () =>
 				readCurrentSessionEntries().filter(
