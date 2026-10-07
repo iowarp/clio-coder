@@ -12,6 +12,7 @@ import {
 	createCapacityAdmissionController,
 	foregroundEndpointBlock,
 } from "../../src/domains/dispatch/admission.js";
+import { AdmissionTimedOutError } from "../../src/domains/dispatch/admission-error.js";
 import {
 	type AdmissionQueueRequest,
 	createAdmissionQueue,
@@ -363,7 +364,7 @@ describe("dispatch admission boundary", () => {
 			orderAdmissionRequests([queued("b"), queued("a"), queued("urgent", 1)]).map((entry) => entry.requestId),
 			["urgent", "a", "b"],
 		);
-		const queue = createAdmissionQueue<string>({ maxSize: 1, finiteCeilingMs: 1_000, now: () => 10 });
+		const queue = createAdmissionQueue<string>({ maxSize: 1, now: () => 10 });
 		const first = queue.enqueue(queued("first"));
 		await rejects(queue.enqueue(queued("second")), /queue full/u);
 		queue.cancel("first");
@@ -922,6 +923,26 @@ describe("dispatch admission boundary", () => {
 			strictEqual(admitted.lease.assignmentId, "next");
 			strictEqual(controller.releaseAssignment("holder"), false);
 			strictEqual(controller.releaseAssignment("next"), true);
+		} finally {
+			controller.stop();
+		}
+	});
+
+	it("ends a wait at its caller deadline with a typed timeout, including a deadline already passed", async () => {
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
+		});
+		try {
+			await controller.admit({ assignmentId: "holder", nodeId: "local" });
+			for (const [assignmentId, deadlineAt] of [
+				["late", Date.now() + 20],
+				["overdue", Date.now() - 1_000],
+			] as const) {
+				await rejects(
+					controller.admit({ assignmentId, nodeId: "local", deadlineAt }),
+					(error: unknown) => error instanceof AdmissionTimedOutError && error.code === "admission_timed_out",
+				);
+			}
 		} finally {
 			controller.stop();
 		}

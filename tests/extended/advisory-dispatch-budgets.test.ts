@@ -131,9 +131,9 @@ it("advisory mode retains identical-call fault detection and legacy SDK enforcem
 	equal(gate.attempt("read").kind, "deny");
 });
 
-it("queue estimates neither expire healthy waits nor shorten explicit deadlines", async () => {
+it("queue waits without a deadline never expire and explicit deadlines are not shortened", async () => {
 	let clock = 0;
-	const queue = createAdmissionQueue<string>({ maxSize: 3, finiteCeilingMs: 1, now: () => clock });
+	const queue = createAdmissionQueue<string>({ maxSize: 3, now: () => clock });
 	const request = {
 		requestId: "ordinary",
 		assignmentId: "ordinary",

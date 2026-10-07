@@ -1,8 +1,9 @@
-import type { WorkerPermissionMode } from "../../core/defaults.js";
+import { createHash } from "node:crypto";
+import type { DelegationToolGovernance, WorkerPermissionMode } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnDelegatesTool } from "../../core/turn-constraints.js";
-import { workerPermitDigest } from "../../worker/protocol.js";
+import { canonicalJson, workerPermitDigest } from "../../worker/protocol.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import type { RuntimeEnforcement } from "../providers/index.js";
 import { classify } from "./action-classifier.js";
@@ -313,6 +314,81 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 			allowance,
 			...(unmediatedWrite ? { trustedUnmediated: true as const } : {}),
 		}),
+	});
+}
+
+/**
+ * Marks a permit Clio recorded and did not enforce. An ACP peer runs its own
+ * tools, and Clio answers only the permission requests the peer chooses to
+ * send, under the agent's toolGovernance. A call the peer never asks about
+ * reaches no Clio check.
+ */
+export interface WorkerPermitRecordOnly {
+	mediation: "peer-asks-only";
+	toolGovernance: DelegationToolGovernance;
+}
+
+export interface RecordOnlyWorkerPermit {
+	version: typeof WORKER_PERMIT_VERSION;
+	ceiling: WorkerPermitCeiling;
+	allowance: WorkerPermitAllowance;
+	trustedUnmediated?: true;
+	recordOnly: WorkerPermitRecordOnly;
+	/** sha256 over the canonical ceiling, allowance, trust opt-in and record-only marker. */
+	digest: string;
+}
+
+/**
+ * The permit an ACP delegation is sealed under, for the record. It states the
+ * intended ceiling and never passes through resolveWorkerPermit, whose
+ * unmediated-write refusal would refuse every write-capable clio-coder-policy
+ * peer. Nothing reads it as a cap: a retry of an ACP run inherits no permit.
+ */
+export function recordOnlyAcpPermit(input: {
+	readOnly: boolean;
+	toolGovernance: DelegationToolGovernance;
+	trustedUnmediated: boolean;
+}): RecordOnlyWorkerPermit {
+	const ceiling: WorkerPermitCeiling = {
+		// ACP delegation has no recipe class; a run not pinned read-only is an edit assignment.
+		capabilityClass: input.readOnly ? "read-only" : "workspace-edit",
+		// Clio admits none of its own tools to a peer, whose inventory is its own.
+		tools: [],
+		readOnly: input.readOnly,
+		// ACP dispatch refuses declared write roots, so none is ever intended.
+		writeRoots: [],
+		// Clio judges only the calls the peer asks about and never parks one. It
+		// cannot narrow the peer's tools or scope, and it can still cancel the peer.
+		enforcement: {
+			perCallMediation: false,
+			toolNarrowing: "none",
+			scopeEnforcement: false,
+			grantPauseResume: false,
+			cancellation: true,
+		},
+	};
+	// No operator answers a delegation's approval-required call, so the mediator
+	// denies it. Agent-managed governance approves every call instead, which the
+	// trustedUnmediated opt-in records.
+	const allowance: WorkerPermitAllowance = { git: "inspect", asks: "deny", approvalAuthority: "operator" };
+	const recordOnly: WorkerPermitRecordOnly = { mediation: "peer-asks-only", toolGovernance: input.toolGovernance };
+	const payload = {
+		version: WORKER_PERMIT_VERSION,
+		ceiling,
+		allowance,
+		recordOnly,
+		...(input.trustedUnmediated ? { trustedUnmediated: true } : {}),
+	};
+	return Object.freeze({
+		version: WORKER_PERMIT_VERSION,
+		...(input.trustedUnmediated ? { trustedUnmediated: true as const } : {}),
+		ceiling: Object.freeze({ ...ceiling, tools: Object.freeze([]), writeRoots: Object.freeze([]) }),
+		allowance: Object.freeze(allowance),
+		recordOnly: Object.freeze(recordOnly),
+		// A distinct domain keeps a record-only digest from ever matching an enforced permit's.
+		digest: createHash("sha256")
+			.update(`clio-coder.workerPermit.recordOnly:${canonicalJson(payload)}`, "utf8")
+			.digest("hex"),
 	});
 }
 

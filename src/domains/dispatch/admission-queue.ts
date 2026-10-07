@@ -48,8 +48,6 @@ export interface AdmissionQueue<T> {
 }
 export function createAdmissionQueue<T>(options: {
 	maxSize: number;
-	/** Legacy planning estimate; never shortens an explicit deadline or stops a healthy wait. */
-	finiteCeilingMs: number;
 	/** Reserved concurrent peak for a plan, resolved when the plan is seen. */
 	reservedPlanPeak?: (planId: string) => number | undefined;
 	now?: () => number;
@@ -57,8 +55,6 @@ export function createAdmissionQueue<T>(options: {
 }): AdmissionQueue<T> {
 	if (!Number.isInteger(options.maxSize) || options.maxSize < 1)
 		throw new Error("admission queue maxSize must be a positive integer");
-	if (!Number.isFinite(options.finiteCeilingMs) || options.finiteCeilingMs <= 0)
-		throw new Error("admission queue ceiling must be finite and positive");
 	const now = options.now ?? Date.now;
 	// A plan slot belongs to an assignment, not to an attempt: a retry re-enters
 	// the queue with the slot it already holds and must not be blocked by itself.

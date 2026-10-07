@@ -3,7 +3,7 @@ import { resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.j
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ScopeSpec } from "../safety/scope.js";
-import { AdmissionCanceledError } from "./admission-error.js";
+import { AdmissionCanceledError, AdmissionTimedOutError } from "./admission-error.js";
 import { createAdmissionQueue } from "./admission-queue.js";
 import {
 	acquireCapacityLease,
@@ -200,7 +200,6 @@ export function createCapacityAdmissionController(options: {
 	};
 	now?: () => number;
 	maxQueueSize?: number;
-	queueCeilingMs?: number;
 	heartbeatMs?: number;
 	/** Reserved concurrent peak for a plan; one plan never exceeds it. */
 	reservedPlanPeak?: (planId: string) => number | undefined;
@@ -212,7 +211,6 @@ export function createCapacityAdmissionController(options: {
 	let draining = false;
 	const queue = createAdmissionQueue<() => CapacityLease>({
 		maxSize: options.maxQueueSize ?? 256,
-		finiteCeilingMs: options.queueCeilingMs ?? 60_000,
 		now,
 		...(options.reservedPlanPeak !== undefined ? { reservedPlanPeak: options.reservedPlanPeak } : {}),
 	});
@@ -320,7 +318,7 @@ export function createCapacityAdmissionController(options: {
 						usage: options.usage?.() ?? capacityLeaseUsage({ nowMs: now() }),
 					});
 					if (outcome.state === "canceled") throw new AdmissionCanceledError(detail);
-					throw new Error(detail);
+					throw new AdmissionTimedOutError(detail);
 				}
 				const lease = acquired.get(input.assignmentId);
 				if (!lease) throw new Error("dispatch: admitted request has no capacity lease");

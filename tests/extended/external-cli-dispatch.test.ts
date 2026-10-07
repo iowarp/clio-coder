@@ -402,6 +402,10 @@ for (const event of [
 		const run = await bundle.contract.dispatch(writeRequest);
 		const receipt = await run.finalPromise;
 		equal(receipt.safety?.permit?.trustedUnmediated, true);
+		// The sealed ceiling states that Codex, not Clio, enforced this run's tools.
+		equal(receipt.safety?.permit?.ceiling?.readOnly, false);
+		equal(receipt.safety?.permit?.ceiling?.enforcement.perCallMediation, false);
+		equal(receipt.safety?.permit?.ceiling?.enforcement.toolNarrowing, "none");
 		equal(
 			receipt.outcome,
 			"succeeded",

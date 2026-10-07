@@ -5,6 +5,7 @@ import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from ".
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import { writeRootsOverlap } from "./parallel-writers.js";
 
 export interface CheckoutWriterLeaseRecord {
 	version: 1;
@@ -14,9 +15,28 @@ export interface CheckoutWriterLeaseRecord {
 	acquiredAt: string;
 }
 
+/**
+ * One writer holding the lease inside this process. The pid record excludes
+ * other processes; holders let the reentrant path refuse a writer from another
+ * dispatch call that would share the checkout with a live one, such as a
+ * foreground writer started while a detached writer still runs there.
+ */
+export interface CheckoutWriterHolder {
+	/** Requests of one dispatch call, and their retries, share a group and never refuse each other. */
+	group: string;
+	/** Canonical declared write roots; null when the request declared none. */
+	roots: ReadonlyArray<string> | null;
+	/** A worktree run edits its own checkout, so it never conflicts on the source checkout. */
+	isolated: boolean;
+	agentId: string;
+	runId?: string;
+}
+
 export interface CheckoutWriterLease {
 	checkout: string;
 	path: string;
+	/** Name the run that holds this lease once dispatch has assigned its id. */
+	bindRun(runId: string): void;
 	release(): void;
 }
 
@@ -26,7 +46,7 @@ export interface CheckoutWriterLeaseProbe {
 	alive?(pid: number): boolean;
 }
 
-const held = new Map<string, { count: number; path: string }>();
+const held = new Map<string, { count: number; path: string; holders: Set<CheckoutWriterHolder> }>();
 let exitHooksInstalled = false;
 
 function canonicalCheckout(checkout: string): string {
@@ -99,8 +119,30 @@ function installExitHooks(): void {
 	process.once("exit", releaseAllOnExit);
 }
 
+function holdersConflict(existing: CheckoutWriterHolder, incoming: CheckoutWriterHolder): boolean {
+	if (existing.isolated || incoming.isolated || existing.group === incoming.group) return false;
+	return existing.roots === null || incoming.roots === null || writeRootsOverlap(existing.roots, incoming.roots);
+}
+
+function writerConflictMessage(
+	checkout: string,
+	existing: CheckoutWriterHolder,
+	incoming: CheckoutWriterHolder,
+): string {
+	const roots = (value: ReadonlyArray<string> | null): string => (value === null ? "undeclared" : value.join(", "));
+	const runId = existing.runId ?? "unknown";
+	return `checkout_writer_conflict: ${incoming.agentId} would write ${checkout} while run ${runId} (${existing.agentId}, started by an earlier dispatch call) is still live there; its write roots are ${roots(existing.roots)}, this request's are ${roots(incoming.roots)}. Wait for it with monitor(mode="wait", run_id="${runId}"), declare disjoint intent.write_roots on both dispatches, or use worktree: true.`;
+}
+
+/**
+ * Take the checkout's writer lease. A request without a holder, such as a
+ * read-only run, writes nothing, so it neither refuses another writer nor is
+ * refused. Overlap refuses and never queues: a detached writer refuses
+ * timeout_ms, so a foreground writer serialized behind it could wait without limit.
+ */
 export function acquireCheckoutWriterLease(input: {
 	checkout: string;
+	holder?: CheckoutWriterHolder;
 	nowMs?: number;
 	pid?: number;
 	processBirthToken?: string;
@@ -108,16 +150,28 @@ export function acquireCheckoutWriterLease(input: {
 }): CheckoutWriterLease {
 	const checkout = canonicalCheckout(input.checkout);
 	const path = checkoutWriterLeasePath(checkout);
+	const holder = input.holder === undefined ? undefined : { ...input.holder };
+	const bindRun = (runId: string): void => {
+		if (holder !== undefined) holder.runId = runId;
+	};
 	const local = held.get(checkout);
 	if (local !== undefined && (input.pid === undefined || input.pid === process.pid)) {
+		if (holder !== undefined) {
+			for (const existing of local.holders) {
+				if (holdersConflict(existing, holder)) throw new Error(writerConflictMessage(checkout, existing, holder));
+			}
+			local.holders.add(holder);
+		}
 		local.count += 1;
 		let released = false;
 		return {
 			checkout,
 			path,
+			bindRun,
 			release: () => {
 				if (released) return;
 				released = true;
+				if (holder !== undefined) local.holders.delete(holder);
 				releaseCheckoutWriterLease(checkout);
 			},
 		};
@@ -140,17 +194,23 @@ export function acquireCheckoutWriterLease(input: {
 		};
 		atomicWrite(path, JSON.stringify(record, null, 2));
 	});
-	if (ownerPid === process.pid) {
-		held.set(checkout, { count: 1, path });
+	const entry =
+		ownerPid === process.pid
+			? { count: 1, path, holders: new Set<CheckoutWriterHolder>(holder === undefined ? [] : [holder]) }
+			: undefined;
+	if (entry !== undefined) {
+		held.set(checkout, entry);
 		installExitHooks();
 	}
 	let released = false;
 	return {
 		checkout,
 		path,
+		bindRun,
 		release: () => {
 			if (released) return;
 			released = true;
+			if (holder !== undefined) entry?.holders.delete(holder);
 			if (ownerPid === process.pid) releaseCheckoutWriterLease(checkout);
 			else releaseLeaseRecord(path, checkout, ownerPid, token);
 		},

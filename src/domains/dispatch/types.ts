@@ -16,7 +16,7 @@ import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
-import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
+import type { CostProvenance, RuntimeEnforcement, RuntimeTargetSnapshot } from "../providers/index.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
@@ -119,14 +119,14 @@ export interface RunLineage {
  * Provenance for a pipeline step whose worker received the previous step's
  * final output as threaded dynamic input. Absent on step 1 and on every
  * non-pipeline run. `inputBytes` is the UTF-8 byte length of the upstream
- * text before the 12000-char cap; `inputTruncated` records whether the cap
+ * text before the 12000-byte cap; `inputTruncated` records whether the cap
  * clipped it. Follows the optional-field pattern of `lineage`/`identity`.
  */
 export interface RunPipelineProvenance {
 	fromRunId: string | null; // run whose output was threaded in; null when unknown
 	position: number; // 1-based index of this step in the chain
 	inputBytes: number; // UTF-8 byte length of the upstream text before capping
-	inputTruncated: boolean; // true when the 12000-char cap clipped the input
+	inputTruncated: boolean; // true when the 12000-byte cap clipped the input
 }
 
 /** Integrity-covered proof of the exact bounded briefing content sent to a worker. */
@@ -736,7 +736,10 @@ export interface RunReceiptSafetySummary {
 	};
 	/** Worker runtime limitations. Worker receipts always carry it; main-agent receipts omit it. */
 	runtimeLimitations?: ReadonlyArray<string>;
-	/** The immutable permit a native, SDK or subprocess worker ran under. Main-agent and ACP receipts omit it. */
+	/**
+	 * The immutable permit a native, SDK or subprocess worker ran under. An ACP
+	 * receipt carries a record-only one; main-agent receipts omit it.
+	 */
 	permit?: {
 		version: number;
 		digest: string;
@@ -747,6 +750,25 @@ export interface RunReceiptSafetySummary {
 		executeAutonomy?: "yolo";
 		/** The operator's trustedUnmediated opt-in let an unmediated runtime take write-capable work. */
 		trustedUnmediated?: true;
+		/**
+		 * The permit's hard ceiling. Absent on receipts sealed before it was
+		 * recorded, so those still digest exactly as they did.
+		 */
+		ceiling?: {
+			tools: ReadonlyArray<string>;
+			readOnly: boolean;
+			writeRoots: ReadonlyArray<string>;
+			enforcement: RuntimeEnforcement;
+		};
+		/**
+		 * Present only on ACP delegation receipts. The peer runs its own tools and
+		 * Clio answers only the permission requests it sends, so this permit
+		 * records the intended ceiling and Clio enforced none of it.
+		 */
+		recordOnly?: {
+			mediation: "peer-asks-only";
+			toolGovernance: "clio-coder-policy" | "agent-managed" | "deny-all";
+		};
 	};
 	/**
 	 * Effective OS sandbox for the worker's own commands. Present only on
