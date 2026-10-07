@@ -86,7 +86,25 @@ export function createSystemOneRequestAdmission(deps: {
 			throw new LlmAdmissionRefused(error instanceof Error ? error.message : String(error), { cause: error });
 		}
 		return (usage) => {
-			if (usage === null) return;
+			if (usage === null) {
+				appendOutOfTurnUsageRow(deps.stateDir, {
+					label: "system-one",
+					repoIdentity,
+					timestamp: new Date().toISOString(),
+					target: targetId,
+					attributedModelId: model,
+					usage: {
+						input: null,
+						output: null,
+						cacheRead: null,
+						cacheWrite: null,
+						reasoning: null,
+						totalTokens: null,
+						costUsd: null,
+					},
+				});
+				return;
+			}
 			const cacheRead = usage.cacheRead ?? 0;
 			const cacheWrite = usage.cacheWrite ?? 0;
 			const reasoning = usage.reasoning ?? 0;

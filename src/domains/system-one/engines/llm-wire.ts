@@ -249,6 +249,9 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			body: JSON.stringify(body),
 			signal,
 			readErrorBody: true,
+		}).catch((error: unknown) => {
+			recordUsage?.(null);
+			throw error;
 		});
 		recordUsage?.(response.data ? (usageOf(response.data) ?? null) : null);
 		if (!response.ok || !response.data) {

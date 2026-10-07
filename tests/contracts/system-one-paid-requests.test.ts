@@ -155,12 +155,16 @@ describe("System One paid requests: admission and accounting", () => {
 		// The rejected request reported no usage; every answered one is charged.
 		strictEqual(charges.length, 5);
 		for (const charge of charges) assertCharged(charge);
-		strictEqual(rows().length, 5, "each charge also lands in the out-of-turn usage store");
+		strictEqual(rows().length, 6, "the rejected request remains visible with unknown usage");
+		const missing = (rows() as string[])
+			.map((row) => JSON.parse(row) as { usage: { totalTokens: number | null; costUsd: number | null } })
+			.find((row) => row.usage.totalTokens === null);
+		strictEqual(missing?.usage.costUsd, null);
 	});
 
 	it("admits each one-shot attempt, the schema retry included, and charges the answer's usage", async () => {
 		const target = paidTarget("llamacpp", "http://one-shot.test");
-		const { admit, charges, admitted } = ledger(target);
+		const { admit, charges, admitted, rows } = ledger(target);
 		const bodies = fakeFetch(async (body) =>
 			body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
@@ -193,6 +197,7 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(admitted(), 2, "both attempts were admitted");
 		strictEqual(charges.length, 1);
 		assertCharged(charges[0]);
+		strictEqual(rows().length, 2, "the schema-free retry keeps the first attempt's missing usage visible");
 	});
 });
 
