@@ -1,9 +1,19 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { acquireCheckoutWriterLease } from "../../src/domains/dispatch/checkout-writer-lease.js";
 import {
 	claimCompeteGroup,
 	cleanupCompeteGroup,
@@ -70,6 +80,7 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 		strictEqual(prepare([writer(["src/"]), writer(["docs/"])]), undefined);
 		strictEqual(prepare([writer(), { agent: "scout", task: "Inspect sources" }]), undefined);
 		strictEqual(prepare([writer(), writer()], { writers: 1 }), undefined);
+		match(String(prepare([writer(), writer()], { writers: 1, detach: true })), /cannot combine with detach: true/);
 		strictEqual(
 			prepare([
 				{ ...writer(), worktree: true },
@@ -82,6 +93,37 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 		match(String(prepare([writer(["src/"]), writer(["alias/new/"])])), /parallel_writer_conflict/);
 	} finally {
 		process.chdir(previous);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("the writer lease refuses an overlapping writer from another dispatch call until the live one releases", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
+	const src = join(root, "src");
+	const holder = (group: string, roots: string[] | null, isolated = false) => ({
+		group,
+		roots,
+		isolated,
+		agentId: "coder",
+	});
+	try {
+		const detached = acquireCheckoutWriterLease({ checkout: root, holder: holder("call-1", [src]) });
+		detached.bindRun("run-detached");
+		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", [join(root, "docs")]) }).release();
+		throws(
+			() => acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", [join(src, "nested")]) }),
+			(error: unknown) =>
+				error instanceof Error &&
+				error.message ===
+					`checkout_writer_conflict: coder would write ${root} while run run-detached (coder, started by an earlier dispatch call) is still live there; its write roots are ${src}, this request's are ${join(src, "nested")}. Wait for it with monitor(mode="wait", run_id="run-detached"), declare disjoint intent.write_roots on both dispatches, or use worktree: true.`,
+		);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null) }), /are undeclared\./u);
+		// Siblings and retries of one call, worktree runs, and holderless read-only runs pass.
+		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-1", null) }).release();
+		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null, true) }).release();
+		acquireCheckoutWriterLease({ checkout: root }).release();
+		detached.release();
+		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null) }).release();
+	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });

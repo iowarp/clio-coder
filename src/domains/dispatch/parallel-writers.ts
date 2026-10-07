@@ -3,6 +3,22 @@ import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import type { AgentSpec } from "../agents/spec.js";
 import type { DispatchRequest } from "./contract.js";
 
+/** A request's declared write roots, canonical and resolved against its cwd; empty when it declared none. */
+export function canonicalWriteRoots(request: Pick<DispatchRequest, "cwd" | "writeRoots" | "intent">): string[] {
+	return (request.writeRoots ?? request.intent?.writeRoots ?? []).map((root) =>
+		canonicalizeExistingPath(resolve(request.cwd ?? process.cwd(), root)),
+	);
+}
+
+/** True when a root on one side contains, or is contained by, a root on the other. */
+export function writeRootsOverlap(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+	const contains = (parent: string, child: string) => {
+		const rel = relative(parent, child);
+		return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+	};
+	return left.some((a) => right.some((b) => contains(a, b) || contains(b, a)));
+}
+
 /** Ad-hoc roots are enforced by worker admission, independently of fleet diff windows. */
 export function parallelWriterConflict(
 	requests: ReadonlyArray<DispatchRequest>,
@@ -12,20 +28,12 @@ export function parallelWriterConflict(
 	const writers = requests.filter(
 		(request) => request.worktree !== true && request.readOnly !== true && classes.get(request.agentId) !== "read-only",
 	);
-	const roots = writers.map((request) =>
-		(request.writeRoots ?? request.intent?.writeRoots ?? []).map((root) =>
-			canonicalizeExistingPath(resolve(request.cwd ?? process.cwd(), root)),
-		),
-	);
-	const contains = (parent: string, child: string) => {
-		const rel = relative(parent, child);
-		return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
-	};
+	const roots = writers.map(canonicalWriteRoots);
 	for (let i = 0; i < writers.length; i++)
 		for (let j = i + 1; j < writers.length; j++) {
 			const left = roots[i] ?? [],
 				right = roots[j] ?? [];
-			if (!left.length || !right.length || left.some((a) => right.some((b) => contains(a, b) || contains(b, a)))) {
+			if (!left.length || !right.length || writeRootsOverlap(left, right)) {
 				return `parallel_writer_conflict: ${writers[i]?.agentId} and ${writers[j]?.agentId} have overlapping or undeclared write roots. For inspection, choose read-only recipes from dispatch(list: true). For authorized writes, use worktree: true, declare disjoint intent.write_roots, or serialize writers with writers: 1.`;
 			}
 		}

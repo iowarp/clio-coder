@@ -320,6 +320,7 @@ import {
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
+import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
 	declaredScopeReplacementDiagnostic,
@@ -3335,7 +3336,8 @@ export function createDispatchBundle(
 		// attended card has no deadline. Release it so a lone dispatch is not
 		// queued behind a slot nothing uses. Not when a sibling is queued or still
 		// active: releasing is what would admit it into this checkout while the
-		// operator's Merge lands (the writer lease is shared within a process, so it
+		// operator's Merge lands (the writer lease refuses only an overlapping
+		// writer from another dispatch call, never one beside a worktree run, so it
 		// would not stop it), and a batch's members share one checkout. They keep
 		// today's order, with the slot held until the card settles. The later settle
 		// releases by the same assignment id and finds nothing left when released.
@@ -8355,6 +8357,11 @@ export function createDispatchBundle(
 			// Validate before creating worktrees or acquiring writer/capacity leases.
 			previewFixed(req);
 		}
+		// A retry joins its first attempt's writer group through lineage.rootRunId,
+		// which is the first attempt's run id, so a top-level run takes that id
+		// before the writer lease. dispatchAttempt would otherwise assign it later.
+		if (req.lineage === undefined && req.runIdHint === undefined && req.worktree !== true)
+			req = { ...req, runIdHint: newRunId() };
 		let prepared =
 			preparation?.deadlineAt === undefined
 				? req
@@ -8367,7 +8374,35 @@ export function createDispatchBundle(
 		const writerRecipe = agents.get(req.agentId);
 		if (writerRecipe !== null && normalizeAgentSpec(writerRecipe).capabilityClass === "workspace-edit") {
 			const checkout = req.taskWorktree?.root ?? gitCheckoutRoot(req.cwd ?? process.cwd());
-			if (checkout !== null) writerLease = acquireCheckoutWriterLease({ checkout });
+			if (checkout !== null) {
+				const roots = canonicalWriteRoots(req);
+				const runId = req.runIdHint ?? req.lineage?.rootRunId;
+				try {
+					writerLease = acquireCheckoutWriterLease({
+						checkout,
+						// A read-only run writes nothing, so it carries no holder.
+						...(req.readOnly === true
+							? {}
+							: {
+									holder: {
+										// One dispatch call's requests, and their retries, share a group.
+										group: req.parentToolCallId ?? req.lineage?.rootRunId ?? req.runIdHint ?? newRunId(),
+										roots: roots.length > 0 ? roots : null,
+										isolated: req.worktree === true || req.taskWorktree !== undefined,
+										agentId: req.agentId,
+										...(runId !== undefined ? { runId } : {}),
+									},
+								}),
+					});
+				} catch (error) {
+					// A refused writer never reaches the attempt below, whose failure
+					// path returns the plan's reservation, so return it here.
+					if (req.reservation !== undefined && req.lineage === undefined) {
+						rollbackDispatchReservation(req.reservation.ownerId, now());
+					}
+					throw error;
+				}
+			}
 		}
 		if (req.worktree === true && req.taskWorktree === undefined) {
 			const requestedCwd = resolvePath(req.cwd ?? process.cwd());
@@ -8446,6 +8481,7 @@ export function createDispatchBundle(
 		try {
 			preparation?.signal?.throwIfAborted();
 			handle = await dispatchAttempt(prepared, observer, preparation, settlement);
+			writerLease?.bindRun(handle.runId);
 		} catch (error) {
 			writerLease?.release();
 			if (createdWorktree !== undefined) {
