@@ -196,7 +196,7 @@ import {
 	routeValidationProjection,
 } from "./active-route-planner.js";
 import { admit, createCapacityAdmissionController, createLeaseSlotGuard } from "./admission.js";
-import { AdmissionCanceledError } from "./admission-error.js";
+import { AdmissionCanceledError, AdmissionTimedOutError } from "./admission-error.js";
 import { agentRouteCandidates } from "./agent-candidates.js";
 import type { LedgerAssignment } from "./agent-ledger.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, projectLedgerAssignments, renderAgentLedger } from "./agent-ledger.js";
@@ -3737,7 +3737,7 @@ export function createDispatchBundle(
 		const outcome: RunOutcome =
 			error instanceof AdmissionCanceledError
 				? "canceled"
-				: /admission timed out/u.test(detail)
+				: error instanceof AdmissionTimedOutError
 					? "timed_out"
 					: "denied_by_policy";
 		context.bus.emit(BusChannels.DispatchFailed, {
@@ -3798,7 +3798,11 @@ export function createDispatchBundle(
 			return admitted.lease;
 		} catch (error) {
 			if (req.lineage === undefined) {
-				if (error instanceof Error && /timed_out/.test(error.message)) await timeoutStoredAssignment(assignmentId);
+				// Typed errors, not message text: no admission message ever contained
+				// "timed_out", so a timed-out wait used to be stored as failed.
+				if (error instanceof AdmissionTimedOutError) await timeoutStoredAssignment(assignmentId);
+				else if (error instanceof AdmissionCanceledError || signal?.aborted === true)
+					await cancelStoredAssignment(assignmentId);
 				else await failQueuedAssignment(assignmentId);
 			}
 			throw error;
@@ -5283,6 +5287,7 @@ export function createDispatchBundle(
 		observer?: DispatchAdmissionObserver,
 		callerDeadlineAt?: number,
 		hostRun?: DispatchPreparationOptions["hostRun"],
+		signal?: AbortSignal,
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -5325,7 +5330,9 @@ export function createDispatchBundle(
 		if (queuedIdentity !== null) publishCapacityQueued(queuedIdentity, timing, null);
 		let capacityLease: Awaited<ReturnType<typeof admitAssignmentCapacity>>;
 		try {
-			capacityLease = await admitAssignmentCapacity(req, "local", timing, null);
+			// The tool's abort signal reaches the queue, so a delegation waiting for
+			// a slot can be canceled like a native one.
+			capacityLease = await admitAssignmentCapacity(req, "local", timing, null, signal);
 		} catch (error) {
 			if (queuedIdentity !== null) publishCapacityAdmissionFailure(queuedIdentity, error);
 			throw error;
@@ -6264,6 +6271,7 @@ export function createDispatchBundle(
 				observer,
 				preparation?.deadlineAt,
 				hostRun,
+				preparation?.signal,
 			);
 			// An ACP member never runs host verification, so it can only ever leave
 			// the barrier. It still edits the checkout, so the barrier has to wait

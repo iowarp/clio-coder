@@ -652,15 +652,13 @@ function attributeFailure(input: {
  * Membership is what is LIVE, never what was requested. A run still queued for
  * capacity holds no lease and cannot write, and waiting on it would deadlock
  * every batch larger than `fleet.concurrency`: parked members keep their lease
- * until dispatch finalization ends (`extension.ts:5720`), so the queued member's
- * `admit` would time out (`admission.ts:244-291`) and take the whole batch down
- * with it. Live-only membership still costs a queued member the difference
- * between the first live member finishing and the last, charged against the same
- * 60 s admission deadline (`extension.ts:2669`). That wait is not free: a batch
- * whose first member finishes inside the deadline and whose last does not now
- * expires the queued member's `admit`, and `dispatchBatch` aborts every already
- * dispatched run when one member's admission throws (`extension.ts:6197-6205`).
- * Releasing the lease before parking would let a fresh writer into the checkout
+ * until dispatch finalization ends, so the queued member's `admit` would never be
+ * granted and the batch would hang. Live-only membership still costs a queued
+ * member the difference between the first live member finishing and the last.
+ * Admission waits are advisory (c7670370e), so that wait has no deadline of its
+ * own. Only a caller deadline, such as the dispatch call's `timeout_ms`, can
+ * expire the queued member's `admit`, and `dispatchBatch` aborts every already
+ * dispatched run when one member's admission throws. Releasing the lease before parking would let a fresh writer into the checkout
  * the settlement is about to judge, which is the defect itself, so the wait
  * stands until the lease lifecycle is restructured.
  *

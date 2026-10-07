@@ -7,3 +7,17 @@ export class AdmissionCanceledError extends Error {
 		this.name = "AdmissionCanceledError";
 	}
 }
+
+/**
+ * A queued assignment's caller deadline passed before it acquired capacity,
+ * including a deadline that had already passed when it reached the queue.
+ * Waits without a caller deadline are advisory and never end this way.
+ */
+export class AdmissionTimedOutError extends Error {
+	readonly code = "admission_timed_out" as const;
+
+	constructor(message: string) {
+		super(message);
+		this.name = "AdmissionTimedOutError";
+	}
+}
