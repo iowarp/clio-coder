@@ -1,5 +1,5 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { codemapPath, readCodewiki, wikiDir } from "../context/index.js";
@@ -690,8 +690,10 @@ export interface RecordingSource {
 /** A cast is timed terminal output; no image/video understanding is implied. */
 export function extractRecording(source: RecordingSource, options: ExtractionOptions = {}): ExtractionResult {
 	const limits = limitsFor(options);
-	const root = realpathSync(source.root);
-	const path = resolve(source.path);
+	const lexicalRoot = resolve(source.root);
+	const root = realpathSync(lexicalRoot);
+	// allowed() compares canonical paths, so a symlinked data directory must not reject every cast.
+	const path = join(root, relative(lexicalRoot, resolve(source.path)));
 	if (
 		source.redacted !== true ||
 		!source.projectId ||
@@ -709,7 +711,8 @@ export function extractRecording(source: RecordingSource, options: ExtractionOpt
 	let previous = -1;
 	let truncated = false;
 	const base = {
-		sourceId: `recording:${source.runId}`,
+		// A run's cast is exported into both its run bundle and its session bundle.
+		sourceId: `recording:${basename(root)}:${source.runId}`,
 		kind: "recording" as const,
 		projectId: source.projectId,
 		scope: "project" as const,

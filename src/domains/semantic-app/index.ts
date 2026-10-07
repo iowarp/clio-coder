@@ -375,13 +375,17 @@ export async function searchSemantic(
 	const policy = createSafetyPolicyEngine({ cwd: app.projectId });
 	const records = loadMemoryRecordsSync(clioDataDir());
 	const evidenceRoot = join(clioDataDir(), "evidence");
-	const inboxRoots = registeredInboxes(app.config, app.projectId).flatMap((inbox) => {
+	const realRoot = (root: string) => {
 		try {
-			return [realpathSync(inbox.root)];
+			return [realpathSync(root)];
 		} catch {
+			// A missing root admits nothing; its records are dropped at the next refresh.
 			return [];
 		}
-	});
+	};
+	// Recording paths are canonical, evidence surface paths are not; a symlinked data directory needs both.
+	const evidenceRoots = [evidenceRoot, ...realRoot(evidenceRoot)];
+	const inboxRoots = registeredInboxes(app.config, app.projectId).flatMap((inbox) => realRoot(inbox.root));
 	const eligibleMemories = eligibleSemanticMemory(records, {
 		activeRepository: canonicalMemoryRepositoryIdentity(app.projectId),
 	});
@@ -401,7 +405,7 @@ export async function searchSemantic(
 				if (record.kind === "memory") return record.contentHash === eligibleMemoryHashes.get(record.memoryId ?? "");
 				const roots =
 					record.kind === "evidence" || record.kind === "recording"
-						? [evidenceRoot]
+						? evidenceRoots
 						: record.kind === "inbox"
 							? inboxRoots
 							: [app.projectId];
