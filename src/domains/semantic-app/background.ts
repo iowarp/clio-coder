@@ -34,12 +34,14 @@ export function createSemanticBackgroundRefresh(getSettings: () => Readonly<Clio
 			.finally(() => {
 				active = null;
 				controller = null;
-				if (pendingRoot && !stopped) schedule(pendingRoot);
+				start();
 			});
 	};
 	const schedule = (projectRoot: string): void => {
 		if (stopped || !enabledSettings()) return;
 		pendingRoot = projectRoot;
+		// Commits during a run coalesce into the one follow-up its settlement starts.
+		if (active) return;
 		if (timer) clearTimeout(timer);
 		timer = setTimeout(() => {
 			timer = null;
