@@ -109,7 +109,7 @@ test("BT-006 Clio-owned Anthropic credentials stay usable in a relocated home", 
 			JSON.stringify({
 				version: 2,
 				entries: {
-					anthropic: {
+					"anthropic-max": {
 						type: "oauth",
 						access: "scratch",
 						refresh: "scratch",

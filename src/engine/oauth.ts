@@ -117,7 +117,7 @@ let providers: Map<string, EngineOAuthProvider> | null = null;
 
 function builtinProviders(): EngineOAuthProvider[] {
 	return [
-		fromOAuthAuth("anthropic", anthropicProvider().auth.oauth, true),
+		fromOAuthAuth("anthropic-max", anthropicProvider().auth.oauth, true),
 		fromOAuthAuth("openai-codex", openaiCodexProvider().auth.oauth, true),
 		fromOAuthAuth("github-copilot", githubCopilotProvider().auth.oauth, false),
 	];

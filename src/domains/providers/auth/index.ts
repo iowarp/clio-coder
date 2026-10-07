@@ -7,6 +7,7 @@ export function openAuthStorage(path?: string): AuthStorage {
 
 export { authStoragePath, FileAuthStorageBackend } from "./backend-file.js";
 export { InMemoryAuthStorageBackend } from "./backend-memory.js";
+export { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "./claude-subscription.js";
 export type {
 	ApiKeyCredential,
 	AuthCredential,

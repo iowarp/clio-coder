@@ -32,6 +32,9 @@ writeFileSync(join(process.cwd(), "observed.json"), JSON.stringify({
   args: process.argv.slice(2), stdin,
   env: { HOME: process.env.HOME, PATH: process.env.PATH, AI_AGENT: process.env.AI_AGENT,
     FAKE_API_SECRET: process.env.FAKE_API_SECRET,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+    CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     }
 }));
 if (scenario.stderr) process.stderr.write(scenario.stderr);
@@ -118,6 +121,34 @@ const RESULT = {
 };
 
 describe("Claude Code external subprocess contract", () => {
+	for (const shared of [false, true]) {
+		it(`keeps the external Claude configuration with ${shared ? "Clio subscription" : "external profile"} authentication`, async () => {
+			const { root, binary, home } = scratch();
+			writeScenario(root, { lines: [SYSTEM, RESULT] });
+			const result = await startClaudeCodeWorkerRun(
+				workerInput(root, shared ? { apiKey: "sk-ant-oat01-clio" } : {}),
+				() => {},
+				{
+					binary,
+					workspaceRoot: root,
+					environment: {
+						PATH: process.env.PATH,
+						HOME: home,
+						CLAUDE_CONFIG_DIR: join(root, "selected-profile"),
+						ANTHROPIC_API_KEY: "external-key",
+					},
+				},
+			).promise;
+			equal(result.exitCode, 0);
+			const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8"));
+			equal(observed.env.CLAUDE_CONFIG_DIR, join(root, "selected-profile"));
+			equal(observed.env.CLAUDE_CODE_OAUTH_TOKEN, shared ? "sk-ant-oat01-clio" : undefined);
+			equal(observed.env.ANTHROPIC_API_KEY, shared ? undefined : "external-key");
+			ok(!observed.args.includes("--setting-sources"));
+			ok(!observed.args.includes("--strict-mcp-config"));
+		});
+	}
+
 	it("sends the prompt on stdin, keeps it out of argv, and passes only allowlisted environment values", async () => {
 		const { root, binary, home } = scratch();
 		writeScenario(root, { lines: [SYSTEM, DELTA, { ...DELTA, delta: { type: "text_delta", text: "world" } }, RESULT] });

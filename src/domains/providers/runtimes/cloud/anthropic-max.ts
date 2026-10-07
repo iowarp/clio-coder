@@ -33,10 +33,9 @@ const defaultCapabilities: CapabilityFlags = {
  * the Claude Code identity. Clio only has to register the runtime and route the
  * credential.
  *
- * The registry id is `anthropic-max` because the pi-ai OAuth provider id is
- * `anthropic`, which already names the api-key Anthropic runtime. `oauthProviderId`
- * bridges this runtime back to that provider so login/refresh/storage all key on
- * `anthropic`, leaving the api-key path untouched.
+ * Clio registers this OAuth flow as `anthropic-max`. Pi's HTTP provider remains
+ * `anthropic`, but the subscription credential must never share the API-key
+ * runtime's storage slot.
  *
  * It has no live model listing. Its models are pi-ai's Anthropic catalog, and
  * every surface labels them as the catalog rather than as a provider answer.
@@ -48,7 +47,6 @@ const anthropicMaxRuntime: RuntimeDescriptor = {
 	tier: "cloud",
 	apiFamily: "anthropic-messages",
 	auth: "oauth",
-	oauthProviderId: "anthropic",
 	authNotice:
 		"Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). " +
 		"Using subscription credentials outside Anthropic's first-party apps may not align with their " +

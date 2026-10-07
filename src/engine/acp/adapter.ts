@@ -1,12 +1,15 @@
 import { performance } from "node:perf_hooks";
+import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import {
 	DEFAULT_DELEGATION_CONNECT_TIMEOUT_MS,
 	DEFAULT_DELEGATION_TURN_TIMEOUT_MS,
 	type DelegationAgentConfig,
 } from "../../core/defaults.js";
 import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
+import { isBuiltinClaudeAcp } from "../../domains/providers/auth/index.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
+import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import { withInstalledCodex } from "./codex-launch.js";
@@ -28,6 +31,9 @@ export const DEFAULT_CANCEL_GRACE_MS = 1_000;
 
 export interface AcpDelegationRunInput {
 	agent: DelegationAgentConfig;
+	/** Resolved launch secrets are separate from the persisted agent recipe. */
+	environment?: Record<string, string>;
+	credentialExpiresAt?: number;
 	task: string;
 	/** Explicit peer model requested for this run. */
 	model?: string;
@@ -296,23 +302,31 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	const usage = emptyUsage();
 	const mapper = new AcpEventMapper();
 	const transportOptions: StdioTransportOptions = { cwd: input.agent.cwd ?? input.cwd };
+	if (input.environment) transportOptions.env = input.environment;
 	if (input.agent.env !== undefined) {
 		// The safe child environment omits provider credentials. An explicitly
 		// configured reference passes only the named value to this ACP peer,
 		// while settings and receipts retain the reference rather than the key.
-		transportOptions.env = Object.fromEntries(
-			Object.entries(input.agent.env).map(([name, value]) => {
-				const reference = /^\{env:([A-Z_][A-Z0-9_]*)\}$/u.exec(value);
-				if (reference === null) return [name, value];
-				const sourceName = reference[1];
-				const resolved = sourceName === undefined ? undefined : process.env[sourceName];
-				if (resolved === undefined || resolved.length === 0)
-					throw new Error(`ACP agent environment reference '${sourceName}' is unavailable`);
-				return [name, resolved];
-			}),
-		);
+		transportOptions.env = {
+			...transportOptions.env,
+			...Object.fromEntries(
+				Object.entries(input.agent.env).map(([name, value]) => {
+					const reference = /^\{env:([A-Z_][A-Z0-9_]*)\}$/u.exec(value);
+					if (reference === null) return [name, value];
+					const sourceName = reference[1];
+					const resolved = sourceName === undefined ? undefined : process.env[sourceName];
+					if (resolved === undefined || resolved.length === 0)
+						throw new Error(`ACP agent environment reference '${sourceName}' is unavailable`);
+					return [name, resolved];
+				}),
+			),
+		};
 	}
 	transportOptions.env = withInstalledCodex(input.agent, transportOptions.cwd ?? input.cwd, transportOptions.env);
+	if (isBuiltinClaudeAcp(input.agent) && !input.agent.env?.PATH && !transportOptions.env?.CLAUDE_CODE_EXECUTABLE) {
+		const installed = findExecutableOnPath("claude");
+		if (installed) transportOptions.env = { ...transportOptions.env, CLAUDE_CODE_EXECUTABLE: installed };
+	}
 	if (input.terminationGraceMs !== undefined) transportOptions.terminationGraceMs = input.terminationGraceMs;
 	if (input.terminationWaitMs !== undefined) transportOptions.terminationWaitMs = input.terminationWaitMs;
 	const transport = createStdioTransport(input.agent.command, input.agent.args ?? [], transportOptions);
@@ -323,6 +337,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	let cancelTimer: ReturnType<typeof setTimeout> | null = null;
 	let forceTermination: Promise<AcpForceTerminationResult> | null = null;
 	let unregisterAbortSignal = (): void => {};
+	let authFailure: string | null = null;
 	const beginForceTermination = (): Promise<AcpForceTerminationResult> => {
 		forceTermination ??= transport.forceTerminate();
 		return forceTermination;
@@ -388,6 +403,11 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		}
 	}
 
+	const stopExpiryWatch = watchCredentialExpiry(input.credentialExpiresAt, () => {
+		authFailure =
+			"Clio's Claude subscription access token expired. Start a new delegation to refresh it; this run was stopped without replaying its work.";
+		void beginForceTermination();
+	});
 	const promise = (async (): Promise<AcpDelegationResult> => {
 		let selectedModelId: string | null = null;
 		try {
@@ -509,6 +529,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				mergeUsage(usage, promptResponse?.tokenUsage);
 			}
 			const reportedFailure =
+				authFailure ??
 				mapper.reportedFailure() ??
 				(typeof promptResponse?.stopReason === "string" && promptResponse.stopReason.length > 0
 					? null
@@ -540,7 +561,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			};
 		} catch (err) {
 			const termination = await beginForceTermination();
-			const baseMessage = `ACP delegation failed: ${errorMessage(err)}`;
+			const baseMessage = `ACP delegation failed: ${authFailure ?? errorMessage(err)}`;
 			const message = termination.exited
 				? baseMessage
 				: `${baseMessage}; ACP ${termination.scope} exit was not observed within the force-termination bound`;
@@ -563,6 +584,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 			};
 		} finally {
+			stopExpiryWatch();
 			unregisterAbortSignal();
 			for (const unregister of unregisters) unregister();
 			clearCancelTimer();

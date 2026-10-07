@@ -1,3 +1,4 @@
+import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -7,6 +8,7 @@ import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
+import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
 	compileWorkerFlowPolicy,
@@ -1799,6 +1801,8 @@ interface DispatchWorkerSpecInput {
 	toolSignature: string;
 	dynamicHash: string | null;
 	apiKey: string | undefined;
+	authProfile?: string;
+	credentialExpiresAt?: number;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
 	protectedArtifactState?: ProtectedArtifactState;
 	readOnly: boolean;
@@ -1830,6 +1834,8 @@ interface DispatchLifecycleStage {
 	promptSignature: string | null;
 	toolSignature: string;
 	apiKey: string | undefined;
+	authProfile?: string;
+	credentialExpiresAt?: number;
 	runtimeKind: RunKind;
 	agentAudience: AgentAudience;
 	capabilityClass: AgentCapabilityClass;
@@ -2761,6 +2767,8 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		if (protectedModels.length > 0) spec.protectedModels = protectedModels;
 	}
 	if (input.apiKey) spec.apiKey = input.apiKey;
+	if (input.authProfile) spec.authProfile = input.authProfile;
+	if (input.credentialExpiresAt !== undefined) spec.credentialExpiresAt = input.credentialExpiresAt;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
 	if (input.req.turnConstraints !== undefined) spec.turnConstraints = workerTurnConstraints(input.req.turnConstraints);
 	const skillPaths = [...(input.req.skillPaths ?? []), ...(input.recipe?.boundSkillPaths ?? [])];
@@ -5073,12 +5081,22 @@ export function createDispatchBundle(
 		const auth = targetRequiresAuth(target.target, target.runtime)
 			? await providers.auth.resolveForTarget(target.target, target.runtime)
 			: null;
+		const claudeCredential =
+			target.runtime.auth === "claude-cli"
+				? await resolveClaudeLaunchCredential(target.target.auth, process.env, signal ? { signal } : {})
+				: null;
 		// pi-ai's openai-completions provider refuses to stream without an apiKey
 		// even when the target is a local server that ignores Authorization headers.
 		// Match chat-loop's LOCAL_API_KEY_FALLBACK so dispatch-spawned workers can
 		// reach openai-compat local endpoints (LM Studio, llama.cpp) without
 		// requiring the user to invent a credential.
-		const apiKey = auth?.apiKey ?? (auth === null ? "clio-coder-local-target" : undefined);
+		const apiKey =
+			claudeCredential?.apiKey ??
+			auth?.apiKey ??
+			(auth === null && target.runtime.kind === "http" ? "clio-coder-local-target" : undefined);
+		const authProfile =
+			(claudeCredential && !claudeCredential.profile.startsWith("env:") ? claudeCredential.profile : undefined) ??
+			(auth?.credentialType === "oauth" && auth.source === "stored-oauth" ? auth.providerId : undefined);
 		const runtimeKind: RunKind = target.runtime.kind;
 		const limitations = runtimeLimitations(runtimeKind, target.runtime.id);
 		return {
@@ -5096,6 +5114,8 @@ export function createDispatchBundle(
 			promptSignature: compiledPromptHash,
 			toolSignature: currentToolSignature,
 			apiKey,
+			...(authProfile ? { authProfile } : {}),
+			...(claudeCredential?.expiresAt !== undefined ? { credentialExpiresAt: claudeCredential.expiresAt } : {}),
 			runtimeKind,
 			agentAudience: spec.audience,
 			capabilityClass: spec.capabilityClass,
@@ -5296,8 +5316,18 @@ export function createDispatchBundle(
 		})();
 		let acp: AcpDelegationRunHandle;
 		try {
+			let environment: Record<string, string> | undefined;
+			let credentialExpiresAt: number | undefined;
+			if (isBuiltinClaudeAcp(lifecycle.agentConfig)) {
+				const selected = { ...claudeAuthEnvironment(), ...lifecycle.agentConfig.env };
+				const credential = await resolveClaudeLaunchCredential(undefined, selected);
+				environment = withClaudeCredential(selected, credential?.apiKey) as Record<string, string>;
+				credentialExpiresAt = credential?.expiresAt;
+			}
 			acp = startAcpRun({
 				agent: lifecycle.agentConfig,
+				...(environment ? { environment } : {}),
+				...(credentialExpiresAt !== undefined ? { credentialExpiresAt } : {}),
 				task: req.task,
 				...(req.model !== undefined ? { model: req.model } : {}),
 				...(req.thinkingLevel !== undefined ? { thinkingLevel: req.thinkingLevel } : {}),
@@ -6339,6 +6369,26 @@ export function createDispatchBundle(
 					"dispatch: fleet.permissions.mode=main routes worker asks to the main agent, but this placement launches through a remote transport, which cannot carry a bound grant yet; use fleet.permissions.mode escalate or deny for this work",
 				);
 			}
+			// Capacity admission may have waited. Resolve the subscription again at
+			// launch so a CLI peer never starts with the queued snapshot's old token.
+			const claudeLaunch = lifecycle.target.runtime.auth === "claude-cli";
+			const launchCredential = claudeLaunch
+				? await resolveClaudeLaunchCredential(
+						lifecycle.target.target.auth,
+						process.env,
+						preparation?.signal ? { signal: preparation.signal } : {},
+					)
+				: null;
+			if (claudeLaunch && lifecycle.authProfile && !launchCredential) {
+				throw new Error(
+					"Clio's Claude credential changed while this assignment was queued. Submit a new assignment with the intended account.",
+				);
+			}
+			const launchAuthProfile = claudeLaunch
+				? launchCredential && !launchCredential.profile.startsWith("env:")
+					? launchCredential.profile
+					: undefined
+				: lifecycle.authProfile;
 			spec = buildDispatchWorkerSpec(
 				{
 					req,
@@ -6355,7 +6405,11 @@ export function createDispatchBundle(
 					protectedArtifactState,
 					flowRestrictions: options?.getFlowRestrictions?.() ?? null,
 					...(options?.getFlowPolicy !== undefined ? { flowPolicy: options.getFlowPolicy() } : {}),
-					apiKey: lifecycle.apiKey,
+					apiKey: claudeLaunch ? launchCredential?.apiKey : lifecycle.apiKey,
+					...((placement === null || placement.node.kind === "local") && launchAuthProfile
+						? { authProfile: launchAuthProfile }
+						: {}),
+					...(launchCredential?.expiresAt !== undefined ? { credentialExpiresAt: launchCredential.expiresAt } : {}),
 					readOnly: lifecycle.readOnly,
 					budget: lifecycle.budget,
 					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),

@@ -1,7 +1,8 @@
 import type { ChildProcessByStdio } from "node:child_process";
 import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-
+import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
+import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
@@ -273,7 +274,7 @@ export function startClaudeCodeWorkerRun(
 	const cwd = resolveSafeCwd(input.cwd, workspaceRoot);
 	const child: ClaudeChildProcess = spawn(dependencies.binary ?? CLAUDE_BINARY, args, {
 		cwd,
-		env: buildSafeToolEnv({}, sourceEnv),
+		env: withClaudeCredential(buildSafeToolEnv(claudeAuthEnvironment(sourceEnv), sourceEnv), input.apiKey),
 		detached: process.platform !== "win32",
 		stdio: ["pipe", "pipe", "pipe"],
 	});
@@ -293,6 +294,11 @@ export function startClaudeCodeWorkerRun(
 		terminator.terminate();
 	};
 	const onAbort = (): void => abort();
+	const stopExpiryWatch = watchCredentialExpiry(input.credentialExpiresAt, () => {
+		transportError =
+			"Clio's Claude subscription access token expired. Start a new assignment to refresh it; this run was stopped without replaying its work.";
+		terminator.terminate();
+	});
 	if (input.signal?.aborted) abort();
 	else input.signal?.addEventListener("abort", onAbort, { once: true });
 	const onChildError = (cause: Error): void => {
@@ -348,6 +354,7 @@ export function startClaudeCodeWorkerRun(
 			return { messages, exitCode: finalMessage.stopReason === "stop" ? 0 : 1 };
 		} finally {
 			settled = true;
+			stopExpiryWatch();
 			terminator.cleanup();
 			input.signal?.removeEventListener("abort", onAbort);
 			child.off("error", onChildError);
