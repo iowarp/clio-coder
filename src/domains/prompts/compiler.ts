@@ -749,7 +749,7 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 		"Repository details not included above must be fetched, never invented; compact CLIO-CODER.md instructions may be preloaded.",
 		...(inputs.semanticSearchAvailable && sessionHasContext(inputs)
 			? [
-					"When a request connects unfamiliar code behavior, older memory or evidence, or scientific artifacts across media, try one bounded context(scope=semantic) query early. It returns candidate locations, not verified facts. Inspect the original source with read, code_nav, evidence, or an artifact reader before citing it or claiming how a result was produced. If the index is unavailable or misses, continue with the ordinary tools.",
+					`When a request connects unfamiliar code behavior, older memory or evidence, or scientific artifacts across media, try one bounded context(scope=semantic) query early${toolSurfaceHasTool(inputs.toolNames, "context") ? "" : ' through gateway(op="call", capability="context", args={scope:"semantic",query:"<query>"})'}. It returns candidate locations, not verified facts. Inspect the original source with read, code_nav, evidence, or an artifact reader before citing it or claiming how a result was produced. If the index is unavailable or misses, continue with the ordinary tools.`,
 				]
 			: []),
 	].join("\n");
