@@ -445,6 +445,23 @@ interface RunTokenMeter {
 	reasoningTokens: number;
 	/** Native calls are priced individually by the SDK, including cache TTLs and context tiers. */
 	costUsd?: number;
+	/** An external CLI reported no token counts, so a declared rate cannot price the run. */
+	tokenUsageMissing?: boolean;
+}
+
+/**
+ * Target-rate provenance holds only while the meter saw real token counts. A
+ * priced external CLI that reported none books $0, and calling that `known`
+ * would claim a free run.
+ */
+function meterCostProvenance(
+	meter: RunTokenMeter,
+	base: EffectivePricing["provenance"],
+	costUsd: number,
+): EffectivePricing["provenance"] {
+	if (base === "known_free") return base;
+	if (meter.tokenUsageMissing === true) return "unknown";
+	return base === "unknown" && costUsd > 0 ? "estimated" : base;
 }
 
 interface ActiveRun {
@@ -659,7 +676,11 @@ function accumulateNativeUsage(
 		cacheWriteTokens: count(usage.cacheWrite),
 		reasoningTokens: extractReasoningTokenCount(usage),
 	};
-	const reported = isRecord(usage.cost) ? usage.cost.total : undefined;
+	const external = isRecord(usage.clioExternal) ? usage.clioExternal : null;
+	// External CLIs such as Codex and agy fill cost with a placeholder zero and
+	// say so with cost: "missing"; that zero must not beat the target's rates.
+	const reported = isRecord(usage.cost) && external?.cost !== "missing" ? usage.cost.total : undefined;
+	if (external !== null && external.tokenUsage === "missing") meter.tokenUsageMissing = true;
 	// An SDK total is already priced with per-call tiers, service tier
 	// and cache-write lifetime. Never reprice it from an aggregate token count.
 	// Retain the target-rate fallback only for workers that omit calculated
@@ -4450,7 +4471,7 @@ export function createDispatchBundle(
 			const meter = run.meter;
 			const tokenCount = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
 			const costUsd = calculateUsageCostUsd(meter, run.pricing);
-			const costProvenance = run.costProvenance === "unknown" && costUsd > 0 ? "estimated" : run.costProvenance;
+			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
 			if (
 				row.tokenCount !== tokenCount ||
 				row.inputTokenCount !== meter.inputTokens ||
@@ -7398,9 +7419,7 @@ export function createDispatchBundle(
 				costProvenance:
 					externalTelemetry?.cost === "provider-reported"
 						? "known"
-						: lifecycle.target.effectivePricing.provenance === "unknown" && costUsd > 0
-							? "estimated"
-							: lifecycle.target.effectivePricing.provenance,
+						: meterCostProvenance(tokenMeter, lifecycle.target.effectivePricing.provenance, costUsd),
 				...(externalTelemetry ? { externalTelemetry } : {}),
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
@@ -9207,7 +9226,7 @@ export function createDispatchBundle(
 			const meter = run.meter;
 			const totalTokens = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
 			const costUsd = calculateUsageCostUsd(meter, run.pricing);
-			const costProvenance = run.costProvenance === "unknown" && costUsd > 0 ? "estimated" : run.costProvenance;
+			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
 			const startedMs = Date.parse(run.startedAt);
 			const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, tickNow - startedMs) : 0;
 			running.push({

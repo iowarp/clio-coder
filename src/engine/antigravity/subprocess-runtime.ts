@@ -160,19 +160,46 @@ function finite(value: unknown): number {
 
 function normalizeUsage(raw: unknown): Usage {
 	const source = (record(raw) ?? {}) as AntigravityUsage;
-	const input = finite(source.input_tokens);
-	const output = finite(source.output_tokens);
-	const cacheRead = finite(source.cache_read_tokens);
+	const prompt = finite(source.input_tokens);
+	const reportedOutput = finite(source.output_tokens);
+	const cacheRead = Math.min(prompt, finite(source.cache_read_tokens));
 	const reasoningTokens = finite(source.thinking_tokens);
+	const reportedTotal = finite(source.total_tokens);
+	// Dispatch prices each field at its own rate, so map agy's Gemini-style
+	// counts the way pi-ai's Google adapter does: cached tokens come out of the
+	// prompt, and thinking is billed as output. The reported total decides
+	// whether output_tokens already counts the thinking.
+	const thinkingSeparate = reportedTotal === 0 || reportedTotal >= prompt + reportedOutput + reasoningTokens;
+	const output = thinkingSeparate ? reportedOutput + reasoningTokens : reportedOutput;
 	const usage: Usage & { reasoningTokens?: number } = {
-		input,
+		input: prompt - cacheRead,
 		output,
 		cacheRead,
 		cacheWrite: 0,
-		totalTokens: finite(source.total_tokens) || input + output + reasoningTokens,
+		totalTokens: reportedTotal || prompt + output,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
 	if (reasoningTokens > 0) usage.reasoningTokens = reasoningTokens;
+	return usage;
+}
+
+/**
+ * agy reports tokens but never a price. The zero cost above is a placeholder:
+ * `cost: "missing"` tells dispatch to price the call from the target's
+ * declared rates instead of booking it as a known $0.
+ */
+function externalUsage(raw: unknown, conversationId: string | null): Usage {
+	const usage = normalizeUsage(raw) as Usage & { clioExternal?: Record<string, unknown> };
+	const source = record(raw);
+	usage.clioExternal = {
+		tokenUsage: [source?.input_tokens, source?.output_tokens].some(
+			(value) => typeof value === "number" && Number.isFinite(value),
+		)
+			? "provider-reported"
+			: "missing",
+		cost: "missing",
+		sessionId: conversationId,
+	};
 	return usage;
 }
 
@@ -350,7 +377,7 @@ function buildAssistantMessage(input: {
 		api: "external-agent-subprocess",
 		provider: "antigravity",
 		model: input.model,
-		usage: normalizeUsage(input.result?.usage),
+		usage: externalUsage(input.result?.usage, input.conversationId),
 		stopReason: input.aborted ? "aborted" : succeeded ? "stop" : "error",
 		timestamp: Date.now(),
 	} as AgentMessage & { role: "assistant" };
