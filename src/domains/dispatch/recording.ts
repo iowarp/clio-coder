@@ -10,8 +10,8 @@ import { createRedactionTally, redactSecretSegments } from "../evidence/index.js
 import type { RunEventJournalSink } from "./run-event-journal.js";
 import type { RunNodeIdentity } from "./types.js";
 
-export const RECORDING_MAX_BYTES = 2 * 1024 * 1024;
-export const RECORDING_MAX_DURATION_MS = 60 * 60 * 1000;
+const RECORDING_MAX_BYTES = 2 * 1024 * 1024;
+const RECORDING_MAX_DURATION_MS = 60 * 60 * 1000;
 export interface RecordingReference {
 	manifestPath: string;
 }
@@ -32,10 +32,9 @@ export interface RecordingManifest {
 	redactionCount: number;
 	error?: string;
 }
-export type CastOutputEvent = [number, "o", string];
+type CastOutputEvent = [number, "o", string];
 
-export function recordingReference(runId: string): RecordingReference {
-	assertSafeId(runId, "run");
+function recordingReference(runId: string): RecordingReference {
 	if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) throw new Error("invalid recording run id");
 	return { manifestPath: `runs/${runId}/recording.json` };
 }
@@ -95,7 +94,7 @@ export function parseRecordingCast(raw: string): CastOutputEvent[] {
 	return events;
 }
 
-export interface RecordingJournal extends RunEventJournalSink {
+interface RecordingJournal extends RunEventJournalSink {
 	accepts(runId: string): boolean;
 	gap(runId: string, droppedFrames: number): void;
 	start(runId: string, node: RunNodeIdentity): RecordingReference;

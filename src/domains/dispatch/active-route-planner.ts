@@ -24,8 +24,6 @@ export function routeValidationProjection(
 	request: DispatchRequest,
 	allowUnenvelopedApproval = false,
 ): { jobSpec: JobSpec; restore(validated: JobSpec): DispatchRequest } {
-	if (request.record !== undefined && typeof request.record !== "boolean")
-		throw new Error("dispatch: record must be a boolean");
 	const {
 		record,
 		// Generated-context sampling and its synthesis deadline are host-owned, outside model-authored job arguments.
