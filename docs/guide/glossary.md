@@ -11,7 +11,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `DurableAssignmentRecord` in [assignment-store.ts](../../src/domains/dispatch/assignment-store.ts).
 
 ### 2. Run
-- **Definition**: A concrete execution attempt of an assignment. Dispatch creates a 12-character random base36 run identifier with `newRunId()`. Session ids use the same 12-character base36 generator, while appended session turn and entry ids use UUIDv7. Every run has an isolated event stream, a designated execution node, and a final cryptographically sealed receipt.
+- **Definition**: A concrete execution attempt of an assignment. Dispatch creates a 12-character random base36 run identifier with `newRunId()`. Session ids use the same 12-character base36 generator, while appended session turn and entry ids use UUIDv7. Every run has an isolated event stream, a designated execution node, and a final receipt sealed with an unkeyed SHA-256 digest.
 - **Owning Type**: `RunEnvelope` in [types.ts](../../src/domains/dispatch/types.ts).
 
 ### 3. Attempt
@@ -27,7 +27,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `ExecutionPlan` in [execution-plan.ts](../../src/domains/dispatch/execution-plan.ts).
 
 ### 6. Receipt
-- **Definition**: An immutable, cryptographically sealed record of a completed run containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.
+- **Definition**: A record of a completed run, sealed with an unkeyed SHA-256 digest that verification checks against the run ledger, containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.
 - **Owning Type**: `RunReceipt` in [types.ts](../../src/domains/dispatch/types.ts) (`RUN_RECEIPT_INTEGRITY_VERSION = 20` in [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts)).
 
 ### 7. Envelope
@@ -195,15 +195,15 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `formatTrustSummary` and `TrustSummaryProjection` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 48. Trust Verdict
-- **Definition**: The presentation tier read off the axes in a fixed order, used for styling and sorting and never as a score. `reviewed` requires an authenticated independent pass and is the only tier styled as independently verified. `grounded` is observed validation without independent review. `unverified` is a sealed receipt with nothing observed. `compromised` is a broken seal, a failed or inferred validation, a failed or correlated review, or a contradictory context record. `unknown` is an unchecked or missing seal.
+- **Definition**: The presentation tier read off the axes in a fixed order, used for styling and sorting and never as a score. `reviewed` requires a verified independent pass and is the only tier styled as independently verified. `grounded` is observed validation without independent review. `unverified` is a sealed receipt with nothing observed. `compromised` is a broken seal, a failed or inferred validation, a failed or correlated review, or a contradictory context record. `unknown` is an unchecked or missing seal.
 - **Owning Type**: `TrustVerdict` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 49. Trust Vocabulary
-- **Definition**: The standardized word for each canonical state, so the same fact is never spelled two ways. `sealed` means the receipt authenticated against the ledger row. `grounded` means validation was observed to run and pass, named by its claimant (`host-verification`, `validation-tool`, `receipt-quality`, `evidence-grounding`). `independently reviewed` means an authenticated reviewer that was not the run itself recorded a verdict. `inferred` means the worker claimed validation and nothing was observed to have run. `unknown` means a named source could not answer; `not applicable` means a named authority decided the axis does not apply.
+- **Definition**: The standardized word for each canonical state, so the same fact is never spelled two ways. `sealed` means the receipt verified against the ledger row. `grounded` means validation was observed to run and pass, named by its claimant (`host-verification`, `validation-tool`, `receipt-quality`, `evidence-grounding`). `independently reviewed` means a verified reviewer that was not the run itself recorded a verdict. `inferred` means the worker claimed validation and nothing was observed to have run. `unknown` means a named source could not answer; `not applicable` means a named authority decided the axis does not apply.
 - **Owning Type**: `TRUST_STATE_WORDS` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 50. Commonly Confused Trust States
-- **Definition**: `sealed` is not `grounded`: a receipt can authenticate perfectly and describe a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio Coder observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `mediated` and `enforced` are one state under two names, the receipt grade and the canonical id. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
+- **Definition**: `sealed` is not `grounded`: a receipt can verify perfectly and describe a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio Coder observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `mediated` and `enforced` are one state under two names, the receipt grade and the canonical id. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 51. System One
@@ -267,7 +267,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `extractOperatorNotes` and `formatOperatorNotes` in [compact.ts](../../src/domains/session/compaction/compact.ts).
 
 ### 66. Receipt Facts
-- **Definition**: The compact terminal facts of a finished run, read back from its sealed receipt: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the authenticated trust status. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same bytes. A missing or corrupt receipt reads as `receipt unavailable` and never fails a render.
+- **Definition**: The compact terminal facts of a finished run, read back from its sealed receipt: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the verified trust status. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same bytes. A missing or corrupt receipt reads as `receipt unavailable` and never fails a render.
 - **Owning Type**: `RunReceiptSummary` and `RunReceiptFacts` in [receipt-facts.ts](../../src/domains/dispatch/receipt-facts.ts).
 
 ### 67. Clio Coder

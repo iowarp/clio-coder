@@ -1,5 +1,6 @@
 /** Bounded role prompts shared by dispatch topology construction and ACP admission. */
 
+import { createHash } from "node:crypto";
 import { COUNCIL_BALLOT_SHAPE, COUNCIL_BALLOT_VERDICT_MAX_BYTES } from "../agents/result-contract.js";
 
 /**
@@ -82,13 +83,55 @@ export function renderCouncilVoteMemberTask(originalTask: string): string {
  */
 export type CompeteStance = "minimal-diff" | "test-first" | "refactor-tolerant" | "spec-literal";
 
-/** Assignment order for candidate N: `COMPETE_STANCES[(N - 1) % COMPETE_STANCES.length]`. */
+/** Candidates draw from these through `competeStanceFor`, never by index. */
 export const COMPETE_STANCES: ReadonlyArray<CompeteStance> = [
 	"minimal-diff",
 	"test-first",
 	"refactor-tolerant",
 	"spec-literal",
 ];
+
+/**
+ * Permutation of `0..count-1` keyed only by `seed`. Fisher-Yates draws each
+ * swap from the seed's sha256 stream, so anyone holding the compete group id
+ * that every decision artifact records can recompute the same order.
+ */
+function seededPermutation(seed: string, count: number): number[] {
+	const order = Array.from({ length: count }, (_, position) => position);
+	let digest = createHash("sha256").update(seed).digest();
+	let offset = 0;
+	for (let top = count - 1; top > 0; top -= 1) {
+		if (offset + 4 > digest.length) {
+			digest = createHash("sha256").update(digest).digest();
+			offset = 0;
+		}
+		const pick = digest.readUInt32BE(offset) % (top + 1);
+		offset += 4;
+		const held = order[top] as number;
+		order[top] = order[pick] as number;
+		order[pick] = held;
+	}
+	return order;
+}
+
+/**
+ * Order the judge reads candidates in, as 0-based positions into the candidate
+ * list. Index order let a judge with a position bias favour candidate 1, and
+ * candidate 1 always carried the same stance, so the ordinal leaked posture.
+ */
+export function competePresentationOrder(group: string, count: number): number[] {
+	return seededPermutation(group, count);
+}
+
+/**
+ * Stance for 1-based candidate `index`. The draw is independent of the
+ * presentation order, so neither the ordinal nor the reading position tells the
+ * judge which posture produced a candidate.
+ */
+export function competeStanceFor(group: string, index: number): CompeteStance {
+	const order = seededPermutation(`${group}:stance`, COMPETE_STANCES.length);
+	return COMPETE_STANCES[order[(index - 1) % order.length] as number] as CompeteStance;
+}
 
 const COMPETE_STANCE_LINERS: Record<CompeteStance, string> = {
 	"minimal-diff": "Prefer the smallest change that satisfies the task; do not restructure surrounding code.",

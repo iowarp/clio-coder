@@ -166,7 +166,7 @@ it("keeps assignment retries on the same owned lease and holds the next wave unt
 
 it("admits two waves through the real bounded admission controller", { timeout: 5_000 }, async () => {
 	const reservation = reserve();
-	const controller = createCapacityAdmissionController({ limits: () => limits, queueCeilingMs: 100 });
+	const controller = createCapacityAdmissionController({ limits: () => limits });
 	// The production queue timers are unref'd; keep this bounded source-only test alive.
 	const keepAlive = setInterval(() => {}, 1_000);
 	try {

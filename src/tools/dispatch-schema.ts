@@ -89,10 +89,11 @@ export function coordinatorDispatchParameters() {
 		briefing: Type.Optional(Type.String({ description: "Relevant parent evidence, separate from instructions." })),
 		// A plain string: this schema is checked before the canonical one, so an
 		// enum here would refuse the compete and council modes describe teaches.
+		// The last clause is the only cue that those modes exist at all.
 		mode: Type.Optional(
 			Type.String({
 				description:
-					"parallel: independent tasks; sequential: ordered tasks; pipeline: tasks consuming the previous result.",
+					"parallel: independent tasks; sequential: ordered tasks; pipeline: tasks consuming the previous result. compete, council and review: gateway describe dispatch.",
 			}),
 		),
 		worktree: Type.Optional(Type.Literal(true)),
@@ -120,13 +121,19 @@ const DispatchBudgetPhaseSchema = Type.Object(
 
 const DispatchBudgetSchema = Type.Object(
 	{
-		toolCalls: Type.Integer({ minimum: 1, description: "Tool-call phase boundary." }),
-		readReserve: Type.Integer({ minimum: 0, description: "Tail reserve for read calls." }),
+		toolCalls: Type.Integer({
+			minimum: 1,
+			description: "Planning estimate; native workers stop at a hard tool-call ceiling.",
+		}),
+		readReserve: Type.Integer({
+			minimum: 0,
+			description: "Read tail; native scout, provenance and context-bootstrap runs only.",
+		}),
 		retryRevision: Type.Optional(DispatchBudgetPhaseSchema),
 	},
 	{
 		additionalProperties: false,
-		description: "Advisory call counts, never a hard stop. retryRevision estimates a retry.",
+		description: "Estimates, not stop points; only the native ceiling is hard. retryRevision estimates a retry.",
 	},
 );
 
@@ -216,7 +223,7 @@ const WorkerContextSchema = Type.Union(
 /**
  * `judge` serves both compete and council synthesis, and their defaults
  * differ: compete falls back to the verifier (`gateDeciderAgentId`), a council
- * judge to the call's own agent (`dispatch-admission.ts`).
+ * judge to oracle, or researcher when oracle is seated (`councilJudgeAgentId`).
  */
 function judgeSchema(composition: DispatchSchemaComposition) {
 	const both = composition.compete && composition.council;
@@ -225,10 +232,10 @@ function judgeSchema(composition: DispatchSchemaComposition) {
 			agent: Type.Optional(
 				Type.String({
 					description: both
-						? "Judge recipe id (default: verifier for compete, the call's agent for council)."
+						? "Judge recipe id (default: verifier for compete; oracle for council, researcher if oracle is seated)."
 						: composition.compete
 							? "Judge recipe id (default: verifier)."
-							: "Judge recipe id (default: the call's agent).",
+							: "Judge recipe id (default: oracle, or researcher if oracle is seated).",
 				}),
 			),
 			model: Type.Optional(Type.String()),

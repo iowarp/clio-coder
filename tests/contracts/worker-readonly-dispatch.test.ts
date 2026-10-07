@@ -4,9 +4,12 @@ import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
+import { startClaudeSdkWorkerRun } from "../../src/engine/claude/sdk-runtime.js";
+import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
-import { parseWorkerSpec, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
+import { workerPermitDigest } from "../../src/worker/protocol.js";
+import { parseWorkerSpec, WORKER_SPEC_VERSION, type WorkerSpec } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -53,6 +56,56 @@ test("a yolo session dispatches a default worker and rejects the previous worker
 		await bundle.extension.stop?.();
 		env.restore();
 	}
+});
+
+/** The JSON document production dispatch writes for a default coder run. */
+async function sealedCoderSpec(prefix: string) {
+	const env = await isolateClioEnv(prefix);
+	let captured: WorkerSpec | undefined;
+	const bundle = makeDispatchBundle(dispatchStubContext(), {
+		spawnWorker(spec) {
+			captured = spec;
+			throw new Error("worker spec observed");
+		},
+	});
+	try {
+		await bundle.extension.start();
+		await rejects(
+			bundle.contract.dispatch({ agentId: "coder", task: "Inspect the task", executionRole: "builder", cwd: env.dir }),
+			/worker spec observed/u,
+		);
+		ok(captured);
+		return JSON.parse(JSON.stringify(captured));
+	} finally {
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+}
+
+test("a worker refuses a permit or tool surface edited after the host sealed it", async () => {
+	const sealed = await sealedCoderSpec("clio-permit-seal-");
+	strictEqual(parseWorkerSpec(structuredClone(sealed)).permit.digest, sealed.permit.digest);
+	const widened = structuredClone(sealed);
+	widened.permit.ceiling.tools = [...widened.permit.ceiling.tools, ToolNames.Dispatch].sort();
+	throws(() => parseWorkerSpec(widened), /WorkerSpec\.permit\.digest does not match the permit/u);
+	const outside = structuredClone(sealed);
+	outside.allowedTools = [...outside.allowedTools, ToolNames.Dispatch];
+	throws(() => parseWorkerSpec(outside), /WorkerSpec\.allowedTools exceed the permit ceiling: dispatch/u);
+});
+
+test("escalate is refused, never downgraded, where the runtime cannot park a call", async () => {
+	const parked = await sealedCoderSpec("clio-permit-escalate-");
+	parked.onPermission = "escalate";
+	parked.permit.allowance = { ...parked.permit.allowance, asks: "main", approvalAuthority: "operator" };
+	parked.permit.digest = workerPermitDigest(parked.permit);
+	strictEqual(parseWorkerSpec(structuredClone(parked)).onPermission, "escalate");
+	parked.permit.ceiling.enforcement = { ...parked.permit.ceiling.enforcement, grantPauseResume: false };
+	parked.permit.digest = workerPermitDigest(parked.permit);
+	throws(() => parseWorkerSpec(parked), /escalate needs a runtime that can park a call/u);
+	throws(
+		() => startClaudeSdkWorkerRun({ onPermission: "escalate" } as unknown as WorkerRunInput, () => {}),
+		/escalate is unsupported on the Claude SDK runtime/u,
+	);
 });
 
 test("read-only admission denies mutation, dispatch, and outside reads without parking", async () => {

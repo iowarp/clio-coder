@@ -95,10 +95,22 @@ describe("worker permit", () => {
 		deepStrictEqual(main.allowance, { git: "inspect", asks: "main", approvalAuthority: "main" });
 		strictEqual(workerPermissionModeForPermit(main.allowance), "escalate");
 		strictEqual(mainGrantsUnavailable(main.allowance), true);
-		// A recipe routing asks to main never raises who decides them.
-		const declared = resolveWorkerPermit(input({ mode: "deny", declared: { asks: "main" } }));
-		deepStrictEqual(declared.allowance, { git: "inspect", asks: "main", approvalAuthority: "operator" });
-		strictEqual(workerPermissionModeForPermit(declared.allowance), "escalate");
+		// The mode is a ceiling: a recipe routing asks to main under deny or fail is
+		// capped to the operator's route, not turned into an approval card.
+		for (const mode of ["deny", "fail"] as const) {
+			const capped = resolveWorkerPermit(input({ mode, declared: { asks: "main" } }));
+			deepStrictEqual(capped.allowance, { git: "inspect", asks: mode, approvalAuthority: "operator" }, mode);
+			strictEqual(workerPermissionModeForPermit(capped.allowance), mode);
+		}
+		// Under a mode that already routes to main, the recipe keeps that route and
+		// never raises who decides it.
+		const underMain = resolveWorkerPermit(input({ mode: "main", declared: { asks: "main" } }));
+		deepStrictEqual(underMain.allowance, { git: "inspect", asks: "main", approvalAuthority: "main" });
+		strictEqual(workerPermissionModeForPermit(underMain.allowance), "escalate");
+		const underEscalate = resolveWorkerPermit(input({ mode: "escalate", declared: { asks: "main" } }));
+		deepStrictEqual(underEscalate.allowance, { git: "inspect", asks: "main", approvalAuthority: "operator" });
+		// A recipe still narrows a main route to deny.
+		strictEqual(resolveWorkerPermit(input({ mode: "main", declared: { asks: "deny" } })).allowance.asks, "deny");
 		// A retry of an operator-decided attempt stays operator-decided after the setting changes.
 		const retried = resolveWorkerPermit(
 			input({ mode: "main", inherited: { git: "inspect", asks: "main", approvalAuthority: "operator" } }),

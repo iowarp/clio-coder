@@ -1,6 +1,7 @@
 import type { ActionClass } from "./action-classifier.js";
 import type { AutonomyExposure } from "./autonomy.js";
 import { sanitizeCallTargetText } from "./call-target.js";
+import { SESSION_CODE_CONSENT_RULE_ID, SESSION_CODE_CONSENT_TEXT } from "./session-code-consent.js";
 
 /** Closed consequence categories used only to explain an already-made decision request. */
 export const DECISION_TIERS = ["conversation", "workspace", "outward", "safety-net", "system", "worker"] as const;
@@ -36,9 +37,16 @@ export const SYSTEM_ONE_GATE_RULE_ID = "system-one-gate";
  * the grant row share. The build comes from an engine reply, so it is drawn
  * only after the sanitizer a call target takes.
  */
-export function systemOneGateText(build?: string): string {
+function systemOneGateText(build?: string): string {
 	const named = build === undefined ? "" : sanitizeCallTargetText(build);
 	return named === "" ? "System One gate (experimental)" : `System One gate (experimental, ${named})`;
+}
+
+/** A safety-net rail as the parked row, the grant row and the notice name it. */
+export function safetyNetRailText(ruleId: string, gateBuild?: string): string {
+	if (ruleId === SYSTEM_ONE_GATE_RULE_ID) return systemOneGateText(gateBuild);
+	if (ruleId === SESSION_CODE_CONSENT_RULE_ID) return SESSION_CODE_CONSENT_TEXT;
+	return `safety-net rail ${ruleId}`;
 }
 
 /**
@@ -168,6 +176,13 @@ function isSystemOneGate(facts: TrustedDecisionFacts): boolean {
 	return facts.axis.kind === "safety-net" && facts.axis.ruleId === SYSTEM_ONE_GATE_RULE_ID;
 }
 
+/** The once-per-session test-runner ask. Approving it covers later test runners, so its copy cannot say "once". */
+function isSessionCodeConsent(facts: TrustedDecisionFacts): boolean {
+	return (
+		facts.origin.kind === "main" && facts.axis.kind === "safety-net" && facts.axis.ruleId === SESSION_CODE_CONSENT_RULE_ID
+	);
+}
+
 function tierIdentity(
 	tier: DecisionTier,
 	facts: TrustedDecisionFacts,
@@ -195,6 +210,14 @@ function tierIdentity(
 				semanticToken: "warning",
 			};
 		case "safety-net":
+			if (isSessionCodeConsent(facts)) {
+				return {
+					tierLabel: "Test runner consent",
+					title: "Allow test runners this session",
+					kind: "test runner consent",
+					semanticToken: "warning",
+				};
+			}
 			// The gate is System One's judgment of one command, not a standing
 			// rail, so the card is titled for who asked.
 			return isSystemOneGate(facts)
@@ -232,6 +255,7 @@ function requestedByCopy(facts: TrustedDecisionFacts): string {
 		facts.origin.kind === "worker" ? `worker ${facts.origin.agentId} (run ${facts.origin.runId})` : "main agent";
 	if (facts.axis.kind === "answer") return requester;
 	if (isSystemOneGate(facts)) return `${requester} through ${systemOneGateText(facts.gateBuild)}`;
+	if (isSessionCodeConsent(facts)) return `${requester} through ${SESSION_CODE_CONSENT_TEXT}`;
 	if (facts.axis.kind === "safety-net") return `${requester} through safety-net rail ${facts.axis.ruleId}`;
 	return `${requester} through autonomy level (${facts.axis.level})`;
 }
@@ -246,6 +270,9 @@ function authorizationCopy(facts: TrustedDecisionFacts): string {
 	const actionClass = facts.actionClass ?? "unknown";
 	if (facts.origin.kind === "worker") {
 		return `Approval authorizes this ${actionClass} call to ${tool} and identical calls under the same permission conditions for this worker run. Each call still passes the safety net. The autonomy level does not change.`;
+	}
+	if (isSessionCodeConsent(facts)) {
+		return `Approval runs this ${actionClass} call to ${tool} and lets test runners run without asking for the rest of this session. It does not change the autonomy level.`;
 	}
 	if (tool === "ask_user" && facts.exposure === "outward") {
 		return "Approval opens this one outward-decision interview. It does not publish or send anything by itself.";
@@ -264,6 +291,9 @@ function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): strin
 		case "outward":
 			return "The resulting step can reach people or systems outside the workspace.";
 		case "safety-net":
+			if (isSessionCodeConsent(facts)) {
+				return "This session wrote or edited files, and a test runner executes repository code, those files included, under your account without a sandbox.";
+			}
 			// A gate park is System One's judgment of this one command, not a
 			// standing rule, so "always-on rail" would tell the operator something
 			// false about why the card exists.
@@ -307,8 +337,10 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			{ id: "cancel", label: "Cancel", consequence: "Closes the interview without recording an answer for this round." },
 		];
 	}
-	const approveLabel =
-		tier === "system"
+	const sessionConsent = isSessionCodeConsent(facts);
+	const approveLabel = sessionConsent
+		? "Approve test runners for this session"
+		: tier === "system"
 			? "Approve system change once"
 			: tier === "safety-net"
 				? "Approve guarded action once"
@@ -328,7 +360,9 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			consequence:
 				facts.origin.kind === "worker"
 					? "Runs this request and remembers approval for identical calls under the same permission conditions in this worker run."
-					: "Runs only the presented request and does not change the autonomy level.",
+					: sessionConsent
+						? "Runs the presented request and lets test runners run without asking until this session ends."
+						: "Runs only the presented request and does not change the autonomy level.",
 		},
 		{
 			id: "deny",
@@ -336,7 +370,9 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			consequence:
 				facts.origin.kind === "worker"
 					? "Denies this request and remembers denial for identical calls under the same permission conditions in this worker run."
-					: "Denies only the presented request and advances the queue.",
+					: sessionConsent
+						? "Denies only the presented request; the next test runner asks again."
+						: "Denies only the presented request and advances the queue.",
 		},
 		{ id: "stop", label: "Deny and stop", consequence: stopConsequence },
 	];

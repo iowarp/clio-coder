@@ -147,14 +147,20 @@ describe("compact coordinator dispatch contract", () => {
 		ok(verdict.kind === "ok" && verdict.result.kind === "ok");
 		const described = JSON.parse(verdict.result.output) as {
 			parameters: { properties: Record<string, unknown> };
+			advanced: { properties: Record<string, unknown> };
 			authority: string[];
 		};
 		const attached = resolveAgentTools({ registry });
 		deepStrictEqual(described.parameters, attached.find((tool) => tool.name === "dispatch")?.parameters);
-		for (const field of ["candidates", "members", "context", "routing"]) {
+		// The compact attached schema stays small, but describe must still reach
+		// the canonical compete, council and review fields.
+		for (const field of ["candidates", "judge", "members", "review", "context", "routing"]) {
 			ok(!(field in compact.properties));
 			ok(!(field in described.parameters.properties));
+			ok(field in described.advanced.properties, field);
 		}
+		match(JSON.stringify(described.advanced.properties.mode), /compete/u);
+		match(JSON.stringify(compact.properties.mode), /gateway describe dispatch/u);
 		match(described.authority.join(" "), /"dispatch" is a direct tool.*call it directly, not through the gateway/u);
 		const gatewayVerdict = await registry.invoke({ tool: "gateway", args: { op: "describe", capability: "gateway" } });
 		ok(gatewayVerdict.kind === "ok" && gatewayVerdict.result.kind === "ok");

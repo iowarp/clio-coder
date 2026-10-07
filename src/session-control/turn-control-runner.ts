@@ -62,11 +62,13 @@ export interface TurnControlRunnerDeps {
 	getTurnConstraints(): TurnConstraints | undefined;
 	isContinuation(): boolean;
 	/**
-	 * The turn site's fitted reading of this request if it has landed, or
-	 * undefined. Nothing waits for it, and the host forgets it at settle, so it
-	 * is this turn's reading and never the previous one's.
+	 * The turn site's fitted reading of this request, or undefined. Without
+	 * `wait` it is taken as it stands. With `wait` the host may hold for a
+	 * reading still in flight, bounded by the site's deadline and cancelled by
+	 * `wait.signal`. The host forgets the reading at settle, so it is this
+	 * turn's reading and never the previous one's.
 	 */
-	readInterpretation(): TurnInterpretation | undefined;
+	readInterpretation(wait?: { signal: AbortSignal }): Promise<TurnInterpretation | undefined>;
 	facts: {
 		turnIndex(): number;
 		taskEstablished(): boolean;
@@ -132,9 +134,23 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 			);
 			const scoutRecipeId = scouts.find((spec) => spec.id === "scout")?.id ?? scouts[0]?.id ?? null;
 			const continuation = input.continuation ?? deps.isContinuation();
+			// The turn site is asked at submit, just before this runs, so a reading
+			// taken at once was never there yet and orientation and direction could
+			// not act. Wait for it, bounded, only when a reading could change the
+			// decision: decide() never reads it under explicit constraints, on a
+			// continuation, without orientation or direction enabled, or when a
+			// finished batch makes collect win.
+			const workflows = settings.workflows;
+			const readingCanAct =
+				!continuation &&
+				constraints === undefined &&
+				(workflows.includes("orientation") || workflows.includes("direction")) &&
+				!(workflows.includes("detached-collection") && deps.facts.finishedDetachedBatchIds().length > 0);
 			// A continuation carries the nudge, not the operator's request, so this
 			// turn's verdict is not about it and the record must not claim it was.
-			const interpretation = continuation ? null : (deps.readInterpretation() ?? null);
+			const interpretation = continuation
+				? null
+				: ((await deps.readInterpretation(readingCanAct ? { signal: input.signal } : undefined)) ?? null);
 			// Without an interpretation the controller can only collect a finished
 			// batch or do nothing, and neither reads the workspace or the turn's place
 			// in the session. Two git subprocesses, a codemap read and a ledger parse

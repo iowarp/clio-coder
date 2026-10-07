@@ -16,6 +16,9 @@ import type { FlowRestrictionSet } from "../../core/flow-restrictions.js";
  *     free-form diagnostics, which are tailed. A bulk flood cannot delay a
  *     heartbeat, because the lanes are separate pipes.
  *
+ * Stdin carries the spec and, once the announce verifies, the `admit` frame
+ * the worker waits for before its first model call.
+ *
  * The channel machinery is transport-neutral: `spawnWorkerProcess` takes an
  * argv and works for both the local fork and an `ssh <host> -- clio-coder worker`
  * remote launch (see transport.ts). The wire protocol is identical on every
@@ -52,9 +55,11 @@ import {
 	parseBulkFrame,
 	parseControlFrame,
 	verifyWorkerAttestation,
+	WORKER_ANNOUNCE_DEADLINE_MS,
 	WORKER_BULK_FRAME_MAX_BYTES,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	WORKER_STDIN_QUEUE_MAX_BYTES,
+	type WorkerAdmitFrame,
 	type WorkerAttestation,
 	WorkerChannelFailure,
 	type WorkerGrantRequestFrame,
@@ -168,6 +173,11 @@ export interface WorkerProcessOptions {
 	/** How long bulk output may precede the announce before the peer is refused. */
 	attestationGraceMs?: number;
 	/**
+	 * How long after the spec is written the peer may go without an attestation
+	 * verdict before it is refused. Defaults to WORKER_ANNOUNCE_DEADLINE_MS.
+	 */
+	announceDeadlineMs?: number;
+	/**
 	 * Wall clock behind the heartbeat anchor, defaulting to `Date.now`. The
 	 * anchor stays a wall-clock instant because the ledger and evidence record
 	 * serialize the derived heartbeat as ISO-8601 for an operator to read. This
@@ -259,6 +269,7 @@ function attachWorkerChannel(
 ): SpawnedWorker {
 	const shutdownGraceMs = opts?.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
 	const attestationGraceMs = opts?.attestationGraceMs ?? DEFAULT_ATTESTATION_GRACE_MS;
+	const announceDeadlineMs = opts?.announceDeadlineMs ?? WORKER_ANNOUNCE_DEADLINE_MS;
 	const now = opts?.now ?? Date.now;
 	const monotonicNow = opts?.monotonicNow ?? (() => performance.now());
 	const approved = opts?.approvedIdentity ?? approvedIdentityForSpec(spec);
@@ -326,10 +337,36 @@ function attachWorkerChannel(
 	let sawSpawnError = false;
 	let announceAccepted = false;
 	let announceFailed = false;
+	let announceDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function clearAnnounceDeadline(): void {
+		if (announceDeadlineTimer === null) return;
+		clearTimeout(announceDeadlineTimer);
+		announceDeadlineTimer = null;
+	}
+
+	/**
+	 * A protocol 2 worker produces no bulk output until it is admitted, so the
+	 * bulk-triggered grace below never starts for one that heartbeats but never
+	 * announces. This bound starts with the spec write, which for a held worker
+	 * is adoption rather than spawn.
+	 */
+	function startAnnounceDeadline(): void {
+		if (announceDeadlineTimer !== null || announceAccepted || announceFailed) return;
+		announceDeadlineTimer = setTimeout(() => {
+			announceDeadlineTimer = null;
+			if (announceAccepted || announceFailed) return;
+			failAttestation(
+				`Missing worker attestation: the peer did not announce its route identity within ${announceDeadlineMs} ms of receiving its spec`,
+			);
+		}, announceDeadlineMs);
+		announceDeadlineTimer.unref?.();
+	}
 
 	function failAttestation(message: string): void {
 		if (announceFailed) return;
 		announceFailed = true;
+		clearAnnounceDeadline();
 		appendStderr(`[worker] ${message}\n`);
 		// A peer that did not prove the approved route identity must not execute.
 		// Terminate the whole group authoritatively rather than offering a
@@ -357,6 +394,7 @@ function attachWorkerChannel(
 			appendStderr(`[worker] ${channelFailure.message}\n`);
 		});
 		child.stdin.write(`${JSON.stringify(spec)}\n`);
+		startAnnounceDeadline();
 	}
 
 	/**
@@ -461,8 +499,16 @@ function attachWorkerChannel(
 				return;
 			}
 			announceAccepted = true;
+			clearAnnounceDeadline();
 			attestation = frame.value.attestation;
 			opts?.onAnnounce?.(frame.value.attestation);
+			// The worker holds its model run until this frame names the digest it
+			// attested. A worker the admit cannot reach would only wait out its own
+			// bound, so it is stopped here instead of holding its slot.
+			if (!send({ type: "admit", specDigest: approved.specDigest } satisfies WorkerAdmitFrame)) {
+				forceOwnedKill();
+				return;
+			}
 			releaseHeldFrames();
 			return;
 		}
@@ -597,6 +643,7 @@ function attachWorkerChannel(
 		if (drainTimer !== null) clearTimeout(drainTimer);
 		if (attestationGraceTimer !== null) clearTimeout(attestationGraceTimer);
 		drainTimer = attestationGraceTimer = null;
+		clearAnnounceDeadline();
 		try {
 			child.stdin?.end();
 		} catch {
@@ -679,7 +726,7 @@ function attachWorkerChannel(
 	 */
 	let queuedStdinBytes = 0;
 
-	function failChannel(operation: "steer" | "permission_decision" | "ledger_delta", detail: string): false {
+	function failChannel(operation: "steer" | "permission_decision" | "ledger_delta" | "admit", detail: string): false {
 		channelFailure = new WorkerChannelFailure(operation, detail);
 		appendStderr(`[worker] ${channelFailure.message}\n`);
 		return false;
@@ -692,7 +739,9 @@ function attachWorkerChannel(
 				? "permission_decision"
 				: frameType === "ledger_delta"
 					? "ledger_delta"
-					: "steer";
+					: frameType === "admit"
+						? "admit"
+						: "steer";
 		if (!isAlive()) return failChannel(operation, "worker has exited");
 		const stdin = child.stdin;
 		if (!stdin || stdin.destroyed || !stdin.writable) return failChannel(operation, "worker stdin is not writable");

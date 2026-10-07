@@ -288,6 +288,10 @@ for (const mode of ["single", "parallel", "review", "compete", "council"] as con
 			strictEqual(f.captured.length, mode === "single" ? 1 : mode === "parallel" || mode === "review" ? 2 : 3);
 			for (const request of f.captured)
 				strictEqual(request.lineage, undefined, "host ancestry cannot change assignment admission");
+			if (mode === "council") {
+				const synthesis = f.captured.find((request) => request.gate?.role === "synthesis");
+				strictEqual(synthesis?.agentId, "oracle", "an unpinned council judge is never the seated agent");
+			}
 			for (const preparation of f.preparations) deepStrictEqual(preparation?.hostRun, hostRun);
 			const journal = readRunJournal(join(env.dir, "state"));
 			ok(journal);
@@ -551,6 +555,14 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 		strictEqual(receipt.runtimeKind, "acp-delegation");
 		strictEqual(receipt.autonomy, "default");
 		strictEqual(receipt.safety?.toolTelemetry?.workspaceMutationPossible, true);
+		// Clio cannot hold a peer to a permit, so the sealed one is marked record-only.
+		deepStrictEqual(receipt.safety?.permit?.recordOnly, {
+			mediation: "peer-asks-only",
+			toolGovernance: "clio-coder-policy",
+		});
+		strictEqual(receipt.safety?.permit?.capabilityClass, "workspace-edit");
+		strictEqual(receipt.safety?.permit?.asks, "deny");
+		strictEqual(receipt.safety?.permit?.ceiling?.enforcement.perCallMediation, false);
 		deepStrictEqual(receipt.lineage, childLineage);
 		deepStrictEqual(journal.envelopes.get(receipt.runId)?.lineage, childLineage);
 		deepStrictEqual(completed, childLineage);

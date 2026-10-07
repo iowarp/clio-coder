@@ -4,7 +4,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
+import { councilJudgeAgentId, gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
 	COUNCIL_MAX_MEMBERS,
@@ -590,6 +590,14 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		if (args.writers === 1 && mode !== "parallel") {
 			return shapeRejection(args, "dispatch: writers is supported only for parallel dispatch");
 		}
+		// A detached batch launches every task at once and never reads writers,
+		// so accepting both would silently drop the serialization asked for.
+		if (args.writers === 1 && args.detach === true) {
+			return shapeRejection(
+				args,
+				"dispatch: writers: 1 cannot combine with detach: true; a detached batch starts every task at once. Dispatch serialized writers attached, or detach writers that use worktree: true or disjoint intent.write_roots.",
+			);
+		}
 		if (mode === "parallel" && args.writers !== 1) {
 			const conflict = parallelWriterConflict(parsed.requests, deps.getAgentSpecs());
 			if (conflict !== null) return shapeRejection(args, conflict);
@@ -777,7 +785,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				}
 				if (council.synthesis === "judge") {
 					const judgeRequest: DispatchRequest = {
-						agentId: council.judge?.agent ?? base.agentId,
+						agentId: councilJudgeAgentId(council.judge?.agent, base.agentId),
 						...(base.budget === undefined ? {} : { budget: base.budget }),
 						...(base.record === undefined ? {} : { record: base.record }),
 						executionRole: "judge",

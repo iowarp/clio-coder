@@ -427,10 +427,18 @@ describe("Antigravity external subprocess contract", () => {
 		equal(message.provider, "antigravity");
 		equal(message.responseId, "opaque-conversation");
 		equal(message.model, "gemini-selected");
-		equal(message.usage.input, 7);
-		equal(message.usage.output, 2);
+		// agy reports Gemini-style counts: the cached token sits inside the 7
+		// prompt tokens and the 3 thinking tokens bill as output.
+		equal(message.usage.input, 6);
+		equal(message.usage.output, 5);
 		equal((message.usage as typeof message.usage & { reasoningTokens?: number }).reasoningTokens, 3);
 		equal(message.usage.cacheRead, 1);
+		equal(message.usage.cost.total, 0);
+		deepStrictEqual((message.usage as typeof message.usage & { clioExternal?: unknown }).clioExternal, {
+			tokenUsage: "provider-reported",
+			cost: "missing",
+			sessionId: "opaque-conversation",
+		});
 		const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8")) as Record<string, unknown>;
 		deepStrictEqual(observed.args, buildAgyArgs(input));
 		deepStrictEqual(JSON.parse(String(observed.stdin).trim()), JSON.parse(buildAgyStdinLine(input)));

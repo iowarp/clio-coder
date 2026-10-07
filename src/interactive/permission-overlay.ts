@@ -3,6 +3,7 @@ import {
 	type DecisionPresentation,
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
+import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { type Component, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ApprovalRequestView } from "../session-control/approval-request-view.js";
 import {
@@ -392,11 +393,15 @@ function permissionInspectionLines(
  * says what allow, deny, and stop mean. The full terms are behind the terms
  * key, which the rail names.
  */
-function termsSummary(presentation: DecisionPresentation, actionClass: string): string {
+function termsSummary(view: ApprovalRequestView, presentation: DecisionPresentation): string {
+	const actionClass = view.actionClass;
 	const stop = presentation.requiredActions.find((action) => action.id === "stop");
 	const stopWords = stop?.consequence.includes("main-agent turn") ? "ends the main-agent turn" : "ends the turn";
 	if (presentation.tier === "worker") {
 		return `Allow or Deny holds for identical calls in this worker run. Stop ${stopWords}.`;
+	}
+	if (view.axis.kind === "net" && view.axis.ruleId === SESSION_CODE_CONSENT_RULE_ID) {
+		return `Allow runs this ${actionClass} call and later test runners this session. Deny skips it. Stop ${stopWords}.`;
 	}
 	return `Allow runs this one ${actionClass} call. Deny skips it. Stop ${stopWords}.`;
 }
@@ -467,7 +472,7 @@ function permissionCardSections(
 				]
 			: [];
 	if (!terms) {
-		rest.push(...wrapSentence(termsSummary(presentation, view.actionClass), content));
+		rest.push(...wrapSentence(termsSummary(view, presentation), content));
 		return { facts, rest };
 	}
 	rest.push(

@@ -39,30 +39,36 @@ function isContinuationByte(bytes: Buffer, index: number): boolean {
  * excerpt ends with the failure summary and an agent report's last finding is
  * often the one that failed. Cuts land on UTF-8 character boundaries, so the
  * result never carries U+FFFD and never exceeds the allowance once encoded.
+ * A null run id names the previous step instead, for pipeline input whose
+ * source run is unknown.
  */
-function abbreviate(handoff: ExecutionHandoff, limit: number): string {
-	const bytes = Buffer.from(handoff.output, "utf8");
-	if (bytes.length <= limit) return handoff.output;
+export function abbreviateHandoffText(text: string, limit: number, runId: string | null): string {
+	const bytes = Buffer.from(text, "utf8");
+	if (bytes.length <= limit) return text;
 	// An agent run keeps its full output in its receipt and a code step in its
 	// own record and log, so the marker names the run, not one storage kind.
 	// The id is clipped because validation bounds only its presence, and an
 	// overlong one would otherwise crowd the excerpt out of its own allowance.
-	const runId = handoff.terminalRunId.slice(0, 80);
+	const source = runId === null ? "the previous step" : `run ${runId.slice(0, 80)}`;
 	const marker = (omitted: number): string =>
-		`\n[clio: ${omitted} of ${bytes.length} bytes omitted from this handoff excerpt; the coordinator retains the full output of run ${runId}]\n`;
+		`\n[clio: ${omitted} of ${bytes.length} bytes omitted from this handoff excerpt; the coordinator retains the full output of ${source}]\n`;
 	// The widest omitted count sizes the marker, so the rendered one always fits.
 	const keep = Math.max(0, limit - Buffer.byteLength(marker(bytes.length), "utf8"));
 	let headEnd = Math.floor(keep / 2);
 	while (headEnd > 0 && isContinuationByte(bytes, headEnd)) headEnd -= 1;
 	let tailStart = bytes.length - (keep - Math.floor(keep / 2));
 	while (tailStart < bytes.length && isContinuationByte(bytes, tailStart)) tailStart += 1;
-	const text = `${bytes.subarray(0, headEnd).toString("utf8")}${marker(tailStart - headEnd)}${bytes.subarray(tailStart).toString("utf8")}`;
-	if (Buffer.byteLength(text, "utf8") <= limit) return text;
+	const abbreviated = `${bytes.subarray(0, headEnd).toString("utf8")}${marker(tailStart - headEnd)}${bytes.subarray(tailStart).toString("utf8")}`;
+	if (Buffer.byteLength(abbreviated, "utf8") <= limit) return abbreviated;
 	// Only an allowance smaller than the marker itself lands here.
 	const cut = Buffer.from(marker(bytes.length), "utf8");
 	let end = Math.min(limit, cut.length);
 	while (end > 0 && isContinuationByte(cut, end)) end -= 1;
 	return cut.subarray(0, end).toString("utf8");
+}
+
+function abbreviate(handoff: ExecutionHandoff, limit: number): string {
+	return abbreviateHandoffText(handoff.output, limit, handoff.terminalRunId);
 }
 
 export function projectExecutionHandoffs(

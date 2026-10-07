@@ -3,7 +3,8 @@
  *
  * A fake SystemOne stands where the runner would: it answers each site through
  * the real site's own reading, so the host is tested against the shapes it will
- * meet. Nothing in the host waits on an engine, so no case needs a clock.
+ * meet. Only the turn controller's bounded wait holds on an engine, and its
+ * cases set a bound no run reaches, so no case needs a clock.
  */
 
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
@@ -133,6 +134,36 @@ describe("contracts/system one host: the turn site", () => {
 		release(LOUD_TURN);
 		await landed();
 		ok(host.interpretation() !== undefined, "a fitted reading that landed is held");
+	});
+
+	it("lets the turn controller wait for a reading that lands within the bound", async () => {
+		let release: (answers: Readonly<Record<string, Answer>>) => void = () => {};
+		const { systemOne } = fakeSystemOne(() => new Promise((resolve) => (release = resolve)), ["turn"]);
+		const host = hostOver(systemOne);
+
+		host.readTurn(turnInput("turn-1"));
+		const waiting = host.awaitInterpretation(60_000, new AbortController().signal);
+		await landed();
+		release(LOUD_TURN);
+		strictEqual((await waiting)?.intent, "inspect", "the reading, not the bound, ended the wait");
+	});
+
+	it("does not wait when the site is unbound, and the operator's cancel ends a wait", async () => {
+		const unbound = hostOver(fakeSystemOne(() => LOUD_TURN, []).systemOne);
+		unbound.readTurn(turnInput("turn-1"));
+		const first = await Promise.race([
+			unbound.awaitInterpretation(60_000, new AbortController().signal).then(() => "read"),
+			landed().then(() => "waited"),
+		]);
+		strictEqual(first, "read");
+
+		const { systemOne } = fakeSystemOne(() => new Promise(() => {}), ["turn"]);
+		const host = hostOver(systemOne);
+		host.readTurn(turnInput("turn-2"));
+		const cancel = new AbortController();
+		const waiting = host.awaitInterpretation(60_000, cancel.signal);
+		cancel.abort();
+		strictEqual(await waiting, undefined);
 	});
 
 	it("leaves hints, interpretation and prewarm empty when the verdict is null", async () => {

@@ -19,7 +19,7 @@ import { isSkillLoadRefusal, type SkillLoadRefusal } from "../../core/skill-acti
 import { ToolNames } from "../../core/tool-names.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
-import { SYSTEM_ONE_GATE_RULE_ID, systemOneGateText } from "../../domains/safety/decision-presentation.js";
+import { safetyNetRailText } from "../../domains/safety/decision-presentation.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -798,15 +798,14 @@ export function renderToolAwaitingApproval(
 
 /**
  * The rule or level that asked, as the parked row and the grant row both state
- * it. The System One gate is named as itself: its rail id only keeps the audit
- * row and the approval axis distinct, and "safety-net rail" would send someone
- * scrolling back to look for a standing rule that does not exist.
+ * it. The System One gate and the session's test-runner consent are named as
+ * themselves: their rail ids only keep the audit row and the approval axis
+ * distinct, and "safety-net rail" would send someone scrolling back to look
+ * for a standing rule that does not exist.
  */
 export function approvalAxisText(view: Pick<ApprovalRequestView, "axis" | "gateBuild">): string {
 	if (view.axis.kind === "autonomy") return `autonomy level ${view.axis.level}`;
-	return view.axis.ruleId === SYSTEM_ONE_GATE_RULE_ID
-		? systemOneGateText(view.gateBuild)
-		: `safety-net rail ${view.axis.ruleId}`;
+	return safetyNetRailText(view.axis.ruleId, view.gateBuild);
 }
 
 /**

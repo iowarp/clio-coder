@@ -83,7 +83,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `fleet.retry.maxRetries` | `2` | Integer at least 0. Automatic retries of a retryable worker outcome. | next turn |
 | `fleet.retry.routeCooldownMs` | `15000` | Integer at least 0. How long a failing target, runtime and model route is skipped; `0` disables the wait. | next turn |
 | `fleet.retry.breakerThreshold` | `1` | Integer at least 1. Consecutive failures that open a route's breaker. | next turn |
-| `fleet.limits.toolCallsPerRun` | `150` | Integer at least 1. Tool calls one worker may make; a worker's own smaller cap still applies. | next turn |
+| `fleet.limits.toolCallsPerRun` | `150` | Integer at least 1. The hard tool-call cap for native workers. In advisory mode it lowers a larger recipe maximum but never below the dispatch's admitted `budget.toolCalls`. Claude SDK advisory runs, CLI subprocess workers and ACP peers have no per-tool cap. | next turn |
 | `fleet.limits.internalRunTimeoutMs` | `900000` | Integer at least 1. Ceiling for one internal worker run such as the wiki writer or the first project scout. | next turn |
 | `fleet.history.maxRuns` | `1000` | Integer at least 1. Finished runs kept in the run ledger; the oldest run and its event log go first. | next turn |
 | `fleet.history.journal` | `true` | Boolean. Keep the per-run event journal. | next turn |

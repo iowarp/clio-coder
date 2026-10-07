@@ -98,7 +98,7 @@ Readers open the named core files above. Bundles built by older releases may hol
 | `tool-events.jsonl` | Tool summaries from session entries, audit rows, or receipts. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
 | `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
-| `trust-status.json` | Canonical per-run five-axis trust projections derived from authenticated receipts, gate decisions, and grounded validation artifacts. A bundle without it reads as `projection: historical_format`. |
+| `trust-status.json` | Canonical per-run five-axis trust projections derived from verified receipts, gate decisions, and grounded validation artifacts. A bundle without it reads as `projection: historical_format`. |
 | `findings.json` / `findings.md` | Structured findings plus a readable report that begins with each linked run's canonical tier, fixed-order summary, and five axes. |
 
 ### Run attribution under concurrency
@@ -109,11 +109,11 @@ When a run was chained (pipeline), composed with a persona override, or escalate
 
 ### Task and decision provenance
 
-Session evidence retains the two operator-facing bookkeeping ledgers instead of flattening them into prose. A `taskLedger` projection names the stable board id, goal counts, active runs, required evidence, and bounded task rows with status, origin, `userTaskId`, reason, and evidence. This keeps an operator task traceable from the project inbox correlation through agent pickup and completion. A `decisionLedger` projection names the active-path anchor, interview identity and status, timing, round count, summary, and every settled or superseded decision. Operator revisions are explicit through `revisedAt`, `revisionSource=operator`, and the recorded correction text. Both kinds remain session facts in the readable transcript; evidence does not reinterpret them as validation results. Authenticated receipt `decisionRefs` link runs to recorded arguments on the session's active path, with resolved records in `overview.json` and resolved or missing-reference findings in both readable evidence documents. Wiki page writers receive up to twelve active decisions matching their source paths or symbols and cite those refs in the body and optional `decisions` frontmatter instead of inferring rationale.
+Session evidence retains the two operator-facing bookkeeping ledgers instead of flattening them into prose. A `taskLedger` projection names the stable board id, goal counts, active runs, required evidence, and bounded task rows with status, origin, `userTaskId`, reason, and evidence. This keeps an operator task traceable from the project inbox correlation through agent pickup and completion. A `decisionLedger` projection names the active-path anchor, interview identity and status, timing, round count, summary, and every settled or superseded decision. Operator revisions are explicit through `revisedAt`, `revisionSource=operator`, and the recorded correction text. Both kinds remain session facts in the readable transcript; evidence does not reinterpret them as validation results. Verified receipt `decisionRefs` link runs to recorded arguments on the session's active path, with resolved records in `overview.json` and resolved or missing-reference findings in both readable evidence documents. Wiki page writers receive up to twelve active decisions matching their source paths or symbols and cite those refs in the body and optional `decisions` frontmatter instead of inferring rationale.
 
 ### Sealed receipt facts
 
-`src/domains/dispatch/receipt-facts.ts` reads a sealed receipt back, authenticates it against its ledger row, and projects the compact terminal facts that the TUI worker block, the exit summary and ACP terminal fleet frames report; the receipt contract is in [observability.md](observability.md).
+`src/domains/dispatch/receipt-facts.ts` reads a sealed receipt back, verifies it against its ledger row, and projects the compact terminal facts that the TUI worker block, the exit summary and ACP terminal fleet frames report; the receipt contract is in [observability.md](observability.md).
 
 ---
 
@@ -185,11 +185,11 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ### Computation and Lifecycle
 - **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in [receipt-findings.ts](../../src/domains/dispatch/receipt-findings.ts)). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected. The evidence index computes its own `firstPassSuccess` from the full bundle, and that value is the authority for accountability rates.
-- **Cryptographic Coverage**: Current receipts use strict v20 and authenticate every current receipt field, including dispatch intent path provenance, resolved path scope, briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance, against the reconstructed ledger. Only v20 is authenticated as current evidence. Lower versions are reported as retired and are neither migrated nor read as evidence.
+- **Digest Coverage**: Current receipts use strict v20, whose unkeyed SHA-256 digest covers every current receipt field, including dispatch intent path provenance, resolved path scope, briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance, together with the reconstructed ledger fields. Verification compares the receipt with its ledger row and recomputes the digest. That catches an edit that leaves the digest stale, but not a receipt and ledger row rewritten together with a recomputed digest, because the digest is not a signature. Only v20 is verified as current evidence. Lower versions are reported as retired and are neither migrated nor read as evidence.
 
 | Version | Verification policy | Compatibility policy |
 |---|---|---|
-| v20 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
+| v20 | Current canonical projection; every current receipt and reconstructible ledger field is covered by the digest and verified | Accepted |
 | v1 through v19 | Historical sealed shape unsupported by this build | Reported as retired; not migrated and not read as evidence |
 | Malformed, unversioned, or future version | No current reader | Invalid; archive incompatible state rather than expecting migration |
 
@@ -208,9 +208,9 @@ decision and preserve every other axis unchanged.
 
 | Axis | Closed states | Question answered |
 |---|---|---|
-| Artifact integrity | `verified`, `failed`, `absent`, `unknown`, `not_applicable` | Did the integrity verifier authenticate the referenced artifact? |
+| Artifact integrity | `verified`, `failed`, `absent`, `unknown`, `not_applicable` | Did the integrity verifier check the referenced artifact against its digest? |
 | Validation grounding | `validated`, `failed`, `ungrounded`, `absent`, `unknown`, `not_applicable` | What correctness-bearing validation was observed and grounded? |
-| Independent review | `passed`, `failed`, `inconclusive`, `not_independent`, `absent`, `unknown`, `not_applicable` | What outcome did an authenticated independent reviewer or judge record? |
+| Independent review | `passed`, `failed`, `inconclusive`, `not_independent`, `absent`, `unknown`, `not_applicable` | What outcome did a verified independent reviewer or judge record? |
 | Context provenance | `recorded`, `invalid`, `absent`, `unknown`, `not_applicable` | Is the origin of briefing, project context, or linked evidence recorded consistently? |
 | Completion evidence | `evidenced`, `incomplete`, `limited`, `absent`, `unknown`, `not_applicable` | What did the finish contract observe at the completion boundary? |
 
@@ -237,7 +237,7 @@ The composition rules prohibit cross-axis promotion:
 
 #### Validation grounding precedence
 
-For an authenticated receipt, `adaptRunReceiptValidationStatus` reads the first rule that applies:
+For a verified receipt, `adaptRunReceiptValidationStatus` reads the first rule that applies:
 
 1. No receipt: `absent` with `artifact_missing`.
 2. Host verification `rejected`: `failed` by `host-verification`. When every failing host check also failed on the task base, the change did not cause the failure, so the state is `unknown` by `host-verification-baseline-failed` and the human clause reads `check also failed on task base; change validation unknown`.
@@ -254,7 +254,7 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Existing persisted fact | Canonical mapping |
 |---|---|
 | Missing receipt | Every receipt-owned axis is `absent` with `artifact_missing`. |
-| Current receipt present but integrity not checked | Artifact integrity is `unknown`; the receipt's own digest never authenticates itself. The other receipt-owned axes are `absent` with `not_observed` until authentication succeeds. |
+| Current receipt present but integrity not checked | Artifact integrity is `unknown`; the receipt's own digest never verifies itself. The other receipt-owned axes are `absent` with `not_observed` until verification succeeds. |
 | Historical receipt missing its integrity block | Receipt-owned axes are `unknown` through the compatibility source, even if a caller presents a contradictory positive verification result. |
 | Integrity verification succeeds or fails | Artifact integrity is `verified` or `failed`. A failure leaves the receipt-owned validation grounding and context provenance `absent`; no untrusted receipt claim contributes a positive state. Validation the session ledger observed on its own (a validation command that ran and exited 0) still grounds the run, so a tampered run can read `artifactIntegrity: failed` beside `validationGrounding: validated`. The two axes name different artifacts and different authorities, and the bundle's `receipt-integrity` finding is what flags the pairing. |
 | Receipt sealed under a retired integrity version | Artifact integrity is `unknown` through the compatibility source `run_receipt:<runId>:integrity-v<N>-retired`, which is where the human clause reads the version back from (`seal v19 retired (this build verifies v20)`); `failed` and "seal broken" are reserved for a seal this build checked and rejected. The receipt-owned axes are `absent` with `historical_format`, and the verdict is `unknown` rather than `compromised`. The receipt is not migrated and not read as evidence: the bundle records a `receipt-retired` info finding, `evidence build` prints it as a note and exits 0, and `/view verify` reports `not checked` with both versions. |
@@ -263,19 +263,19 @@ They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
 | Receipt verification `unknown` or `not_applicable` | Validation grounding preserves `unknown` or `not_applicable`. A missing historical verification field maps to `unknown`. |
 | Typed receipt validation or result-contract quality | A passing correctness-bearing fact maps to `validated`; a failing fact maps to `failed`; an ungrounded passing claim maps to `ungrounded`. |
 | Valid bounded project context, valid none-tier workspace-root record, or valid briefing hash | Context provenance is `recorded`. A `none`-tier run still receives the workspace-root message, so a none-tier block naming exactly `workspace-root` with a well-formed count and hash is `recorded`. Explicit project-context tier `none` with no content and no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count) is `invalid`. |
-| Gate decision | An authenticated independent pass or fail maps to `passed` or `failed`; for a compete `winner` outcome the winning subject maps to `passed` and every other subject to `failed`. Correlated review maps to `not_independent`. A decision with no decider or correlation record is `inconclusive`. Unauthenticated artifacts map to `unknown`; operator confirmation or yolo authority alone is `not_applicable` to independent review. |
+| Gate decision | A verified independent pass or fail maps to `passed` or `failed`; for a compete `winner` outcome the winning subject maps to `passed` and every other subject to `failed`. Correlated review maps to `not_independent`. A decision with no decider or correlation record is `inconclusive`. Unverified artifacts map to `unknown`; operator confirmation or yolo authority alone is `not_applicable` to independent review. |
 | Older receipt with `autonomyEnforcement` | Its integrity seal still verifies when the historical field was covered by the digest. Readers ignore the field and project five trust axes. |
 | Finish-contract assessment | The assessment is an audit row linked to the run and counted in `totals.auditRows`. It does not override the receipt-derived `completionEvidence` axis on the evidence surface alone. |
 | Malformed audit row identifier | A blank or whitespace-only optional identifier remains linked as audit input and never aborts the bundle. It cannot affect the receipt-derived trust projection. |
 | Bundle without `trust-status.json` | Inspection reports `projection: historical_format` with no canonical run projections. It never reconstructs positive states from older summary tags. |
 
 Receipt inspection, worker output, monitor details, and evidence rebuilding all
-use the same authenticated receipt projection boundary. Evidence rebuilding
-then composes independently authenticated gate decisions without changing
+use the same verified receipt projection boundary. Evidence rebuilding
+then composes independently verified gate decisions without changing
 receipt-owned axes. Findings such as
 `no-validation`, `proxy-validation`, `external-bypass`,
 `independent-review`, `context-provenance`, and `completion-evidence`
-are selected from authenticated receipt facts and canonical states. `findings.md`
+are selected from verified receipt facts and canonical states. `findings.md`
 prints the tier, summary, and every axis before those diagnostic records, while
 their detailed domain artifacts remain in the receipt, gate, audit, and trace
 files.
@@ -345,8 +345,8 @@ failed or correlated review, or contradictory context record is
 `compromised`, and an unchecked or missing seal is `unknown`. Human receipt summaries name the failed axis instead of printing `compromised`; the machine verdict tier is unchanged. The Fleet Runs board
 never carries a verdict on the terminal bus event: the event is published the
 moment the receipt is sealed, before anything has read it back and
-authenticated it against the ledger row, so the board reads the receipt file
-back and projects that authenticated status, and shows `trust: receipt not
+verified it against the ledger row, so the board reads the receipt file
+back and projects that verified status, and shows `trust: receipt not
 read back` until it can.
 
 ### Mutation-report grounding

@@ -22,6 +22,8 @@ export interface JobRuntimeDeps {
 	constraints(): TurnConstraints | undefined;
 	safety: SafetyContract;
 	autonomy(): AutonomyLevel;
+	/** The attended session wrote files and has not consented to test runners yet (#377 follow-up). */
+	sessionCodeConsentPending?(): boolean;
 	hostRefusal(): string | null;
 	trustRefusal(): string | null;
 	permissionPending(): boolean;
@@ -61,7 +63,10 @@ function jobTurnConstraints(
 
 /** The synchronous final check is shared by operator creation and each effect (#411). */
 export function jobAuthorityRefusal(
-	deps: Pick<JobRuntimeDeps, "isCurrent" | "constraints" | "safety" | "autonomy" | "hostRefusal" | "trustRefusal">,
+	deps: Pick<
+		JobRuntimeDeps,
+		"isCurrent" | "constraints" | "safety" | "autonomy" | "sessionCodeConsentPending" | "hostRefusal" | "trustRefusal"
+	>,
 	owner: JobOwner,
 	runner: JobRunner,
 	stored: TurnConstraints | null,
@@ -89,6 +94,7 @@ export function jobAuthorityRefusal(
 		effects,
 		cwd: owner.cwd,
 		...(constraints === undefined ? {} : { constraints: { turnConstraints: constraints } }),
+		...(deps.sessionCodeConsentPending?.() === true ? { sessionCodeConsentPending: true } : {}),
 	});
 	return admission.kind === "allow"
 		? null

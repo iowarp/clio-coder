@@ -7,6 +7,7 @@ import {
 	approvedIdentityForSpec,
 	CONTROL_FRAME_PREFIX,
 	parseControlFrame,
+	WORKER_PROTOCOL_VERSION,
 } from "../../src/domains/dispatch/worker-protocol.js";
 import { type SpawnedWorker, spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
 import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
@@ -73,7 +74,7 @@ const load = JSON.parse(process.argv[3]);
 readline.createInterface({ input: process.stdin }).once("line", () => {
   const unknown = { known: false };
   const attestation = {
-    ...identity, protocolVersion: 1, pid: process.pid, processGroupId: process.pid, host: "load-fixture",
+    ...identity, protocolVersion: ${WORKER_PROTOCOL_VERSION}, pid: process.pid, processGroupId: process.pid, host: "load-fixture",
     resources: { labels: [], cpuCount: unknown, totalMemoryBytes: unknown,
       freeMemoryBytes: unknown, gpuCount: unknown, vramBytes: unknown, residentModels: unknown }
   };

@@ -238,6 +238,7 @@ import {
 	type ProtectedArtifactProtectEvent,
 } from "../domains/safety/protected-artifacts-registration.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
+import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
@@ -275,6 +276,7 @@ import { createSystemOne } from "../domains/system-one/index.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
+import { TURN_SITE } from "../domains/system-one/sites/turn.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -2610,9 +2612,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		for (const off of unsubscribeGuardianWakes) off();
 		disposeMemoryLifecycle();
 	});
-	if (contextDomain) {
-		middleware.registerHook(createFileMutationObserver(({ paths }) => contextDomain.noteFileChanges(paths)));
-	}
+	// An attended session asks once before a test runner runs code it wrote or
+	// edited (#377 follow-up). The tracker is per session: a park resets it.
+	const sessionCodeConsent = createSessionCodeConsent();
+	// A resumed or forked session may already hold files it wrote before this
+	// process saw them, so it starts as written and asks once; the park that
+	// precedes it clears the previous session's consent.
+	bus.on(BusChannels.SessionParked, ({ reason }) => {
+		sessionCodeConsent.reset();
+		if (reason === "fork") sessionCodeConsent.noteWrite();
+	});
+	bus.on(BusChannels.SessionResumed, () => sessionCodeConsent.noteWrite());
+	// One observer feeds both sinks: any successful write makes the next test
+	// runner ask, and the codewiki refreshes the written paths when the context
+	// domain is loaded.
+	middleware.registerHook(
+		createFileMutationObserver(({ paths }) => {
+			sessionCodeConsent.noteWrite();
+			contextDomain?.noteFileChanges(paths);
+		}),
+	);
 	// User-defined hooks: extensions and the project (.clio-coder/hooks.yaml,
 	// .clio-coder/hooks.local.yaml) declare a conservative, receipted hook set on the
 	// same effect machinery. A hook may add effects (including request block_tool)
@@ -2827,6 +2846,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			mcpTransport: (tool) => toolBootstrap.mcpCapabilities?.transportOf(tool) ?? null,
 		},
 		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
+		// Headless runs deny every ask, so they keep #377's test-runner allow.
+		...(options.headless === undefined ? { sessionCodeConsent } : {}),
 	});
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {
@@ -3280,6 +3301,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		attended: options.headless === undefined,
 		safety,
 		autonomy: resolveEffectiveAutonomy,
+		...(options.headless === undefined ? { sessionCodeConsentPending: () => sessionCodeConsent.pending() } : {}),
 		createSession: () => {
 			const settings = getCurrentSettings();
 			session?.create({
@@ -3810,7 +3832,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		isContinuation: () => false,
 		// The turn site answered with acts and a breadth under cuts fitted to the
 		// build that produced them, so an unmeasured model never starts harness work.
-		readInterpretation: () => systemOneHost.interpretation(),
+		// A wait is bounded by the deadline the turn call itself runs under.
+		readInterpretation: async (wait) => {
+			if (wait === undefined) return systemOneHost.interpretation();
+			const binding = getCurrentSettings().systemOne.sites.turn;
+			const bindingTimeoutMs = typeof binding === "object" ? binding.timeoutMs : undefined;
+			return systemOneHost.awaitInterpretation(bindingTimeoutMs ?? TURN_SITE.deadlineMs, wait.signal);
+		},
 		facts: {
 			turnIndex: () =>
 				readCurrentSessionEntries().filter(

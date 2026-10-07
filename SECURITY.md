@@ -5,8 +5,8 @@ release line; users should update to its latest patch.
 
 | Version | Support |
 | --- | --- |
-| `0.5.x` | Current release line |
-| `< 0.5` | Superseded development releases; update to the current line |
+| `0.6.x` | Current release line, including `0.6.2` release candidates |
+| `< 0.6` | Superseded development releases; update to the current line |
 
 ## Reporting a Vulnerability
 
