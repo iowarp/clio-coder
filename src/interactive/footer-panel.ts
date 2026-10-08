@@ -137,30 +137,28 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 								: "waiting";
 	const theme = clioTheme();
 	const tone = job.cancelRequested || job.state === "paused" || job.persistenceError !== null ? "warning" : "annotation";
-	const progress = `${job.settled}${job.spec.count === null ? "" : `/${job.spec.count}`} settled`;
-	const extra = jobs.length > 1 ? ` · +${jobs.length - 1} jobs` : "";
-	const room = Math.max(0, width - visibleWidth(extra));
-	let text = `Loop ${progress} · ${state}`;
-	const append = (detail: string): void => {
-		if (visibleWidth(`${text} · ${detail}`) <= room) text += ` · ${detail}`;
+	// State leads so a narrow rail keeps "paused" or "not saved". Ids and
+	// pending reasons stay with `/loop status`; navigation stores its raw park
+	// code as the reason.
+	let text = `Loop ${state}`;
+	const append = (detail: string): boolean => {
+		if (visibleWidth(text) + 3 + visibleWidth(detail) > width) return false;
+		text += ` · ${detail}`;
+		return true;
 	};
-	if (job.starts !== job.settled) append(`${job.starts} started`);
-	if (job.state === "active" && job.nextDueAt !== null)
-		append(job.nextDueAt <= now ? "due now" : `next ${formatCompactMs(job.nextDueAt - now)}`);
-	// Settled includes failures and cancellation; this measures consumed runs, not success.
-	if (job.spec.count !== null && job.spec.count > 0 && visibleWidth(text) + 7 <= room) {
+	const counter = `${job.settled}${job.spec.count === null ? "" : `/${job.spec.count}`} settled`;
+	// Settled includes failures and cancellation, so the meter measures consumed runs, not success.
+	if (job.spec.count !== null && job.spec.count > 0) {
 		const filled = Math.min(6, Math.max(0, Math.floor((job.settled / job.spec.count) * 6)));
 		const meter =
 			theme.fg("harnessAction", GLYPH.barFull.repeat(filled)) + theme.fg("border", GLYPH.barEmpty.repeat(6 - filled));
-		text = text.replace("Loop ", `Loop ${meter} `);
-	}
-	append(truncateToWidth(sanitizeCallTargetText(job.id), 18, "…"));
-	if (job.pendingReason !== null && visibleWidth(text) + 12 < room)
-		append(truncateToWidth(sanitizeCallTargetText(job.pendingReason), room - visibleWidth(text) - 3, "…"));
+		if (!append(`${meter} ${counter}`)) append(counter);
+	} else append(counter);
+	if (jobs.length > 1) append(`+${jobs.length - 1} loops`);
+	// The scheduler skips an unsaved job, so its stored due time is not a countdown.
+	if (job.state === "active" && job.nextDueAt !== null && job.persistenceError === null)
+		append(job.nextDueAt <= now ? "due now" : `next ${formatCompactMs(job.nextDueAt - now)}`);
+	if (job.starts !== job.settled) append(`${job.starts} started`);
 	append("/loop");
-	return fitFooterText(
-		`${theme.fg(tone, fitFooterText(text, Math.max(1, room), "…"))}${theme.fg(tone, extra)}`,
-		width,
-		"…",
-	);
+	return theme.base(tone, fitFooterText(text, width, "…"));
 }

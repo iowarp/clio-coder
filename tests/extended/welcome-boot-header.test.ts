@@ -764,12 +764,12 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 		const frame = (width = 100): string[] => built.root.render(width).map(stripAnsi);
 		const loopRow = (width = 100): string => frame(width).find((row) => row.includes("Loop ")) ?? "";
 		try {
-			match(loopRow(), /Loop .*0\/3 settled · waiting · next 10s/u);
+			match(loopRow(), /Loop waiting · .*0\/3 settled · next 10s/u);
 			const rows = frame();
 			strictEqual(loopRow(), stripAnsi(built.editor.render(100).at(-1) ?? ""));
 			ok(rows.find((row) => row.includes("Loop "))?.startsWith("━ Loop "), "loop status belongs to the composer rail");
 			emit({ ...job, id: "other-watch" });
-			match(loopRow(), /\+1 jobs/u);
+			match(loopRow(), /\+1 loops/u);
 			for (const width of [1, 8, 20, 40, 80, 120]) {
 				frame(width);
 				const row = stripAnsi(built.editor.render(width).at(-1) ?? "");
@@ -796,7 +796,7 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 				evidence: null,
 			};
 			emit({ ...job, active: occurrence, starts: 1 });
-			match(loopRow(), /0\/3 settled · running.*1 started/u);
+			match(loopRow(), /Loop running · .*0\/3 settled.*1 started/u);
 			emit({ ...job, active: occurrence, starts: 1, persistenceError: "write failed" });
 			match(loopRow(), /not saved/u);
 			ok(!loopRow().includes("running"));
@@ -807,7 +807,7 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 			emit({ ...job, state: "paused", nextDueAt: null });
 			match(loopRow(), /paused/u);
 			emit({ ...job, state: "terminal", cancelRequested: true, active: occurrence, nextDueAt: null, starts: 1 });
-			match(loopRow(), /0\/3 settled · cancel requested/u);
+			match(loopRow(), /Loop cancel requested · .*0\/3 settled/u);
 			emit({
 				...job,
 				state: "terminal",
@@ -873,7 +873,7 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 			deepStrictEqual(footerDeps.getToolCounts?.(), { tools: { read: 1 }, errors: 1, active: 0, truncatedResults: 0 });
 			currentSession = "loop-session";
 			built.resetForNewSession();
-			match(loopRow(), /watch-build/u);
+			match(loopRow(), /Loop waiting · .*0\/3 settled/u);
 			strictEqual(reads, 3, "each canonical session reset loads one scoped snapshot");
 		} finally {
 			built.dispose();
