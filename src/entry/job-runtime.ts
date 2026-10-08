@@ -107,6 +107,14 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 	const check = (context: JobAdmissionContext, starting = false): JobAdmission => {
 		const { job, phase, signal } = context;
 		const command = job.spec.runner.kind === "command" && phase !== "delivery";
+		if (signal.aborted) return { status: "denied", reason: "This occurrence was canceled before admission." };
+		if (
+			phase !== "create" &&
+			phase !== "resume" &&
+			!(phase === "delivery" && job.delivery?.kind === "notice") &&
+			deps.permissionPending()
+		)
+			return { status: "wait", reason: "An operator permission/interview decision is pending." };
 		const refusal = jobAuthorityRefusal(
 			deps,
 			job.owner,
@@ -114,7 +122,6 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 			job.spec.constraints,
 		);
 		if (refusal !== null) return { status: "denied", reason: refusal };
-		if (signal.aborted) return { status: "denied", reason: "This occurrence was canceled before admission." };
 		if (command && unresolvedCommandCleanup)
 			return {
 				status: "denied",
@@ -123,8 +130,6 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 			};
 		if (phase === "create" || phase === "resume") return { status: "ready" };
 		if (phase === "delivery" && job.delivery?.kind === "notice") return { status: "ready" };
-		if (deps.permissionPending())
-			return { status: "wait", reason: "An operator permission/interview decision is pending." };
 		if (starting) return { status: "ready" };
 		if (command)
 			return commandSlots < 2

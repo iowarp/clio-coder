@@ -164,12 +164,17 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			if (!owned(job) || jobHasUnresolvedCleanup(job)) continue;
 			const execution = live.get(job.id);
 			if (execution && !execution.abort.signal.aborted) due = Math.min(due, now() + execution.timeoutAt - spanNow());
-			if (!jobIsComplete(job) && job.spec.deadlineAt !== null && job.reason !== "deadline")
+			if (
+				!jobIsComplete(job) &&
+				job.spec.deadlineAt !== null &&
+				job.reason !== "deadline" &&
+				(job.persistenceError === null || (execution && !execution.abort.signal.aborted))
+			)
 				due = Math.min(due, job.spec.deadlineAt);
 			if (job.persistenceError !== null) continue;
 			if (job.state === "active" && job.nextDueAt !== null) due = Math.min(due, job.nextDueAt);
 			if (job.state !== "paused" && !execution && (job.pending !== null || job.delivery?.state === "pending"))
-				due = Math.min(due, retryAt.get(job.id) ?? now());
+				due = Math.min(due, now() + (retryAt.get(job.id) ?? spanNow()) - spanNow());
 		}
 		if (!Number.isFinite(due)) return;
 		timer = setTimeout(tick, Math.max(1, Math.min(2_147_483_647, due - now())));
@@ -244,6 +249,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 	function settle(id: string, execution: LiveExecution, result: JobRunResult): void {
 		let job = current(id);
 		if (result.cleanupUnresolved === true) cleanupBlocked = true;
+		if (job.persistenceError !== null) return;
 		// A completion microtask may run before an already-due timer callback (#411).
 		if (!execution.abort.signal.aborted && job.spec.deadlineAt !== null && now() >= job.spec.deadlineAt) {
 			job = terminal(id, "deadline");
@@ -251,7 +257,6 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			abortLive(id, "execution timeout", "timed_out");
 		}
 		if (!execution.started) {
-			if (job.persistenceError !== null) return;
 			if (execution.abort.signal.aborted || job.generation !== execution.generation) {
 				commit(job, (draft) => {
 					draft.cancelRequested = false;
@@ -325,8 +330,9 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				return;
 			}
 			if (draft.state === "active") draft.pendingReason = null;
-			if (draft.state === "terminal" || draft.generation !== execution.generation) return;
+			if (draft.state === "terminal") return;
 			const matched =
+				draft.generation === execution.generation &&
 				draft.spec.until !== null &&
 				["succeeded", "noop"].includes(evidence.outcome) &&
 				evidence.jsonComplete &&
@@ -352,6 +358,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				draft.reason = "count";
 				draft.pending = null;
 				draft.nextDueAt = null;
+			} else if (draft.generation !== execution.generation) {
+				return;
 			} else if (evidence.errorClass === "permission") {
 				draft.state = "paused";
 				draft.nextDueAt = null;
@@ -405,7 +413,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				{ status: "wait", reason: main ? "main job turn is occupied" : "command job capacity is occupied" },
 				kind,
 			);
-			retryAt.set(id, now() + POLL_MS);
+			retryAt.set(id, spanNow() + POLL_MS);
 			return;
 		}
 		const executionId = kind === "delivery" ? job.delivery?.id : job.pending?.id;
@@ -422,10 +430,11 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		};
 		live.set(id, execution);
 		execution.promise = (async () => {
+			let result: JobRunResult | null = null;
 			try {
 				const admission = await options.ports.admit({ job: copy(job), phase: kind, signal: execution.abort.signal });
 				if (!canStart(current(id), execution)) {
-					settle(id, execution, { outcome: "deferred", summary: "scope unavailable after admission" });
+					result = { outcome: "deferred", summary: "scope unavailable after admission" };
 					return;
 				}
 				if (admission.status !== "ready") {
@@ -438,18 +447,18 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					signal: execution.abort.signal,
 					start: () => startExecution(id, execution),
 				};
-				const result = await (kind === "delivery" ? options.ports.deliver(context) : options.ports.run(context));
-				settle(id, execution, result);
+				result = await (kind === "delivery" ? options.ports.deliver(context) : options.ports.run(context));
 			} catch (error) {
+				result = { outcome: "failed", summary: errorText(error), errorClass: "infrastructure" };
+				report(error);
+			} finally {
 				try {
-					settle(id, execution, { outcome: "failed", summary: errorText(error), errorClass: "infrastructure" });
+					if (result !== null) settle(id, execution, result);
 				} catch (settleError) {
 					report(settleError);
 				}
-				report(error);
-			} finally {
 				live.delete(id);
-				retryAt.set(id, now() + POLL_MS);
+				retryAt.set(id, spanNow() + POLL_MS);
 				schedule();
 			}
 		})();
@@ -470,15 +479,17 @@ export function createJobController(options: JobControllerOptions): JobControlle
 						now() >= job.spec.deadlineAt &&
 						job.reason !== "deadline"
 					) {
-						terminal(id, "deadline");
+						if (job.persistenceError === null) terminal(id, "deadline");
+						else abortLive(id, "deadline", "timed_out");
 						continue;
 					}
 					if (execution && spanNow() >= execution.timeoutAt && !execution.abort.signal.aborted) {
 						try {
-							commit(job, (draft) => {
-								draft.cancelRequested = true;
-								draft.pendingReason = "execution timeout; awaiting settlement";
-							});
+							if (job.persistenceError === null)
+								commit(job, (draft) => {
+									draft.cancelRequested = true;
+									draft.pendingReason = "execution timeout; awaiting settlement";
+								});
 						} finally {
 							abortLive(id, "execution timeout", "timed_out");
 						}
@@ -509,7 +520,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 							}
 						});
 					}
-					if (execution || job.state === "paused" || now() < (retryAt.get(id) ?? 0)) continue;
+					if (execution || job.state === "paused" || spanNow() < (retryAt.get(id) ?? 0)) continue;
 					if (job.delivery?.state === "pending") launch(id, "delivery");
 					else if (job.state === "active" && job.pending) launch(id, "run");
 				} catch (error) {
@@ -547,6 +558,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					return;
 				}
 				if (draft.active) {
+					draft.costUsd = null;
 					draft.history = [
 						...draft.history,
 						{
@@ -560,12 +572,19 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					draft.settled += 1;
 				}
 				if (draft.delivery?.state === "running") {
+					draft.costUsd = null;
 					draft.delivery.state = "failed";
 					draft.delivery.endedAt = now();
 					draft.delivery.reason = "delivery interrupted; not replayed";
 					draft.delivery.evidence = jobEvidence({ outcome: "failed", summary: draft.delivery.reason }, "interrupted");
 				} else dropDelivery(draft, "session owner exited; wake not replayed");
-				if (draft.state !== "terminal") draft.state = "paused";
+				if (draft.state !== "terminal") {
+					if (draft.spec.count !== null && draft.starts >= draft.spec.count) {
+						draft.state = "terminal";
+						draft.reason ??= "count";
+						draft.pendingReason = null;
+					} else draft.state = "paused";
+				}
 			});
 		}
 		schedule();
