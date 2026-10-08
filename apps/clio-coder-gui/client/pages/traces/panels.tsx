@@ -98,7 +98,7 @@ export function Waterfall({
 									)
 									.map((event) => (
 										<i
-											key={event.rowid}
+											key={event.event_id}
 											className="trace-tool-span"
 											title={`${event.name} · ${event.ended_at ? formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at)) : "end not recorded"}`}
 											style={{

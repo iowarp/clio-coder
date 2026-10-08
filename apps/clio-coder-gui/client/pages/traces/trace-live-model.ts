@@ -13,20 +13,27 @@ export const lastRowid = (rows: readonly TraceEvent[] | undefined) => {
 };
 
 /**
- * Appends streamed rows to the held list in rowid order. A reconnect can replay rows the page
- * already holds, so rows at or below a held rowid replace nothing and are dropped. Returns the
- * previous list unchanged when nothing new arrived, so the query cache does not re-render.
+ * Keeps the newest rowid for each stable event_id: a span's finish advances its cursor without
+ * becoming a second event. Older and equal replays leave the held version alone. Returns the
+ * previous list unchanged when nothing changed, so the query cache does not re-render.
  */
 export function mergeTraceEvents(previous: TraceEvent[] | undefined, incoming: readonly TraceEvent[]): TraceEvent[] {
 	const held = previous ?? [];
-	const seen = new Set(held.map((row) => row.rowid));
-	const fresh = incoming.filter((row) => !seen.has(row.rowid) && seen.add(row.rowid));
-	if (!fresh.length) return held;
-	const tail = lastRowid(held);
-	// Rows arrive in rowid order; sort only when a replayed batch interleaves with held rows.
-	const ordered = fresh.every((row, i) => row.rowid > (i ? (fresh[i - 1]?.rowid ?? tail) : tail));
-	const merged = [...held, ...fresh];
-	return ordered ? merged : merged.sort((a, b) => a.rowid - b.rowid);
+	if (!incoming.length) return held;
+	const seen = new Map(held.map((row) => [row.event_id, row]));
+	const fresh = new Map<string, TraceEvent>();
+	for (const row of incoming) {
+		const current = fresh.get(row.event_id) ?? seen.get(row.event_id);
+		if (!current || row.rowid > current.rowid) fresh.set(row.event_id, row);
+	}
+	if (!fresh.size) return held;
+	const rows = [...fresh.values()];
+	const kept = rows.some((row) => seen.has(row.event_id)) ? held.filter((row) => !fresh.has(row.event_id)) : held;
+	// Normal appends and finishes advance beyond the held tail. Sort only the changed batch first,
+	// so repeated revisions in one flush do not force a sort of the whole history.
+	if (!rows.every((row, i) => i === 0 || row.rowid > (rows[i - 1]?.rowid ?? 0))) rows.sort((a, b) => a.rowid - b.rowid);
+	const merged = [...kept, ...rows];
+	return (rows[0]?.rowid ?? 0) > lastRowid(kept) ? merged : merged.sort((a, b) => a.rowid - b.rowid);
 }
 
 /**

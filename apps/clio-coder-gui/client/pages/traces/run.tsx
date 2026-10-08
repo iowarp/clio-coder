@@ -12,7 +12,7 @@ import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
 import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import "../run-inspection.css";
-import { detailRefetchMs, liveLabel, runIsLive, type TraceLiveState } from "./trace-live-model.js";
+import { detailRefetchMs, liveLabel, mergeTraceEvents, runIsLive, type TraceLiveState } from "./trace-live-model.js";
 import { histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
 import { useTraceLive } from "./use-trace-live.js";
 export function TraceRunPage({ client }: { client: Client }) {
@@ -56,10 +56,10 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		queryKey: ["trace-events", runId],
 		queryFn: async () => {
 			let after = 0;
-			const result: TraceEvent[] = [];
+			let result: TraceEvent[] = [];
 			while (true) {
 				const page = await client.call(routes.traceEvents, { ...input, query: { after, limit: 500 } });
-				result.push(...page.events);
+				result = mergeTraceEvents(result, page.events);
 				after = page.cursor;
 				if (!page.hasMore) return result;
 			}
@@ -182,7 +182,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				{/* biome-ignore lint/a11y/noNoninteractiveTabindex: The bounded event log is a keyboard-scrollable region. */}
 				<section className="inspection-log" tabIndex={0} aria-label={phase ? `${phase.name} events` : "All run events"}>
 					{phaseEvents.map((event) => (
-						<EventRow key={event.rowid} event={event} start={run.started_at} />
+						<EventRow key={event.event_id} event={event} start={run.started_at} />
 					))}
 				</section>
 				{!phaseEvents.length ? <PanelEmpty>{emptyState.emptyStore("event", "for this phase")}</PanelEmpty> : null}

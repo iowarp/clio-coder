@@ -1,8 +1,62 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
+import { lastRowid, mergeTraceEvents } from "../client/pages/traces/trace-live-model.js";
+import type { TraceEvent } from "../contracts/traces.js";
 import { harness } from "./harness/app.js";
 import { traceFixture } from "./harness/trace-fixture.js";
+
+test("a live span finish replaces its open event and older replays cannot reopen it", () => {
+	const open: TraceEvent = {
+		rowid: 1,
+		event_id: "tool-1",
+		run_id: "run",
+		phase_id: "phase",
+		parent_id: null,
+		type: "tool",
+		name: "read",
+		payload_json: null,
+		tokens: null,
+		started_at: "2026-10-07T10:00:00Z",
+		ended_at: null,
+	};
+	const other = { ...open, rowid: 2, event_id: "tool-2" };
+	const held = [open, other];
+	const finished = { ...open, rowid: 3, ended_at: "2026-10-07T10:00:01Z", payload_json: '{"ok":true}' };
+	const merged = mergeTraceEvents(held, [finished]);
+	assert.deepEqual(merged, [other, finished]);
+	assert.equal(lastRowid(merged), 3);
+	assert.equal(merged[0], other);
+	assert.equal(open.ended_at, null, "the held open object is never mutated");
+	assert.equal(mergeTraceEvents(merged, [open, finished, { ...finished, payload_json: null }]), merged);
+	assert.equal(mergeTraceEvents(merged, []), merged);
+});
+
+test("paged and batched trace rows keep one newest version per event in cursor order", () => {
+	const open: TraceEvent = {
+		rowid: 2,
+		event_id: "tool",
+		run_id: "run",
+		phase_id: "phase",
+		parent_id: null,
+		type: "tool",
+		name: "read",
+		payload_json: null,
+		tokens: null,
+		started_at: "2026-10-07T10:00:00Z",
+		ended_at: null,
+	};
+	const older = { ...open, rowid: 1, event_id: "earlier" };
+	const other = { ...open, rowid: 3, event_id: "other" };
+	const finished = { ...open, rowid: 4, ended_at: "2026-10-07T10:00:01Z" };
+	let pages = mergeTraceEvents(undefined, [open, other]);
+	pages = mergeTraceEvents(pages, [finished, open, older, finished]);
+	assert.deepEqual(pages, [older, other, finished]);
+	const batch = mergeTraceEvents(undefined, [open, other, finished, older, open]);
+	assert.deepEqual(batch, pages);
+	assert.equal(mergeTraceEvents(batch, [older, open, other]), batch);
+	assert.equal(lastRowid(batch), 4);
+});
 
 test("live tail delivers post-connect appends in rowid order and closes after two terminal idle polls", {
 	timeout: 10000,
