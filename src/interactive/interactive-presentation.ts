@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { JobRecord } from "../core/job-types.js";
 import { motionEnabled } from "../core/terminal-preferences.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
@@ -16,6 +17,7 @@ import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/provider
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
+import { jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -25,6 +27,7 @@ import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
 import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
+import type { JobOperations } from "../tools/job-types.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { createChatPanel } from "./chat-panel.js";
 import type { CoalescingChatRenderer } from "./chat-renderer.js";
@@ -47,6 +50,7 @@ import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
 import { composerPhasePresentation } from "./footer/widgets.js";
+import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
@@ -117,6 +121,7 @@ export interface InteractivePresentationDeps {
 	resources?: Pick<ResourcesContract, "skills" | "prompts" | "promptsForDisplay">;
 	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
+	jobs?: Pick<JobOperations, "list" | "subscribe">;
 	getSessionId?: () => string | null;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
 	getLocalCapacity?: () => LocalCapacity | null;
@@ -244,6 +249,45 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const getCwd = deps.getCwd ?? (() => process.cwd());
 	const now = deps.now ?? performance.now.bind(performance);
 	const requestRender = (): void => deps.tui.requestRender();
+	const sessionId = (): string | null => deps.session?.current()?.id ?? deps.getSessionId?.() ?? null;
+	let loopSessionId = sessionId();
+	const loopJobs = new Map<string, JobRecord>();
+	let loopSnapshot: readonly JobRecord[] = [];
+	const updateLoopSnapshot = (): void => {
+		loopSnapshot = [...loopJobs.values()].sort((left, right) => {
+			const priority = (job: JobRecord): number =>
+				job.cancelRequested || job.active !== null || job.delivery?.state === "running"
+					? 0
+					: job.state === "paused"
+						? 2
+						: 1;
+			return priority(left) - priority(right) || (left.nextDueAt ?? Infinity) - (right.nextDueAt ?? Infinity);
+		});
+	};
+	const resetLoopJobs = (): void => {
+		loopSessionId = sessionId();
+		loopJobs.clear();
+		for (const job of deps.jobs?.list() ?? []) {
+			if (job.owner.sessionId === loopSessionId && !jobIsComplete(job)) loopJobs.set(job.id, job);
+		}
+		updateLoopSnapshot();
+	};
+	resetLoopJobs();
+	const unsubscribeLoops = deps.jobs?.subscribe((job) => {
+		if (loopSessionId !== sessionId()) resetLoopJobs();
+		if (job.owner.sessionId !== loopSessionId) return;
+		if (jobIsComplete(job)) loopJobs.delete(job.id);
+		else loopJobs.set(job.id, job);
+		updateLoopSnapshot();
+		requestRender();
+	});
+	const loops: Component = {
+		render: (width) => {
+			const line = loopSegment(loopSnapshot, width, Date.now());
+			return line === null ? [] : [line];
+		},
+		invalidate: () => {},
+	};
 	const settings = deps.getSettings?.() ?? structuredClone(DEFAULT_SETTINGS);
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
@@ -704,6 +748,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 						preparation: deps.chat.turnPreparation().phase,
 					}),
 			),
+			loops,
 			footer: footer.view,
 		},
 		{
@@ -749,7 +794,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				!["idle", "ended"].includes(statusController.current().phase) ||
 				localBashStartedAt !== null ||
 				dispatchBoardStore.rows().some((row) => row.status === "running");
-			if (deps.chat.isStreaming() || statusActive) {
+			if (deps.chat.isStreaming() || statusActive || loopSnapshot.some((job) => job.nextDueAt !== null)) {
 				footer.refresh();
 				needsRender = true;
 			}
@@ -783,6 +828,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		footer.dispose();
 		unsubscribeObservability();
 		contextActivityStore.unsubscribe();
+		unsubscribeLoops?.();
 		dispatchBoardStore.unsubscribe();
 		unbindRunReaders();
 	};
@@ -838,6 +884,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			lastTurnSummary = summary;
 		},
 		resetForNewSession: () => {
+			resetLoopJobs();
 			banner.resetToLaunchpad();
 			footerToolCounts.clear();
 			footerActiveTools.clear();

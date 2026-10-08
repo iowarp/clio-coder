@@ -346,7 +346,7 @@ type ReplayBlockRenderer = (
  * live, the ledger entry's on replay. `/view` states each one's age from it.
  */
 type TranscriptEntry =
-	| { role: "user"; text: string; at: number; status?: () => UserTurnStatus }
+	| { role: "user"; text: string; at: number; status?: () => UserTurnStatus; origin?: string }
 	| { role: "retryStatus"; status: RetryStatusPayload; at: number }
 	| {
 			role: "assistant";
@@ -398,7 +398,7 @@ export interface ChatPanel extends Component {
 	 * reports anything but `committed`, so the row the transcript shows before
 	 * admission is visibly not the durable turn it will become.
 	 */
-	appendUser(text: string, status?: () => UserTurnStatus): void;
+	appendUser(text: string, status?: () => UserTurnStatus, origin?: string): void;
 	/**
 	 * Append a caller-rendered block. Pass `isLive` when the closure reads state
 	 * that keeps changing after the append, so the panel keeps re-rendering it
@@ -914,8 +914,18 @@ function appendUserRowTail(rendered: string[], tail: string, width: number): voi
  */
 const SKILL_INVOCATION = /^\/skill\s+\S+/u;
 
-function renderUserLines(text: string, width: number, status: UserTurnStatus): string[] {
+function renderUserLines(text: string, width: number, status: UserTurnStatus, origin?: string): string[] {
 	const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
+	const scheduled = /^job (\S+) (\S+)$/u.exec(origin ?? "");
+	if (scheduled !== null) {
+		const header = `${GLYPH.phaseTool} Scheduled loop · ${sanitizeCallTargetText(scheduled[1] ?? "")}`;
+		return [
+			...wrapTextWithAnsi(clioTheme().fg("annotation", header), width),
+			...hangProseLines(
+				wrapTextWithAnsi(clioTheme().fg("annotation", sanitizeMultilineDisplayText(text).text), contentWidth),
+			),
+		];
+	}
 	const committed = status === "committed";
 	const prefix = committed ? USER_PREFIX() : USER_PREFIX_PENDING();
 	const rendered: string[] = [];
@@ -935,6 +945,7 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus): s
 	}
 	if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
 	if (!committed) appendUserRowTail(rendered, status === "pending" ? USER_PENDING_TAIL : USER_REFUSED_TAIL, width);
+	if (origin) rendered.push(...wrapTextWithAnsi(`  ${sanitizeCallTargetText(origin)}`, width));
 	return rendered;
 }
 
@@ -1246,7 +1257,7 @@ function renderEntryLines(
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "user") {
-		return renderUserLines(entry.text, width, entry.status?.() ?? "committed");
+		return renderUserLines(entry.text, width, entry.status?.() ?? "committed", entry.origin);
 	}
 	if (entry.role === "retryStatus") {
 		return renderRetryStatus(entry.status, width, detail, unboundedToolBodies, terminalRows);
@@ -2120,9 +2131,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	return {
-		appendUser(text: string, status?: () => UserTurnStatus): void {
+		appendUser(text: string, status?: () => UserTurnStatus, origin?: string): void {
 			lastSettledReceipt = null;
-			transcript.push({ role: "user", text, at: stamp(), ...(status ? { status } : {}) });
+			transcript.push({
+				role: "user",
+				text,
+				at: stamp(),
+				...(status ? { status } : {}),
+				...(origin !== undefined ? { origin } : {}),
+			});
 			markDirty();
 		},
 		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
@@ -2359,9 +2376,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// A queued steer or follow-up the engine just injected. Rendering it
 				// here, at injection time, keeps the transcript in the order the
 				// model saw: enqueue time shows the text only in the queue panel.
-				transcript.push({ role: "user", text: event.display?.text ?? event.text, at: stamp() });
+				transcript.push({
+					role: "user",
+					text: event.display?.text ?? event.text,
+					at: stamp(),
+					...(event.origin !== undefined ? { origin: event.origin } : {}),
+				});
 				const note = event.display?.note;
-				if (note !== undefined) {
+				if (note !== undefined && note !== event.origin) {
 					transcript.push({
 						role: "replayBlock",
 						renderBlock: (width) => wrapTextWithAnsi(`  ${note}`, width),

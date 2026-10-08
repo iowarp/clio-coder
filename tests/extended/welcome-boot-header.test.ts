@@ -1,7 +1,9 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { performance } from "node:perf_hooks";
 import { test } from "node:test";
 import { isDevVersion, readClioVersionLabel } from "../../src/core/build-info.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { JobRecord } from "../../src/core/job-types.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import {
 	stripTerminalSequences as stripAnsi,
@@ -16,6 +18,7 @@ import {
 	createInteractivePresentation,
 	type InteractivePresentationDeps,
 } from "../../src/interactive/interactive-presentation.js";
+import { buildLayout } from "../../src/interactive/layout.js";
 import {
 	buildWelcomeDashboardLines,
 	createBootWelcome,
@@ -607,8 +610,8 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 			createChatPanel: () => ({ ...view, reset: noop, appendReplayBlock: noop, workerStates: () => [] }),
 			createFollowUpQueuePanel: () => view,
 			createStatusController: () => ({ current: () => ({ phase: "idle" }), reset: noop, dispose: noop }),
-			createDispatchBoardStore: () => ({ rows: () => [], unsubscribe: noop }),
-			createContextActivityStore: () => ({ current: () => ({}), unsubscribe: noop }),
+			createDispatchBoardStore: () => ({ rows: () => [], activeRows: () => [], unsubscribe: noop }),
+			createContextActivityStore: () => ({ current: () => null, unsubscribe: noop }),
 			createNotificationCenter: () => ({ add: noop, list: () => [], dismiss: noop }),
 			buildFooter: (deps: Parameters<typeof buildFooterDashboard>[0]) => {
 				footerDeps = deps;
@@ -619,12 +622,12 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 			createEditor: (_tui: unknown, chrome: EditorChrome) =>
 				realEditor
 					? new ClioEditor(new TuiMainScreen({ columns: 120, rows: 24, write: noop } as unknown as Terminal), chrome)
-					: { ...view, focused: false, setAutocompleteProvider: noop },
+					: { ...view, render: () => ["COMPOSER"], focused: false, setAutocompleteProvider: noop },
 			createAutocomplete: () => ({}),
 			createDispatchBoardView: () => view,
 			createChatRenderer: () => ({ mutate: (run: () => void) => run(), reset: (run: () => void) => run(), flush: noop }),
 			createIo: () => ({ stderr: noop, stdout: noop }),
-			buildLayout: () => view,
+			buildLayout,
 		},
 		...over,
 	} as unknown as InteractivePresentationDeps;
@@ -679,31 +682,203 @@ test("the presentation opens on the launchpad and collapses on first submit", as
 	strictEqual(headerRows(built).length, 1);
 });
 
-test("a session reset restores the launchpad and clears tool telemetry, including late results", () => {
-	const { presentation: built, footerDeps } = presentation();
-	built.collapseWelcomeDashboard();
-	strictEqual(headerRows(built).length, 1);
-	built.recordToolStart("failed-call", "bash");
-	built.recordToolEnd({ toolCallId: "failed-call", isError: true, truncated: true });
-	built.recordToolStart("pending-call", "read");
-	deepStrictEqual(footerDeps.getToolCounts?.(), {
-		tools: { bash: 1, read: 1 },
-		errors: 1,
-		active: 1,
-		truncatedResults: 1,
-	});
-	built.resetForNewSession();
-	strictEqual(headerRows(built).length, 18);
-	built.collapseWelcomeDashboard();
-	strictEqual(headerRows(built).length, 1);
-	built.recordToolEnd({ toolCallId: "pending-call", isError: true, truncated: true });
-	deepStrictEqual(footerDeps.getToolCounts?.(), { tools: {}, errors: 0, active: 0, truncatedResults: 0 });
-	strictEqual(built.toolCounts().size, 0);
-	built.recordToolStart("current-call", "read");
-	built.recordToolEnd({ toolCallId: "current-call", isError: true, truncated: false });
-	built.recordToolEnd({ toolCallId: "current-call", isError: true, truncated: false });
-	deepStrictEqual(footerDeps.getToolCounts?.(), { tools: { read: 1 }, errors: 1, active: 0, truncatedResults: 0 });
-	built.dispose();
+test("a session reset restores the launchpad and clears tool telemetry, including late results", (t) => {
+	let wall = 100_000;
+	let elapsed = 1_000;
+	t.mock.method(Date, "now", () => wall);
+	t.mock.method(performance, "now", () => elapsed);
+	for (const mode of ["regular", "fullscreen"] as const) {
+		let currentSession = "loop-session";
+		let reads = 0;
+		let listener: ((job: JobRecord) => void) | null = null;
+		let heartbeat: (() => void) | undefined;
+		const job: JobRecord = {
+			version: 1,
+			id: "watch-build",
+			revision: 0,
+			spec: {
+				intervalMs: 1_000,
+				runner: { kind: "main", prompt: "Inspect build" },
+				count: 3,
+				deadlineAt: null,
+				timeoutMs: 1_000,
+				until: null,
+				onMatch: { kind: "notice" },
+				constraints: null,
+				originTurnId: null,
+			},
+			specHash: "fixture",
+			owner: { sessionId: currentSession, cwd: process.cwd(), generation: "initial" },
+			generation: 0,
+			process: { pid: process.pid, birthToken: null, instanceId: "fixture" },
+			createdAt: wall,
+			updatedAt: wall,
+			state: "active",
+			reason: null,
+			cancelRequested: false,
+			nextDueAt: wall + 10_000,
+			starts: 0,
+			settled: 0,
+			consecutiveFailures: 0,
+			pendingReason: null,
+			active: null,
+			pending: null,
+			history: [],
+			delivery: null,
+			costUsd: null,
+			persistenceError: null,
+		};
+		const emit = (updated: JobRecord): void => {
+			listener?.(updated);
+		};
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.interface.mode = mode;
+		const {
+			presentation: built,
+			footerDeps,
+			renders,
+		} = presentation(
+			{
+				getSessionId: () => currentSession,
+				getSettings: () => settings,
+				jobs: {
+					list: () => {
+						reads += 1;
+						return currentSession === "loop-session" ? [job] : [];
+					},
+					subscribe: (next) => {
+						listener = next;
+						return () => {
+							listener = null;
+						};
+					},
+				},
+				scheduleInterval: (run, interval) => {
+					if (interval === 1_000) heartbeat = run;
+					return { unref: noop };
+				},
+			},
+			false,
+			true,
+		);
+		const frame = (width = 100): string[] => built.root.render(width).map(stripAnsi);
+		const loopRow = (width = 100): string => frame(width).find((row) => row.startsWith("Loop ")) ?? "";
+		try {
+			match(loopRow(), /watch-build · waiting · 0\/3 settled · next 10s/u);
+			const rows = frame();
+			strictEqual(rows.findIndex((row) => row.startsWith("Loop ")) + 1, rows.indexOf("COMPOSER"));
+			emit({ ...job, id: "other-watch" });
+			match(loopRow(), /\+1 jobs/u);
+			for (const width of [1, 8, 20, 40, 80, 120]) {
+				const lines = frame(width);
+				const row = lines[lines.indexOf("COMPOSER") - 1] ?? "";
+				ok(row.length > 0);
+				ok(visibleWidth(row) <= width, row);
+			}
+			emit({ ...job, id: "other-watch", state: "terminal", nextDueAt: null });
+			built.footer.setExpanded(true);
+			match(loopRow(), /waiting/u);
+			built.footer.setExpanded(false);
+			const beforeTick = renders();
+			wall += 2_000;
+			elapsed += 2_000;
+			heartbeat?.();
+			ok(renders() > beforeTick, "idle loops must repaint their next-run countdown");
+			match(loopRow(), /next 8\.0s/u);
+			strictEqual(reads, 1, "rendering and heartbeat must use the event cache");
+			const occurrence = {
+				id: "run-1",
+				scheduledAt: wall,
+				startedAt: wall,
+				endedAt: null,
+				state: "running" as const,
+				evidence: null,
+			};
+			emit({ ...job, active: occurrence, starts: 1 });
+			match(loopRow(), /running · 0\/3 settled.*1 started/u);
+			emit({ ...job, active: occurrence, starts: 1, persistenceError: "write failed" });
+			match(loopRow(), /not saved/u);
+			ok(!loopRow().includes("running"));
+			emit({ ...job, pendingReason: "Waiting for operator \x1b]0;FAKE\x07 input\nready" });
+			const waiting = loopRow(160);
+			match(waiting, /waiting/u);
+			ok(!waiting.includes("FAKE") && !waiting.includes("\n"), waiting);
+			emit({ ...job, state: "paused", nextDueAt: null });
+			match(loopRow(), /paused/u);
+			emit({ ...job, state: "terminal", cancelRequested: true, active: occurrence, nextDueAt: null, starts: 1 });
+			match(loopRow(), /cancel requested · 0\/3 settled/u);
+			emit({
+				...job,
+				state: "terminal",
+				nextDueAt: null,
+				delivery: {
+					id: "delivery-1",
+					occurrenceId: "run-1",
+					kind: "main_turn",
+					state: "pending",
+					createdAt: wall,
+					startedAt: null,
+					endedAt: null,
+					reason: null,
+					evidence: null,
+				},
+			});
+			match(loopRow(), /analysis waiting/u);
+			emit({
+				...job,
+				state: "terminal",
+				nextDueAt: null,
+				delivery: {
+					id: "notice-1",
+					occurrenceId: "run-1",
+					kind: "notice",
+					state: "pending",
+					createdAt: wall,
+					startedAt: null,
+					endedAt: null,
+					reason: null,
+					evidence: null,
+				},
+			});
+			match(loopRow(), /notice waiting/u);
+			emit({ ...job, state: "terminal", nextDueAt: null, starts: 3, settled: 3 });
+			strictEqual(loopRow(), "", "completed jobs leave the band immediately");
+			emit(job);
+			built.collapseWelcomeDashboard();
+			strictEqual(headerRows(built).length, 1);
+			built.recordToolStart("failed-call", "bash");
+			built.recordToolEnd({ toolCallId: "failed-call", isError: true, truncated: true });
+			built.recordToolStart("pending-call", "read");
+			deepStrictEqual(footerDeps.getToolCounts?.(), {
+				tools: { bash: 1, read: 1 },
+				errors: 1,
+				active: 1,
+				truncatedResults: 1,
+			});
+			currentSession = "other-session";
+			built.resetForNewSession();
+			strictEqual(loopRow(), "", "session navigation clears the old loop projection");
+			emit(job);
+			strictEqual(loopRow(), "", "late old-session updates cannot restore its row");
+			strictEqual(headerRows(built).length, 18);
+			built.collapseWelcomeDashboard();
+			strictEqual(headerRows(built).length, 1);
+			built.recordToolEnd({ toolCallId: "pending-call", isError: true, truncated: true });
+			deepStrictEqual(footerDeps.getToolCounts?.(), { tools: {}, errors: 0, active: 0, truncatedResults: 0 });
+			strictEqual(built.toolCounts().size, 0);
+			built.recordToolStart("current-call", "read");
+			built.recordToolEnd({ toolCallId: "current-call", isError: true, truncated: false });
+			built.recordToolEnd({ toolCallId: "current-call", isError: true, truncated: false });
+			deepStrictEqual(footerDeps.getToolCounts?.(), { tools: { read: 1 }, errors: 1, active: 0, truncatedResults: 0 });
+			currentSession = "loop-session";
+			built.resetForNewSession();
+			match(loopRow(), /watch-build/u);
+			strictEqual(reads, 3, "each canonical session reset loads one scoped snapshot");
+		} finally {
+			built.dispose();
+			strictEqual(listener, null, "disposing the presentation releases its job subscription");
+		}
+	}
 });
 
 test("a boot-time resume opens collapsed, with no fresh-start onboarding", () => {

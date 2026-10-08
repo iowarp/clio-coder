@@ -696,6 +696,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			})
 		: undefined;
 	const presentation = createInteractivePresentation({
+		...(deps.jobs ? { jobs: deps.jobs } : {}),
 		bus: deps.bus,
 		getLifecycleHint: () => updateMonitor?.text() ?? null,
 		getLeaderArmed: () => leaderArmed,

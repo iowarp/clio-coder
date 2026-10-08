@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -12,10 +12,11 @@ import type { SessionEntry } from "../../src/domains/session/index.js";
 import { isSessionEntry, isSessionHeader } from "../../src/domains/session/index.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { readSessionFileEntries, sessionPaths } from "../../src/engine/session.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { createPeerInbox } from "../../src/interactive/peer-inbox.js";
-import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
+import type { ChatLoopEvent, CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
@@ -160,6 +161,7 @@ it("persists and replays machine origin after the real engine injects a busy fol
 		tokensPerSecond: 0,
 	});
 	const model = faux.getModel();
+	const providerUsers: string[] = [];
 	let release!: () => void;
 	const gate = new Promise<void>((resolve) => {
 		release = resolve;
@@ -169,6 +171,7 @@ it("persists and replays machine origin after the real engine injects a busy fol
 		entered = resolve;
 	});
 	const response: Parameters<typeof faux.setResponses>[0][number] = async (_context, _options, state) => {
+		providerUsers.push(JSON.stringify(_context.messages.filter((message) => message.role === "user")));
 		if (state.callCount === 1) {
 			entered();
 			await gate;
@@ -191,7 +194,7 @@ it("persists and replays machine origin after the real engine injects a busy fol
 			},
 		};
 	};
-	faux.setResponses([response, response]);
+	faux.setResponses([response, response, response, response]);
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.targets = [{ id: "peer-target", runtime: "peer-fixture", defaultModel: model.id }];
@@ -225,7 +228,14 @@ it("persists and replays machine origin after the real engine injects a busy fol
 		session,
 		readSessionEntries: entries,
 	});
+	const live = createChatPanel({ getOutputStyle: () => "detailed" });
+	const queued: Array<Extract<ChatLoopEvent, { type: "queued_user_turn" }>> = [];
+	loop.onEvent((event) => {
+		live.applyEvent(event);
+		if (event.type === "queued_user_turn") queued.push(event);
+	});
 	try {
+		live.appendUser("operator turn");
 		const running = loop.submit("operator turn");
 		await started;
 		strictEqual(loop.isStreaming(), true);
@@ -252,6 +262,12 @@ it("persists and replays machine origin after the real engine injects a busy fol
 		const replay = panel.render(120).join("\n");
 		ok(replay.includes(text), replay);
 		ok(replay.includes(origin), replay);
+		strictEqual(queued[0]?.origin, origin, "queue injection retains machine provenance");
+		strictEqual(
+			live.render(120).map(stripTerminalSequences).join("\n").split(origin).length - 1,
+			1,
+			"peer origin is shown once when its display note is the same attribution",
+		);
 
 		// A lifecycle change during an admission await retires the sender's
 		// generation before persistence or another model request can happen.
@@ -274,6 +290,50 @@ it("persists and replays machine origin after the real engine injects a busy fol
 			users,
 			"retired admission appends no user row",
 		);
+		for (const [executionId, text] of [
+			["occurrence-1", "Inspect the build"],
+			["delivery-1", "Analyze the matching build"],
+		] as const) {
+			const origin = `job job-watch ${executionId}`;
+			const result = await loop.submitMachineTurn?.({
+				jobId: "job-watch",
+				executionId,
+				text,
+				origin,
+				sessionId: session.current()?.id ?? "",
+				signal: new AbortController().signal,
+				isAdmissionCurrent: () => true,
+				onStarting: () => true,
+			});
+			strictEqual(result?.status, "succeeded");
+			const event = queued.at(-1);
+			ok(event);
+			strictEqual(event.origin, origin);
+			const entry = entries().find(
+				(entry) =>
+					entry.kind === "message" && entry.role === "user" && (entry.payload as { origin?: string }).origin === origin,
+			);
+			ok(entry?.kind === "message");
+			strictEqual(entry.role, "user", "scheduled input keeps the model's user role");
+			ok(providerUsers.at(-1)?.includes(text), "the provider receives the scheduled task");
+			for (const style of ["compact", "standard", "detailed"] as const) {
+				const projected = createChatPanel({ getOutputStyle: () => style });
+				projected.applyEvent(event);
+				const resumed = createChatPanel({ getOutputStyle: () => style });
+				rehydrateChatPanelFromTurns(resumed, [entry]);
+				for (const width of [20, 40, 80, 120]) {
+					const raw = projected.render(width);
+					const plain = raw.map(stripTerminalSequences).join("\n");
+					deepStrictEqual(raw.map(stripTerminalSequences), resumed.render(width).map(stripTerminalSequences));
+					match(plain, /Scheduled loop/u);
+					ok(plain.includes("job-watch"));
+					doesNotMatch(plain, /▌/u);
+					ok(!raw.join("\n").includes("\x1b]133;A"), "scheduled prompts are not operator navigation markers");
+					ok(raw.every((row) => visibleWidth(row) <= width));
+				}
+			}
+		}
+		match(live.render(120).map(stripTerminalSequences).join("\n"), /▌ operator turn/u);
 	} finally {
 		release();
 		loop.dispose();

@@ -1,4 +1,5 @@
 import { formatFooterTokens } from "../core/display-units.js";
+import type { JobRecord } from "../core/job-types.js";
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { Text } from "../engine/tui.js";
@@ -6,7 +7,7 @@ import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 import { formatReasoningChip } from "./status/reasoning.js";
-import { GLYPH } from "./theme/index.js";
+import { clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
 
 /** Shared footer projection of live and failed worker states. */
 export const ACTIVE_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Set([
@@ -113,4 +114,42 @@ export interface FooterPanel {
 export function fitFooterText(text: string, width: number, ellipsis = ""): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	return visibleWidth(text) > safeWidth ? truncateToWidth(text, safeWidth, ellipsis, true) : text;
+}
+
+export function loopSegment(jobs: readonly JobRecord[], width: number, now: number): string | null {
+	const job = jobs[0];
+	if (!job) return null;
+	const delivery = job.delivery?.state;
+	const running = job.active !== null || delivery === "running";
+	const state =
+		job.persistenceError !== null
+			? "not saved"
+			: job.cancelRequested
+				? "cancel requested"
+				: delivery === "running" || delivery === "pending"
+					? `${job.delivery?.kind === "main_turn" ? "analysis" : "notice"} ${delivery === "running" ? "running" : "waiting"}`
+					: job.state === "paused"
+						? `paused${running ? " · running" : ""}`
+						: running
+							? "running"
+							: job.state === "terminal"
+								? "settling"
+								: "waiting";
+	const id = truncateToWidth(sanitizeCallTargetText(job.id), Math.max(4, Math.min(18, Math.floor(width / 5))), "…");
+	const progress = `${job.settled}${job.spec.count === null ? "" : `/${job.spec.count}`} settled`;
+	const extra = jobs.length > 1 ? ` · +${jobs.length - 1} jobs` : "";
+	let text = `Loop ${id} · ${state} · ${progress}`;
+	if (job.state === "active" && job.nextDueAt !== null) {
+		text += job.nextDueAt <= now ? " · due now" : ` · next ${formatCompactMs(job.nextDueAt - now)}`;
+	}
+	if (job.starts !== job.settled && visibleWidth(`${text} · ${job.starts} started${extra}`) <= width)
+		text += ` · ${job.starts} started`;
+	if (job.pendingReason !== null && visibleWidth(`${text}${extra}`) + 12 < width)
+		text += ` · ${truncateToWidth(sanitizeCallTargetText(job.pendingReason), width - visibleWidth(`${text}${extra}`) - 3, "…")}`;
+	text = fitFooterText(text, Math.max(1, width - visibleWidth(extra)), "…") + fitFooterText(extra, width);
+	if (visibleWidth(`${text} · /loop`) <= width) text += " · /loop";
+	return clioTheme().fg(
+		job.cancelRequested || job.state === "paused" || job.persistenceError !== null ? "warning" : "annotation",
+		fitFooterText(text, width, "…"),
+	);
 }

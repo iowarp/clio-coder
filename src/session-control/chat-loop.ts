@@ -221,6 +221,7 @@ export interface QueueUpdateEvent {
  */
 export interface QueuedUserTurnEvent {
 	display?: { text: string; note?: string };
+	origin?: string;
 	type: "queued_user_turn";
 	text: string;
 	/** `interrupt` marks a message that cancelled the run and was submitted as a fresh prompt. */
@@ -1361,6 +1362,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				text: entry.text,
 				kind: entry.kind,
 				...(entry.display ? { display: entry.display } : {}),
+				...(entry.origin !== undefined ? { origin: entry.origin } : {}),
 			}),
 		emitNotice,
 		// What became of each queued entry, joined by id to the steer site's reading
@@ -2843,6 +2845,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						text: operatorText,
 						kind: "interrupt",
 						...(options.display ? { display: options.display } : {}),
+						...(options.origin !== undefined ? { origin: options.origin } : {}),
 					});
 				context.logPromptCompileIfPending();
 				if (deps.flushSystemOne && deps.session?.current()) {
@@ -3887,7 +3890,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						type: "queued_user_turn",
 						text: request.text,
 						kind: "follow-up",
-						display: { text: request.text, note: `Scheduled loop · ${request.jobId}` },
+						origin: request.origin,
 					});
 					if (request.signal.aborted) cancel();
 				},

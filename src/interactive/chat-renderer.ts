@@ -716,12 +716,8 @@ function replayEntries(
 					const startedAt = Date.parse(entry.timestamp);
 					runStartedAtMs = Number.isFinite(startedAt) ? startedAt : undefined;
 					const text = replayedUserText(entry);
-					if (text.length > 0) chatPanel.appendUser(text);
-					// A turn another Clio submitted says so on replay, as it did live.
 					const origin = payloadObject(entry.payload)?.origin;
-					if (typeof origin === "string" && origin.length > 0) {
-						chatPanel.appendReplayBlock((width) => wrapTextWithAnsi(`  ${origin}`, width));
-					}
+					if (text.length > 0) chatPanel.appendUser(text, undefined, typeof origin === "string" ? origin : undefined);
 					break;
 				}
 				if (entry.role === "assistant") {
