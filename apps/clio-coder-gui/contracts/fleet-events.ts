@@ -114,7 +114,20 @@ export type FleetItem = Static<typeof FleetItem>;
  * and a board that mixed them would have to filter its own feed to draw either.
  */
 export const HealthPayloads = {
-	"health.compacted": Type.Object({ trigger: Type.String({ maxLength: 64 }) }, closed),
+	"health.compacted": Type.Object(
+		{
+			trigger: Type.String({ maxLength: 64 }),
+			outcome: Type.Optional(
+				Type.Union([
+					Type.Literal("completed"),
+					Type.Literal("unchanged"),
+					Type.Literal("failed"),
+					Type.Literal("cancelled"),
+				]),
+			),
+		},
+		closed,
+	),
 	"health.contextWarning": Type.Object({ warning: Type.Union([Type.String({ maxLength: 256 }), Type.Null()]) }, closed),
 	"health.toolBudget": Type.Object(
 		{

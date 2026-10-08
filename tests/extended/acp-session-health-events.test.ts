@@ -106,6 +106,10 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 		deepStrictEqual(events[1]?.payload, { warning: "Context window is 85% full." });
 		// The clear has to cross as itself, or a client's banner never comes down.
 		deepStrictEqual(events[2]?.payload, { warning: null });
+		for (const outcome of ["completed", "unchanged", "failed", "cancelled"] as const) {
+			bus.emit(BusChannels.CompactionEnd, { trigger: "threshold", at: Date.now(), outcome });
+			deepStrictEqual(eventsOf(peer).at(-1)?.payload, { trigger: "threshold", outcome });
+		}
 		peer.transport.close();
 		strictEqual(await served, 0);
 	});
@@ -171,6 +175,20 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 			latencyMs: 812,
 		});
 		ok(!JSON.stringify(events[0]).includes("sk-must-not-cross"));
+		bus.emit(BusChannels.ProviderHealth, {
+			id: "local-lmstudio",
+			status: {
+				available: false,
+				reason: "",
+				health: { status: "unknown", lastCheckAt: null, lastError: null, latencyMs: null },
+			},
+		} as never);
+		deepStrictEqual(eventsOf(peer).at(-1)?.payload, {
+			targetId: "local-lmstudio",
+			status: "unknown",
+			available: false,
+			latencyMs: null,
+		});
 		peer.transport.close();
 		strictEqual(await served, 0);
 	});

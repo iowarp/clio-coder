@@ -15,10 +15,13 @@ import { type HealthItemLike, summarizeHealth } from "../client/chat/health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveState, liveStatus } from "../client/chat/live-status.js";
 import { routeFacts } from "../client/chat/route.js";
 import { conversationChanges, routeDraft, savedRoutePatch } from "../client/chat/route-picker-model.js";
+import { presentTool } from "../client/chat/tool-presentation.js";
 import { activeTurn, type ChatTurn, groupTurns, sameTurnView, turnStatuses } from "../client/chat/turns.js";
 import type { HealthItem } from "../contracts/fleet-events.js";
 import type { Permission } from "../contracts/permissions.js";
+import { applySessionDelta, emptySession } from "../contracts/session-projection.js";
 import type { TimelineItem, Turn } from "../contracts/sessions.js";
+import { fleetEvent } from "../server/acp/fleet-events.js";
 import { projectConfigOptions } from "../server/acp/session-config.js";
 
 function item(
@@ -246,9 +249,72 @@ test("summarizeActivity derives a label and a tone from statuses alone", () => {
 		summarizeActivity([tool("a", "completed"), item({ id: "n", turnId: "t", kind: "notice" })]).label,
 		"2 steps completed",
 	);
-	// An unrecognised status counts as done rather than stranding the group as running.
-	assert.equal(summarizeActivity([tool("a", "something_new")]).label, "1 tool completed");
+	const unknown = summarizeActivity([tool("a", "something_new")]);
+	assert.equal(unknown.label, "1 tool with no reported outcome");
+	assert.equal(unknown.completed, 0);
+	assert.equal(unknown.tone, "warning");
+	assert.equal(unknown.attention, true);
+	assert.equal(activityGlyph(unknown), "?");
+	assert.equal(activityOpen(null, true, unknown), true);
 	assert.equal(summarizeActivity([]).label, "0 tools completed");
+});
+
+test("settling a turn never supplies a missing tool outcome or discards its partial output", () => {
+	for (const stopReason of ["end_turn", "cancelled"]) {
+		const snapshot = {
+			...emptySession("session", "workspace"),
+			turns: [turnRow({ id: "t", status: "running" })],
+			timeline: [
+				{ ...tool("open", "in_progress"), title: "grep", partialOutput: "src/main.ts:2:match" },
+				tool("queued", "pending"),
+				tool("done", "completed"),
+				tool("failed", "failed"),
+				tool("stopped", "cancelled"),
+				item({ id: "text", turnId: "t", kind: "text", status: "in_progress" }),
+				{ ...tool("other", "in_progress"), turnId: "other-turn" },
+			],
+		};
+		const settled = applySessionDelta(snapshot, {
+			type: "turn.finished",
+			payload: { resource: "session", revision: 1, turnId: "t", stopReason, usage: null, problem: null, finishedAt: null },
+		});
+		assert.deepEqual(
+			settled.timeline.map((entry) => entry.status),
+			[
+				"unknown",
+				"unknown",
+				"completed",
+				"failed",
+				"cancelled",
+				stopReason === "end_turn" ? "completed" : "cancelled",
+				"in_progress",
+			],
+		);
+		const open = settled.timeline[0];
+		assert.ok(open);
+		assert.equal(open.rawOutput, undefined);
+		const card = presentTool(open, { nowMs: 10000, startedAtMs: 0 });
+		assert.equal(card.statusLabel, "Outcome not reported");
+		assert.equal(card.settled, true);
+		assert.equal(card.digest, null);
+		assert.equal(card.output.source, "partial");
+		assert.equal(card.output.text, "src/main.ts:2:match");
+		assert.equal(card.output.running, false);
+		assert.equal(
+			card.facts.some((fact) => fact.label === "still running"),
+			false,
+		);
+		assert.equal(activityDigest([open]), "1 tool with no reported outcome");
+		const write = presentTool({
+			...open,
+			title: "write",
+			rawInput: { path: "/repo/a.ts", content: "new file\n" },
+		});
+		assert.equal(write.diff?.provenance, "unverified");
+		assert.equal(write.diff?.diff?.adds, 1);
+		assert.match(write.diff?.note ?? "", /No terminal result was reported.*cannot confirm/);
+		assert.doesNotMatch(write.diff?.note ?? "", /Nothing has been written|Nothing was written/);
+	}
 });
 
 test("summarizeActivity attention and the group glyph", () => {
@@ -505,7 +571,7 @@ test("compaction, tool budget and provider health reduce to readable rows", () =
 			id: "c1",
 			at: "2026-09-20T00:00:01.000Z",
 			sourceSequence: 1,
-			fact: { type: "health.compacted", payload: { trigger: "token-pressure" } },
+			fact: { type: "health.compacted", payload: { trigger: "token-pressure", outcome: "completed" } },
 		},
 		{
 			id: "b1",
@@ -569,6 +635,19 @@ test("compaction, tool budget and provider health reduce to readable rows", () =
 });
 
 test("an uninterrupted budget breach and a partially reported provider still read as sentences", () => {
+	const projected = fleetEvent(
+		{
+			version: 1,
+			sessionId: "session",
+			sequence: 1,
+			kind: "provider.health",
+			payload: { targetId: "beta", status: "unknown", available: false, latencyMs: null },
+		},
+		"session",
+		0,
+	);
+	assert.equal(projected.type, "health.provider");
+	assert.ok("item" in projected && projected.item);
 	const summary = summarizeHealth([
 		health("health.toolBudget", {
 			tool: "Bash",
@@ -577,7 +656,7 @@ test("an uninterrupted budget breach and a partially reported provider still rea
 			hardCeiling: null,
 			interrupted: false,
 		}),
-		health("health.provider", { targetId: "beta", status: "unknown", available: false, latencyMs: null }),
+		projected.item,
 	]);
 	assert.equal(summary.toolBudget?.label, "Tool budget exceeded");
 	assert.equal(summary.toolBudget?.tone, "warn");
@@ -587,6 +666,35 @@ test("an uninterrupted budget breach and a partially reported provider still rea
 	);
 	assert.equal(summary.providers[0]?.tone, "unverified");
 	assert.equal(summary.providers[0]?.detail, "Not reachable, reported unknown, latency not reported.");
+});
+
+test("compaction attempts report their outcome without inferring success for legacy frames", () => {
+	for (const [outcome, label, tone] of [
+		["completed", "Context compacted", "neutral"],
+		["unchanged", "Context unchanged", "neutral"],
+		["failed", "Compaction failed", "fail"],
+		["cancelled", "Compaction stopped", "neutral"],
+		[undefined, "Compaction attempt ended", "unverified"],
+	] as const) {
+		const projected = fleetEvent(
+			{
+				version: 1,
+				sessionId: "session",
+				sequence: 1,
+				kind: "compaction.end",
+				payload: { trigger: "threshold", ...(outcome !== undefined ? { outcome } : {}) },
+			},
+			"session",
+			0,
+		);
+		assert.ok("item" in projected && projected.item);
+		const row = summarizeHealth([projected.item]).compaction;
+		assert.equal(row?.label, label);
+		assert.equal(row?.tone, tone);
+		assert.equal(row?.attention, outcome === "failed");
+		assert.doesNotMatch(row?.detail ?? "", /summari[sz]ed/);
+		if (outcome === undefined) assert.match(row?.detail ?? "", /outcome was not reported/);
+	}
 });
 
 test("an unknown health fact reduces to a readable row rather than being dropped or throwing", () => {

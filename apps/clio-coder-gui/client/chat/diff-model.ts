@@ -398,7 +398,7 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 	// nor zero bytes written. Only the producer's own refusal sentence earns
 	// "not approved"; everything else stays neutral about what reached disk.
 	const refused = inputs.resultText?.includes(NOT_APPROVED_NOTE) ?? false;
-	const settled = inputs.status === "failed" || inputs.status === "cancelled";
+	const settled = inputs.status === "failed" || inputs.status === "cancelled" || inputs.status === "unknown";
 
 	if (raw !== null) {
 		const parsed = parseDiff(raw);
@@ -443,9 +443,13 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 			provenance === "rejected"
 				? "Nothing was written. This is the change Clio Coder asked to make."
 				: provenance === "unverified"
-					? "The call did not complete, so this view cannot confirm whether any of it reached the file. This is the change Clio Coder asked to make."
+					? `${inputs.status === "unknown" ? "No terminal result was reported" : "The call did not complete"}, so this view cannot confirm whether any of it reached the file. This is the change Clio Coder asked to make.`
 					: "Built from the tool's arguments in this browser. Nothing has been written yet.";
-		return { provenance, label: PROVENANCE_LABEL[provenance], diff: proposed, note, firstChangedLine, path };
+		const label =
+			provenance === "unverified" && inputs.status === "unknown"
+				? "Application unverified · no terminal result"
+				: PROVENANCE_LABEL[provenance];
+		return { provenance, label, diff: proposed, note, firstChangedLine, path };
 	}
 
 	return {

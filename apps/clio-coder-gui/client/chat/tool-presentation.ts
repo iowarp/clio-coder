@@ -362,7 +362,7 @@ export function stoppedRun(
 }
 
 export function isSettledStatus(status: string): boolean {
-	return status === "completed" || status === "failed" || status === "cancelled";
+	return status === "completed" || status === "failed" || status === "cancelled" || status === "unknown";
 }
 
 /**
@@ -371,14 +371,14 @@ export function isSettledStatus(status: string): boolean {
  */
 export function outputPane(item: Pick<TimelineItem, "status" | "partialOutput">, wire: ToolWire): OutputPane {
 	const running = !isSettledStatus(item.status);
-	if (running) {
+	if (running || item.status === "unknown") {
 		const partial = item.partialOutput;
 		if (partial !== undefined && partial.length > 0)
 			return {
 				source: "partial",
 				text: stripAnsi(partial),
 				styled: hasStyle(partial) ? partial : null,
-				running: true,
+				running,
 				truncated: partial.length >= PARTIAL_OUTPUT_LIMIT,
 				placeholder: null,
 			};
@@ -386,9 +386,9 @@ export function outputPane(item: Pick<TimelineItem, "status" | "partialOutput">,
 			source: "none",
 			text: "",
 			styled: null,
-			running: true,
+			running,
 			truncated: false,
-			placeholder: "Running. No output yet.",
+			placeholder: running ? "Running. No output yet." : "No terminal result was reported.",
 		};
 	}
 	const text = wire.resultText;
@@ -752,6 +752,7 @@ const STATUS_LABEL: Readonly<Record<string, string>> = {
 	completed: "Done",
 	failed: "Failed",
 	cancelled: "Cancelled",
+	unknown: "Outcome not reported",
 };
 
 function toneFor(status: string, isError: boolean): StatusTone {
@@ -894,7 +895,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 	const excerpt =
 		failed && !refused && !stopped && (kind.body !== "chain" || steps.length === 0) ? failureExcerpt(output.text) : null;
 	const digest =
-		refused || stopped
+		refused || stopped || item.status === "unknown"
 			? { text: null, tone: null }
 			: excerpt === null
 				? digestFor(kind.body, facts, diff, matches, settled)

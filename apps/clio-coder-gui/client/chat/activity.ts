@@ -17,6 +17,7 @@ export interface ActivitySummary {
 	readonly waiting: number;
 	readonly completed: number;
 	readonly failed: number;
+	readonly unknown: number;
 	readonly canceled: number;
 	/** Calls settled at their approval gate; they did not break, so they are not failures. */
 	readonly declined: number;
@@ -28,14 +29,14 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 
 /**
  * `TimelineItem.status` is an open string carrying the raw ACP status, so this maps the values the
- * harness actually emits and treats anything else as completed, which is the only assumption that
- * cannot strand a group in a permanently running state.
+ * harness actually emits. An unrecognised status has no reported outcome and earns no success.
  */
 export function summarizeActivity(items: readonly TimelineItem[]): ActivitySummary {
 	let running = 0,
 		waiting = 0,
 		completed = 0,
 		failed = 0,
+		unknown = 0,
 		canceled = 0,
 		declined = 0,
 		onlyTools = true;
@@ -64,8 +65,12 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 			case "expired":
 				canceled += 1;
 				break;
-			default:
+			case "completed":
+			case "allowed":
 				completed += 1;
+				break;
+			default:
+				unknown += 1;
 				break;
 		}
 	}
@@ -80,6 +85,9 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 	} else if (failed > 0) {
 		label = `${plural(failed, noun)} failed${completed > 0 ? ` · ${completed} completed` : ""}`;
 		tone = "error";
+	} else if (unknown > 0) {
+		label = `${plural(unknown, noun)} with no reported outcome${completed > 0 ? ` · ${completed} completed` : ""}`;
+		tone = "warning";
 	} else {
 		const endings = (
 			[
@@ -99,14 +107,15 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 	return {
 		label,
 		tone,
-		total: running + waiting + completed + failed + canceled + declined,
+		total: running + waiting + completed + failed + canceled + declined + unknown,
 		running,
 		waiting,
 		completed,
 		failed,
+		unknown,
 		canceled,
 		declined,
-		attention: waiting > 0 || running > 0 || failed > 0,
+		attention: waiting > 0 || running > 0 || failed > 0 || unknown > 0,
 	};
 }
 
@@ -116,6 +125,7 @@ export const TOOL_STATUS_LABELS: Readonly<Record<string, string>> = {
 	completed: "done",
 	cancelled: "stopped",
 	failed: "failed",
+	unknown: "outcome not reported",
 	escalated: "waiting",
 	allowed: "allowed",
 	rejected: "rejected",
@@ -129,6 +139,7 @@ export const STATUS_GLYPHS: Readonly<Record<string, string>> = {
 	completed: "✓",
 	cancelled: "–",
 	failed: "✕",
+	unknown: "?",
 	allowed: "✓",
 	rejected: "✕",
 	expired: "–",
@@ -143,6 +154,7 @@ export function activityGlyph(summary: ActivitySummary): string {
 	if (summary.waiting > 0) return "!";
 	if (summary.running > 0) return "◐";
 	if (summary.failed > 0) return "✕";
+	if (summary.unknown > 0) return "?";
 	if (summary.completed === 0 && summary.canceled + summary.declined > 0) return "–";
 	return "✓";
 }
@@ -156,7 +168,7 @@ export function activityGlyph(summary: ActivitySummary): string {
 export function activityOpen(userOpen: boolean | null, settled: boolean, summary: ActivitySummary): boolean {
 	if (userOpen !== null) return userOpen;
 	// A change that was not approved keeps its proposal on screen, so its group stays open too.
-	return !settled || summary.failed > 0 || summary.waiting > 0 || summary.declined > 0;
+	return !settled || summary.failed > 0 || summary.waiting > 0 || summary.declined > 0 || summary.unknown > 0;
 }
 
 type Phrase = (count: number) => string;
@@ -182,6 +194,7 @@ const DIGEST_PHRASES: Readonly<Record<string, Phrase>> = {
 	"change:failed": (count) => `${plural(count, "change")} failed`,
 	"change:stopped": (count) => `${plural(count, "change")} stopped`,
 	"change:open": (count) => `${plural(count, "change")} in progress`,
+	unknown: (count) => `${plural(count, "tool")} with no reported outcome`,
 };
 const CHANGES = new Set(["edit", "write", "artifact"]);
 /** Kinds whose phrase counts distinct paths rather than calls, so rereading one file reads as one file. */
@@ -221,13 +234,15 @@ export function activityDigest(items: readonly TimelineItem[]): string {
 		const gateway = readGateway(item);
 		const title = gateway.name ?? item.title ?? "";
 		const key =
-			item.kind === "notice"
-				? "notice"
-				: CHANGES.has(title)
-					? changeKey(item)
-					: DIGEST_PHRASES[title] === undefined
-						? "other"
-						: title;
+			item.status === "unknown"
+				? "unknown"
+				: item.kind === "notice"
+					? "notice"
+					: CHANGES.has(title)
+						? changeKey(item)
+						: DIGEST_PHRASES[title] === undefined
+							? "other"
+							: title;
 		let tally = tallies.get(key);
 		if (tally === undefined) {
 			tally = { calls: 0, paths: new Set() };

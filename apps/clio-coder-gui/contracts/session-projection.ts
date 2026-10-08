@@ -351,7 +351,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 				}),
 				timeline: state.timeline.map((item) =>
 					item.turnId === turnId && (item.status === "in_progress" || item.status === "pending")
-						? { ...item, status: status === "succeeded" ? "completed" : status }
+						? { ...item, status: item.kind === "tool" ? "unknown" : status === "succeeded" ? "completed" : status }
 						: item,
 				),
 			};

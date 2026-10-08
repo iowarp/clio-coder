@@ -84,6 +84,13 @@ const PROVIDER_TONES: Readonly<Record<string, StatusTone>> = {
 	unknown: "unverified",
 };
 
+const COMPACTION_OUTCOMES: Readonly<Record<string, { label: string; detail: string; tone: StatusTone }>> = {
+	completed: { label: "Context compacted", detail: "Context was compacted to make room.", tone: "neutral" },
+	unchanged: { label: "Context unchanged", detail: "Compaction left context unchanged.", tone: "neutral" },
+	failed: { label: "Compaction failed", detail: "Compaction did not complete.", tone: "fail" },
+	cancelled: { label: "Compaction stopped", detail: "Compaction was cancelled.", tone: "neutral" },
+};
+
 function providerDetail(status: string, available: boolean, latencyMs: number | null): string {
 	const reach = available ? "Reachable" : "Not reachable";
 	const latency = latencyMs === null ? "latency not reported" : `${amount(latencyMs)} ms last check`;
@@ -129,16 +136,22 @@ function toRow(item: HealthItemLike): HealthRow | null {
 						attention: true,
 					};
 		}
-		case "health.compacted":
+		case "health.compacted": {
+			const outcome = COMPACTION_OUTCOMES[text(payload.outcome) ?? ""] ?? {
+				label: "Compaction attempt ended",
+				detail: "The outcome was not reported.",
+				tone: "unverified" as const,
+			};
 			return {
 				...base,
 				kind: "compaction",
 				key: "compaction",
-				label: "Context compacted",
-				detail: `Triggered by ${text(payload.trigger) ?? "an unreported condition"}. Earlier conversation was summarised to make room.`,
-				tone: "neutral",
-				attention: false,
+				label: outcome.label,
+				detail: `Triggered by ${text(payload.trigger) ?? "an unreported condition"}. ${outcome.detail}`,
+				tone: outcome.tone,
+				attention: outcome.tone === "fail",
 			};
+		}
 		case "health.toolBudget": {
 			const interrupted = flag(payload.interrupted);
 			return {

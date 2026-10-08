@@ -224,7 +224,8 @@ function RawDisclosure({ item }: { item: TimelineItem }) {
  * always keeps its output visible, so an error is never mistaken for an empty
  * successful result.
  */
-function Body({ card }: { card: ToolPresentation }) {
+function Body({ card, status }: { card: ToolPresentation; status: string }) {
+	if (status === "unknown" && card.body !== "diff") return <OutputBlock pane={card.output} />;
 	switch (card.body) {
 		case "diff":
 			// A change that did not land keeps the proposal on screen, labelled as not applied or unverified,
@@ -318,7 +319,7 @@ export const ToolCard = memo(function ToolCard({ item, options, agent = null, el
 					<FactStrip facts={card.facts} />
 					{card.note === null ? null : <p className="tool-card__note">{card.note}</p>}
 					<Locations locations={card.locations} headline={card.headline} />
-					<Body card={card} />
+					<Body card={card} status={item.status} />
 					<RawDisclosure item={item} />
 				</div>
 			) : null}

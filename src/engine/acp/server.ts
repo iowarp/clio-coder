@@ -4029,12 +4029,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		);
 		unsubscribeEvents.push(
 			bus.on(BusChannels.CompactionEnd, (payload: CompactionPayload) => {
-				// Only the end fires: a client that drew a "compacting" state from
-				// the begin channel would have to guess when to clear it, and the
-				// fact a context meter needs is that the window was just cut.
 				const trigger = safeStoredIdentifier(payload.trigger, 64);
 				if (trigger === null) return;
-				forwardEvent("compaction.end", null, false, { trigger });
+				forwardEvent("compaction.end", null, false, {
+					trigger,
+					...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
+				});
 			}),
 		);
 		unsubscribeEvents.push(

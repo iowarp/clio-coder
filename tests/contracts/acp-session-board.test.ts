@@ -5,6 +5,7 @@ import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js"
 import type { UserTask } from "../../src/domains/user-tasks/store.js";
 import { ACP_BOARD_MAX_ITEMS, type AcpBoardSource, projectSessionBoard } from "../../src/engine/acp/board.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
+import { createAcpLiveTelemetry } from "../../src/engine/acp/live-telemetry.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 
@@ -12,6 +13,40 @@ import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js"
 // operator task but never list one. The board is that read path, bounded for the stdio line.
 
 const at = "2026-09-26T00:00:00.000Z";
+
+test("plan replay restores unchanged and empty plans after the client resets its branch", () => {
+	const updates: Array<Record<string, unknown>> = [];
+	let plan: TaskBoardSnapshot | null = {
+		boardId: "b1",
+		title: "Ship it",
+		tasks: [{ id: "1", title: "Read", status: "pending" }],
+		activeRunIds: [],
+	};
+	const telemetry = createAcpLiveTelemetry({
+		sessionId: () => "session",
+		cwd: process.cwd(),
+		plan: () => plan,
+		notify: (_sessionId, update) => updates.push(update),
+	});
+	try {
+		telemetry.bind(false);
+		assert.equal(updates.length, 0);
+		telemetry.bind(true);
+		telemetry.bind(true);
+		assert.equal(updates.length, 2);
+		assert.deepEqual(updates[1], updates[0]);
+		telemetry.toolSettled(false);
+		assert.equal(updates.length, 2, "ordinary unchanged tools still coalesce the plan");
+		plan = null;
+		telemetry.bind(true);
+		telemetry.bind(true);
+		assert.equal(updates.length, 4);
+		assert.deepEqual(updates[2]?.entries, []);
+		assert.deepEqual(updates[3], updates[2]);
+	} finally {
+		telemetry.dispose();
+	}
+});
 const task = (id: string, title = `Task ${id}`): UserTask => ({
 	id,
 	title,

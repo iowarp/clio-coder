@@ -221,7 +221,7 @@ export interface AcpLiveTelemetry {
 export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelemetry {
 	let usageSignature: string | null = null;
 	let accountingSignature: string | null = null;
-	let planSignature = EMPTY_PLAN_SIGNATURE;
+	let planSignature: string | null = EMPTY_PLAN_SIGNATURE;
 	let turn: { usage: AcpTurnUsage } | null = null;
 	let pendingUsage: ReturnType<typeof setImmediate> | null = null;
 	let workspaceView: AcpWorkspaceView | null = null;
@@ -361,9 +361,9 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		bind(replay) {
 			usageSignature = null;
 			flushUsage(replay);
-			// The plan signature carries over: a fork or /tree switch replaces the
-			// plan the client already shows, and an empty plan on a first load is
-			// not news because a client starts with none.
+			// Replay replaces the client's branch state, so even an unchanged or
+			// empty plan must be sent again after that reset.
+			planSignature = replay ? null : EMPTY_PLAN_SIGNATURE;
 			flushPlan(replay);
 		},
 		turnStarted(usage) {

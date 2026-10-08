@@ -45,6 +45,16 @@ test("finished records without an end retain unknown wall time and accounting", 
 	assert.equal(runTotals({ ...run, ended_at: null, status: "running" }, now)[2]?.value, "2m 0s");
 });
 
+test("trace detail totals preserve missing token coverage and pricing provenance", () => {
+	const accounted = { ...run, total_tokens: 24, missing_token_calls: 1, total_cost_usd: 0.25 };
+	const partial = runTotals({ ...accounted, cost_estimated: 1, cost_unknown: 1 }, now);
+	assert.equal(partial[0]?.value, "24 +? (1 call missing usage)");
+	assert.equal(partial[1]?.value, "about $0.25 subtotal, some calls unpriced");
+	assert.equal(runTotals({ ...accounted, total_cost_usd: 0, cost_unknown: 1 }, now)[1]?.value, "Cost not measured");
+	assert.equal(runTotals(accounted, now)[1]?.value, "$0.25 (pricing unknown)");
+	assert.equal(runTotals({ ...accounted, cost_estimated: 0, cost_unknown: 0 }, now)[1]?.value, "$0.25");
+});
+
 test("list navigation preserves owned filters and never propagates launch credentials", () => {
 	const search = new URLSearchParams({
 		q: "a/b & model",

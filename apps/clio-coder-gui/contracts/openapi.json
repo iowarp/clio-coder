@@ -23775,6 +23775,26 @@
 																			"trigger": {
 																				"type": "string",
 																				"maxLength": 64
+																			},
+																			"outcome": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "completed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "unchanged"
+																					},
+																					{
+																						"type": "string",
+																						"const": "failed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "cancelled"
+																					}
+																				]
 																			}
 																		},
 																		"additionalProperties": false
@@ -28760,6 +28780,26 @@
 																			"trigger": {
 																				"type": "string",
 																				"maxLength": 64
+																			},
+																			"outcome": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "completed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "unchanged"
+																					},
+																					{
+																						"type": "string",
+																						"const": "failed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "cancelled"
+																					}
+																				]
 																			}
 																		},
 																		"additionalProperties": false
@@ -32330,6 +32370,26 @@
 																			"trigger": {
 																				"type": "string",
 																				"maxLength": 64
+																			},
+																			"outcome": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "completed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "unchanged"
+																					},
+																					{
+																						"type": "string",
+																						"const": "failed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "cancelled"
+																					}
+																				]
 																			}
 																		},
 																		"additionalProperties": false
@@ -35864,6 +35924,26 @@
 																				"trigger": {
 																					"type": "string",
 																					"maxLength": 64
+																				},
+																				"outcome": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "completed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unchanged"
+																						},
+																						{
+																							"type": "string",
+																							"const": "failed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "cancelled"
+																						}
+																					]
 																				}
 																			},
 																			"additionalProperties": false
@@ -39645,6 +39725,26 @@
 																			"trigger": {
 																				"type": "string",
 																				"maxLength": 64
+																			},
+																			"outcome": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "completed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "unchanged"
+																					},
+																					{
+																						"type": "string",
+																						"const": "failed"
+																					},
+																					{
+																						"type": "string",
+																						"const": "cancelled"
+																					}
+																				]
 																			}
 																		},
 																		"additionalProperties": false
@@ -55479,6 +55579,26 @@
 																	"trigger": {
 																		"type": "string",
 																		"maxLength": 64
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unchanged"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "cancelled"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -55732,6 +55852,26 @@
 																	"trigger": {
 																		"type": "string",
 																		"maxLength": 64
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unchanged"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "cancelled"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -55985,6 +56125,26 @@
 																	"trigger": {
 																		"type": "string",
 																		"maxLength": 64
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unchanged"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "cancelled"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -56238,6 +56398,26 @@
 																	"trigger": {
 																		"type": "string",
 																		"maxLength": 64
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unchanged"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "cancelled"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
@@ -56491,6 +56671,26 @@
 																	"trigger": {
 																		"type": "string",
 																		"maxLength": 64
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "completed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unchanged"
+																			},
+																			{
+																				"type": "string",
+																				"const": "failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "cancelled"
+																			}
+																		]
 																	}
 																},
 																"additionalProperties": false
