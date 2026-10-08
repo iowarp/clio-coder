@@ -135,6 +135,7 @@
 		"@anthropic-ai/claude-agent-sdk": "0.3.292",
 		"@biomejs/biome": "2.5.1",
 		"@types/node": "24.12.2",
+		"@typescript/native": "npm:typescript@7.0.2",
 		"@vscode/tree-sitter-wasm": "0.3.1",
 		"chalk": "5.6.2",
 		"diff": "9.0.0",
@@ -145,7 +146,7 @@
 		"tsup": "8.5.1",
 		"tsx": "4.22.4",
 		"typebox": "1.3.0",
-		"typescript": "6.0.3",
+		"typescript": "npm:@typescript/typescript6@6.0.2",
 		"uuid": "14.0.1",
 		"yaml": "2.9.0"
 	},
