@@ -2,10 +2,17 @@
 // phases in their recorded order, and how many events and processes there were of each kind. Pure,
 // so the ordering and the wording are testable without a browser.
 
-import type { TracePhase, TraceRun } from "../../../contracts/traces.js";
+import type { TraceCaptureCoverage, TracePhase, TraceRun } from "../../../contracts/traces.js";
 import { formatCost, formatDuration, formatTokens } from "../../api/clock.js";
 import { omittedSentence } from "../../design/facts-model.js";
-import { type StatusTone, toneForOutcome } from "../../design/status.js";
+import type { StatusTone } from "../../design/status.js";
+import { toneForOutcome } from "../../design/status.js";
+
+export function captureCoverageLabel(coverage: TraceCaptureCoverage | null): string {
+	if (coverage === null || coverage.status === "unreported")
+		return "Capture coverage unreported. Recorded activity does not establish complete capture.";
+	return `Database-wide capture: ${coverage.status === "known_loss" ? "known loss" : "degraded"}. Dropped progress: ${coverage.droppedProgress ?? "unreported"}; dropped package activity: ${coverage.droppedPackageActivity ?? "unreported"}. Per-run and remaining coverage is unreported.`;
+}
 
 export interface RunTotal {
 	label: string;

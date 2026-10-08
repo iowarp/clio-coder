@@ -40654,10 +40654,60 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["available", "schemaVersion", "retentionPolicy"],
+									"required": ["available", "captureCoverage", "schemaVersion", "retentionPolicy"],
 									"properties": {
 										"available": {
 											"type": "boolean"
+										},
+										"captureCoverage": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["status", "droppedProgress", "droppedPackageActivity"],
+													"properties": {
+														"status": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "known_loss"
+																},
+																{
+																	"type": "string",
+																	"const": "degraded"
+																},
+																{
+																	"type": "string",
+																	"const": "unreported"
+																}
+															]
+														},
+														"droppedProgress": {
+															"anyOf": [
+																{
+																	"type": "number"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"droppedPackageActivity": {
+															"anyOf": [
+																{
+																	"type": "number"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
 										},
 										"schemaVersion": {
 											"anyOf": [

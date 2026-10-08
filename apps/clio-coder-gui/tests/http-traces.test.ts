@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { captureCoverageLabel } from "../client/pages/traces/trace-model.js";
 import { routes } from "../contracts/routes.js";
 import { harness, json } from "./harness/app.js";
 import { TraceReader, traceFixture } from "./harness/trace-fixture.js";
@@ -20,6 +21,21 @@ test("trace read-only seams, public projections, Date, rowid bounds, and full re
 	const status = await json(await h.request("/api/traces/status"), routes.traceStatus.response);
 	assert.equal(status.available, true);
 	assert.equal(status.schemaVersion, 1);
+	assert.deepEqual(status.captureCoverage, {
+		status: "unreported",
+		droppedProgress: null,
+		droppedPackageActivity: null,
+	});
+	assert.match(captureCoverageLabel(status.captureCoverage), /coverage unreported/i);
+	fixture.store.recordCaptureLoss("progress", 5);
+	fixture.store.recordCaptureLoss("package_activity", 3);
+	const loss = await json(await h.request("/api/traces/status"), routes.traceStatus.response);
+	assert.deepEqual(loss.captureCoverage, { status: "known_loss", droppedProgress: 5, droppedPackageActivity: 3 });
+	assert.match(captureCoverageLabel(loss.captureCoverage), /Database-wide capture: known loss/);
+	fixture.store.recordCaptureLoss("degraded");
+	const degraded = await json(await h.request("/api/traces/status"), routes.traceStatus.response);
+	assert.equal(degraded.captureCoverage?.status, "degraded");
+	assert.match(captureCoverageLabel(degraded.captureCoverage), /Per-run and remaining coverage is unreported/);
 	assert.ok(!JSON.stringify(status).includes(state));
 	for (const [suffix, route] of [
 		["", routes.traceRun],
@@ -86,7 +102,10 @@ test("trace status tolerates absence, refuses schema and non-WAL, and cached rea
 	const h = await harness(),
 		state = join(h.home.path, "state");
 	t.after(h.close);
-	assert.equal((await json(await h.request("/api/traces/status"), routes.traceStatus.response)).available, false);
+	const absent = await json(await h.request("/api/traces/status"), routes.traceStatus.response);
+	assert.equal(absent.available, false);
+	assert.equal(absent.captureCoverage, null);
+	assert.match(captureCoverageLabel(absent.captureCoverage), /coverage unreported/i);
 	assert.equal((await h.request("/api/traces/runs?cursor=e30")).status, 422);
 	let fixture = traceFixture(state);
 	assert.equal((await h.request("/api/traces/runs")).status, 200);

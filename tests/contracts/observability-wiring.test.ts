@@ -4,28 +4,149 @@
  * was raised at a level the dispatch board never reads, and a failed or
  * aborted prewarm was read back as a zero-cost success.
  */
-import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, match, ok, throws } from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { subscribeExtensionObservations } from "../../src/domains/extensions/bus-observations.js";
 import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
+import type { OutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
+import { appendOutOfTurnUsageRow, readOutOfTurnUsageRows } from "../../src/domains/observability/out-of-turn-usage.js";
+import type { ProjectionReadModel } from "../../src/domains/observability/projection.js";
+import { createObservabilityProjection } from "../../src/domains/observability/projection.js";
 import {
-	appendOutOfTurnUsageRow,
-	type OutOfTurnUsageRow,
-	readOutOfTurnUsageRows,
-} from "../../src/domains/observability/out-of-turn-usage.js";
-import { createObservabilityProjection, type ProjectionReadModel } from "../../src/domains/observability/projection.js";
-import { createDispatchTraceMirror, TraceReader } from "../../src/domains/observability/trace-store.js";
+	createDispatchTraceMirror,
+	TRACE_WRITE_QUEUE_LIMIT,
+	TraceReader,
+	TraceStore,
+} from "../../src/domains/observability/trace-store.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import { createDispatchBoardView, type DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "clio-coder-observability-wiring-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
+
+it("serializes schema creation when two cold writers wait on the same database", async () => {
+	const path = join(scratch, "cold-writers.sqlite");
+	const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+	const lock = new DatabaseSync(path);
+	lock.exec("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE");
+	const script = `
+import { TraceStore } from ${JSON.stringify(pathToFileURL(resolve("src/domains/observability/trace-store.ts")).href)};
+process.send("ready");
+await new Promise(resolve => process.once("message", resolve));
+new TraceStore(${JSON.stringify(path)}).close();
+process.disconnect();`;
+	const children = Array.from({ length: 2 }, () => {
+		const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			stdio: ["ignore", "ignore", "pipe", "ipc"],
+		});
+		let stderr = "";
+		child.stderr?.on("data", (chunk) => {
+			stderr += String(chunk);
+		});
+		return { child, ready: once(child, "message"), closed: once(child, "close"), stderr: () => stderr };
+	});
+	try {
+		await Promise.all(children.map(({ ready }) => ready));
+		for (const { child } of children) child.send("open");
+		await delay(100);
+		lock.exec("COMMIT");
+		for (const { closed, stderr } of children) equal((await closed)[0], 0, stderr());
+		const reader = new TraceReader(path);
+		reader.close();
+	} finally {
+		for (const { child } of children) if (child.exitCode === null) child.kill();
+		lock.close();
+	}
+});
+
+it("persists database-wide queue loss and degradation without claiming complete coverage", async () => {
+	const path = join(scratch, "capture-loss.sqlite");
+	const warnings: string[] = [];
+	const mirror = createDispatchTraceMirror(path, { warn: (message) => warnings.push(message) });
+	mirror.enqueue("dispatch.enqueued", {
+		runId: "run-loss",
+		agentId: "coder",
+		targetId: "local",
+		wireModelId: "model",
+		runtimeId: "fixture",
+	});
+	for (let i = 0; i < TRACE_WRITE_QUEUE_LIMIT + 6; i++)
+		mirror.enqueue("dispatch.progress", { runId: "run-loss", agentId: "coder", event: { type: "log" } });
+	await mirror.flush();
+	const reader = new TraceReader(path);
+	try {
+		deepStrictEqual(reader.captureCoverage(), { status: "known_loss", droppedProgress: 7, droppedPackageActivity: null });
+		match(warnings[0] ?? "", /dropped 7/);
+		await mirror.flush();
+		equal(reader.captureCoverage().droppedProgress, 7);
+		mirror.enqueue("dispatch.progress", { runId: "missing", agentId: "coder", event: { type: "log" } });
+		await mirror.flush();
+		equal(reader.captureCoverage().status, "degraded");
+		match(warnings[1] ?? "", /FOREIGN KEY/);
+	} finally {
+		reader.close();
+		await mirror.close();
+	}
+	const reopened = new TraceReader(path);
+	try {
+		deepStrictEqual(reopened.captureCoverage(), { status: "degraded", droppedProgress: 7, droppedPackageActivity: null });
+	} finally {
+		reopened.close();
+	}
+});
+
+it("counts package losses once per event in the same transaction across writer connections", () => {
+	const path = join(scratch, "package-loss.sqlite");
+	const first = new TraceStore(path);
+	const second = new TraceStore(path);
+	const reader = new TraceReader(path);
+	const activity = {
+		eventId: "package-loss",
+		at: new Date().toISOString(),
+		type: "clio_coder_extension_activity" as const,
+		kind: "runtime_start",
+		owner: { kind: "extension", id: "fixture", version: "1", digest: "fixture" },
+		sessionId: "fixture",
+		captureDroppedBefore: 3,
+	};
+	try {
+		deepStrictEqual(reader.captureCoverage(), {
+			status: "unreported",
+			droppedProgress: null,
+			droppedPackageActivity: null,
+		});
+		first.recordPackageActivity(activity);
+		second.recordPackageActivity(activity);
+		second.recordPackageActivity({ ...activity, eventId: "package-next", captureDroppedBefore: 4 });
+		equal(reader.captureCoverage().droppedPackageActivity, 7);
+		first.db.exec(
+			"CREATE TRIGGER reject_activity BEFORE INSERT ON events WHEN NEW.event_id='rejected' BEGIN SELECT RAISE(ABORT, 'activity rejected'); END",
+		);
+		throws(
+			() =>
+				first.recordPackageActivity({ ...activity, eventId: "rejected", sessionId: "rejected", captureDroppedBefore: 10 }),
+			/activity rejected/,
+		);
+		equal(reader.captureCoverage().droppedPackageActivity, 7);
+		equal(reader.run("session-activity:rejected"), null);
+	} finally {
+		reader.close();
+		first.close();
+		second.close();
+	}
+});
 
 describe("trace mirror tool rows", () => {
 	const at = (second: number) => new Date(Date.UTC(2026, 8, 25, 12, 0, second)).toISOString();
@@ -136,6 +257,96 @@ describe("trace mirror tool rows", () => {
 		} finally {
 			reader.close();
 			await mirror.close();
+		}
+	});
+
+	it("retains late producer facts and event cursors after terminal settlement", async () => {
+		for (const [index, firstClio] of [true, false].entries()) {
+			const runId = `run-settled-${index}`;
+			const path = join(scratch, `${runId}.sqlite`);
+			let second = 0;
+			const warnings: string[] = [];
+			const mirror = createDispatchTraceMirror(path, {
+				now: () => at(second++),
+				warn: (message) => warnings.push(message),
+			});
+			const identity = {
+				runId,
+				agentId: "coder",
+				targetId: "local",
+				wireModelId: "model",
+				runtimeId: "fixture",
+				runtimeKind: "http",
+				contextWindow: 1000,
+				gate: { role: "reviewer", cycle: 2 },
+			};
+			const progress = (event: Record<string, unknown>) =>
+				mirror.enqueue("dispatch.progress", { runId, agentId: "coder", event });
+			mirror.enqueue("dispatch.enqueued", identity);
+			mirror.enqueue("dispatch.started", { ...identity, pid: null });
+			progress({ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "src/a.ts" } });
+			progress(clioStart("c1", "read"));
+			const engineEnd = {
+				type: "tool_execution_end",
+				toolCallId: "c1",
+				toolName: "read",
+				result: "permission denied",
+				isError: true,
+			};
+			const clioEnd = clioFinish("c1", "read", 40, "blocked", "execute permission denied");
+			progress(firstClio ? clioEnd : engineEnd);
+			progress({ type: "log", level: "info" });
+			mirror.enqueue(index === 0 ? "dispatch.completed" : "dispatch.failed", {
+				...identity,
+				outcome: index === 0 ? "success" : "failure",
+				outcomeDetail: null,
+			});
+			await mirror.flush();
+			const reader = new TraceReader(path);
+			try {
+				const before = reader.events(runId);
+				const cursor = before.at(-1)?.rowid ?? 0;
+				const startedAt = before.find((row) => row.type === "tool_call")?.started_at;
+				progress(firstClio ? engineEnd : clioEnd);
+				progress({ type: "log", level: "info" });
+				progress({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						usage: { totalTokens: 10 },
+						content: JSON.stringify({ verdict: "pass", checks: [{ name: "scope", passed: true, evidence: "checked" }] }),
+					},
+				});
+				await mirror.flush();
+				const updates = reader.events(runId, cursor);
+				ok(updates.every((row) => row.rowid > cursor));
+				const tool = updates.find((row) => row.type === "tool_call");
+				ok(tool);
+				equal(tool.started_at, startedAt);
+				const facts = JSON.parse(tool.payload_json ?? "null");
+				deepStrictEqual(facts.args, { path: "src/a.ts" });
+				equal(facts.duration_ms, 40);
+				equal(facts.result_snippet, "permission denied");
+				equal(facts.ok, false);
+				equal(facts.outcome, "blocked");
+				equal(facts.block_reason, "execute permission denied");
+				deepStrictEqual(
+					reader
+						.events(runId)
+						.filter((row) => row.event_id.startsWith(`${runId}:event:`))
+						.map((row) => row.event_id),
+					[`${runId}:event:1`, `${runId}:event:2`, `${runId}:event:3`],
+				);
+				equal(reader.phases(runId)[0]?.context_window, 1000);
+				equal(reader.gateResults(runId)[0]?.gate, "reviewer");
+				progress({ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "late.ts" } });
+				await mirror.flush();
+				deepStrictEqual(reader.events(runId, updates.at(-1)?.rowid ?? 0), []);
+				deepStrictEqual(warnings, []);
+			} finally {
+				reader.close();
+				await mirror.close();
+			}
 		}
 	});
 

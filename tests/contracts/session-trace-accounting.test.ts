@@ -136,6 +136,7 @@ it("trace inspect retains partial accounting and rejects unreadable stores", asy
 		} as DispatchCompletedPayload,
 		true,
 	);
+	store.recordCaptureLoss("progress", 3);
 	store.close();
 	let output = "";
 	const write = t.mock.method(process.stdout, "write", (chunk: string) => {
@@ -148,6 +149,7 @@ it("trace inspect retains partial accounting and rejects unreadable stores", asy
 		write.mock.restore();
 	}
 	const snapshot = JSON.parse(output) as TraceInspectSnapshot;
+	deepStrictEqual(snapshot.captureCoverage, { status: "known_loss", droppedProgress: 3, droppedPackageActivity: null });
 	const run = snapshot.runs[0];
 	for (const row of [run, run?.phases[0]]) {
 		strictEqual(row?.totalTokens, 12);

@@ -1,4 +1,5 @@
-import { type Static, Type } from "typebox";
+import type { Static } from "typebox";
+import { Type } from "typebox";
 import { PageCursor } from "./common.js";
 
 const closed = { additionalProperties: false };
@@ -7,9 +8,19 @@ const text = Type.String();
 export const TraceId = Type.String({ minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9:._-]*$" });
 const optionalText = Type.Union([text, Type.Null()]);
 const count = Type.Union([Type.Number(), Type.Null()]);
+export const TraceCaptureCoverage = Type.Object(
+	{
+		status: Type.Union([Type.Literal("known_loss"), Type.Literal("degraded"), Type.Literal("unreported")]),
+		droppedProgress: count,
+		droppedPackageActivity: count,
+	},
+	closed,
+);
+export type TraceCaptureCoverage = Static<typeof TraceCaptureCoverage>;
 export const TraceStatus = Type.Object(
 	{
 		available: Type.Boolean(),
+		captureCoverage: Type.Union([TraceCaptureCoverage, Type.Null()]),
 		schemaVersion: Type.Union([Type.Integer(), Type.Null()]),
 		retentionPolicy: Type.Object({ maxAgeDays: Type.Integer(), maxBytes: Type.Integer() }, closed),
 	},

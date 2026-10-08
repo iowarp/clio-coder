@@ -4,16 +4,18 @@ import { clioStatePath } from "../core/xdg.js";
 import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
 import { codeStepDir, readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
 import { renderCostAggregate } from "../domains/observability/cost.js";
+import type {
+	TraceEventRow,
+	TracePhaseRow,
+	TraceProcessRow,
+	TraceRunRow,
+} from "../domains/observability/trace-store.js";
 import {
 	assertTraceSelectOnly,
 	DEFAULT_TRACE_RETENTION_POLICY,
 	resolveTraceRetentionPolicy,
 	TRACE_EVENT_POLL_LIMIT,
-	type TraceEventRow,
-	type TracePhaseRow,
-	type TraceProcessRow,
 	TraceReader,
-	type TraceRunRow,
 	TraceStore,
 	traceDatabasePath,
 } from "../domains/observability/trace-store.js";
@@ -194,6 +196,10 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 		return 1;
 	}
 	try {
+		const capture = reader.captureCoverage();
+		process.stderr.write(
+			`trace capture (database-wide): ${capture.status.replace("_", " ")}; dropped progress=${capture.droppedProgress ?? "unreported"}, dropped package activity=${capture.droppedPackageActivity ?? "unreported"}; per-run and remaining coverage unreported\n`,
+		);
 		// Every case below is reachable only after `invocationError` accepted the
 		// command and its required positional, so the run id is present wherever
 		// this reads one.

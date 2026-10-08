@@ -11,7 +11,8 @@ import {
 	traceDatabasePath,
 } from "../../../../../src/domains/observability/trace-store.js";
 import { Id } from "../../../contracts/common.js";
-import { TraceId, type TraceRequest } from "../../../contracts/traces.js";
+import type { TraceRequest } from "../../../contracts/traces.js";
+import { TraceId } from "../../../contracts/traces.js";
 import { AppProblem } from "../../services/problem.js";
 
 const Cursor = Type.Object(
@@ -74,7 +75,12 @@ export class TraceAdapter {
 		try {
 			const reader = this.open();
 			if (input.kind === "status")
-				return { available: true, schemaVersion: TRACE_SCHEMA_VERSION, retentionPolicy: resolveTraceRetentionPolicy() };
+				return {
+					available: true,
+					schemaVersion: TRACE_SCHEMA_VERSION,
+					captureCoverage: reader.captureCoverage(),
+					retentionPolicy: resolveTraceRetentionPolicy(),
+				};
 			if (input.kind === "runs") {
 				const { source, status, q, limit } = input.query;
 				const page = reader.runsPage({
@@ -113,7 +119,12 @@ export class TraceAdapter {
 			this.close();
 			if (error instanceof AppProblem) throw error;
 			if (input.kind === "status")
-				return { available: false, schemaVersion: null, retentionPolicy: resolveTraceRetentionPolicy() };
+				return {
+					available: false,
+					schemaVersion: null,
+					captureCoverage: null,
+					retentionPolicy: resolveTraceRetentionPolicy(),
+				};
 			throw new AppProblem("unavailable", "Trace database is unavailable or has an unsupported schema or journal mode.");
 		}
 	}

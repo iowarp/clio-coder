@@ -25,7 +25,8 @@ import { processAlive, processBirthToken } from "../../core/process-identity.js"
 import { chainStepToolCallId, displayToolCall, gatewayChainSteps, VIA_GATEWAY } from "../../tools/gateway-display.js";
 import { createRedactionTally, redactSecretsText, secretRedactingReplacer } from "../evidence/redact.js";
 import { normalizeCostProvenance } from "../providers/types/cost-provenance.js";
-import { aggregateCostAmounts, type CostAggregate } from "./cost.js";
+import type { CostAggregate } from "./cost.js";
+import { aggregateCostAmounts } from "./cost.js";
 
 export const TRACE_SCHEMA_VERSION = 1;
 export const TRACE_DATABASE_FILE = "trace.sqlite";
@@ -48,6 +49,13 @@ export interface TracePruneResult {
 	bytesRemoved: number;
 	vacuumed: boolean;
 	protectedRuns: number;
+}
+
+/** Database-wide known loss; an absent report never establishes completeness. */
+export interface TraceCaptureCoverage {
+	status: "known_loss" | "degraded" | "unreported";
+	droppedProgress: number | null;
+	droppedPackageActivity: number | null;
 }
 
 /** Thirty days or 128 MiB, whichever limit the mirror reaches first. */
@@ -403,7 +411,7 @@ export interface TraceProcessRow {
 }
 
 function applyConnectionPragmas(db: DatabaseSync): void {
-	db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;");
+	db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;");
 }
 
 function readVersion(db: DatabaseSync): number | null {
@@ -593,10 +601,10 @@ export class TraceStore {
 		mkdirSync(dirname(path), { recursive: true });
 		this.db = new (databaseSyncConstructor())(path);
 		applyConnectionPragmas(this.db);
-		const version = readVersion(this.db);
-		if (version === null) this.db.exec(`BEGIN IMMEDIATE; ${SCHEMA_SQL} COMMIT;`);
-		else if (version !== TRACE_SCHEMA_VERSION) throw new TraceSchemaVersionError(version);
 		this.transaction(() => {
+			const version = readVersion(this.db);
+			if (version === null) this.db.exec(SCHEMA_SQL);
+			else if (version !== TRACE_SCHEMA_VERSION) throw new TraceSchemaVersionError(version);
 			ensureProcessOwnerColumns(this.db);
 			ensureRunSourceColumn(this.db);
 			ensureCacheWriteLifetimeColumn(this.db);
@@ -606,6 +614,13 @@ export class TraceStore {
 
 	close(): void {
 		this.db.close();
+	}
+
+	recordCaptureLoss(kind: "progress" | "package_activity" | "degraded", count = 1): void {
+		this.db
+			.prepare(`INSERT INTO meta(key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=CAST(meta.value AS INTEGER) + CAST(excluded.value AS INTEGER)`)
+			.run(kind === "degraded" ? "capture_degraded" : `capture_dropped_${kind}`, String(count));
 	}
 
 	transaction(action: () => void): void {
@@ -737,14 +752,23 @@ export class TraceStore {
 		this.upsertRun(input, at);
 		this.transaction(() => {
 			this.db.prepare("UPDATE runs SET status='running', started_at=? WHERE run_id=?").run(at, input.runId);
-			this.db.prepare("UPDATE phases SET status='running', started_at=? WHERE phase_id=?").run(at, input.runId);
+			this.db
+				.prepare(
+					"UPDATE phases SET status='running', started_at=?, context_window=COALESCE(?, context_window) WHERE phase_id=?",
+				)
+				.run(at, input.contextWindow ?? null, input.runId);
 			this.insertEventRaw({
 				eventId: `${input.runId}:agent_start`,
 				runId: input.runId,
 				phaseId: input.runId,
 				type: "agent_start",
 				name: input.agentId,
-				payload: { target: input.targetId, model: input.wireModelId, runtime: input.runtimeId },
+				payload: {
+					target: input.targetId,
+					model: input.wireModelId,
+					runtime: input.runtimeId,
+					...(input.gate === undefined ? {} : { gate: input.gate }),
+				},
 				startedAt: at,
 			});
 			if (input.pid !== null) {
@@ -1014,32 +1038,37 @@ export class TraceStore {
 	}
 
 	recordPackageActivity(activity: PackageActivity): void {
-		const candidate = activity.runId ?? (activity.turnId ? `session:${activity.turnId}` : "");
-		const existing = candidate ? this.db.prepare("SELECT run_id FROM runs WHERE run_id = ?").get(candidate) : undefined;
-		const runId = existing ? candidate : `session-activity:${activity.sessionId}`;
-		if (!existing) {
-			this.db
-				.prepare(
-					"INSERT INTO runs (run_id, assignment_id, status, agent, target, model, runtime, started_at, ended_at, source) VALUES (?, 'session', 'success', 'package activity', '', '', 'host', ?, ?, 'session') ON CONFLICT(run_id) DO UPDATE SET ended_at=excluded.ended_at",
-				)
-				.run(runId, activity.at, activity.at);
-			this.db
-				.prepare(
-					"INSERT INTO phases (phase_id, run_id, seq, name, kind, owner, status, started_at, ended_at) VALUES (?, ?, 0, 'package activity', 'session', 'host', 'success', ?, ?) ON CONFLICT(phase_id) DO UPDATE SET ended_at=excluded.ended_at",
-				)
-				.run(runId, runId, activity.at, activity.at);
-		}
-		const phase = this.db.prepare("SELECT phase_id FROM phases WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as
-			| { phase_id: string }
-			| undefined;
-		this.insertEvent({
-			eventId: activity.eventId,
-			runId,
-			phaseId: phase?.phase_id ?? runId,
-			type: activity.type,
-			name: `${activity.owner.id}@${activity.owner.version}/${activity.kind}`,
-			payload: activity,
-			startedAt: activity.at,
+		this.transaction(() => {
+			if (this.db.prepare("SELECT 1 FROM events WHERE event_id=?").get(activity.eventId)) return;
+			const candidate = activity.runId ?? (activity.turnId ? `session:${activity.turnId}` : "");
+			const existing = candidate ? this.db.prepare("SELECT run_id FROM runs WHERE run_id = ?").get(candidate) : undefined;
+			const runId = existing ? candidate : `session-activity:${activity.sessionId}`;
+			if (!existing) {
+				this.db
+					.prepare(
+						"INSERT INTO runs (run_id, assignment_id, status, agent, target, model, runtime, started_at, ended_at, source) VALUES (?, 'session', 'success', 'package activity', '', '', 'host', ?, ?, 'session') ON CONFLICT(run_id) DO UPDATE SET ended_at=excluded.ended_at",
+					)
+					.run(runId, activity.at, activity.at);
+				this.db
+					.prepare(
+						"INSERT INTO phases (phase_id, run_id, seq, name, kind, owner, status, started_at, ended_at) VALUES (?, ?, 0, 'package activity', 'session', 'host', 'success', ?, ?) ON CONFLICT(phase_id) DO UPDATE SET ended_at=excluded.ended_at",
+					)
+					.run(runId, runId, activity.at, activity.at);
+			}
+			const phase = this.db.prepare("SELECT phase_id FROM phases WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as
+				| { phase_id: string }
+				| undefined;
+			this.insertEventRaw({
+				eventId: activity.eventId,
+				runId,
+				phaseId: phase?.phase_id ?? runId,
+				type: activity.type,
+				name: `${activity.owner.id}@${activity.owner.version}/${activity.kind}`,
+				payload: activity,
+				startedAt: activity.at,
+			});
+			if (activity.captureDroppedBefore !== undefined)
+				this.recordCaptureLoss("package_activity", activity.captureDroppedBefore);
 		});
 	}
 
@@ -1245,6 +1274,27 @@ export class TraceReader {
 		this.db.close();
 	}
 
+	captureCoverage(): TraceCaptureCoverage {
+		const rows = this.db
+			.prepare(
+				"SELECT key, value FROM meta WHERE key IN ('capture_dropped_progress', 'capture_dropped_package_activity', 'capture_degraded')",
+			)
+			.all() as { key: string; value: string }[];
+		const values = new Map(rows.map((row) => [row.key, Number(row.value)]));
+		const droppedProgress = values.get("capture_dropped_progress") ?? null;
+		const droppedPackageActivity = values.get("capture_dropped_package_activity") ?? null;
+		return {
+			status:
+				(values.get("capture_degraded") ?? 0) > 0
+					? "degraded"
+					: (droppedProgress ?? 0) + (droppedPackageActivity ?? 0) > 0
+						? "known_loss"
+						: "unreported",
+			droppedProgress,
+			droppedPackageActivity,
+		};
+	}
+
 	runs(limit = 50): TraceRunRow[] {
 		return this.db
 			.prepare(
@@ -1437,10 +1487,17 @@ export function createDispatchTraceMirror(
 	let degraded = false;
 	let pendingWrites = 0;
 	let droppedProgress = 0;
+	let unreportedProgress = 0;
 	const starts = new Map<string, ToolStart>();
 	const seen = new Map<string, number>();
 	const contextWindows = new Map<string, number>();
 	const gateRuns = new Map<string, { role: string; cycle: number }>();
+	const forgetRun = (runId: string): void => {
+		for (const key of starts.keys()) if (key.startsWith(`${runId}:`)) starts.delete(key);
+		seen.delete(runId);
+		contextWindows.delete(runId);
+		gateRuns.delete(runId);
+	};
 
 	const getStore = (): TraceStore => {
 		store ??= new TraceStore(path);
@@ -1459,9 +1516,29 @@ export function createDispatchTraceMirror(
 								return resolve();
 							}
 							work();
+							if (unreportedProgress > 0) {
+								getStore().recordCaptureLoss("progress", unreportedProgress);
+								unreportedProgress = 0;
+							}
 						} catch (error) {
 							if (!degraded) warn(error instanceof Error ? error.message : String(error));
 							degraded = true;
+							starts.clear();
+							seen.clear();
+							contextWindows.clear();
+							gateRuns.clear();
+							if (store === null) warn("capture degradation could not be recorded: trace database unavailable");
+							else {
+								try {
+									store.recordCaptureLoss("degraded");
+									if (unreportedProgress > 0) store.recordCaptureLoss("progress", unreportedProgress);
+									unreportedProgress = 0;
+								} catch (markerError) {
+									warn(
+										`capture degradation could not be recorded: ${markerError instanceof Error ? markerError.message : String(markerError)}`,
+									);
+								}
+							}
 						}
 						pendingWrites -= 1;
 						resolve();
@@ -1475,6 +1552,7 @@ export function createDispatchTraceMirror(
 			const observedAt = now();
 			if (pendingWrites >= TRACE_WRITE_QUEUE_LIMIT && !isCriticalTraceEvent(channel, raw)) {
 				droppedProgress += 1;
+				unreportedProgress += 1;
 				return;
 			}
 			schedule(() => {
@@ -1482,24 +1560,22 @@ export function createDispatchTraceMirror(
 				if (channel === "dispatch.enqueued") {
 					const payload = raw as unknown as DispatchEnqueuedPayload;
 					getStore().upsertRun(payload, observedAt);
+					seen.set(payload.runId, seen.get(payload.runId) ?? 0);
 					if (payload.contextWindow !== undefined) contextWindows.set(payload.runId, payload.contextWindow);
 					if (payload.gate !== undefined) gateRuns.set(payload.runId, payload.gate);
 				} else if (channel === "dispatch.started")
 					getStore().startRun(raw as unknown as DispatchStartedPayload, observedAt);
-				else if (channel === "dispatch.progress")
-					recordProgress(
-						getStore(),
-						raw as unknown as DispatchProgressPayload,
-						starts,
-						seen,
-						contextWindows,
-						gateRuns,
-						observedAt,
-					);
-				else if (channel === "dispatch.completed")
-					getStore().finishRun(raw as unknown as DispatchCompletedPayload, true, observedAt);
-				else if (channel === "dispatch.failed")
-					recordFailure(getStore(), raw as unknown as DispatchFailedPayload, observedAt);
+				else if (channel === "dispatch.progress") {
+					const payload = raw as unknown as DispatchProgressPayload;
+					const active = seen.has(payload.runId);
+					recordProgress(getStore(), payload, starts, seen, contextWindows, gateRuns, observedAt);
+					if (!active) forgetRun(payload.runId);
+				} else if (channel === "dispatch.completed" || channel === "dispatch.failed") {
+					const payload = raw as unknown as DispatchFailedPayload;
+					if (channel === "dispatch.completed") getStore().finishRun(payload, true, observedAt);
+					else recordFailure(getStore(), payload, observedAt);
+					if (channel === "dispatch.completed" || payload.reason !== "retry_denied") forgetRun(payload.runId);
+				}
 			});
 		},
 		enqueueSessionTurn(trace): void {
@@ -1524,6 +1600,10 @@ export function createDispatchTraceMirror(
 			if (droppedProgress > 0)
 				warn(`dropped ${droppedProgress} display-only progress events because the trace queue was full`);
 			store?.close();
+			starts.clear();
+			seen.clear();
+			contextWindows.clear();
+			gateRuns.clear();
 		},
 	};
 }
@@ -1565,7 +1645,13 @@ function recordProgress(
 				.reduce((sum, value) => sum + value, 0);
 		store.recordContext(payload.runId, contextTokens, contextWindows.get(payload.runId) ?? null, at);
 	}
-	const gate = gateRuns.get(payload.runId);
+	let gate = gateRuns.get(payload.runId);
+	if (!seen.has(payload.runId) && type === "message_end") {
+		const row = store.db
+			.prepare("SELECT payload_json FROM events WHERE event_id=?")
+			.get(`${payload.runId}:agent_start`) as { payload_json: string } | undefined;
+		gate = (JSON.parse(row?.payload_json ?? "null") as { gate?: { role: string; cycle: number } } | null)?.gate;
+	}
 	if (type === "message_end" && gate !== undefined && isRecord(event.message) && event.message.role === "assistant") {
 		const result = structuredGateResult(messageText(event.message));
 		if (result !== null) {
@@ -1585,11 +1671,20 @@ function recordProgress(
 		const engine = type === "tool_execution_start";
 		const named = stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool);
 		const known = starts.get(key);
+		const previous = !seen.has(payload.runId)
+			? (store.db
+					.prepare("SELECT started_at, ended_at, payload_json FROM events WHERE event_id=?")
+					.get(`${payload.runId}:tool:${toolCallId}`) as
+					| { started_at: string; ended_at: string | null; payload_json: string | null }
+					| undefined)
+			: undefined;
+		if (previous?.ended_at != null) return;
+		const prior = JSON.parse(previous?.payload_json ?? "null") as Record<string, unknown> | null;
 		const start: ToolStart = known ?? {
 			toolCallId,
-			tool: named ?? "tool",
-			args: engine ? (toolFacts.args ?? null) : null,
-			startedAt: at,
+			tool: named ?? stringValue(prior?.tool) ?? "tool",
+			args: engine ? (toolFacts.args ?? prior?.args ?? null) : (prior?.args ?? null),
+			startedAt: previous?.started_at ?? at,
 			engineStarted: engine,
 			clioStarted: !engine,
 			engineFinished: false,
@@ -1623,7 +1718,7 @@ function recordProgress(
 			payload: {
 				tool: shown.toolName,
 				tool_call_id: toolCallId,
-				...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
+				...(shown.viaGateway || prior?.via === VIA_GATEWAY ? { via: VIA_GATEWAY } : {}),
 				args,
 				agent: payload.agentId,
 			},
@@ -1634,6 +1729,15 @@ function recordProgress(
 	if ((type === "tool_execution_end" || type === "clio_coder_tool_finish") && toolCallId !== null) {
 		const key = `${payload.runId}:${toolCallId}`;
 		const start = starts.get(key);
+		const previous =
+			start === undefined
+				? (store.db
+						.prepare("SELECT started_at, ended_at, payload_json FROM events WHERE event_id=?")
+						.get(`${payload.runId}:tool:${toolCallId}`) as
+						| { started_at: string; ended_at: string | null; payload_json: string | null }
+						| undefined)
+				: undefined;
+		const prior = JSON.parse(previous?.payload_json ?? "null") as Record<string, unknown> | null;
 		const engine = type === "tool_execution_end";
 		const outcome =
 			toolFacts.outcome === "ok" || toolFacts.outcome === "error" || toolFacts.outcome === "blocked"
@@ -1648,7 +1752,7 @@ function recordProgress(
 			start.durationMs ??= finiteNonNegative(toolFacts.durationMs);
 			if (start.result === undefined && reported !== undefined) start.result = reported;
 			start.ok &&= finishedOk;
-			start.outcome ??= outcome;
+			if (outcome === "blocked" || start.outcome === null) start.outcome = outcome;
 			start.blockReason ??= blockReason;
 		}
 		// One clock frame per row. The worker measures `durationMs` on its own
@@ -1662,18 +1766,22 @@ function recordProgress(
 		// observed start, `at` anchors the end and the start is derived backwards
 		// instead. With no reported span there is only one measurement to begin
 		// with, and both stamps stay as the mirror read them.
-		const duration = start !== undefined ? start.durationMs : finiteNonNegative(toolFacts.durationMs);
-		const observedStart = start?.startedAt;
+		const duration =
+			start !== undefined
+				? start.durationMs
+				: (finiteNonNegative(prior?.duration_ms) ?? finiteNonNegative(toolFacts.durationMs));
+		const observedStart = start?.startedAt ?? previous?.started_at;
 		const startedAt = observedStart ?? (duration === null ? at : new Date(Date.parse(at) - duration).toISOString());
 		const startedAtMs = Date.parse(startedAt);
 		const endedAt =
 			duration !== null && observedStart !== undefined && Number.isFinite(startedAtMs)
 				? new Date(startedAtMs + duration).toISOString()
-				: at;
-		const tool = start?.tool ?? stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool) ?? "tool";
-		const wireArgs = start?.args ?? toolFacts.args ?? null;
-		const result = (start !== undefined ? start.result : reported) ?? null;
-		const ok = start !== undefined ? start.ok : finishedOk;
+				: (previous?.ended_at ?? at);
+		const tool =
+			start?.tool ?? stringValue(prior?.tool) ?? stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool) ?? "tool";
+		const wireArgs = start?.args ?? prior?.args ?? toolFacts.args ?? null;
+		const result = (start !== undefined ? start.result : (prior?.result_snippet ?? reported)) ?? null;
+		const ok = start !== undefined ? start.ok : prior?.ok !== false && finishedOk;
 		// A span names the capability a gateway op=call ran, as a direct call's
 		// span did, and keeps the gateway as an attribute.
 		const shown = displayToolCall(tool, wireArgs, isRecord(result) ? result.details : undefined);
@@ -1689,12 +1797,17 @@ function recordProgress(
 			payload: {
 				tool: shown.toolName,
 				tool_call_id: toolCallId,
-				...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
+				...(shown.viaGateway || prior?.via === VIA_GATEWAY ? { via: VIA_GATEWAY } : {}),
 				args,
 				result_snippet: boundedSnippet(result),
 				ok,
-				outcome: start?.outcome ?? outcome ?? (ok ? "ok" : "error"),
-				block_reason: start?.blockReason ?? blockReason,
+				outcome:
+					start?.outcome === "blocked" || outcome === "blocked" || prior?.outcome === "blocked"
+						? "blocked"
+						: ok
+							? "ok"
+							: "error",
+				block_reason: start?.blockReason ?? prior?.block_reason ?? blockReason,
 				duration_ms: duration,
 				agent: payload.agentId,
 			},
@@ -1703,7 +1816,10 @@ function recordProgress(
 		});
 		// A chain's settled steps are spans of their own under the chain's span.
 		// They carry no clock of their own, so they share the chain's frame.
-		for (const step of gatewayChainSteps(tool, result)) {
+		for (const step of gatewayChainSteps(
+			start?.tool ?? stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool) ?? tool,
+			reported ?? result,
+		)) {
 			const stepCallId = chainStepToolCallId(toolCallId, step.id);
 			store.insertEvent({
 				eventId: `${payload.runId}:tool:${stepCallId}`,
@@ -1737,7 +1853,17 @@ function recordProgress(
 		}
 		return;
 	}
-	const sequence = (seen.get(payload.runId) ?? 0) + 1;
+	const prefix = `${payload.runId}:event:`;
+	const sequence =
+		(seen.get(payload.runId) ??
+			(
+				store.db
+					.prepare(
+						"SELECT CAST(substr(event_id, ?) AS INTEGER) AS sequence FROM events WHERE run_id=? AND substr(event_id, 1, ?)=? ORDER BY rowid DESC LIMIT 1",
+					)
+					.get(prefix.length + 1, payload.runId, prefix.length, prefix) as { sequence: number } | undefined
+			)?.sequence ??
+			0) + 1;
 	seen.set(payload.runId, sequence);
 	store.insertEvent({
 		eventId: `${payload.runId}:event:${sequence}`,

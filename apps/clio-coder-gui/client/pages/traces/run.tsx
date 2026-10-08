@@ -12,8 +12,9 @@ import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
 import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import "../run-inspection.css";
-import { detailRefetchMs, liveLabel, mergeTraceEvents, type TraceLiveState } from "./trace-live-model.js";
-import { histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
+import type { TraceLiveState } from "./trace-live-model.js";
+import { detailRefetchMs, liveLabel, mergeTraceEvents } from "./trace-live-model.js";
+import { captureCoverageLabel, histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
 import { useTraceLive } from "./use-trace-live.js";
 export function TraceRunPage({ client }: { client: Client }) {
 	const { runId = "" } = useParams();
@@ -37,6 +38,11 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		[now, setNow] = useState(clock.now()),
 		[tail, setTail] = useState<TraceLiveState>("idle");
 	const input = { params: { runId }, query: {}, body: {} };
+	const coverage = useQuery({
+		queryKey: ["trace-status"],
+		queryFn: () => client.call(routes.traceStatus, { params: {}, query: {}, body: {} }),
+		refetchInterval: 5000,
+	});
 	const detail = useQuery({
 		queryKey: ["trace-detail", runId, full],
 		queryFn: async () => {
@@ -102,6 +108,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				</span>
 			</div>
 			<p className="panel-note">Durable run record · receipt integrity is a separate check</p>
+			<p className="panel-note">{captureCoverageLabel(coverage.data?.captureCoverage ?? null)}</p>
 			<ul className="trace-totals">
 				{runTotals(run, now).map((total) => (
 					<li key={total.label}>

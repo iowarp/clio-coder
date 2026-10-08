@@ -1,12 +1,14 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
-import { type Input, routes } from "../../../contracts/routes.js";
+import type { Input } from "../../../contracts/routes.js";
+import { routes } from "../../../contracts/routes.js";
 import type { Client } from "../../api/client.js";
 import { formatCost, formatTime, formatTokens } from "../../api/clock.js";
 import { PanelEmpty } from "../../design/panel.js";
 import { listDestination } from "../run-inspection-model.js";
 import "../run-inspection.css";
 import { emptyState } from "../../design/panel-model.js";
+import { captureCoverageLabel } from "./trace-model.js";
 export function TraceRuns({ client }: { client: Client }) {
 	const [search, setSearch] = useSearchParams();
 	const source = search.get("source"),
@@ -40,6 +42,7 @@ export function TraceRuns({ client }: { client: Client }) {
 			<p className="eyebrow">Execution history</p>
 			<h1>Traces</h1>
 			<p className="intro">Follow a run from its first decision to its final evidence.</p>
+			{availability.data && <p className="trace-note">{captureCoverageLabel(availability.data.captureCoverage)}</p>}
 			<form
 				className="trace-filters"
 				key={search.toString()}

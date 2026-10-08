@@ -17,6 +17,7 @@
 
 import { existsSync } from "node:fs";
 import { clioStatePath } from "../core/xdg.js";
+import type { TraceCaptureCoverage } from "../domains/observability/trace-store.js";
 import { TraceReader, traceDatabasePath } from "../domains/observability/trace-store.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth } from "../engine/tui-primitives.js";
@@ -109,6 +110,7 @@ export interface TraceInspectSnapshot {
 	 * distinguishable from a database that exists and holds no runs.
 	 */
 	readonly available: boolean;
+	readonly captureCoverage: TraceCaptureCoverage | null;
 	readonly runs: readonly TraceInspectRun[];
 	readonly truncated: boolean;
 }
@@ -180,7 +182,7 @@ function traceInspectSnapshot(
 ): TraceInspectSnapshot {
 	const generatedAt = new Date(now()).toISOString();
 	if (!existsSync(databasePath)) {
-		return { version: 1, generatedAt, available: false, runs: [], truncated: false };
+		return { version: 1, generatedAt, available: false, captureCoverage: null, runs: [], truncated: false };
 	}
 	const reader = new TraceReader(databasePath);
 	try {
@@ -234,6 +236,7 @@ function traceInspectSnapshot(
 			version: 1,
 			generatedAt,
 			available: true,
+			captureCoverage: reader.captureCoverage(),
 			runs,
 			truncated: selected.length > window.length,
 		};
