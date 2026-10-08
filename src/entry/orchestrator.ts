@@ -839,14 +839,14 @@ function prepareBackgroundMemoryRoute(
 						admit: () => endpointKey === null || (endpointCapacityUsage()[endpointKey] ?? 0) < admissionLimit,
 					},
 					async (request: TaskMemoryModelRequest) => {
-						const startedAt = Date.now();
+						const startedAt = performance.now();
 						let observedUsage: TaskMemoryStepUsage | undefined;
 						const mapUsage = (completion: Pick<EngineTextCompletionResult, "usage" | "backend">): TaskMemoryStepUsage => ({
 							...completion.usage,
 							targetId,
 							attributedModelId: refined.wireModelId,
 							costProvenance: completion.usage.missingTokenCalls ? "unknown" : costProvenance,
-							durationMs: Date.now() - startedAt,
+							durationMs: performance.now() - startedAt,
 							backend: completion.backend,
 						});
 						const completion = await completeEngineText({

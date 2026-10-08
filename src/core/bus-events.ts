@@ -778,6 +778,7 @@ export interface AccountabilityEvidenceReadyPayload extends ObservabilityRunEvid
 export interface CompactionPayload {
 	trigger: string;
 	at: number;
+	outcome?: "completed" | "unchanged" | "failed" | "cancelled";
 }
 
 // ---------------------------------------------------------------------------
