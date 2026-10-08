@@ -73,6 +73,8 @@ export interface EditorChrome {
 	getModelLabel: () => TargetIdentity | string;
 	/** Effective label plus whether the model actually has an effort range. */
 	getThinkingLabel: () => string;
+	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
+	getLoopRail?: (width: number) => string | null;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
 	getHarnessStatus?: (width: number) => { label: string; glyph: string; token: ClioToken; live: boolean } | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
@@ -510,7 +512,10 @@ export class ClioEditor extends Editor {
 				)
 			: "";
 		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
-		return renderEditorRail(theme, width, { right: hint, rightRaw: true }, rail);
+		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
+		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
+		const left = loop ? `${theme.fg(rail.tone ?? "composerRail", "━")} ${loop}` : "";
+		return renderEditorRail(theme, width, { left, leftRaw: true, right: hint, rightRaw: true }, rail);
 	}
 
 	private railLabelRoom(width: number): number {

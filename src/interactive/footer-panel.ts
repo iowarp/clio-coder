@@ -135,21 +135,32 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 							: job.state === "terminal"
 								? "settling"
 								: "waiting";
-	const id = truncateToWidth(sanitizeCallTargetText(job.id), Math.max(4, Math.min(18, Math.floor(width / 5))), "…");
+	const theme = clioTheme();
+	const tone = job.cancelRequested || job.state === "paused" || job.persistenceError !== null ? "warning" : "annotation";
 	const progress = `${job.settled}${job.spec.count === null ? "" : `/${job.spec.count}`} settled`;
 	const extra = jobs.length > 1 ? ` · +${jobs.length - 1} jobs` : "";
-	let text = `Loop ${id} · ${state} · ${progress}`;
-	if (job.state === "active" && job.nextDueAt !== null) {
-		text += job.nextDueAt <= now ? " · due now" : ` · next ${formatCompactMs(job.nextDueAt - now)}`;
+	const room = Math.max(0, width - visibleWidth(extra));
+	let text = `Loop ${progress} · ${state}`;
+	const append = (detail: string): void => {
+		if (visibleWidth(`${text} · ${detail}`) <= room) text += ` · ${detail}`;
+	};
+	if (job.starts !== job.settled) append(`${job.starts} started`);
+	if (job.state === "active" && job.nextDueAt !== null)
+		append(job.nextDueAt <= now ? "due now" : `next ${formatCompactMs(job.nextDueAt - now)}`);
+	// Settled includes failures and cancellation; this measures consumed runs, not success.
+	if (job.spec.count !== null && job.spec.count > 0 && visibleWidth(text) + 7 <= room) {
+		const filled = Math.min(6, Math.max(0, Math.floor((job.settled / job.spec.count) * 6)));
+		const meter =
+			theme.fg("harnessAction", GLYPH.barFull.repeat(filled)) + theme.fg("border", GLYPH.barEmpty.repeat(6 - filled));
+		text = text.replace("Loop ", `Loop ${meter} `);
 	}
-	if (job.starts !== job.settled && visibleWidth(`${text} · ${job.starts} started${extra}`) <= width)
-		text += ` · ${job.starts} started`;
-	if (job.pendingReason !== null && visibleWidth(`${text}${extra}`) + 12 < width)
-		text += ` · ${truncateToWidth(sanitizeCallTargetText(job.pendingReason), width - visibleWidth(`${text}${extra}`) - 3, "…")}`;
-	text = fitFooterText(text, Math.max(1, width - visibleWidth(extra)), "…") + fitFooterText(extra, width);
-	if (visibleWidth(`${text} · /loop`) <= width) text += " · /loop";
-	return clioTheme().fg(
-		job.cancelRequested || job.state === "paused" || job.persistenceError !== null ? "warning" : "annotation",
-		fitFooterText(text, width, "…"),
+	append(truncateToWidth(sanitizeCallTargetText(job.id), 18, "…"));
+	if (job.pendingReason !== null && visibleWidth(text) + 12 < room)
+		append(truncateToWidth(sanitizeCallTargetText(job.pendingReason), room - visibleWidth(text) - 3, "…"));
+	append("/loop");
+	return fitFooterText(
+		`${theme.fg(tone, fitFooterText(text, Math.max(1, room), "…"))}${theme.fg(tone, extra)}`,
+		width,
+		"…",
 	);
 }

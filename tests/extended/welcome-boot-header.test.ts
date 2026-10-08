@@ -758,20 +758,21 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 					return { unref: noop };
 				},
 			},
-			false,
+			true,
 			true,
 		);
 		const frame = (width = 100): string[] => built.root.render(width).map(stripAnsi);
-		const loopRow = (width = 100): string => frame(width).find((row) => row.startsWith("Loop ")) ?? "";
+		const loopRow = (width = 100): string => frame(width).find((row) => row.includes("Loop ")) ?? "";
 		try {
-			match(loopRow(), /watch-build · waiting · 0\/3 settled · next 10s/u);
+			match(loopRow(), /Loop .*0\/3 settled · waiting · next 10s/u);
 			const rows = frame();
-			strictEqual(rows.findIndex((row) => row.startsWith("Loop ")) + 1, rows.indexOf("COMPOSER"));
+			strictEqual(loopRow(), stripAnsi(built.editor.render(100).at(-1) ?? ""));
+			ok(rows.find((row) => row.includes("Loop "))?.startsWith("━ Loop "), "loop status belongs to the composer rail");
 			emit({ ...job, id: "other-watch" });
 			match(loopRow(), /\+1 jobs/u);
 			for (const width of [1, 8, 20, 40, 80, 120]) {
-				const lines = frame(width);
-				const row = lines[lines.indexOf("COMPOSER") - 1] ?? "";
+				frame(width);
+				const row = stripAnsi(built.editor.render(width).at(-1) ?? "");
 				ok(row.length > 0);
 				ok(visibleWidth(row) <= width, row);
 			}
@@ -795,7 +796,7 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 				evidence: null,
 			};
 			emit({ ...job, active: occurrence, starts: 1 });
-			match(loopRow(), /running · 0\/3 settled.*1 started/u);
+			match(loopRow(), /0\/3 settled · running.*1 started/u);
 			emit({ ...job, active: occurrence, starts: 1, persistenceError: "write failed" });
 			match(loopRow(), /not saved/u);
 			ok(!loopRow().includes("running"));
@@ -806,7 +807,7 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 			emit({ ...job, state: "paused", nextDueAt: null });
 			match(loopRow(), /paused/u);
 			emit({ ...job, state: "terminal", cancelRequested: true, active: occurrence, nextDueAt: null, starts: 1 });
-			match(loopRow(), /cancel requested · 0\/3 settled/u);
+			match(loopRow(), /0\/3 settled · cancel requested/u);
 			emit({
 				...job,
 				state: "terminal",

@@ -281,13 +281,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		updateLoopSnapshot();
 		requestRender();
 	});
-	const loops: Component = {
-		render: (width) => {
-			const line = loopSegment(loopSnapshot, width, Date.now());
-			return line === null ? [] : [line];
-		},
-		invalidate: () => {},
-	};
 	const settings = deps.getSettings?.() ?? structuredClone(DEFAULT_SETTINGS);
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
@@ -534,6 +527,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 
 	const editorChrome: EditorChrome = {
+		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getModelLabel: () => {
 			const current = deps.getSettings?.();
 			// Keep raw fields separate through the terminal-lease proxy until render knows its width.
@@ -748,7 +742,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 						preparation: deps.chat.turnPreparation().phase,
 					}),
 			),
-			loops,
 			footer: footer.view,
 		},
 		{
