@@ -317,7 +317,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const rate = state.throughput?.tokensPerSecond;
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? metricText(theme, String(rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10), "tps")
+			? metricText(
+					theme,
+					`${state.throughput?.estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`,
+					"tps",
+				)
 			: "";
 	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
 	const statsCap = Math.floor(w * 0.4);
@@ -504,7 +508,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				: "unreported",
 		],
 		["Workers", `${active.length} active · ${completed} done · ${failed} failed`],
-		["Tools", `${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`],
+		["Tools (visit)", `${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`],
 		["Worker cap", capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled"],
 	];
 	const right: [string, string | MeterCell][] = [

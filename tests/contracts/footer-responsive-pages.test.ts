@@ -42,6 +42,21 @@ test("narrow context reports unknown, estimated and saved occupancy without inve
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /0\/100K \(0\.0%\)$/);
 });
 
+test("compact throughput keeps the estimate marker and omits unavailable rates", () => {
+	const state = footerState();
+	state.context.used = null;
+	state.throughput = { tokensPerSecond: 12.3, outputTokens: 123, durationMs: 10000, estimated: true };
+	const plain = () => renderCompactDashboard(state, 120).map(stripTerminalSequences).join("\n");
+	match(plain(), /≈12\s*tps/);
+	state.throughput.estimated = false;
+	match(plain(), /12\s*tps/);
+	doesNotMatch(plain(), /≈12/);
+	for (const rate of [0, NaN, Infinity]) {
+		state.throughput.tokensPerSecond = rate;
+		doesNotMatch(plain(), /tps/);
+	}
+});
+
 test("a narrow attention row preserves workspace and context with armed skill facts beside it", () => {
 	const state = footerState();
 	state.agent.statusText = "Ready";
@@ -85,6 +100,7 @@ function allContent(page: "Context" | "Status", width: number): string[] {
 test("Context and Status retain stacked and split sections through compact scrolling viewports", () => {
 	for (const width of [60, 80, 83, 84, 87, 88, 120, 200]) {
 		const status = allContent("Status", width);
+		match(status.join("\n"), /Tools \(visit\)/);
 		const cost = status.findIndex((line) => line.includes("COST & CONNECTIONS"));
 		const machine = status.findIndex((line) => line.includes("LOCAL MACHINE"));
 		ok(cost >= 0 && machine >= 0);

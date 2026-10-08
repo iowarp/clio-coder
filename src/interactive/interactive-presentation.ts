@@ -829,7 +829,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerToolCounts.set(toolName, (footerToolCounts.get(toolName) ?? 0) + 1);
 		},
 		recordToolEnd: ({ toolCallId, isError, truncated }) => {
-			footerActiveTools.delete(toolCallId);
+			if (!footerActiveTools.delete(toolCallId)) return;
 			if (isError) footerToolErrors += 1;
 			if (truncated) footerToolTruncatedResults += 1;
 		},

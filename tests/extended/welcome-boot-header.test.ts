@@ -563,6 +563,7 @@ function noop(): void {}
  */
 function presentation(over: Partial<InteractivePresentationDeps> = {}, realEditor = false, realFooter = false) {
 	let rendered = 0;
+	let footerDeps!: Parameters<typeof buildFooterDashboard>[0];
 	const view = { render: () => [], invalidate: noop };
 	const deps = {
 		bus: { on: () => noop, emit: noop },
@@ -609,10 +610,12 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 			createDispatchBoardStore: () => ({ rows: () => [], unsubscribe: noop }),
 			createContextActivityStore: () => ({ current: () => ({}), unsubscribe: noop }),
 			createNotificationCenter: () => ({ add: noop, list: () => [], dismiss: noop }),
-			buildFooter: realFooter
-				? (deps: Parameters<typeof buildFooterDashboard>[0]) =>
-						buildFooterDashboard({ ...deps, resolveCurrentBranch: async () => null })
-				: () => ({ view, refresh: noop, dispose: noop, isExpanded: () => false }),
+			buildFooter: (deps: Parameters<typeof buildFooterDashboard>[0]) => {
+				footerDeps = deps;
+				return realFooter
+					? buildFooterDashboard({ ...deps, resolveCurrentBranch: async () => null })
+					: { view, refresh: noop, dispose: noop, isExpanded: () => false };
+			},
 			createEditor: (_tui: unknown, chrome: EditorChrome) =>
 				realEditor
 					? new ClioEditor(new TuiMainScreen({ columns: 120, rows: 24, write: noop } as unknown as Terminal), chrome)
@@ -626,7 +629,7 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 		...over,
 	} as unknown as InteractivePresentationDeps;
 	const built = createInteractivePresentation(deps);
-	return { presentation: built, renders: () => rendered };
+	return { presentation: built, renders: () => rendered, footerDeps };
 }
 
 function headerRows(built: ReturnType<typeof presentation>["presentation"], width = 100): string[] {
@@ -676,12 +679,31 @@ test("the presentation opens on the launchpad and collapses on first submit", as
 	strictEqual(headerRows(built).length, 1);
 });
 
-test("a new session restores the launchpad", () => {
-	const { presentation: built } = presentation();
+test("a session reset restores the launchpad and clears tool telemetry, including late results", () => {
+	const { presentation: built, footerDeps } = presentation();
 	built.collapseWelcomeDashboard();
 	strictEqual(headerRows(built).length, 1);
+	built.recordToolStart("failed-call", "bash");
+	built.recordToolEnd({ toolCallId: "failed-call", isError: true, truncated: true });
+	built.recordToolStart("pending-call", "read");
+	deepStrictEqual(footerDeps.getToolCounts?.(), {
+		tools: { bash: 1, read: 1 },
+		errors: 1,
+		active: 1,
+		truncatedResults: 1,
+	});
 	built.resetForNewSession();
 	strictEqual(headerRows(built).length, 18);
+	built.collapseWelcomeDashboard();
+	strictEqual(headerRows(built).length, 1);
+	built.recordToolEnd({ toolCallId: "pending-call", isError: true, truncated: true });
+	deepStrictEqual(footerDeps.getToolCounts?.(), { tools: {}, errors: 0, active: 0, truncatedResults: 0 });
+	strictEqual(built.toolCounts().size, 0);
+	built.recordToolStart("current-call", "read");
+	built.recordToolEnd({ toolCallId: "current-call", isError: true, truncated: false });
+	built.recordToolEnd({ toolCallId: "current-call", isError: true, truncated: false });
+	deepStrictEqual(footerDeps.getToolCounts?.(), { tools: { read: 1 }, errors: 1, active: 0, truncatedResults: 0 });
+	built.dispose();
 });
 
 test("a boot-time resume opens collapsed, with no fresh-start onboarding", () => {

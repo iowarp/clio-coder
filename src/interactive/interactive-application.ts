@@ -1296,6 +1296,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	 * immediately submitted to cannot produce a second transition.
 	 */
 	const adoptExistingConversation = (): void => {
+		presentation.resetForNewSession();
 		presentation.collapseWelcomeDashboard();
 		resetTranscript();
 	};

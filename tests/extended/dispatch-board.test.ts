@@ -250,6 +250,7 @@ describe("dispatch board uses the observability projection", () => {
 		const rendered = view.render(180).join("\n");
 		match(rendered, /coder/);
 		match(rendered, /check failed/);
+		match(stripTerminalSequences(rendered), /20\/s wall avg/);
 		strictEqual(
 			projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence?.evidenceId,
 			"run-board-run",

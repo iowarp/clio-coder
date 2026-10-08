@@ -639,13 +639,13 @@ function renderDispatchCard(
 			: `${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
-	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
+	const wallTokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
 	// A queued run has produced nothing yet, so it never carries a throughput.
-	const showRate = row.status !== "enqueued" && tokensPerSec > 0;
+	const showRate = row.status !== "enqueued" && wallTokensPerSec > 0;
 	const up = theme.fg("body", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
 	const down = theme.fg(
 		"body",
-		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${tokensPerSec}/s)` : ""}`,
+		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${wallTokensPerSec}/s wall avg)` : ""}`,
 	);
 	const total = theme.fg("body", `total ${formatFooterTokens(row.tokenCount)}`);
 
