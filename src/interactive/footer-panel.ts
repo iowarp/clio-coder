@@ -146,19 +146,15 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 		text += ` · ${detail}`;
 		return true;
 	};
-	const counter = `${job.settled}${job.spec.count === null ? "" : `/${job.spec.count}`} settled`;
-	// Settled includes failures and cancellation, so the meter measures consumed runs, not success.
-	if (job.spec.count !== null && job.spec.count > 0) {
-		const filled = Math.min(6, Math.max(0, Math.floor((job.settled / job.spec.count) * 6)));
+	const counter = job.spec.count === null ? `${job.settled} settled` : `${job.settled}/${job.spec.count}`;
+	const dueAt = state === "waiting" ? job.nextDueAt : null;
+	if (dueAt !== null) {
+		const filled = Math.min(6, Math.max(0, Math.floor((1 - (dueAt - now) / job.spec.intervalMs) * 6)));
 		const meter =
 			theme.fg("composerRail", GLYPH.meterFull.repeat(filled)) + theme.fg("border", GLYPH.meterEmpty.repeat(6 - filled));
-		if (!append(`${meter} ${counter}`)) append(counter);
+		if (!append(`${meter} · ${counter}`)) append(counter);
 	} else append(counter);
 	if (jobs.length > 1) append(`+${jobs.length - 1} loops`);
-	// The scheduler skips an unsaved job, so its stored due time is not a countdown.
-	if (job.state === "active" && job.nextDueAt !== null && job.persistenceError === null)
-		append(job.nextDueAt <= now ? "due now" : `next ${formatCompactMs(job.nextDueAt - now)}`);
-	if (job.starts !== job.settled) append(`${job.starts} started`);
-	append("/loop");
+	if (dueAt !== null) append(dueAt <= now ? "due now" : `in ${formatCompactMs(dueAt - now)}`);
 	return theme.base(tone, fitFooterText(text, width, "…"));
 }
