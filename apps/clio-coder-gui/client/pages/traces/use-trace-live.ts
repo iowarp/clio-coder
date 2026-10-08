@@ -4,7 +4,7 @@ import { routes } from "../../../contracts/routes.js";
 import type { TraceEvent } from "../../../contracts/traces.js";
 import { onTokenRejected, tokenRejected } from "../../api/auth-state.js";
 import { type Client, emptyInput } from "../../api/client.js";
-import { lastRowid, mergeTraceEvents, type TraceLiveState } from "./trace-live-model.js";
+import { lastRowid, mergeTraceEvents, runIsLive, type TraceLiveState } from "./trace-live-model.js";
 
 const eventsKey = (runId: string) => ["trace-events", runId] as const;
 
@@ -14,9 +14,11 @@ const eventsKey = (runId: string) => ["trace-events", runId] as const;
  * stream. A dropped connection resumes from the held rowid: the browser's own retry sends
  * Last-Event-ID, and a closed source reopens with `after` set to the last cached row.
  */
-export function useTraceLive(client: Client, runId: string, enabled: boolean) {
+export function useTraceLive(client: Client, runId: string, eventsReady: boolean, status: string | undefined) {
 	const queries = useQueryClient();
 	const [state, setState] = useState<TraceLiveState>("idle");
+	const enabled = eventsReady && runIsLive(status);
+	const terminal = eventsReady && (status === "success" || status === "fail" || state === "finished");
 	useEffect(() => {
 		if (!enabled) {
 			setState((current) => (current === "finished" ? current : "idle"));
@@ -24,6 +26,13 @@ export function useTraceLive(client: Client, runId: string, enabled: boolean) {
 		}
 		return tail(client, queries, runId, setState);
 	}, [client, queries, runId, enabled]);
+	useEffect(() => {
+		if (!terminal) return;
+		// Initial events must land before this refresh; invalidating a pending read can reuse its
+		// unfinished snapshot. Either terminal signal then reconciles rows and header facts once.
+		void queries.invalidateQueries({ queryKey: ["trace-events", runId] });
+		void queries.invalidateQueries({ queryKey: ["trace-detail", runId] });
+	}, [queries, runId, terminal]);
 	return state;
 }
 
@@ -71,8 +80,6 @@ function tail(client: Client, queries: QueryClient, runId: string, setState: (st
 		opened.addEventListener("finished", () => {
 			if (!current()) return;
 			stop("finished");
-			// The run header carries the final status, totals and end time the tail does not.
-			void queries.invalidateQueries({ queryKey: ["trace-detail", runId] });
 		});
 		// The server reports a failed read once and ends the stream; polling covers the page from here.
 		opened.addEventListener("problem", () => {

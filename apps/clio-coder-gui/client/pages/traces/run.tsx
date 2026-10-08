@@ -12,7 +12,7 @@ import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
 import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import "../run-inspection.css";
-import { detailRefetchMs, liveLabel, mergeTraceEvents, runIsLive, type TraceLiveState } from "./trace-live-model.js";
+import { detailRefetchMs, liveLabel, mergeTraceEvents, type TraceLiveState } from "./trace-live-model.js";
 import { histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
 import { useTraceLive } from "./use-trace-live.js";
 export function TraceRunPage({ client }: { client: Client }) {
@@ -66,7 +66,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		},
 		staleTime: Number.POSITIVE_INFINITY,
 	});
-	const live = useTraceLive(client, runId, !!events.data && runIsLive(detail.data?.run.status));
+	const live = useTraceLive(client, runId, !!events.data, detail.data?.run.status);
 	useEffect(() => setTail(live), [live]);
 	useEffect(() => {
 		if (detail.data?.run.status !== "running") return;
