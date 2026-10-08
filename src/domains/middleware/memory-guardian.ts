@@ -424,6 +424,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				citedEntries: 0,
 				inputTokens: result.inputTokens,
 				outputTokens: result.outputTokens,
+				...(result.usage === null ? {} : { missingTokenCalls: result.usage.missingTokenCalls ?? 0 }),
 				latencyMs: Number(process.hrtime.bigint() - started) / 1_000_000,
 				...(client.route === undefined ? {} : { route: client.route }),
 				...(result.resumeAt === undefined ? {} : { resumeAt: result.resumeAt }),

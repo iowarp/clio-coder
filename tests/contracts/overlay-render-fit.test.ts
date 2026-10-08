@@ -1,6 +1,9 @@
 import { deepStrictEqual, doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
+import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
+import { emptyTaskMemorySpendSummary } from "../../src/domains/memory/task-memory-spend.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import { MemoryOverlayView } from "../../src/interactive/memory-overlay.js";
 import { ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
 import { SideQuestionOverlayBody } from "../../src/interactive/overlays/side-question.js";
 import { ANIMATION_STEP_MS, GLYPH } from "../../src/interactive/theme/index.js";
@@ -48,4 +51,32 @@ test("routine side-question progress remains static across renders and clock ste
 		now += ANIMATION_STEP_MS;
 		deepStrictEqual(body.render(width), first);
 	}
+});
+
+test("memory history warnings survive 96-column rendering and cache changes with unchanged totals", () => {
+	let spend = { ...emptyTaskMemorySpendSummary(), unreadableFiles: 1 };
+	const view = new MemoryOverlayView(
+		() => ({
+			enabled: true,
+			tier: "llm",
+			size: 0,
+			lastDecision: null,
+			bank: new TaskMemoryBank().snapshot(),
+			activity: [],
+			stepInFlight: false,
+			spend,
+		}),
+		() => [],
+		() => {},
+		() => {},
+	);
+	const unavailable = view.render(96);
+	match(unavailable.map(stripTerminalSequences).join("\n"), /partial retained spend.*unreadable.*unavailable/u);
+	spend = { ...spend, readableFiles: 1, llmSteps: 312, totalTokens: 165_499, invalidRows: 1, missingTokenCalls: 2 };
+	const partial = view.render(96);
+	match(partial.map(stripTerminalSequences).join("\n"), /partial retained spend.*unreadable/u);
+	spend = { ...spend, unreadableFiles: 0, invalidRows: 0, missingTokenCalls: 0 };
+	const recovered = view.render(96);
+	doesNotMatch(recovered.map(stripTerminalSequences).join("\n"), /partial|unreadable/u);
+	for (const row of [...unavailable, ...partial, ...recovered]) ok(visibleWidth(row) <= 96);
 });

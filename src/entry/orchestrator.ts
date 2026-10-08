@@ -5160,9 +5160,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				),
 				stepInFlight: memoryIntervention.stepInFlight(),
 				guardian: currentGuardianState(),
-				// Folded from the telemetry ledger, which is durable across sessions,
-				// so `/memory` answers what the tier has cost since it was turned on
-				// rather than what it cost since this process started.
+				// Fold available retained telemetry across sessions; rotation bounds this history.
 				spend: readTaskMemorySpendSummary(clioStateDir()),
 			};
 		},

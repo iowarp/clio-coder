@@ -84,6 +84,8 @@ export interface TaskMemoryTelemetryRecord {
 	droppedOperations: number;
 	citedEntries: number;
 	tokenCost: TaskMemoryTokenCost;
+	/** Calls whose provider usage was not observed. Absent on older rows. */
+	missingTokenCalls?: number;
 	latencyMs: number;
 	/** Route the step ran on. Absent on rules-tier rows and on rows written before the field existed. */
 	targetId?: string;
@@ -104,6 +106,7 @@ export interface TaskMemoryTelemetryStep {
 	citedEntries: number;
 	inputTokens: number;
 	outputTokens: number;
+	missingTokenCalls?: number;
 	latencyMs: number;
 	/** Resolved route of the attempt, present only when a model client was resolved. */
 	route?: TaskMemoryRoute;
@@ -161,6 +164,7 @@ export function taskMemoryTelemetryRecord(step: TaskMemoryTelemetryStep, at: Dat
 		droppedOperations: nonNegativeInteger(step.droppedOperations),
 		citedEntries: nonNegativeInteger(step.citedEntries),
 		tokenCost: { input, output, total: input + output },
+		...(step.missingTokenCalls === undefined ? {} : { missingTokenCalls: step.missingTokenCalls }),
 		latencyMs: nonNegativeFinite(step.latencyMs),
 		...(step.route === undefined ? {} : { targetId: step.route.targetId, modelId: step.route.modelId }),
 		...(step.resumeAt === undefined ? {} : { resumeAt: step.resumeAt }),
@@ -176,7 +180,12 @@ export function taskMemoryBankDelta(before: TaskMemorySnapshot, after: TaskMemor
 }
 
 export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTelemetryRecord | null {
-	if (!isRecord(value) || !hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason", "resumeAt"])) return null;
+	if (
+		!isRecord(value) ||
+		!hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason", "resumeAt", "missingTokenCalls"])
+	)
+		return null;
+	if (value.missingTokenCalls !== undefined && !isNonNegativeInteger(value.missingTokenCalls)) return null;
 	if (value.refusalReason !== undefined && typeof value.refusalReason !== "string") return null;
 	if (value.resumeAt !== undefined && !validIsoTimestamp(value.resumeAt)) return null;
 	const route = parseRoute(value);
@@ -201,6 +210,7 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 		droppedOperations: value.droppedOperations,
 		citedEntries: value.citedEntries,
 		tokenCost,
+		...(value.missingTokenCalls === undefined ? {} : { missingTokenCalls: value.missingTokenCalls as number }),
 		latencyMs: value.latencyMs,
 		...route,
 		...(value.resumeAt === undefined ? {} : { resumeAt: value.resumeAt as string }),

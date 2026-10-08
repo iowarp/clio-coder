@@ -10,6 +10,7 @@ import {
 	type TaskMemoryTelemetryDecision,
 } from "../domains/memory/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
+import { truncateToWidth } from "../engine/tui.js";
 import { clockLocal } from "./format-time.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
@@ -46,12 +47,6 @@ function formatMemoryStatusLine(status: TaskMemoryOperatorStatus, contentWidth: 
 		const resume = status.lastSkip.resumeAt === undefined ? "" : ` until ${rowClock(status.lastSkip.resumeAt)}`;
 		units.push(theme.fg("warning", `skipped ${status.lastSkip.reason}${resume}`));
 	}
-	// Lifetime cost of the background plane, beside the state of the current
-	// session. The tier spent 137,205 tokens over 14 days on the operator's own
-	// machine before any surface said so (#229), and a hit rate is the one figure
-	// that says whether that spend is buying anything.
-	const spend = status.spend === null || status.spend === undefined ? "" : formatTaskMemorySpend(status.spend);
-	if (spend.length > 0) units.push(theme.fg("annotation", spend));
 	return fitUnits(theme, "", units, width);
 }
 
@@ -200,7 +195,6 @@ function memorySignature(status: TaskMemoryOperatorStatus, records: ReadonlyArra
 		status.lastDecision ?? "none",
 		status.stepInFlight ? "running" : "idle",
 		`${status.lastSkip?.reason ?? ""}:${status.lastSkip?.resumeAt ?? ""}`,
-		`${status.spend?.llmSteps ?? 0}:${status.spend?.injections ?? 0}:${status.spend?.totalTokens ?? 0}`,
 	];
 	for (const record of records) parts.push(`r:${record.id}:${record.approved}:${record.rejectedAt ?? ""}`);
 	for (const entry of bankEntries(status.bank)) {
@@ -268,6 +262,10 @@ export class MemoryOverlayView implements Component {
 	render(width: number): string[] {
 		const status = this.sync();
 		const statusLine = formatMemoryStatusLine(status, width);
+		const spendLine =
+			status.spend === null || status.spend === undefined
+				? null
+				: truncateToWidth(clioTheme().fg("annotation", formatTaskMemorySpend(status.spend)), width, "…", false);
 		const routeLine = status.route
 			? fitUnits(
 					clioTheme(),
@@ -285,12 +283,13 @@ export class MemoryOverlayView implements Component {
 			this.promotionMessage === null
 				? null
 				: fitUnits(clioTheme(), "", [clioTheme().fg(this.promotionMessage.token, this.promotionMessage.text)], width);
-		const statusKey = [statusLine, routeLine, promotionLine].filter((line) => line !== null).join("\n");
+		const statusKey = [statusLine, spendLine, routeLine, promotionLine].filter((line) => line !== null).join("\n");
 		const listLines = this.list.render(width);
 		const memo = this.renderMemo;
 		if (memo && memo.width === width && memo.status === statusKey && memo.listLines === listLines) return memo.lines;
 		const lines = [
 			statusLine,
+			...(spendLine === null ? [] : [spendLine]),
 			...(routeLine === null ? [] : [routeLine]),
 			...(promotionLine === null ? [] : [promotionLine]),
 			rule(clioTheme(), width),

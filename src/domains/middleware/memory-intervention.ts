@@ -1037,6 +1037,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 								{
 									bankOperations: promptedResult.bankOperations,
 									droppedOperations: promptedResult.droppedOperations,
+									...(promptedResult.usage === null ? {} : { missingTokenCalls: promptedResult.usage.missingTokenCalls ?? 0 }),
 									...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
 								},
 								attemptRoute,
@@ -1095,6 +1096,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			{
 				bankOperations: promptedResult.bankOperations,
 				droppedOperations: promptedResult.droppedOperations,
+				...(promptedResult.usage === null ? {} : { missingTokenCalls: promptedResult.usage.missingTokenCalls ?? 0 }),
 				...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
 				...(promptedResult.resumeAt === undefined ? {} : { resumeAt: promptedResult.resumeAt }),
 			},
@@ -1126,7 +1128,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		inputTokens: number,
 		outputTokens: number,
 		started: bigint,
-		operations: { bankOperations: number; droppedOperations: number; refusalReason?: string; resumeAt?: string } = {
+		operations: {
+			bankOperations: number;
+			droppedOperations: number;
+			refusalReason?: string;
+			resumeAt?: string;
+			missingTokenCalls?: number;
+		} = {
 			bankOperations: 0,
 			droppedOperations: 0,
 		},
@@ -1149,6 +1157,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				citedEntries,
 				inputTokens,
 				outputTokens,
+				...(operations.missingTokenCalls === undefined ? {} : { missingTokenCalls: operations.missingTokenCalls }),
 				latencyMs,
 				...(route === undefined ? {} : { route }),
 				...(operations.resumeAt === undefined ? {} : { resumeAt: operations.resumeAt }),

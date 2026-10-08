@@ -59,7 +59,7 @@ export interface TaskMemoryOperatorStatus {
 	/** Newest budget skip among the recent steps, or null when none of them was skipped. */
 	lastSkip?: TaskMemoryBudgetSkip | null;
 	/**
-	 * Lifetime llm-tier spend and hit rate folded from the telemetry ledger. Null
+	 * Retained llm-tier spend and hit rate folded from available telemetry. Null
 	 * on a surface that does not read the ledger, which is every surface that
 	 * only needs the live bank.
 	 */

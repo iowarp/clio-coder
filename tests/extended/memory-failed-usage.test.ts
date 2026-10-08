@@ -17,6 +17,9 @@ import {
 import { createDispatchReservation, releaseDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryStepUsage } from "../../src/domains/memory/task-memory-policy.js";
+import { readTaskMemorySpendSummary } from "../../src/domains/memory/task-memory-spend.js";
+import { createTaskMemoryTelemetrySink } from "../../src/domains/memory/task-memory-telemetry.js";
+import { createMemoryGuardian } from "../../src/domains/middleware/memory-guardian.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { readOutOfTurnUsageRows } from "../../src/domains/observability/out-of-turn-usage.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
@@ -30,6 +33,7 @@ import {
 } from "../../src/engine/api-registry.js";
 import { createBackgroundMemoryModelClient, createBackgroundMemoryRouting } from "../../src/entry/orchestrator.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "../../src/entry/task-memory-lifecycle.js";
+import { holdEventLoop } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -157,6 +161,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 			const proposals: unknown[] = [];
 			const registration = createMemoryInterventionRegistration({
 				bank,
+				telemetry: createTaskMemoryTelemetrySink({ logDir: join(env.dir, "state", "memory") }),
 				getModelClient: () => route.client,
 				captureStepUsage: () =>
 					captureTaskMemoryUsage({
@@ -186,6 +191,11 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				const rows = readOutOfTurnUsageRows(join(env.dir, "state")).rows;
 				assert.equal(rows.length, 1);
 				assert.equal(rows[0]?.sessionId, origin.id);
+				if (!switched) {
+					const spend = readTaskMemorySpendSummary(join(env.dir, "state"));
+					assert.equal(spend.missingTokenCalls, ending === "no-usage" ? 1 : 0);
+					assert.equal(spend.unreportedUsageSteps, 0);
+				}
 				if (ending === "no-usage") {
 					assert.equal(rows[0]?.usage.totalTokens, null);
 					assert.equal(rows[0]?.usage.costProvenance, "unknown");
@@ -623,4 +633,82 @@ test("a failed fallback capacity read preserves the dedicated call's result and 
 	assert.equal(result.usage, known);
 	assert.equal(result.inputTokens, 7);
 	assert.equal(fallbackCalls, 0);
+});
+
+test("the history guardian retains an explicit missing-usage observation in its spend ledger", async (t) => {
+	const env = await isolateClioEnv("clio-coder-memory-history-usage-");
+	t.after(() => env.restore());
+	const hold = holdEventLoop();
+	t.after(() => hold.release());
+	const stateDir = join(env.dir, "state");
+	const sink = createTaskMemoryTelemetrySink({ logDir: join(stateDir, "memory") });
+	let recorded!: () => void;
+	const completed = new Promise<void>((resolve) => {
+		recorded = resolve;
+	});
+	const guardian = createMemoryGuardian({
+		enabled: () => true,
+		isForegroundActive: () => false,
+		live: { pendingWork: () => false, stepInFlight: () => false, runIdleStep: async () => "none" },
+		historySource: () => ({
+			repositoryKey: "test-repository",
+			next: () => ({
+				slice: {
+					sessionId: "earlier-session",
+					root: env.dir,
+					text: "An earlier test command failed.",
+					succeededCommands: new Set(),
+					observedReads: new Map(),
+					advance: { key: "earlier-session", cursor: { offset: 0, size: 0 }, seenCalls: [] },
+				},
+				exhausted: true,
+			}),
+			commit() {},
+		}),
+		client: {
+			getModelClient: () => ({
+				complete: async () => ({
+					text: "<operations>[]</operations>",
+					usage: {
+						targetId: "history-target",
+						attributedModelId: "history-model",
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						reasoning: 0,
+						totalTokens: 0,
+						missingTokenCalls: 1,
+						costUsd: 0,
+						costProvenance: "unknown",
+						durationMs: 1,
+						backend: null,
+					},
+				}),
+			}),
+			getFallbackModelClient: () => null,
+			getModelMaxTokens: (max) => max,
+			backgroundEndpointBusy: () => false,
+		},
+		settings: () => ({ maxTokens: 2_000, timeoutMs: 1_000 }),
+		workspaceRoot: () => env.dir,
+		getKeptLessons: () => [],
+		onHistoryLessons() {},
+		onStateChange() {},
+		scopeKey: () => "current-session",
+		telemetry: {
+			record(step) {
+				sink.record(step);
+				recorded();
+			},
+		},
+	});
+	t.after(() => guardian.dispose());
+	guardian.wake("ready");
+	await completed;
+	guardian.dispose();
+	const spend = readTaskMemorySpendSummary(stateDir);
+	assert.equal(spend.llmSteps, 1);
+	assert.equal(spend.missingTokenCalls, 1);
+	assert.equal(spend.unreportedUsageSteps, 0);
 });
