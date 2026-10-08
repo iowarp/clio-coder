@@ -6,17 +6,20 @@
  * This runs the same model-free, deterministic indexer as `clio-coder context
  * index` (tree-sitter wasm plus regex fallbacks; byte-identical across runs)
  * and serializes the result straight into dist/assets/. The file set is what
- * `npm pack` will ship, read off `npm pack --dry-run`, so every entry names a
- * file the installed package actually contains. It never reads or writes
+ * `npm pack` will ship, read through npm's official packlist and actual
+ * dependency tree without compressing a throwaway tarball. Every entry names a
+ * file the installed package actually contains. The API pins mirror Node 22's
+ * bundled npm and must move with it. It never reads or writes
  * `.clio-coder/`: a found, cached, or checked-in index would describe some
  * other tree, and `state.json` carries timestamps and mtimeMs fingerprints
  * that must never enter the tarball. Wired into `pnpm run build` after tsup so
  * the grammars it loads are the vendored ones.
  */
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import Arborist from "@npmcli/arborist";
+import packlist from "npm-packlist";
 import { serializeCodewiki } from "../src/domains/context/codewiki/artifact.js";
 import { buildCodewiki } from "../src/domains/context/codewiki/indexer.js";
 import { detectProjectProfile } from "../src/domains/session/workspace/project-type.js";
@@ -26,20 +29,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const target = join(root, "dist", "assets", "codemap.json");
 const startedAt = performance.now();
 
-const report = JSON.parse(
-	// pnpm exports its own npm_config_* keys to scripts, which npm warns about on
-	// every run; errors still reach the terminal.
-	execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts", "--loglevel=error"], {
-		cwd: root,
-		shell: process.platform === "win32",
-		encoding: "utf8",
-		maxBuffer: 64 * 1024 * 1024,
-		stdio: ["ignore", "pipe", "inherit"],
-	}),
-) as Array<{ files: Array<{ path: string }> }>;
-const packedReport = report[0];
-if (!packedReport) throw new Error("npm pack returned no package report");
-const packed = new Set(packedReport.files.map((file) => file.path));
+const tree = await new Arborist({ path: root }).loadActual();
+const packOptions = { path: root, prefix: root };
+const packed = new Set(await packlist(tree, packOptions));
 
 const profile = detectProjectProfile(root);
 const codewiki = await buildCodewiki(
