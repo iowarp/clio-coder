@@ -1,4 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 
 /**
  * Session-scoped optional refresh. A failed or interrupted job keeps its last complete generation.
@@ -28,8 +29,12 @@ export function createSemanticBackgroundRefresh(getSettings: () => Readonly<Clio
 			.then(async ({ refreshSemantic }) => {
 				if (!signal.aborted) await refreshSemantic({ projectRoot, settings }, signal);
 			})
-			.catch(() => {
-				// The checkpoint/status surface owns failures; source edits and turns stay usable.
+			.catch((error) => {
+				if (!signal.aborted)
+					writeDiagnostic(
+						`Semantic background refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+						"warning",
+					);
 			})
 			.finally(() => {
 				active = null;

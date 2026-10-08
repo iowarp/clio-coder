@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type { createEngineAgent } from "../engine/agent.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatTurnState } from "./turn-state.js";
@@ -169,6 +170,7 @@ export interface TurnQueues {
 export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	const { state } = deps;
 	const now = deps.now ?? (() => Date.now());
+	const queuedAt = new WeakMap<QueuedChatMessage, number>();
 	// Entries still in Clio's hands, in delivery order.
 	const queue: QueuedChatMessage[] = [];
 	// Entries handed to the engine and not yet injected. Pi polls right after
@@ -217,6 +219,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			...(paths.length > 0 ? { referencedPaths: [...paths] } : {}),
 			...(options?.origin !== undefined ? { origin: options.origin, pinned: true } : {}),
 		};
+		queuedAt.set(entry, performance.now());
 		if (options?.front === true) queue.unshift(entry);
 		else queue.push(entry);
 		emitQueueUpdate();
@@ -230,7 +233,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			// Recording never costs the queue operation it describes.
 		}
 	};
-	const waited = (entry: QueuedChatMessage): number => Math.max(0, now() - entry.enqueuedAt);
+	const waited = (entry: QueuedChatMessage): number => performance.now() - (queuedAt.get(entry) as number);
 	const removed = (entries: ReadonlyArray<QueuedChatMessage>, reason: QueueRemovalReason): void => {
 		for (const entry of entries) report({ type: "removed", entry: { ...entry }, reason, waitedMs: waited(entry) });
 	};

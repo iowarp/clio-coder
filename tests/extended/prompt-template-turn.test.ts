@@ -1,9 +1,11 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { performance } from "node:perf_hooks";
 import { test } from "node:test";
 import type { ResourcesContract } from "../../src/domains/resources/contract.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { appendOperatorAside, type CommandOutputSink } from "../../src/interactive/command-output.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/interactive-application.js";
+import type { QueueEvent } from "../../src/session-control/turn-queues.js";
 
 function sink(): { sink: CommandOutputSink; blocks: Array<(width: number) => string[]>; renders: number } {
 	const blocks: Array<(width: number) => string[]> = [];
@@ -63,12 +65,16 @@ test("the aside under an operator turn is one dim row in the prose gutter", () =
 	strictEqual(out.blocks.length, 1, "an empty note adds nothing");
 });
 
-test("streaming prompt injection and stranded resubmission retain presentation and full model text", async () => {
+test("streaming prompt injection and stranded resubmission retain presentation, text and monotonic queue age", async (t) => {
 	const { createTurnQueues } = await import("../../src/session-control/turn-queues.js");
+	let wallClock = Date.parse("2026-10-07T00:00:00Z");
+	let elapsed = 0;
+	t.mock.method(performance, "now", () => elapsed);
 	const expansion = await expandInteractiveSubmitAsync("/interview:daisy", fakeResources(), "/tmp");
 	const model: unknown[] = [];
 	const injected: Array<{ kind: string; text: string; display?: unknown }> = [];
 	const resubmitted: string[] = [];
+	const outcomes: QueueEvent[] = [];
 	const state = {
 		streaming: true,
 		pendingRequestContinuation: false,
@@ -85,26 +91,57 @@ test("streaming prompt injection and stranded resubmission retain presentation a
 		emitQueueUpdateEvent: () => {},
 		emitQueuedUserTurn: (entry) => injected.push({ kind: entry.kind, text: entry.text, display: entry.display }),
 		emitNotice: () => {},
+		now: () => wallClock,
+		onEvent: (event) => outcomes.push(event),
 		submit: async (text) => {
 			resubmitted.push(text);
 		},
 	});
 	for (const kind of ["steer", "follow-up"] as const) {
-		strictEqual(
-			(kind === "steer"
+		const entry =
+			kind === "steer"
 				? queues.steer(expansion.text, expansion.display)
-				: queues.queueFollowUp(expansion.text, expansion.display)) !== null,
-			true,
-		);
+				: queues.queueFollowUp(expansion.text, expansion.display);
+		ok(entry);
+		strictEqual(entry.enqueuedAt, wallClock);
+		wallClock += kind === "steer" ? 60_000 : -120_000;
+		elapsed += 25;
+		queues.relabel(entry.id, { producer: "triage" }, kind);
+		queues.setEntryKind(entry.id, kind);
 		// The engine receives the entry only at a slot; a final turn hands
 		// end-of-turn entries over once nothing is left to steer.
 		queues.handOverAtFinishTurn(kind === "follow-up");
-		queues.acknowledgeInjected(expansion.text);
+		const delivered = outcomes.at(-1);
+		ok(delivered?.type === "delivered");
+		strictEqual(delivered.waitedMs, 25);
+		deepStrictEqual(delivered.entry, queues.acknowledgeInjected(expansion.text));
 		deepStrictEqual(injected.at(-1), { kind, text: TEMPLATE_BODY, display: expansion.display });
 	}
 	for (const message of model) strictEqual((message as { content: string }).content, TEMPLATE_BODY);
 	queues.steer(expansion.text, expansion.display);
+	elapsed += 15;
 	strictEqual(await queues.resubmitStranded(), true);
+	const resubmittedOutcome = outcomes.at(-1);
+	ok(resubmittedOutcome?.type === "removed");
+	strictEqual(resubmittedOutcome.waitedMs, 15);
 	deepStrictEqual(injected.at(-1), { kind: "steer", text: TEMPLATE_BODY, display: expansion.display });
 	deepStrictEqual(resubmitted, [TEMPLATE_BODY]);
+	const requeued = queues.steer("requeue after cancellation");
+	ok(requeued);
+	elapsed += 10;
+	queues.handOverAtFinishTurn(false);
+	queues.onRunCancelled({ hold: true });
+	wallClock -= 60_000;
+	elapsed += 20;
+	queues.removeEntry(requeued.id);
+	const removed = outcomes.at(-1);
+	ok(removed?.type === "removed");
+	strictEqual(removed.waitedMs, 30);
+	queues.queueFollowUp("machine prompt", undefined, { origin: "peer" });
+	elapsed += 5;
+	queues.reset();
+	const reset = outcomes.at(-1);
+	ok(reset?.type === "removed");
+	strictEqual(reset.waitedMs, 5);
+	deepStrictEqual(queues.entries(), []);
 });

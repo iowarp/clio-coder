@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { installDiagnosticSink } from "../../src/core/diagnostics.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { SemanticHit, SemanticRecord, SemanticSearchResult } from "../../src/domains/semantic/index.js";
 import { SemanticIndex, sourceHash } from "../../src/domains/semantic/index.js";
+import { createSemanticBackgroundRefresh } from "../../src/domains/semantic-app/background.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import type { ContextSemanticRequest } from "../../src/tools/context/index.js";
 import { createContextTool } from "../../src/tools/context/index.js";
@@ -41,6 +43,66 @@ function hit(id: string): SemanticHit {
 		mediaType: "text/plain",
 	};
 }
+
+test("background failures before checkpoint report diagnostics, coalesce work and retain the generation", {
+	timeout: 5000,
+}, async (t) => {
+	const { openSemanticApp, statusSemantic } = await import("../../src/domains/semantic-app/index.js");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [{ id: "embedding", runtime: "litellm", url: "http://fixture.invalid" }];
+	Object.assign(settings.context.semantic, {
+		enabled: true,
+		background: true,
+		target: "embedding",
+		model: "gemma",
+		assetIdentity: "fixture",
+	});
+	t.mock.method(globalThis, "fetch", () => {
+		throw new Error("background regression must not call a provider");
+	});
+	const options = { projectRoot: isolated.dir, settings, offline: true };
+	const app = await openSemanticApp(options);
+	await app.index.refresh([]);
+	const before = await statusSemantic(options);
+	const unavailable = { ...settings, targets: [] };
+	const background = createSemanticBackgroundRefresh(() => unavailable);
+	t.after(() => background.stop());
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const diagnostics: Array<{ text: string; level: string }> = [];
+	let reported!: () => void;
+	const reporting = new Promise<void>((resolve) => {
+		reported = resolve;
+	});
+	const missingRoot = join(isolated.dir, "missing-project");
+	const uninstall = installDiagnosticSink((text, level) => {
+		diagnostics.push({ text, level });
+		if (diagnostics.length === 1) {
+			background.schedule(isolated.dir);
+			background.schedule(missingRoot);
+		} else reported();
+	});
+	t.after(uninstall);
+	background.schedule(isolated.dir);
+	t.mock.timers.tick(750);
+	await reporting;
+	await background.stop();
+	assert.equal(diagnostics.length, 2);
+	assert.match(
+		diagnostics[0]?.text ?? "",
+		/Semantic background refresh failed: Semantic target embedding is not configured/,
+	);
+	assert.match(diagnostics[1]?.text ?? "", /ENOENT/);
+	assert((diagnostics[1]?.text ?? "").includes(missingRoot));
+	assert(diagnostics.every(({ level }) => level === "warning"));
+	assert.deepEqual(await statusSemantic(options), before);
+	const cancelled = createSemanticBackgroundRefresh(() => unavailable);
+	cancelled.schedule(isolated.dir);
+	t.mock.timers.tick(750);
+	await cancelled.stop();
+	cancelled.schedule(missingRoot);
+	t.mock.timers.tick(750);
+	assert.equal(diagnostics.length, 2, "shutdown cancellation and post-stop edits stay quiet");
+});
 
 test("disabled and unbound semantic mode is inert, including core-bootstrap's settings gate", async () => {
 	let loads = 0;
