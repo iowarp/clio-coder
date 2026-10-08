@@ -1297,6 +1297,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	 */
 	const adoptExistingConversation = (): void => {
 		presentation.resetForNewSession();
+		exitSummary.reset();
 		presentation.collapseWelcomeDashboard();
 		resetTranscript();
 	};
