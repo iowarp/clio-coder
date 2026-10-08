@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { ActionClass } from "../safety/action-classifier.js";
@@ -274,6 +275,7 @@ export function createCapacityAdmissionController(options: {
 			});
 			if (foregroundBlock !== null) throw new Error(foregroundBlock);
 			const queuedAt = now();
+			const startedAt = performance.now();
 			const requestId = `admit-${queuedAt.toString(36)}-${randomBytes(5).toString("hex")}`;
 			pending.set(input.assignmentId, requestId);
 			try {
@@ -311,7 +313,7 @@ export function createCapacityAdmissionController(options: {
 						state: outcome.state,
 						nodeId: input.nodeId,
 						...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
-						waitedMs: now() - queuedAt,
+						waitedMs: performance.now() - startedAt,
 						overdueAtQueueMs: input.deadlineAt === undefined ? 0 : queuedAt - input.deadlineAt,
 						queueDepth: queue.size(),
 						limits: options.limits(),

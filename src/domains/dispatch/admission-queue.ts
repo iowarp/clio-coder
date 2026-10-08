@@ -1,4 +1,4 @@
-import { rawDurationMs } from "../../core/timers.js";
+import { performance } from "node:perf_hooks";
 
 export interface AdmissionQueueRequest<T> {
 	requestId: string;
@@ -63,6 +63,7 @@ export function createAdmissionQueue<T>(options: {
 		string,
 		{
 			request: AdmissionQueueRequest<T>;
+			startedAt: number;
 			resolve: (outcome: AdmissionQueueOutcome<T>) => void;
 			reject: (error: Error) => void;
 			timer: ReturnType<typeof setTimeout> | undefined;
@@ -99,7 +100,7 @@ export function createAdmissionQueue<T>(options: {
 					effectiveDeadline === undefined
 						? undefined
 						: setTimeout(expire, Math.min(2_147_483_647, Math.max(0, effectiveDeadline - now())));
-				entries.set(request.requestId, { request: bounded, resolve, reject, timer });
+				entries.set(request.requestId, { request: bounded, startedAt: performance.now(), resolve, reject, timer });
 			});
 		},
 		cancel(requestId) {
@@ -139,7 +140,7 @@ export function createAdmissionQueue<T>(options: {
 					state: "admitted",
 					request,
 					admittedAt: nowMs,
-					queueWaitMs: Math.max(0, rawDurationMs(request.queuedAt, nowMs)),
+					queueWaitMs: performance.now() - entry.startedAt,
 				});
 				return request;
 			}

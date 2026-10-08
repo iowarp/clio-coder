@@ -30,11 +30,11 @@ export function createSemanticBackgroundRefresh(getSettings: () => Readonly<Clio
 				if (!signal.aborted) await refreshSemantic({ projectRoot, settings }, signal);
 			})
 			.catch((error) => {
-				if (!signal.aborted)
-					writeDiagnostic(
-						`Semantic background refresh failed: ${error instanceof Error ? error.message : String(error)}`,
-						"warning",
-					);
+				if (signal.aborted && (error === signal.reason || (error instanceof Error && error.name === "AbortError"))) return;
+				writeDiagnostic(
+					`Semantic background refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+					"warning",
+				);
 			})
 			.finally(() => {
 				active = null;

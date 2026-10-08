@@ -102,6 +102,23 @@ test("background failures before checkpoint report diagnostics, coalesce work an
 	cancelled.schedule(missingRoot);
 	t.mock.timers.tick(750);
 	assert.equal(diagnostics.length, 2, "shutdown cancellation and post-stop edits stay quiet");
+	const racing = createSemanticBackgroundRefresh(() => unavailable);
+	let stopped!: Promise<void>;
+	const routeReached = new Promise<void>((resolve) => {
+		unavailable.targets.find = () => {
+			queueMicrotask(() => {
+				stopped = racing.stop();
+				resolve();
+			});
+			return undefined;
+		};
+	});
+	racing.schedule(isolated.dir);
+	t.mock.timers.tick(750);
+	await routeReached;
+	await stopped;
+	assert.equal(diagnostics.length, 3, "shutdown after a route failure cannot hide that failure");
+	assert.match(diagnostics[2]?.text ?? "", /Semantic target embedding is not configured/);
 });
 
 test("disabled and unbound semantic mode is inert, including core-bootstrap's settings gate", async () => {

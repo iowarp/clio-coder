@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:a
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -13,11 +14,8 @@ import {
 	foregroundEndpointBlock,
 } from "../../src/domains/dispatch/admission.js";
 import { AdmissionTimedOutError } from "../../src/domains/dispatch/admission-error.js";
-import {
-	type AdmissionQueueRequest,
-	createAdmissionQueue,
-	orderAdmissionRequests,
-} from "../../src/domains/dispatch/admission-queue.js";
+import type { AdmissionQueueRequest } from "../../src/domains/dispatch/admission-queue.js";
+import { createAdmissionQueue, orderAdmissionRequests } from "../../src/domains/dispatch/admission-queue.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
 import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
@@ -369,6 +367,38 @@ describe("dispatch admission boundary", () => {
 		await rejects(queue.enqueue(queued("second")), /queue full/u);
 		queue.cancel("first");
 		strictEqual((await first).state, "canceled");
+	});
+
+	it("keeps queue spans monotonic while admission timestamps and deadlines remain epoch", async (t) => {
+		let wallClock = Date.now();
+		let elapsed = 0;
+		t.mock.method(performance, "now", () => elapsed);
+		const queue = createAdmissionQueue<string>({ maxSize: 1, now: () => wallClock });
+		for (const jump of [-60_000, 120_000]) {
+			const request = { ...queued("first"), queuedAt: wallClock, deadlineAt: wallClock + 300_000 };
+			const pending = queue.enqueue(request);
+			wallClock += jump;
+			elapsed += 25;
+			strictEqual(queue.admitNext()?.requestId, request.requestId);
+			const admitted = await pending;
+			ok(admitted.state === "admitted");
+			strictEqual(admitted.queueWaitMs, 25);
+			strictEqual(admitted.admittedAt, wallClock);
+			deepStrictEqual(admitted.request, request);
+		}
+		const canceled = queue.enqueue({ ...queued("first"), queuedAt: wallClock, deadlineAt: wallClock + 1000 });
+		elapsed += 10;
+		queue.cancel("first");
+		strictEqual((await canceled).state, "canceled");
+		const retry = queue.enqueue({ ...queued("first"), queuedAt: wallClock, deadlineAt: wallClock + 1000 });
+		elapsed += 5;
+		queue.admitNext();
+		const admitted = await retry;
+		ok(admitted.state === "admitted");
+		strictEqual(admitted.queueWaitMs, 5);
+		const expired = queue.enqueue({ ...queued("expired"), queuedAt: wallClock, deadlineAt: wallClock - 1 });
+		strictEqual(queue.admitNext(), null);
+		strictEqual((await expired).state, "timed_out");
 	});
 
 	it("uses operator capacity, then discovered capacity, then the conservative local default", () => {
@@ -928,21 +958,42 @@ describe("dispatch admission boundary", () => {
 		}
 	});
 
-	it("ends a wait at its caller deadline with a typed timeout, including a deadline already passed", async () => {
+	it("ends a wait at its epoch deadline and reports monotonic elapsed time across wall-clock jumps", async (t) => {
+		let wallClock = Date.now();
+		let elapsed = 0;
+		t.mock.method(performance, "now", () => elapsed);
+		t.mock.timers.enable({ apis: ["setTimeout"] });
 		const controller = createCapacityAdmissionController({
 			limits: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
+			now: () => wallClock,
 		});
 		try {
-			await controller.admit({ assignmentId: "holder", nodeId: "local" });
-			for (const [assignmentId, deadlineAt] of [
-				["late", Date.now() + 20],
-				["overdue", Date.now() - 1_000],
-			] as const) {
-				await rejects(
-					controller.admit({ assignmentId, nodeId: "local", deadlineAt }),
-					(error: unknown) => error instanceof AdmissionTimedOutError && error.code === "admission_timed_out",
-				);
+			const holder = await controller.admit({ assignmentId: "holder", nodeId: "local" });
+			strictEqual(holder.queuedAt, wallClock);
+			strictEqual(holder.admittedAt, wallClock);
+			for (const jump of [-60_000, 120_000]) {
+				const deadlineAt = wallClock + 1000;
+				const pending = controller.admit({ assignmentId: "late", nodeId: "local", deadlineAt });
+				const rejected = rejects(pending, (error: unknown) => {
+					ok(error instanceof AdmissionTimedOutError);
+					strictEqual(error.code, "admission_timed_out");
+					match(error.message, /after 75ms waiting for a worker slot/u);
+					return true;
+				});
+				wallClock += jump;
+				elapsed += 25;
+				if (jump < 0) {
+					t.mock.timers.tick(20);
+					wallClock = deadlineAt;
+				}
+				elapsed += 50;
+				t.mock.timers.tick(1000);
+				await rejected;
 			}
+			await rejects(
+				controller.admit({ assignmentId: "overdue", nodeId: "local", deadlineAt: wallClock - 1000 }),
+				(error: unknown) => error instanceof AdmissionTimedOutError && error.code === "admission_timed_out",
+			);
 		} finally {
 			controller.stop();
 		}
