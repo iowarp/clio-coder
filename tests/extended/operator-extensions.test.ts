@@ -6,7 +6,11 @@ import path from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { PackageActivity } from "../../src/core/package-activity.js";
-import { bindPackageActivitySink, flushPackageActivities } from "../../src/core/package-activity.js";
+import {
+	bindPackageActivitySink,
+	flushPackageActivities,
+	recordPackageActivity,
+} from "../../src/core/package-activity.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
@@ -109,6 +113,47 @@ test("runtime activity retains admitted extension identity", async (t) => {
 		reader.close();
 	}
 });
+test("bounded package activity carries dropped counts until delivery is acknowledged", (t) => {
+	const owner = { kind: "extension", id: "capture-probe", version: "1.0.0", digest: "capture-probe" };
+	const captured: PackageActivity[] = [];
+	let ready = false;
+	let failing = false;
+	let unbind = bindPackageActivitySink((row) => {
+		if (!ready) return false;
+		if (failing) throw new Error("sink unavailable");
+		captured.push(row);
+		return true;
+	});
+	t.after(() => unbind());
+	for (let index = 0; index < 250; index += 1) recordPackageActivity({ owner, kind: "startup", details: { index } });
+	equal(captured.length, 0);
+	ready = true;
+	failing = true;
+	flushPackageActivities();
+	equal(captured.length, 0);
+	failing = false;
+	flushPackageActivities();
+	equal(captured.length, 200);
+	equal(captured[0]?.details?.index, 50);
+	equal(captured[0]?.captureDroppedBefore, 50);
+	equal(
+		captured.slice(1).some((row) => row.captureDroppedBefore !== undefined),
+		false,
+	);
+	flushPackageActivities();
+	equal(captured.length, 200);
+	ready = false;
+	for (let index = 0; index < 3; index += 1) recordPackageActivity({ owner, kind: "unacknowledged" });
+	unbind();
+	unbind = bindPackageActivitySink((row) => {
+		captured.push(row);
+		return true;
+	});
+	recordPackageActivity({ owner, kind: "after-rebind" });
+	equal(captured.length, 201);
+	equal(captured.at(-1)?.captureDroppedBefore, 3);
+});
+
 const normal =
 	'export default api => { let n=0; api.handle("inspect", (args,ctx) => ({text:JSON.stringify({args,n:++n,snapshot:ctx.snapshot,secret:process.env.CLIO_CODER_TEST_SECRET??null}),status:{text:"SYNTHETIC fixture ready"}})); };';
 /** Install into the project and approve it as `config trust extensions` would, returning the entry as it now lists. */
