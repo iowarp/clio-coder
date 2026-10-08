@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
+import type { CompactionPayload } from "../../src/core/bus-events.js";
 import { BusChannels, type ContextActivityPayload, type ContextPrunedPayload } from "../../src/core/bus-events.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../../src/core/context-operation.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -282,7 +283,13 @@ describe("production compaction controls", () => {
 		f.settings.chat.prewarm = false;
 		f.providers.getDetectedReasoning = () => false;
 		const notices: string[] = [];
+		const bus = createSafeEventBus();
+		const compactionEnds: CompactionPayload[] = [];
+		let compactionBegins = 0;
+		bus.on(BusChannels.CompactionBegin, () => compactionBegins++);
+		bus.on(BusChannels.CompactionEnd, (event) => compactionEnds.push(event));
 		const loop = createChatLoop({
+			bus,
 			getSettings: () => f.settings,
 			providers: f.providers,
 			knownTargets: () => new Set(["chat-target", "summary-target"]),
@@ -303,6 +310,11 @@ describe("production compaction controls", () => {
 			await loop.compact();
 			strictEqual(notices.filter((notice) => notice === message).length, 2);
 			strictEqual(f.calls.length, 3, "forced no-gain attempts are not memoized");
+			strictEqual(compactionBegins, 2);
+			deepStrictEqual(
+				compactionEnds.map((event) => event.outcome),
+				["unchanged", "unchanged"],
+			);
 			deepStrictEqual(
 				f.entries().filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
 				before,
@@ -374,6 +386,13 @@ describe("production compaction controls", () => {
 			const notices: string[] = [];
 			const bus = createSafeEventBus();
 			const activity: ContextActivityPayload[] = [];
+			const compactionEnds: CompactionPayload[] = [];
+			let compactionBegins = 0;
+			bus.on(BusChannels.CompactionBegin, (event) => {
+				compactionBegins++;
+				strictEqual(event.outcome, undefined);
+			});
+			bus.on(BusChannels.CompactionEnd, (event) => compactionEnds.push(event));
 			bus.on(BusChannels.ContextActivity, (event) => {
 				activity.push(event);
 			});
@@ -478,6 +497,11 @@ describe("production compaction controls", () => {
 				else if (mode === "manual" || mode === "reset" || mode === "dispose") await loop.compact();
 				else await loop.submit("Keep the numerical tolerances unchanged.");
 				strictEqual(cancellationObserved, true, notices.join("\n"));
+				strictEqual(compactionBegins, 1);
+				deepStrictEqual(
+					compactionEnds.map((event) => event.outcome),
+					["cancelled"],
+				);
 				strictEqual(f.calls.length, 1, notices.join("\n"));
 				deepStrictEqual(submitted, []);
 				// A submit canceled before admission records one typed `turnOutcome` row for
@@ -743,7 +767,13 @@ describe("production compaction controls", () => {
 		let attempts = 0;
 		let failing = true;
 		const notices: string[] = [];
+		const bus = createSafeEventBus();
+		const compactionEnds: CompactionPayload[] = [];
+		let compactionBegins = 0;
+		bus.on(BusChannels.CompactionBegin, () => compactionBegins++);
+		bus.on(BusChannels.CompactionEnd, (event) => compactionEnds.push(event));
 		const context = createTurnContext({
+			bus,
 			state,
 			session: f.session,
 			getSettings: () => f.settings,
@@ -769,6 +799,9 @@ describe("production compaction controls", () => {
 		for (let i = 1; i <= 3; i++) {
 			await rejects(context.runAutoCompact(runtime, false), /summary route unavailable/);
 			strictEqual(attempts, i);
+			strictEqual(compactionBegins, i);
+			strictEqual(compactionEnds.length, i);
+			strictEqual(compactionEnds.at(-1)?.outcome, "failed");
 		}
 		strictEqual(notices.filter((notice) => notice === paused).length, 1);
 		strictEqual(await context.runAutoCompact(runtime, false), false);
@@ -776,6 +809,7 @@ describe("production compaction controls", () => {
 		failing = false;
 		strictEqual(await context.runAutoCompact(runtime, true), true, "/compact still runs while paused");
 		strictEqual(attempts, 4);
+		strictEqual(compactionEnds.at(-1)?.outcome, "completed");
 		await context.runAutoCompact(runtime, false);
 		strictEqual(attempts, 5, "a successful compaction lifts the pause");
 	});

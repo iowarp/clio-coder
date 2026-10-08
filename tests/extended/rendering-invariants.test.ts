@@ -428,6 +428,32 @@ describe("Clio rendering invariants", () => {
 });
 
 describe("worker rendering invariants", () => {
+	it("keeps identified concurrent calls pending after unmatched or duplicate finishes", () => {
+		const progress = createWorkerProgressFold();
+		for (const toolCallId of ["first", "second"]) {
+			progress.observe({
+				type: "clio_coder_tool_start",
+				payload: { tool: "read", toolCallId, action: { verb: "reading", object: `${toolCallId}.ts` } },
+			});
+		}
+		progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "unknown" } });
+		strictEqual(progress.snapshot().currentAction?.toolCallId, "second");
+		strictEqual(progress.snapshot().phase, "tool");
+		for (let index = 0; index < 2; index += 1) {
+			progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "first" } });
+			strictEqual(progress.snapshot().currentAction?.toolCallId, "second");
+			strictEqual(progress.snapshot().phase, "tool");
+		}
+		progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "second" } });
+		strictEqual(progress.snapshot().currentAction, null);
+		strictEqual(progress.snapshot().phase, "waiting");
+
+		progress.observe({ type: "clio_coder_tool_start", payload: { tool: "read" } });
+		progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "legacy" } });
+		strictEqual(progress.snapshot().currentAction, null);
+		strictEqual(progress.snapshot().phase, "waiting");
+	});
+
 	it("discards worker reasoning content", () => {
 		const progress = createWorkerProgressFold();
 		strictEqual(

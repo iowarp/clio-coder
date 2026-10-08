@@ -9,7 +9,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { subscribeExtensionObservations } from "../../src/domains/extensions/bus-observations.js";
+import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
 import {
 	appendOutOfTurnUsageRow,
@@ -65,13 +68,29 @@ describe("trace mirror tool rows", () => {
 		type: "clio_coder_tool_start",
 		payload: { tool, toolCallId, posture: "operating", startedAt: 0 },
 	});
-	const clioFinish = (toolCallId: string, tool: string, durationMs: number, outcome = "ok") => ({
+	const clioFinish = (toolCallId: string, tool: string, durationMs: number, outcome = "ok", reason?: string) => ({
 		type: "clio_coder_tool_finish",
-		payload: { tool, toolCallId, posture: "operating", durationMs, outcome },
+		payload: { tool, toolCallId, posture: "operating", durationMs, outcome, ...(reason === undefined ? {} : { reason }) },
+	});
+
+	it("persists an unfinished tool as an open span without a fabricated outcome", async () => {
+		const rows = await toolRows("run-interrupted", [
+			{ type: "tool_execution_start", toolCallId: "open", toolName: "read", args: { path: "src/a.ts" } },
+			clioStart("open", "read"),
+		]);
+		equal(rows.length, 1);
+		equal(rows[0]?.startedAt, at(1));
+		equal(rows[0]?.endedAt, null);
+		deepStrictEqual(rows[0]?.payload.args, { path: "src/a.ts" });
+		equal(rows[0]?.payload.outcome, undefined);
+		equal(rows[0]?.payload.ok, undefined);
 	});
 
 	it("gives a claude-sdk worker, which emits only the Clio frames, a row with its duration", async () => {
-		const rows = await toolRows("run-claude", [clioStart("c1", "bash"), clioFinish("c1", "bash", 5, "blocked")]);
+		const rows = await toolRows("run-claude", [
+			clioStart("c1", "bash"),
+			clioFinish("c1", "bash", 5, "blocked", "execute permission denied"),
+		]);
 		equal(rows.length, 1);
 		const row = rows[0];
 		ok(row);
@@ -79,6 +98,8 @@ describe("trace mirror tool rows", () => {
 		equal(row.payload.tool_call_id, "c1");
 		equal(row.payload.duration_ms, 5);
 		equal(row.payload.ok, false);
+		equal(row.payload.outcome, "blocked");
+		equal(row.payload.block_reason, "execute permission denied");
 		equal(row.startedAt, at(1));
 		equal(row.endedAt, new Date(Date.parse(at(1)) + 5).toISOString());
 	});
@@ -89,6 +110,7 @@ describe("trace mirror tool rows", () => {
 			clioStart("n1", "read"),
 			clioFinish("n1", "read", 40),
 			{ type: "tool_execution_end", toolCallId: "n1", toolName: "read", result: "file text", isError: false },
+			{ type: "tool_execution_start", toolCallId: "n1", toolName: "read", args: { path: "late.ts" } },
 		]);
 		equal(rows.length, 1);
 		const row = rows[0];
@@ -97,8 +119,35 @@ describe("trace mirror tool rows", () => {
 		equal(row.payload.result_snippet, "file text");
 		equal(row.payload.duration_ms, 40);
 		equal(row.payload.ok, true);
+		equal(row.payload.outcome, "ok");
+		equal(row.payload.block_reason, null);
 		equal(row.startedAt, at(1));
 		equal(row.endedAt, new Date(Date.parse(at(1)) + 40).toISOString());
+	});
+
+	it("retains a native worker's blocked verdict across both finish orders", async () => {
+		const engineFinish = {
+			type: "tool_execution_end",
+			toolCallId: "blocked-call",
+			toolName: "bash",
+			result: "permission denied",
+			isError: true,
+		};
+		const clio = clioFinish("blocked-call", "bash", 3, "blocked", "execute permission denied");
+		for (const [index, finishes] of [
+			[clio, engineFinish],
+			[engineFinish, clio],
+		].entries()) {
+			const rows = await toolRows(`run-blocked-${index}`, [
+				{ type: "tool_execution_start", toolCallId: "blocked-call", toolName: "bash", args: { command: "pwd" } },
+				clioStart("blocked-call", "bash"),
+				...finishes,
+			]);
+			equal(rows.length, 1);
+			equal(rows[0]?.payload.outcome, "blocked");
+			equal(rows[0]?.payload.block_reason, "execute permission denied");
+			equal(rows[0]?.payload.ok, false);
+		}
 	});
 
 	it("keeps an ACP worker's engine-frame row and adds the Clio frame's duration", async () => {
@@ -117,6 +166,21 @@ describe("trace mirror tool rows", () => {
 		equal(row.payload.duration_ms, 25);
 		equal(row.startedAt, at(1));
 		equal(row.endedAt, new Date(Date.parse(at(1)) + 25).toISOString());
+	});
+});
+
+describe("compaction observations", () => {
+	it("maps known terminal failures and cancellation without inventing success", () => {
+		const bus = createSafeEventBus();
+		const observations: ExtensionObservationV2[] = [];
+		const unsubscribe = subscribeExtensionObservations(bus, (observation) => observations.push(observation));
+		for (const outcome of ["completed", "unchanged", "failed", "cancelled"] as const)
+			bus.emit(BusChannels.CompactionEnd, { trigger: "force", at: 0, outcome });
+		deepStrictEqual(
+			observations.map((observation) => (observation.event === "compaction_end" ? observation.outcome : null)),
+			["ok", "ok", "failed", "failed"],
+		);
+		unsubscribe();
 	});
 });
 

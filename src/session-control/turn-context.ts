@@ -1155,6 +1155,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	let compactionOperation: ReturnType<typeof createContextOperation> | null = null;
+	let compactionLifecycleStarted = false;
+	let compactionLifecycleTrigger: CompactionTrigger = "auto";
 	let compactionFacts: ContextOperationFact[] = [];
 	let compactionTokens: { before: number; after: number; basis: "runtime-estimate" } | undefined;
 	let compactionConclusion = "Context compaction finished";
@@ -1168,6 +1170,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				? compactionActivityPhase
 				: "compact",
 	): void => {
+		if (status === "started" && !compactionLifecycleStarted) {
+			compactionLifecycleStarted = true;
+			deps.bus?.emit(BusChannels.CompactionBegin, { trigger: compactionLifecycleTrigger, at: Date.now() });
+		}
 		compactionActivityPhase = phase;
 		if (status === "completed" || status === "failed") {
 			compactionConclusion = message;
@@ -1304,6 +1310,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
+		compactionLifecycleTrigger = trigger;
 		const operationCwd = process.cwd();
 		compactionFacts = [];
 		compactionTokens = undefined;
@@ -1359,22 +1366,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						masked = maskStaleObservations(deps.readSessionEntries() ?? [], 6);
 					} catch (error) {
 						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
-						deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 						emitCompactionActivity("started", "compacting context (mask stage)");
 						emitCompactionActivity("failed", compactionFailureMessage(error));
-						deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 						throw error;
 					}
 					if (masked.changed) {
 						preSummaryStageActed = true;
 						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
-						deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 						emitCompactionActivity("started", "compacting context (mask stage)");
 						deps.session.replaceEntries(masked.entries);
 						refreshAgentMessagesFromSession(agentRuntime);
 						// The masked history is not the one the provider counted.
 						reconciledAnchor = null;
-						deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
 						const postMaskSnapshot = captureRuntimeContextSnapshot(
 							agentRuntime,
@@ -1584,7 +1587,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		let summaryLifecycleStarted = false;
 		const startSummaryLifecycle = (): void => {
 			middleware.fireCompactionHook("llm_summary", trigger);
-			deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 			emitCompactionActivity("started", "summarizing session history", "summarize");
 			summaryLifecycleStarted = true;
 		};
@@ -1680,7 +1682,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		} catch (error) {
 			if (!summaryLifecycleStarted) startSummaryLifecycle();
 			emitCompactionActivity("failed", compactionFailureMessage(error));
-			deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 			summarySignal?.throwIfAborted();
 			if (!force && ++autoCompactFailures === AUTO_COMPACT_FAILURE_LIMIT)
 				deps.emitNotice(
@@ -1700,7 +1701,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
 			deps.emitNotice(message);
 			if (summaryLifecycleStarted) {
-				deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 				emitCompactionActivity("completed", message);
 			}
 			rememberEmptyAutomaticAttempt();
@@ -1708,7 +1708,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 		if (!result || result.summary.length === 0) {
 			if (summaryLifecycleStarted) {
-				deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 				emitCompactionActivity("completed", "nothing to compact");
 			} else {
 				rememberEmptyAutomaticAttempt();
@@ -1717,7 +1716,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 		if (!summaryLifecycleStarted) startSummaryLifecycle();
 		emitCompactionActivity("running", "saving checkpoint and rebuilding context", "state");
-		deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 
 		// The checkpoint identifies the selected summary route; older results
 		// fall back to the active chat route. The ledger carries usage for reseed; this is the
@@ -1797,28 +1795,30 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const operation = performAutoCompact(...operationArgs)
 			.then(
 				(changed) => {
-					compactionOperation?.finish(
-						changed || compactionFacts.length > 0 ? "completed" : "unchanged",
-						compactionConclusion,
-						{
-							facts: compactionFacts,
-							...(compactionTokens ? { tokens: compactionTokens } : {}),
-						},
-					);
+					const outcome = changed || compactionFacts.length > 0 ? "completed" : "unchanged";
+					compactionOperation?.finish(outcome, compactionConclusion, {
+						facts: compactionFacts,
+						...(compactionTokens ? { tokens: compactionTokens } : {}),
+					});
+					if (compactionLifecycleStarted)
+						deps.bus?.emit(BusChannels.CompactionEnd, { trigger: compactionLifecycleTrigger, at: Date.now(), outcome });
 					return changed;
 				},
 				(error: unknown) => {
-					compactionOperation?.finish(
-						error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed",
-						compactionFailureMessage(error),
-						{ facts: compactionFacts, ...(compactionTokens ? { tokens: compactionTokens } : {}) },
-					);
-					deps.bus?.emit(BusChannels.CompactionEnd, { trigger: args[3] ?? (args[1] ? "force" : "auto"), at: Date.now() });
+					const outcome =
+						operationArgs[6]?.aborted || (error instanceof Error && error.name === "AbortError") ? "cancelled" : "failed";
+					compactionOperation?.finish(outcome, compactionFailureMessage(error), {
+						facts: compactionFacts,
+						...(compactionTokens ? { tokens: compactionTokens } : {}),
+					});
+					if (compactionLifecycleStarted)
+						deps.bus?.emit(BusChannels.CompactionEnd, { trigger: compactionLifecycleTrigger, at: Date.now(), outcome });
 					throw error;
 				},
 			)
 			.finally(() => {
 				compactionOperation = null;
+				compactionLifecycleStarted = false;
 				if (compactionController === controller) compactionController = null;
 			});
 		reductionInFlight = operation;

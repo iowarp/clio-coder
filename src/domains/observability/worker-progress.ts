@@ -337,10 +337,11 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		}
 	};
 
-	const lastPendingActionForTool = (tool: string): WorkerAction | undefined => {
+	const lastCompatiblePendingAction = (action: WorkerAction): WorkerAction | undefined => {
 		for (let index = pendingActions.length - 1; index >= 0; index -= 1) {
 			const candidate = pendingActions[index];
-			if (candidate?.tool === tool) return candidate;
+			if (candidate?.tool === action.tool && (action.toolCallId === undefined || candidate.toolCallId === undefined))
+				return candidate;
 		}
 		return undefined;
 	};
@@ -436,7 +437,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				// from an older or incomplete producer, retain the historical name match.
 				const finished =
 					(action.toolCallId !== undefined ? pendingActionsById.get(action.toolCallId) : undefined) ??
-					lastPendingActionForTool(action.tool) ??
+					lastCompatiblePendingAction(action) ??
 					action;
 				removePendingAction(finished);
 				currentAction = pendingActions[pendingActions.length - 1] ?? null;

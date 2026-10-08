@@ -790,7 +790,8 @@ export class TraceStore {
         (event_id, run_id, phase_id, parent_id, type, name, payload_json, tokens, started_at, ended_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(event_id) DO UPDATE SET name=excluded.name, payload_json=excluded.payload_json,
-          tokens=excluded.tokens, started_at=excluded.started_at, ended_at=excluded.ended_at`)
+          tokens=excluded.tokens, started_at=excluded.started_at, ended_at=excluded.ended_at
+        WHERE excluded.ended_at IS NOT NULL OR events.ended_at IS NULL`)
 			.run(
 				input.eventId,
 				input.runId,
@@ -1419,6 +1420,8 @@ interface ToolStart {
 	durationMs: number | null;
 	result: unknown;
 	ok: boolean;
+	outcome: "ok" | "error" | "blocked" | null;
+	blockReason: string | null;
 }
 
 export function createDispatchTraceMirror(
@@ -1581,33 +1584,61 @@ function recordProgress(
 		const engine = type === "tool_execution_start";
 		const named = stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool);
 		const known = starts.get(key);
-		if (known === undefined) {
-			starts.set(key, {
-				toolCallId,
-				tool: named ?? "tool",
-				args: engine ? (toolFacts.args ?? null) : null,
-				startedAt: at,
-				engineStarted: engine,
-				clioStarted: !engine,
-				engineFinished: false,
-				clioFinished: false,
-				durationMs: null,
-				result: undefined,
-				ok: true,
-			});
-		} else if (engine) {
+		const start: ToolStart = known ?? {
+			toolCallId,
+			tool: named ?? "tool",
+			args: engine ? (toolFacts.args ?? null) : null,
+			startedAt: at,
+			engineStarted: engine,
+			clioStarted: !engine,
+			engineFinished: false,
+			clioFinished: false,
+			durationMs: null,
+			result: undefined,
+			ok: true,
+			outcome: null,
+			blockReason: null,
+		};
+		if (known === undefined) starts.set(key, start);
+		else if (engine) {
 			// The engine frame names the call the way rows always have and is the
 			// only one that carries args, so it refines a Clio-announced start.
 			known.engineStarted = true;
 			if (named !== null) known.tool = named;
 			if (toolFacts.args !== undefined) known.args = toolFacts.args;
-		} else known.clioStarted = true;
+		} else {
+			known.clioStarted = true;
+			return;
+		}
+		const shown = displayToolCall(start.tool, start.args);
+		const args = shown.viaGateway ? (shown.args ?? {}) : start.args;
+		store.insertEvent({
+			eventId: `${payload.runId}:tool:${toolCallId}`,
+			runId: payload.runId,
+			phaseId: payload.runId,
+			parentId: `${payload.runId}:agent_start`,
+			type: "tool_call",
+			name: readableToolName(shown.toolName, args),
+			payload: {
+				tool: shown.toolName,
+				tool_call_id: toolCallId,
+				...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
+				args,
+				agent: payload.agentId,
+			},
+			startedAt: start.startedAt,
+		});
 		return;
 	}
 	if ((type === "tool_execution_end" || type === "clio_coder_tool_finish") && toolCallId !== null) {
 		const key = `${payload.runId}:${toolCallId}`;
 		const start = starts.get(key);
 		const engine = type === "tool_execution_end";
+		const outcome =
+			toolFacts.outcome === "ok" || toolFacts.outcome === "error" || toolFacts.outcome === "blocked"
+				? toolFacts.outcome
+				: null;
+		const blockReason = stringValue(toolFacts.blockReason) ?? stringValue(toolFacts.reason);
 		const finishedOk = toolFacts.isError !== true && toolFacts.outcome !== "error" && toolFacts.outcome !== "blocked";
 		const reported = toolFacts.result ?? toolFacts.resultSnippet;
 		if (start !== undefined) {
@@ -1616,6 +1647,8 @@ function recordProgress(
 			start.durationMs ??= finiteNonNegative(toolFacts.durationMs);
 			if (start.result === undefined && reported !== undefined) start.result = reported;
 			start.ok &&= finishedOk;
+			start.outcome ??= outcome;
+			start.blockReason ??= blockReason;
 		}
 		// One clock frame per row. The worker measures `durationMs` on its own
 		// clock while the mirror stamps `at` on the orchestrator's, so storing
@@ -1659,6 +1692,8 @@ function recordProgress(
 				args,
 				result_snippet: boundedSnippet(result),
 				ok,
+				outcome: start?.outcome ?? outcome ?? (ok ? "ok" : "error"),
+				block_reason: start?.blockReason ?? blockReason,
 				duration_ms: duration,
 				agent: payload.agentId,
 			},
@@ -1684,6 +1719,8 @@ function recordProgress(
 					args: step.args,
 					result_snippet: boundedSnippet(step.result),
 					ok: !step.isError && step.outcome !== "blocked",
+					outcome: step.outcome ?? (step.isError ? "error" : "ok"),
+					block_reason: step.blockReason ?? null,
 					duration_ms: null,
 					agent: payload.agentId,
 				},

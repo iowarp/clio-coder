@@ -233,7 +233,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		// A previous turn still open means it ended without a final assistant row
 		// (an abort, or a stream that died). The operator submitting again is the
 		// honest close for it; leaving it 'running' forever would be worse.
-		finishTracedTurn("success", null);
+		finishTracedTurn("fail", "interrupted: a new operator turn started before the previous turn finished");
 		traceRunId = `session:${userTurnId}`;
 		traceEventSeq = 0;
 		mirror({
@@ -525,6 +525,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 					tool: shown.toolName,
 					tool_call_id: event.toolCallId,
 					...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
+					args: shown.args ?? (shown.viaGateway ? {} : null),
 					ok: event.isError !== true && event.outcome !== "error" && event.outcome !== "blocked",
 					duration_ms: event.durationMs ?? null,
 					result_summary: payload.resultSummary,
