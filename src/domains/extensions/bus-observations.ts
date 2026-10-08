@@ -43,7 +43,15 @@ export function subscribeExtensionObservations(
 			send({ event: "dispatch_failed", runId: p.runId, agentId: p.agentId, reason: String(p.reason) }),
 		),
 		bus.on(BusChannels.CompactionEnd, (p) =>
-			send({ event: "compaction_end", outcome: p.outcome === "failed" || p.outcome === "cancelled" ? "failed" : "ok" }),
+			send({
+				event: "compaction_end",
+				outcome:
+					p.outcome === "completed" || p.outcome === "unchanged"
+						? "ok"
+						: p.outcome === "failed" || p.outcome === "cancelled"
+							? "failed"
+							: "unknown",
+			}),
 		),
 		bus.on(BusChannels.BudgetAlert, (p) => send({ event: "budget_alert", costUsd: p.currentUsd })),
 	];

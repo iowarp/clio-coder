@@ -789,7 +789,8 @@ export class TraceStore {
 			.prepare(`INSERT INTO events
         (event_id, run_id, phase_id, parent_id, type, name, payload_json, tokens, started_at, ended_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(event_id) DO UPDATE SET name=excluded.name, payload_json=excluded.payload_json,
+        ON CONFLICT(event_id) DO UPDATE SET rowid=(SELECT MAX(rowid)+1 FROM events),
+          name=excluded.name, payload_json=excluded.payload_json,
           tokens=excluded.tokens, started_at=excluded.started_at, ended_at=excluded.ended_at
         WHERE excluded.ended_at IS NOT NULL OR events.ended_at IS NULL`)
 			.run(

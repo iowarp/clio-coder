@@ -88,7 +88,7 @@ export type ExtensionObservationV2 =
 	| { event: "dispatch_started"; runId: string; agentId: string }
 	| { event: "dispatch_completed"; runId: string; agentId: string; durationMs: number; usage: ExtensionUsage | null }
 	| { event: "dispatch_failed"; runId: string; agentId: string; reason: string }
-	| { event: "compaction_end"; outcome: "ok" | "failed" }
+	| { event: "compaction_end"; outcome: "ok" | "failed" | "unknown" }
 	| { event: "budget_alert"; costUsd: number | null }
 	| { event: "safety_blocked"; tool: string }
 	| { event: "fs_changed"; paths: string[] }

@@ -86,6 +86,59 @@ describe("trace mirror tool rows", () => {
 		equal(rows[0]?.payload.ok, undefined);
 	});
 
+	it("delivers a settled span after the reader's start cursor without reopening it on a late start", async () => {
+		const path = join(scratch, "run-cursor.sqlite");
+		const runId = "run-cursor";
+		const mirror = createDispatchTraceMirror(path);
+		mirror.enqueue("dispatch.enqueued", {
+			runId,
+			agentId: "coder",
+			targetId: "local",
+			wireModelId: "model",
+			runtimeId: "fixture",
+			runtimeKind: "http",
+		});
+		const start = { type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "src/a.ts" } };
+		mirror.enqueue("dispatch.progress", { runId, agentId: "coder", event: start });
+		mirror.enqueue("dispatch.progress", { runId, agentId: "coder", event: clioStart("c1", "read") });
+		mirror.enqueue("dispatch.progress", { runId, agentId: "coder", event: { type: "log", level: "info" } });
+		await mirror.flush();
+		const reader = new TraceReader(path);
+		try {
+			const initial = reader.events(runId);
+			const opened = initial.find((row) => row.type === "tool_call");
+			ok(opened);
+			equal(opened.ended_at, null);
+			const cursor = initial.at(-1)?.rowid ?? 0;
+			ok(cursor > opened.rowid, "the cursor has already advanced past the tool start");
+			mirror.enqueue("dispatch.progress", { runId, agentId: "coder", event: clioFinish("c1", "read", 40) });
+			mirror.enqueue("dispatch.progress", {
+				runId,
+				agentId: "coder",
+				event: { type: "tool_execution_end", toolCallId: "c1", toolName: "read", result: "file text", isError: false },
+			});
+			await mirror.flush();
+			const updates = reader.events(runId, cursor);
+			equal(updates.length, 1);
+			const finished = updates[0];
+			ok(finished);
+			equal(finished.event_id, opened.event_id);
+			ok(finished.rowid > cursor);
+			ok(finished.ended_at);
+			equal(JSON.parse(finished.payload_json ?? "null").result_snippet, "file text");
+			mirror.enqueue("dispatch.progress", { runId, agentId: "coder", event: start });
+			await mirror.flush();
+			deepStrictEqual(reader.events(runId, finished.rowid), []);
+			deepStrictEqual(
+				reader.events(runId).filter((row) => row.type === "tool_call"),
+				[finished],
+			);
+		} finally {
+			reader.close();
+			await mirror.close();
+		}
+	});
+
 	it("gives a claude-sdk worker, which emits only the Clio frames, a row with its duration", async () => {
 		const rows = await toolRows("run-claude", [
 			clioStart("c1", "bash"),
@@ -170,15 +223,15 @@ describe("trace mirror tool rows", () => {
 });
 
 describe("compaction observations", () => {
-	it("maps known terminal failures and cancellation without inventing success", () => {
+	it("maps terminal outcomes and keeps unreported legacy outcomes unknown", () => {
 		const bus = createSafeEventBus();
 		const observations: ExtensionObservationV2[] = [];
 		const unsubscribe = subscribeExtensionObservations(bus, (observation) => observations.push(observation));
-		for (const outcome of ["completed", "unchanged", "failed", "cancelled"] as const)
-			bus.emit(BusChannels.CompactionEnd, { trigger: "force", at: 0, outcome });
+		for (const outcome of ["completed", "unchanged", "failed", "cancelled", undefined] as const)
+			bus.emit(BusChannels.CompactionEnd, { trigger: "force", at: 0, ...(outcome === undefined ? {} : { outcome }) });
 		deepStrictEqual(
 			observations.map((observation) => (observation.event === "compaction_end" ? observation.outcome : null)),
-			["ok", "ok", "failed", "failed"],
+			["ok", "ok", "failed", "failed", "unknown"],
 		);
 		unsubscribe();
 	});

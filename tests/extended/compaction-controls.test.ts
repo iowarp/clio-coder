@@ -286,8 +286,12 @@ describe("production compaction controls", () => {
 		const bus = createSafeEventBus();
 		const compactionEnds: CompactionPayload[] = [];
 		let compactionBegins = 0;
-		bus.on(BusChannels.CompactionBegin, () => compactionBegins++);
-		bus.on(BusChannels.CompactionEnd, (event) => compactionEnds.push(event));
+		bus.on(BusChannels.CompactionBegin, () => {
+			compactionBegins++;
+		});
+		bus.on(BusChannels.CompactionEnd, (event) => {
+			compactionEnds.push(event);
+		});
 		const loop = createChatLoop({
 			bus,
 			getSettings: () => f.settings,
@@ -392,7 +396,9 @@ describe("production compaction controls", () => {
 				compactionBegins++;
 				strictEqual(event.outcome, undefined);
 			});
-			bus.on(BusChannels.CompactionEnd, (event) => compactionEnds.push(event));
+			bus.on(BusChannels.CompactionEnd, (event) => {
+				compactionEnds.push(event);
+			});
 			bus.on(BusChannels.ContextActivity, (event) => {
 				activity.push(event);
 			});
@@ -770,8 +776,12 @@ describe("production compaction controls", () => {
 		const bus = createSafeEventBus();
 		const compactionEnds: CompactionPayload[] = [];
 		let compactionBegins = 0;
-		bus.on(BusChannels.CompactionBegin, () => compactionBegins++);
-		bus.on(BusChannels.CompactionEnd, (event) => compactionEnds.push(event));
+		bus.on(BusChannels.CompactionBegin, () => {
+			compactionBegins++;
+		});
+		bus.on(BusChannels.CompactionEnd, (event) => {
+			compactionEnds.push(event);
+		});
 		const context = createTurnContext({
 			bus,
 			state,
