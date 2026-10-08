@@ -41,6 +41,10 @@ export interface TraceInspectPhase {
 	readonly elapsedMs: number | null;
 	readonly totalTokens: number | null;
 	readonly totalCostUsd: number | null;
+	readonly apiCalls: number | null;
+	readonly missingTokenCalls: number | null;
+	readonly costEstimated: boolean | null;
+	readonly costUnknown: boolean | null;
 }
 
 /**
@@ -86,6 +90,10 @@ export interface TraceInspectRun {
 	readonly elapsedMs: number | null;
 	readonly totalTokens: number | null;
 	readonly totalCostUsd: number | null;
+	readonly apiCalls: number | null;
+	readonly missingTokenCalls: number | null;
+	readonly costEstimated: boolean | null;
+	readonly costUnknown: boolean | null;
 	readonly phases: readonly TraceInspectPhase[];
 	readonly phasesTruncated: boolean;
 	readonly events: TraceInspectEvents;
@@ -116,7 +124,7 @@ function nullableBounded(value: string | null, width: number): string | null {
 }
 
 /** A finite non-negative count, or null when the store recorded none. */
-function tally(value: number | null): number | null {
+function tally(value: number | null | undefined): number | null {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
 }
 
@@ -174,15 +182,7 @@ function traceInspectSnapshot(
 	if (!existsSync(databasePath)) {
 		return { version: 1, generatedAt, available: false, runs: [], truncated: false };
 	}
-	let reader: TraceReader;
-	try {
-		reader = new TraceReader(databasePath);
-	} catch {
-		// A database that exists but will not open is not an empty installation,
-		// and it is not this command's job to diagnose it. Report it as present
-		// with nothing readable rather than inventing either extreme.
-		return { version: 1, generatedAt, available: true, runs: [], truncated: false };
-	}
+	const reader = new TraceReader(databasePath);
 	try {
 		const selected = reader.runs(TRACE_INSPECT_MAX_RUNS + 1);
 		const window = selected.slice(0, TRACE_INSPECT_MAX_RUNS);
@@ -201,6 +201,10 @@ function traceInspectSnapshot(
 				elapsedMs: elapsed(row.started_at, row.ended_at),
 				totalTokens: tally(row.total_tokens),
 				totalCostUsd: cost(row.total_cost_usd),
+				apiCalls: tally(row.api_calls),
+				missingTokenCalls: tally(row.missing_token_calls),
+				costEstimated: row.cost_estimated == null ? null : row.cost_estimated === 1,
+				costUnknown: row.cost_unknown == null ? null : row.cost_unknown === 1,
 				phases: visible.map(
 					(phase): TraceInspectPhase => ({
 						name: bounded(phase.name, IDENTITY_WIDTH),
@@ -215,6 +219,10 @@ function traceInspectSnapshot(
 						elapsedMs: elapsed(phase.started_at, phase.ended_at),
 						totalTokens: tally(phase.total_tokens),
 						totalCostUsd: cost(phase.total_cost_usd),
+						apiCalls: tally(phase.api_calls),
+						missingTokenCalls: tally(phase.missing_token_calls),
+						costEstimated: phase.cost_estimated == null ? null : phase.cost_estimated === 1,
+						costUnknown: phase.cost_unknown == null ? null : phase.cost_unknown === 1,
 					}),
 				),
 				phasesTruncated: allPhases.length > visible.length,
