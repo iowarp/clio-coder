@@ -151,7 +151,7 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 	if (job.spec.count !== null && job.spec.count > 0) {
 		const filled = Math.min(6, Math.max(0, Math.floor((job.settled / job.spec.count) * 6)));
 		const meter =
-			theme.fg("harnessAction", GLYPH.barFull.repeat(filled)) + theme.fg("border", GLYPH.barEmpty.repeat(6 - filled));
+			theme.fg("composerRail", GLYPH.meterFull.repeat(filled)) + theme.fg("border", GLYPH.meterEmpty.repeat(6 - filled));
 		if (!append(`${meter} ${counter}`)) append(counter);
 	} else append(counter);
 	if (jobs.length > 1) append(`+${jobs.length - 1} loops`);
