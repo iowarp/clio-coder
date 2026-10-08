@@ -164,7 +164,16 @@ export async function runTests(tier) {
 	const preload = gui ? "./tests/harness/no-network.ts" : "./tests/harness/tmp-root.ts";
 	const child = spawn(
 		process.execPath,
-		["--import", "tsx", "--import", preload, "--test", "--test-reporter=spec", "--test-concurrency=2", ...files],
+		[
+			"--import",
+			"tsx",
+			"--import",
+			preload,
+			"--test",
+			"--test-reporter=spec",
+			`--test-concurrency=${tier === "core" ? 4 : 2}`,
+			...files,
+		],
 		{ cwd, stdio: ["inherit", "pipe", "pipe"] },
 	);
 	let transcript = "";
