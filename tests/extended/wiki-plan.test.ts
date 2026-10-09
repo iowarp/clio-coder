@@ -370,12 +370,15 @@ test("new-area admission uses saved source coverage rather than subdivision path
 	const { sourceContent: _baseline, ...legacy } = saved;
 	assert.deepEqual(unclaimedCandidates(legacy, index(files), "medium"), []);
 	assert.deepEqual(unclaimedCandidates({ ...saved, sourceContent: {} }, index(files), "medium"), []);
-	for (const added of [file("new/service/main.py", 9000), file("src/suite/new.py", 9000)]) {
-		const unclaimed = unclaimedCandidates(saved, index([...files, added]), "medium");
-		assert.equal(unclaimed.length, 1);
-		assert.deepEqual(unclaimed[0]?.sources, [added.path]);
-		assert.deepEqual(scopeCounts(unclaimed[0]?.intent ?? ""), [1, added.loc]);
-	}
+	const service = file("new/service/main.py", 9000);
+	const unclaimed = unclaimedCandidates(saved, index([...files, service]), "medium");
+	assert.equal(unclaimed.length, 1);
+	assert.deepEqual(unclaimed[0]?.sources, [service.path]);
+	assert.deepEqual(scopeCounts(unclaimed[0]?.intent ?? ""), [1, service.loc]);
+	assert.deepEqual(unclaimedCandidates(saved, index([...files, file("src/suite/new.py", 9000)]), "medium"), []);
+	const rooted = [...files, file("main.py", 20)];
+	const rootedSaved = { ...saved, sourceContent: Object.fromEntries(rooted.map((item) => [item.path, "1".repeat(64)])) };
+	assert.deepEqual(unclaimedCandidates(rootedSaved, index([...rooted, file("tiny/util.py", 20)]), "medium"), []);
 });
 
 test("completed medium updates preserve coarse paths without planner dispatch until explicit replanning", async () => {

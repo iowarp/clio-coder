@@ -16,11 +16,11 @@ import type { Codewiki } from "../codewiki/schema.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
 import type { ResolvedWikiDepth, WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
 import {
-	buildCandidatePlan,
 	MAX_MEDIUM_OWNERSHIP_PAGES,
 	MAX_PLAN_INTENT_CHARS,
 	MAX_PLAN_PAGES,
 	MAX_PLAN_PATH_CHARS,
+	newCoverageCandidates,
 } from "./plan.js";
 import { parseWikiSourceContent } from "./source-content.js";
 
@@ -255,19 +255,18 @@ export function validateWikiPlanAnchors(
 }
 
 /**
- * Candidate areas grounded in indexed sources absent from the saved baseline.
+ * Candidate areas whose entire assigned scope is absent from the saved baseline.
  *
  * These are offered to a planning pass, never appended to a settled plan.
- * Bounded anchors cannot distinguish new coverage from finer subdivision.
- * Legacy checkpoints without a source inventory retain their existing shape.
+ * A new file inside an existing scope, or a small directory that folds into
+ * one, is absorbed by that page, and finer subdivision of baseline files keeps
+ * the saved shape until an explicit replan. Legacy checkpoints without a
+ * source inventory retain their existing shape.
  */
 export function unclaimedCandidates(plan: WikiPlan, codewiki: Codewiki, depth: ResolvedWikiDepth): WikiPlanPage[] {
 	const baseline = plan.sourceContent;
 	if (!baseline || Object.keys(baseline).length === 0) return [];
-	const files = codewiki.files.filter((file) => file.lang !== "config" && !Object.hasOwn(baseline, file.path));
-	if (files.length === 0) return [];
-	const candidate = buildCandidatePlan({ ...codewiki, files }, depth);
-	return candidate.pages.filter((page) => page.path !== "architecture.md" || candidate.pages.length === 1);
+	return newCoverageCandidates(codewiki, depth, (path) => Object.hasOwn(baseline, path));
 }
 
 export interface ScopeUpdateInput {

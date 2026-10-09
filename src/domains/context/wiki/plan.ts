@@ -317,6 +317,34 @@ function intentForScope(
  * did, so a small directory is documented somewhere rather than dropped.
  */
 export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth): WikiPlan {
+	return candidateWithScopes(codewiki, depth).plan;
+}
+
+/**
+ * Candidate pages that own only source the caller does not already know.
+ *
+ * The full candidate is built at the real thresholds, then filtered on each
+ * page's entire assigned file scope. The architecture page owns the whole
+ * repository and is never returned.
+ */
+export function newCoverageCandidates(
+	codewiki: Codewiki,
+	depth: ResolvedWikiDepth,
+	known: (path: string) => boolean,
+): WikiPlanPage[] {
+	const { plan, scopes } = candidateWithScopes(codewiki, depth);
+	return plan.pages.filter((page, index) => {
+		if (page.path === "architecture.md") return false;
+		const scope = scopes[index] ?? [];
+		return scope.length > 0 && scope.every((file) => !known(file.path));
+	});
+}
+
+/** Candidate plan plus each page's owned files, index-aligned with `plan.pages`. */
+function candidateWithScopes(
+	codewiki: Codewiki,
+	depth: ResolvedWikiDepth,
+): { plan: WikiPlan; scopes: ReadonlyArray<ReadonlyArray<CodewikiFile>> } {
 	const source = codewiki.files.filter((file) => file.lang !== "config");
 	const totalLines = source.reduce((total, file) => total + Math.max(0, file.loc), 0);
 	const { areaDepth, areaShare, minAreaLines } = WIKI_DEPTH_STRATEGY[depth];
@@ -342,20 +370,25 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 	if (depth === "simple" && selected.length === 1 && onlyArea) {
 		const files = [...onlyArea.files, ...(extras.get(onlyArea.key) ?? [])];
 		return {
-			version: 1,
-			depth,
-			overview: "",
-			pages: [
-				{
-					...overview,
-					intent: `${overview.intent} ${intentForScope(files, areaDepth, MAX_PLAN_INTENT_CHARS - overview.intent.length - 1)}`,
-					sources: rankedSources(files),
-				},
-			],
+			plan: {
+				version: 1,
+				depth,
+				overview: "",
+				pages: [
+					{
+						...overview,
+						intent: `${overview.intent} ${intentForScope(files, areaDepth, MAX_PLAN_INTENT_CHARS - overview.intent.length - 1)}`,
+						sources: rankedSources(files),
+					},
+				],
+			},
+			scopes: [source],
 		};
 	}
+	const scopes: CodewikiFile[][] = [source];
 	const pages = selected.map((area): WikiPlanPage => {
 		const files = [...area.files, ...(extras.get(area.key) ?? [])];
+		scopes.push(files);
 		return {
 			path: pagePathForArea(area.key),
 			title: titleForArea(area.key),
@@ -372,12 +405,15 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 		overview.intent +=
 			" Link to the area pages for detailed behavior; keep this page focused on their composition and relationships.";
 	}
-	return dedupePagePaths({
-		version: 1,
-		depth,
-		overview: "",
-		pages: [overview, ...pages],
-	});
+	return {
+		plan: dedupePagePaths({
+			version: 1,
+			depth,
+			overview: "",
+			pages: [overview, ...pages],
+		}),
+		scopes,
+	};
 }
 
 /** Two areas can slug to one path; keep the first and suffix the rest. */
