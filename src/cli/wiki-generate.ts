@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
@@ -709,14 +709,29 @@ async function runPagePhase(
 					: { detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer` }),
 			}),
 	});
-	// A tool-call cap hit after a successful write or edit still leaves a draft on disk. Only the
-	// evidence gate can judge it, and discarding it forces a full writer (~1M tokens) where a
-	// validation or bounded repair costs a fraction. The receipt keeps the cap in the run detail.
+	// A tool-call cap hit after a successful write or edit can still leave a draft on disk. Only the
+	// evidence gate can judge it, and discarding it forces a full writer where a validation or bounded
+	// repair costs a fraction. mutatingSucceeded only proves the writer mutated something under its
+	// write roots, which is the whole staging dir, so this page must also have changed during the run.
+	// Otherwise the gate would judge a stale seeded draft the run never touched. The receipt keeps the
+	// cap in the run detail.
+	const pageChangedByRun = (): boolean => {
+		const file = join(input.outputDir, page.path);
+		if (!existsSync(file)) return false;
+		if (!seeded || !draftHash) return true;
+		try {
+			return createHash("sha256").update(readFileSync(file)).digest("hex") !== draftHash;
+		} catch {
+			// An unreadable page cannot be judged, so the writer failure stands.
+			return false;
+		}
+	};
 	const delivered =
 		outcome.ok ||
 		(outcome.phase === "writer" &&
 			outcome.receipt?.outcomeCode === "worker_tool_call_cap_exhausted" &&
-			outcome.receipt.toolActivity?.mutatingSucceeded === true);
+			outcome.receipt.toolActivity?.mutatingSucceeded === true &&
+			pageChangedByRun());
 	const evidence = delivered
 		? inspectWikiPageEvidence({
 				pagePath: page.path,

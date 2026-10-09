@@ -11,7 +11,7 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { WikiModelRoute } from "../../src/cli/wiki-generate.js";
@@ -364,6 +364,38 @@ describe("wiki generation outcomes", () => {
 				const failed = readWikiMeta(cwd)?.plan?.pages[0];
 				assert.equal(failed?.lastFailure?.phase, "writer");
 				assert.match(failed?.lastFailure?.detail ?? "", /worker_tool_call_cap_exhausted/u);
+				const requests: string[] = [];
+				await resume(
+					generator((spec, path) => {
+						assert.ok(path);
+						requests.push(spec.agentId ?? "");
+						writeFileSync(path, content("a", 2));
+					}),
+				);
+				assert.deepEqual(requests, ["wiki-writer"]);
+			});
+		}
+
+		for (const [label, touch] of [
+			["rewrites the seeded page with identical bytes", (path: string) => writeFileSync(path, content("a", 1))],
+			[
+				"only mutates a different staged page",
+				(path: string) => writeFileSync(join(dirname(path), "b.md"), content("b", 2)),
+			],
+		] as const) {
+			it(`keeps a capped run that ${label} a writer failure`, async () => {
+				await seedPending();
+				const first = await resume(
+					generator((_spec, path) => {
+						assert.ok(path);
+						touch(path);
+						return capped(true);
+					}),
+				);
+				assert.equal(first.pending, 1);
+				const failed = readWikiMeta(cwd)?.plan?.pages[0];
+				assert.equal(failed?.status, "pending");
+				assert.equal(failed?.lastFailure?.phase, "writer");
 				const requests: string[] = [];
 				await resume(
 					generator((spec, path) => {
