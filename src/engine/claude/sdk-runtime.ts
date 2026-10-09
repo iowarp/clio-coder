@@ -488,7 +488,7 @@ function decideToolUse(
 	});
 }
 
-export function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback {
+function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback {
 	return async (hookInput) => {
 		if (hookInput.hook_event_name !== "PostToolUse" && hookInput.hook_event_name !== "PostToolUseFailure")
 			return { continue: true };
