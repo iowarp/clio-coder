@@ -1620,7 +1620,11 @@ try {
 		// test-token is shorter than a bare token may be, so it is pasted as the link the server prints.
 		await page.getByLabel("Launch link or token", { exact: true }).fill(`[clio-coder:gui] ${origin}/#token=test-token`);
 		await page.getByRole("button", { name: "Connect this browser", exact: true }).click();
-		await page.locator('.wb-sidebar .wb-status[data-tone="ok"]', { hasText: "Connected" }).waitFor({ state: "attached" });
+		// The connected rail reports installation health once its diagnostics settle.
+		await page
+			.locator(".wb-sidebar .wb-status__label")
+			.filter({ hasText: /^(Ready|Unverified|\d+ issues?|\d+ warnings?)$/ })
+			.waitFor({ state: "attached" });
 		await page
 			.getByRole("heading", { name: "This browser is no longer connected", exact: true })
 			.waitFor({ state: "detached" });
