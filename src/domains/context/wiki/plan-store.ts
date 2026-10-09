@@ -12,9 +12,10 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
+import type { Codewiki } from "../codewiki/schema.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
-import type { WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
-import { MAX_PLAN_PAGES, MAX_PLAN_PATH_CHARS } from "./plan.js";
+import type { ResolvedWikiDepth, WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
+import { buildCandidatePlan, MAX_PLAN_PAGES, MAX_PLAN_PATH_CHARS } from "./plan.js";
 import { parseWikiSourceContent } from "./source-content.js";
 
 /** Dispatches one page may receive across all runs before it is left alone. */
@@ -245,28 +246,19 @@ export function validateWikiPlanAnchors(
 }
 
 /**
- * Candidate pages for areas no existing page covers.
+ * Candidate areas grounded in indexed sources absent from the saved baseline.
  *
- * These are offered to a planning pass, never appended to a settled plan. The
- * index proposes paths derived from directory names; a planner routinely
- * renames and regroups them, so appending by path would grow a second, machine-
- * named copy of coverage that already exists. An area counts as covered when
- * some page claims one of its sources, whatever that page ended up being called.
+ * These are offered to a planning pass, never appended to a settled plan.
+ * Bounded anchors cannot distinguish new coverage from finer subdivision.
+ * Legacy checkpoints without a source inventory retain their existing shape.
  */
-export function unclaimedCandidates(
-	plan: WikiPlan,
-	candidate: WikiPlan,
-	pageSources: ReadonlyMap<string, ReadonlyArray<string>> = new Map(),
-): WikiPlanPage[] {
-	const knownPaths = new Set(plan.pages.map((page) => page.path));
-	const claimed = new Set<string>();
-	for (const page of plan.pages) {
-		for (const source of [...page.sources, ...(page.dependencies ?? []), ...(pageSources.get(page.path) ?? [])])
-			claimed.add(source);
-	}
-	return candidate.pages.filter(
-		(page) => !knownPaths.has(page.path) && !page.sources.some((source) => claimed.has(source)),
-	);
+export function unclaimedCandidates(plan: WikiPlan, codewiki: Codewiki, depth: ResolvedWikiDepth): WikiPlanPage[] {
+	const baseline = plan.sourceContent;
+	if (!baseline || Object.keys(baseline).length === 0) return [];
+	const files = codewiki.files.filter((file) => file.lang !== "config" && !Object.hasOwn(baseline, file.path));
+	if (files.length === 0) return [];
+	const candidate = buildCandidatePlan({ ...codewiki, files }, depth);
+	return candidate.pages.filter((page) => page.path !== "architecture.md" || candidate.pages.length === 1);
 }
 
 export interface ScopeUpdateInput {

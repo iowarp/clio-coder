@@ -36,6 +36,7 @@ import {
 	writeWikiMeta,
 	writeWikiMetaInDir,
 } from "./meta.js";
+import type { ResolvedWikiDepth } from "./plan.js";
 import {
 	planWikiGeneration,
 	type WikiDepth,
@@ -386,6 +387,8 @@ function resolvePlan(input: {
 	adopted: boolean;
 	mode: WikiGenerateMode;
 	candidate: WikiPlan;
+	codewiki: Codewiki;
+	depth: ResolvedWikiDepth;
 	previousPlan: WikiPlan | undefined;
 	sourceContent: WikiSourceContent;
 	gitHead: string | null;
@@ -479,7 +482,7 @@ function resolvePlan(input: {
 		return {
 			plan,
 			resumed: staged !== null,
-			unclaimedAreas: staged ? [] : unclaimedCandidates(previous, input.candidate, pageSources),
+			unclaimedAreas: staged ? [] : unclaimedCandidates(previous, input.codewiki, input.depth),
 		};
 	}
 	return { plan: input.candidate, resumed: false, unclaimedAreas: [] };
@@ -571,6 +574,8 @@ export async function runWikiGenerate(
 			adopted: staging.adopted,
 			mode,
 			candidate: generation.plan,
+			codewiki,
+			depth: generation.depth,
 			previousPlan: existingMeta?.plan,
 			sourceContent,
 			gitHead: existingMeta?.gitHead ?? null,

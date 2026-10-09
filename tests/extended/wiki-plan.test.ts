@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import type { Codewiki, CodewikiFile } from "../../src/domains/context/codewiki/schema.js";
+import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
+import { readWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import { buildCandidatePlan, planWikiGeneration, type WikiPlan } from "../../src/domains/context/wiki/plan.js";
-import { sanitizePagePath, sanitizeWikiPlan } from "../../src/domains/context/wiki/plan-store.js";
+import {
+	sanitizePagePath,
+	sanitizeWikiPlan,
+	unclaimedCandidates,
+	writeWikiPlanFile,
+} from "../../src/domains/context/wiki/plan-store.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function file(path: string, loc: number, role: CodewikiFile["role"] = "module"): CodewikiFile {
 	return { id: path, path, loc, role, lang: "python", hash: "fixture", imports: [] };
@@ -296,4 +309,126 @@ test("candidate ownership survives reserved navigation names, long paths and slu
 	}
 	assert.equal(sanitizePagePath("pkg/index.md"), null);
 	assert.equal(sanitizePagePath("quickstart.md"), null);
+});
+
+test("new-area admission uses saved source coverage rather than subdivision paths or eight anchors", () => {
+	const files = [
+		file("src/suite/main.py", 10_000),
+		...Array.from({ length: 12 }, (_, child) => file(`src/suite/child-${child}/run.py`, 1000)),
+	];
+	const candidate = buildCandidatePlan(index(files), "medium");
+	const saved: WikiPlan = {
+		version: 1,
+		depth: "medium",
+		overview: "",
+		sourceContent: Object.fromEntries(files.map((item) => [item.path, "1".repeat(64)])),
+		pages: [
+			{ ...pageAt(candidate, 0), status: "written", attempts: 1 },
+			{
+				...pageAt(candidate, 1),
+				path: "suite.md",
+				sources: files.slice(0, 8).map((item) => item.path),
+				status: "written",
+				attempts: 1,
+			},
+		],
+	};
+	assert.ok(candidate.pages.length > saved.pages.length);
+	assert.deepEqual(unclaimedCandidates(saved, index(files), "medium"), []);
+	assert.deepEqual(
+		unclaimedCandidates(saved, index(files.map((item) => ({ ...item, loc: item.loc * 2 }))), "medium"),
+		[],
+	);
+	const { sourceContent: _baseline, ...legacy } = saved;
+	assert.deepEqual(unclaimedCandidates(legacy, index(files), "medium"), []);
+	assert.deepEqual(unclaimedCandidates({ ...saved, sourceContent: {} }, index(files), "medium"), []);
+	for (const added of [file("new/service/main.py", 9000), file("src/suite/new.py", 9000)]) {
+		const unclaimed = unclaimedCandidates(saved, index([...files, added]), "medium");
+		assert.equal(unclaimed.length, 1);
+		assert.deepEqual(unclaimed[0]?.sources, [added.path]);
+		assert.deepEqual(scopeCounts(unclaimed[0]?.intent ?? ""), [1, added.loc]);
+	}
+});
+
+test("completed medium updates preserve coarse paths without planner dispatch until explicit replanning", async () => {
+	const isolated = await isolateClioEnv("clio-coder-wiki-plan-stability-");
+	try {
+		const cwd = join(isolated.dir, "repo");
+		const sources = ["src/suite/main.py", ...Array.from({ length: 12 }, (_, child) => `src/suite/child-${child}/run.py`)];
+		for (const [position, source] of sources.entries()) {
+			mkdirSync(join(cwd, source, ".."), { recursive: true });
+			writeFileSync(join(cwd, source), "# source\n".repeat(position === 0 ? 10_000 : 1000));
+		}
+		writeFileSync(join(cwd, ".gitignore"), ".clio-coder/\n");
+		for (const args of [
+			["init", "-q"],
+			["add", "."],
+			["-c", "user.name=Fixture", "-c", "user.email=fixture@local", "commit", "-qm", "initial"],
+		])
+			execFileSync("git", args, { cwd, stdio: "ignore" });
+		const initial = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			depth: "medium",
+			generate(input) {
+				const anchor = pageAt(input.plan, 0);
+				const pages = [
+					{ ...anchor, status: "written" as const, attempts: 1 },
+					{
+						...anchor,
+						path: "suite.md",
+						title: "Suite",
+						sources: sources.slice(0, 8),
+						status: "written" as const,
+						attempts: 1,
+					},
+				];
+				for (const page of pages)
+					writeFileSync(
+						join(input.outputDir, page.path),
+						`---\ntitle: ${page.title}\nsources: ${JSON.stringify(page.sources)}\n---\n# ${page.title}\n\nSuite behavior.\n`,
+					);
+				writeWikiPlanFile(input.outputDir, { ...input.plan, pages });
+			},
+		});
+		assert.equal(initial.pending, 0);
+		let calls = 0;
+		const dispatch = {
+			abort() {},
+			async dispatch() {
+				calls++;
+				assert.fail("unchanged ownership must not admit a planner or writer");
+			},
+		} as unknown as DispatchContract;
+		const unchanged = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			depth: "medium",
+			generate: modelWikiGenerate({ dispatch }),
+		});
+		assert.equal(calls, 0);
+		assert.equal(unchanged.pending, 0);
+		assert.equal(unchanged.status, "noop");
+		assert.deepEqual(
+			readWikiMeta(cwd)?.plan?.pages.map((page) => page.path),
+			["architecture.md", "suite.md"],
+		);
+		await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			depth: "medium",
+			replan: true,
+			generate(input) {
+				assert.equal(input.resumed, false);
+				assert.equal(input.replan, true);
+				assert.ok(input.generation.plan.pages.length > 2);
+				assert.deepEqual(
+					input.plan.pages.map((page) => page.path),
+					["architecture.md", "suite.md"],
+				);
+			},
+		});
+	} finally {
+		isolated.restore();
+	}
 });
