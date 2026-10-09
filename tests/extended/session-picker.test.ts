@@ -61,6 +61,7 @@ function picker(t: TestContext, sessions: SessionMeta[], overrides: Record<strin
 		clearScreen: noop,
 		setTitle: noop,
 		setProgress: noop,
+		setProgramStatus: noop,
 	};
 	const tui = new TuiAltScreen(terminal);
 	const editor = new ClioEditor(tui, { getModelLabel: () => "fixture", getThinkingLabel: () => "off" });

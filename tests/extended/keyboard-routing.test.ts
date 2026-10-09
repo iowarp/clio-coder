@@ -60,6 +60,7 @@ class KeyboardTerminal implements Terminal {
 	clearScreen(): void {}
 	setTitle(): void {}
 	setProgress(): void {}
+	setProgramStatus(): void {}
 }
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {

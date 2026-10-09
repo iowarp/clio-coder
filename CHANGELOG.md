@@ -6,6 +6,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 Candidate notes for 0.6.2-rc.3. This beta is not published from the sprint branch.
 
+- Upgrade the Pi engine packages to 1.1.0 for native Haiku 5.5 catalog support and updated Anthropic provider compatibility.
 - Add an opt-in EmbeddingGemma 2 Q8 service and persistent semantic context index for code, scientific inboxes, approved memory, evidence, and recorded dispatch output. The agent and CLI receive bounded, attributed search results; exact profile identities isolate vector spaces, and an explicit offline command reembeds old canonical records under a new profile. Approved API 2 extensions can call the host embedding service through a declared capability without receiving model credentials.
 - Add explicit local or SSH worker recording as a bounded asciicast side channel with redacted evidence exports. Add a checksum-pinned asciinema installer and a previewed user-level fleet provisioning command.
 - Keep background indexing disabled by default. PDF text, notebook outputs, images, mono 16 kHz WAV audio, and bounded timestamped GIF/video still frames are supported where the image route is qualified and FFmpeg is available. Raw video embedding and scanned PDF OCR remain unsupported. See the [semantic context beta guide](docs/guide/semantic-context.md).

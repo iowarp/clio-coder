@@ -104,10 +104,10 @@ index 5e7fffa205390c2b2ff906a5386275c9197490fa..73428b2ee1c8b555bd3a8eed2dd88e11
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index f9a115092e2014240e414ec70b71d1d07971c4dc..7df22fde65119146cf0f8d95c3f148ad5010c863 100644
+index 0c488810118e4d5f4ee18ccbd3dd4de8778b7e2c..c7672b9ab7e86dac0fd3981b369ab21e833fc205 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
-@@ -105,11 +105,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -107,11 +107,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
      scrollBy(lines: number): void;
      scrollToTop(): void;
      scrollToBottom(): void;
@@ -126,10 +126,10 @@ index f9a115092e2014240e414ec70b71d1d07971c4dc..7df22fde65119146cf0f8d95c3f148ad
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 2789a11558000bd5965cbaade52f5c0638c4d6b1..ab2a964986311530a5c56e2709744dcaa550481c 100644
+index afc1e6ebe4a8412430c910938e0a995e1b1f0adb..0e0608ef0de71062b7562504b83721d8b4f4af4f 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -309,6 +309,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -314,6 +314,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }

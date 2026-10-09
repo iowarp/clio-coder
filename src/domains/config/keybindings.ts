@@ -233,6 +233,14 @@ export const CLIO_KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
 	"tui.editor.historyPrevious": { ...TUI_KEYBINDINGS["tui.editor.historyPrevious"], defaultKeys: "ctrl+p" },
 	"tui.editor.historyNext": { ...TUI_KEYBINDINGS["tui.editor.historyNext"], defaultKeys: "ctrl+n" },
+	"tui.editor.cursorLineStart": {
+		...TUI_KEYBINDINGS["tui.editor.cursorLineStart"],
+		defaultKeys: ["home", "ctrl+home", "ctrl+a"],
+	},
+	"tui.editor.cursorLineEnd": {
+		...TUI_KEYBINDINGS["tui.editor.cursorLineEnd"],
+		defaultKeys: ["end", "ctrl+end", "ctrl+e"],
+	},
 	"tui.editor.deleteWordBackward": {
 		...TUI_KEYBINDINGS["tui.editor.deleteWordBackward"],
 		defaultKeys: ["ctrl+w", "alt+backspace", "ctrl+backspace"],

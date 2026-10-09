@@ -616,6 +616,7 @@ describe("engine TUI: keybinding table and alternate-screen render seams", () =>
 			clearScreen(): void {}
 			setTitle(): void {}
 			setProgress(): void {}
+			setProgramStatus(): void {}
 		}
 		const frames: Array<{ mode: string; phases: TuiRenderPhase[] }> = [];
 		const observer: TuiRenderObserver = {
