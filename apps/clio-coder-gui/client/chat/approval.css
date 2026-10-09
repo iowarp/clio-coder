@@ -5,8 +5,9 @@
 
 /* ---- the banner ------------------------------------------------------------------------- */
 
-/* Pinned above the scrolling transcript and never inside it. It is not focus-trapping: the
-   operator has to be able to keep reading while an approval waits. */
+/* Its own grid row above the transcript, never inside it. It scrolls with .conversation__main
+   instead of staying pinned, because a sticky banner overlapped the composer. It is not
+   focus-trapping: the operator has to be able to keep reading while an approval waits. */
 .approval-banner {
 	position: relative;
 	z-index: 2;

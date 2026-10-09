@@ -16,7 +16,8 @@
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
 	/* bar, approval, transcript, jump anchor, composer: one track per child, in source order. Notices
-	   moved to the Session column; a missing child shifts the transcript out of the 1fr track. */
+	   render in their own row of the app layout grid, outside this column; a missing child shifts
+	   the transcript out of the 1fr track. */
 	grid-template-rows: auto max-content minmax(6rem, 1fr) 0 max-content;
 	overflow-y: auto;
 	overscroll-behavior: contain;
