@@ -724,7 +724,9 @@ try {
 		await removal.getByRole("button", { name: "Apply this change", exact: true }).click();
 		await removal.getByText("The files and the install record are gone.").waitFor();
 		await removal.getByRole("button", { name: "Done", exact: true }).click();
-		await page.locator("main").getByText("No packages match.").waitFor();
+		await offer.waitFor({ state: "detached" });
+		await page.locator("main").getByRole("listitem", { name: "extension:fixture-extension", exact: true }).waitFor();
+		assert.equal(await page.locator("main .library-packages > li").count(), 1);
 		await page
 			.locator("main")
 			.getByRole("tablist", { name: "Library collections" })
