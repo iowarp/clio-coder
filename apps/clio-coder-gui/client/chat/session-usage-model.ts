@@ -2,8 +2,11 @@
 // Every number is the agent's own: cost and tokens are Clio Coder's accounting, folded per provider and
 // model as the terminal's /usage folds them, and quota is each provider's report. Nothing is summed here.
 
+import type { LiveUsage } from "../../contracts/session-telemetry.js";
+import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { SessionUsage } from "../../contracts/usage.js";
 import type { StatusTone } from "../design/status.js";
+import { taskOverview } from "./overview-model.js";
 
 type Cost = SessionUsage["session"]["cost"];
 
@@ -124,4 +127,98 @@ export function quotaCards(
 /** A quota window's fill tone, on the same steps as the context meter so a nearly spent window reads alike. */
 export function quotaTone(share: number): "ok" | "warn" | "full" {
 	return share >= 85 ? "full" : share >= 65 ? "warn" : "ok";
+}
+
+export interface Spend {
+	missingTokenCalls?: number;
+	readonly tokens: number;
+	/** "$0.42", "~$0.42" when estimated, "$0.42 +?" when some calls are unpriced; null when nothing is priced. */
+	readonly cost: string | null;
+	/** Clio's accounting covers side questions and handoffs; the turn sums cover only the transcript. */
+	readonly source: "clio" | "turns";
+}
+
+/**
+ * One spend figure for every surface. Clio's own accounting wins whenever the session reports it,
+ * because it also counts what ran beside the conversation; the per-turn sums are the fallback for a
+ * session that does not.
+ */
+export function sessionSpend(
+	turns: SessionSnapshot["turns"],
+	usage: SessionUsage | undefined,
+	live?: LiveUsage,
+): Spend {
+	if (live?.session) {
+		const totals = live.session;
+		const cost =
+			totals.costProvenance === "unknown"
+				? totals.costUsd > 0
+					? `${totals.hasEstimatedCost ? "~" : ""}${dollars(totals.costUsd)} +?`
+					: null
+				: `${totals.costProvenance === "estimated" ? "~" : ""}${dollars(totals.costUsd)}`;
+		return {
+			tokens: totals.totalTokens,
+			cost,
+			source: "clio",
+			...(totals.missingTokenCalls ? { missingTokenCalls: totals.missingTokenCalls } : {}),
+		};
+	}
+	if (usage) {
+		const cost = usage.session.cost;
+		const priced =
+			cost.calls === 0 || (cost.unknown && cost.knownUsd === 0)
+				? null
+				: cost.free
+					? "$0.00"
+					: `${cost.estimated ? "~" : ""}${dollars(cost.knownUsd)}${cost.unknown ? " +?" : ""}`;
+		return {
+			tokens: usage.session.tokens,
+			cost: priced,
+			source: "clio",
+			...(usage.session.missingTokenCalls ? { missingTokenCalls: usage.session.missingTokenCalls } : {}),
+		};
+	}
+	const overview = taskOverview(turns, 0);
+	return {
+		tokens: overview.tokens,
+		cost:
+			overview.costUsd !== null && overview.costUsd > 0
+				? `${overview.hasEstimatedCost ? "~" : ""}${dollars(overview.costUsd)}${overview.hasUnknownCost ? " +?" : ""}`
+				: null,
+		...(overview.missingTokenCalls ? { missingTokenCalls: overview.missingTokenCalls } : {}),
+		source: "turns",
+	};
+}
+
+export function usageSummary(
+	sessionOpen: boolean,
+	turns: SessionSnapshot["turns"],
+	usage: SessionUsage | undefined,
+	recorded: LiveUsage | undefined,
+) {
+	const hasSnapshot = !!recorded?.session || turns.some((turn) => !!turn.usage);
+	const spend = sessionSpend(turns, usage, recorded);
+	const totals =
+		!recorded?.session && usage
+			? usageTotals(usage)
+			: hasSnapshot
+				? [
+						{ label: "Cost", value: spend.cost ?? "Unpriced" },
+						{
+							label: "Tokens",
+							value: `${tokens(spend.tokens)}${spend.missingTokenCalls ? ` +? (${tokens(spend.missingTokenCalls)} call${spend.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
+						},
+					]
+				: [];
+	return {
+		totals,
+		details: sessionOpen && !!usage,
+		note: !sessionOpen
+			? totals.length > 0
+				? "Last recorded totals. Open this task to refresh model details and provider quota."
+				: "No usage totals were recorded. Open this task to read its usage."
+			: recorded?.session
+				? "Live totals. Model details below update when the turn finishes."
+				: "Clio Coder’s own accounting for this conversation.",
+	};
 }

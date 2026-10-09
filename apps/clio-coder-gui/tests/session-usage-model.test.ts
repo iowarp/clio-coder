@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { taskOverview } from "../client/chat/overview-model.js";
-import { sessionSpend } from "../client/chat/session-telemetry.js";
-import { costText, quotaCards, usageRows, usageTotals } from "../client/chat/session-usage-model.js";
+import {
+	costText,
+	quotaCards,
+	sessionSpend,
+	usageRows,
+	usageSummary,
+	usageTotals,
+} from "../client/chat/session-usage-model.js";
 import type { SessionSnapshot } from "../contracts/sessions.js";
 import type { SessionUsage } from "../contracts/usage.js";
 
@@ -43,6 +49,10 @@ test("cost is worded as measured, estimated, partly unpriced, free or not yet re
 		},
 	] as unknown as SessionSnapshot["turns"];
 	assert.equal(taskOverview(turns, 0).tokens, 36);
+	assert.deepEqual(usageSummary(false, turns, undefined, undefined).totals, [
+		{ label: "Cost", value: "~$0.42 +?" },
+		{ label: "Tokens", value: "36 +? (1 call missing usage)" },
+	]);
 	assert.deepEqual(sessionSpend(turns, undefined), {
 		tokens: 36,
 		cost: "~$0.42 +?",
@@ -145,4 +155,35 @@ test("quota cards say what each provider reported, and a stale reading says so",
 		status: "failed",
 		reason: "Quota could not be read: quota cache locked",
 	});
+});
+
+test("parked usage shows recorded totals without exposing live model details or quota", () => {
+	const recorded = {
+		used: 1,
+		size: 10,
+		session: {
+			input: 1_284_400,
+			output: 13,
+			cacheRead: 0,
+			cacheWrite: 0,
+			reasoning: 0,
+			totalTokens: 1_284_413,
+			costUsd: 0.03,
+			costProvenance: "estimated" as const,
+		},
+	};
+	const parked = usageSummary(false, [], usage, recorded);
+	assert.deepEqual(parked.totals, [
+		{ label: "Cost", value: "~$0.03" },
+		{ label: "Tokens", value: "1,284,413" },
+	]);
+	assert.match(parked.note, /^Last recorded totals\./);
+	assert.equal(parked.details, false);
+	assert.deepEqual(usageSummary(false, [], undefined, recorded), parked);
+	assert.deepEqual(usageSummary(false, [], usage, undefined).totals, usageTotals(usage));
+	assert.equal(usageSummary(true, [], usage, recorded).details, true);
+	assert.match(usageSummary(true, [], usage, recorded).note, /^Live totals\./);
+	const absent = usageSummary(false, [], undefined, undefined);
+	assert.deepEqual(absent.totals, []);
+	assert.match(absent.note, /^No usage totals were recorded\./);
 });

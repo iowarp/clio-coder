@@ -3,11 +3,11 @@ import { memo, useId } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { LiveUsage } from "../../contracts/session-telemetry.js";
+import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
-import { sessionSpend } from "./session-telemetry.js";
-import { quotaCards, quotaTone, usageRows, usageTotals } from "./session-usage-model.js";
+import { quotaCards, quotaTone, usageRows, usageSummary } from "./session-usage-model.js";
 import "./session-board.css";
 import "./usage-panel.css";
 
@@ -23,6 +23,7 @@ export const UsagePanel = memo(function UsagePanel({
 	capabilities,
 	settledTurns,
 	liveUsage,
+	turns,
 }: {
 	client: Client;
 	sessionId: string;
@@ -30,6 +31,7 @@ export const UsagePanel = memo(function UsagePanel({
 	capabilities: AgentCapabilities | undefined;
 	settledTurns: number;
 	liveUsage?: LiveUsage;
+	turns: SessionSnapshot["turns"];
 }) {
 	const supported = !!capabilities?.usage;
 	const id = useId();
@@ -42,46 +44,33 @@ export const UsagePanel = memo(function UsagePanel({
 		// so rows (and the focus a row holds) do not vanish between the two reads.
 		placeholderData: (previous) => previous,
 	});
-	const live = liveUsage?.session ? sessionSpend([], undefined, liveUsage) : null;
-	const totals = live
-		? [
-				{ label: "Cost", value: live.cost ?? "Unpriced" },
-				{
-					label: "Tokens",
-					value: `${live.tokens.toLocaleString("en-US")}${live.missingTokenCalls ? ` +? (${live.missingTokenCalls} call${live.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
-				},
-			]
-		: usage.data
-			? usageTotals(usage.data)
-			: [];
+	const summary = usageSummary(sessionOpen, turns, usage.data, liveUsage);
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	return (
 		<div className="pane-drill drill usage-panel">
-			{!sessionOpen ? <p className="pane-empty">This task is not open. Open it to read its usage.</p> : null}
+			{!sessionOpen ? <p className="pane-empty">{summary.note}</p> : null}
 			{sessionOpen && !supported ? <p className="pane-empty">Clio does not report usage for this task.</p> : null}
 			{usage.isPending && sessionOpen && supported ? <p className="pane-empty">Reading usage…</p> : null}
-			{usage.error ? (
+			{sessionOpen && usage.error ? (
 				<p role="alert" className="pane-empty">
 					{usage.error.message}
 				</p>
 			) : null}
-			{usage.data ? (
+			{summary.totals.length > 0 ? (
+				<section className="drill__section" aria-label="This conversation's spend">
+					<dl className="usage-panel__stats">
+						{summary.totals.map((figure) => (
+							<div key={figure.label}>
+								<dt>{figure.label}</dt>
+								<dd>{figure.value}</dd>
+							</div>
+						))}
+					</dl>
+					{sessionOpen ? <p className="drill__note">{summary.note}</p> : null}
+				</section>
+			) : null}
+			{summary.details && usage.data ? (
 				<>
-					<section className="drill__section" aria-label="This conversation's spend">
-						<dl className="usage-panel__stats">
-							{totals.map((figure) => (
-								<div key={figure.label}>
-									<dt>{figure.label}</dt>
-									<dd>{figure.value}</dd>
-								</div>
-							))}
-						</dl>
-						<p className="drill__note">
-							{live
-								? "Live totals. Model details below update when the turn finishes."
-								: "Clio Coder’s own accounting for this conversation."}
-						</p>
-					</section>
 					{usage.data.session.rows.length > 0 ? (
 						<section className="drill__section" aria-labelledby={`${id}-models`}>
 							<h3 id={`${id}-models`}>By model</h3>

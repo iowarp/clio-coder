@@ -4,13 +4,13 @@ import type { Client } from "../api/client.js";
 import { compactCount, contextMeter } from "./overview-model.js";
 import type { PaneView } from "./pane-model.js";
 import {
-	sessionSpend,
 	settledTurns,
 	useContextLedger,
 	useSessionCapabilities,
 	useSessionTelemetry,
 	useSessionUsage,
 } from "./session-telemetry.js";
+import { sessionSpend } from "./session-usage-model.js";
 
 const RING = 2 * Math.PI * 6;
 

@@ -23,13 +23,13 @@ import { ReceiptLine } from "./ReceiptLine.js";
 import type { RouteFacts } from "./route.js";
 import { modelSessionFacts, sessionFacts } from "./session-facts-model.js";
 import {
-	sessionSpend,
 	settledTurns,
 	spendLine,
 	useContextLedger,
 	useSessionCapabilities,
 	useSessionUsage,
 } from "./session-telemetry.js";
+import { sessionSpend } from "./session-usage-model.js";
 import { livePlanView } from "./telemetry-model.js";
 
 function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
