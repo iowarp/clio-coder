@@ -70,6 +70,25 @@ export function captureWikiSourceContent(cwd: string): WikiSourceContent {
 	}
 }
 
+const normalizeClaim = (path: string): string => path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+const covers = (source: string, path: string): boolean => path === source || path.startsWith(`${source}/`);
+
+/**
+ * Claims that cover a path in either snapshot. A citation neither snapshot
+ * observed never resolved, so it is a draft defect rather than source change.
+ */
+export function observedWikiSources(
+	previous: WikiSourceContent | undefined,
+	current: WikiSourceContent,
+	sources: readonly string[],
+): string[] {
+	const paths = [...Object.keys(previous ?? {}), ...Object.keys(current)];
+	return sources.filter((source) => {
+		const claim = normalizeClaim(source);
+		return paths.some((path) => covers(claim, path));
+	});
+}
+
 /** A directory claim compares every covered child, including additions and deletions. */
 export function wikiSourcesMatch(
 	previous: WikiSourceContent | undefined,
@@ -77,10 +96,10 @@ export function wikiSourcesMatch(
 	sources?: readonly string[],
 ): boolean {
 	if (!previous || Object.keys(previous).length === 0 || Object.keys(current).length === 0) return false;
-	const claimed = sources?.map((path) => path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, ""));
+	const claimed = sources?.map(normalizeClaim);
 	const paths = [...new Set([...Object.keys(previous), ...Object.keys(current)])].filter(
-		(path) => !claimed || claimed.some((source) => path === source || path.startsWith(`${source}/`)),
+		(path) => !claimed || claimed.some((source) => covers(source, path)),
 	);
-	if (claimed?.some((source) => !paths.some((path) => path === source || path.startsWith(`${source}/`)))) return false;
+	if (claimed?.some((source) => !paths.some((path) => covers(source, path)))) return false;
 	return paths.length > 0 && paths.every((path) => previous[path] != null && previous[path] === current[path]);
 }

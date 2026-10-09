@@ -173,7 +173,7 @@ describe("wiki generation outcomes", () => {
 		it(`dispatches one bounded repair with complete diagnostics and ${succeeds ? "credits its validated edit" : `keeps ${resultKind} pending`}`, async () => {
 			const plan: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
 			const invalid =
-				content("a", 1) +
+				content("a", 1).replace("  - src/a.ts", "  - src/a.ts\n  - bench/missing.ts") +
 				Array.from({ length: 12 }, (_, n) => `See \`src/${n === 11 ? "x".repeat(330) : ""}missing-${n}.ts\`.\n`).join("");
 			const requests: JobSpec[] = [];
 			const result = await run(
@@ -195,7 +195,7 @@ describe("wiki generation outcomes", () => {
 							const data = /```json\s+([\s\S]*?)\s+```/u.exec(spec.task)?.[1];
 							assert.ok(data);
 							const diagnostics = JSON.parse(data).diagnostics;
-							assert.equal(diagnostics.length, 12);
+							assert.equal(diagnostics.length, 13);
 							assert.ok(JSON.stringify(diagnostics).length > 500);
 							assert.match(diagnostics.at(-1), /missing-11/u);
 							assert.ok(diagnostics.at(-1).length > 300);

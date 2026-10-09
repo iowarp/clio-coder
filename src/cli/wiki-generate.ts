@@ -23,7 +23,11 @@ import {
 	writeWikiPlanFile,
 } from "../domains/context/wiki/plan-store.js";
 import { buildWikiPagePrompt, buildWikiPlanPrompt, buildWikiRepairPrompt } from "../domains/context/wiki/prompts.js";
-import { captureWikiSourceContent, wikiSourcesMatch } from "../domains/context/wiki/source-content.js";
+import {
+	captureWikiSourceContent,
+	observedWikiSources,
+	wikiSourcesMatch,
+} from "../domains/context/wiki/source-content.js";
 import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
@@ -494,7 +498,11 @@ async function runPagePhase(
 	];
 	const stable = (dependencies: readonly string[] = []): boolean => {
 		const current = captureWikiSourceContent(input.cwd);
-		return wikiSourcesMatch(baseline, current) && wikiSourcesMatch(baseline, current, [...sources, ...dependencies]);
+		// Repair exists to fix unresolved citations, so only observed claims can veto it.
+		const observed = observedWikiSources(baseline, current, [...sources, ...dependencies]);
+		return (
+			wikiSourcesMatch(baseline, current) && (observed.length === 0 || wikiSourcesMatch(baseline, current, observed))
+		);
 	};
 	const diagnostic = seeded
 		? inspectWikiPageEvidence({
