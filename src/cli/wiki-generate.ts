@@ -33,7 +33,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import { runEventJournalPath } from "../domains/dispatch/run-event-journal.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import { callLevelUpstreamResponses, type RunReceipt } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { renderCostAmount } from "../domains/observability/cost.js";
@@ -204,7 +204,7 @@ type WikiRunUsage = Pick<
 	| "costUsd"
 	| "costProvenance"
 > &
-	Partial<Pick<RunReceipt, "costSummary" | "budget">>;
+	Partial<Pick<RunReceipt, "costSummary" | "budget" | "upstreamResponses">>;
 
 interface WikiEarlierAttempt {
 	runId: string;
@@ -295,10 +295,35 @@ const USAGE_FIELDS = [
 	["missingTokenCalls", "missing-usage calls"],
 ] as const;
 
+/**
+ * reported: a tracked call carried a cache-read field or the count is non-zero. unreported: every tracked call
+ * omitted it. mixed: tracked calls disagree. untracked: no call says, so the number is shown as recorded.
+ */
+type CacheReporting = "reported" | "unreported" | "mixed" | "untracked";
+interface CacheReadSummary {
+	reporting: CacheReporting;
+	unreportedCalls: number;
+	trackedCalls: number;
+}
+
+function summarizeCacheRead(usage: WikiRunUsage | undefined): CacheReadSummary {
+	const tracked = callLevelUpstreamResponses(usage?.upstreamResponses ?? []).flatMap((response) =>
+		typeof response.usage?.cacheReadReported === "boolean" ? [response.usage.cacheReadReported] : [],
+	);
+	const unreportedCalls = tracked.filter((reported) => !reported).length;
+	const base = { unreportedCalls, trackedCalls: tracked.length };
+	if (tracked.length === 0) return { ...base, reporting: "untracked" };
+	if (unreportedCalls === 0) return { ...base, reporting: "reported" };
+	if (unreportedCalls < tracked.length) return { ...base, reporting: "mixed" };
+	return { ...base, reporting: (usage?.cacheReadTokenCount ?? 0) === 0 ? "unreported" : "reported" };
+}
+
 type WikiUsage = Pick<RunReceipt, (typeof USAGE_FIELDS)[number][0]>;
 type WikiReceipts = Array<{
 	receipt: WikiRunUsage | undefined;
 	kind: "writer" | "repair";
+	/** Cache-read reporting of this run, so the invocation line can tell an unreported zero from a measured one. */
+	cacheReporting: CacheReporting;
 	/** The attempt ledger was unreadable, so this dispatch may have unrecorded earlier attempts. */
 	unrecoveredAttempts?: true;
 	/** Page accepted after a tool-call cap stopped its writer; surfaced in the invocation summary. */
@@ -307,8 +332,13 @@ type WikiReceipts = Array<{
 const ATTEMPT_LINE_LIMIT = 4;
 const CAPPED_PAGE_LIMIT = 5;
 
-function usageDetail(usage: WikiUsage): string {
-	return USAGE_FIELDS.map(([key, label]) => `${label}=${usage[key] ?? "unknown"}`).join(", ");
+/** `cacheRead` replaces the printed cache-read value when the caller knows it was not measured. */
+function usageDetail(usage: WikiUsage, cacheRead?: string): string {
+	return USAGE_FIELDS.map(([key, label]) =>
+		key === "cacheReadTokenCount" && cacheRead !== undefined
+			? `${label}=${cacheRead}`
+			: `${label}=${usage[key] ?? "unknown"}`,
+	).join(", ");
 }
 
 function dispatchUsage(
@@ -319,8 +349,16 @@ function dispatchUsage(
 	if (outcome.phase === "admission") return "";
 	const receipt = outcome.receipt;
 	const attempts = outcome.attempts;
-	receipts.push({ receipt, kind, ...(attempts?.incomplete ? { unrecoveredAttempts: true as const } : {}) });
-	for (const earlier of attempts?.earlier ?? []) receipts.push({ receipt: earlier.usage, kind });
+	const cache = summarizeCacheRead(receipt);
+	receipts.push({
+		receipt,
+		kind,
+		cacheReporting: cache.reporting,
+		...(attempts?.incomplete ? { unrecoveredAttempts: true as const } : {}),
+	});
+	// Ledger envelopes carry no upstream responses, so earlier attempts stay untracked.
+	for (const earlier of attempts?.earlier ?? [])
+		receipts.push({ receipt: earlier.usage, kind, cacheReporting: "untracked" });
 	const runId = attempts?.terminalRunId ?? outcome.runId;
 	const breakdown = attempts?.incomplete
 		? "; earlier attempts unrecoverable; all-attempt tokens total unknown (incomplete)"
@@ -330,10 +368,17 @@ function dispatchUsage(
 	if (!receipt) return `; run=${runId}; usage unavailable${breakdown}`;
 	const provenance = receipt.costProvenance;
 	return (
-		`; run=${runId}; tokens: ${usageDetail(receipt)}; cost=${renderCostAmount(receipt.costUsd, provenance, receipt.costSummary)} (${provenance})` +
+		`; run=${runId}; tokens: ${usageDetail(receipt, cacheReadText(receipt, cache))}; cost=${renderCostAmount(receipt.costUsd, provenance, receipt.costSummary)} (${provenance})` +
 		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "") +
 		breakdown
 	);
+}
+
+function cacheReadText(usage: WikiUsage, cache: CacheReadSummary): string | undefined {
+	if (cache.reporting === "unreported") return "unreported";
+	if (cache.reporting === "mixed")
+		return `${usage.cacheReadTokenCount ?? "unknown"} (unreported on ${cache.unreportedCalls}/${cache.trackedCalls} calls)`;
+	return undefined;
 }
 
 function attemptsBreakdown(attempts: WikiAttempts, terminal: WikiRunUsage | undefined): string {
@@ -376,9 +421,15 @@ function invocationUsage(receipts: WikiReceipts): string {
 		else if (receipt.costProvenance === "estimated") estimated += receipt.costUsd;
 		else known += receipt.costUsd;
 	}
+	const partial = receipts.filter((run) => run.cacheReporting === "unreported" || run.cacheReporting === "mixed").length;
+	const cacheRead = receipts.every((run) => run.cacheReporting === "unreported")
+		? "unreported"
+		: partial > 0
+			? `${totals.cacheReadTokenCount ?? "unknown"} (unreported on ${partial} runs)`
+			: undefined;
 	const capped = receipts.flatMap((run) => (run.completedAfterCapPage ? [run.completedAfterCapPage] : []));
 	return (
-		`${receipts.length} dispatched runs; reported tokens: ${usageDetail(totals)}` +
+		`${receipts.length} dispatched runs; reported tokens: ${usageDetail(totals, cacheRead)}` +
 		(receipts.some((run) => run.kind === "repair")
 			? `; repair runs=${receipts.filter((run) => run.kind === "repair").length}`
 			: "") +

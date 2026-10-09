@@ -145,6 +145,102 @@ it("separates known, estimated and unknown run costs and reports missing usage",
 	}
 });
 
+async function runCacheReportingFixture(
+	prefix: string,
+	flags: ReadonlyArray<boolean> | undefined,
+): Promise<{ details: string[]; summaries: string[] }> {
+	const isolated = await isolateClioEnv(prefix);
+	try {
+		const cwd = isolated.dir;
+		const outputDir = join(cwd, ".clio-coder/wiki-staging");
+		mkdirSync(outputDir, { recursive: true });
+		writeFileSync(join(cwd, "package.json"), "{}\n");
+		const plan: WikiPlan = {
+			version: 1,
+			overview: "Cache fixture",
+			pages: [
+				{
+					path: "page.md",
+					title: "page",
+					intent: "Explain page",
+					sources: ["package.json"],
+					status: "pending",
+					attempts: 0,
+				},
+			],
+		};
+		// Every dispatch (writer, retry, repair) returns the same receipt so the fixture does not depend on the dispatch count.
+		const receipt = {
+			exitCode: 0,
+			tokenCount: 50,
+			inputTokenCount: 30,
+			outputTokenCount: 10,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 5,
+			missingTokenCalls: 0,
+			costUsd: 1,
+			costProvenance: "known",
+			...(flags
+				? {
+						upstreamResponses: flags.map((cacheReadReported) => ({
+							usage: { observed: true, cacheReadReported },
+							usageScope: "call",
+						})),
+					}
+				: {}),
+		};
+		let dispatched = 0;
+		const dispatch = {
+			abort() {},
+			async dispatch() {
+				dispatched += 1;
+				return {
+					runId: `cache-${dispatched}`,
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve(receipt),
+				};
+			},
+		} as unknown as DispatchContract;
+		const details: string[] = [];
+		const summaries: string[] = [];
+		await modelWikiGenerate({ dispatch })({
+			cwd,
+			outputDir,
+			mode: "init",
+			resumed: false,
+			plan,
+			unclaimedAreas: [],
+			codewiki: { version: 5, language: "typescript", files: [], symbols: [], edges: [] },
+			generation: { requestedDepth: "simple", depth: "simple", sourceFiles: 1, sourceLines: 1, plan },
+			progress(event) {
+				if (event.message === "wiki invocation usage") summaries.push(event.detail ?? "");
+				else if (event.detail?.includes("; run=cache-")) details.push(event.detail);
+			},
+		});
+		return { details, summaries };
+	} finally {
+		isolated.restore();
+	}
+}
+
+it("prints cache read as unreported when no call reported the field and keeps a measured zero otherwise", async () => {
+	const all = await runCacheReportingFixture("wiki-cache-unreported-", [false, false]);
+	assert.ok(all.details.length > 0);
+	for (const detail of all.details) assert.match(detail, /cache read=unreported, cache write=5/u);
+	assert.match(all.summaries[0] ?? "", /^\d+ dispatched runs; reported tokens: .*cache read=unreported, cache write=/u);
+
+	const mixed = await runCacheReportingFixture("wiki-cache-mixed-", [false, true, false]);
+	assert.ok(mixed.details.length > 0);
+	for (const detail of mixed.details) assert.match(detail, /cache read=0 \(unreported on 2\/3 calls\), cache write=5/u);
+	assert.match(mixed.summaries[0] ?? "", /cache read=0 \(unreported on \d+ runs\), cache write=/u);
+
+	const untracked = await runCacheReportingFixture("wiki-cache-untracked-", undefined);
+	assert.ok(untracked.details.length > 0);
+	for (const detail of untracked.details) assert.match(detail, /cache read=0, cache write=5/u);
+	assert.match(untracked.summaries[0] ?? "", /cache read=0, cache write=/u);
+	assert.doesNotMatch(untracked.summaries[0] ?? "", /unreported/u);
+});
+
 it("counts every attempt of a transiently retried dispatch and pairs each run id with its own tokens", async () => {
 	const isolated = await isolateClioEnv("wiki-retry-usage-");
 	try {
