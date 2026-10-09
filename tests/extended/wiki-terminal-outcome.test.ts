@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -10,11 +10,11 @@ import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-it("reports pending publications as incomplete for wiki and refresh, including no-op updates", () => {
+it("reports incomplete publications and fails wiki generation with pending pages, including no-op updates", () => {
 	for (const command of ["wiki", "refresh", "retry"]) {
 		for (const status of ["generated", "noop"]) {
 			for (const pending of [0, 1, 3]) {
-				const stdout = execFileSync(
+				const result = spawnSync(
 					process.execPath,
 					[
 						"--experimental-test-module-mocks",
@@ -27,6 +27,10 @@ it("reports pending publications as incomplete for wiki and refresh, including n
 					],
 					{ encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] },
 				);
+				assert.ifError(result.error);
+				assert.equal(result.signal, null);
+				assert.equal(result.status, command !== "refresh" && pending > 0 ? 1 : 0, result.stderr);
+				const stdout = result.stdout;
 				assert.match(stdout, new RegExp(`3 published pages; ${3 - pending} complete, ${pending} pending`, "u"));
 				if (pending > 0) {
 					assert.match(stdout, /: incomplete \(/u);

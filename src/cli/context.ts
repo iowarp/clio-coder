@@ -349,8 +349,10 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			process.stderr.write(`clio-coder context wiki failed: ${(result.problems ?? ["unknown failure"]).join("; ")}\n`);
 			return 1;
 		}
-		printWikiOutcome("clio-coder context wiki", result, context.readWikiMeta(process.cwd()));
-		return 0;
+		const meta = context.readWikiMeta(process.cwd());
+		printWikiOutcome("clio-coder context wiki", result, meta);
+		const pending = result.pending ?? meta?.plan?.pages.filter((page) => page.status !== "written").length ?? 0;
+		return pending > 0 ? 1 : 0;
 	} catch (err) {
 		process.stderr.write(`clio-coder context wiki failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
