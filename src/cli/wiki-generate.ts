@@ -177,20 +177,107 @@ async function drainDispatchEvents(
 	return { tools: completed, errors, blocked, firstBlockReason, firstError, mix };
 }
 
-function summaryDetail(summary: DispatchSummary, startedAtClock: number): string {
+function summaryDetail(summary: DispatchSummary, startedAtClock: number, attemptCount = 1): string {
 	const blockedDetail =
 		summary.blocked > 0
 			? `; blocked=${summary.blocked}${summary.firstBlockReason ? ` (${summarizeBlockReason(summary.firstBlockReason)})` : ""}`
 			: "";
 	return (
-		`${formatElapsed(performance.now() - startedAtClock)}; ${summary.mix || "no tools completed"}` +
+		`${formatElapsed(performance.now() - startedAtClock)}${attemptCount > 1 ? ` spanning ${attemptCount} attempts` : ""}; ${summary.mix || "no tools completed"}` +
+		`${attemptCount > 1 && summary.mix ? ` (all ${attemptCount} attempts)` : ""}` +
 		`${summary.errors > 0 ? `; errors=${summary.errors}${summary.firstError ? ` (${summary.firstError})` : ""}` : ""}${blockedDetail}`
 	);
 }
 
+/** Usage and cost facts of one attempt, from its receipt or its finalized ledger envelope. */
+type WikiRunUsage = Pick<
+	RunReceipt,
+	| "tokenCount"
+	| "inputTokenCount"
+	| "outputTokenCount"
+	| "cacheReadTokenCount"
+	| "cacheWriteTokenCount"
+	| "missingTokenCalls"
+	| "costUsd"
+	| "costProvenance"
+> &
+	Partial<Pick<RunReceipt, "costSummary" | "budget">>;
+
+interface WikiEarlierAttempt {
+	runId: string;
+	outcome: string;
+	usage: WikiRunUsage | undefined;
+}
+
+/** Attempts of one logical dispatch other than the terminal one. */
+interface WikiAttempts {
+	/** Run id of the attempt whose receipt resolved the dispatch. */
+	terminalRunId: string;
+	/** Total attempts, terminal included. */
+	count: number;
+	earlier: ReadonlyArray<WikiEarlierAttempt>;
+}
+
 type WikiDispatchOutcome =
 	| { ok: false; phase: "admission"; detail: string }
-	| { ok: boolean; phase: "writer"; detail: string; runId: string; receipt?: RunReceipt };
+	| {
+			ok: boolean;
+			phase: "writer";
+			detail: string;
+			runId: string;
+			receipt?: RunReceipt;
+			attempts?: WikiAttempts;
+	  };
+
+/**
+ * dispatch() hands back the first attempt's run id while its final promise
+ * resolves to the last attempt's receipt. Recover the earlier attempts from the
+ * assignment and the run ledger so a transient retry does not erase their usage.
+ * A dispatch without those surfaces reads as a single attempt.
+ */
+function collectWikiAttempts(
+	dispatch: DispatchContract,
+	rootRunId: string,
+	terminal: RunReceipt | undefined,
+): WikiAttempts | undefined {
+	try {
+		if (typeof dispatch.getRun !== "function") return undefined;
+		const refs = dispatch.assignments?.get(rootRunId)?.attempts;
+		if (!refs || refs.length === 0) return undefined;
+		const terminalRunId = terminal?.runId ?? refs[refs.length - 1]?.runId ?? rootRunId;
+		const earlier: WikiEarlierAttempt[] = [];
+		for (const ref of refs) {
+			if (ref.runId === terminalRunId) continue;
+			const run = dispatch.getRun(ref.runId);
+			const finalized =
+				run !== null &&
+				run.endedAt !== null &&
+				run.status !== "queued" &&
+				run.status !== "running" &&
+				(run.lineage === undefined || run.lineage.rootRunId === rootRunId);
+			earlier.push({
+				runId: ref.runId,
+				outcome: ref.outcome,
+				usage: finalized
+					? {
+							tokenCount: run.tokenCount,
+							...(run.inputTokenCount !== undefined ? { inputTokenCount: run.inputTokenCount } : {}),
+							...(run.outputTokenCount !== undefined ? { outputTokenCount: run.outputTokenCount } : {}),
+							...(run.cacheReadTokenCount !== undefined ? { cacheReadTokenCount: run.cacheReadTokenCount } : {}),
+							...(run.cacheWriteTokenCount !== undefined ? { cacheWriteTokenCount: run.cacheWriteTokenCount } : {}),
+							...(run.missingTokenCalls !== undefined ? { missingTokenCalls: run.missingTokenCalls } : {}),
+							costUsd: run.costUsd,
+							costProvenance: run.costProvenance ?? "unknown",
+							...(run.costSummary ? { costSummary: run.costSummary } : {}),
+						}
+					: undefined,
+			});
+		}
+		return { terminalRunId, count: earlier.length + 1, earlier };
+	} catch {
+		return undefined;
+	}
+}
 
 const USAGE_FIELDS = [
 	["tokenCount", "total"],
@@ -202,7 +289,8 @@ const USAGE_FIELDS = [
 ] as const;
 
 type WikiUsage = Pick<RunReceipt, (typeof USAGE_FIELDS)[number][0]>;
-type WikiReceipts = Array<{ receipt: RunReceipt | undefined; kind: "writer" | "repair" }>;
+type WikiReceipts = Array<{ receipt: WikiRunUsage | undefined; kind: "writer" | "repair" }>;
+const ATTEMPT_LINE_LIMIT = 4;
 
 function usageDetail(usage: WikiUsage): string {
 	return USAGE_FIELDS.map(([key, label]) => `${label}=${usage[key] ?? "unknown"}`).join(", ");
@@ -215,12 +303,31 @@ function dispatchUsage(
 ): string {
 	if (outcome.phase === "admission") return "";
 	const receipt = outcome.receipt;
+	const attempts = outcome.attempts;
 	receipts.push({ receipt, kind });
-	if (!receipt) return `; run=${outcome.runId}; usage unavailable`;
+	for (const earlier of attempts?.earlier ?? []) receipts.push({ receipt: earlier.usage, kind });
+	const runId = attempts?.terminalRunId ?? outcome.runId;
+	const breakdown = attempts && attempts.count > 1 ? attemptsBreakdown(attempts, receipt) : "";
+	if (!receipt) return `; run=${runId}; usage unavailable${breakdown}`;
 	const provenance = receipt.costProvenance;
 	return (
-		`; run=${outcome.runId}; tokens: ${usageDetail(receipt)}; cost=${renderCostAmount(receipt.costUsd, provenance, receipt.costSummary)} (${provenance})` +
-		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "")
+		`; run=${runId}; tokens: ${usageDetail(receipt)}; cost=${renderCostAmount(receipt.costUsd, provenance, receipt.costSummary)} (${provenance})` +
+		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "") +
+		breakdown
+	);
+}
+
+function attemptsBreakdown(attempts: WikiAttempts, terminal: WikiRunUsage | undefined): string {
+	const shown = attempts.earlier
+		.slice(0, ATTEMPT_LINE_LIMIT)
+		.map((a) => `${a.runId} tokens=${a.usage?.tokenCount ?? "unknown"} outcome=${a.outcome}`);
+	const hidden = attempts.earlier.length - shown.length;
+	const all = [terminal, ...attempts.earlier.map((a) => a.usage)];
+	const total = all.reduce((sum, usage) => sum + (usage?.tokenCount ?? 0), 0);
+	const incomplete = all.some((usage) => usage === undefined);
+	return (
+		`; attempts=${attempts.count} (earlier: ${shown.join(", ")}${hidden > 0 ? `, +${hidden} more` : ""})` +
+		`; all-attempt tokens total=${total}${incomplete ? " (incomplete)" : ""}`
 	);
 }
 
@@ -375,13 +482,16 @@ async function runWikiDispatch(input: {
 			completedTools = tools;
 		});
 		receipt = await handle.finalPromise;
+		const attempts = collectWikiAttempts(input.dispatch, handle.runId, receipt);
+		const spanned = attempts?.count ?? 1;
 		if (timedOut || safetyDeadline.timedOut())
 			return {
 				ok: false,
 				phase: "writer",
 				runId: handle.runId,
 				receipt,
-				detail: `${timedOut ? "timed out: explicit wiki deadline reached" : safetyDeadline.message()}; ${summaryDetail(summary, startedAtClock)}`,
+				...(attempts ? { attempts } : {}),
+				detail: `${timedOut ? "timed out: explicit wiki deadline reached" : safetyDeadline.message()}; ${summaryDetail(summary, startedAtClock, spanned)}`,
 			};
 		if (receipt.exitCode !== 0) {
 			input.dispatch.abort(handle.runId);
@@ -390,13 +500,22 @@ async function runWikiDispatch(input: {
 				phase: "writer",
 				runId: handle.runId,
 				receipt,
-				detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAtClock)}`,
+				...(attempts ? { attempts } : {}),
+				detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAtClock, spanned)}`,
 			};
 		}
-		return { ok: true, phase: "writer", runId: handle.runId, receipt, detail: summaryDetail(summary, startedAtClock) };
+		return {
+			ok: true,
+			phase: "writer",
+			runId: handle.runId,
+			receipt,
+			...(attempts ? { attempts } : {}),
+			detail: summaryDetail(summary, startedAtClock, spanned),
+		};
 	} catch (err) {
 		if (!timedOut) input.dispatch.abort(handle.runId);
 		receipt = await handle.finalPromise.catch(() => undefined);
+		const attempts = collectWikiAttempts(input.dispatch, handle.runId, receipt);
 		const reason = timedOut
 			? "timed out: explicit wiki deadline reached"
 			: safetyDeadline.timedOut()
@@ -409,6 +528,7 @@ async function runWikiDispatch(input: {
 			phase: "writer",
 			runId: handle.runId,
 			...(receipt ? { receipt } : {}),
+			...(attempts ? { attempts } : {}),
 			detail: `${reason}; ${formatElapsed(performance.now() - startedAtClock)}`,
 		};
 	} finally {
