@@ -753,7 +753,7 @@ try {
 		await check("library-agent-details");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `library-agents-${width}.png`), fullPage: true });
-		for (const collection of ["Agents", "Prompts", "Fleets", "Extensions", "Verifiers"]) {
+		for (const collection of ["Agents", "Prompts", "Playbooks", "Extensions", "Verifiers"]) {
 			await page
 				.locator("main")
 				.getByRole("tab", { name: new RegExp(`^${collection} · [1-9]`) })
