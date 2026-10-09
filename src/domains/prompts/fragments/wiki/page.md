@@ -39,8 +39,9 @@ validate:
 ```
 
 `sources` and `tests` must be repository-relative paths that exist. They are read by tooling to
-route future work to this page, so a path that is not there is worse than one you leave out. A
-list with nothing to put in it is omitted entirely. Include at least one inspected repository file
+route future work to this page, so a path that is not there is worse than one you leave out.
+When a list has no entries, omit its key entirely; never emit an empty key or null for `sources`
+or `tests`. Include at least one inspected repository file
 in `sources`, `tests`, or a backticked body citation. File references must stay inside the
 repository, including symlink targets. Exact line citations must resolve to current file lines.
 Unresolved paths or invented line ranges fail the mechanical publication check; that check
@@ -78,6 +79,9 @@ Grounding rules:
   the body. Omit it when none apply; never invent a decision ref or a missing rationale.
 - Cite source paths in backticks: `src/domains/dispatch/validation.ts`. Prefer a stable path plus
   a symbol name over a line number; use `path:line` only when the exact location is load-bearing.
+- A backticked standalone path is a repository citation and must exist. Use plain quoted text
+  for artifact names, naming patterns, and absent paths, with a separate citation to the
+  enforcing source or test.
 - Use repository-relative file paths in prose even when describing a relative import. A module's
   import specifier is relative to that module, and copying it as a file citation can escape the
   repository root. Name the resolved repository file instead. Quote test glob selectors inside

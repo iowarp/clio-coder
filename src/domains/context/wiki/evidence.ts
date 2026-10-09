@@ -62,7 +62,8 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 						value !== undefined &&
 						(!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim()))
 					) {
-						fail(`Repair frontmatter ${field}: use a list of nonempty repository-relative file paths.`);
+						const received = value === null ? "null" : Array.isArray(value) ? "array with invalid entries" : typeof value;
+						fail(`Repair frontmatter ${field}: use a list of nonempty repository-relative file paths; received ${received}.`);
 					}
 				}
 			}
