@@ -528,7 +528,7 @@ async function runPagePhase(
 					draftHash: createHash("sha256")
 						.update(readFileSync(join(input.outputDir, page.path)))
 						.digest("hex"),
-					diagnostics: diagnostic?.reasons ?? [],
+					diagnostics: diagnostic?.allReasons ?? diagnostic?.reasons ?? [],
 					sources,
 				})
 			: buildWikiPagePrompt({
@@ -584,7 +584,9 @@ async function runPagePhase(
 			else
 				nextPage.lastFailure = {
 					phase: repair ? "writer" : outcome.ok ? "validation" : outcome.phase,
-					detail: repair ? `repair failed: ${detail}; full writer required next invocation` : detail,
+					detail: (repair ? `repair failed: ${detail}; full writer required next invocation` : detail)
+						.replace(/\s+/gu, " ")
+						.slice(0, 500),
 					...(outcome.phase === "writer" ? { runId: outcome.runId } : {}),
 				};
 			return nextPage;

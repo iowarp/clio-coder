@@ -83,7 +83,7 @@ function parsedFailure(value: unknown): WikiPageFailure | undefined {
 	const detail = usableString(value.detail);
 	if (!detail) return undefined;
 	const runId = usableString(value.runId)?.slice(0, 120);
-	return { phase, detail, ...(runId ? { runId } : {}) };
+	return { phase, detail: detail.replace(/\s+/gu, " ").slice(0, 500), ...(runId ? { runId } : {}) };
 }
 
 export interface SanitizeWikiPlanOptions {

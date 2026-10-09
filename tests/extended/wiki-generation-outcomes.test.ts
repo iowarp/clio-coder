@@ -112,7 +112,9 @@ describe("wiki generation outcomes", () => {
 		const succeeds = resultKind === "valid";
 		it(`dispatches one bounded repair with complete diagnostics and ${succeeds ? "credits its validated edit" : `keeps ${resultKind} pending`}`, async () => {
 			const plan: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
-			const invalid = content("a", 1) + Array.from({ length: 8 }, (_, n) => `See \`src/missing-${n}.ts\`.\n`).join("");
+			const invalid =
+				content("a", 1) +
+				Array.from({ length: 12 }, (_, n) => `See \`src/${n === 11 ? "x".repeat(330) : ""}missing-${n}.ts\`.\n`).join("");
 			const requests: JobSpec[] = [];
 			const result = await run(
 				generator(
@@ -133,9 +135,10 @@ describe("wiki generation outcomes", () => {
 							const data = /```json\s+([\s\S]*?)\s+```/u.exec(spec.task)?.[1];
 							assert.ok(data);
 							const diagnostics = JSON.parse(data).diagnostics;
-							assert.equal(diagnostics.length, 8);
+							assert.equal(diagnostics.length, 12);
 							assert.ok(JSON.stringify(diagnostics).length > 500);
-							assert.match(diagnostics.at(-1), /missing-7/u);
+							assert.match(diagnostics.at(-1), /missing-11/u);
+							assert.ok(diagnostics.at(-1).length > 300);
 							assert.doesNotMatch(spec.task, /Read every one|Indexed symbols|Repository guidance/u);
 							assert.equal(spec.intent?.readRoots.includes("."), false);
 						}
@@ -155,6 +158,7 @@ describe("wiki generation outcomes", () => {
 			assert.equal(saved?.status, succeeds ? "written" : "pending");
 			if (!succeeds) {
 				assert.match(saved?.lastFailure?.detail ?? "", /repair failed/u);
+				assert.ok((saved?.lastFailure?.detail.length ?? 0) <= 500);
 				await run(
 					generator((spec, path) => {
 						assert.equal(spec.agentId, "wiki-writer");
