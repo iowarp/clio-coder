@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { Client } from "../api/client.js";
 import { useShell } from "../shell/shell-context.js";
+import { settingsDestination } from "../shell/shell-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import type { SettingsScopeId } from "./settings-control-model.js";
 import { SettingsControlsView } from "./settings-controls.js";
@@ -25,7 +26,7 @@ function SettingsPageFrame({
 	scope: SettingsScopeId;
 	title: string;
 	lede: string;
-	before?: ReactNode;
+	before?: (workspaceId: string) => ReactNode;
 	after?: ReactNode;
 }) {
 	const shell = useShell();
@@ -40,7 +41,7 @@ function SettingsPageFrame({
 					<p className="settings-page__lede">{lede}</p>
 				</div>
 			</div>
-			{before}
+			{before?.(id)}
 			{(selection.workspaces.data?.length ?? 0) > 1 ? <WorkspacePicker selection={{ ...selection, id }} /> : null}
 			{id ? (
 				<SettingsControlsView key={`${id}:${scope}`} client={client} workspaceId={id} scope={scope} />
@@ -67,28 +68,28 @@ export function ModelsSettings({ client }: { client: Client }) {
 			scope="models"
 			title="Models"
 			lede="Which model answers, and how it answers. Connections and sign-in are set up in the guided setup."
-			before={
+			before={(workspaceId) => (
 				<ul className="settings-page__links">
 					<li>
-						<Link to={setupLink()} state={{ from: "/settings/models" }}>
+						<Link to={setupLink()} state={{ from: settingsDestination("/settings/models", workspaceId) }}>
 							Add a connection <span aria-hidden="true">→</span>
 						</Link>
 						<small>Guided setup for an app, a server, a subscription or an API account.</small>
 					</li>
 					<li>
-						<Link to="/settings/targets">
+						<Link to={settingsDestination("/settings/targets", workspaceId)}>
 							Connections <span aria-hidden="true">→</span>
 						</Link>
 						<small>Check each connection, choose the one that answers, repair or remove one.</small>
 					</li>
 					<li>
-						<Link to="/settings/routing">
+						<Link to={settingsDestination("/settings/routing", workspaceId)}>
 							Routing <span aria-hidden="true">→</span>
 						</Link>
 						<small>Which model each profile and agent uses.</small>
 					</li>
 				</ul>
-			}
+			)}
 		/>
 	);
 }
@@ -122,22 +123,22 @@ export function AdvancedSettings({ client }: { client: Client }) {
 			scope="advanced"
 			title="All settings"
 			lede="Every other setting the runtime offers, with search. Each one is saved to your user settings."
-			before={
+			before={(workspaceId) => (
 				<ul className="settings-page__links">
 					<li>
-						<Link to="/settings/effective">
+						<Link to={settingsDestination("/settings/effective", workspaceId)}>
 							Effective values <span aria-hidden="true">→</span>
 						</Link>
 						<small>What is in force right now, and which layer set it.</small>
 					</li>
 					<li>
-						<Link to="/settings/why">
+						<Link to={settingsDestination("/settings/why", workspaceId)}>
 							Sources and timing <span aria-hidden="true">→</span>
 						</Link>
 						<small>How the layers combine and when each change takes effect.</small>
 					</li>
 				</ul>
-			}
+			)}
 		/>
 	);
 }
