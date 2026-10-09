@@ -75,7 +75,9 @@ test("a queued read spends its deadline on its own work, not on the call ahead o
 test("HTTP read deadline returns an unavailable problem while the adapter completes", async (t) => {
 	const h = await harness({ readDelayMs: 100, readDeadlineMs: 20 });
 	t.after(h.close);
-	await h.reads.call("tools.list", {}, { deadlineMs: 2000 });
+	// Warm-up only primes the worker; a cold start on a loaded 4-vCPU runner
+	// exceeded 2 s in ci (22). The 20 ms read deadline is what this test checks.
+	await h.reads.call("tools.list", {}, { deadlineMs: 10_000 });
 	const response = await h.request("/api/toolchain/tools");
 	assert.equal(response.status, 503);
 	assert.equal((await json(response, Problem)).code, "unavailable");
