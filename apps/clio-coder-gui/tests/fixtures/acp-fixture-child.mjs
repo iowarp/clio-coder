@@ -15,6 +15,7 @@ const settings = {
 	safety: { autonomy: "default" },
 };
 const editable = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"];
+const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const configOptions = () => [
 	{ id: "autonomy", currentValue: autonomy, options: [] },
 	{
@@ -23,12 +24,12 @@ const configOptions = () => [
 		options: (settings.chat.target === "field-station"
 			? ["survey-large", "survey-small"]
 			: ["fixture-model", "fixture-small"]
-		).map((value) => ({ value, name: value })),
+		).map((value) => ({ value, name: value, thinkingLevels })),
 	},
 	{
 		id: "thinkingLevel",
 		currentValue: settings.chat.thinkingLevel,
-		options: ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((value) => ({ value, name: value })),
+		options: thinkingLevels.map((value) => ({ value, name: value })),
 	},
 ];
 const pending = new Map();
