@@ -5499,8 +5499,10 @@ export function createDispatchBundle(
 					),
 				);
 			}
-			if (event.type === "message_end" && event.message?.role === "assistant") {
-				const u = isRecord(event.message.usage) ? event.message.usage : {};
+			// A usage-less assistant message_end is synthetic (an ACP delegation fault, for one), not a provider call, so
+			// counting it would inflate apiCalls and falsely flag token usage as missing.
+			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
+				const u = event.message.usage;
 				accumulateNativeUsage(tokenMeter, u, null);
 				upstreamResponses.push(
 					upstreamResponse(
@@ -7011,8 +7013,10 @@ export function createDispatchBundle(
 					),
 				);
 			}
-			if (event.type === "message_end" && event.message?.role === "assistant") {
-				const u = isRecord(event.message.usage) ? event.message.usage : {};
+			// A usage-less assistant message_end is synthetic (an ACP delegation fault, for one), not a provider call, so
+			// counting it would inflate apiCalls and falsely flag token usage as missing.
+			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
+				const u = event.message.usage;
 				if (lifecycle.runtimeKind === "subprocess") {
 					const evidence = isRecord(u.clioExternal) ? u.clioExternal : null;
 					const stopReason = event.message.stopReason;
