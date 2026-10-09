@@ -1,7 +1,6 @@
 import { Fragment } from "react";
 import { Link, useLocation } from "react-router";
 import { Icon } from "../design/icons.js";
-import { useShell } from "./shell-context.js";
 import {
 	SETTINGS_GROUPS,
 	SETTINGS_SECTIONS,
@@ -36,10 +35,17 @@ function SectionLink({
 }
 
 /** Configuration is reached from the work sidebar's Settings button. */
-export function SettingsSidebar({ onNavigate, onHelp }: { onNavigate: () => void; onHelp: () => void }) {
+export function SettingsSidebar({
+	activeWorkspaceId,
+	onNavigate,
+	onHelp,
+}: {
+	activeWorkspaceId: string | null;
+	onNavigate: () => void;
+	onHelp: () => void;
+}) {
 	const location = useLocation();
-	const shell = useShell();
-	const workspaceId = new URLSearchParams(location.search).get("workspace") || shell?.activeWorkspaceId;
+	const workspaceId = new URLSearchParams(location.search).get("workspace") || activeWorkspaceId;
 	const current = settingsSectionFor(location.pathname);
 	return (
 		<nav className="wb-side__sections" aria-label="Settings">

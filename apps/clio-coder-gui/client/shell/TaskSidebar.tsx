@@ -119,7 +119,7 @@ export function TaskSidebar({
 					<Link className="wb-back" to={backTo.current} onClick={onNavigate}>
 						<Icon name="arrowLeft" /> Back to work
 					</Link>
-					<SettingsSidebar onNavigate={onNavigate} onHelp={onHelp} />
+					<SettingsSidebar activeWorkspaceId={activeWorkspaceId} onNavigate={onNavigate} onHelp={onHelp} />
 				</div>
 			) : (
 				<div className="wb-side__panel">
