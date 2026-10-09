@@ -910,7 +910,7 @@ try {
 		assert.ok(grownComposer.bottomGap <= 32, "a growing draft moved a followed transcript away from its live edge");
 		// A `/name` nothing owns is flagged before it is sent; a loaded template is not.
 		await composerField.fill("/tpyo fix the build");
-		await page.getByText("/tpyo is not a command or prompt template in this session").waitFor();
+		await page.getByText("/tpyo is not a command or prompt template in this task").waitFor();
 		await check("composer-unknown-command");
 		await composerField.fill("/review-pr 42");
 		await page.getByText("is not a command or prompt template").waitFor({ state: "detached" });
