@@ -443,6 +443,31 @@ function preserveInterruptedReasoning(
 	};
 }
 
+/**
+ * The gpt-oss chat template raises on an assistant turn that carries text,
+ * reasoning and tool calls together ("Cannot pass both content and thinking in
+ * an assistant message with tool calls"). Hosted endpoints report it as a bare
+ * 400, so one such turn poisons every later request in the session. Harmony
+ * renders that text on the analysis channel anyway: drop the reasoning from
+ * the request only and never modify the saved transcript.
+ */
+function harmonyToolTurnsWithoutThinking(context: Context, resolved: ResolvedModelRuntimeCapabilities): Context {
+	if (resolved.response.parser !== "harmony") return context;
+	return {
+		...context,
+		messages: context.messages.map((message) => {
+			if (
+				message.role !== "assistant" ||
+				!message.content.some((block) => block.type === "toolCall") ||
+				!message.content.some((block) => block.type === "text" && block.text.trim().length > 0) ||
+				!message.content.some((block) => block.type === "thinking")
+			)
+				return message;
+			return { ...message, content: message.content.filter((block) => block.type !== "thinking") };
+		}),
+	};
+}
+
 function withStrippedPartial<TEvent extends AssistantMessageEvent>(event: TEvent): TEvent {
 	if (!("partial" in event)) return event;
 	return { ...event, partial: stripThinkingFromMessage(event.partial as AssistantMessage) };
@@ -1067,7 +1092,9 @@ function streamCompletions<TOptions extends StreamOptions>(
 	) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
 	const resolved = resolvedCapabilitiesForModel(model, level);
-	const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
+	const effectiveContext = stripsThinking(resolved)
+		? stripThinkingFromContext(context)
+		: harmonyToolTurnsWithoutThinking(context, resolved);
 	// Pi's credential check reads request headers, while its HTTP client also
 	// reads model headers. Forward both so header-authenticated targets pass both.
 	const transportOptions = model.headers
