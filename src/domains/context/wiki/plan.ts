@@ -115,12 +115,23 @@ export const MAX_PLAN_PAGES = 200;
 export const MAX_PLAN_PATH_CHARS = 200;
 export const MAX_PLAN_INTENT_CHARS = 600;
 export const MAX_MEDIUM_OWNERSHIP_PAGES = 24;
+export const MAX_DETAILED_OWNERSHIP_PAGES = 64;
 const MEDIUM_SPLIT_LINES = 8_000;
+const DETAILED_SPLIT_LINES = 4_000;
 
 interface Area {
 	key: string;
 	files: CodewikiFile[];
 	lines: number;
+	/** Set on an owner made of one directory's direct files grouped by filename prefix. */
+	group?: FlatGroup;
+}
+
+interface FlatGroup {
+	dir: string;
+	name: string;
+	first: string;
+	last: string;
 }
 
 /**
@@ -201,16 +212,161 @@ function collectAreas(source: ReadonlyArray<CodewikiFile>, areaDepth: number): A
 	return [...byKey.values()].sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
 }
 
-function mediumOwnership(areas: Area[], threshold: number): Area[] {
+interface OwnershipBounds {
+	maxOwners: number;
+	minSplitLines: number;
+	divisor: number;
+	areaShare: number;
+	minAreaLines: number;
+	/** Split directories whose lines sit in direct files by filename prefix. */
+	flat: boolean;
+}
+
+const OWNERSHIP_BOUNDS: Record<"medium" | "detailed", OwnershipBounds> = {
+	medium: {
+		maxOwners: MAX_MEDIUM_OWNERSHIP_PAGES,
+		minSplitLines: MEDIUM_SPLIT_LINES,
+		divisor: MAX_MEDIUM_OWNERSHIP_PAGES,
+		areaShare: WIKI_DEPTH_STRATEGY.medium.areaShare,
+		minAreaLines: WIKI_DEPTH_STRATEGY.medium.minAreaLines,
+		flat: false,
+	},
+	detailed: {
+		maxOwners: MAX_DETAILED_OWNERSHIP_PAGES,
+		minSplitLines: DETAILED_SPLIT_LINES,
+		divisor: MAX_DETAILED_OWNERSHIP_PAGES,
+		areaShare: WIKI_DEPTH_STRATEGY.detailed.areaShare,
+		minAreaLines: WIKI_DEPTH_STRATEGY.detailed.minAreaLines,
+		flat: true,
+	},
+};
+
+function byPath(a: CodewikiFile, b: CodewikiFile): number {
+	return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+}
+
+function baseName(path: string): string {
+	return path.split("/").pop() ?? path;
+}
+
+function fileStem(path: string): string {
+	return baseName(path).replace(/\.[^.]*$/, "");
+}
+
+function stemTokens(path: string): string[] {
+	const stem = fileStem(path);
+	const tokens = stem.split(/[-_.]/).filter((token) => token.length > 0);
+	return tokens.length > 0 ? tokens : [stem];
+}
+
+function sumLines(files: ReadonlyArray<CodewikiFile>): number {
+	return files.reduce((total, file) => total + Math.max(0, file.loc), 0);
+}
+
+/** Split sorted files into contiguous groups of at most `limit` lines; a file above it stays alone. */
+function rawGroups(files: CodewikiFile[], limit: number): CodewikiFile[][] {
+	const groups: CodewikiFile[][] = [];
+	let current: CodewikiFile[] = [];
+	let lines = 0;
+	for (const file of files) {
+		const size = Math.max(0, file.loc);
+		if (current.length > 0 && lines + size > limit) {
+			groups.push(current);
+			current = [];
+			lines = 0;
+		}
+		current.push(file);
+		lines += size;
+	}
+	if (current.length > 0) groups.push(current);
+	return groups;
+}
+
+/**
+ * Contiguous groups of sorted files, cut on filename-prefix boundaries. Consecutive prefix groups pack
+ * greedily while they stay within `limit`; a prefix group above it splits by the next stem token, and
+ * only when tokens run out by raw sorted order.
+ */
+function prefixGroups(files: CodewikiFile[], level: number, limit: number): CodewikiFile[][] {
+	const runs: CodewikiFile[][] = [];
+	let previousToken: string | undefined;
+	for (const file of files) {
+		const token = stemTokens(file.path)[level] ?? "";
+		if (previousToken === token) runs[runs.length - 1]?.push(file);
+		else runs.push([file]);
+		previousToken = token;
+	}
+	const out: CodewikiFile[][] = [];
+	let pending: CodewikiFile[] = [];
+	let pendingLines = 0;
+	const flush = (): void => {
+		if (pending.length > 0) out.push(pending);
+		pending = [];
+		pendingLines = 0;
+	};
+	for (const run of runs) {
+		const lines = sumLines(run);
+		if (lines <= limit) {
+			if (pendingLines + lines > limit) flush();
+			pending.push(...run);
+			pendingLines += lines;
+			continue;
+		}
+		flush();
+		const tokenDepth = Math.max(...run.map((file) => stemTokens(file.path).length));
+		if (run.length === 1) out.push(run);
+		else if (level + 1 < tokenDepth) out.push(...prefixGroups(run, level + 1, limit));
+		else out.push(...rawGroups(run, limit));
+	}
+	flush();
+	return out;
+}
+
+/** The page name of one flat group: its shared stem prefix, else its first and last stems. */
+function flatGroupName(files: ReadonlyArray<CodewikiFile>): string {
+	const first = files[0];
+	const last = files[files.length - 1];
+	if (!first || !last) return "files";
+	if (files.length === 1) return slugSegment(fileStem(first.path));
+	const firstTokens = stemTokens(first.path);
+	let prefix = 0;
+	while (prefix < firstTokens.length && files.every((file) => stemTokens(file.path)[prefix] === firstTokens[prefix]))
+		prefix += 1;
+	if (prefix > 0) return slugSegment(firstTokens.slice(0, prefix).join("-"));
+	return `${slugSegment(fileStem(first.path))}-to-${slugSegment(fileStem(last.path))}`;
+}
+
+/** Owners for the direct files of one directory, and the files of that scope they leave behind. */
+function flatOwners(
+	dir: string,
+	files: ReadonlyArray<CodewikiFile>,
+	limit: number,
+): { groups: Area[]; rest: CodewikiFile[] } {
+	const isDirect = (file: CodewikiFile): boolean => areaForPath(file.path, Number.MAX_SAFE_INTEGER) === dir;
+	const direct = files.filter(isDirect).sort(byPath);
+	const rest = files.filter((file) => !isDirect(file));
+	const groups = prefixGroups(direct, 0, limit).map((group): Area => {
+		const first = group[0] as CodewikiFile;
+		const last = group[group.length - 1] as CodewikiFile;
+		return {
+			key: `${dir}#${first.path}`,
+			files: group,
+			lines: sumLines(group),
+			group: { dir, name: flatGroupName(group), first: baseName(first.path), last: baseName(last.path) },
+		};
+	});
+	return { groups, rest };
+}
+
+function boundedOwnership(areas: Area[], threshold: number, bounds: OwnershipBounds): Area[] {
+	const { maxOwners } = bounds;
 	const splitLines = Math.max(
-		MEDIUM_SPLIT_LINES,
-		Math.ceil(areas.reduce((sum, area) => sum + area.lines, 0) / MAX_MEDIUM_OWNERSHIP_PAGES),
+		bounds.minSplitLines,
+		Math.ceil(areas.reduce((sum, area) => sum + area.lines, 0) / bounds.divisor),
 	);
 	const included = areas.filter((area) => area.lines >= threshold);
 	const selected = included.length > 0 ? included : areas.slice(0, 1);
-	const owned = new Map(
-		selected.slice(0, MAX_MEDIUM_OWNERSHIP_PAGES - 1).map((area) => [area.key, { ...area, files: [...area.files] }]),
-	);
+	const owned = new Map(selected.slice(0, maxOwners - 1).map((area) => [area.key, { ...area, files: [...area.files] }]));
 	const selectedKeys = new Set(owned.keys());
 	for (const area of areas) {
 		if (selectedKeys.has(area.key)) continue;
@@ -220,7 +376,7 @@ function mediumOwnership(areas: Area[], threshold: number): Area[] {
 		const parent = area.key.split("/").slice(0, -1).join("/") || ".";
 		const key = owned.has(area.key)
 			? area.key
-			: (ancestor ?? (owned.has(parent) || owned.size < MAX_MEDIUM_OWNERSHIP_PAGES - 1 ? parent : "."));
+			: (ancestor ?? (owned.has(parent) || owned.size < maxOwners - 1 ? parent : "."));
 		const host = owned.get(key) ?? { key, files: [], lines: 0 };
 		host.files.push(...area.files);
 		host.lines += area.lines;
@@ -229,8 +385,8 @@ function mediumOwnership(areas: Area[], threshold: number): Area[] {
 	const result = [...owned.values()].sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
 	for (let position = 0; position < result.length; position += 1) {
 		const area = result[position];
-		if (!area || area.lines <= splitLines) continue;
-		const { areaShare, minAreaLines } = WIKI_DEPTH_STRATEGY.medium;
+		if (!area || area.group || area.lines <= splitLines) continue;
+		const { areaShare, minAreaLines } = bounds;
 		const childThreshold = Math.max(minAreaLines, Math.floor(area.lines * areaShare));
 		let childDepth = area.key === "." ? 1 : area.key.split("/").length + 1;
 		let children = collectAreas(area.files, childDepth);
@@ -244,33 +400,38 @@ function mediumOwnership(areas: Area[], threshold: number): Area[] {
 		const substantial = children.filter((child) => child.key !== area.key && child.lines >= childThreshold);
 		const keys = new Set(substantial.map((child) => child.key));
 		const remainder = children.filter((child) => !keys.has(child.key));
-		const split = [
-			...substantial,
-			...(remainder.length > 0
-				? [
-						{
-							key: area.key,
-							files: remainder.flatMap((child) => child.files),
-							lines: remainder.reduce((sum, child) => sum + child.lines, 0),
-						},
-					]
-				: []),
-		];
-		if (split.length < 2) continue;
-		const merged = new Map(result.filter((_, index) => index !== position).map((entry) => [entry.key, entry]));
-		for (const child of split) {
-			const existing = merged.get(child.key);
-			merged.set(
-				child.key,
-				existing
-					? { key: child.key, files: [...existing.files, ...child.files], lines: existing.lines + child.lines }
-					: child,
-			);
+		const remainderFiles = remainder.flatMap((child) => child.files);
+		const remainderLines = remainder.reduce((sum, child) => sum + child.lines, 0);
+		const withRemainder = (parts: Area[], files: CodewikiFile[]): Area[] =>
+			files.length > 0 ? [...parts, { key: area.key, files, lines: sumLines(files) }] : parts;
+		const candidates: Area[][] = [];
+		if (bounds.flat && remainderLines > splitLines) {
+			const flat = flatOwners(area.key, remainderFiles, splitLines);
+			candidates.push(withRemainder([...substantial, ...flat.groups], flat.rest));
+			if (substantial.length > 0) {
+				const only = flatOwners(area.key, area.files, splitLines);
+				candidates.push(withRemainder(only.groups, only.rest));
+			}
 		}
-		if (merged.size > MAX_MEDIUM_OWNERSHIP_PAGES) continue;
-		result.splice(0, result.length, ...merged.values());
-		result.sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
-		position = -1;
+		candidates.push(withRemainder(substantial, remainderFiles));
+		for (const split of candidates) {
+			if (split.length < 2) continue;
+			const merged = new Map(result.filter((_, index) => index !== position).map((entry) => [entry.key, entry]));
+			for (const child of split) {
+				const existing = merged.get(child.key);
+				merged.set(
+					child.key,
+					existing
+						? { key: child.key, files: [...existing.files, ...child.files], lines: existing.lines + child.lines }
+						: child,
+				);
+			}
+			if (merged.size > maxOwners) continue;
+			result.splice(0, result.length, ...merged.values());
+			result.sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
+			position = -1;
+			break;
+		}
 	}
 	for (const area of result) area.files.sort((a, b) => a.path.localeCompare(b.path));
 	return result.sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
@@ -301,12 +462,17 @@ function intentForScope(
 	files: ReadonlyArray<CodewikiFile>,
 	areaDepth: number,
 	maxChars = MAX_PLAN_INTENT_CHARS,
+	assigned?: string[],
 ): string {
 	const lines = files.reduce((total, file) => total + Math.max(0, file.loc), 0);
 	const introduction =
 		`Assigned scope (${files.length} indexed files, ${lines} lines): document responsibilities and key entry points/symbols; ` +
 		"explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests " +
 		"establish them. Anchors are starting points, not the full assignment. Assigned areas: ";
+	if (assigned) {
+		const fit = assigned.find((option) => introduction.length + option.length + 1 <= maxChars);
+		return `${introduction}${fit ?? "repository root"}.`;
+	}
 	let scopeDepth = areaDepth;
 	let scopes = [...new Set(files.map((file) => areaForPath(file.path, scopeDepth)))].sort();
 	while (introduction.length + scopes.join(", ").length + 1 > maxChars && scopeDepth > 1) {
@@ -360,11 +526,15 @@ function candidateWithScopes(
 	// If every area is below threshold, the largest hosts the folded coverage.
 	// At simple depth a single ownership group shares the architecture page.
 	const selected =
-		depth === "medium" ? mediumOwnership(areas, threshold) : included.length > 0 ? included : areas.slice(0, 1);
+		depth === "simple"
+			? included.length > 0
+				? included
+				: areas.slice(0, 1)
+			: boundedOwnership(areas, threshold, OWNERSHIP_BOUNDS[depth]);
 	const selectedKeys = new Set(selected.map((area) => area.key));
 	const extras = new Map<string, CodewikiFile[]>();
 	for (const area of areas) {
-		if (depth === "medium") break;
+		if (depth !== "simple") break;
 		if (selectedKeys.has(area.key)) continue;
 		const ancestor = selected.find((candidate) => area.key.startsWith(`${candidate.key}/`));
 		const host = ancestor?.key ?? selected[0]?.key;
@@ -395,12 +565,28 @@ function candidateWithScopes(
 	const pages = selected.map((area): WikiPlanPage => {
 		const files = [...area.files, ...(extras.get(area.key) ?? [])];
 		scopes.push(files);
+		if (area.group) {
+			const { dir, name, first, last } = area.group;
+			const named = dir === "." ? name : `${dir}/${name}`;
+			const dirLabel = dir === "." ? "repository root" : dir;
+			return {
+				path: pagePathForArea(named),
+				title: titleForArea(named),
+				intent: intentForScope(files, areaDepth, MAX_PLAN_INTENT_CHARS, [
+					`${dirLabel} (${first === last ? first : `${first} to ${last}`})`,
+					dirLabel,
+				]),
+				sources: rankedSources(files),
+				status: "pending",
+				attempts: 0,
+			};
+		}
 		return {
 			path: pagePathForArea(area.key),
 			title: titleForArea(area.key),
 			intent: intentForScope(
 				files,
-				depth === "medium" ? (area.key === "." ? 1 : area.key.split("/").length + 1) : areaDepth,
+				depth === "simple" ? areaDepth : area.key === "." ? 1 : area.key.split("/").length + 1,
 			),
 			sources: rankedSources(files),
 			status: "pending",
