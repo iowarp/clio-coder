@@ -851,19 +851,21 @@ try {
 		// Complete accounting lives with the turn outcome, not as a repeated line above the
 		// composer. Its native disclosure must work from the keyboard and remain accessible open.
 		assert.equal(await page.locator(".conversation__dock > .chat-usage").count(), 0);
-		const usage = page.locator(".turn-usage").last();
+		const usage = page.locator(".turn-outcome").last();
 		const usageSummary = usage.locator("summary");
 		await usageSummary.focus();
 		await page.keyboard.press("Enter");
 		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), true);
-		assert.equal(
-			await usage
-				.locator("dt")
-				.allTextContents()
-				.then((labels) => labels.join(" · ")),
-			"Input · Output · Cache read · Cache write · Reasoning",
-		);
-		assert.deepEqual(await usage.locator("dd").allTextContents(), ["11", "12", "13", "14", "15"]);
+		const tokenGroup = usage.locator(".turn-details__group", {
+			has: page.getByRole("heading", { name: "Usage", exact: true }),
+		});
+		assert.deepEqual(await tokenGroup.locator("dt").allTextContents(), ["Input", "Output", "Reasoning"]);
+		assert.deepEqual(await tokenGroup.locator("dd").allTextContents(), ["11", "12", "15"]);
+		const cacheGroup = usage.locator(".turn-details__group", {
+			has: page.getByRole("heading", { name: "Cache", exact: true }),
+		});
+		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Hit share", "Written"]);
+		assert.deepEqual(await cacheGroup.locator("dd").allTextContents(), ["34%", "14"]);
 		await check("conversation-usage");
 		await page.keyboard.press("Enter");
 		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
