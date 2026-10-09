@@ -5,6 +5,7 @@ import {
 } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { flushPackageActivities, PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
+import { aggregateCostAmounts } from "../observability/cost.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import type { LabelEntry, SessionEntry, SessionInfoEntry } from "./entries.js";
@@ -237,6 +238,18 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 					outcome: "loaded",
 				});
 			return activation;
+		},
+		recordUsage(turn) {
+			if (!state) throw new Error("session.recordUsage: no current session");
+			const prev = state.meta.usage;
+			state.meta.usage = {
+				tokens: (prev?.tokens ?? 0) + turn.tokens,
+				cost: aggregateCostAmounts([
+					...(prev ? [{ usd: 0, provenance: "unknown" as const, apiCalls: prev.cost.calls, costSummary: prev.cost }] : []),
+					{ usd: 0, provenance: "unknown", apiCalls: turn.cost.calls, costSummary: turn.cost },
+				]),
+			};
+			persistSessionMeta(state);
 		},
 		async checkpoint(reason) {
 			if (!state) throw new Error("session.checkpoint: no current session");

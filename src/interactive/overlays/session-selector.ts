@@ -1,6 +1,8 @@
 import { basename } from "node:path";
+import { formatFooterTokens } from "../../core/display-units.js";
+import { formatCostAggregate } from "../../domains/observability/cost.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
-import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
+import type { SessionContract, SessionMeta } from "../../domains/session/index.js";
 import type { TuiMouseEvent, TuiMouseEventResult } from "../../engine/tui.js";
 import {
 	getKeybindings,
@@ -100,7 +102,10 @@ function metaStrip(meta: SessionMeta, now: number): string {
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
 	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";
-	return `${status} ${when} · ${countLabel} · ${folder} · ${shortTarget(meta)}`;
+	const base = `${status} ${when} · ${countLabel} · ${folder} · ${shortTarget(meta)}`;
+	if (!meta.usage) return base;
+	const cost = formatCostAggregate(meta.usage.cost);
+	return `${base} · ${formatFooterTokens(meta.usage.tokens)} tok${cost !== null ? ` · ${cost}` : ""}`;
 }
 
 /**

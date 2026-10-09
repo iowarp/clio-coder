@@ -1,5 +1,6 @@
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../engine/session.js";
+import type { CostAggregate } from "../observability/cost.js";
 import type { SessionEntry } from "./entries.js";
 import type { TreeSnapshot } from "./tree/navigator.js";
 import type { WorkspaceSnapshot } from "./workspace/index.js";
@@ -48,6 +49,8 @@ export type ClioSessionMetaExtension = {
 	workspace?: WorkspaceSnapshot;
 	/** Ordered record of skills activated in this session. */
 	skillActivations?: SkillActivation[];
+	/** Clio's recorded totals for the session's turns; absent on sessions recorded before this field. */
+	usage?: { tokens: number; cost: CostAggregate };
 	/**
 	 * The turn `/tree` last switched the append point to, persisted so it
 	 * survives quit + resume. `resume()`/`switchBranch()` prefer this over
@@ -107,6 +110,8 @@ export interface SessionContract {
 	replaceEntries(entries: ReadonlyArray<SessionEntry>): void;
 	/** Append a skill activation ledger entry and mirror it into meta.json. */
 	recordSkillActivation(activation: SkillActivation): SkillActivation;
+	/** Fold one settled turn's recorded totals into the session's meta.json `usage`. */
+	recordUsage(turn: { tokens: number; cost: CostAggregate }): void;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */
 	checkpoint(reason?: string): Promise<void>;
 	/** Synchronously make current.jsonl appends durable; used by write-ahead safety journals. */

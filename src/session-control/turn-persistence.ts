@@ -184,6 +184,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	// is a no-op without an observability contract or without an open turn, so a
 	// session that resumes mid-turn contributes nothing rather than half a run.
 	let traceRunId: string | null = null;
+	let traceSessionId: string | null = null;
 	let traceEventSeq = 0;
 	let traceUsage: SessionTurnUsage | null = null;
 	let lastTracedTurn: { runId: string; usage: SessionTurnUsage | null } | null = null;
@@ -210,13 +211,32 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		else finishTracedTurn(status, error);
 	};
 
+	// Once per turn (traceRunId clears on close) and only into the session the turn started in;
+	// an abandoned turn closing after a /resume drops its spend.
+	const recordSessionUsage = (usage: SessionTurnUsage | null): void => {
+		if (
+			traceSessionId === null ||
+			deps.session?.current()?.id !== traceSessionId ||
+			usage === null ||
+			usage.costSummary === undefined
+		)
+			return;
+		try {
+			deps.session.recordUsage({ tokens: usage.totalTokens, cost: usage.costSummary });
+		} catch {
+			// Spend on the resume picker is a convenience; the trace already holds the turn.
+		}
+	};
+
 	const finishTracedTurn = (status: "success" | "fail", error: string | null): void => {
 		scheduledTraceClose = null;
 		if (traceRunId === null) return;
 		mirror({ kind: "finish", runId: traceRunId, status, error, usage: traceUsage, at: traceNow() });
+		recordSessionUsage(traceUsage);
 		// Settlement runs after the assessor; keep the facts even though the trace is already closed.
 		lastTracedTurn = { runId: traceRunId, usage: traceUsage };
 		traceRunId = null;
+		traceSessionId = null;
 		traceUsage = null;
 		traceToolStarts.clear();
 		shownToolCalls.clear();
@@ -235,6 +255,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		// honest close for it; leaving it 'running' forever would be worse.
 		finishTracedTurn("fail", "interrupted: a new operator turn started before the previous turn finished");
 		traceRunId = `session:${userTurnId}`;
+		traceSessionId = deps.session?.current()?.id ?? null;
 		traceEventSeq = 0;
 		mirror({
 			kind: "start",
