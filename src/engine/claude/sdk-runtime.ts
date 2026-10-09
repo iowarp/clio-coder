@@ -503,7 +503,9 @@ function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback 
 				audit.startLine = file.startLine;
 				audit.endLine = file.startLine + file.numLines - 1;
 				audit.rangeUnit = "physical-lines";
-				if (typeof file.totalLines === "number") audit.truncated = file.numLines < file.totalLines;
+				// Native reads flag truncation only when content remains after the returned range, so a read that
+				// starts mid-file and reaches the end is not truncated.
+				if (typeof file.totalLines === "number") audit.truncated = audit.endLine < file.totalLines;
 			}
 		}
 		emit({
