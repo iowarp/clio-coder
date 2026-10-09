@@ -1,7 +1,7 @@
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
+import { normalizeCallUsage, normalizeTokenUsage } from "../../core/token-split.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
@@ -802,7 +802,7 @@ function upstreamResponse(
 	const gatewayRouting = gatewayRoutingObservationFromRecord(message);
 	return {
 		...(usageScope === "call" ? { callIndex } : {}),
-		usage: normalizeTokenUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }),
+		usage: normalizeCallUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }),
 		usageScope,
 		requestedModelId: readStringOrNull(message.model),
 		responseModelIdObservation: responseModelIdObservationFromRecord(message, "not-observed"),

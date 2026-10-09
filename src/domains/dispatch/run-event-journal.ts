@@ -44,8 +44,8 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
-import type { NormalizedTokenUsage } from "../../core/token-split.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
+import type { CallUsage } from "../../core/token-split.js";
+import { normalizeCallUsage } from "../../core/token-split.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolAuditFacts } from "../../tools/agent-tools.js";
 
@@ -73,7 +73,7 @@ interface JournalLineBase {
 export interface RunEventJournalFacts {
 	audit?: ToolAuditFacts;
 	callIndex?: number;
-	usage?: NormalizedTokenUsage;
+	usage?: CallUsage;
 	usageScope?: "call" | "run-aggregate";
 	tool?: string;
 	/** Pairs a tool start with its finish when the producer carried an id. */
@@ -534,7 +534,7 @@ function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
 			? { callIndex: record.callIndex }
 			: {}),
 		...(usage
-			? { usage: normalizeTokenUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }) }
+			? { usage: normalizeCallUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }) }
 			: {}),
 		...(record.usageScope === "call" || record.usageScope === "run-aggregate" ? { usageScope: record.usageScope } : {}),
 		...(text(record.tool) ? { tool: record.tool } : {}),

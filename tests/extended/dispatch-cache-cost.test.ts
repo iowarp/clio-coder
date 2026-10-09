@@ -52,6 +52,7 @@ for (const priced of [true, false]) {
 								cacheRead: 6000,
 								cacheWrite: 2000,
 								cacheWrite1h: 500,
+								cacheReadReported: true,
 								totalTokens: 10100,
 								cost: { total: 0.0175 },
 							},
@@ -63,7 +64,7 @@ for (const priced of [true, false]) {
 						message: {
 							role: "assistant",
 							stopReason: "aborted",
-							usage: { input: 1000, output: 0, cacheRead: 0, cacheWrite: 0 },
+							usage: { input: 1000, output: 0, cacheRead: 0, cacheWrite: 0, cacheReadReported: false },
 						},
 					};
 					observed();
@@ -101,6 +102,9 @@ for (const priced of [true, false]) {
 			strictEqual(receipt.missingTokenCalls, 0);
 			strictEqual(receipt.cacheWrite1hTokenCount, 500);
 			strictEqual(receipt.tokenCount, 11100, "do not count the one-hour subset twice");
+			// The adapter's cache-read flag survives onto each receipt row: reported on the first call, checked and omitted on the second.
+			strictEqual(receipt.upstreamResponses?.[0]?.usage?.cacheReadReported, true);
+			strictEqual(receipt.upstreamResponses?.[1]?.usage?.cacheReadReported, false);
 			const envelope = bundle.contract.getRun(run.runId);
 			ok(envelope);
 			strictEqual(envelope.costUsd, expected);

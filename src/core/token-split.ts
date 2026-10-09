@@ -52,3 +52,18 @@ export function normalizeTokenUsage(raw: Record<string, unknown>) {
 }
 
 export type NormalizedTokenUsage = ReturnType<typeof normalizeTokenUsage>;
+
+/**
+ * Per-call usage. `cacheReadReported` is true when the provider sent a cache-read field, false when the adapter
+ * checked and the provider omitted it, and absent when the adapter does not track it. It is kept off
+ * `normalizeTokenUsage` because that result is persisted and compared exactly elsewhere.
+ */
+export type CallUsage = NormalizedTokenUsage & { cacheReadReported?: boolean };
+
+/** Normalize one call's usage and carry `cacheReadReported` through when the raw flag is a boolean on observed usage. */
+export function normalizeCallUsage(raw: Record<string, unknown>): CallUsage {
+	const usage = normalizeTokenUsage(raw);
+	return usage.observed && typeof raw.cacheReadReported === "boolean"
+		? { ...usage, cacheReadReported: raw.cacheReadReported }
+		: usage;
+}

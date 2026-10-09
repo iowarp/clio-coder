@@ -49,7 +49,7 @@ import type {
 import { BusChannels } from "../../core/bus-events.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { normalizeClioCoderEventRecord } from "../../core/naming-events.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
+import { normalizeCallUsage } from "../../core/token-split.js";
 import { runTailEntryFromEvent } from "../../tools/dispatch-run-events.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { isThinkingEvent, workerTextDelta } from "../observability/worker-progress.js";
@@ -191,7 +191,7 @@ function runFeedEntryFromEvent(
 			at,
 			type,
 			...(callIndex !== undefined ? { callIndex } : {}),
-			usage: normalizeTokenUsage({ ...rawUsage, estimated: rawUsage.estimated === true || rawUsage.observed === false }),
+			usage: normalizeCallUsage({ ...rawUsage, estimated: rawUsage.estimated === true || rawUsage.observed === false }),
 			usageScope: "call",
 		};
 	}
@@ -201,7 +201,7 @@ function runFeedEntryFromEvent(
 		const aggregate = rawUsage.clioSdkAggregate === true;
 		const usage =
 			callIndex !== undefined || aggregate
-				? normalizeTokenUsage({ ...rawUsage, estimated: rawUsage.estimated === true || rawUsage.observed === false })
+				? normalizeCallUsage({ ...rawUsage, estimated: rawUsage.estimated === true || rawUsage.observed === false })
 				: undefined;
 		const tokens = usage?.observed ? usage.totalTokens : undefined;
 		const tail = streamed ? null : runTailEntryFromEvent(normalized, at);

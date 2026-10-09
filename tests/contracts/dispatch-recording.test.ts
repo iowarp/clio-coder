@@ -9,6 +9,7 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { createRecordingJournal, parseRecordingCast, readRunRecording } from "../../src/domains/dispatch/recording.js";
+import { readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import { buildEvidence } from "../../src/domains/evidence/build.js";
 import { exportEvidenceRecordings } from "../../src/domains/evidence/recordings.js";
@@ -245,4 +246,23 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			else process.env.PATH = originalPath;
 		}
 	}
+});
+
+it("run event journal keeps the per-call cacheReadReported flag through a write and read", () => {
+	const bus = createSafeEventBus();
+	const bridge = attachRunEventJournalBridge(bus, {});
+	const send = (usage: Record<string, unknown>) =>
+		bus.emit(BusChannels.DispatchProgress, {
+			runId: "cache-flag",
+			agentId: "coder",
+			event: { type: "message_end", message: { role: "assistant", usage } },
+		});
+	send({ input: 10, output: 2, cacheReadReported: true });
+	send({ input: 10, output: 2, cacheReadReported: false });
+	send({ input: 10, output: 2 });
+	bridge.stop();
+	const flags = readRunEventJournal("cache-flag").lines.flatMap((line) =>
+		line.kind === "event" && line.usage ? [line.usage.cacheReadReported] : [],
+	);
+	deepStrictEqual(flags, [true, false, undefined]);
 });
