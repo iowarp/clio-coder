@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, posix, relative, resolve } from "node:path";
+import type { Tokens } from "marked";
 import { parse } from "yaml";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
 import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
@@ -34,6 +35,69 @@ export interface WikiPageEvidenceResult {
 	draftHash?: string;
 	/** Coverage failures require substantive writing, not a mechanical repair pass. */
 	validationKind?: "coverage";
+	/** Non-gating diagnostic: line citations whose bound identifier is absent from the cited lines. */
+	relevance?: WikiRelevance;
+}
+
+export interface WikiRelevanceFlag {
+	citation: string;
+	identifier: string;
+	/** 1-based lines where the identifier occurs in the cited file, at most eight. */
+	lines: number[];
+}
+
+export interface WikiRelevance {
+	flags: WikiRelevanceFlag[];
+	summary: string;
+}
+
+const IDENTIFIER_SPAN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\(\))?$/;
+const SOURCE_EXTENSION =
+	/\.(?:[cm]?[jt]sx?|py|rs|go|c|h|cpp|hpp|java|rb|sh|json|ya?ml|toml|md|txt|ini|cfg|xml|html|css|sql)$/i;
+const RELEVANCE_SLACK = 2;
+const MAX_RELEVANCE_FLAGS = 32;
+
+function escapeRegexText(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A backticked span is an identifier when it is not itself a file reference. */
+function identifierFromSpan(span: string): string | null {
+	const text = span.replace(/^`+|`+$/g, "").trim();
+	if (!IDENTIFIER_SPAN.test(text) || SOURCE_EXTENSION.test(text)) return null;
+	return text.replace(/\(\)$/, "");
+}
+
+/**
+ * Finds the identifiers prose ties to one citation span: `ID` (`cite`), `ID` at|in|defined in `cite`
+ * (up to four letter-led words between, so punctuation ends adjacency), or `cite` (`ID`). Marked supplies
+ * the inline text; only the exact citation span anchors the match. The regexes compile once per span and
+ * identical inline texts are scanned once.
+ */
+function adjacentIdentifiers(inlines: ReadonlySet<string>, citationRaw: string): string[] {
+	const cite = escapeRegexText(citationRaw);
+	const before = new RegExp(`(\`+[^\`]+\`+)\\s*(?:\\(\\s*|(?:[A-Za-z][\\w'-]*\\s+){0,4}(?:at|in)\\s+)${cite}`, "g");
+	const after = new RegExp(`${cite}\\s*\\(\\s*(\`+[^\`]+\`+)\\s*\\)`, "g");
+	const found = new Set<string>();
+	for (const inline of inlines) {
+		for (const matcher of [before, after]) {
+			for (const hit of inline.matchAll(matcher)) {
+				const id = identifierFromSpan(hit[1] ?? "");
+				if (id !== null) found.add(id);
+			}
+		}
+	}
+	return [...found];
+}
+
+function relevanceSummary(flags: readonly WikiRelevanceFlag[]): string {
+	const items = flags.map((flag) => {
+		const where = flag.lines.length > 0 ? `at ${flag.lines.slice(0, 3).join(", ")}` : "not found";
+		return `\`${flag.citation}\` (${flag.identifier} ${where})`;
+	});
+	const noun = flags.length === 1 ? "line citation names" : "line citations name";
+	const line = `${flags.length} ${noun} an identifier outside the cited lines \u00b12: ${items.join(", ")}`;
+	return line.length > 300 ? `${line.slice(0, 297)}...` : line;
 }
 
 function within(root: string, path: string): boolean {
@@ -213,8 +277,11 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		if (/[:#]/.test(reference))
 			fail(`Use a plain file path in sources/tests: ${JSON.stringify(reference)}; put line/symbol citations in the body.`);
 	}
-	for (const token of inspectWikiMarkdown(body).citations) {
+	const inspection = inspectWikiMarkdown(body);
+	const citationTokens = new Map<string, Tokens.Codespan[]>();
+	for (const token of inspection.citations) {
 		const cited = token.text;
+		citationTokens.set(cited, [...(citationTokens.get(cited) ?? []), token]);
 		if (/\s/.test(cited)) continue;
 		// A filename extension distinguishes a file citation from a symbol or a
 		// recorded decision ref. Include extensionless conventional repo files.
@@ -260,6 +327,9 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	const declaredFiles = new Set<string>();
 	const declaredFilesByName = new Map<string, Set<string>>();
 	const linesByFile = new Map<string, number>();
+	// Split text is kept beside the count so the relevance diagnostic never reads a file again.
+	const textLinesByFile = new Map<string, string[]>();
+	const relevanceFlags: WikiRelevanceFlag[] = [];
 	let readBytes = 0;
 	let literalBytes = 0;
 	const literalText = new Map<string, string | null>();
@@ -279,7 +349,6 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		literalText.set(path, text);
 		return text;
 	};
-	const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	// Repository files, listed once and only when a body citation matches no
 	// declared file. Small writer models cite `grader.py` for
 	// `src/clio_researcher/grader.py` and `contracts/campaign.py` for
@@ -332,7 +401,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	const importedSource = (specifier: string): string | null => {
 		if (!/^\.\.?\//.test(specifier)) return null;
 		const importPattern = new RegExp(
-			`(?:\\bfrom\\s*|\\b(?:require|import)\\s*\\(\\s*|\\bimport\\s*)["']${escapeRegex(specifier)}["']`,
+			`(?:\\bfrom\\s*|\\b(?:require|import)\\s*\\(\\s*|\\bimport\\s*)["']${escapeRegexText(specifier)}["']`,
 		);
 		const found = new Set<string>();
 		for (const origin of declaredFiles) {
@@ -352,7 +421,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			selector.split("/").includes("..")
 		)
 			return false;
-		const pattern = new RegExp(`^${selector.split("*").map(escapeRegex).join("[^/]*")}$`);
+		const pattern = new RegExp(`^${selector.split("*").map(escapeRegexText).join("[^/]*")}$`);
 		for (const path of declaredFiles) {
 			try {
 				let dir = dirname(path);
@@ -399,7 +468,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	};
 	const groundedLayout = (cited: string): boolean => {
 		if (isAbsolute(cited) || cited.includes("\\") || cited.split("/").includes("..")) return false;
-		const literal = new RegExp(`(?<![\\w/.-])${escapeRegex(cited)}(?![\\w/-]|\\.\\w)`);
+		const literal = new RegExp(`(?<![\\w/.-])${escapeRegexText(cited)}(?![\\w/-]|\\.\\w)`);
 		const glob = /[*?[]/.test(cited);
 		const template = /<[A-Za-z_][\w-]*>|[{}]/.test(cited);
 		if (glob && !template) {
@@ -426,7 +495,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	for (const reference of references) {
 		const label = JSON.stringify(reference);
 		const match =
-			/^([^:#]+)(?:(?::(\d+)(?:-(\d+))?)|(?:#L(\d+)(?:-L?(\d+))?))?(?::[A-Za-z_$][\w$.-]*|(?:::[A-Za-z_][\w$.-]*)+)?$/.exec(
+			/^([^:#]+)(?:(?::(\d+)(?:-(\d+))?)|(?:#L(\d+)(?:-L?(\d+))?))?(?::([A-Za-z_$][\w$.-]*)|((?:::[A-Za-z_][\w$.-]*)+))?$/.exec(
 				reference,
 			);
 		if (!match) {
@@ -498,6 +567,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 					const text = readFileSync(real, "utf8");
 					lines = text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 					linesByFile.set(real, lines);
+					textLinesByFile.set(real, text.split("\n"));
 				}
 				const start = Number(startText);
 				const end = Number(match[3] ?? match[5] ?? startText);
@@ -506,6 +576,40 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 						`Repair line range in ${label}: the current file has ${lines} lines; use an existing ordered range starting at 1.`,
 					);
 					continue;
+				}
+				if (bodyReferences.has(reference) && relevanceFlags.length < MAX_RELEVANCE_FLAGS) {
+					const tail = match[6] !== undefined ? `:${match[6]}` : (match[7] ?? "");
+					const symbol = (match[6] ?? match[7]?.split("::").pop() ?? "").replace(/[.-]+$/, "");
+					const own = identifierFromSpan(symbol);
+					const tokens = citationTokens.get(reference) ?? [];
+					const bound = own
+						? [own]
+						: [...new Set(tokens.map((token) => token.raw))].flatMap((raw) =>
+								adjacentIdentifiers(
+									new Set(
+										tokens.filter((token) => token.raw === raw).map((token) => inspection.citationContext.get(token) ?? ""),
+									),
+									raw,
+								),
+							);
+					const fileLines = textLinesByFile.get(real);
+					for (const identifier of fileLines ? new Set(bound) : []) {
+						if (relevanceFlags.length >= MAX_RELEVANCE_FLAGS) break;
+						// The last segment alone decides: it is a whole-word match for the dotted form as well.
+						const name = identifier.split(".").pop() ?? identifier;
+						const word = new RegExp(`(?<![\\w$])${escapeRegexText(name)}(?![\\w$])`);
+						const near = (fileLines ?? []).slice(Math.max(0, start - 1 - RELEVANCE_SLACK), end + RELEVANCE_SLACK);
+						if (near.some((line) => word.test(line))) continue;
+						const where: number[] = [];
+						for (let index = 0; index < (fileLines?.length ?? 0) && where.length < 8; index++) {
+							if (word.test(fileLines?.[index] ?? "")) where.push(index + 1);
+						}
+						relevanceFlags.push({
+							citation: tail ? reference.slice(0, -tail.length) : reference,
+							identifier,
+							lines: where,
+						});
+					}
 				}
 			}
 			if (bodyReferences.has(reference) && canonical !== cited) {
@@ -526,6 +630,9 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			: { resolvedDependencies: [...dependencies].sort(), allReasons }),
 		...(Object.keys(resolvedCitations).length > 0 ? { resolvedCitations } : {}),
 		...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}),
+		...(relevanceFlags.length > 0
+			? { relevance: { flags: relevanceFlags, summary: relevanceSummary(relevanceFlags) } }
+			: {}),
 	};
 }
 

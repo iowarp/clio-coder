@@ -786,6 +786,68 @@ describe("wiki mechanical evidence gate", () => {
 		strictEqual(check(page("src/main.ts", "See `src/main.ts:1`.")).ok, false);
 	});
 
+	it("flags line citations whose bound identifier is outside the cited lines without gating", () => {
+		const filler = (count: number, start = 1) => Array.from({ length: count }, (_, i) => `// line ${start + i}`);
+		const lines = [
+			...filler(9),
+			"export function handleRequest() {}",
+			...filler(29, 11),
+			"export class Server { handleRequest() {} }",
+		];
+		writeFileSync(join(root, "src/a.ts"), `${lines.join("\n")}\n`);
+		const run = (body: string) => check(page("src/a.ts", body));
+		const flags = (body: string) => run(body).relevance?.flags;
+		strictEqual(flags("See `src/a.ts:10:handleRequest`."), undefined);
+		strictEqual(flags("See `src/a.ts:12:handleRequest`."), undefined);
+		deepStrictEqual(flags("See `src/a.ts:20:handleRequest`."), [
+			{ citation: "src/a.ts:20", identifier: "handleRequest", lines: [10, 40] },
+		]);
+		deepStrictEqual(flags("`handleRequest` (`src/a.ts:20`)"), [
+			{ citation: "src/a.ts:20", identifier: "handleRequest", lines: [10, 40] },
+		]);
+		deepStrictEqual(flags("`src/a.ts:20` (`handleRequest()`)")?.[0]?.identifier, "handleRequest");
+		deepStrictEqual(flags("The `handleRequest` function defined in `src/a.ts:20`.")?.length, 1);
+		strictEqual(flags("`handleRequest` at `src/a.ts:10`"), undefined);
+		strictEqual(flags("The handler is at `src/a.ts:20`."), undefined);
+		strictEqual(flags("`src/main.ts` (`src/a.ts:20`)"), undefined);
+		deepStrictEqual(flags("See `src/a.ts:20:Server.handleRequest`.")?.[0]?.identifier, "Server.handleRequest");
+		strictEqual(flags("See `src/a.ts:11:Server.handleRequest`."), undefined);
+		deepStrictEqual(flags("See `src/a.ts#L20-L21:handleRequest`.")?.[0]?.lines, [10, 40]);
+		deepStrictEqual(flags("See `src/a.ts:20:missingSymbol`."), [
+			{ citation: "src/a.ts:20", identifier: "missingSymbol", lines: [] },
+		]);
+		// Definition at line 10: the slack is exactly two lines either side.
+		strictEqual(flags("See `src/a.ts:12:handleRequest`."), undefined);
+		strictEqual(flags("See `src/a.ts:8:handleRequest`."), undefined);
+		strictEqual(flags("See `src/a.ts:13:handleRequest`.")?.length, 1);
+		strictEqual(flags("See `src/a.ts:7:handleRequest`.")?.length, 1);
+		// A sentence boundary ends adjacency, so the earlier identifier does not bind to the later citation.
+		strictEqual(
+			flags("It writes a transcript via `handleRequest`.  The sandbox in `src/a.ts:20` enforces limits."),
+			undefined,
+		);
+		// The same citation beside two identifiers flags only the one missing from the lines.
+		deepStrictEqual(
+			flags("`handleRequest` (`src/a.ts:10`) and `missingSymbol` (`src/a.ts:10`)")?.map((flag) => flag.identifier),
+			["missingSymbol"],
+		);
+		writeFileSync(join(root, "tests/x.py"), `${filler(14).join("\n")}\ndef test_ok(): pass\n`);
+		const pytest = check(page("tests/x.py", "See `tests/x.py:3::TestA::test_ok`."));
+		deepStrictEqual(pytest.relevance?.flags, [{ citation: "tests/x.py:3", identifier: "test_ok", lines: [15] }]);
+		const flagged = run("See `src/a.ts:20:handleRequest`.");
+		const clean = run("See `src/a.ts:20`.");
+		strictEqual(flagged.ok, true);
+		deepStrictEqual(flagged.reasons, clean.reasons);
+		deepStrictEqual(flagged.dependencies, clean.dependencies);
+		match(
+			flagged.relevance?.summary ?? "",
+			/^1 line citation names an identifier outside the cited lines \u00b12: `src\/a\.ts:20` \(handleRequest at 10, 40\)$/,
+		);
+		const failed = run("See `src/a.ts:20:handleRequest` and `src/a.ts:999`.");
+		strictEqual(failed.ok, false);
+		strictEqual(failed.relevance?.flags.length, 1);
+	});
+
 	it("rejects traversal, absolute paths, directories and symlink escapes but permits internal aliases", () => {
 		writeFileSync(join(sandbox, "outside.ts"), "outside\n");
 		symlinkSync(join(sandbox, "outside.ts"), join(root, "src/escape.ts"));

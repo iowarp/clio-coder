@@ -10,12 +10,15 @@ const markdown = new Marked(options);
 export interface WikiMarkdown {
 	tokens: TokensList;
 	citations: Tokens.Codespan[];
+	/** Raw inline text of the parent block (paragraph, heading, list item, table cell) holding each citation. */
+	citationContext: Map<Tokens.Codespan, string>;
 	links: Array<{ token: Tokens.Link; definition?: Tokens.Def }>;
 }
 
 export function inspectWikiMarkdown(body: string): WikiMarkdown {
 	const tokens = markdown.lexer(body);
 	const citations: Tokens.Codespan[] = [];
+	const citationContext = new Map<Tokens.Codespan, string>();
 	const links: WikiMarkdown["links"] = [];
 	const definitions = new Map<string, Tokens.Def>();
 	markdown.walkTokens(tokens, (token) => {
@@ -23,6 +26,12 @@ export function inspectWikiMarkdown(body: string): WikiMarkdown {
 	});
 	markdown.walkTokens(tokens, (token) => {
 		if (token.type === "codespan") citations.push(token as Tokens.Codespan);
+		// Walk order visits a parent before its children, so the context is known when the codespan is reached.
+		const children = "tokens" in token && Array.isArray(token.tokens) ? (token.tokens as Token[]) : [];
+		if (children.some((child) => child.type === "codespan")) {
+			const inline = children.map((child) => child.raw).join("");
+			for (const child of children) if (child.type === "codespan") citationContext.set(child as Tokens.Codespan, inline);
+		}
 		if (token.type !== "link") return;
 		let definition: Tokens.Def | undefined;
 		const lexer = new Lexer(options);
@@ -36,7 +45,7 @@ export function inspectWikiMarkdown(body: string): WikiMarkdown {
 		lexer.inlineTokens(token.raw);
 		links.push({ token: token as Tokens.Link, ...(definition ? { definition } : {}) });
 	});
-	return { tokens, citations, links };
+	return { tokens, citations, citationContext, links };
 }
 
 export interface WikiMarkdownEdit {

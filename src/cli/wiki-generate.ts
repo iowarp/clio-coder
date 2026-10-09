@@ -773,6 +773,18 @@ async function runPagePhase(
 						written,
 						reasons: reasons.map((reason) => redactSecretString(reason).slice(0, SIDECAR_REASON_MAX_CHARS)),
 						...(omittedReasons > 0 ? { omittedReasons } : {}),
+						...(evidence.relevance
+							? {
+									relevance: {
+										flags: evidence.relevance.flags.map((flag) => ({
+											citation: redactSecretString(flag.citation).slice(0, SIDECAR_REASON_MAX_CHARS),
+											identifier: redactSecretString(flag.identifier).slice(0, SIDECAR_REASON_MAX_CHARS),
+											lines: flag.lines,
+										})),
+										summary: redactSecretString(evidence.relevance.summary).slice(0, SIDECAR_REASON_MAX_CHARS),
+									},
+								}
+							: {}),
 						sourceSnapshotHash,
 						sourceTreeHash: plan.sourceTreeHash ?? null,
 						sourceGitHead: plan.sourceGitHead ?? null,
@@ -841,7 +853,8 @@ async function runPagePhase(
 		message: `${written ? (repair ? "repaired" : "wrote") : repair ? "could not repair" : "could not write"} ${page.path}${completedAfterCap ? " after tool-call cap" : ""} (${position.index}/${position.total})`,
 		current: position.index,
 		total: position.total,
-		detail: `${repair ? "repair; " : ""}${detail}${usage}`,
+		// The non-gating relevance note rides the progress line only; it never enters lastFailure or retries.
+		detail: `${repair ? "repair; " : ""}${detail}${usage}${evidence?.relevance ? `; ${redactSecretString(evidence.relevance.summary)}` : ""}`,
 	});
 	if (
 		!repair &&

@@ -103,6 +103,7 @@ Grounding rules:
   the body. Omit it when none apply; never invent a decision ref or a missing rationale.
 - Cite source paths in backticks: `src/domains/dispatch/validation.ts`. Prefer a stable path plus
   a symbol name over a line number; use `path:line` only when the exact location is load-bearing.
+  When a line matters, write `path:line:Symbol` so the cited symbol can be checked at that line.
 - A backticked standalone path must resolve to a repository file, occur with that exact spelling
   in a cited source, or be a plain glob matching tracked repository files. Source-text occurrence
   establishes only the spelling, not the resulting runtime path. Put synthesized templates and
