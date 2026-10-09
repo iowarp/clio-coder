@@ -829,6 +829,18 @@ export interface RunReceiptUpstreamResponse {
 }
 
 /**
+ * Per-call responses of a receipt. The Claude SDK adds one "run-aggregate" row
+ * next to its per-call rows, and counting it as a call would inflate call totals,
+ * so it is kept only when no per-call row exists.
+ */
+export function callLevelUpstreamResponses(
+	responses: ReadonlyArray<RunReceiptUpstreamResponse>,
+): ReadonlyArray<RunReceiptUpstreamResponse> {
+	const calls = responses.filter((response) => response.usageScope !== "run-aggregate");
+	return calls.length > 0 ? calls : responses;
+}
+
+/**
  * Bounded assistant output captured by the dispatch event pump and sealed into
  * the receipt so the worker's answer survives process exit and session resume.
  * `state: "final"` means the text is a completed assistant message (the last

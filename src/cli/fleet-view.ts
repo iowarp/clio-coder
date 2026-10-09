@@ -46,7 +46,7 @@ import {
 	runEventJournalPath,
 } from "../domains/dispatch/run-event-journal.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
-import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import { callLevelUpstreamResponses, type RunEnvelope, type RunReceipt } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
@@ -192,7 +192,7 @@ function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | n
  */
 function modelObservationText(receipt: RunReceipt): string {
 	const requested = `requested ${sanitizeBounded(receipt.wireModelId ?? "not recorded", 128)}`;
-	const responses = receipt.upstreamResponses ?? [];
+	const responses = callLevelUpstreamResponses(receipt.upstreamResponses ?? []);
 	if (responses.length === 0) return `${requested} · no provider response recorded`;
 	const counts = new Map<string, number>();
 	for (const response of responses) {

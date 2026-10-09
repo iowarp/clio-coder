@@ -1,7 +1,7 @@
 import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
 import { responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import { callLevelUpstreamResponses, type RunReceipt } from "../domains/dispatch/types.js";
 
 /** Return the durable final assistant text carried by a worker event. */
 export function assistantTextFromEvent(event: unknown): string {
@@ -10,7 +10,7 @@ export function assistantTextFromEvent(event: unknown): string {
 
 /** Human projection of the response model-id observations carried by a receipt. */
 export function receiptResponseModelIdObservationLabel(receipt: Pick<RunReceipt, "upstreamResponses">): string | null {
-	const responses = receipt.upstreamResponses ?? [];
+	const responses = callLevelUpstreamResponses(receipt.upstreamResponses ?? []);
 	if (responses.length === 0) return null;
 	const labels = responses.map((response) => {
 		const observation = responseModelIdObservationFromRecord(
@@ -27,7 +27,7 @@ export function receiptResponseModelIdObservationLabel(receipt: Pick<RunReceipt,
 
 /** Human projection of gateway routes carried by a receipt. */
 export function receiptGatewayRoutingLabel(receipt: Pick<RunReceipt, "upstreamResponses">): string | null {
-	const observations = (receipt.upstreamResponses ?? [])
+	const observations = callLevelUpstreamResponses(receipt.upstreamResponses ?? [])
 		.map((response) => gatewayRoutingObservationFromRecord(response as unknown as Record<string, unknown>))
 		.filter((observation) => observation !== null);
 	if (observations.length === 0) return null;
