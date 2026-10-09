@@ -2,37 +2,19 @@
 // problem-only toast had no way to express. The store is a module singleton rather than React state
 // because the events transport that raises most notices is not a component.
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiProblem } from "../api/client.js";
 import { useLiveState } from "../interaction/announcer.js";
+import type { Notice, NoticeTone } from "./notification-model.js";
+import { DEFAULT_TTL, problemTone } from "./notification-model.js";
 import "../interaction/interaction.css";
 
-export type NoticeTone = "error" | "warning" | "info" | "success";
-
-export interface Notice {
-	readonly id: string;
-	readonly tone: NoticeTone;
-	readonly title: string;
-	readonly detail?: string;
-	/** Problem code and instance when the notice came from an ApiProblem. */
-	readonly code?: string;
-	readonly reference?: string;
-	/** ms before auto-dismissal; null pins the notice until dismissed. */
-	readonly ttl: number | null;
-	readonly at: number;
-}
+export type { Notice, NoticeTone } from "./notification-model.js";
 
 let notices: Notice[] = [];
 const listeners = new Set<() => void>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 let paused = false;
-
-const DEFAULT_TTL: Readonly<Record<NoticeTone, number | null>> = {
-	error: null,
-	warning: null,
-	info: 6_000,
-	success: 4_000,
-};
 
 function publish(): void {
 	for (const listener of listeners) listener();
@@ -104,10 +86,6 @@ export function useNotices(): readonly Notice[] {
 	return useSyncExternalStore(subscribe, snapshot, () => EMPTY);
 }
 
-// A refusal is the product working correctly. Painting it as a failure teaches operators to ignore
-// the channel, so the codes that mean "not now" and "not like that" are warnings.
-const WARNING_CODES = new Set(["conflict", "unsupported"]);
-
 /** Every thrown value becomes a notice. An unrecognised error is still shown, never swallowed. */
 export function reportProblem(error: unknown): void {
 	// A refused token fails every request the same way. The shell replaces the page with one
@@ -116,7 +94,7 @@ export function reportProblem(error: unknown): void {
 	if (error instanceof ApiProblem) {
 		notify({
 			id: error.problem.instance,
-			tone: WARNING_CODES.has(error.problem.code) ? "warning" : "error",
+			tone: problemTone(error.problem.code),
 			title: error.problem.title,
 			detail: error.problem.detail,
 			code: error.problem.code,
@@ -141,6 +119,17 @@ const TONE_WORDS: Readonly<Record<NoticeTone, string>> = {
 
 export function NoticeToasts() {
 	const values = useNotices();
+	const region = useRef<HTMLElement>(null);
+	const [hovered, setHovered] = useState(false);
+	const [focused, setFocused] = useState(false);
+	useEffect(() => {
+		setHovered(values.length > 0 && (region.current?.matches(":hover") ?? false));
+		setFocused(values.length > 0 && (region.current?.contains(document.activeElement) ?? false));
+	}, [values]);
+	useEffect(() => {
+		setPaused(hovered || focused);
+		return () => setPaused(false);
+	}, [hovered, focused]);
 	const urgent = [...values].reverse().find((notice) => notice.tone === "error" || notice.tone === "warning");
 	const calm = [...values].reverse().find((notice) => notice.tone === "info" || notice.tone === "success");
 	return (
@@ -148,18 +137,21 @@ export function NoticeToasts() {
 			{/* The toasts themselves are not a live region: a toast that is its own `role="alert"`
 			    re-announces on every re-render and cannot express a polite tone. */}
 			<div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-				{calm ? `${TONE_WORDS[calm.tone]}. ${calm.title}` : ""}
+				{calm ? `${TONE_WORDS[calm.tone]}. ${calm.title}${calm.detail ? `. ${calm.detail}` : ""}` : ""}
 			</div>
 			<div className="sr-only" role="alert" aria-atomic="true">
-				{urgent ? `${TONE_WORDS[urgent.tone]}. ${urgent.title}` : ""}
+				{urgent ? `${TONE_WORDS[urgent.tone]}. ${urgent.title}${urgent.detail ? `. ${urgent.detail}` : ""}` : ""}
 			</div>
 			<section
+				ref={region}
 				className="notice-region"
 				aria-label="Notifications"
-				onMouseEnter={() => setPaused(true)}
-				onMouseLeave={() => setPaused(false)}
-				onFocusCapture={() => setPaused(true)}
-				onBlurCapture={() => setPaused(false)}
+				onMouseEnter={() => setHovered(true)}
+				onMouseLeave={() => setHovered(false)}
+				onFocusCapture={() => setFocused(true)}
+				onBlurCapture={(event) => {
+					if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+				}}
 			>
 				{values.length > 1 && (
 					<div className="notice-region__controls">
@@ -169,22 +161,26 @@ export function NoticeToasts() {
 						</button>
 					</div>
 				)}
-				{values.map((notice) => (
-					<article className={`notice notice--${notice.tone}`} key={notice.id}>
-						<div className="notice__heading">
-							<span className="notice__glyph" aria-hidden="true">
-								{GLYPHS[notice.tone]}
-							</span>
-							<strong>{notice.title}</strong>
-							<button type="button" aria-label={`Dismiss ${notice.title}`} onClick={() => dismiss(notice.id)}>
-								×
-							</button>
-						</div>
-						{notice.detail ? <p>{notice.detail}</p> : null}
-						{notice.code ? <code>{notice.code}</code> : null}
-						{notice.reference ? <small>Reference: {notice.reference}</small> : null}
-					</article>
-				))}
+				{values.length > 0 && (
+					<div className="notice-region__list">
+						{values.map((notice) => (
+							<article className={`notice notice--${notice.tone}`} key={notice.id}>
+								<div className="notice__heading">
+									<span className="notice__glyph" aria-hidden="true">
+										{GLYPHS[notice.tone]}
+									</span>
+									<strong>{notice.title}</strong>
+									<button type="button" aria-label={`Dismiss ${notice.title}`} onClick={() => dismiss(notice.id)}>
+										×
+									</button>
+								</div>
+								{notice.detail ? <p>{notice.detail}</p> : null}
+								{notice.code ? <code>{notice.code}</code> : null}
+								{notice.reference ? <small>Reference: {notice.reference}</small> : null}
+							</article>
+						))}
+					</div>
+				)}
 			</section>
 		</>
 	);

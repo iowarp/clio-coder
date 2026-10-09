@@ -1090,7 +1090,7 @@ nav a:hover {
    that it eases down to the phone size, so a conversation between two open sidebars keeps a
    readable measure instead of forty characters a line. Headings keep their ratio to it. */
 .conversation__main {
-	container: chat / inline-size;
+	container: chat / size;
 }
 .conversation__main > * {
 	--text-reading: clamp(18px, 12px + 1.08cqi, 22px);
@@ -1132,6 +1132,12 @@ nav a:hover {
 
 .conversation__approval {
 	min-height: 0;
+	max-height: min(38cqh, 22rem);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.conversation .composer__field {
+	max-height: min(14rem, 28cqh);
 }
 .conversation__recovery,
 .conversation__connection {
@@ -1159,8 +1165,6 @@ nav a:hover {
 }
 .conversation .approval-banner {
 	margin-block: var(--space-2);
-	max-height: min(38dvh, 22rem);
-	overflow-y: auto;
 }
 @media (max-width: 650px) {
 	.conversation__dock {

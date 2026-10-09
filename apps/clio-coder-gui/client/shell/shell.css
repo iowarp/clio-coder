@@ -10,6 +10,20 @@
 	--wb-faint: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 
+.app-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr) auto;
+	height: 100dvh;
+}
+.app-setup {
+	min-height: 0;
+	overflow: auto;
+}
+.app-setup .wizard {
+	min-height: 100%;
+}
+
 .wb {
 	--wb-side: 320px;
 	--wb-aside: 400px;
@@ -18,7 +32,7 @@
 	--wb-row: 40px;
 	display: grid;
 	grid-template-columns: var(--wb-side) minmax(0, 1fr) 0;
-	height: 100dvh;
+	min-height: 0;
 	background: var(--paper);
 	color: var(--ink);
 	transition: grid-template-columns var(--motion-base) var(--ease-standard);
@@ -927,7 +941,7 @@ button.wb-chip:hover:not(:disabled) {
 	}
 	.wb-stage,
 	.wb[data-sidebar="collapsed"] .wb-stage {
-		height: 100dvh;
+		height: 100%;
 		margin: 0;
 		border: 0;
 		border-radius: 0;
@@ -1204,11 +1218,8 @@ button.wb-chip:hover:not(:disabled) {
 	body {
 		padding-top: var(--window-titlebar-height);
 	}
-	.wb {
+	.app-layout {
 		height: calc(100dvh - var(--window-titlebar-height));
-	}
-	.wizard {
-		min-height: calc(100dvh - var(--window-titlebar-height));
 	}
 	.pane__dialog {
 		height: calc(100dvh - var(--space-4) - var(--window-titlebar-height));

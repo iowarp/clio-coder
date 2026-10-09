@@ -8,8 +8,7 @@
 /* Pinned above the scrolling transcript and never inside it. It is not focus-trapping: the
    operator has to be able to keep reading while an approval waits. */
 .approval-banner {
-	position: sticky;
-	top: var(--space-2);
+	position: relative;
 	z-index: 2;
 	margin-block: var(--space-4);
 }

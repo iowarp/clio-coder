@@ -64,6 +64,15 @@ function useDocked(): boolean {
 }
 
 export function App({ client }: { client: Client }) {
+	return (
+		<div className="app-layout">
+			<Workbench client={client} />
+			<NoticeToasts />
+		</div>
+	);
+}
+
+function Workbench({ client }: { client: Client }) {
 	useApplyTheme();
 	const queries = useQueryClient();
 	const navigate = useNavigate();
@@ -364,7 +373,7 @@ export function App({ client }: { client: Client }) {
 	const authed = !!client.token && !refused;
 	if (wizardMode !== null && authed && meta.data?.apiVersion === API_VERSION)
 		return (
-			<>
+			<div className="app-setup">
 				<WindowTitlebar />
 				{pendingNotice}
 				<Suspense
@@ -383,8 +392,7 @@ export function App({ client }: { client: Client }) {
 					/>
 				</Suspense>
 				<LiveRegions />
-				<NoticeToasts />
-			</>
+			</div>
 		);
 	return (
 		<div
@@ -482,7 +490,6 @@ export function App({ client }: { client: Client }) {
 				</aside>
 			) : null}
 			<LiveRegions />
-			<NoticeToasts />
 		</div>
 	);
 }

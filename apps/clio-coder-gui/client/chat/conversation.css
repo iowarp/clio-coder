@@ -17,7 +17,9 @@
 	grid-template-columns: minmax(0, 1fr);
 	/* bar, approval, transcript, jump anchor, composer: one track per child, in source order. Notices
 	   moved to the Session column; a missing child shifts the transcript out of the 1fr track. */
-	grid-template-rows: auto auto minmax(0, 1fr) 0 auto;
+	grid-template-rows: auto max-content minmax(6rem, 1fr) 0 max-content;
+	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 .conversation__health {
 	display: grid;

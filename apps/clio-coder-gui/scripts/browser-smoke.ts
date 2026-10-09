@@ -157,11 +157,11 @@ try {
 		page.on("response", (response) => {
 			if (response.status() >= 400) statuses.push({ path: new URL(response.url()).pathname, status: response.status() });
 		});
-		async function check(name: string) {
-			await page.evaluate(() => document.fonts.ready);
+		async function check(name: string, checkedPage = page) {
+			await checkedPage.evaluate(() => document.fonts.ready);
 			// A theme change lands as an attribute first; let the cascade and a paint settle before axe reads colours.
 			// Without an explicit choice no attribute is set and the system preference decides.
-			await page.waitForFunction(
+			await checkedPage.waitForFunction(
 				() =>
 					getComputedStyle(document.body).color ===
 					((document.documentElement.dataset.theme ??
@@ -169,8 +169,10 @@ try {
 						? "rgb(242, 243, 242)"
 						: "rgb(26, 22, 18)"),
 			);
-			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-			const builder = new AxeBuilder({ page });
+			await checkedPage.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			const builder = new AxeBuilder({ page: checkedPage });
 			const axe = await builder.analyze();
 			assert.deepEqual(
 				axe.violations.filter((item) => item.id === "aria-allowed-role"),
@@ -178,7 +180,7 @@ try {
 				`${name} has an invalid ARIA role at ${width}px`,
 			);
 			const serious = axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical");
-			const overflow = await page.evaluate(
+			const overflow = await checkedPage.evaluate(
 				() => document.documentElement.scrollWidth > document.documentElement.clientWidth,
 			);
 			checks.push({
@@ -429,6 +431,7 @@ try {
 		await openDialog.getByRole("button", { name: "Open", exact: true }).click();
 		await page.waitForURL(/\/sessions\/[^/]+$/);
 		await page.getByLabel("Message Clio Coder", { exact: true }).waitFor();
+		const noticeSessionUrl = page.url();
 		await page.locator(".conversation .wb-bar .wb-menu summary").click();
 		await page.getByRole("menuitem", { name: /^All tasks in / }).click();
 		await page.waitForURL(/\/workspaces\/[^/]+\/sessions$/);
@@ -452,6 +455,91 @@ try {
 		await thinking.getByRole("button", { name: "Save", exact: true }).click();
 		await thinking.getByRole("status").getByText("Used by the next relevant request").waitFor();
 		await check("settings-saved");
+		// A loaded approval can precede its tool-call history. Exercise the full banner beside a
+		// growing draft and a full notice row, including the short viewport where the task must scroll.
+		const noticeSessionId = new URL(noticeSessionUrl).pathname.split("/").at(-1);
+		assert.ok(noticeSessionId);
+		const noticePage = await context.newPage();
+		noticePage.on("pageerror", (error) => errors.push(error.message));
+		await noticePage.route(`**/api/sessions/${noticeSessionId}{,/**}`, async (route) => {
+			const path = new URL(route.request().url()).pathname;
+			if (path === `/api/sessions/${noticeSessionId}`) {
+				await route.fulfill({
+					json: {
+						...h.supervisor.get(noticeSessionId),
+						permissions: [
+							{
+								id: "notice-approval",
+								turnId: "notice-turn",
+								toolCallId: "notice-call",
+								title: "Run a command",
+								kind: "execute",
+								requestedAt: new Date().toISOString(),
+								escalateAt: "2099-01-01T00:00:00Z",
+								expiresAt: "2099-01-02T00:00:00Z",
+								status: "pending",
+								canStopTurn: false,
+							},
+						],
+					},
+				});
+			} else {
+				await route.fulfill({
+					status: 503,
+					json: {
+						type: "urn:clio-coder:problem:unavailable",
+						title: "Notice layout check",
+						status: 503,
+						code: "unavailable",
+						detail: "The request could not complete. ".repeat(8),
+						instance: path,
+					},
+				});
+			}
+		});
+		try {
+			await noticePage.goto(`${noticeSessionUrl}#token=test-token`);
+			const draft = noticePage.getByLabel("Message Clio Coder", { exact: true });
+			await draft.fill("A draft line\n".repeat(12));
+			await noticePage.locator(".approval-banner:not(.approval-banner--strip)").waitFor();
+			await noticePage.getByRole("button", { name: "Dismiss all", exact: true }).waitFor();
+			for (const height of zoom === 2 ? [await noticePage.evaluate(() => innerHeight)] : [900, 450]) {
+				if (zoom !== 2) await noticePage.setViewportSize({ width, height });
+				const receivesPointer = (control: Locator) =>
+					control.evaluate((element) => {
+						const rect = element.getBoundingClientRect();
+						return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+					});
+				for (const name of ["Reject", "Allow once"]) {
+					const answer = noticePage.locator(".conversation__approval").getByRole("button", { name, exact: true });
+					await answer.scrollIntoViewIfNeeded();
+					assert.equal(await receivesPointer(answer), true, `${name} stays reachable with notices at ${width}×${height}`);
+					await answer.click({ trial: true, timeout: 1_000 });
+				}
+				const transcript = noticePage.locator(".chat-transcript");
+				await transcript.scrollIntoViewIfNeeded();
+				const transcriptBounds = await transcript.boundingBox();
+				assert.ok(transcriptBounds && transcriptBounds.height >= 64, "the transcript keeps a readable scrolling viewport");
+				assert.equal(await receivesPointer(transcript), true, "the transcript stays reachable beside approval and draft");
+				const submit = noticePage.locator(".composer__submit");
+				await submit.scrollIntoViewIfNeeded();
+				assert.equal(await receivesPointer(submit), true, "the composer controls stay reachable with notices");
+				const noticeList = noticePage.locator(".notice-region__list");
+				assert.equal(await noticeList.evaluate((list) => list.scrollHeight > list.clientHeight), true);
+				await noticeList.evaluate((list) => {
+					list.scrollTop = 100;
+				});
+				const dismiss = noticePage.locator(".notice__heading button").first();
+				await dismiss.focus();
+				assert.equal(await dismiss.evaluate((button) => button === document.activeElement), true);
+				assert.equal(await receivesPointer(dismiss), true, "the focused individual Dismiss stays above the notice list");
+				await dismiss.click({ trial: true, timeout: 1_000 });
+				await check(`notice-approval-${height}`, noticePage);
+				await noticePage.screenshot({ path: join(output, `notice-approval-${width}-${height}.png`) });
+			}
+		} finally {
+			await noticePage.close();
+		}
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `settings-controls-${width}.png`), fullPage: true });
 		await findSetting.fill("fleet.concurrency");
