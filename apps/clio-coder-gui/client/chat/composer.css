@@ -549,6 +549,7 @@
 	color: var(--ink);
 }
 .turn-outcome .status-mark {
+	flex-shrink: 0;
 	flex-wrap: nowrap;
 	font-size: inherit;
 	white-space: nowrap;
@@ -600,6 +601,7 @@
 	align-items: baseline;
 }
 .turn-details__group dt {
+	flex: none;
 	color: var(--ink-muted);
 }
 .turn-details__group dd {

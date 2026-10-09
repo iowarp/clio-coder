@@ -809,6 +809,25 @@ export function usageTitle(usage: Usage): string {
 	].join(" · ");
 }
 
+function turnCost(usage: Usage | null): string | null {
+	if (!usage) return null;
+	const summary = usage.costSummary;
+	if (summary?.calls === 0 || (!summary && usage.costUsd === undefined && usage.costProvenance === undefined))
+		return null;
+	const provenance = usage.costProvenance ?? "unknown";
+	const amount = summary?.knownUsd ?? (provenance === "unknown" ? 0 : usage.costUsd);
+	const unknown =
+		(summary?.hasUnknown ?? provenance === "unknown") ||
+		((usage.missingTokenCalls ?? 0) > 0 && provenance !== "known_free");
+	const estimated = summary?.hasEstimated ?? provenance === "estimated";
+	const free = summary?.allKnownFree ?? provenance === "known_free";
+	if (free) return "$0 (free)";
+	if (unknown && (!amount || !Number.isFinite(amount))) return "Cost unknown";
+	if (amount === undefined || !Number.isFinite(amount)) return null;
+	const value = `${estimated ? "Estimated " : ""}${amount === 0 ? "$0" : `$${amount.toFixed(4)}`}`;
+	return unknown ? `${value} subtotal, some calls unpriced` : value;
+}
+
 const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: string; label: string }>> = {
 	running: { tone: "running", glyph: "▸", label: "Running" },
 	succeeded: { tone: "success", glyph: "✓", label: "Done" },
@@ -833,6 +852,7 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		[];
 	if (turn.details?.model) breakdown.push({ group: "Model", label: "Model", value: turn.details.model });
 	const usage = turn.usage;
+	const cost = turnCost(usage);
 	if (usage) {
 		for (const [key, label] of [
 			["input", "Input"],
@@ -849,12 +869,7 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 			});
 		if (usage.cacheWrite > 0)
 			breakdown.push({ group: "Cache", label: "Written", value: usage.cacheWrite.toLocaleString("en-US") });
-		if (usage.costUsd !== undefined && Number.isFinite(usage.costUsd))
-			breakdown.push({
-				group: "Cost",
-				label: "Reported",
-				value: usage.costUsd === 0 ? "$0" : `$${usage.costUsd.toFixed(4)}`,
-			});
+		if (cost !== null) breakdown.push({ group: "Cost", label: "Cost", value: cost });
 	}
 	if (turn.details?.outputTokensPerSecond && turn.details.outputTokensPerSecond > 0)
 		breakdown.push({
@@ -872,8 +887,7 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 					: `${(turn.details.ttftMs / 1000).toFixed(2)}s`,
 		});
 	if (toolCount > 0) breakdown.push({ group: "Tools", label: "Calls", value: String(toolCount) });
-	if (usage?.costUsd !== undefined && Number.isFinite(usage.costUsd))
-		facts.push(usage.costUsd === 0 ? "$0" : `$${usage.costUsd.toFixed(4)}`);
+	if (cost !== null) facts.push(cost);
 	if (turn.details?.outputTokensPerSecond && turn.details.outputTokensPerSecond > 0)
 		facts.push(`${turn.details.outputTokensPerSecond.toFixed(1)} tokens/s`);
 	if (toolCount > 0) facts.push(`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`);
