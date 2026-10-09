@@ -61,10 +61,17 @@ function OpenChoiceField({
 }) {
 	const [typing, setTyping] = useState(value !== "" && !choice.words.includes(value));
 	const [asked, setAsked] = useState(false);
+	const focusList = useRef(false);
 	if (!typing)
 		return (
 			<select
 				id={id}
+				ref={(element) => {
+					if (element && focusList.current) {
+						focusList.current = false;
+						element.focus();
+					}
+				}}
 				aria-describedby={describedBy}
 				value={value}
 				disabled={disabled}
@@ -101,7 +108,15 @@ function OpenChoiceField({
 				// biome-ignore lint/a11y/noAutofocus: the operator just asked to type the value; the field is where they type it.
 				autoFocus={asked}
 			/>
-			<button type="button" className="model-select__back" disabled={disabled} onClick={() => setTyping(false)}>
+			<button
+				type="button"
+				className="model-select__back"
+				disabled={disabled}
+				onClick={() => {
+					focusList.current = true;
+					setTyping(false);
+				}}
+			>
 				Choose from the list
 			</button>
 		</div>

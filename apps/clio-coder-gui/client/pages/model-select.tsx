@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { type ModelOption, modelOptions, OTHER_MODEL } from "./model-picker-model.js";
 import "./model-select.css";
 
@@ -33,6 +33,7 @@ export function ModelSelect({
 	onChange: (value: string) => void;
 }) {
 	const [typing, setTyping] = useState(false);
+	const focusList = useRef(false);
 	const catalog = models !== null && models.length > 0;
 	const options: readonly ModelOption[] = catalog ? modelOptions(models, value, defaultModel, emptyLabel) : [];
 	return (
@@ -40,6 +41,12 @@ export function ModelSelect({
 			{catalog && !typing ? (
 				<select
 					id={id}
+					ref={(element) => {
+						if (element && focusList.current) {
+							focusList.current = false;
+							element.focus();
+						}
+					}}
 					value={value}
 					disabled={disabled}
 					aria-describedby={describedBy}
@@ -70,7 +77,15 @@ export function ModelSelect({
 						autoFocus={typing}
 					/>
 					{catalog ? (
-						<button type="button" className="model-select__back" disabled={disabled} onClick={() => setTyping(false)}>
+						<button
+							type="button"
+							className="model-select__back"
+							disabled={disabled}
+							onClick={() => {
+								focusList.current = true;
+								setTyping(false);
+							}}
+						>
 							Choose from the list
 						</button>
 					) : null}
