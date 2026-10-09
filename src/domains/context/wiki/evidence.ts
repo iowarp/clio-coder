@@ -240,25 +240,26 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 				`Use a plain file path in sources/tests: ${JSON.stringify(reference.slice(0, 160))}; put line/symbol citations in the body.`,
 			);
 	}
-	// Remove code fences: example programs and shell commands are not citations.
-	const prose = body.replace(/^\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\s*\1\s*$/gm, "");
-	for (const match of prose.matchAll(/`([^`\s]+)`/g)) {
-		const cited = match[1] ?? "";
-		// A filename extension distinguishes a file citation from a symbol or a
-		// recorded decision ref. Include extensionless conventional repo files.
-		const pathLike = cited.includes("/") && /\.[\w-]+(?=[:#]|$)/.test(cited);
-		const rootFile =
-			/^[^/:#]+\.(?:[cm]?[jt]sx?|py|rs|go|c|h|cpp|hpp|java|rb|sh|json|ya?ml|toml|md|txt|ini|cfg|xml|html|css|sql)(?=[:#]|$)/i.test(
-				cited,
-			);
-		if (
-			!/^[a-z][a-z\d+.-]*:\/\//i.test(cited) &&
-			(pathLike || rootFile || /^(?:Makefile|Dockerfile|LICENSE)(?=[:#]|$)/.test(cited))
-		) {
-			references.add(cited);
-			bodyReferences.add(cited);
+	mapWikiProse(body, (line) => {
+		for (const match of line.matchAll(/`([^`\s]+)`/g)) {
+			const cited = match[1] ?? "";
+			// A filename extension distinguishes a file citation from a symbol or a
+			// recorded decision ref. Include extensionless conventional repo files.
+			const pathLike = cited.includes("/") && /\.[\w-]+(?=[:#]|$)/.test(cited);
+			const rootFile =
+				/^[^/:#]+\.(?:[cm]?[jt]sx?|py|rs|go|c|h|cpp|hpp|java|rb|sh|json|ya?ml|toml|md|txt|ini|cfg|xml|html|css|sql)(?=[:#]|$)/i.test(
+					cited,
+				);
+			if (
+				!/^[a-z][a-z\d+.-]*:\/\//i.test(cited) &&
+				(pathLike || rootFile || /^(?:Makefile|Dockerfile|LICENSE)(?=[:#]|$)/.test(cited))
+			) {
+				references.add(cited);
+				bodyReferences.add(cited);
+			}
 		}
-	}
+		return line;
+	});
 	if (references.size > 512) {
 		fail("Page exceeds the 512-reference evidence-check limit; split or shorten it before retrying.");
 		return { ok: false, reasons, ...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}) };

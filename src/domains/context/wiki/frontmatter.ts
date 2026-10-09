@@ -100,7 +100,12 @@ export function mapWikiProse(body: string, transform: (line: string) => string):
 			const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
 			if (marker) {
 				if (!fence) fence = marker;
-				else if (marker[0] === fence[0] && marker.length >= fence.length) fence = "";
+				else if (
+					marker[0] === fence[0] &&
+					marker.length >= fence.length &&
+					/^\s*$/.test(line.trimStart().slice(marker.length))
+				)
+					fence = "";
 				return line;
 			}
 			return fence ? line : transform(line);

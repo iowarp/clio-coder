@@ -282,6 +282,8 @@ describe("contracts/context lifecycle", () => {
 				"Names: `index.ts`, `settings.yaml`, `verdict-<tier>.json`, `src/*.ts`, and `toString`.",
 				"```ts\nconst file = `src/main.js:1-2:main`;\n```",
 				"~~~text\n`main.js#L1-L2`\n~~~",
+				"~~~markdown\n~~~text\n`main.js#L1-L2`\n~~~~ \nAfter tilde: `main.js#L1-L2`.",
+				"```markdown\n````text\n`main.js#L1-L2`\n```\nAfter backtick: `main.js#L1-L2`.",
 				"````text\n```ts\n`src/main.js:1-2:main`\n```\n````",
 				"```text\n`main.js#L1-L2`",
 			].join("\n"),
@@ -300,6 +302,8 @@ describe("contracts/context lifecycle", () => {
 		ok(canonical.includes("Names: `index.ts`, `settings.yaml`, `verdict-<tier>.json`, `src/*.ts`, and `toString`."));
 		ok(canonical.includes("```ts\nconst file = `src/main.js:1-2:main`;\n```"));
 		ok(canonical.includes("~~~text\n`main.js#L1-L2`\n~~~"));
+		ok(canonical.includes("~~~markdown\n~~~text\n`main.js#L1-L2`\n~~~~ \nAfter tilde: `src/main.ts#L1-L2`."));
+		ok(canonical.includes("```markdown\n````text\n`main.js#L1-L2`\n```\nAfter backtick: `src/main.ts#L1-L2`."));
 		ok(canonical.includes("````text\n```ts\n`src/main.js:1-2:main`\n```\n````"));
 		ok(canonical.includes("```text\n`main.js#L1-L2`"));
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
