@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { appendFileSync, readdirSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -156,6 +157,12 @@ export const guiTests = [
 
 export const packageTests = ["tests/smoke/installed-package.test.ts", "tests/smoke/native-call-timing.test.ts"];
 
+// Qualification runs the core, GUI and package tiers at once. Core at four
+// (da71294f7) was measured alone on 24 CPUs; on a 4-vCPU hosted runner the
+// combined eight test processes pushed timing-bound ACP, idle-exit and RPC
+// deadline tests past their limits in ci (22), so small hosts keep two.
+const coreConcurrency = availableParallelism() >= 8 ? 4 : 2;
+
 export async function runTests(tier) {
 	const gui = tier === "gui";
 	const cwd = gui ? join(root, "apps/clio-coder-gui") : root;
@@ -171,7 +178,7 @@ export async function runTests(tier) {
 			preload,
 			"--test",
 			"--test-reporter=spec",
-			`--test-concurrency=${tier === "core" ? 4 : 2}`,
+			`--test-concurrency=${tier === "core" ? coreConcurrency : 2}`,
 			...files,
 		],
 		{ cwd, stdio: ["inherit", "pipe", "pipe"] },
