@@ -24,6 +24,7 @@ class RailTerminal implements Terminal {
 	clearScreen(): void {}
 	setTitle(): void {}
 	setProgress(): void {}
+	setProgramStatus(): void {}
 }
 
 const noop = (): void => {};

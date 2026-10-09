@@ -3,8 +3,11 @@ import { existsSync, readFileSync, statSync, symlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import test from "node:test";
 import { Type } from "typebox";
+import { getCatalogModelForRuntime } from "../../src/domains/providers/catalog.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
+import { createEngineAgent } from "../../src/engine/agent.js";
 import { engineStream, engineStreamSimple } from "../../src/engine/api-registry.js";
+import { PREWARM_USER_TEXT, runPrewarmRound } from "../../src/engine/prewarm.js";
 import { applyToolRounds, type ToolRound } from "../../src/engine/provider-payload.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -34,11 +37,17 @@ test("Anthropic named-tool rounds retain the entire tool prefix and resume think
 	type Body = {
 		tools: Array<{ name: string }>;
 		tool_choice?: unknown;
-		thinking?: { type: string };
+		thinking?: { type: string; budget_tokens?: number };
+		temperature?: number;
 		output_config?: { effort?: string };
 	};
 	const wire = async (target: EngineModel, rounds: readonly ToolRound[]): Promise<Body> => {
-		const controlled = applyToolRounds(target, request, { apiKey: "fixture", reasoning: "high" }, rounds);
+		const controlled = applyToolRounds(
+			target,
+			request,
+			{ apiKey: "fixture", reasoning: "high", temperature: 0.2 },
+			rounds,
+		);
 		let body: Body | undefined;
 		await engineStreamSimple(target, controlled.context, {
 			...controlled.options,
@@ -64,6 +73,16 @@ test("Anthropic named-tool rounds retain the entire tool prefix and resume think
 	assert.equal(resumed.thinking?.type, "adaptive");
 	assert.equal(resumed.output_config?.effort, "high");
 	assert.equal(resumed.tool_choice, undefined);
+	const haiku = getCatalogModelForRuntime("anthropic", "claude-haiku-5-5");
+	assert.ok(haiku);
+	const adaptive = await wire(haiku, []);
+	assert.equal(adaptive.thinking?.type, "adaptive");
+	assert.equal(adaptive.thinking?.budget_tokens, undefined);
+	assert.equal(adaptive.output_config?.effort, "high");
+	assert.equal(adaptive.temperature, undefined);
+	const forcedHaiku = await wire(haiku, [{ kind: "required", toolName: "read" }]);
+	assert.deepEqual(forcedHaiku.tool_choice, { type: "tool", name: "read" });
+	assert.equal(forcedHaiku.thinking, undefined);
 	const missing = applyToolRounds(managed, request, undefined, [{ kind: "required", toolName: "missing" }]);
 	assert.equal(missing.context, request);
 	assert.equal(missing.options, undefined);
@@ -141,8 +160,10 @@ test("operator Anthropic cache retention reaches both central stream paths and h
 	try {
 		delete process.env.PI_CACHE_RETENTION;
 		const sent: Record<string, unknown>[] = [];
+		const headers: Headers[] = [];
 		const fetch: typeof globalThis.fetch = async (_input, init) => {
 			sent.push(JSON.parse(String(init?.body)));
+			headers.push(new Headers(init?.headers));
 			return anthropicResponse();
 		};
 		for (const stream of [engineStream, engineStreamSimple]) {
@@ -170,6 +191,60 @@ test("operator Anthropic cache retention reaches both central stream paths and h
 				{ apiKey: "fixture-key", fetch, cacheRetention: "none" },
 			).result();
 			assert.doesNotMatch(JSON.stringify(sent.at(-1)), /"cache_control"/u);
+		}
+		const haiku = getCatalogModelForRuntime("anthropic", "claude-haiku-5-5");
+		assert.ok(haiku);
+		const { agent } = createEngineAgent({
+			initialState: {
+				model: haiku,
+				thinkingLevel: "high",
+				systemPrompt: "cacheable system",
+				messages: [{ role: "user", content: "retained context", timestamp: 0 }],
+				tools: [
+					{
+						name: "inspect",
+						label: "Inspect",
+						description: "Original paths",
+						parameters: Type.Object({}),
+						execute: async () => {
+							throw new Error("warm and text-only response must not execute tools");
+						},
+					},
+				],
+			},
+			getApiKey: () => "fixture-key",
+			transcriptStreamFn: (current, context, options) => engineStreamSimple(current, context, { ...options, fetch }),
+		});
+		agent.state.tools = agent.state.tools.map((tool) => ({ ...tool, description: "Updated paths" }));
+		const warm = await runPrewarmRound({ model: haiku, state: agent.state, agent, apiKey: "fixture-key" });
+		assert.equal(warm.errorMessage, null);
+		await agent.prompt("Actual task suffix");
+		const [warmed, actual] = sent.slice(-2);
+		assert.ok(warmed && actual);
+		assert.equal(warmed.max_tokens, 1);
+		assert.deepEqual(warmed.system, actual.system);
+		assert.deepEqual(warmed.tools, actual.tools);
+		assert.deepEqual(
+			warmed.messages,
+			JSON.parse(JSON.stringify(actual.messages).replaceAll("Actual task suffix", PREWARM_USER_TEXT)),
+		);
+		for (const request of [warmed, actual]) {
+			const messages = request.messages as Array<{
+				content: Array<{ type: string; tool?: { type: string; definition?: { name: string; description: string } } }>;
+			}>;
+			const changes = messages.flatMap((message) => (Array.isArray(message.content) ? message.content : []));
+			const addition = changes.find((block) => block.type === "tool_addition");
+			assert.equal(addition?.tool?.type, "tool_definition");
+			assert.equal(addition?.tool?.definition?.name, "inspect");
+			assert.equal(addition?.tool?.definition?.description, "Updated paths");
+			assert.equal(
+				changes.some((block) => block.type === "tool_removal"),
+				false,
+			);
+		}
+		for (const header of headers.slice(-2)) {
+			assert.ok(header.get("anthropic-beta")?.split(",").includes("inline-tools-2026-09-15"));
+			assert.equal(header.get("anthropic-beta")?.includes("mid-conversation-tool-changes-2026-07-01"), false);
 		}
 	} finally {
 		env.restore();

@@ -26,4 +26,4 @@ overrides:
   # GHSA-jqcg-44mw-7w3h (critical): reached through the MCP SDK's express.
   proxy-addr@<2.0.8: "2.0.8"
 patchedDependencies:
-  '@earendil-works/pi-tui@1.0.0': patches/@earendil-works__pi-tui@1.0.0.patch
+  '@earendil-works/pi-tui@1.1.0': patches/@earendil-works__pi-tui@1.1.0.patch

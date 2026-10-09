@@ -679,6 +679,7 @@ class RenderingTerminal implements Terminal {
 	clearScreen(): void {}
 	setTitle(): void {}
 	setProgress(): void {}
+	setProgramStatus(): void {}
 }
 
 const STREAMED_ANSWER = [
