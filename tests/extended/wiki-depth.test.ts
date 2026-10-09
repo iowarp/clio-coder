@@ -169,7 +169,9 @@ describe("wiki coverage depth", () => {
 				const page = input.plan.pages[0];
 				assert.ok(page);
 				assert.equal(page.attempts, 0);
-				assert.equal(page.lastFailure?.runId, "original-receipt");
+				assert.equal(page.lastFailure?.phase, "validation");
+				assert.equal(page.lastFailure?.detail, "Missing source citation");
+				assert.equal(page.lastFailure?.runId, undefined);
 				const authored = readAuthoredWikiPlan(input.outputDir, input.plan);
 				assert.ok(authored);
 				assert.equal(authored.pages[0]?.lastFailure?.detail, "Missing source citation");

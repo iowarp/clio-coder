@@ -423,9 +423,9 @@ function resolvePlan(input: {
 							...(pageSources.get(page.path) ?? []),
 						])
 					) {
-						const pending = { ...page };
-						delete pending.lastFailure;
-						return pending;
+						// Keep the diagnostic for the full writer; dropping runId makes the page repair-ineligible.
+						const { runId: _runId, ...failure } = page.lastFailure;
+						return { ...page, lastFailure: failure };
 					}
 					const evidence = inspectWikiPageEvidence({
 						pagePath: page.path,
@@ -440,9 +440,9 @@ function resolvePlan(input: {
 							...(evidence.dependencies ?? evidence.resolvedDependencies ?? []),
 						])
 					) {
-						const pending = { ...page };
-						delete pending.lastFailure;
-						return pending;
+						// Keep the diagnostic for the full writer; dropping runId makes the page repair-ineligible.
+						const { runId: _runId, ...failure } = page.lastFailure;
+						return { ...page, lastFailure: failure };
 					}
 					if (!evidence.ok) return page;
 					const revalidated = { ...page, status: "written" as const, dependencies: evidence.dependencies ?? [] };

@@ -726,7 +726,10 @@ describe("wiki generation outcomes", () => {
 			assert.equal(result.pending, attempts === 3 ? 1 : 0);
 			assert.equal(dispatches, attempts === 3 ? 1 : 2, "B is refreshed; A requires available normal-writer admission");
 			if (attempts === 3) {
-				assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure, undefined);
+				const retained = readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure;
+				assert.equal(retained?.phase, "validation");
+				assert.equal(retained?.detail, "Historical gate failure");
+				assert.equal(retained?.runId, undefined);
 				const stillPending = await run(write);
 				assert.equal(stillPending.pending, 1, "replacing the baseline cannot make the stale draft reusable");
 				assert.equal(dispatches, 1);
