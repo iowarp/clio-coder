@@ -10,6 +10,7 @@
 }
 .tool-card__head {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: baseline;
 	gap: var(--space-2);
 	min-width: 0;
@@ -65,7 +66,7 @@
 	color: var(--ink);
 }
 .tool-card__headline {
-	flex: 1 1 auto;
+	flex: 1 1 0;
 	min-width: 0;
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
@@ -75,12 +76,7 @@
 	white-space: nowrap;
 }
 .tool-card__trail {
-	flex: 0 1 auto;
-	min-width: 0;
-	max-width: 60%;
-	display: inline-flex;
-	align-items: baseline;
-	gap: var(--space-2);
+	display: contents;
 	font-family: var(--font-mono);
 	font-size: var(--text-exact);
 	font-variant-numeric: tabular-nums;
@@ -91,7 +87,7 @@
 	flex: none;
 }
 .tool-card__trail > .tool-card__digest {
-	flex: 0 1 auto;
+	flex: 1 1 0;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -430,8 +426,11 @@
 		row-gap: 2px;
 	}
 	.tool-card__head:has(.tool-card__digest[data-tone="fail"]) .tool-card__trail {
-		flex-basis: 100%;
-		max-width: none;
+		display: inline-flex;
+		flex: 0 1 100%;
+		min-width: 0;
+		align-items: baseline;
+		gap: var(--space-2);
 		padding-left: 1.5em;
 	}
 }
