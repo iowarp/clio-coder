@@ -42,7 +42,7 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Onl
 
 ## Built-in catalog
 
-The catalog equals the files under `src/domains/agents/builtins/`: fourteen recipes. Every recipe declares `synthesis: true`. Budgets read `toolCalls/readReserve`. Tools are shown as the recipe declares them: `anyOf` groups mean at least one must be admitted, and every other required tool must be present on the target.
+The catalog equals the files under `src/domains/agents/builtins/`: fifteen recipes. Every recipe declares `synthesis: true`. Budgets read `toolCalls/readReserve`. Tools are shown as the recipe declares them: `anyOf` groups mean at least one must be admitted, and every other required tool must be present on the target.
 
 ### Shipped Base Agents
 User-facing agents visible in `clio-coder agents`. All declare `projectContextTier: bounded`.
@@ -57,6 +57,7 @@ User-facing agents visible in `clio-coder agents`. All declare `projectContextTi
 | `tester` | read, any of write or edit | grep, find, ls, git, verify, code_nav, ledger, limitation | Adds focused deterministic regression and coverage tests. | `workspace-edit` | `balanced` | 40/5 | `mutation-report` |
 | `verifier` | verify | evidence, read, grep, find, ls, git, code_nav, ledger | Runs test, lint, build, review, and release gates and reports each independently. It is the default `review.reviewer` and the default compete `judge.agent`, never the builder's own agent. | `verification` | `fast` | 20/3 | `verifier-report` |
 | `wiki-writer` | read, any of write or edit | grep, find, ls, code_nav, context, ledger, limitation | Plans a repository wiki or writes one wiki page against a supplied plan. | `workspace-edit` | `balanced` | 40/6 | `artifact-report` |
+| `wiki-repair` | read, edit | grep | Repairs the publication diagnostics of one existing wiki draft with targeted edits and at most three source reads. | `workspace-edit` | `balanced` | 10/4 | `artifact-report` |
 
 Bound skills: `architect` binds `sprint-plan`; `coder` binds `fix-issue` and `ship`; `git-master` binds `fix-issue`, `ship`, `worktree-create`, and `worktree-merge`. The skill bodies live under `library/skills/`. The `coder`, `documenter`, `git-master`, and `tester` recipes declare `permissions: {git: worktree}`, which lets a worker commit inside the host-owned task worktree. `wiki-writer` declares `product: orientation`.
 
