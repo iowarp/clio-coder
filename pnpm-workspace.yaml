@@ -25,5 +25,7 @@ overrides:
   "@modelcontextprotocol/sdk@<1.31.0": "1.32.1"
   # GHSA-jqcg-44mw-7w3h (critical): reached through the MCP SDK's express.
   proxy-addr@<2.0.8: "2.0.8"
+  # GHSA-238p-pmpm-9mq7: force 0.18.2 outside Mermaid 11.17.2's declared ^0.16.47.
+  "katex@<0.18.2": "0.18.2"
 patchedDependencies:
   '@earendil-works/pi-tui@1.1.0': patches/@earendil-works__pi-tui@1.1.0.patch
