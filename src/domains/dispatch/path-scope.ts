@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { isAbsolute, relative } from "node:path";
 import {
 	asDirectoryPathBoundary,
 	normalizePathBoundaryEntry,
@@ -10,7 +11,7 @@ import type { DispatchRequest } from "./contract.js";
 import type { RunLedgerProjection } from "./types.js";
 
 /** Path-like tokens retained for requests that do not carry typed intent. */
-const DISPATCH_PATH_TOKEN_RE = /(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.[A-Za-z0-9]{1,8}\b/g;
+const DISPATCH_PATH_TOKEN_RE = /\/?(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.[A-Za-z0-9]{1,8}\b/g;
 const HTTP_URL_RE = /\bhttps?:\/\/\S+/gu;
 const POSIX_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'])((?:\/[\w.~+-]+)+)/gu;
 const WINDOWS_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'])([A-Za-z]:[\\/][^\s"']+)/gu;
@@ -180,7 +181,9 @@ function inferredPaths(
 ): { paths: string[]; droppedTokens: string[] } {
 	const paths = new Set<string>();
 	const droppedTokens = new Set<string>();
-	const text = `${req.task}\n${req.briefing ?? ""}`;
+	const text = `${req.task}\n${req.briefing ?? ""}`
+		.replace(/^```json[^\n]*\n[\s\S]*?^```[ \t]*$/gmu, "")
+		.replace(HTTP_URL_RE, "");
 	for (const match of text.matchAll(DISPATCH_PATH_TOKEN_RE)) {
 		const inferred = inferredPathToken(match[0], root);
 		if (inferred.kind === "dropped") {
@@ -188,8 +191,8 @@ function inferredPaths(
 			continue;
 		}
 		const token = inferred.kind === "anchored" ? inferred.resolved : inferred.token;
-		if (token.startsWith("http://") || token.startsWith("https://")) continue;
-		paths.add(token);
+		const local = isAbsolute(token) ? relative(root, token) : token;
+		paths.add(local === ".." || local.startsWith("../") ? token : local);
 	}
 	return { paths: [...paths], droppedTokens: [...droppedTokens] };
 }

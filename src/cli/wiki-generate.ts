@@ -518,6 +518,7 @@ async function runPagePhase(
 		...(repair ? { repairSources: sources } : {}),
 		task: repair
 			? buildWikiRepairPrompt({
+					cwd: input.cwd,
 					outputDir: input.outputDir,
 					page,
 					draftHash,
