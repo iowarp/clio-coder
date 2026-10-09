@@ -16,6 +16,7 @@ import {
 	MAX_PAGE_ATTEMPTS,
 	pendingPages,
 	readAuthoredWikiPlan,
+	validateWikiPlanAnchors,
 	writeWikiPlanFile,
 } from "../domains/context/wiki/plan-store.js";
 import { buildWikiPagePrompt, buildWikiPlanPrompt } from "../domains/context/wiki/prompts.js";
@@ -465,11 +466,21 @@ async function generateWikiWithDocumenter(
 ): Promise<void> {
 	signal?.throwIfAborted();
 	const startedAtClock = performance.now();
+	const checkAnchors = (plan: WikiPlan): WikiPlan =>
+		validateWikiPlanAnchors(plan, input.cwd, (page, sources) =>
+			input.progress?.({
+				phase: "generate",
+				status: "completed",
+				message: `rejected invalid anchors for ${page}`,
+				detail: sources.map((source) => JSON.stringify(source)).join(", "),
+			}),
+		);
+	let plan = checkAnchors(input.plan);
 	if (
 		!input.replan &&
 		input.mode === "update" &&
 		input.unclaimedAreas.length === 0 &&
-		input.plan.pages.every((page) => page.status === "written")
+		plan.pages.every((page) => page.status === "written")
 	) {
 		input.progress?.({
 			phase: "generate",
@@ -490,9 +501,9 @@ async function generateWikiWithDocumenter(
 
 	// Keep page paths stable while updating their source evidence. Only new
 	// areas, a changed depth, or --replan need the repository-wide planner.
-	let plan = input.resumed ? input.plan : await runPlanPhase(dispatch, input, route, deadline);
+	if (!input.resumed) plan = checkAnchors(await runPlanPhase(dispatch, { ...input, plan }, route, deadline));
 	signal?.throwIfAborted();
-	if (!input.resumed) writeWikiPlanFile(input.outputDir, plan);
+	writeWikiPlanFile(input.outputDir, plan);
 
 	const queue = pendingPages(plan, input.retryPending);
 	if (queue.length === 0) {

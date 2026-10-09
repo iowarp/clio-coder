@@ -9,8 +9,8 @@
  * just rewrote, so a planning pass cannot mark its own pages finished.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
 import type { WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
@@ -209,6 +209,41 @@ export function readAuthoredWikiPlan(dir: string, previous: WikiPlan): WikiPlan 
 
 export function writeWikiPlanFile(dir: string, plan: WikiPlan): void {
 	safeResourceWrite(wikiPlanPath(dir), `${JSON.stringify(plan, null, 2)}\n`, { encoding: "utf8" });
+}
+
+export function validateWikiPlanAnchors(
+	plan: WikiPlan,
+	cwd: string,
+	onRejected: (page: string, sources: string[]) => void,
+): WikiPlan {
+	let root: string;
+	try {
+		root = realpathSync(cwd);
+	} catch {
+		return plan;
+	}
+	return {
+		...plan,
+		pages: plan.pages.map((page) => {
+			const sources = page.sources.filter((source) => {
+				if (isAbsolute(source)) return false;
+				try {
+					const file = realpathSync(resolve(root, source));
+					const rel = relative(root, file);
+					return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) && statSync(file).isFile();
+				} catch {
+					// Missing or inaccessible anchors cannot ground a writer.
+					return false;
+				}
+			});
+			if (sources.length === page.sources.length) return page;
+			onRejected(
+				page.path,
+				page.sources.filter((source) => !sources.includes(source)),
+			);
+			return { ...page, sources, status: "pending", attempts: page.status === "written" ? 0 : page.attempts };
+		}),
+	};
 }
 
 /**
