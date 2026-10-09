@@ -9,6 +9,7 @@ import { captureProjectSurface, recordProjectSurfaceTrust } from "../../../../sr
 import { openAuthStorage } from "../../../../src/domains/providers/auth/index.js";
 
 const cwd = process.argv[2];
+const targetId = process.argv[3] ?? "fixture-target";
 assert.ok(cwd);
 const config = process.env.CLIO_CODER_CONFIG_DIR;
 assert.ok(config);
@@ -20,13 +21,13 @@ writeFileSync(
 		version: 2,
 		targets: [
 			{
-				id: "fixture-target",
+				id: targetId,
 				runtime: "openai-compat",
 				url: "http://127.0.0.1:9",
 				auth: { headers: { "X-Fixture": "fixture-header-secret" } },
 			},
 		],
-		chat: { target: "fixture-target", thinkingLevel: "high", model: "fixture-user-model" },
+		chat: { target: targetId, thinkingLevel: "high", model: "fixture-user-model" },
 		integrations: {
 			externalAgents: {
 				entries: [

@@ -46,7 +46,7 @@ const h = await harness(
 		env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" },
 	},
 );
-await seedSettings(h.home.path, h.home.env);
+await seedSettings(h.home.path, h.home.env, "fixture");
 await seedFleet(h.home.path, h.home.env);
 await seedEvidence(h.home.path, h.home.env);
 await seedReports(h.home.path, h.home.env);
@@ -654,10 +654,10 @@ try {
 			.locator("main")
 			.getByRole("link", { name: /^Connections/ })
 			.click();
-		await page.getByRole("article", { name: "fixture-target", exact: true }).waitFor();
+		await page.getByRole("article", { name: "fixture", exact: true }).waitFor();
 		await check("targets");
 		await page
-			.getByRole("article", { name: "fixture-target", exact: true })
+			.getByRole("article", { name: "fixture", exact: true })
 			.getByRole("button", { name: "Use for chat & fleet", exact: true })
 			.click();
 		await page.locator("main").getByRole("heading", { name: "Connection use · succeeded", exact: true }).waitFor();
