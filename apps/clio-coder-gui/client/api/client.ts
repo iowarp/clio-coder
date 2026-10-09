@@ -1,6 +1,6 @@
 import type { Problem } from "../../contracts/common.js";
 import type { Input, Output, Route } from "../../contracts/routes.js";
-import { markTokenRejected } from "./auth-state.js";
+import { markTokenRejected, tokenRejected } from "./auth-state.js";
 import { clock } from "./clock.js";
 import { dropStoredToken } from "./token.js";
 
@@ -9,11 +9,23 @@ export class ApiProblem extends Error {
 		super(problem.detail);
 	}
 }
+function unauthorized() {
+	return new ApiProblem({
+		type: "urn:clio-coder:problem:unauthorized",
+		title: "unauthorized",
+		status: 401,
+		code: "unauthorized",
+		detail: "A valid launch token is required.",
+		instance: "browser",
+	});
+}
 export function createClient(token: string, fetcher: typeof fetch = fetch) {
 	return {
 		token,
 		/** `signal` cancels the request itself; a cancelled call rejects with the abort, never as "server unavailable". */
 		async call<R extends Route>(route: R, input: Input<R>, key?: string, signal?: AbortSignal): Promise<Output<R>> {
+			// A refused token only recovers through a reload, so nothing else is read in this document.
+			if (tokenRejected()) throw unauthorized();
 			const path = route.path.replace(/:([A-Za-z0-9]+)/g, (_, name: string) =>
 				encodeURIComponent(String((input.params as Record<string, unknown>)[name])),
 			);
