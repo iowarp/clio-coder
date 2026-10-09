@@ -778,21 +778,19 @@ function readStringOrNull(value: unknown): string | null {
 }
 
 /**
- * Row for an assistant reply that reports no usage. Usage stays absent rather than a fabricated zero, and a
- * reply naming no model, response id or gateway route is a synthetic fault (an ACP delegation error, for one)
- * that must not appear as a provider call.
+ * Row for an assistant reply that reports no usage. Usage stays absent rather than a fabricated zero. A reply
+ * the engine marked `clioSyntheticFault` (an ACP delegation error, for one) never reached a provider and so
+ * yields no row. Every other usage-less reply is a real call, even when it names no model, so its row falls
+ * back to the dispatch's requested model when the message carries none.
  */
 function usagelessUpstreamResponse(
 	message: Record<string, unknown>,
 	callIndex: number,
+	fallbackModelId: string | null,
 ): RunReceiptUpstreamResponse | null {
+	if (message.clioSyntheticFault === true) return null;
 	const { usage: _usage, usageScope: _usageScope, ...row } = upstreamResponse(message, callIndex, "call");
-	const identified =
-		row.requestedModelId !== null ||
-		row.differingResponseModelId !== null ||
-		row.providerResponseId !== null ||
-		row.gatewayRouting !== undefined;
-	return identified ? row : null;
+	return row.requestedModelId === null && fallbackModelId !== null ? { ...row, requestedModelId: fallbackModelId } : row;
 }
 
 function upstreamResponse(
@@ -5532,7 +5530,7 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
-					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1);
+					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, null);
 					if (row !== null) upstreamResponses.push(row);
 				}
 				if (event.message.stopReason === "error") {
@@ -7066,7 +7064,7 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
-					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1);
+					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, lifecycle.target.wireModelId);
 					if (row !== null) upstreamResponses.push(row);
 				}
 				if (event.message.stopReason === "error") {

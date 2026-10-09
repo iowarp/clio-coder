@@ -282,8 +282,10 @@ function cancelGraceMs(value: number | undefined): number {
 }
 
 function errorEvents(messageText: string): AgentEvent[] {
+	// The marker lets dispatch tell this fault from a real usage-less ACP reply, which looks identical otherwise.
 	const message = {
 		role: "assistant",
+		clioSyntheticFault: true,
 		content: [{ type: "text", text: messageText }],
 		timestamp: Date.now(),
 		stopReason: "error",

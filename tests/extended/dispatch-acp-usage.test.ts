@@ -195,6 +195,11 @@ for (const scenario of [
 				costUsd: scenario.cost,
 				costProvenance: scenario.provenance,
 			});
+			if (scenario.name === "absent usage stays unknown") {
+				// A real ACP reply without usage is still one provider observation, but never a metered call.
+				strictEqual(receipt.upstreamResponses?.length, 1);
+				strictEqual("usage" in (receipt.upstreamResponses?.[0] ?? {}), false);
+			}
 			if (scenario.name === "Clio metadata costUsd with estimated provenance") {
 				strictEqual(receipt.apiCalls, 3);
 				strictEqual(receipt.missingTokenCalls, 1);
@@ -220,3 +225,32 @@ for (const scenario of [
 		}
 	});
 }
+
+it("records no upstream row for a synthetic ACP delegation fault", { timeout: 15_000 }, async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.autonomy = "yolo";
+	settings.fleet.retry.maxRetries = 0;
+	settings.integrations.externalAgents.entries = [
+		{
+			id: "usage-fault",
+			command: process.execPath,
+			args: ["-e", "process.exit(1)"],
+			toolGovernance: "clio-coder-policy",
+		},
+	];
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }));
+	await bundle.extension.start();
+	try {
+		const run = await bundle.contract.dispatch({
+			agentId: "usage-fault",
+			task: "Inspect the fixture input.",
+			executionRole: "researcher",
+			requestOrigin: "internal",
+		});
+		const receipt = await run.finalPromise;
+		ok(receipt.outcome !== "succeeded");
+		strictEqual(receipt.upstreamResponses, undefined);
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
