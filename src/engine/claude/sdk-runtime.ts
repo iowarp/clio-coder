@@ -358,7 +358,11 @@ export function createClaudeWorkerBudgetGate(
 	let admitted = 0;
 	let locked = false;
 	const phaseDecision = (canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string } => {
-		if (budget.mode === "advisory") return { kind: "allow" };
+		if (budget.mode === "advisory") {
+			if (budget.ceiling !== undefined && admitted >= budget.ceiling)
+				return { kind: "deny", reason: `worker tool-call ceiling reached (${budget.ceiling}); tools are disabled` };
+			return { kind: "allow" };
+		}
 		const reserveAdmits = isReserveAdmittedTool(canonicalToolName, deliveryTools);
 		if (locked || admitted >= budget.toolCalls) {
 			// Same rule the native guard applies: the soft budget ends discovery,
@@ -407,10 +411,12 @@ export function createClaudeWorkerBudgetGate(
 			const phase = phaseDecision(canonicalToolName);
 			if (phase.kind === "deny") return phase;
 			admitted += 1;
-			// Locking here is what ends the work phase. A delivery-capable agent is
-			// not locked at its soft budget: it still owes the files it was
-			// dispatched to write, and hardCap in attempt() is its bound.
-			if (budget.mode !== "advisory" && admitted >= budget.toolCalls && deliveryTools.length === 0) {
+			// Delivery work can continue beyond an enforced soft estimate. An
+			// explicit advisory ceiling ends all admitted work, including delivery.
+			if (
+				(budget.mode === "advisory" && budget.ceiling !== undefined && admitted >= budget.ceiling) ||
+				(budget.mode !== "advisory" && admitted >= budget.toolCalls && deliveryTools.length === 0)
+			) {
 				locked = true;
 				onBoundary();
 			}
@@ -627,7 +633,10 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		if (input.budget?.synthesis === false) {
 			budgetFailure = true;
 			emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
-			return { continue: false, stopReason: `worker agent budget reached (${input.budget.toolCalls})` };
+			return {
+				continue: false,
+				stopReason: `worker agent budget reached (${input.budget.ceiling ?? input.budget.toolCalls})`,
+			};
 		}
 		return {
 			continue: true,

@@ -103,6 +103,27 @@ for (const synthesis of [false, true]) {
 		equal(gate.phaseReached(), false);
 		equal(boundaries, 0);
 	});
+	it(`SDK advisory calls stop at the admitted ceiling with delivery tools (synthesis=${synthesis})`, () => {
+		let boundaries = 0;
+		let hardCaps = 0;
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 10, readReserve: 4, synthesis, hardCap: 120, mode: "advisory", ceiling: 10 },
+			() => boundaries++,
+			() => hardCaps++,
+			["edit"],
+		);
+		for (let call = 0; call < 10; call++) {
+			equal(gate.attempt("edit").kind, "allow");
+			equal(gate.admit("edit").kind, "allow");
+		}
+		equal(gate.phaseReached(), true);
+		const eleventh = gate.attempt("edit");
+		ok(eleventh.kind === "deny");
+		match(eleventh.reason, /ceiling reached \(10\)/u);
+		equal(gate.admit("edit").kind, "deny", "execution admission also closes calls attempted in parallel");
+		equal(boundaries, 1);
+		equal(hardCaps, 0);
+	});
 }
 
 it("advisory mode retains identical-call fault detection and legacy SDK enforcement", () => {
