@@ -165,6 +165,13 @@ function layoutConstructions(text: string): Set<string> {
 		),
 	];
 	const tokens = lexemes.map((match) => match[0]);
+	let depth = 0;
+	const depths = tokens.map((token) => {
+		const before = depth;
+		if (token === "(" || token === "[") depth++;
+		else if (token === ")" || token === "]") depth--;
+		return before;
+	});
 	const paths = new Set<string>();
 	const placeholder = (name: string): string => `<${name.split(".").at(-1)}>`;
 	const atom = (start: number): { value: string; end: number } | null => {
@@ -204,15 +211,16 @@ function layoutConstructions(text: string): Set<string> {
 		if (previous && /^(?:[+*%&|^!?~.-]|and|or|not|in|is)$/.test(previous)) return false;
 		while (/^(?:[)\]}]|\/\*)/.test(tokens[end] ?? "")) end++;
 		const next = tokens[end];
-		if (next === undefined || /^(?:[,;:]|#|\/\/)/.test(next)) return true;
+		if (next === undefined || /^(?:[,;:]|#)/.test(next)) return true;
 		const last = lexemes[end - 1];
 		const following = lexemes[end];
 		return (
 			last !== undefined &&
 			following !== undefined &&
 			/\n/.test(text.slice(last.index + last[0].length, following.index)) &&
+			depths[end] === 0 &&
 			identifier.test(next) &&
-			!/^(?:and|or|if|else|for|in|is)$/.test(next)
+			!/^(?:and|or|else|in|is)$/.test(next)
 		);
 	};
 
