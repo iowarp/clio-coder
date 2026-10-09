@@ -89,13 +89,13 @@ describe("wiki mechanical evidence gate", () => {
 		);
 	});
 
-	it("keeps shorthand strict for ambiguity, undeclared files, frontmatter, escapes and lines", () => {
+	it("keeps shorthand strict for ambiguous lines, undeclared files, frontmatter and escapes", () => {
 		writeFileSync(join(root, "tests/main.ts"), "different\n");
 		writeFileSync(join(root, "src/undeclared.ts"), "present but not declared\n");
 		writeFileSync(join(sandbox, "outside.ts"), "outside\n");
 		symlinkSync(join(sandbox, "outside.ts"), join(root, "src/escape.ts"));
 		for (const content of [
-			"---\nsources: [src/main.ts, tests/main.ts]\n---\nSee `main.ts`.",
+			"---\nsources: [src/main.ts, tests/main.ts]\n---\nSee `main.ts:1`.",
 			"---\nsources: [src/main.ts, main.ts]\n---\nSee `main.ts`.",
 			page("src/main.ts", "See `undeclared.ts` and `unknown.ts`."),
 			page("src/main.ts", "See `main.ts:4`."),
@@ -107,6 +107,92 @@ describe("wiki mechanical evidence gate", () => {
 			strictEqual(result.ok, false, content);
 			strictEqual(result.dependencies, undefined);
 		}
+	});
+
+	it("resolves unique NodeNext basenames and path suffixes to authored files", () => {
+		mkdirSync(join(root, "src/nested"));
+		for (const [authored, cited] of [
+			["main.ts", "main.js"],
+			["view.tsx", "view.js"],
+			["module.mts", "module.mjs"],
+			["common.cts", "common.cjs"],
+		] as const) {
+			writeFileSync(join(root, "src/nested", authored), "source\n");
+			const reference = authored === "main.ts" ? `nested/${cited}` : cited;
+			deepStrictEqual(check(page("package.json", `See \`${reference}\`.`)), {
+				ok: true,
+				reasons: [],
+				dependencies: ["package.json", `src/nested/${authored}`],
+			});
+		}
+		rmSync(join(root, "src/nested/main.ts"));
+		deepStrictEqual(check(page("package.json", "See `main.js`.")), {
+			ok: true,
+			reasons: [],
+			dependencies: ["package.json", "src/main.ts"],
+		});
+	});
+
+	it("accepts ambiguous real basenames as mentions without adding or substituting evidence", () => {
+		writeFileSync(join(root, "tests/main.ts"), "different\n");
+		for (const name of ["main.ts", "main.js"]) {
+			deepStrictEqual(check(page("package.json", `Modules use \`${name}\`.`)), {
+				ok: true,
+				reasons: [],
+				dependencies: ["package.json"],
+			});
+			const result = check(`Modules use \`${name}\`.`);
+			strictEqual(result.ok, false);
+			match(result.reasons.join(" "), /Cite at least one existing repository file/);
+			strictEqual(check(page("package.json", `See \`${name}:1\`.`)).ok, false);
+		}
+	});
+
+	it("accepts declared source literals as mentions while rejecting fabricated or unverified citations", () => {
+		writeFileSync(join(root, "src/main.ts"), 'const config = "settings.yaml"; const example = "[project]/src/a.ts";\n');
+		const content = page("src/main.ts", "The names are `settings.yaml` and `[project]/src/a.ts`.");
+		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["src/main.ts"] });
+		strictEqual(check(content.replace("settings.yaml", "fabricated.yaml")).ok, false);
+		strictEqual(check(page("package.json", "The name is `settings.yaml`.")).ok, false);
+		strictEqual(check(page("src/main.ts", "See `settings.yaml:1`.")).ok, false);
+		strictEqual(check(page("settings.yaml", "The configuration is described here.")).ok, false);
+		truncateSync(join(root, "src/main.ts"), 512 * 1024 + 1);
+		strictEqual(check(content).ok, false);
+	});
+
+	it("requires complete literal tokens rather than filename or path substrings", () => {
+		for (const [cited, literal] of [
+			["data.ts", "metadata.ts"],
+			["foo/bar.ts", "src/foo/bar.ts"],
+		]) {
+			writeFileSync(join(root, "src/main.ts"), `const example = "${literal}";\n`);
+			strictEqual(check(page("src/main.ts", `See \`${cited}\`.`)).ok, false, cited);
+		}
+		writeFileSync(join(root, "src/main.ts"), "// Load settings.yaml.\n");
+		deepStrictEqual(check(page("src/main.ts", "The name is `settings.yaml`.")), {
+			ok: true,
+			reasons: [],
+			dependencies: ["src/main.ts"],
+		});
+	});
+
+	it("verifies test selectors against the nearest workspace package and a declared matching test", () => {
+		mkdirSync(join(root, "apps/gui/tests"), { recursive: true });
+		writeFileSync(join(root, "apps/gui/tests/view.test.ts"), "test\n");
+		const manifest = join(root, "apps/gui/package.json");
+		writeFileSync(manifest, '{"scripts":{"test":"node --test tests/*.test.ts tests/*.test.tsx"}}');
+		const content = "---\ntests: [apps/gui/tests/view.test.ts]\n---\nCI discovers `tests/*.test.ts`.";
+		deepStrictEqual(check(content), {
+			ok: true,
+			reasons: [],
+			dependencies: ["apps/gui/package.json", "apps/gui/tests/view.test.ts"],
+		});
+		strictEqual(check(content.replace("tests/*.test.ts`", "tests/*.test.tsx`")).ok, false);
+		writeFileSync(join(root, "package.json"), '{"scripts":{"test":"node --test apps/gui/tests/*.test.ts"}}');
+		writeFileSync(manifest, "{}");
+		strictEqual(check(content.replace("`tests/*.test.ts`", "`apps/gui/tests/*.test.ts`")).ok, false);
+		writeFileSync(manifest, "invalid json");
+		strictEqual(check(content).ok, false);
 	});
 
 	it("deduplicates declared aliases by their verified canonical file", () => {

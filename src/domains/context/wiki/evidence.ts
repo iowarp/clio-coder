@@ -1,5 +1,5 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
-import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
@@ -100,8 +100,6 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			references.add(cited);
 		}
 	}
-	if (references.size === 0)
-		fail("Cite at least one existing repository file in sources/tests or as a backticked source path.");
 	if (references.size > 512) {
 		fail("Page exceeds the 512-reference evidence-check limit; split or shorten it before retrying.");
 		return { ok: false, reasons };
@@ -142,7 +140,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	// `src/clio_researcher/grader.py` and `contracts/campaign.py` for
 	// `src/clio_researcher/contracts/campaign.py`. Exactly one file whose name, or
 	// whose path ending on whole segments, equals the citation is that file; zero
-	// or several keep failing so a guess never becomes evidence.
+	// or several cannot establish a source dependency.
 	let workspaceFiles: string[] | null = null;
 	let filesByName: Map<string, string[]> | null = null;
 	const listedFiles = (): string[] => {
@@ -156,7 +154,13 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		}
 		return workspaceFiles;
 	};
-	const repositoryFileNamed = (name: string): string | null => {
+	const sourceCandidates = (path: string): string[] => {
+		if (path.endsWith(".js")) return [path, `${path.slice(0, -3)}.ts`, `${path.slice(0, -3)}.tsx`];
+		if (path.endsWith(".mjs")) return [path, `${path.slice(0, -4)}.mts`];
+		if (path.endsWith(".cjs")) return [path, `${path.slice(0, -4)}.cts`];
+		return [path];
+	};
+	const repositoryFilesNamed = (name: string): string[] => {
 		if (filesByName === null) {
 			filesByName = new Map();
 			for (const file of listedFiles()) {
@@ -166,15 +170,18 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 				filesByName.set(key, files);
 			}
 		}
-		const files = filesByName.get(name);
-		return files?.length === 1 ? resolveSourcePath(root, files[0] ?? "") : null;
+		return sourceCandidates(name).flatMap((candidate) =>
+			(filesByName?.get(candidate) ?? []).map((file) => resolve(root, file)),
+		);
 	};
 	const repositoryFileEndingWith = (cited: string): string | null => {
 		const segments = cited.split("/");
 		if (segments.some((segment) => segment === "" || segment === "." || segment === "..") || /[*?{}<>[\]\\]/.test(cited))
 			return null;
-		const suffix = `/${cited}`;
-		const matches = listedFiles().filter((file) => file.split("\\").join("/").endsWith(suffix));
+		const candidates = sourceCandidates(cited);
+		const matches = listedFiles().filter((file) =>
+			candidates.some((candidate) => file === candidate || file.split("\\").join("/").endsWith(`/${candidate}`)),
+		);
 		return matches.length === 1 ? resolveSourcePath(root, matches[0] ?? "") : null;
 	};
 	const importedSource = (specifier: string): string | null => {
@@ -201,24 +208,33 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		)
 			return false;
 		const pattern = new RegExp(`^${selector.split("*").map(escapeRegex).join("[^/]*")}$`);
-		if (![...declaredFiles].some((path) => pattern.test(relative(root, path).split("\\").join("/")))) return false;
-		const manifest = resolve(root, "package.json");
-		try {
-			const scripts: unknown = JSON.parse(sourceText(manifest) ?? "{}").scripts;
-			if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts)) return false;
-			if (
-				!Object.values(scripts).some(
-					(command) =>
-						typeof command === "string" &&
-						command.split(/\s+/).some((token) => token.replace(/^["']|["']$/g, "") === selector),
+		for (const path of declaredFiles) {
+			try {
+				let dir = dirname(path);
+				while (dir !== root && !existsSync(resolve(dir, "package.json"))) {
+					const parent = dirname(dir);
+					if (parent === dir) break;
+					dir = parent;
+				}
+				if (!pattern.test(relative(dir, path).split("\\").join("/"))) continue;
+				const manifest = resolve(dir, "package.json");
+				const scripts: unknown = JSON.parse(sourceText(manifest) ?? "{}").scripts;
+				if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts)) continue;
+				if (
+					!Object.values(scripts).some(
+						(command) =>
+							typeof command === "string" &&
+							command.split(/\s+/).some((token) => token.replace(/^["']|["']$/g, "") === selector),
+					)
 				)
-			)
-				return false;
-			dependencies.add(relative(root, realpathSync(manifest)).split("\\").join("/"));
-			return true;
-		} catch {
-			return false;
+					continue;
+				dependencies.add(relative(root, realpathSync(manifest)).split("\\").join("/"));
+				return true;
+			} catch {
+				// An unreadable package cannot establish a test selector.
+			}
 		}
+		return false;
 	};
 	for (const reference of references) {
 		const label = JSON.stringify(reference.slice(0, 160));
@@ -231,6 +247,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			continue;
 		}
 		const cited = match[1] ?? "";
+		const mention = !declaredReferences.has(reference) && reference === cited;
 		try {
 			if (
 				!declaredReferences.has(reference) &&
@@ -243,12 +260,22 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			if (source === null && !declaredReferences.has(reference)) source = importedSource(cited);
 			if (source === null && !declaredReferences.has(reference) && !/[\\/]/.test(cited)) {
 				const declared = declaredFilesByName.get(cited);
-				if (declared?.size === 1) source = [...declared][0] ?? null;
-				else if (declared === undefined) source = repositoryFileNamed(cited);
+				const matches = declared ? [...declared] : repositoryFilesNamed(cited);
+				if (matches.length === 1) source = matches[0] ?? null;
+				else if (mention && matches.length > 1) continue;
 			} else if (source === null && !declaredReferences.has(reference)) {
 				source = repositoryFileEndingWith(cited);
 			}
 			if (source === null) {
+				const literal = new RegExp(`(?<![\\w/.-])${escapeRegex(cited)}(?![\\w/-]|\\.\\w)`);
+				if (
+					mention &&
+					!isAbsolute(cited) &&
+					!cited.includes("\\") &&
+					!cited.split("/").includes("..") &&
+					[...declaredFiles].some((path) => literal.test(sourceText(path) ?? ""))
+				)
+					continue;
 				fail(`Replace or remove unresolved repository reference ${label}; inspect the current file path.`);
 				continue;
 			}
@@ -303,6 +330,8 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			fail(`Cannot inspect ${label}; restore readable repository evidence or remove the unsupported reference.`);
 		}
 	}
+	if (dependencies.size === 0)
+		fail("Cite at least one existing repository file in sources/tests or as a backticked source path.");
 	return reasons.length === 0 ? { ok: true, reasons, dependencies: [...dependencies].sort() } : { ok: false, reasons };
 }
 
