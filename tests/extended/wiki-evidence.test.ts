@@ -261,6 +261,10 @@ describe("wiki mechanical evidence gate", () => {
 			`path.posix.join(root, "lineage", \`\${campaign_id}.jsonl\`)`,
 			`\`lineage/\${campaign_id}.jsonl\``,
 			'"lineage/" + campaign_id + ".jsonl"',
+			'(f"lineage/{campaign_id}.jsonl")',
+			'write_file(f"lineage/{campaign_id}.jsonl", contents)',
+			'f"lineage/{campaign_id}.jsonl"; next_statement()',
+			'f"lineage/{campaign_id}.jsonl" # Comment\nnext_statement()',
 		]) {
 			writeFileSync(join(root, "src/main.ts"), `output = ${expression}\n`);
 			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.jsonl`.")).ok, true, expression);
@@ -273,6 +277,14 @@ describe("wiki mechanical evidence gate", () => {
 			'"lineage" / campaign_id + ".jsonl"',
 			'f"lineage/{transform(campaign_id)}.jsonl"',
 			'f"lineage/{campaign_id}.jsonl" + ".yaml"',
+			'f"lineage/{campaign_id}.jsonl".replace(".jsonl", ".yaml")',
+			'Path(root, "lineage", f"{campaign_id}.jsonl").with_suffix(".yaml")',
+			'(f"lineage/{campaign_id}.jsonl").replace(".jsonl", ".yaml")',
+			'(f"lineage/{campaign_id}.jsonl")\n.replace(".jsonl", ".yaml")',
+			'f"lineage/{campaign_id}.jsonl"[:-1]',
+			'f"lineage/{campaign_id}.jsonl" * 2',
+			'2 * f"lineage/{campaign_id}.jsonl"',
+			'f"lineage/{campaign_id}.jsonl" if condition else "other.yaml"',
 		]) {
 			writeFileSync(join(root, "src/main.ts"), `output = ${expression}\n`);
 			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.jsonl`.")).ok, false, expression);

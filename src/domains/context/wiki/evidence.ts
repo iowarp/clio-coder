@@ -151,11 +151,12 @@ export function repairWikiLinks(
 /** Recognize a small expression grammar; never combine literals from separate expressions. */
 function layoutConstructions(text: string): Set<string> {
 	const identifier = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
-	const tokens = [
+	const lexemes = [
 		...text.matchAll(
 			/#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?:[fFrRbBuU]{0,2})(?:"""[\s\S]*?"""|'''[\s\S]*?''')|[fFrR]?(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|`(?:\\.|[^`\\])*`|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|[^\s]/g,
 		),
-	].map((match) => match[0]);
+	];
+	const tokens = lexemes.map((match) => match[0]);
 	const paths = new Set<string>();
 	const placeholder = (name: string): string => `<${name.split(".").at(-1)}>`;
 	const atom = (start: number): { value: string; end: number } | null => {
@@ -190,6 +191,23 @@ function layoutConstructions(text: string): Set<string> {
 		}
 		return { value, end: start + 1 };
 	};
+	const atBoundary = (start: number, end: number): boolean => {
+		const previous = tokens[start - 1];
+		if (previous && /^(?:[+*%&|^!?~.-]|and|or|not|in|is)$/.test(previous)) return false;
+		while (/^(?:[)\]}]|\/\*)/.test(tokens[end] ?? "")) end++;
+		const next = tokens[end];
+		if (next === undefined || /^(?:[,;:]|#|\/\/)/.test(next)) return true;
+		const last = lexemes[end - 1];
+		const following = lexemes[end];
+		return (
+			last !== undefined &&
+			following !== undefined &&
+			/\n/.test(text.slice(last.index + last[0].length, following.index)) &&
+			identifier.test(next) &&
+			!/^(?:and|or|if|else|for|in|is)$/.test(next)
+		);
+	};
+
 	for (let index = 0; index < tokens.length; index++) {
 		let expression = atom(index);
 		if (!expression) continue;
@@ -206,7 +224,7 @@ function layoutConstructions(text: string): Set<string> {
 			operator = nextOperator;
 			expression = { value: expression.value + (operator === "/" ? "/" : "") + next.value, end: next.end };
 		}
-		if (supported) {
+		if (supported && atBoundary(index, expression.end)) {
 			paths.add(expression.value);
 			// An opaque base directory can be omitted; literal path components cannot.
 			if (/^<[\w$]+>\//.test(expression.value)) paths.add(expression.value.replace(/^<[\w$]+>\//, ""));
