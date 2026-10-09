@@ -1,5 +1,5 @@
 import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/ai.js";
-import type { Api, KnownProvider, Model } from "../../engine/types.js";
+import type { Api, KnownProvider, Model, Usage } from "../../engine/types.js";
 import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
 import { acceptsImageInput } from "./image-input.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
@@ -40,8 +40,38 @@ export function listCatalogModelsForRuntime(runtimeId: string): Model<Api>[] {
 }
 
 export interface EffectivePricing {
-	rates: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+	rates: Model<Api>["cost"] | null;
 	provenance: CostProvenance;
+}
+
+export function calculatePricingCostUsd(
+	rates:
+		| (Pick<Model<Api>["cost"], "input" | "output" | "tiers"> &
+				Partial<Pick<Model<Api>["cost"], "cacheRead" | "cacheWrite">>)
+		| null,
+	usage: Pick<Usage, "input" | "output"> & Partial<Pick<Usage, "cacheRead" | "cacheWrite" | "cacheWrite1h">>,
+): number {
+	if (rates === null) return 0;
+	const cacheRead = usage.cacheRead ?? 0;
+	const cacheWrite = usage.cacheWrite ?? 0;
+	const inputTokens = usage.input + cacheRead + cacheWrite;
+	let selected = rates;
+	let threshold = -1;
+	for (const tier of rates.tiers ?? []) {
+		if (inputTokens > tier.inputTokensAbove && tier.inputTokensAbove > threshold) {
+			selected = tier;
+			threshold = tier.inputTokensAbove;
+		}
+	}
+	const longWrite = usage.cacheWrite1h ?? 0;
+	return (
+		(usage.input * selected.input +
+			usage.output * selected.output +
+			cacheRead * (selected.cacheRead ?? 0) +
+			(cacheWrite - longWrite) * (selected.cacheWrite ?? 0) +
+			longWrite * selected.input * 2) /
+		1_000_000
+	);
 }
 
 /** The runtime facts pricing reads: its id for the catalog, its tier for locality. */
@@ -76,12 +106,7 @@ export function resolveEffectivePricing(
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
 	if (!catalogModel) return { rates: null, provenance: "unknown" };
 	return {
-		rates: {
-			input: catalogModel.cost.input,
-			output: catalogModel.cost.output,
-			cacheRead: catalogModel.cost.cacheRead,
-			cacheWrite: catalogModel.cost.cacheWrite,
-		},
+		rates: structuredClone(catalogModel.cost),
 		provenance: "estimated",
 	};
 }

@@ -12,6 +12,8 @@ import { selectMemoryForPrompt } from "../../src/domains/memory/prompt-section.j
 import { loadMemoryRecords } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { loadTaskBankSnapshot, saveTaskBankSnapshot } from "../../src/domains/memory/task-bank-store.js";
+import { resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
+import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 
 const roots: string[] = [];
 
@@ -182,6 +184,10 @@ describe("memory guardian gate", () => {
 			endpoint: { occupied: 0, admissionLimit: 1, prefillTokensPerSecond: null, generationTokensPerSecond: null },
 		};
 		const measured = { occupied: 0, admissionLimit: 1, prefillTokensPerSecond: 1_000 };
+		const haiku = {
+			...metered,
+			...resolveEffectivePricing({ id: "api", runtime: "anthropic" }, anthropic, "claude-haiku-5-5"),
+		};
 		const cases: ReadonlyArray<[string, Partial<BackgroundStepFacts>, BackgroundStepDecision]> = [
 			["metered under the ceiling", {}, { admit: true, kind: "metered", timeoutMs: 60_000 }],
 			[
@@ -195,6 +201,16 @@ describe("memory guardian gate", () => {
 				{ admit: true, kind: "metered", timeoutMs: 60_000 },
 			],
 			["quota below warning", { route: quota, quota: window(79) }, { admit: true, kind: "quota", timeoutMs: 60_000 }],
+			[
+				"catalog prompt at the tier threshold",
+				{ route: haiku, inputTokens: 100_000, session: { spendUsd: 1, ceilingUsd: 1.02 } },
+				{ admit: true, kind: "metered", timeoutMs: 60_000 },
+			],
+			[
+				"catalog prompt above the tier threshold",
+				{ route: haiku, inputTokens: 100_001, session: { spendUsd: 1, ceilingUsd: 1.02 } },
+				{ admit: false, kind: "metered", reason: "cost_ceiling" },
+			],
 			[
 				"quota at warning",
 				{ route: quota, quota: window(80) },

@@ -20,7 +20,7 @@
 import type { DecisionHintLines } from "../domains/middleware/decision-hints.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
-import { resolveEffectivePricing } from "../domains/providers/catalog.js";
+import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { SessionCostCeilingError, sessionCeilingReached } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
@@ -125,13 +125,13 @@ export function createSystemOneRequestAdmission(deps: {
 			const totalTokens = usage.totalTokens ?? usage.input + usage.output + cacheRead + cacheWrite;
 			const costUsd =
 				usage.costUsd ??
-				(pricing.rates === null
-					? 0
-					: (usage.input * pricing.rates.input +
-							usage.output * pricing.rates.output +
-							cacheRead * pricing.rates.cacheRead +
-							cacheWrite * pricing.rates.cacheWrite) /
-						1_000_000);
+				calculatePricingCostUsd(pricing.rates, {
+					input: usage.input,
+					output: usage.output,
+					cacheRead,
+					cacheWrite,
+					cacheWrite1h: usage.cacheWrite1h ?? 0,
+				});
 			// Late answers must not charge the session that replaced their origin.
 			if (deps.currentSession() === session) {
 				deps.observability?.recordTokens(

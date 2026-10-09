@@ -10,6 +10,7 @@ import {
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import { createClaudeWorkerBudgetGate } from "../../src/engine/claude/sdk-runtime.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -227,6 +228,59 @@ describe("dispatch advisory admission and explicit authority", () => {
 			equal(starts, 0);
 		} finally {
 			await bundle.extension.stop?.();
+		}
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [{ id: "api", runtime: "anthropic", defaultModel: "claude-haiku-5-5" }];
+		settings.fleet.default = { ...settings.fleet.default, target: "api", model: "claude-haiku-5-5" };
+		settings.chat.maxOutputTokens = 100;
+		const priced = makeDispatchBundle(dispatchStubContext({ settings, runtime: anthropic }), {
+			spawnWorker: () => {
+				starts++;
+				throw new Error("fixture launch reached");
+			},
+		});
+		await priced.extension.start();
+		try {
+			const bounded = {
+				...request,
+				routingIntent: {
+					posture: "balanced" as const,
+					maxCostUsd: 0.02,
+					deadlineMs: null,
+					minimumQuality: null,
+					locality: "any" as const,
+					requiredCapabilities: [],
+					failover: "none" as const,
+				},
+			};
+			await rejects(priced.contract.dispatch(bounded), /fixture launch/u);
+			equal(starts, 1);
+			await rejects(
+				priced.contract.dispatch({ ...bounded, task: "Inspect the worker evidence.\n".repeat(15_000) }),
+				/budget ceiling crossed/u,
+			);
+			equal(starts, 1);
+			const reservedRequest = {
+				...bounded,
+				task: "Inspect the worker evidence.\n".repeat(15_000),
+				routingIntent: { ...bounded.routingIntent, maxCostUsd: 1 },
+			};
+			const preview = priced.contract.preview?.(reservedRequest);
+			const reservations = priced.contract.reservations;
+			ok(preview && reservations);
+			const reserved = reservations.prepare({
+				topology: "pipeline",
+				tasks: [{ memberId: "priced", wave: 0, resolution: preview }],
+			});
+			await rejects(
+				priced.contract.dispatch({ ...reservedRequest, reservation: { ownerId: reserved.ownerId, memberId: "priced" } }),
+				/fixture launch/u,
+			);
+			equal(starts, 2);
+			const reconciled = reservations.get(reserved.ownerId)?.members[0]?.costUpperBoundUsd;
+			ok(reconciled !== undefined && reconciled > preview.costUpperBoundUsd);
+		} finally {
+			await priced.extension.stop?.();
 		}
 	});
 	it("gives an advisory worker a hard ceiling at the recipe maximum and refuses one on an enforced budget", async () => {

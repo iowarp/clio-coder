@@ -138,7 +138,8 @@ import type { MiddlewareContract } from "../middleware/contract.js";
 import { workerPermitLine, workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
 import { selectProjectPreload } from "../prompts/preload.js";
-import { type EffectivePricing, resolveEffectivePricing } from "../providers/catalog.js";
+import type { EffectivePricing } from "../providers/catalog.js";
+import { calculatePricingCostUsd, resolveEffectivePricing } from "../providers/catalog.js";
 import {
 	type CapabilityFlags,
 	canonicalEndpointKey,
@@ -190,6 +191,7 @@ import {
 import { SESSION_COST_CEILING_REASON, SessionCostCeilingError, sessionCeilingReached } from "../scheduling/budget.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
+import { ceilChars } from "../session/context-accounting.js";
 import {
 	approvedRouteObservation,
 	consumeActiveRouteApproval,
@@ -526,7 +528,6 @@ interface ActiveRun {
 	/** Set while the finalizer waits on the operator's merge card; the worker is gone, the orchestrator is the live party. */
 	awaitingOperator?: boolean;
 	meter: RunTokenMeter;
-	pricing: EffectivePricing["rates"];
 	costProvenance: import("../providers/index.js").CostProvenance;
 	finalPromise: Promise<RunReceipt>;
 }
@@ -660,18 +661,6 @@ function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): R
 }
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
-function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["rates"]): number {
-	if (meter.costUsd !== undefined) return meter.costUsd;
-	if (pricing === null) return 0;
-	return (
-		(meter.inputTokens * pricing.input +
-			meter.outputTokens * pricing.output +
-			meter.cacheReadTokens * pricing.cacheRead +
-			meter.cacheWriteTokens * pricing.cacheWrite) /
-		1_000_000
-	);
-}
-
 function accumulateNativeUsage(
 	meter: RunTokenMeter,
 	usage: Record<string, unknown>,
@@ -689,6 +678,8 @@ function accumulateNativeUsage(
 		cacheWriteTokens: normalized.cacheWrite,
 		reasoningTokens: normalized.reasoning,
 	};
+	if (typeof usage.cacheWrite1h === "number" && usage.cacheWrite1h >= 0 && usage.cacheWrite1h <= call.cacheWriteTokens)
+		call.cacheWrite1hTokens = usage.cacheWrite1h;
 	meter.apiCalls = (meter.apiCalls ?? 0) + 1;
 	meter.totalTokens = (meter.totalTokens ?? 0) + normalized.totalTokens;
 	if (!normalized.observed) {
@@ -706,15 +697,21 @@ function accumulateNativeUsage(
 		typeof reported === "number" && Number.isFinite(reported) && reported >= 0 && usage.estimated !== true
 			? reported
 			: normalized.observed
-				? calculateUsageCostUsd(call, pricing)
+				? calculatePricingCostUsd(pricing, {
+						input: call.inputTokens,
+						output: call.outputTokens,
+						cacheRead: call.cacheReadTokens,
+						cacheWrite: call.cacheWriteTokens,
+						cacheWrite1h: call.cacheWrite1hTokens ?? 0,
+					})
 				: 0;
 	meter.costUsd = (meter.costUsd ?? 0) + callCost;
 	meter.inputTokens += call.inputTokens;
 	meter.outputTokens += call.outputTokens;
 	meter.cacheReadTokens += call.cacheReadTokens;
 	meter.cacheWriteTokens += call.cacheWriteTokens;
-	if (typeof usage.cacheWrite1h === "number" && usage.cacheWrite1h >= 0 && usage.cacheWrite1h <= call.cacheWriteTokens)
-		meter.cacheWrite1hTokens = (meter.cacheWrite1hTokens ?? 0) + usage.cacheWrite1h;
+	if (call.cacheWrite1hTokens !== undefined)
+		meter.cacheWrite1hTokens = (meter.cacheWrite1hTokens ?? 0) + call.cacheWrite1hTokens;
 	meter.reasoningTokens += call.reasoningTokens;
 }
 
@@ -728,13 +725,24 @@ function admissionMaxOutputTokens(settings: EffectiveSettings): number {
 	return settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens;
 }
 
-function conservativeRouteAdmissionEstimateUsd(pricing: EffectivePricing, maxOutputTokens: number): number {
+function conservativeRouteAdmissionEstimateUsd(
+	pricing: EffectivePricing,
+	maxOutputTokens: number,
+	req: DispatchRequest,
+	prompt?: Pick<DispatchLifecycleStage, "systemPrompt" | "dynamicPromptMessages">,
+): number {
 	if (pricing.provenance === "known_free") return 0;
 	if (pricing.rates === null) return UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD;
-	return (
-		(ADMISSION_INPUT_TOKEN_ESTIMATE * pricing.rates.input + Math.max(1, maxOutputTokens) * pricing.rates.output) /
-		1_000_000
+	const messages = prompt?.dynamicPromptMessages ?? buildDynamicPromptMessages(req);
+	const inputTokens = Math.max(
+		ADMISSION_INPUT_TOKEN_ESTIMATE,
+		ceilChars(
+			req.task.length +
+				(prompt?.systemPrompt ?? req.systemPrompt ?? "").length +
+				messages.reduce((length, message) => length + message.body.length, 0),
+		) + (req.contextSeed?.provenance.mode === "fork" ? req.contextSeed.provenance.estimatedTokens : 0),
 	);
+	return calculatePricingCostUsd(pricing.rates, { input: inputTokens, output: Math.max(1, maxOutputTokens) });
 }
 
 function requestOriginFor(req: DispatchRequest): DispatchRequestOrigin {
@@ -3668,9 +3676,10 @@ export function createDispatchBundle(
 		req: DispatchRequest,
 		pricing: EffectivePricing,
 		settings: EffectiveSettings,
+		prompt: Pick<DispatchLifecycleStage, "systemPrompt" | "dynamicPromptMessages">,
 		signal?: AbortSignal,
 	): Promise<void> {
-		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings));
+		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings), req, prompt);
 		const intentCeiling = req.routingIntent?.maxCostUsd;
 		if (intentCeiling !== null && intentCeiling !== undefined && estimateUsd > intentCeiling)
 			denyDispatchForBudget({ currentUsd: estimateUsd, ceilingUsd: intentCeiling }, req.agentId, estimateUsd);
@@ -3801,7 +3810,6 @@ export function createDispatchBundle(
 		}
 	}
 
-	/** Retries only: the first attempt's member was consumed with the planned bound. */
 	async function rebindReservationSlot(
 		req: DispatchRequest,
 		nodeId: string,
@@ -3809,14 +3817,13 @@ export function createDispatchBundle(
 		costUsd: number,
 		settings: EffectiveSettings,
 	): Promise<void> {
-		if (req.reservation === undefined || req.lineage === undefined) return;
-		// Retries can await fresh capacity; the advisory display cache is never admission data.
+		if (req.reservation === undefined) return;
 		const capacity = reservationCapacitySnapshot(settings, await capacityLeaseUsageAsync());
 		const rebind = {
 			...req.reservation,
 			nodeId,
 			...(endpoint !== null ? { endpointKey: endpoint.key } : {}),
-			costUpperBoundUsd: req.routeApproval?.totalCostUpperBoundUsd ?? costUsd,
+			costUpperBoundUsd: Math.max(req.routeApproval?.totalCostUpperBoundUsd ?? 0, costUsd),
 			capacity,
 			nowMs: now(),
 		};
@@ -4482,7 +4489,7 @@ export function createDispatchBundle(
 			const meter = run.meter;
 			const tokenCount =
 				meter.totalTokens ?? meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
-			const costUsd = calculateUsageCostUsd(meter, run.pricing);
+			const costUsd = meter.costUsd ?? 0;
 			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
 			if (
 				row.tokenCount !== tokenCount ||
@@ -5309,7 +5316,7 @@ export function createDispatchBundle(
 		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId, probeClaims);
 
 		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
-		await assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
+		await assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings, lifecycle);
 
 		const queuedIdentity =
 			req.lineage === undefined && req.runIdHint !== undefined
@@ -5687,7 +5694,6 @@ export function createDispatchBundle(
 			heartbeatAt: acp.heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
-			pricing: null,
 			costProvenance: "unknown",
 			finalPromise,
 		};
@@ -6310,7 +6316,7 @@ export function createDispatchBundle(
 			probeClaims,
 		);
 
-		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, preparation?.signal);
+		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, lifecycle, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
 		let remoteReturn: FleetChangeReturn | undefined;
@@ -6335,7 +6341,12 @@ export function createDispatchBundle(
 			req,
 			effectiveRoute.node,
 			endpoint,
-			conservativeRouteAdmissionEstimateUsd(lifecycle.target.effectivePricing, admissionMaxOutputTokens(settings)),
+			conservativeRouteAdmissionEstimateUsd(
+				lifecycle.target.effectivePricing,
+				admissionMaxOutputTokens(settings),
+				req,
+				lifecycle,
+			),
 			settings,
 		);
 		if (placement?.reroutes !== undefined && placement.reroutes.length > 0) {
@@ -7352,7 +7363,6 @@ export function createDispatchBundle(
 			heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
-			pricing: lifecycle.target.effectivePricing.rates,
 			costProvenance: lifecycle.target.effectivePricing.provenance,
 			finalPromise,
 		};
@@ -7384,7 +7394,7 @@ export function createDispatchBundle(
 			const routeOutcomeDetail = mergeRouteWarningDetail(lifecycle.target.routeWarning, outcomeDetail ?? activityNote);
 			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(routeOutcomeDetail, result, includeDiagnostics);
 			const finalFailureMessage = mergeWorkerDiagnosticFailure(failureMessage, result, includeDiagnostics);
-			const costUsd = calculateUsageCostUsd(tokenMeter, lifecycle.target.effectivePricing.rates);
+			const costUsd = tokenMeter.costUsd ?? 0;
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const tokenCount =
 				tokenMeter.totalTokens ??
@@ -8692,6 +8702,7 @@ export function createDispatchBundle(
 			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(
 				target.effectivePricing,
 				admissionMaxOutputTokens(settings),
+				req,
 			),
 			costUpperBoundKnown: target.effectivePricing.provenance !== "unknown",
 			routeApproval: null,
@@ -9339,7 +9350,7 @@ export function createDispatchBundle(
 			const meter = run.meter;
 			const totalTokens =
 				meter.totalTokens ?? meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
-			const costUsd = calculateUsageCostUsd(meter, run.pricing);
+			const costUsd = meter.costUsd ?? 0;
 			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
 			const startedMs = Date.parse(run.startedAt);
 			const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, tickNow - startedMs) : 0;

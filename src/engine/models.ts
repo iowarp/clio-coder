@@ -27,4 +27,13 @@ const CONFIGURED_PROVIDER_FACTORIES = [
 ] as const;
 
 export const engineModels = createModels();
-for (const factory of CONFIGURED_PROVIDER_FACTORIES) engineModels.setProvider(factory());
+for (const factory of CONFIGURED_PROVIDER_FACTORIES) {
+	const provider = factory();
+	if (provider.id === "anthropic") {
+		// Pi 1.1.0 predates the Sonnet cache-read correction in upstream ce950d78.
+		for (const model of provider.getModels()) {
+			if (model.id === "claude-sonnet-5-5") model.cost.cacheRead = 0.1;
+		}
+	}
+	engineModels.setProvider(provider);
+}

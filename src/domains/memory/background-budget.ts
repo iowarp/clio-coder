@@ -14,6 +14,8 @@
  * retried here; the next cadence tick decides again.
  */
 
+import type { EffectivePricing } from "../providers/catalog.js";
+import { calculatePricingCostUsd } from "../providers/catalog.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import { primaryWindow, windowAtWarning } from "../quota/severity.js";
@@ -45,7 +47,7 @@ export interface BackgroundRouteFacts {
 	/** Provenance of the resolved pricing (`resolveEffectivePricing`). */
 	provenance: CostProvenance;
 	/** Resolved USD rates per million tokens, or null when nothing priced the route. */
-	rates: { input: number; output: number } | null;
+	rates: Pick<NonNullable<EffectivePricing["rates"]>, "input" | "output" | "tiers"> | null;
 	runtime: Pick<RuntimeDescriptor, "auth" | "tier">;
 	/** The quota adapter that reads this runtime's account, or null when Clio reads none. */
 	quotaProviderId: string | null;
@@ -107,7 +109,7 @@ export function decideBackgroundStep(facts: BackgroundStepFacts): BackgroundStep
 		case "metered": {
 			const rates = facts.route.rates;
 			if (rates === null) return admit(facts.timeoutCapMs);
-			const projectedUsd = (facts.inputTokens * rates.input + facts.maxOutputTokens * rates.output) / 1_000_000;
+			const projectedUsd = calculatePricingCostUsd(rates, { input: facts.inputTokens, output: facts.maxOutputTokens });
 			return sessionCeilingReached(facts.session.spendUsd + projectedUsd, facts.session.ceilingUsd)
 				? skip("cost_ceiling")
 				: admit(facts.timeoutCapMs);
