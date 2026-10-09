@@ -1,4 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import type { Codewiki } from "../../src/domains/context/codewiki/schema.js";
 import { readWikiPage } from "../../src/domains/context/wiki/frontmatter.js";
@@ -115,6 +116,42 @@ describe("wiki page decision prompts", () => {
 		match(text, /caller -> arguments -> enforcing\s+branch -> observable outcome/);
 		match(text, /Coverage gaps prevent completion and require normal writing/);
 		match(text, /compare every frontmatter invariant with the body's conditions/);
+	});
+
+	it("gives a seeded writer retry fresh bounded draft diagnostics ahead of the stale failure", () => {
+		const diagnostics = [`${"x".repeat(1100)} first`, ...Array.from({ length: 40 }, (_, index) => `reason ${index}`)];
+		const text = buildWikiPagePrompt({
+			cwd: process.cwd(),
+			mode: "init",
+			codewiki,
+			page: {
+				path: "cache.md",
+				title: "Cache",
+				intent: "Explain the cache",
+				sources: ["src/cache.ts"],
+				status: "pending",
+				attempts: 1,
+				lastFailure: { phase: "validation", detail: "stale failure detail", runId: "old-run" },
+			},
+			siblings: [],
+			outputDir: "/staging",
+			seeded: true,
+			diagnostics,
+		});
+		const block = /## Current draft publication diagnostics[\s\S]*?```json\s+([\s\S]*?)\s+```/u.exec(text);
+		const parsed = JSON.parse(block?.[1] ?? "{}") as { reasons: string[]; omittedDiagnostics?: number };
+		strictEqual(parsed.reasons.length, 32);
+		strictEqual(parsed.reasons[0]?.length, 1000);
+		strictEqual(parsed.omittedDiagnostics, 9);
+		match(text, /unread assigned implementation, configuration, or existing tests remain coverage gaps/);
+		doesNotMatch(text, /Previous attempt diagnostic|stale failure detail/);
+	});
+
+	it("keeps the writer agent prompt consistent with the page fragment on unverified wording and coverage_gaps", () => {
+		const agent = readFileSync(new URL("../../src/domains/agents/builtins/wiki-writer.md", import.meta.url), "utf8");
+		match(agent, /`coverage_gaps` frontmatter list/);
+		match(agent, /never a substitute for reading a source the task assigned/);
+		doesNotMatch(agent, /say what is unverified instead of writing the claim/);
 	});
 
 	it("carries recorded arguments, origin, timestamp and refs and instructs citation", async () => {
