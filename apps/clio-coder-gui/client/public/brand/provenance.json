@@ -14,9 +14,9 @@
 		"padding": "Square app icons center the mark within a 94% safe area; the header mark is unchanged.",
 		"sha256": {
 			"clio-coder-logo.webp": "0a9ad4f1015c4c0bb17dbe952841c915a39ca0cf5fc9ec06f403d1673357bd23",
-			"favicon.png": "1d0d4233d5aea0affb11330e3e7243b0310207be13a7d27feede9e64d7ebf68d",
-			"icon-192.png": "bcd22f337b89420082980b9c1ddbb461086ad5c73d314fed39ffbc7af37a6c4c",
-			"icon-512.png": "cbb4bf89f51072438f7ff499fc40e303e2d4f57c7f6adcb72dec1353016bb11c"
+			"favicon.png": "aee4987b90c10325893ccc86394d1e6fd94212b3f9be9d432df6738b98a171ef",
+			"icon-192.png": "e12e1148cd8778615667cd82c01fe5b6e76ef6b1d472b77c86ca2d100ab46d51",
+			"icon-512.png": "f0643709aa249eb0c3e6b6739532b3de3f0cf66f70332661f7058b9758eabd16"
 		},
 		"iconTreatment": {
 			"source": "site/assets/brand/clio-mark.png",
@@ -24,7 +24,8 @@
 			"saturation": 1.16,
 			"brightness": 1.14,
 			"resampling": "Pillow Image.Resampling.LANCZOS",
-			"alpha": "Preserved from the canonical mark before resizing."
+			"alpha": "Preserved from the canonical mark before resizing.",
+			"optimization": "pngquant 2.18.0, quality 90-100, speed 1; palette quantization after resizing."
 		}
 	}
 }

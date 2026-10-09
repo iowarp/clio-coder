@@ -14,13 +14,13 @@
 	"theme_color": "#0b0a09",
 	"icons": [
 		{
-			"src": "/icon-192.png?v=bcd22f337b89",
+			"src": "/icon-192.png?v=e12e1148cd87",
 			"sizes": "192x192",
 			"type": "image/png",
 			"purpose": "any"
 		},
 		{
-			"src": "/icon-512.png?v=cbb4bf89f510",
+			"src": "/icon-512.png?v=f0643709aa24",
 			"sizes": "512x512",
 			"type": "image/png",
 			"purpose": "any"
