@@ -438,3 +438,120 @@ test("a /name the session cannot run is flagged before it is sent, and nothing e
 	assert.equal(slashNotice("/tpyo", { version: 1, commands: catalog.commands }), null);
 	assert.equal(slashNotice("/tpyo", undefined), null);
 });
+
+for (const [name, accounting, expected] of [
+	["absent provenance with zero cost", { costUsd: 0 }, "Cost unknown"],
+	["absent provenance with positive cost", { costUsd: 0.25 }, "Cost unknown"],
+	["unknown with positive cost", { costUsd: 0.25, costProvenance: "unknown" }, "Cost unknown"],
+	[
+		"known with missing token calls",
+		{ costUsd: 0.25, costProvenance: "known", missingTokenCalls: 1 },
+		"$0.2500 subtotal, some calls unpriced",
+	],
+	[
+		"estimated with missing token calls",
+		{ costUsd: 0.25, costProvenance: "estimated", missingTokenCalls: 1 },
+		"Estimated $0.2500 subtotal, some calls unpriced",
+	],
+	[
+		"known free with missing token calls",
+		{ costUsd: 0, costProvenance: "known_free", missingTokenCalls: 1 },
+		"$0 (free)",
+	],
+	[
+		"priced summary with missing token calls",
+		{
+			costUsd: 0.25,
+			costProvenance: "known",
+			missingTokenCalls: 1,
+			costSummary: { knownUsd: 0.25, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 1 },
+		},
+		"$0.2500 subtotal, some calls unpriced",
+	],
+	["unknown", { costUsd: 0, costProvenance: "unknown" }, "Cost unknown"],
+	["unknown without amount", { costProvenance: "unknown" }, "Cost unknown"],
+	["estimated", { costUsd: 0.0123, costProvenance: "estimated" }, "Estimated $0.0123"],
+	["known free", { costUsd: 0, costProvenance: "known_free" }, "$0 (free)"],
+	["known", { costUsd: 0.0123, costProvenance: "known" }, "$0.0123"],
+	["known zero", { costUsd: 0, costProvenance: "known" }, "$0"],
+	["unreported", {}, null],
+	[
+		"mixed known and unknown",
+		{
+			costUsd: 0,
+			costProvenance: "unknown",
+			costSummary: { knownUsd: 0.25, hasEstimated: false, hasUnknown: true, allKnownFree: false, calls: 2 },
+		},
+		"$0.2500 subtotal, some calls unpriced",
+	],
+	[
+		"mixed estimated and unknown",
+		{
+			costUsd: 0,
+			costProvenance: "unknown",
+			costSummary: { knownUsd: 0.25, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 2 },
+		},
+		"Estimated $0.2500 subtotal, some calls unpriced",
+	],
+	[
+		"free and unknown",
+		{
+			costUsd: 0,
+			costProvenance: "unknown",
+			costSummary: { knownUsd: 0, hasEstimated: false, hasUnknown: true, allKnownFree: false, calls: 2 },
+		},
+		"Cost unknown",
+	],
+	[
+		"summary wins over turn amount",
+		{
+			costUsd: 99,
+			costProvenance: "unknown",
+			costSummary: { knownUsd: 0.25, hasEstimated: true, hasUnknown: false, allKnownFree: false, calls: 2 },
+		},
+		"Estimated $0.2500",
+	],
+] satisfies Array<[string, Partial<Usage>, string | null]>) {
+	test(`completed turn cost: ${name}`, () => {
+		const outcome = turnOutcome(turn({ startedAt: null, usage: { ...usage, ...accounting } }), 0);
+		assert.deepEqual(outcome.facts, expected === null ? [] : [expected]);
+		assert.equal(outcome.usageLabel, "12K in / 678 out", "pricing provenance does not change reported tokens");
+		assert.deepEqual(
+			outcome.breakdown.filter((row) => row.group === "Usage"),
+			[
+				{ group: "Usage", label: "Input", value: "12,345" },
+				{ group: "Usage", label: "Output", value: "678" },
+				{ group: "Usage", label: "Reasoning", value: "234" },
+			],
+		);
+		assert.deepEqual(
+			outcome.breakdown.filter((row) => row.group === "Cost").map((row) => row.value),
+			expected === null ? [] : [expected],
+		);
+	});
+}
+
+test("known-free pricing does not invent tokens when usage is missing", () => {
+	const outcome = turnOutcome(
+		turn({
+			startedAt: null,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				reasoning: 0,
+				costUsd: 0,
+				costProvenance: "known_free",
+				missingTokenCalls: 1,
+			},
+		}),
+		0,
+	);
+	assert.deepEqual(outcome.facts, ["$0 (free)"]);
+	assert.equal(outcome.usageLabel, null);
+	assert.deepEqual(
+		outcome.breakdown.filter((row) => row.group === "Usage"),
+		[],
+	);
+});

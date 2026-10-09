@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { AxeBuilder } from "@axe-core/playwright";
 import { serve } from "@hono/node-server";
 import { type BrowserContext, chromium, type Locator } from "playwright-core";
+import type { SettingsControls } from "../contracts/settings-controls.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -495,6 +496,33 @@ try {
 		await dark(false);
 		// Adding a connection is the guided setup's job; it opens from Models and closes back there.
 		await navigate("Models");
+		const controlsPath = "**/api/workspaces/*/settings/controls";
+		await page.route(controlsPath, async (route) => {
+			const response = await route.fetch();
+			const report = (await response.json()) as SettingsControls;
+			await route.fulfill({
+				json: {
+					...report,
+					controls: report.controls.map((control) =>
+						control.path === "chat.target"
+							? { ...control, value: "fixture" }
+							: control.path === "chat.model"
+								? { ...control, access: "writable" }
+								: control,
+					),
+				},
+			});
+		});
+		await page.reload();
+		const catalogSelect = page.locator(".model-select select").first();
+		await catalogSelect.waitFor();
+		const modelId = await catalogSelect.getAttribute("id");
+		const modelField = page.locator(".model-select").filter({ has: page.locator(`[id="${modelId}"]`) });
+		await modelField.locator("select").selectOption({ label: "Advanced: unverified model id…" });
+		await modelField.getByRole("button", { name: "Choose from the list", exact: true }).click();
+		assert.equal(await modelField.locator("select").evaluate((element) => element === document.activeElement), true);
+		await page.unroute(controlsPath);
+		await page.reload();
 		await page
 			.locator("main")
 			.getByRole("link", { name: /^Add a connection/ })
@@ -845,6 +873,10 @@ try {
 		}
 		await openPane();
 		await assertConversationPreserved();
+		await pane.locator(".pane-steps li").first().waitFor();
+		const planTree = await pane.locator(".pane-steps").ariaSnapshot();
+		assert.match(planTree, /Completed:.*Read the fixture workspace/);
+		assert.match(planTree, /In progress:.*Summarize the findings/);
 		await check("pane-session");
 		// The column lists evidence from this session's own fleet records only, never the installation's inventory.
 		assert.equal(
