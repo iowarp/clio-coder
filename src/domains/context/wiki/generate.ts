@@ -413,6 +413,7 @@ function resolvePlan(input: {
 						!page.lastFailure.runId ||
 						page.attempts === 0 ||
 						!existing.has(page.path) ||
+						!wikiSourcesMatch(previous.sourceContent, input.sourceContent) ||
 						!wikiSourcesMatch(previous.sourceContent, input.sourceContent, [
 							...page.sources,
 							...(page.dependencies ?? []),

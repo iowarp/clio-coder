@@ -533,6 +533,48 @@ describe("wiki generation outcomes", () => {
 			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, attempts + 1);
 		});
 	}
+	it("requires normal writing when a real failed draft loses a body-only dependency", async () => {
+		writeFileSync(join(cwd, "src/helper.ts"), "export const helper = 1;\n");
+		await initialize();
+		const dir = join(cwd, ".clio-coder/wiki-staging-deleted-dependency");
+		mkdirSync(dir);
+		const saved = readWikiMeta(cwd)?.plan;
+		assert.ok(saved?.pages[0]);
+		saved.pages[0].status = "pending";
+		saved.pages[0].attempts = 2;
+		saved.pages[0].lastFailure = { phase: "writer", detail: "Previous writer failed", runId: "failed-writer" };
+		writeWikiPlanFile(dir, saved);
+		writeFileSync(join(dir, "a.md"), content("a", 1));
+		writeFileSync(join(dir, "b.md"), content("b", 1));
+		const failed = await run(
+			generator((spec, path) => {
+				assert.equal(spec.agentId, "wiki-writer");
+				assert.ok(path);
+				writeFileSync(path, `${content("a", 1)}See \`src/helper.ts\` and \`src/missing.ts\`.\n`);
+			}),
+		);
+		assert.equal(failed.pending, 1);
+		const checkpoint = readWikiMeta(cwd)?.plan?.pages[0];
+		assert.equal(checkpoint?.attempts, 3);
+		assert.equal(checkpoint?.lastFailure?.phase, "validation");
+		assert.ok(checkpoint?.dependencies?.includes("src/helper.ts"));
+		rmSync(join(cwd, "src/helper.ts"));
+		let calls = 0;
+		const retried = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			retryPending: true,
+			generate: generator((spec, path) => {
+				assert.equal(spec.agentId, "wiki-writer");
+				assert.ok(path);
+				calls++;
+				writeFileSync(path, content("a", 2));
+			}),
+		});
+		assert.equal(calls, 1);
+		assert.equal(retried.pending, 0);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 4);
+	});
 	it("writes a missing validation-failed draft immediately", async () => {
 		await initialize();
 		const dir = join(cwd, ".clio-coder/wiki-staging-missing");

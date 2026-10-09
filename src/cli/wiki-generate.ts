@@ -491,8 +491,10 @@ async function runPagePhase(
 			}
 		}
 	}
-	const stable = (dependencies: readonly string[] = []): boolean =>
-		wikiSourcesMatch(baseline, captureWikiSourceContent(input.cwd), [...sources, ...dependencies]);
+	const stable = (dependencies: readonly string[] = []): boolean => {
+		const current = captureWikiSourceContent(input.cwd);
+		return wikiSourcesMatch(baseline, current) && wikiSourcesMatch(baseline, current, [...sources, ...dependencies]);
+	};
 	const diagnostic =
 		repair && seeded
 			? inspectWikiPageEvidence({
@@ -580,7 +582,13 @@ async function runPagePhase(
 			const nextPage: WikiPlanPage = {
 				...entry,
 				status: written ? "written" : "pending",
-				...(written ? { dependencies: evidence?.dependencies ?? [] } : {}),
+				...(evidence
+					? {
+							dependencies: written
+								? (evidence.dependencies ?? [])
+								: [...new Set([...(entry.dependencies ?? []), ...(evidence.resolvedDependencies ?? [])])],
+						}
+					: {}),
 				attempts: entry.attempts + (outcome.phase === "writer" ? 1 : 0),
 			};
 			if (written) delete nextPage.lastFailure;
