@@ -1,7 +1,9 @@
 import { deepEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { test } from "node:test";
+import type { Tokens } from "marked";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Blocks, CodeBlock, decodeEntities, MarkdownContent, MermaidBlock } from "../client/render/Markdown.js";
+import type { MathToken } from "../client/render/markdown-model.js";
 import {
 	codeLanguage,
 	IncrementalMarkdown,
@@ -13,6 +15,7 @@ import {
 	settledBoundary,
 	tokenText,
 } from "../client/render/markdown-model.js";
+import { typesetMath } from "../client/render/math.js";
 
 function renderMarkdown(source: string, complete = true): string {
 	return renderToStaticMarkup(<MarkdownContent source={source} complete={complete} />);
@@ -268,4 +271,61 @@ test("a table sits in a scroll wrapper that is a plain, unfocused block until it
 	const html = renderDocument("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
 	match(html, /<div class="md-table"><table>/);
 	doesNotMatch(html, /tabindex|role="region"/i, "a table that fits adds no Tab stop or landmark");
+});
+
+test("inline and display math produce MathML without KaTeX HTML layout", async () => {
+	const paragraph = lexMarkdown("Euler: $e^{i\\pi}+1=0$.")[0] as Tokens.Paragraph;
+	const inline = paragraph.tokens.find((token) => token.type === "math") as MathToken;
+	ok(inline);
+	equal(inline.text, "e^{i\\pi}+1=0");
+	equal(inline.displayMode, false);
+	const inlineMarkup = await typesetMath(inline.text, inline.displayMode);
+	match(inlineMarkup, /<math xmlns="http:\/\/www.w3.org\/1998\/Math\/MathML"/u);
+	doesNotMatch(inlineMarkup, /katex-html|<style|<link/u);
+	const display = lexMarkdown("$$\n\\frac{a}{b}\n$$\n")[0] as MathToken;
+	equal(display.type, "math");
+	equal(display.displayMode, true);
+	const displayMarkup = await typesetMath(display.text, display.displayMode);
+	match(displayMarkup, /display="block"/u);
+	match(displayMarkup, /<mfrac>/u);
+});
+
+test("math delimiters leave currency, escaped dollars and code literal", () => {
+	for (const source of [
+		"$5 and $10",
+		"$5 and $10. Code `$x$`.",
+		"$ spaced$",
+		"$spaced $",
+		"$x$2",
+		"\\$x$",
+		"`$x$`",
+		"`$$x$$`",
+		"```tex\n$x$\n$$y$$\n```\n",
+	]) {
+		doesNotMatch(JSON.stringify(lexMarkdown(source)), /"type":"math"/u, source);
+	}
+	match(renderMarkdown("`$x$`"), /<code>\$x\$<\/code>/u);
+});
+
+test("invalid TeX stays readable without throwing", async () => {
+	const markup = await typesetMath("\\frac{", false);
+	match(markup, /katex-error/u);
+	match(markup, /\\frac\{/u);
+});
+
+test("incremental Markdown keeps blank lines inside display math together", () => {
+	const source = "Before\n\n$$\na +\n\nb\n$$\n\nAfter";
+	const incremental = new IncrementalMarkdown();
+	const pending = incremental.update(source.slice(0, source.indexOf("b\n$$")));
+	equal(pending.settledLength, "Before\n\n".length);
+	const complete = incremental.update(source);
+	const math = complete.settled.find((token) => token.type === "math") as MathToken;
+	ok(math);
+	equal(math.text, "a +\n\nb");
+});
+
+test("math caps oversized TeX dimensions", async () => {
+	const markup = await typesetMath("a\\kern 10000em b", false);
+	match(markup, /<mspace width="50em"/u);
+	doesNotMatch(markup, /width="10000em"/u);
 });

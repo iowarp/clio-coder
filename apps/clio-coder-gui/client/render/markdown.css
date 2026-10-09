@@ -404,3 +404,10 @@
 .markdown .md-details__body > * + * {
 	margin-top: 0.85em;
 }
+
+.md-math--display {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+	padding-block: var(--space-2);
+}

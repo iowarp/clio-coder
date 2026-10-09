@@ -9,15 +9,46 @@
  * re-lexed as tokens arrive.
  */
 
-import { Lexer, type Token, type TokensList } from "marked";
+import { Marked, type Token } from "marked";
 
 export type MarkdownToken = Token;
 
-const LEXER_OPTIONS = { gfm: true, breaks: false, pedantic: false, async: false } as const;
+export interface MathToken {
+	type: "math";
+	raw: string;
+	text: string;
+	displayMode: boolean;
+}
+
+const lexer = new Marked(
+	{ gfm: true, breaks: false, pedantic: false, async: false },
+	{
+		extensions: [
+			{
+				name: "math",
+				level: "block",
+				start: (source) => /^ {0,3}\$\$/mu.exec(source)?.index,
+				tokenizer(source): MathToken | undefined {
+					const match = /^ {0,3}\$\$((?:\\[\s\S]|[^\\])+?)\$\$[^\S\n]*(?:\n|$)/u.exec(source);
+					if (match?.[1]) return { type: "math", raw: match[0], text: match[1].trim(), displayMode: true };
+				},
+			},
+			{
+				name: "math",
+				level: "inline",
+				start: (source) => source.indexOf("$"),
+				tokenizer(source): MathToken | undefined {
+					const match = /^\$(?![\s$])((?:\\.|[^\\$`\n])+?)\$(?!\d)/u.exec(source);
+					if (match?.[1] && !/\s$/u.test(match[1]))
+						return { type: "math", raw: match[0], text: match[1], displayMode: false };
+				},
+			},
+		],
+	},
+);
 
 export function lexMarkdown(source: string): readonly MarkdownToken[] {
-	const tokens: TokensList = Lexer.lex(source, LEXER_OPTIONS);
-	return tokens;
+	return lexer.lexer(source);
 }
 
 /** Live link protocols. Everything else, including relative paths, renders as text. */
@@ -45,11 +76,18 @@ const CLOSING_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})\s*$/u;
 export function settledBoundary(source: string, from = 0): number {
 	let boundary = from;
 	let index = from;
+	let displayMath = false;
 	let fence: { readonly char: string; readonly length: number } | null = null;
 	while (index < source.length) {
 		const lineEnd = source.indexOf("\n", index);
 		if (lineEnd < 0) break;
 		const line = source.slice(index, lineEnd);
+		if (fence === null && (displayMath || /^ {0,3}\$\$/u.test(line))) {
+			const delimiters = line.replace(/\\./gu, "").match(/\$\$/gu)?.length ?? 0;
+			if (delimiters % 2 !== 0) displayMath = !displayMath;
+			index = lineEnd + 1;
+			continue;
+		}
 		const opening = FENCE_PATTERN.exec(line);
 		if (opening !== null) {
 			const run = opening[1] ?? "";

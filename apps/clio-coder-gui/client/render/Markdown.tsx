@@ -2,9 +2,8 @@
  * React rendering of Clio Coder's Markdown from marked tokens.
  *
  * Every node is created by React from token data, so nothing the model writes
- * is interpreted as HTML. The single exception is the Mermaid figure, which
- * inserts SVG that strict Mermaid produced and DOMPurify sanitized; see
- * mermaid.ts for the policy.
+ * is interpreted as HTML. Diagrams and math insert only renderer output
+ * sanitized by DOMPurify; see mermaid.ts and MathContent.tsx for the policy.
  */
 
 import type { Tokens } from "marked";
@@ -20,6 +19,7 @@ import {
 	IncrementalMarkdown,
 	lexMarkdown,
 	type MarkdownToken,
+	type MathToken,
 	mermaidSourceProblem,
 	numericColumns,
 	safeHref,
@@ -27,6 +27,16 @@ import {
 	tokenText,
 } from "./markdown-model.js";
 import { type MermaidResult, mermaidThemeKey, renderMermaid, subscribeMermaidTheme } from "./mermaid.js";
+
+const MathContent = React.lazy(() => import("./MathContent.js"));
+
+function MathTokenContent({ token }: { token: MathToken }) {
+	return (
+		<React.Suspense fallback={token.raw}>
+			<MathContent token={token} />
+		</React.Suspense>
+	);
+}
 
 const ENTITY_PATTERN =
 	/&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp|copy|reg|hellip|mdash|ndash|rarr|larr|times);/giu;
@@ -406,6 +416,8 @@ function Inline({ tokens }: { tokens: readonly MarkdownToken[] }) {
 
 function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 	switch (token.type) {
+		case "math":
+			return <MathTokenContent token={token as MathToken} />;
 		case "text": {
 			const text = token as Tokens.Text;
 			if (text.tokens !== undefined && text.tokens.length > 0) return <Inline tokens={text.tokens} />;
@@ -512,6 +524,8 @@ function ListItems({ items, settled }: { items: readonly Tokens.ListItem[]; sett
 
 const Block = memo(function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): ReactNode {
 	switch (token.type) {
+		case "math":
+			return <MathTokenContent token={token as MathToken} />;
 		case "space":
 		case "def":
 			return null;

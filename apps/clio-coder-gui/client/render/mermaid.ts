@@ -9,6 +9,7 @@
  */
 
 import { mermaidSourceProblem } from "./markdown-model.js";
+import { SANITIZE_CONFIG } from "./sanitize-policy.js";
 
 export type MermaidResult = Readonly<{ ok: true; svg: string }> | Readonly<{ ok: false; error: string }>;
 
@@ -142,17 +143,6 @@ export function subscribeMermaidTheme(listener: () => void): () => void {
 		query?.removeEventListener("change", listener);
 	};
 }
-
-/**
- * Mermaid's embedded stylesheet stays: it is scoped to the diagram id and the
- * page CSP keeps every url() it could name on this origin. Everything that
- * could navigate, embed, or run is removed.
- */
-const SANITIZE_CONFIG = {
-	USE_PROFILES: { svg: true, svgFilters: true },
-	FORBID_TAGS: ["foreignObject", "script", "a", "image", "iframe", "object", "embed", "animate", "set"],
-	FORBID_ATTR: ["href", "xlink:href", "onload", "onclick", "onerror", "onmouseover"],
-} as const;
 
 let loading: Promise<{ mermaid: MermaidLike; sanitizer: SanitizerLike }> | null = null;
 let counter = 0;
