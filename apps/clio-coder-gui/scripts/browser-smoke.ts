@@ -1505,7 +1505,7 @@ try {
 		const contextPanel = pane.locator(".context-panel");
 		await contextPanel.locator(".context-panel__figure strong", { hasText: "16%" }).waitFor();
 		assert.equal((await contextPanel.locator(".context-panel__of").innerText()).trim(), "20,480 of 131,072 tokens");
-		await contextPanel.getByText("Measured by the provider.", { exact: true }).waitFor();
+		await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
 		await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();
 		await check("context-window");
 		if (width === 1600 || width === 390) {
