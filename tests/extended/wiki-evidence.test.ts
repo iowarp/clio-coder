@@ -163,6 +163,35 @@ describe("wiki mechanical evidence gate", () => {
 		strictEqual(check(page("src/main.js", "Source metadata is not a body citation.")).resolvedCitations, undefined);
 	});
 
+	it("returns resolved body dependencies and full diagnostics on failed validation", () => {
+		const missing = Array.from({ length: 10 }, (_, index) => `missing/${"segment/".repeat(45)}file-${index}.ts`);
+		const body = [
+			"See `src/main.js:99`, `tests/main.test.ts`, and `package.json`.",
+			...missing.map((path) => `Missing: \`${path}\`.`),
+		].join("\n");
+		const result = check(body);
+		strictEqual(result.ok, false);
+		strictEqual(result.dependencies, undefined);
+		deepStrictEqual(result.resolvedDependencies, ["package.json", "src/main.ts", "tests/main.test.ts"]);
+		strictEqual(result.reasons.length, 8);
+		strictEqual(
+			result.reasons.every((reason) => reason.length <= 300),
+			true,
+		);
+		strictEqual(result.allReasons?.length, 11);
+		match(result.allReasons?.[0] ?? "", /Repair line range/);
+		for (const [index, path] of missing.entries()) {
+			strictEqual(
+				result.allReasons?.[index + 1],
+				`Replace or remove unresolved repository reference ${JSON.stringify(path)}; inspect the current file path.`,
+			);
+		}
+		deepStrictEqual(
+			result.reasons,
+			result.allReasons?.slice(0, 8).map((reason) => reason.slice(0, 300)),
+		);
+	});
+
 	it("resolves a real relative import from a declared source without accepting escaping or invented imports", () => {
 		writeFileSync(join(root, "tests/main.test.ts"), 'import { main } from "../src/main.js";\n');
 		const content = "---\nsources: [src/main.ts]\ntests: [tests/main.test.ts]\n---\nThe test imports `../src/main.js`.";
@@ -605,7 +634,10 @@ describe("wiki mechanical evidence gate", () => {
 			result.reasons.every((reason) => reason.length <= 300),
 			true,
 		);
-		strictEqual(check("x".repeat(2 * 1024 * 1024 + 1)).ok, false);
+		const oversized = check("x".repeat(2 * 1024 * 1024 + 1));
+		strictEqual(oversized.ok, false);
+		deepStrictEqual(oversized.resolvedDependencies, []);
+		deepStrictEqual(oversized.allReasons, oversized.reasons);
 		strictEqual(
 			check(`---\nsources: ${JSON.stringify(Array.from({ length: 513 }, (_, i) => `f${i}.ts`))}\n---\nBody.`).ok,
 			false,

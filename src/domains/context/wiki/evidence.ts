@@ -19,6 +19,10 @@ export interface WikiPageEvidenceResult {
 	reasons: string[];
 	/** Canonical repository-relative evidence files, present only after successful validation. */
 	dependencies?: string[];
+	/** Individually resolved files on failure, including files with invalid line citations. */
+	resolvedDependencies?: string[];
+	/** Every diagnostic produced on failure, without the display count or length limits. */
+	allReasons?: string[];
 	/** Changed body citations that passed individually, even when another reference failed. */
 	resolvedCitations?: Record<string, string>;
 	/** Coverage failures require substantive writing, not a mechanical repair pass. */
@@ -248,11 +252,14 @@ function layoutConstructions(text: string): Set<string> {
  */
 export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPageEvidenceResult {
 	const reasons: string[] = [];
+	const allReasons: string[] = [];
 	const fail = (reason: string): void => {
+		allReasons.push(reason);
 		if (reasons.length < 8) reasons.push(reason.slice(0, 300));
 	};
 	if (Buffer.byteLength(input.content, "utf8") > 2 * 1024 * 1024) {
-		return { ok: false, reasons: ["Page exceeds the 2 MiB evidence-check limit; split or shorten it before retrying."] };
+		fail("Page exceeds the 2 MiB evidence-check limit; split or shorten it before retrying.");
+		return { ok: false, reasons, allReasons, resolvedDependencies: [] };
 	}
 	const { body, metadata } = readWikiPage({ pagePath: input.pagePath, content: input.content });
 	const coverageGaps = metadata.coverage_gaps ?? [];
@@ -301,9 +308,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	const bodyReferences = new Set<string>();
 	for (const reference of references) {
 		if (/[:#]/.test(reference))
-			fail(
-				`Use a plain file path in sources/tests: ${JSON.stringify(reference.slice(0, 160))}; put line/symbol citations in the body.`,
-			);
+			fail(`Use a plain file path in sources/tests: ${JSON.stringify(reference)}; put line/symbol citations in the body.`);
 	}
 	mapWikiProse(body, (line) => {
 		for (const match of line.matchAll(/`([^`\s]+)`/g)) {
@@ -327,14 +332,26 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	});
 	if (references.size > 512) {
 		fail("Page exceeds the 512-reference evidence-check limit; split or shorten it before retrying.");
-		return { ok: false, reasons, ...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}) };
+		return {
+			ok: false,
+			reasons,
+			allReasons,
+			resolvedDependencies: [],
+			...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}),
+		};
 	}
 	let root: string;
 	try {
 		root = realpathSync(input.sourceRoot);
 	} catch {
 		fail("Repository root is unavailable; restore access and retry evidence validation.");
-		return { ok: false, reasons, ...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}) };
+		return {
+			ok: false,
+			reasons,
+			allReasons,
+			resolvedDependencies: [],
+			...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}),
+		};
 	}
 	const dependencies = new Set<string>();
 	const resolvedCitations: Record<string, string> = {};
@@ -481,7 +498,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		});
 	};
 	for (const reference of references) {
-		const label = JSON.stringify(reference.slice(0, 160));
+		const label = JSON.stringify(reference);
 		const match =
 			/^([^:#]+)(?:(?::(\d+)(?:-(\d+))?)|(?:#L(\d+)(?:-L?(\d+))?))?(?::[A-Za-z_$][\w$.-]*|(?:::[A-Za-z_][\w$.-]*)+)?$/.exec(
 				reference,
@@ -576,7 +593,9 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	return {
 		ok: reasons.length === 0,
 		reasons,
-		...(reasons.length === 0 ? { dependencies: [...dependencies].sort() } : {}),
+		...(reasons.length === 0
+			? { dependencies: [...dependencies].sort() }
+			: { resolvedDependencies: [...dependencies].sort(), allReasons }),
 		...(Object.keys(resolvedCitations).length > 0 ? { resolvedCitations } : {}),
 		...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}),
 	};
@@ -588,13 +607,18 @@ export function inspectWikiPageEvidence(input: {
 	outputDir: string;
 	sourceRoot: string;
 }): WikiPageEvidenceResult {
+	const fail = (reason: string): WikiPageEvidenceResult => ({
+		ok: false,
+		reasons: [reason],
+		allReasons: [reason],
+		resolvedDependencies: [],
+	});
 	try {
 		const path = realpathSync(resolve(input.outputDir, input.pagePath));
 		const stat = statSync(path);
 		if (!within(realpathSync(input.outputDir), path) || !stat.isFile())
-			return { ok: false, reasons: ["planned page must be a regular file inside wiki staging"] };
-		if (stat.size > 2 * 1024 * 1024)
-			return { ok: false, reasons: ["page exceeds the 2 MiB evidence-check limit; split or shorten it"] };
+			return fail("planned page must be a regular file inside wiki staging");
+		if (stat.size > 2 * 1024 * 1024) return fail("page exceeds the 2 MiB evidence-check limit; split or shorten it");
 		return validateWikiPageEvidence({
 			pagePath: input.pagePath,
 			content: readFileSync(path, "utf8"),
@@ -602,6 +626,6 @@ export function inspectWikiPageEvidence(input: {
 			wikiLinks: wikiLinkInventory(input.outputDir),
 		});
 	} catch {
-		return { ok: false, reasons: ["writer finished without a readable planned page file"] };
+		return fail("writer finished without a readable planned page file");
 	}
 }
