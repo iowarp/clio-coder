@@ -28,8 +28,7 @@ export interface RouteFacts {
 }
 
 /**
- * Without reported settings the chip says so rather than printing a bare label: a target's health
- * row names that target, and nothing at all is "Model not reported", never a guessed default.
+ * A provider's health does not identify the session's route; an unreported route stays unknown.
  */
 export function routeFacts(
 	settings: RouteSettings | undefined,
@@ -44,7 +43,7 @@ export function routeFacts(
 				config.options.find((row) => row.id === "thinkingLevel")?.currentValue ?? settings?.thinking ?? "not reported",
 		};
 	const target = settings?.target ?? null;
-	const provider = target === null ? health.providers[0] : health.providers.find((row) => row.key === target);
+	const provider = health.providers.find((row) => row.key === target);
 	const tone = provider?.tone ?? "unverified";
 	const healthText = provider
 		? `Target ${provider.key}: ${sentenceEnd(provider.detail ?? provider.label)}`
@@ -52,7 +51,7 @@ export function routeFacts(
 	if (settings === undefined) {
 		return {
 			tone,
-			text: provider ? provider.key : "Model not reported",
+			text: "Model not reported",
 			title: `Clio Coder has not reported this task's model. ${healthText}`,
 			spoken: `Model not reported. ${healthText}`,
 		};
