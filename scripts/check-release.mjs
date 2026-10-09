@@ -58,35 +58,6 @@ if (values.tarball || values.report) {
 const SHEBANG = "#!/usr/bin/env node";
 const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 
-// Size budgets serve as a tripwire against packaging defects such as leaked
-// node_modules or doubled dist, rather than policing documentation size or
-// enforcing an artificial package diet. Pack composition changed deliberately
-// in #66: about 19MB of vendored tree-sitter grammars (dist/assets/grammars/),
-// Clio's own source (src/**), and its code map (dist/assets/codemap.json)
-// ride inside the tarball so the install needs neither grammar collection.
-// Raised for 0.3.6 by operator decision: the unpacked ceiling moves to 50MB to
-// carry this release's added source, and the tarball ceiling tightens to 10MB
-// because the measured artifact sits near 6MB and a jump past 10MB would mean
-// a packaging defect rather than growth.
-// R1 adds the complete web client and shared server/worker entries. The first
-// integrated artifact measured 10.14MB packed / 50.80MB unpacked. Allow modest
-// growth for this deliberate surface addition; keep maps, fixtures and source
-// applications excluded and continue checking exact required runtime assets.
-// 0.5.8 raises the unpacked ceiling to 60MB by operator decision: 0.5.7
-// shipped at 54.44MB, and 0.5.8 adds about 0.9MB spread over chunks, src/**,
-// the code map and guides with no single leaked artifact. A leaked
-// node_modules or doubled dist still overshoots 60MB several times.
-// 0.6.0 raises the tarball ceiling to 14MB by operator decision: 0.6.0 packs
-// at 11.85MB. Shipped src/** is load-bearing because code_nav source=clio and
-// read-scope let Clio read its own code, and the grammars stay local for
-// offline and HPC sites. The next lever is redirecting self-reading to the
-// tagged GitHub source so src/** can leave the tarball.
-// Final 0.6.0 qualification raises the ceilings to 16MB packed / 65MB unpacked
-// by operator decision. The current source, client, bundles, code map and
-// grammars measure 14.23MB packed / 61.56MB unpacked with no packaging leaks.
-const MAX_TARBALL_BYTES = 16_000_000;
-const MAX_UNPACKED_BYTES = 65_000_000;
-
 // The installers ship: `clio-coder upgrade` re-runs the installed copy for an
 // install.sh or install.ps1 installation (src/domains/lifecycle/install-method.ts),
 // install.cmd bootstraps install.ps1 from cmd.exe, and both installers call the
@@ -98,6 +69,63 @@ const SHIPPED_SCRIPTS = new Set([
 	"scripts/install.cmd",
 	"scripts/native-install.cjs",
 ]);
+
+// Size budgets are tripwires against packaging defects such as leaked
+// node_modules or doubled dist. Per-class ceilings follow the package measured
+// at fbd590900, so spare capacity in one payload cannot hide growth in another.
+// Grammars stay local for offline use, and src/** supports Clio reading its own
+// code (#66). The total unpacked ceiling is derived from the class ceilings.
+// At release, re-pin each class ceiling to its last qualified release size rounded
+// up to the next 0.5 MB plus that class's cycle allowance.
+const SIZE_BUDGETS = [
+	{
+		class: "grammars",
+		match: (path) => path.startsWith("dist/assets/grammars/"),
+		maxBytes: 19_500_000,
+	},
+	{
+		class: "codemap",
+		match: (path) => path === "dist/assets/codemap.json",
+		maxBytes: 5_000_000,
+	},
+	{
+		class: "dist bundles",
+		match: (path) =>
+			path.startsWith("dist/") &&
+			!path.startsWith("dist/assets/grammars/") &&
+			path !== "dist/assets/codemap.json" &&
+			!path.startsWith("dist/gui/client/"),
+		maxBytes: 16_000_000,
+	},
+	{
+		class: "gui client",
+		match: (path) => path.startsWith("dist/gui/client/"),
+		maxBytes: 8_000_000,
+	},
+	{
+		class: "src",
+		match: (path) => path.startsWith("src/"),
+		maxBytes: 19_000_000,
+	},
+	{
+		class: "docs",
+		match: (path) => path.startsWith("docs/"),
+		maxBytes: 3_000_000,
+	},
+	{
+		class: "library+examples+models+root files",
+		match: (path) =>
+			!path.includes("/") ||
+			["library/", "examples/", "models/"].some((prefix) => path.startsWith(prefix)) ||
+			[".claude-plugin/marketplace.json", "assets/clio-coder-logo-128.webp", "bin/clio-coder.cjs"].includes(path) ||
+			SHIPPED_SCRIPTS.has(path),
+		maxBytes: 2_000_000,
+	},
+];
+// Maintainer decision: retain 16 MB; the reviewed package measured 15,098,702 packed bytes.
+const MAX_TARBALL_BYTES = 16_000_000;
+const MAX_UNPACKED_BYTES = SIZE_BUDGETS.reduce((total, budget) => total + budget.maxBytes, 0);
+const MAX_ENTRY_COUNT = 3_000;
 
 const FORBIDDEN = [
 	{
@@ -263,6 +291,18 @@ for (const file of files) {
 	}
 }
 
+const sizeTotals = SIZE_BUDGETS.map((budget) => ({ ...budget, bytes: 0 }));
+for (const file of report.files) {
+	const matching = sizeTotals.filter((budget) => budget.match(file.path));
+	if (matching.length === 0) {
+		errors.push(`unclassified file in package: ${file.path}`);
+	} else if (matching.length > 1) {
+		errors.push(`file matches multiple payload classes: ${file.path}`);
+	} else {
+		matching[0].bytes += file.size;
+	}
+}
+
 for (const required of REQUIRED_FILES) {
 	if (!fileSet.has(required)) errors.push(`missing required file: ${required}`);
 }
@@ -373,6 +413,14 @@ if (report.size > MAX_TARBALL_BYTES) {
 if (report.unpackedSize > MAX_UNPACKED_BYTES) {
 	errors.push(`unpacked ${report.unpackedSize} bytes exceeds budget ${MAX_UNPACKED_BYTES}`);
 }
+for (const budget of sizeTotals) {
+	if (budget.bytes > budget.maxBytes) {
+		errors.push(`payload class ${budget.class} ${budget.bytes} bytes exceeds budget ${budget.maxBytes}`);
+	}
+}
+if (report.files.length > MAX_ENTRY_COUNT) {
+	errors.push(`entry count ${report.files.length} exceeds budget ${MAX_ENTRY_COUNT}`);
+}
 
 if (errors.length > 0) {
 	for (const error of errors) process.stderr.write(`check-release: ${error}\n`);
@@ -380,8 +428,8 @@ if (errors.length > 0) {
 }
 
 process.stdout.write(
-	`check-release: ok (${report.entryCount} files, tarball ${(report.size / 1e6).toFixed(
-		2,
-	)} MB, unpacked ${(report.unpackedSize / 1e6).toFixed(2)} MB)\n`,
+	`check-release: ok (${report.files.length}/${MAX_ENTRY_COUNT} files, tarball ${report.size}/${MAX_TARBALL_BYTES} bytes, unpacked ${report.unpackedSize}/${MAX_UNPACKED_BYTES} bytes; ${sizeTotals
+		.map((budget) => `${budget.class} ${budget.bytes}/${budget.maxBytes} bytes`)
+		.join(", ")})\n`,
 );
 process.exit(0);
