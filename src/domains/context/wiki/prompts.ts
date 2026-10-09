@@ -236,17 +236,62 @@ export function buildWikiPlanPrompt(input: BuildWikiPlanPromptInput): string {
 }
 
 /** Symbols the index records for the files this page is anchored on. */
-function scopedSymbols(codewiki: Codewiki, sources: ReadonlyArray<string>, limit = 60): string {
-	const wanted = new Set(sources);
-	const fileById = new Map(codewiki.files.map((file) => [file.id, file] as const));
-	const lines: string[] = [];
-	for (const symbol of codewiki.symbols) {
-		const file = fileById.get(symbol.fileId);
-		if (!file || !wanted.has(file.path)) continue;
-		lines.push(`- ${symbol.name} ${symbol.kind} ${file.path}:${symbol.line}`);
-		if (lines.length >= limit) break;
+function scopedSymbols(codewiki: Codewiki, sources: ReadonlyArray<string>, cwd: string, limit = 60): string {
+	const fileByPath = new Map(codewiki.files.map((file) => [file.path, file] as const));
+	const anchors = [...new Set(sources)].map((path) => {
+		const file = fileByPath.get(path);
+		const symbols = file
+			? codewiki.symbols
+					.filter((symbol) => symbol.fileId === file.id)
+					.sort(
+						(a, b) =>
+							Number(b.exported === true) - Number(a.exported === true) ||
+							a.line - b.line ||
+							a.name.localeCompare(b.name) ||
+							a.kind.localeCompare(b.kind),
+					)
+			: [];
+		return { path, file, symbols, count: 0 };
+	});
+	if (anchors.length === 0) return "No anchor sources were planned.";
+	const share = Math.floor(limit / anchors.length);
+	for (const anchor of anchors) anchor.count = Math.min(share, anchor.symbols.length);
+	let remaining = limit - anchors.reduce((sum, anchor) => sum + anchor.count, 0);
+	while (remaining > 0) {
+		let assigned = false;
+		for (const anchor of anchors) {
+			if (remaining === 0) break;
+			if (anchor.count >= anchor.symbols.length) continue;
+			anchor.count += 1;
+			remaining -= 1;
+			assigned = true;
+		}
+		if (!assigned) break;
 	}
-	return lines.length > 0 ? lines.join("\n") : "No indexed symbols for these paths; read the files directly.";
+	return anchors
+		.map(({ path, file, symbols, count }) => {
+			let bytes = file?.bytes;
+			if (bytes === undefined) {
+				try {
+					const target = realpathSync(join(cwd, path));
+					const stat = statSync(target);
+					if (isWithin(realpathSync(cwd), target) && stat.isFile()) bytes = stat.size;
+				} catch {
+					// Old indexes and unindexed anchors may lack a readable byte count.
+				}
+			}
+			return [
+				`- ${path}: ${file ? `${file.loc} indexed lines` : "not indexed"}; ${bytes ?? "unknown"} bytes; ${count}/${symbols.length} symbols`,
+				...(symbols.length === 0
+					? ["  No indexed symbols; inspect the file directly."]
+					: symbols
+							.slice(0, count)
+							.map(
+								(symbol) => `  - ${symbol.name} ${symbol.kind} :${symbol.line}${symbol.exported === true ? " [export]" : ""}`,
+							)),
+			].join("\n");
+		})
+		.join("\n");
 }
 
 export interface BuildWikiPagePromptInput {
@@ -293,7 +338,7 @@ export function buildWikiPagePrompt(input: BuildWikiPagePromptInput): string {
 			: "No anchor sources were planned. Use `code_nav` to locate this page's subject before writing.",
 		"## Indexed symbols under those sources",
 		"```text",
-		scopedSymbols(input.codewiki, page.sources),
+		scopedSymbols(input.codewiki, page.sources, input.cwd),
 		"```",
 		"## Other pages you may link to",
 		siblingLines.length > 0 ? siblingLines.join("\n") : "None; this is the only page in the plan.",

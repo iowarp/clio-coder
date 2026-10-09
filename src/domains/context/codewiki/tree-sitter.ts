@@ -173,11 +173,12 @@ function addSymbol(
 	node: SyntaxNode,
 	kind: CodewikiSymbolKind,
 	name = nameFromNode(node),
+	exported?: boolean,
 ): void {
 	if (!name) return;
 	const clean = name.trim();
 	if (clean.length === 0) return;
-	target.push({ name: clean, kind, line: line(node), sig: sig(node) });
+	target.push({ name: clean, kind, line: line(node), sig: sig(node), ...(exported !== undefined ? { exported } : {}) });
 }
 
 function descendants(root: SyntaxNode, types: string | string[]): SyntaxNode[] {
@@ -233,23 +234,44 @@ function firstStringValue(node: SyntaxNode | null | undefined): string | null {
 	return stringValue(firstStringDescendant(node));
 }
 
+function tsJsExported(node: SyntaxNode, exports: ReadonlySet<string>): boolean | undefined {
+	const declaration = node.type === "variable_declarator" ? node.parent : node;
+	const parent = declaration?.parent;
+	if (parent?.type === "export_statement" && parent.parent?.type === "program") return true;
+	if (parent?.type === "program") return exports.has(nameFromNode(node) ?? "");
+	return undefined;
+}
+
 function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
+	const exports = new Set<string>();
+	for (const node of namedChildren(root)) {
+		if (node.type !== "export_statement" || node.childForFieldName("source")) continue;
+		const clause = namedChildren(node).find((child) => child.type === "export_clause");
+		if (clause) {
+			for (const specifier of namedChildren(clause)) {
+				const name = specifier.childForFieldName("name");
+				if (name?.type === "identifier") exports.add(name.text);
+			}
+		}
+		const value = node.childForFieldName("value");
+		if (value?.type === "identifier") exports.add(value.text);
+	}
 	const symbols: ExtractedSymbol[] = [];
 	for (const node of descendants(root, ["function_declaration", "generator_function_declaration"])) {
 		if (hasFunctionLikeAncestor(node)) continue;
-		addSymbol(symbols, node, "func");
+		addSymbol(symbols, node, "func", nameFromNode(node), tsJsExported(node, exports));
 	}
 	for (const node of descendants(root, "class_declaration")) {
 		if (hasFunctionLikeAncestor(node)) continue;
-		addSymbol(symbols, node, "class");
+		addSymbol(symbols, node, "class", nameFromNode(node), tsJsExported(node, exports));
 	}
 	for (const node of descendants(root, "interface_declaration")) {
 		if (hasFunctionLikeAncestor(node)) continue;
-		addSymbol(symbols, node, "iface");
+		addSymbol(symbols, node, "iface", nameFromNode(node), tsJsExported(node, exports));
 	}
 	for (const node of descendants(root, ["type_alias_declaration", "enum_declaration"])) {
 		if (hasFunctionLikeAncestor(node)) continue;
-		addSymbol(symbols, node, "type");
+		addSymbol(symbols, node, "type", nameFromNode(node), tsJsExported(node, exports));
 	}
 	for (const node of descendants(root, "method_definition")) {
 		// method_definition covers both class methods (parent class_body) and
@@ -262,7 +284,13 @@ function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
 	for (const node of descendants(root, "variable_declarator")) {
 		if (hasFunctionLikeAncestor(node)) continue;
 		const parentText = node.parent?.text ?? "";
-		addSymbol(symbols, node, parentText.trimStart().startsWith("const") ? "const" : "var");
+		addSymbol(
+			symbols,
+			node,
+			parentText.trimStart().startsWith("const") ? "const" : "var",
+			nameFromNode(node),
+			tsJsExported(node, exports),
+		);
 	}
 	return symbols;
 }
@@ -293,35 +321,48 @@ function extractPython(root: SyntaxNode): ExtractedSymbol[] {
 
 function extractGo(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
-	for (const node of descendants(root, "function_declaration")) addSymbol(symbols, node, "func");
-	for (const node of descendants(root, "method_declaration")) addSymbol(symbols, node, "method");
+	const exported = (node: SyntaxNode): boolean | undefined =>
+		hasFunctionLikeAncestor(node) ? undefined : /^\p{Lu}/u.test(nameFromNode(node) ?? "");
+	for (const node of descendants(root, "function_declaration"))
+		addSymbol(symbols, node, "func", nameFromNode(node), exported(node));
+	for (const node of descendants(root, "method_declaration"))
+		addSymbol(symbols, node, "method", nameFromNode(node), exported(node));
 	for (const node of descendants(root, "type_spec")) {
-		addSymbol(symbols, node, node.text.includes("interface") ? "iface" : "type");
+		addSymbol(symbols, node, node.text.includes("interface") ? "iface" : "type", nameFromNode(node), exported(node));
 	}
 	for (const node of descendants(root, "const_spec")) {
 		if (hasFunctionLikeAncestor(node)) continue;
-		addSymbol(symbols, node, "const");
+		addSymbol(symbols, node, "const", nameFromNode(node), exported(node));
 	}
 	for (const node of descendants(root, "var_spec")) {
 		if (hasFunctionLikeAncestor(node)) continue;
-		addSymbol(symbols, node, "var");
+		addSymbol(symbols, node, "var", nameFromNode(node), exported(node));
 	}
 	return symbols;
 }
 
 function extractRust(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
+	const exported = (node: SyntaxNode): true | undefined =>
+		!hasFunctionLikeAncestor(node) &&
+		namedChildren(node).some((child) => child.type === "visibility_modifier" && child.text === "pub")
+			? true
+			: undefined;
 	for (const node of descendants(root, "function_item")) {
 		// Function items nested inside another fn body are locals; impl/trait
 		// members are methods; everything else is a free function.
 		if (hasFunctionLikeAncestor(node)) continue;
 		const isMethod = hasAncestor(node, "impl_item") || hasAncestor(node, "trait_item");
-		addSymbol(symbols, node, isMethod ? "method" : "func");
+		addSymbol(symbols, node, isMethod ? "method" : "func", nameFromNode(node), exported(node));
 	}
-	for (const node of descendants(root, ["struct_item", "enum_item", "type_item"])) addSymbol(symbols, node, "type");
-	for (const node of descendants(root, "trait_item")) addSymbol(symbols, node, "trait");
-	for (const node of descendants(root, "const_item")) addSymbol(symbols, node, "const");
-	for (const node of descendants(root, "static_item")) addSymbol(symbols, node, "var");
+	for (const node of descendants(root, ["struct_item", "enum_item", "type_item"]))
+		addSymbol(symbols, node, "type", nameFromNode(node), exported(node));
+	for (const node of descendants(root, "trait_item"))
+		addSymbol(symbols, node, "trait", nameFromNode(node), exported(node));
+	for (const node of descendants(root, "const_item"))
+		addSymbol(symbols, node, "const", nameFromNode(node), exported(node));
+	for (const node of descendants(root, "static_item"))
+		addSymbol(symbols, node, "var", nameFromNode(node), exported(node));
 	return symbols;
 }
 

@@ -9,6 +9,7 @@ export interface CodewikiFile {
 	path: string;
 	lang: CodewikiLanguage;
 	loc: number;
+	bytes?: number;
 	role: CodewikiFileRole;
 	hash: string;
 	imports: string[];
@@ -21,6 +22,8 @@ export interface CodewikiSymbol {
 	fileId: string;
 	line: number;
 	sig?: string;
+	/** Explicit export or public declaration; absent when visibility is unknown. */
+	exported?: boolean;
 }
 
 export interface CodewikiInternalEdge {
@@ -66,6 +69,7 @@ export interface ExtractedSymbol {
 	kind: CodewikiSymbolKind;
 	line: number;
 	sig?: string;
+	exported?: boolean;
 }
 
 export interface LanguageExtraction {

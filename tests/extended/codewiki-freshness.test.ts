@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { runContextClear } from "../../src/domains/context/clear.js";
-import { codewikiPath, readCodewiki } from "../../src/domains/context/codewiki/artifact.js";
+import {
+	codewikiPath,
+	parseCodewikiRaw,
+	readCodewiki,
+	serializeCodewiki,
+} from "../../src/domains/context/codewiki/artifact.js";
 import { executeCodewikiBuildOutcome } from "../../src/domains/context/codewiki/build-operation.js";
 import { coordinateCodewikiWrite } from "../../src/domains/context/codewiki/coordinator.js";
 import { buildCodewiki, syncCodewiki, updateCodewikiPaths } from "../../src/domains/context/codewiki/indexer.js";
@@ -23,6 +28,42 @@ describe("codewiki global freshness", () => {
 	});
 	afterEach(() => isolated.restore());
 
+	it("preserves verified exports and file bytes while older indexes retain unknown visibility", async () => {
+		const cwd = isolated.dir;
+		const source = [
+			"function internal() {}",
+			"function renamed() {}",
+			"function defaulted() {}",
+			"export { renamed as publicName };",
+			"export default defaulted;",
+			"export function direct() {}",
+			"export const visible = 1;",
+			"export class Visible { internal() {} }",
+			'export { internal } from "./other.js";',
+			'const unicode = "α";',
+			"",
+		].join("\n");
+		writeFileSync(join(cwd, "exports.ts"), source);
+		const wiki = await buildCodewiki({ cwd, language: "typescript" });
+		strictEqual(wiki.files[0]?.bytes, Buffer.byteLength(source));
+		for (const name of ["renamed", "defaulted", "direct", "visible", "Visible"])
+			strictEqual(wiki.symbols.find((symbol) => symbol.name === name)?.exported, true, name);
+		strictEqual(wiki.symbols.find((symbol) => symbol.name === "internal" && symbol.kind === "func")?.exported, false);
+		strictEqual(wiki.symbols.find((symbol) => symbol.kind === "method")?.exported, undefined);
+		deepStrictEqual(parseCodewikiRaw(serializeCodewiki(wiki)), wiki);
+		const old = {
+			...wiki,
+			files: wiki.files.map(({ bytes: _bytes, ...file }) => file),
+			symbols: wiki.symbols.map(({ exported: _exported, ...symbol }) => symbol),
+		};
+		const parsed = parseCodewikiRaw(JSON.stringify(old));
+		ok(parsed);
+		strictEqual(parsed.files[0]?.bytes, undefined);
+		ok(parsed.symbols.every((symbol) => symbol.exported === undefined));
+		strictEqual(parseCodewikiRaw(JSON.stringify({ ...wiki, symbols: [{ ...wiki.symbols[0], exported: "yes" }] })), null);
+		strictEqual(parseCodewikiRaw(JSON.stringify({ ...wiki, files: [{ ...wiki.files[0], bytes: -1 }] })), null);
+	});
+
 	it("read-only navigation builds and refreshes without creating workspace artifacts", async () => {
 		const cwd = isolated.dir;
 		writeFileSync(join(cwd, "a.ts"), "export const before = 1;\n");
@@ -34,6 +75,26 @@ describe("codewiki global freshness", () => {
 		ok(second.ok);
 		ok(second.codewiki.symbols.some((symbol) => symbol.name === "afterChange"));
 		strictEqual(existsSync(join(cwd, ".clio-coder")), false);
+	});
+
+	it("recognizes Go exports and unrestricted Rust pub without claiming local or restricted declarations", async () => {
+		const cwd = isolated.dir;
+		writeFileSync(
+			join(cwd, "surface.go"),
+			"package surface\nfunc Visible() {}\nfunc hidden() {}\nfunc scope() { type Local int }\n",
+		);
+		writeFileSync(join(cwd, "surface.rs"), "pub fn visible() {}\npub(crate) fn restricted() {}\nfn hidden() {}\n");
+		const wiki = await buildCodewiki({ cwd, language: "go" });
+		strictEqual(wiki.symbols.find((symbol) => symbol.name === "Visible")?.exported, true);
+		strictEqual(
+			wiki.symbols.find(
+				(symbol) => symbol.name === "hidden" && wiki.files.find((file) => file.id === symbol.fileId)?.lang === "go",
+			)?.exported,
+			false,
+		);
+		strictEqual(wiki.symbols.find((symbol) => symbol.name === "Local")?.exported, undefined);
+		strictEqual(wiki.symbols.find((symbol) => symbol.name === "visible")?.exported, true);
+		strictEqual(wiki.symbols.find((symbol) => symbol.name === "restricted")?.exported, undefined);
 	});
 
 	it("resolves Python relative depth, package initializers, and local absolute imports", async () => {

@@ -55,6 +55,12 @@ dependency; and a relevant focused test where one exists, including its actual i
 and assertion. A manifest, a README, a directory listing, or an import list is discovery evidence, not
 implementation evidence.
 
+Use the anchor digest below to locate the relevant implementation. For a large file, request a
+`code_nav` outline only when the digest does not locate the assigned behavior, then read targeted
+line ranges around the caller, enforcing branch, and outcome. Follow the relevant public contracts,
+configuration, dependencies, and focused tests with targeted reads. Avoid repeated full-file reads;
+the digest and an outline guide inspection but do not establish behavior or finish an assignment.
+
 For each central workflow assigned by the page intent, trace caller -> arguments -> enforcing
 branch -> observable outcome, including a relevant focused test's actual inputs and assertions
 where one exists.

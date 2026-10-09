@@ -32,6 +32,77 @@ function records(text: string): Array<Record<string, unknown>> {
 }
 
 describe("wiki page decision prompts", () => {
+	it("balances symbol slots across every anchor, reuses spare slots, and ranks verified exports first", () => {
+		const sources = ["src/large.ts", "src/small.ts", "src/empty.ts", "src/missing.ts"];
+		const files = sources.slice(0, 3).map((path, index) => ({
+			id: String(index),
+			path,
+			lang: "typescript" as const,
+			loc: 200,
+			bytes: 1234,
+			role: "module" as const,
+			hash: "hash",
+			imports: [],
+		}));
+		const symbols = [
+			...Array.from({ length: 80 }, (_, index) => ({
+				name: `large${index}`,
+				kind: "func" as const,
+				fileId: "0",
+				line: index + 1,
+				...(index === 79 ? { exported: true } : {}),
+			})),
+			{ name: "small", kind: "func" as const, fileId: "1", line: 2 },
+		];
+		const text = buildWikiPagePrompt({
+			cwd: process.cwd(),
+			mode: "init",
+			codewiki: { ...codewiki, files, symbols },
+			page: { path: "area.md", title: "Area", intent: "Explain the area", sources, status: "pending", attempts: 0 },
+			siblings: [],
+			outputDir: "/staging",
+			seeded: false,
+		});
+		const digest = /## Indexed symbols under those sources\s+```text\s+([\s\S]*?)\s+```/u.exec(text)?.[1] ?? "";
+		match(
+			digest,
+			/src\/large\.ts: 200 indexed lines; 1234 bytes; 59\/80 symbols\n {2}- large79 func :80 \[export\]\n {2}- large0 func :1/,
+		);
+		match(digest, /src\/small\.ts: 200 indexed lines; 1234 bytes; 1\/1 symbols\n {2}- small func :2/);
+		match(digest, /src\/empty\.ts:[^\n]+\n {2}No indexed symbols/);
+		match(digest, /src\/missing\.ts: not indexed; unknown bytes; 0\/0 symbols\n {2}No indexed symbols/);
+		strictEqual(digest.match(/^ {2}- /gm)?.length, 60);
+		doesNotMatch(digest, /large58 func/);
+	});
+
+	it("shares the allowance evenly and distributes the remainder in anchor order", () => {
+		const sources = Array.from({ length: 7 }, (_, index) => `src/${index}.ts`);
+		const anchor = codewiki.files[0];
+		if (!anchor) throw new Error("missing anchor");
+		const files = sources.map((path, index) => ({ ...anchor, id: String(index), path }));
+		const symbols = files.flatMap((file) =>
+			Array.from({ length: 20 }, (_, index) => ({
+				name: `symbol${index}`,
+				kind: "func" as const,
+				fileId: file.id,
+				line: index + 1,
+			})),
+		);
+		const text = buildWikiPagePrompt({
+			cwd: process.cwd(),
+			mode: "init",
+			codewiki: { ...codewiki, files, symbols: symbols.reverse() },
+			page: { path: "area.md", title: "Area", intent: "Explain the area", sources, status: "pending", attempts: 0 },
+			siblings: [],
+			outputDir: "/staging",
+			seeded: false,
+		});
+		const counts = [...text.matchAll(/src\/\d\.ts: 20 indexed lines; unknown bytes; (\d+)\/20 symbols/g)].map((match) =>
+			Number(match[1]),
+		);
+		deepStrictEqual(counts, [9, 9, 9, 9, 8, 8, 8]);
+	});
+
 	it("preserves coverage gaps through metadata repair and requires qualified central-workflow coverage", () => {
 		const content =
 			'---\nsources: []\ncoverage_gaps:\n  - "Inspect the caller and the failure-path assertion."\n---\n# Area\n\nDraft details.\n';

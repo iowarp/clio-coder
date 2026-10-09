@@ -92,7 +92,14 @@ function compareEdges(a: CodewikiEdge, b: CodewikiEdge): number {
 const SIG_KINDS = new Set<CodewikiSymbolKind>(["func", "class", "method", "type"]);
 function normalizeSymbol(symbol: CodewikiSymbol): CodewikiSymbol {
 	const sig = SIG_KINDS.has(symbol.kind) ? symbol.sig?.trim().slice(0, 240) : undefined;
-	return { name: symbol.name, kind: symbol.kind, fileId: symbol.fileId, line: symbol.line, ...(sig ? { sig } : {}) };
+	return {
+		name: symbol.name,
+		kind: symbol.kind,
+		fileId: symbol.fileId,
+		line: symbol.line,
+		...(sig ? { sig } : {}),
+		...(symbol.exported !== undefined ? { exported: symbol.exported } : {}),
+	};
 }
 function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 	return {
@@ -104,6 +111,7 @@ function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 				path: file.path,
 				lang: file.lang,
 				loc: file.loc,
+				...(file.bytes !== undefined ? { bytes: file.bytes } : {}),
 				role: file.role,
 				hash: file.hash,
 				imports: uniqueSorted(file.imports),
@@ -241,6 +249,7 @@ function validFile(value: unknown, hash: boolean): boolean {
 		LANGUAGES.has(item.lang as CodewikiLanguage) &&
 		Number.isInteger(item.loc) &&
 		(item.loc as number) >= 0 &&
+		(!("bytes" in item) || (Number.isSafeInteger(item.bytes) && (item.bytes as number) >= 0)) &&
 		typeof item.role === "string" &&
 		ROLES.has(item.role as CodewikiFileRole) &&
 		(!hash ||
@@ -260,7 +269,8 @@ function validSymbol(value: unknown): boolean {
 		typeof item.fileId === "string" &&
 		Number.isInteger(item.line) &&
 		(item.line as number) >= 1 &&
-		(!("sig" in item) || typeof item.sig === "string")
+		(!("sig" in item) || typeof item.sig === "string") &&
+		(!("exported" in item) || typeof item.exported === "boolean")
 	);
 }
 function validEdge(value: unknown): boolean {

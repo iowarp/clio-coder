@@ -806,12 +806,13 @@ function buildFile(
 		path: relPath,
 		lang: language,
 		loc: lineCount(text),
+		bytes: Buffer.byteLength(text),
 		role: roleFor(relPath, language),
 		hash: contentHash(text),
 		imports: [],
 	};
 	if (text.trim().length === 0) return { file, symbols: [] };
-	const extracted = isCMakePath(relPath)
+	const extracted: LanguageExtraction | null = isCMakePath(relPath)
 		? extractCMake(text)
 		: language !== "config"
 			? extractSourceFile(language, relPath, text, treeSitterExtractor)
@@ -828,6 +829,7 @@ function buildFile(
 		kind: symbol.kind,
 		fileId: sourceFile.id,
 		line: symbol.line,
+		...(symbol.exported !== undefined ? { exported: symbol.exported } : {}),
 		...symbolSigFields(symbol.kind, symbol.sig),
 	}));
 	return {
