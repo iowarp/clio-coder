@@ -85,7 +85,10 @@ export function repairWikiLinks(
 	const unresolved: string[] = [];
 	const repair = (destination: string): string => {
 		const decoded = decodeWikiDestination(destination);
-		if (!decoded?.path.toLowerCase().endsWith(".md")) return destination;
+		// A tail after .md (encoded %23, %3F, whitespace, control or odd characters) is part of the literal file
+		// name a browser requests, so such links are checked as page links. The tail stays inside the last segment
+		// and has no dot, which keeps .mdx, .md.bak and non-page files like img.md%3Fx.png out of the check.
+		if (!decoded || !/\.md(?:[^\w./-][^/.]*)?$/i.test(decoded.path)) return destination;
 		const href = decoded.path;
 		const anchor = decoded.suffix;
 		const fromDir = posix.dirname(pagePath);

@@ -234,6 +234,26 @@ describe("wiki mechanical evidence gate", () => {
 			const present = repairWikiLinks("section/page.md", body, rooted);
 			deepStrictEqual(present, { body, unresolved: href === "/local.md" ? [] : [expected] }, href);
 		}
+		// An encoded %23/%3F/space is part of the requested file name, never a fragment or query.
+		for (const [from, href, expected] of [
+			["section/page.md", "/local.md%23x", "/local.md#x"],
+			["page.md", "local.md%23x", "local.md#x"],
+			["section/page.md", "/local.md%3Fx", "/local.md?x"],
+			["section/page.md", "/local.md%20", "/local.md "],
+			["section/page.md", "local.md%00", "local.md\0"],
+			["section/page.md", "local.md%E2%80%8B", "local.md\u200b"],
+			["section/page.md", "local.md%25", "local.md%"],
+			["section/page.md", "local.md%2f", "local.md%2f"],
+		] as const) {
+			const body = `[Link](${href})`;
+			deepStrictEqual(repairWikiLinks(from, body, rooted), { body, unresolved: [expected] }, href);
+		}
+		for (const href of ["a.md%20diagram.png", "img.md%3Fx.png", "my.md%20b/c.ts", "readme.mdx", "notes.md.bak"]) {
+			const body = `[Link](${href})`;
+			deepStrictEqual(repairWikiLinks("section/page.md", body, rooted), { body, unresolved: [] }, href);
+		}
+		const fragment = "[Link](/local.md#x)";
+		deepStrictEqual(repairWikiLinks("section/page.md", fragment, rooted), { body: fragment, unresolved: [] });
 	});
 
 	it("preserves CRLF and Unicode and diagnoses normalized or ambiguous repairs", () => {
