@@ -698,20 +698,22 @@ async function runPagePhase(
 			})
 		: undefined;
 	const written = outcome.ok && evidence?.ok === true && (!repair || stable(evidence.dependencies));
-	if (evidence && outcome.phase === "writer") {
+	// dispatch() returns the first attempt's id; after a transient retry the page was authored by the terminal run.
+	const authorRunId = outcome.phase === "writer" ? (outcome.attempts?.terminalRunId ?? outcome.runId) : undefined;
+	if (evidence && authorRunId !== undefined) {
 		const sourceSnapshotHash = createHash("sha256")
 			.update(JSON.stringify(Object.entries(baseline).sort(([a], [b]) => a.localeCompare(b))))
 			.digest("hex");
 		try {
-			if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(outcome.runId)) throw new Error("invalid validation run id");
+			if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(authorRunId)) throw new Error("invalid validation run id");
 			safeResourceWrite(
-				join(dirname(runEventJournalPath(outcome.runId)), "wiki-validation.json"),
+				join(dirname(runEventJournalPath(authorRunId)), "wiki-validation.json"),
 				`${JSON.stringify(
 					{
 						version: 1,
 						page: page.path,
 						attempt: page.attempts + 1,
-						runId: outcome.runId,
+						runId: authorRunId,
 						assignment: kind,
 						validationKind: evidence.validationKind ?? "evidence",
 						ok: evidence.ok,
@@ -766,7 +768,7 @@ async function runPagePhase(
 					detail: (repair ? `repair failed: ${detail}; full writer required next invocation` : detail)
 						.replace(/\s+/gu, " ")
 						.slice(0, 500),
-					...(outcome.phase === "writer" ? { runId: outcome.runId } : {}),
+					...(authorRunId !== undefined ? { runId: authorRunId } : {}),
 				};
 			return nextPage;
 		}),

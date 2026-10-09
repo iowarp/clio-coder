@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import type { WikiPlan } from "../../src/domains/context/wiki/plan.js";
+import { readWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import { runEventJournalPath } from "../../src/domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -245,6 +247,77 @@ it("counts every attempt of a transiently retried dispatch and pairs each run id
 			),
 		);
 		assert.match(summaries[0] ?? "", /unknown cost=0 runs/u);
+	} finally {
+		isolated.restore();
+	}
+});
+
+it("records the validation sidecar and last failure under the terminal run of a retried dispatch", async () => {
+	const isolated = await isolateClioEnv("wiki-retry-sidecar-");
+	try {
+		const cwd = isolated.dir;
+		const outputDir = join(cwd, ".clio-coder/wiki-staging");
+		mkdirSync(outputDir, { recursive: true });
+		writeFileSync(join(cwd, "package.json"), "{}\n");
+		const plan: WikiPlan = {
+			version: 1,
+			overview: "Retry sidecar fixture",
+			pages: [
+				{
+					path: "retried.md",
+					title: "retried",
+					intent: "Explain retried",
+					sources: ["package.json"],
+					status: "pending",
+					attempts: 0,
+				},
+			],
+		};
+		const terminal = {
+			runId: "retry-1",
+			exitCode: 0,
+			tokenCount: 10,
+			missingTokenCalls: 0,
+			costUsd: 0,
+			costProvenance: "known",
+		};
+		const dispatch = {
+			abort() {},
+			assignments: {
+				get: (id: string) =>
+					id === "retry-0"
+						? {
+								attempts: [
+									{ runId: "retry-0", attempt: 0, outcome: "failed" },
+									{ runId: "retry-1", attempt: 1, outcome: "completed" },
+								],
+							}
+						: null,
+			},
+			getRun: () => null,
+			async dispatch() {
+				return {
+					runId: "retry-0",
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve(terminal),
+				};
+			},
+		} as unknown as DispatchContract;
+		await modelWikiGenerate({ dispatch })({
+			cwd,
+			outputDir,
+			mode: "init",
+			resumed: false,
+			plan,
+			unclaimedAreas: [],
+			codewiki: { version: 5, language: "typescript", files: [], symbols: [], edges: [] },
+			generation: { requestedDepth: "simple", depth: "simple", sourceFiles: 1, sourceLines: 1, plan },
+		});
+		const sidecar = join(runEventJournalPath("retry-1").replace(/[^/]+$/u, ""), "wiki-validation.json");
+		assert.ok(existsSync(sidecar), "sidecar lands under the terminal run");
+		assert.equal(JSON.parse(readFileSync(sidecar, "utf8")).runId, "retry-1");
+		assert.ok(!existsSync(join(runEventJournalPath("retry-0").replace(/[^/]+$/u, ""), "wiki-validation.json")));
+		assert.equal(readWikiPlanFile(outputDir)?.pages[0]?.lastFailure?.runId, "retry-1");
 	} finally {
 		isolated.restore();
 	}
