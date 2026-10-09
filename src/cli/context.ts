@@ -324,7 +324,7 @@ async function runWikiCommand(args: string[]): Promise<number> {
 		process.stderr.write("clio-coder context wiki: --replan cannot be combined with --retry-pending\n");
 		return 2;
 	}
-	const progress = createContextCliProgress("wiki");
+	const progress = createContextCliProgress("wiki", { liveness: false });
 	try {
 		const context = await import("../domains/context/index.js");
 		const { modelWikiGenerate, resolveDocumenterModelId } = await import("./wiki-generate.js");

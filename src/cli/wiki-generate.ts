@@ -272,14 +272,9 @@ async function runWikiDispatch(input: {
 		HEARTBEAT_MS,
 	);
 	heartbeat.unref();
-	let lastHeartbeatAt = startedAtClock;
 	try {
 		const summary = await drainDispatchEvents(handle.events, (tools) => {
 			completedTools = tools;
-			const nowMs = performance.now();
-			if (!input.onHeartbeat || nowMs - lastHeartbeatAt < HEARTBEAT_MS) return;
-			lastHeartbeatAt = nowMs;
-			input.onHeartbeat({ elapsedMs: Math.round(nowMs - startedAtClock), tools });
 		});
 		const receipt = await handle.finalPromise;
 		if (timedOut || safetyDeadline.timedOut())
@@ -339,7 +334,7 @@ async function runPlanPhase(
 	route: WikiModelRoute,
 	deadline: WikiDeadline | undefined,
 ): Promise<WikiPlan> {
-	input.progress?.({ phase: "generate", status: "running", message: "planning wiki pages" });
+	input.progress?.({ phase: "generate", status: "started", message: "planning wiki pages" });
 	const outcome = await runWikiDispatch({
 		dispatch,
 		cwd: input.cwd,
@@ -388,6 +383,11 @@ async function runPagePhase(
 	deadline: WikiDeadline | undefined,
 ): Promise<WikiPlan> {
 	const seeded = existsSync(join(input.outputDir, page.path));
+	input.progress?.({
+		phase: "generate",
+		status: "started",
+		message: `writing ${page.path} (${position.index}/${position.total})`,
+	});
 	const outcome = await runWikiDispatch({
 		dispatch,
 		cwd: input.cwd,

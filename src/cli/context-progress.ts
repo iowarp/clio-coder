@@ -10,7 +10,10 @@ function plain(value: string): string {
 }
 
 /** stderr remains useful under --json and in redirected unattended jobs. */
-export function createContextCliProgress(operation: string): {
+export function createContextCliProgress(
+	operation: string,
+	options: { liveness?: boolean } = {},
+): {
 	update(event: BootstrapProgressEvent): void;
 	stop(): void;
 } {
@@ -26,7 +29,7 @@ export function createContextCliProgress(operation: string): {
 		printedAt = performance.now();
 	};
 	const timer = setInterval(() => {
-		if (last && performance.now() - printedAt >= 10_000) print(last);
+		if (options.liveness !== false && last && performance.now() - printedAt >= 10_000) print(last);
 	}, 10_000);
 	timer.unref();
 	return {
