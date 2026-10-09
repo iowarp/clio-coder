@@ -27,8 +27,8 @@ const { values } = parseArgs({
 });
 const widths = values.widths.split(",").map(Number);
 assert.ok(
-	widths.length > 0 && widths.every((width) => [1600, 1050, 400, 390, 320].includes(width)),
-	"widths: 1600, 1050, 400, 390, 320",
+	widths.length > 0 && widths.every((width) => [1600, 1440, 1050, 400, 390, 320].includes(width)),
+	"widths: 1600, 1440, 1050, 400, 390, 320",
 );
 const scratch = fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
 await mkdir(scratch, { recursive: true });
@@ -452,7 +452,36 @@ try {
 		const thinking = setting("chat.thinkingLevel");
 		const level = (await thinking.getByRole("combobox").inputValue()) === "low" ? "high" : "low";
 		await thinking.getByRole("combobox").selectOption(level);
-		await thinking.getByRole("button", { name: "Save", exact: true }).click();
+		const historyNotice = page
+			.locator(".notice", {
+				hasText: "This Clio build does not expose session history.",
+			})
+			.last();
+		const saveThinking = thinking.getByRole("button", { name: "Save", exact: true });
+		await saveThinking.scrollIntoViewIfNeeded();
+		assert.equal(await historyNotice.isVisible(), true, "the notice is present while Save is used");
+		const noticeBounds = await page.locator(".notice-region").boundingBox();
+		const saveBounds = await saveThinking.boundingBox();
+		assert.ok(noticeBounds && saveBounds);
+		assert.ok(
+			saveBounds.y + saveBounds.height <= noticeBounds.y ||
+				noticeBounds.y + noticeBounds.height <= saveBounds.y ||
+				saveBounds.x + saveBounds.width <= noticeBounds.x ||
+				noticeBounds.x + noticeBounds.width <= saveBounds.x,
+			`notifications must not cover Save at ${width}px`,
+		);
+		assert.equal(
+			await saveThinking.evaluate((button) => {
+				const rect = button.getBoundingClientRect();
+				return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+			}),
+			true,
+			"Save receives pointer input while the notification is visible",
+		);
+		if (width === 390 || width === 400)
+			await page.screenshot({ path: join(output, `notice-save-${width}.png`), fullPage: true });
+		await saveThinking.click({ timeout: 1_000 });
+		assert.equal(await historyNotice.isVisible(), true, "Save does not wait for notification dismissal");
 		await thinking.getByRole("status").getByText("Used by the next relevant request").waitFor();
 		await check("settings-saved");
 		// A loaded approval can precede its tool-call history. Exercise the full banner beside a
@@ -1601,6 +1630,7 @@ try {
 		statuses.filter(
 			(item) =>
 				!(item.path === "/api/workspaces" && item.status === 422) &&
+				!(item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) &&
 				!(item.status === 401 && firstReads.includes(item.path)),
 		),
 		[],
