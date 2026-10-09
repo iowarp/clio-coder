@@ -11,7 +11,7 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { WikiModelRoute } from "../../src/cli/wiki-generate.js";
@@ -40,7 +40,11 @@ function generator(action: (spec: JobSpec, path: string | undefined) => number |
 	const dispatch = {
 		abort() {},
 		async dispatch(spec: JobSpec) {
-			const path = /(?:Write the file|Repair the existing draft at) `([^`]+)` and nothing else\./u.exec(spec.task)?.[1];
+			const prompted = /(?:Write the file|Repair the existing draft at) `([^`]+)` and nothing else\./u.exec(
+				spec.task,
+			)?.[1];
+			// Repair prompts cite the draft relative to the job cwd; resolve it like a real worker would.
+			const path = prompted ? resolve(spec.cwd ?? process.cwd(), prompted) : undefined;
 			const exitCode = action(spec, path) ?? 0;
 			return {
 				runId: `fixture-${++sequence}`,
