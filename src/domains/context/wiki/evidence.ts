@@ -63,6 +63,31 @@ export function wikiLinkInventory(dir: string): WikiLinkInventory {
 	return { targets, unavailable: new Set(files.filter((path) => !targets.has(path))) };
 }
 
+function inlineCodeRanges(prose: string): Array<{ start: number; end: number }> {
+	const ticks = [...prose.matchAll(/`+/g)];
+	const nextByLength = new Map<number, number>();
+	const closers = new Map<number, number>();
+	for (let index = ticks.length - 1; index >= 0; index--) {
+		const length = ticks[index]?.[0].length ?? 0;
+		const next = nextByLength.get(length);
+		if (next !== undefined) closers.set(index, next);
+		nextByLength.set(length, index);
+	}
+	const ranges: Array<{ start: number; end: number }> = [];
+	for (let index = 0; index < ticks.length; index++) {
+		const opening = ticks[index];
+		const close = closers.get(index);
+		const closing = close === undefined ? undefined : ticks[close];
+		if (!opening || !closing || close === undefined) continue;
+		let slashes = 0;
+		for (let before = opening.index - 1; before >= 0 && prose[before] === "\\"; before--) slashes++;
+		if (slashes % 2 !== 0) continue;
+		ranges.push({ start: opening.index, end: closing.index + closing[0].length });
+		index = close;
+	}
+	return ranges;
+}
+
 export function repairWikiLinks(
 	pagePath: string,
 	body: string,
@@ -70,38 +95,56 @@ export function repairWikiLinks(
 ): { body: string; unresolved: string[] } {
 	const { targets, unavailable } = inventory;
 	const unresolved: string[] = [];
-	const repaired = mapWikiProse(body, (line) =>
-		line.replace(
-			/(\[[^\]]*\]\()(?![a-z][a-z\d+.-]*:|\/\/|#)([^)\s]+\.md)(#[^)\s]*)?\)/gi,
-			(link: string, opening: string, href: string, anchor: string = "") => {
-				const fromDir = posix.dirname(pagePath);
-				const target = posix.normalize(posix.join(fromDir, href));
-				if (!target.startsWith("..") && targets.has(target)) return link;
-				let replacement: string | undefined;
-				const rootPath = posix.normalize(href);
-				if (!posix.isAbsolute(href) && !unavailable.has(target) && !unavailable.has(rootPath)) {
-					if (targets.has(rootPath)) replacement = rootPath;
-					else {
-						const parts = rootPath.split("/");
-						while (parts.length > 0) {
-							const suffix = parts.join("/");
-							const matches = [...targets].filter((page) => page === suffix || page.endsWith(`/${suffix}`));
-							if (matches.length > 0) {
-								if (matches.length === 1) replacement = matches[0];
-								break;
-							}
-							parts.shift();
-						}
+	const repair = (destination: string): string => {
+		const angle = destination.startsWith("<");
+		const path = angle ? destination.slice(1, -1) : destination;
+		const match = /^(?![a-z][a-z\d+.-]*:|\/\/|#)(.+\.md)(#[\s\S]*)?$/i.exec(path);
+		if (!match) return destination;
+		const href = match[1] ?? "";
+		const anchor = match[2] ?? "";
+		const fromDir = posix.dirname(pagePath);
+		const target = posix.normalize(posix.join(fromDir, href));
+		if (!target.startsWith("..") && targets.has(target)) return destination;
+		let replacement: string | undefined;
+		const rootPath = posix.normalize(href);
+		if (!posix.isAbsolute(href) && !unavailable.has(target) && !unavailable.has(rootPath)) {
+			if (targets.has(rootPath)) replacement = rootPath;
+			else {
+				const parts = rootPath.split("/");
+				while (parts.length > 0) {
+					const suffix = parts.join("/");
+					const matches = [...targets].filter((page) => page === suffix || page.endsWith(`/${suffix}`));
+					if (matches.length > 0) {
+						if (matches.length === 1) replacement = matches[0];
+						break;
 					}
+					parts.shift();
 				}
-				if (replacement === undefined) {
-					unresolved.push(href);
-					return link;
-				}
-				return `${opening}${posix.relative(fromDir, replacement)}${anchor})`;
-			},
-		),
-	);
+			}
+		}
+		if (replacement === undefined) {
+			unresolved.push(href);
+			return destination;
+		}
+		const repaired = `${posix.relative(fromDir, replacement)}${anchor}`;
+		return angle ? `<${repaired}>` : repaired;
+	};
+	const repaired = mapWikiProse(body, (prose) => {
+		for (const pattern of [
+			/(\[[^\]\n]*\]\([ \t]*)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*)?\))/g,
+			/(^ {0,3}\[[^\]\n]+\]:[ \t]*)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*)?)(?=\r?$)/gm,
+		]) {
+			const code = inlineCodeRanges(prose);
+			prose = prose.replace(
+				pattern,
+				(link: string, opening: string, destination: string, closing: string, offset: number) =>
+					code.some((range) => offset >= range.start && offset < range.end)
+						? link
+						: `${opening}${repair(destination)}${closing}`,
+			);
+		}
+		return prose;
+	});
 	return { body: repaired, unresolved };
 }
 

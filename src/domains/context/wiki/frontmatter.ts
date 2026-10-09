@@ -92,12 +92,18 @@ export function stripFrontmatter(content: string): { block: string | null; body:
 	return { block: match[1] ?? "", body: content.slice(match[0].length) };
 }
 
-export function mapWikiProse(body: string, transform: (line: string) => string): string {
+export function mapWikiProse(body: string, transform: (prose: string) => string): string {
 	let fence = "";
-	return body
-		.split("\n")
-		.map((line) => {
-			const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+	const chunks: string[] = [];
+	let prose: string[] = [];
+	for (const line of body.split("\n")) {
+		const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+		if (marker || fence) {
+			if (prose.length > 0) {
+				chunks.push(transform(prose.join("\n")));
+				prose = [];
+			}
+			chunks.push(line);
 			if (marker) {
 				if (!fence) fence = marker;
 				else if (
@@ -106,11 +112,11 @@ export function mapWikiProse(body: string, transform: (line: string) => string):
 					/^\s*$/.test(line.trimStart().slice(marker.length))
 				)
 					fence = "";
-				return line;
 			}
-			return fence ? line : transform(line);
-		})
-		.join("\n");
+		} else prose.push(line);
+	}
+	if (prose.length > 0) chunks.push(transform(prose.join("\n")));
+	return chunks.join("\n");
 }
 
 /**

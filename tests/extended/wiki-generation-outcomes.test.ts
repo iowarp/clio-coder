@@ -159,7 +159,7 @@ describe("wiki generation outcomes", () => {
 			model: "fixture",
 			generate(input) {
 				mkdirSync(join(input.outputDir, "section"), { recursive: true });
-				writeFileSync(join(input.outputDir, "a.md"), `${content("a", 1)}\n[Empty](section/empty.md)\n`);
+				writeFileSync(join(input.outputDir, "a.md"), `${content("a", 1)}\n[Empty](<section/empty.md> "Optional title")\n`);
 				writeFileSync(join(input.outputDir, "b.md"), `${content("b", 1)}\n[Section](section/index.md)\n`);
 				writeFileSync(join(input.outputDir, "section/empty.md"), "# Empty\n");
 				writeFileSync(join(input.outputDir, "section/extra.md"), content("extra", 1));
@@ -184,6 +184,7 @@ describe("wiki generation outcomes", () => {
 		assert.equal(meta?.generation?.pagesWritten, 1);
 		assert.equal(meta?.generation?.pagesPlanned, 5);
 		assert.equal(meta?.plan?.pages.find((entry) => entry.path === "a.md")?.lastFailure?.phase, "validation");
+		assert.equal(meta?.plan?.pages.find((entry) => entry.path === "a.md")?.status, "pending");
 		assert.match(
 			meta?.plan?.pages.find((entry) => entry.path === "a.md")?.lastFailure?.detail ?? "",
 			/section\/empty.md/,

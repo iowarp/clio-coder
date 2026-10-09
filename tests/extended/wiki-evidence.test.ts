@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { inspectWikiPageEvidence, validateWikiPageEvidence } from "../../src/domains/context/wiki/evidence.js";
+import {
+	inspectWikiPageEvidence,
+	repairWikiLinks,
+	validateWikiPageEvidence,
+} from "../../src/domains/context/wiki/evidence.js";
 
 let sandbox: string;
 let root: string;
@@ -72,6 +76,59 @@ describe("wiki mechanical evidence gate", () => {
 				true,
 			);
 		}
+	});
+
+	it("repairs titled, angle-bracket and reference-definition links while preserving Markdown formatting", () => {
+		const wikiLinks = { targets: new Set(["target.md"]), unavailable: new Set<string>() };
+		for (const body of [
+			'[Title](target.md "Optional title")',
+			"[Title](target.md 'Optional title')",
+			"[Title](target.md (Optional title))",
+			"[Angle](<target.md#heading>)",
+			'[Both](<target.md> "Optional `code` title")',
+			'[Reference][target]\n[target]: target.md "Optional title"',
+			'[Collapsed][]\n[Collapsed]: <target.md#heading> "Optional title"',
+			"[Shortcut]\n[Shortcut]: target.md",
+		]) {
+			deepStrictEqual(repairWikiLinks("section/page.md", body, wikiLinks), {
+				body: body.replace("target.md", "../target.md"),
+				unresolved: [],
+			});
+			const input = { sourceRoot: root, pagePath: "section/page.md", wikiLinks };
+			strictEqual(validateWikiPageEvidence({ ...input, content: page("src/main.ts", body) }).ok, true, body);
+			const missing = body.replace("target.md", "missing.md");
+			const result = validateWikiPageEvidence({ ...input, content: page("src/main.ts", missing) });
+			strictEqual(result.ok, false, missing);
+			strictEqual(result.reasons.length, 1, missing);
+			match(result.reasons[0] ?? "", /unresolved wiki link "missing.md"/);
+		}
+	});
+
+	it("excludes inline code spans and fences from link inspection and rewriting", () => {
+		const wikiLinks = { targets: new Set(["target.md"]), unavailable: new Set<string>() };
+		for (const body of [
+			'`[Example](missing.md "Title")` and `[Target](target.md)`.',
+			"`` `[Example](<missing.md>)` and [Target](target.md) ``",
+			"`Example on two lines:\n[Example](missing.md) and [Target](target.md)`",
+			'`Example definition:\n[label]: <missing.md> "Title"`',
+			"~~~markdown\n~~~text\n[Example](missing.md) and [Target](target.md)\n~~~",
+			"```markdown\n[Label][label]\n[label]: missing.md\n```",
+		]) {
+			deepStrictEqual(repairWikiLinks("section/page.md", body, wikiLinks), { body, unresolved: [] });
+			strictEqual(
+				validateWikiPageEvidence({
+					sourceRoot: root,
+					pagePath: "section/page.md",
+					content: page("src/main.ts", body),
+					wikiLinks,
+				}).ok,
+				true,
+				body,
+			);
+		}
+		deepStrictEqual(repairWikiLinks("section/page.md", "Unclosed ` tick: [Missing](missing.md)", wikiLinks).unresolved, [
+			"missing.md",
+		]);
 	});
 
 	it("exposes individually valid body rewrites even when another citation fails", () => {
