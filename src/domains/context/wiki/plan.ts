@@ -107,6 +107,8 @@ const MAX_PAGE_SOURCES = 8;
 
 export const MAX_PLAN_PAGES = 200;
 export const MAX_PLAN_PATH_CHARS = 200;
+export const MAX_PLAN_INTENT_CHARS = 600;
+export const MAX_MEDIUM_OWNERSHIP_PAGES = 24;
 const MEDIUM_SPLIT_LINES = 8_000;
 
 interface Area {
@@ -194,10 +196,14 @@ function collectAreas(source: ReadonlyArray<CodewikiFile>, areaDepth: number): A
 }
 
 function mediumOwnership(areas: Area[], threshold: number): Area[] {
+	const splitLines = Math.max(
+		MEDIUM_SPLIT_LINES,
+		Math.ceil(areas.reduce((sum, area) => sum + area.lines, 0) / MAX_MEDIUM_OWNERSHIP_PAGES),
+	);
 	const included = areas.filter((area) => area.lines >= threshold);
 	const selected = included.length > 0 ? included : areas.slice(0, 1);
 	const owned = new Map(
-		selected.slice(0, MAX_PLAN_PAGES - 2).map((area) => [area.key, { ...area, files: [...area.files] }]),
+		selected.slice(0, MAX_MEDIUM_OWNERSHIP_PAGES - 1).map((area) => [area.key, { ...area, files: [...area.files] }]),
 	);
 	const selectedKeys = new Set(owned.keys());
 	for (const area of areas) {
@@ -208,7 +214,7 @@ function mediumOwnership(areas: Area[], threshold: number): Area[] {
 		const parent = area.key.split("/").slice(0, -1).join("/") || ".";
 		const key = owned.has(area.key)
 			? area.key
-			: (ancestor ?? (owned.has(parent) || owned.size < MAX_PLAN_PAGES - 2 ? parent : "."));
+			: (ancestor ?? (owned.has(parent) || owned.size < MAX_MEDIUM_OWNERSHIP_PAGES - 1 ? parent : "."));
 		const host = owned.get(key) ?? { key, files: [], lines: 0 };
 		host.files.push(...area.files);
 		host.lines += area.lines;
@@ -217,7 +223,7 @@ function mediumOwnership(areas: Area[], threshold: number): Area[] {
 	const result = [...owned.values()].sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
 	for (let position = 0; position < result.length; position += 1) {
 		const area = result[position];
-		if (!area || area.lines <= MEDIUM_SPLIT_LINES) continue;
+		if (!area || area.lines <= splitLines) continue;
 		const { areaShare, minAreaLines } = WIKI_DEPTH_STRATEGY.medium;
 		const childThreshold = Math.max(minAreaLines, Math.floor(area.lines * areaShare));
 		let childDepth = area.key === "." ? 1 : area.key.split("/").length + 1;
@@ -255,7 +261,7 @@ function mediumOwnership(areas: Area[], threshold: number): Area[] {
 					: child,
 			);
 		}
-		if (merged.size >= MAX_PLAN_PAGES) continue;
+		if (merged.size > MAX_MEDIUM_OWNERSHIP_PAGES) continue;
 		result.splice(0, result.length, ...merged.values());
 		result.sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
 		position = -1;
@@ -285,16 +291,24 @@ function overviewPage(source: ReadonlyArray<CodewikiFile>): WikiPlanPage {
 }
 
 /** Counts describe assigned indexed coverage, not the bounded prompt anchors. */
-function intentForScope(files: ReadonlyArray<CodewikiFile>, areaDepth: number): string {
+function intentForScope(
+	files: ReadonlyArray<CodewikiFile>,
+	areaDepth: number,
+	maxChars = MAX_PLAN_INTENT_CHARS,
+): string {
 	const lines = files.reduce((total, file) => total + Math.max(0, file.loc), 0);
-	const scopes = [...new Set(files.map((file) => areaForPath(file.path, areaDepth)))];
-	return (
+	const introduction =
 		`Assigned scope (${files.length} indexed files, ${lines} lines): document responsibilities and key entry points/symbols; ` +
 		"explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests " +
-		"establish them. Anchors are starting points, not the full assignment. Assigned areas: " +
-		scopes.join(", ") +
-		"."
-	);
+		"establish them. Anchors are starting points, not the full assignment. Assigned areas: ";
+	let scopeDepth = areaDepth;
+	let scopes = [...new Set(files.map((file) => areaForPath(file.path, scopeDepth)))].sort();
+	while (introduction.length + scopes.join(", ").length + 1 > maxChars && scopeDepth > 1) {
+		scopeDepth -= 1;
+		scopes = [...new Set(files.map((file) => areaForPath(file.path, scopeDepth)))].sort();
+	}
+	const description = scopes.join(", ");
+	return `${introduction}${introduction.length + description.length + 1 <= maxChars ? description : "repository root"}.`;
 }
 
 /**
@@ -332,7 +346,11 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 			depth,
 			overview: "",
 			pages: [
-				{ ...overview, intent: `${overview.intent} ${intentForScope(files, areaDepth)}`, sources: rankedSources(files) },
+				{
+					...overview,
+					intent: `${overview.intent} ${intentForScope(files, areaDepth, MAX_PLAN_INTENT_CHARS - overview.intent.length - 1)}`,
+					sources: rankedSources(files),
+				},
 			],
 		};
 	}

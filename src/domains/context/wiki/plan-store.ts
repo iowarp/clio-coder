@@ -15,14 +15,17 @@ import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { Codewiki } from "../codewiki/schema.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
 import type { ResolvedWikiDepth, WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
-import { buildCandidatePlan, MAX_PLAN_PAGES, MAX_PLAN_PATH_CHARS } from "./plan.js";
+import {
+	buildCandidatePlan,
+	MAX_MEDIUM_OWNERSHIP_PAGES,
+	MAX_PLAN_INTENT_CHARS,
+	MAX_PLAN_PAGES,
+	MAX_PLAN_PATH_CHARS,
+} from "./plan.js";
 import { parseWikiSourceContent } from "./source-content.js";
 
 /** Dispatches one page may receive across all runs before it is left alone. */
 export const MAX_PAGE_ATTEMPTS = 3;
-
-/** Longest authored intent kept, so one bad entry cannot bloat a page prompt. */
-const MAX_INTENT_CHARS = 600;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -117,7 +120,7 @@ export function sanitizeWikiPlan(
 		if (!isRecord(entry)) continue;
 		const path = sanitizePagePath(entry.path);
 		if (path === null || seen.has(path)) continue;
-		const intent = (usableString(entry.intent) ?? "").slice(0, MAX_INTENT_CHARS);
+		const intent = (usableString(entry.intent) ?? "").slice(0, MAX_PLAN_INTENT_CHARS);
 		const title = usableString(entry.title) ?? path.replace(/\.md$/, "");
 		const sources = stringList(entry.sources, 16);
 		const prior = priorByPath.get(path);
@@ -144,6 +147,12 @@ export function sanitizeWikiPlan(
 		});
 	}
 	if (pages.length === 0) return null;
+	if (
+		!options.trustStatus &&
+		previous?.depth === "medium" &&
+		pages.filter((page) => page.path !== "architecture.md").length > MAX_MEDIUM_OWNERSHIP_PAGES
+	)
+		return null;
 	const retiredPages = [
 		...new Set([
 			...(previous?.retiredPages ?? (options.trustStatus ? stringList(value.retiredPages, MAX_PLAN_PAGES) : [])),

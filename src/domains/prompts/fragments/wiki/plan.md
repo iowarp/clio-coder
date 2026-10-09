@@ -43,6 +43,11 @@ Rules:
 - Split independently substantial subjects; do not assign many domains to one page's detailed coverage.
 - Do not target a page count. Depth follows what the repository contains. A substantial service,
   package, domain, or cross-cutting workflow earns its own page; a thin one does not.
+- At medium depth, keep at most 24 ownership pages plus `architecture.md`. This is a ceiling,
+  not a target. Group related subjects within broader ownership pages when needed, and use
+  their intents to guide readers to central workflows and sources. A revision above this
+  ceiling is rejected in full and the last valid plan is retained. Detailed depth keeps its
+  existing allowance.
 - Judge the plan at the resolved coverage depth below: can a reader understand the core behavior
   and find the source needed to investigate or change it? Add supported coverage where that
   navigation or explanation is missing. A wiki does not replace reading current source.

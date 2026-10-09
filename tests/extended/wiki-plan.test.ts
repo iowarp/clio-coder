@@ -9,6 +9,8 @@ import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
 import { readWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import { buildCandidatePlan, planWikiGeneration, type WikiPlan } from "../../src/domains/context/wiki/plan.js";
 import {
+	readAuthoredWikiPlan,
+	readWikiPlanFile,
 	sanitizePagePath,
 	sanitizeWikiPlan,
 	unclaimedCandidates,
@@ -210,8 +212,8 @@ test("medium child thresholds use their parent scope and skip directories withou
 		index([
 			file("elsewhere/large.py", 1_000_000),
 			file("src/flow/main.py", 34_000),
-			file("src/flow/nested/inner/first/run.py", 4500),
-			file("src/flow/nested/inner/second/run.py", 4500),
+			file("src/flow/nested/inner/first/run.py", 30_000),
+			file("src/flow/nested/inner/second/run.py", 30_000),
 		]),
 		"medium",
 	);
@@ -224,13 +226,13 @@ test("medium child thresholds use their parent scope and skip directories withou
 		[
 			[1, 1_000_000],
 			[1, 34_000],
-			[1, 4500],
-			[1, 4500],
+			[1, 30_000],
+			[1, 30_000],
 		],
 	);
 });
 
-test("medium keeps the split trigger at 8000 lines and preserves simple and detailed policies", () => {
+test("medium uses an 8000-line minimum split trigger and preserves simple and detailed policies", () => {
 	const files = [file("src/suite/alpha/run.py", 4000), file("src/suite/beta/run.py", 4000)];
 	assert.deepEqual(
 		buildCandidatePlan(index(files), "medium").pages.map((page) => page.path),
@@ -256,7 +258,7 @@ test("medium subdivision respects the plan page limit without dropping ownership
 		Array.from({ length: 20 }, (_, child) => file(`src/group-${group}/child-${child}/run.py`, 1000)),
 	).flat();
 	const plan = buildCandidatePlan(index(files), "medium");
-	assert.ok(plan.pages.length <= 200);
+	assert.ok(plan.pages.length <= 25);
 	assert.ok(plan.pages.length > 10);
 	assert.deepEqual(
 		plan.pages.slice(1).reduce<[number, number]>(
@@ -456,5 +458,93 @@ test("completed medium updates preserve coarse paths without planner dispatch un
 		});
 	} finally {
 		isolated.restore();
+	}
+});
+
+test("medium scales its split trigger with total source lines", () => {
+	const fixture = index([
+		file("elsewhere/large.py", 1_000_000),
+		file("src/suite/alpha/run.py", 4500),
+		file("src/suite/beta/run.py", 4500),
+	]);
+	const plan = buildCandidatePlan(fixture, "medium");
+	assert.deepEqual(
+		plan.pages.map((page) => page.path),
+		["architecture.md", "elsewhere.md", "source.md"],
+	);
+	assert.deepEqual(scopeCounts(pageAt(plan, 2).intent), [2, 9000]);
+});
+
+test("medium gives the largest eligible scope the remaining split allowance", () => {
+	const groups = [
+		["a", 12],
+		["z", 21],
+	] as const;
+	const files = groups.flatMap(([name, count]) =>
+		Array.from({ length: count }, (_, child) => file(`src/${name}/child-${child}/run.py`, 1000)),
+	);
+	const plan = buildCandidatePlan(index(files), "medium");
+	assert.equal(plan.pages.length, 23);
+	assert.equal(plan.pages.filter((page) => page.path.startsWith("z/")).length, 21);
+	assert.equal(plan.pages.filter((page) => page.path.startsWith("a/")).length, 0);
+	assert.deepEqual(scopeCounts(plan.pages.find((page) => page.path === "a.md")?.intent ?? ""), [12, 12_000]);
+	assert.equal(
+		plan.pages.slice(1).reduce((sum, page) => sum + (scopeCounts(page.intent)[0] ?? 0), 0),
+		33,
+	);
+	assert.deepEqual(buildCandidatePlan(index([...files].reverse()), "medium"), plan);
+	assert.equal(buildCandidatePlan(index(files), "detailed").pages.length, 34);
+});
+
+test("medium bounds initial owners and rejects whole splits that cannot fit without losing files", () => {
+	const files = Array.from({ length: 30 }, (_, group) => file(`src/group-${group}/main.py`, 1000));
+	const plan = buildCandidatePlan(index(files), "medium");
+	assert.equal(plan.pages.length, 25);
+	const owned = plan.pages.slice(1).flatMap((page) => page.sources);
+	assert.equal(owned.length, files.length);
+	assert.deepEqual(new Set(owned), new Set(files.map((item) => item.path)));
+	const wide = buildCandidatePlan(
+		index(Array.from({ length: 25 }, (_, child) => file(`src/wide/child-${child}/main.py`, 1000))),
+		"medium",
+	);
+	assert.deepEqual(
+		wide.pages.map((page) => page.path),
+		["architecture.md", "wide.md"],
+	);
+	assert.deepEqual(scopeCounts(pageAt(wide, 1).intent), [25, 25_000]);
+});
+
+test("over-limit authored medium plans retain the last plan while legacy checkpoints and detailed revisions survive", async () => {
+	const isolated = await isolateClioEnv("clio-coder-wiki-plan-cap-");
+	try {
+		const prior = buildCandidatePlan(index([file("src/main.py", 1000)]), "medium");
+		const owner = pageAt(prior, 1);
+		const owners = Array.from({ length: 25 }, (_, position) => ({ ...owner, path: `area-${position}.md` }));
+		const oversized = { ...prior, pages: [pageAt(prior, 0), ...owners] };
+		writeWikiPlanFile(isolated.dir, oversized);
+		assert.equal(readAuthoredWikiPlan(isolated.dir, prior), null);
+		assert.equal(readAuthoredWikiPlan(isolated.dir, prior) ?? prior, prior);
+		assert.equal(readWikiPlanFile(isolated.dir)?.pages.length, 26, "trusted legacy paths remain readable");
+		assert.equal(sanitizeWikiPlan({ ...oversized, depth: "detailed" }, prior, { trustStatus: false }), null);
+		assert.equal(sanitizeWikiPlan(oversized, { ...prior, depth: "detailed" }, { trustStatus: false })?.pages.length, 26);
+		assert.equal(sanitizeWikiPlan({ ...oversized, pages: owners }, prior, { trustStatus: false }), null);
+		writeWikiPlanFile(isolated.dir, { ...prior, pages: [pageAt(prior, 0), ...owners.slice(0, 24)] });
+		assert.equal(readAuthoredWikiPlan(isolated.dir, prior)?.pages.length, 25);
+	} finally {
+		isolated.restore();
+	}
+});
+
+test("candidate intents describe complete scope roots within the persistence limit", () => {
+	const fixture = index(
+		Array.from({ length: 20 }, (_, child) => file(`src/suite/long-directory-name-${child}/run.py`, 100)),
+	);
+	for (const depth of ["simple", "medium", "detailed"] as const) {
+		const plan = buildCandidatePlan(fixture, depth);
+		assert.deepEqual(sanitizeWikiPlan(plan)?.pages, plan.pages);
+		for (const page of plan.pages) assert.ok(page.intent.length <= 600);
+		const owner = pageAt(plan, plan.pages.length - 1);
+		assert.deepEqual(scopeCounts(owner.intent), [20, 2000]);
+		assert.match(owner.intent, /Assigned areas: src(?:\/suite)?\.$/u);
 	}
 });
