@@ -431,7 +431,7 @@ function resolvePlan(input: {
 					if (
 						!wikiSourcesMatch(previous.sourceContent, input.sourceContent, [
 							...page.sources,
-							...(evidence.dependencies ?? []),
+							...(evidence.dependencies ?? evidence.resolvedDependencies ?? []),
 						])
 					) {
 						const pending = { ...page };
@@ -452,7 +452,7 @@ function resolvePlan(input: {
 					...page.sources,
 					...(page.dependencies ?? []),
 					...(pageSources.get(page.path) ?? []),
-					...(evidence.dependencies ?? []),
+					...(evidence.dependencies ?? evidence.resolvedDependencies ?? []),
 				];
 				return gitAvailable &&
 					existing.has(page.path) &&

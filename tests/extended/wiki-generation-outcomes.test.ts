@@ -415,7 +415,7 @@ describe("wiki generation outcomes", () => {
 		});
 	}
 	for (const attempts of [1, 3]) {
-		it(`requires normal writing for a newly resolved changed body dependency with ${attempts} previous attempts`, async () => {
+		it(`requires normal writing for a changed body dependency and unrelated bad line with ${attempts} previous attempts`, async () => {
 			await initialize();
 			const dir = join(cwd, ".clio-coder/wiki-staging-body-dependency");
 			mkdirSync(dir);
@@ -426,7 +426,7 @@ describe("wiki generation outcomes", () => {
 			saved.pages[0].lastFailure = { phase: "validation", detail: "Historical gate failure", runId: "successful-writer" };
 			assert.deepEqual(saved.pages[0].dependencies, ["src/a.ts"]);
 			writeWikiPlanFile(dir, saved);
-			writeFileSync(join(dir, "a.md"), `${content("a", 1)}See \`b.ts\` for b version 1.\n`);
+			writeFileSync(join(dir, "a.md"), `${content("a", 1)}See \`b.ts\` for b version 1.\nSee \`src/a.ts:999\`.\n`);
 			writeFileSync(join(dir, "b.md"), content("b", 1));
 			writeFileSync(join(cwd, "src/b.ts"), "export const b = 2;\n");
 			let dispatches = 0;

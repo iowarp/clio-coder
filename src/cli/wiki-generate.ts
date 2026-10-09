@@ -501,7 +501,14 @@ async function runPagePhase(
 					sourceRoot: input.cwd,
 				})
 			: undefined;
-	if (repair && (!seeded || !plan.sourceContent || !stable(diagnostic?.dependencies))) repair = false;
+	for (const dependency of diagnostic?.dependencies ?? diagnostic?.resolvedDependencies ?? []) {
+		if (!sources.includes(dependency)) sources.push(dependency);
+	}
+	if (
+		repair &&
+		(!seeded || !plan.sourceContent || !stable(diagnostic?.dependencies ?? diagnostic?.resolvedDependencies))
+	)
+		repair = false;
 	const kind = repair ? "repair" : "writer";
 	input.progress?.({
 		phase: "generate",
@@ -605,7 +612,7 @@ async function runPagePhase(
 			pending &&
 			pending.attempts < MAX_PAGE_ATTEMPTS &&
 			existsSync(join(input.outputDir, page.path)) &&
-			stable(evidence.dependencies)
+			stable(evidence.dependencies ?? evidence.resolvedDependencies)
 		)
 			return runPagePhase(dispatch, input, next, pending, route, position, deadline, receipts, true);
 	}
