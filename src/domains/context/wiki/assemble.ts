@@ -37,7 +37,7 @@ const SOURCE_CITATION =
 	/`((?:src|tests?|scripts|benchmarks|docs|packages|apps|lib|config|\.github)\/[^`\s:#]+)(?::(\d+)(?:-\d+)?)?(?::[A-Za-z_$][\w$.-]*)?`/g;
 
 /** A relative Markdown link to another page, ignoring external and anchor-only hrefs. */
-const INTERNAL_LINK = /\[[^\]]*\]\((?![a-z][a-z\d+.-]*:|\/\/|#)([^)\s]+\.md)(?:#[^)\s]*)?\)/gi;
+const INTERNAL_LINK = /(\[[^\]]*\]\()(?![a-z][a-z\d+.-]*:|\/\/|#)([^)\s]+\.md)(#[^)\s]*)?\)/gi;
 
 /** Marker line carrying a page's unrepaired references; regenerated every pass. */
 const REPAIR_NOTE = /^<!-- (?:clio-coder|clio):wiki .*-->$/gm;
@@ -118,15 +118,35 @@ function repairPage(
 			if (!validBodyEvidence) issues.push({ page: relPath, kind: "citation", reference: cited });
 		}
 	}
-	for (const match of body.matchAll(INTERNAL_LINK)) {
-		const href = match[1] ?? "";
-		const target = posix.normalize(posix.join(posix.dirname(relPath), href));
-		if (target.startsWith("..") || !knownPages.has(target)) {
-			issues.push({ page: relPath, kind: "link", reference: href });
+	const linkedBody = body.replace(INTERNAL_LINK, (link: string, opening: string, href: string, anchor: string = "") => {
+		const fromDir = posix.dirname(relPath);
+		const target = posix.normalize(posix.join(fromDir, href));
+		if (!target.startsWith("..") && knownPages.has(target)) return link;
+		let replacement: string | undefined;
+		if (!posix.isAbsolute(href)) {
+			const rootPath = posix.normalize(href);
+			if (knownPages.has(rootPath)) replacement = rootPath;
+			else {
+				const parts = rootPath.split("/");
+				while (parts.length > 0) {
+					const suffix = parts.join("/");
+					const matches = [...knownPages].filter((page) => page === suffix || page.endsWith(`/${suffix}`));
+					if (matches.length > 0) {
+						if (matches.length === 1) replacement = matches[0];
+						break;
+					}
+					parts.shift();
+				}
+			}
 		}
-	}
+		if (replacement === undefined) {
+			issues.push({ page: relPath, kind: "link", reference: href });
+			return link;
+		}
+		return `${opening}${linkTo(fromDir, replacement)}${anchor})`;
+	});
 
-	const rebuilt = `${renderWikiPage(parsed.metadata, body).trimEnd()}\n${renderRepairNote(issues)}`;
+	const rebuilt = `${renderWikiPage(parsed.metadata, linkedBody).trimEnd()}\n${renderRepairNote(issues)}`;
 	if (rebuilt !== original) writeText(filePath, rebuilt);
 	return { metadata: parsed.metadata, changed: rebuilt !== original, issues, empty: false };
 }

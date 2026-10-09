@@ -213,6 +213,52 @@ describe("contracts/context lifecycle", () => {
 		strictEqual(lastLoadedContextWindow(meta, "remote", "model-7"), null);
 	});
 
+	it("repairs wiki links only when their root path or longest matching suffix identifies one page", () => {
+		const wiki = join(isolated.dir, ".clio-coder", "wiki");
+		for (const path of ["tests", "areas", "other"]) mkdirSync(join(wiki, path), { recursive: true });
+		for (const path of ["engine.md", "tests/contracts.md", "areas/shared.md", "other/shared.md"]) {
+			writeFileSync(join(wiki, path), "# Target\n\nTarget details.\n");
+		}
+		const page = join(wiki, "tests/extended.md");
+		writeFileSync(
+			page,
+			[
+				"# Extended\n",
+				"[Contracts](tests/contracts.md#coverage)",
+				"[Engine](engine.md)",
+				"[Wrong prefix](old/areas/shared.md#details)",
+				"[Suffix](contracts.md)",
+				"[Ambiguous](old/shared.md#details)",
+				"[Missing](missing.md#details)",
+				"[Valid](../engine.md#details)",
+				"[External](https://example.com/engine.md)",
+				"[Local anchor](#details)",
+			].join("\n"),
+		);
+		const plan = { version: 1 as const, overview: "", pages: [] };
+		const report = assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		const repaired = readFileSync(page, "utf8");
+		for (const link of [
+			"[Contracts](contracts.md#coverage)",
+			"[Engine](../engine.md)",
+			"[Wrong prefix](../areas/shared.md#details)",
+			"[Suffix](contracts.md)",
+			"[Ambiguous](old/shared.md#details)",
+			"[Missing](missing.md#details)",
+			"[Valid](../engine.md#details)",
+			"[External](https://example.com/engine.md)",
+			"[Local anchor](#details)",
+		])
+			ok(repaired.includes(link), link);
+		deepStrictEqual(report.issues, [
+			{ page: "tests/extended.md", kind: "link", reference: "old/shared.md" },
+			{ page: "tests/extended.md", kind: "link", reference: "missing.md" },
+		]);
+		ok(repaired.includes("<!-- clio-coder:wiki unresolved links: old/shared.md, missing.md -->"));
+		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		strictEqual(readFileSync(page, "utf8"), repaired);
+	});
+
 	it("writes canonical wiki repair markers and consumes the released marker", () => {
 		const wiki = join(isolated.dir, ".clio-coder", "wiki");
 		mkdirSync(wiki, { recursive: true });

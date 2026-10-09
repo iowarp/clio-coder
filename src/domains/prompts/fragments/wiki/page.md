@@ -87,8 +87,8 @@ Grounding rules:
   repository root. Name the resolved repository file instead. Quote test glob selectors inside
   their complete verified command rather than as isolated file citations; frontmatter lists
   concrete files, never glob patterns.
-- Link to another wiki page with a relative Markdown link from the list of other pages below. Do
-  not link to a page that is not on that list; it does not exist.
+- Link other wiki pages relative to the current page's directory, using the list of other pages below.
+  Do not link to a page that is not on that list; it does not exist.
 - Separate implemented behavior from partial, planned, or unverified behavior. Verify exact
   commands, configuration keys, test filenames, and CI claims against their current definitions
   before publishing them. Omit unsupported behavior or explicitly label it as unverified; never
