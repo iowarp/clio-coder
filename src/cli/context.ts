@@ -237,7 +237,9 @@ async function runWikiStatusCommand(): Promise<number> {
 		}
 	}
 	lines.push(...wikiRecoveryLines(meta));
-	if (currentHead !== meta.gitHead) {
+	if (meta.gitHead === null) {
+		lines.push("staleness: no fully validated publication baseline; current HEAD alone cannot establish freshness");
+	} else if (currentHead !== meta.gitHead) {
 		lines.push(`staleness: gitHead differs from current HEAD (${currentHead ?? "none"})`);
 	}
 	process.stdout.write(`${lines.join("\n")}\n`);

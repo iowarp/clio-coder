@@ -43,7 +43,7 @@ import {
 	type WikiPlan,
 	type WikiPlanPage,
 } from "./plan.js";
-import { readWikiPlanFile, unclaimedCandidates, writeWikiPlanFile } from "./plan-store.js";
+import { MAX_PAGE_ATTEMPTS, readWikiPlanFile, unclaimedCandidates, writeWikiPlanFile } from "./plan-store.js";
 import type { WikiGenerateMode } from "./prompts.js";
 import { captureWikiSourceContent, type WikiSourceContent, wikiSourcesMatch } from "./source-content.js";
 import { changedPathsSince } from "./staleness.js";
@@ -742,7 +742,7 @@ export async function runWikiGenerate(
 			message: pendingCount > 0 ? "wiki partially generated" : "wiki generated",
 			...(pendingCount > 0
 				? {
-						detail: `${pendingCount} page${pendingCount === 1 ? "" : "s"} remain; run \`clio-coder context wiki --update\` to finish`,
+						detail: `${pendingCount} page${pendingCount === 1 ? "" : "s"} remain; run \`clio-coder context wiki ${finalPlan.pages.some((page) => page.status !== "written" && page.attempts >= MAX_PAGE_ATTEMPTS) ? "--retry-pending" : "--update"}\` to retry`,
 					}
 				: {}),
 		});
