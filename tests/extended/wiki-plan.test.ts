@@ -281,6 +281,32 @@ test("medium local remainders retain direct parent files even when children sort
 	assert.deepEqual(pageAt(plan, 2).sources, ["src/small/child.py", "src/main.py"]);
 });
 
+test("root promotion merges a locally folded area before path allocation and reconsiders its subdivision", () => {
+	for (const nested of [900, 9000]) {
+		const files = [
+			file("big/main.py", nested === 900 ? 100_000 : 400_000),
+			file("launch.py", nested === 900 ? 9000 : 20_000),
+			file("site/main.py", nested === 900 ? 3000 : 10_000),
+			file("site/js/main.py", nested),
+			file("site/tests/test.py", 300),
+		];
+		const plan = buildCandidatePlan(index(files), "medium");
+		assert.equal(plan.pages.filter((page) => page.path === "site.md").length, 1);
+		assert.ok(plan.pages.every((page) => page.path !== "site-2.md"));
+		const site = plan.pages.find((page) => page.path === "site.md");
+		assert.ok(site);
+		if (nested === 900) assert.deepEqual(scopeCounts(site.intent), [3, 4200]);
+		else {
+			assert.deepEqual(scopeCounts(site.intent), [2, 10_300]);
+			assert.ok(plan.pages.some((page) => page.path === "site/js.md"));
+		}
+		const owned = plan.pages.slice(1).flatMap((page) => page.sources);
+		assert.equal(owned.length, files.length);
+		assert.deepEqual(new Set(owned), new Set(files.map((item) => item.path)));
+		assert.deepEqual(buildCandidatePlan(index([...files].reverse()), "medium"), plan);
+	}
+});
+
 test("candidate ownership survives reserved navigation names, long paths and slug collisions", () => {
 	const long = "a".repeat(210);
 	for (const fixture of [

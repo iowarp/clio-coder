@@ -244,9 +244,21 @@ function mediumOwnership(areas: Area[], threshold: number): Area[] {
 					]
 				: []),
 		];
-		if (split.length < 2 || result.length - 1 + split.length >= MAX_PLAN_PAGES) continue;
-		result.splice(position, 1, ...split);
-		position -= 1;
+		if (split.length < 2) continue;
+		const merged = new Map(result.filter((_, index) => index !== position).map((entry) => [entry.key, entry]));
+		for (const child of split) {
+			const existing = merged.get(child.key);
+			merged.set(
+				child.key,
+				existing
+					? { key: child.key, files: [...existing.files, ...child.files], lines: existing.lines + child.lines }
+					: child,
+			);
+		}
+		if (merged.size >= MAX_PLAN_PAGES) continue;
+		result.splice(0, result.length, ...merged.values());
+		result.sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
+		position = -1;
 	}
 	for (const area of result) area.files.sort((a, b) => a.path.localeCompare(b.path));
 	return result.sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
