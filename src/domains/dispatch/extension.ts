@@ -777,6 +777,24 @@ function readStringOrNull(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/**
+ * Row for an assistant reply that reports no usage. Usage stays absent rather than a fabricated zero, and a
+ * reply naming no model, response id or gateway route is a synthetic fault (an ACP delegation error, for one)
+ * that must not appear as a provider call.
+ */
+function usagelessUpstreamResponse(
+	message: Record<string, unknown>,
+	callIndex: number,
+): RunReceiptUpstreamResponse | null {
+	const { usage: _usage, usageScope: _usageScope, ...row } = upstreamResponse(message, callIndex, "call");
+	const identified =
+		row.requestedModelId !== null ||
+		row.differingResponseModelId !== null ||
+		row.providerResponseId !== null ||
+		row.gatewayRouting !== undefined;
+	return identified ? row : null;
+}
+
 function upstreamResponse(
 	message: Record<string, unknown>,
 	callIndex: number,
@@ -5499,18 +5517,24 @@ export function createDispatchBundle(
 					),
 				);
 			}
-			// A usage-less assistant message_end is synthetic (an ACP delegation fault, for one), not a provider call, so
-			// counting it would inflate apiCalls and falsely flag token usage as missing.
-			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-				const u = event.message.usage;
-				accumulateNativeUsage(tokenMeter, u, null);
-				upstreamResponses.push(
-					upstreamResponse(
-						event.message,
-						upstreamResponses.length + 1,
-						u.clioSdkAggregate === true ? "run-aggregate" : "call",
-					),
-				);
+			if (event.type === "message_end" && event.message?.role === "assistant") {
+				// A final ACP reply can omit usage, and an ACP delegation fault never has any. Only the metering and the
+				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
+				// usage as missing, while its failure text and served-model observations remain real.
+				const u = isRecord(event.message.usage) ? event.message.usage : null;
+				if (u !== null) {
+					accumulateNativeUsage(tokenMeter, u, null);
+					upstreamResponses.push(
+						upstreamResponse(
+							event.message,
+							upstreamResponses.length + 1,
+							u.clioSdkAggregate === true ? "run-aggregate" : "call",
+						),
+					);
+				} else {
+					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1);
+					if (row !== null) upstreamResponses.push(row);
+				}
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
 					if (message !== null) failureMessage = message;
@@ -7013,12 +7037,13 @@ export function createDispatchBundle(
 					),
 				);
 			}
-			// A usage-less assistant message_end is synthetic (an ACP delegation fault, for one), not a provider call, so
-			// counting it would inflate apiCalls and falsely flag token usage as missing.
-			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-				const u = event.message.usage;
+			if (event.type === "message_end" && event.message?.role === "assistant") {
+				// A final ACP reply can omit usage, and an ACP delegation fault never has any. Only the metering and the
+				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
+				// usage as missing, while its failure text and served-model observations remain real.
+				const u = isRecord(event.message.usage) ? event.message.usage : null;
 				if (lifecycle.runtimeKind === "subprocess") {
-					const evidence = isRecord(u.clioExternal) ? u.clioExternal : null;
+					const evidence = u !== null && isRecord(u.clioExternal) ? u.clioExternal : null;
 					const stopReason = event.message.stopReason;
 					externalTelemetry = {
 						tokenUsage:
@@ -7031,14 +7056,19 @@ export function createDispatchBundle(
 						toolObservability: "unavailable",
 					};
 				}
-				accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
-				upstreamResponses.push(
-					upstreamResponse(
-						event.message,
-						upstreamResponses.length + 1,
-						u.clioSdkAggregate === true ? "run-aggregate" : "call",
-					),
-				);
+				if (u !== null) {
+					accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
+					upstreamResponses.push(
+						upstreamResponse(
+							event.message,
+							upstreamResponses.length + 1,
+							u.clioSdkAggregate === true ? "run-aggregate" : "call",
+						),
+					);
+				} else {
+					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1);
+					if (row !== null) upstreamResponses.push(row);
+				}
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
 					if (message !== null) {
