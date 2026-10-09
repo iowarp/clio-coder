@@ -564,6 +564,34 @@ test("over-limit authored medium plans retain the last plan while legacy checkpo
 	}
 });
 
+test("authored revisions that drop owned coverage are rejected unless sources still cover the dropped owners", async () => {
+	const isolated = await isolateClioEnv("clio-coder-wiki-plan-coverage-");
+	try {
+		const fixture = index([
+			file("core/main.py", 700, "entry"),
+			file("api/server.py", 500),
+			file("web/ui/view.py", 400),
+			file("web/ui/forms.py", 300),
+		]);
+		for (const depth of ["medium", "detailed"] as const) {
+			const prior = buildCandidatePlan(fixture, depth);
+			const owners = prior.pages.filter((page) => page.path !== "architecture.md");
+			const [first, second] = owners;
+			assert.ok(first && second, `${depth} candidate has at least two owners`);
+			writeWikiPlanFile(isolated.dir, { ...prior, pages: [pageAt(prior, 0)] });
+			assert.equal(readAuthoredWikiPlan(isolated.dir, prior), null, `${depth} architecture-only revision`);
+			const merged = { ...first, path: "merged.md", sources: [first.sources[0] ?? "", second.sources[0] ?? ""] };
+			writeWikiPlanFile(isolated.dir, { ...prior, pages: [pageAt(prior, 0), merged, ...owners.slice(2)] });
+			assert.ok(readAuthoredWikiPlan(isolated.dir, prior), `${depth} merged revision`);
+			const renamed = { ...first, path: "renamed.md", sources: ["core/", "api", "web/"] };
+			writeWikiPlanFile(isolated.dir, { ...prior, pages: [pageAt(prior, 0), renamed, ...owners.slice(2)] });
+			assert.ok(readAuthoredWikiPlan(isolated.dir, prior), `${depth} directory-source revision`);
+		}
+	} finally {
+		isolated.restore();
+	}
+});
+
 test("candidate intents describe complete scope roots within the persistence limit", () => {
 	const fixture = index(
 		Array.from({ length: 20 }, (_, child) => file(`src/suite/long-directory-name-${child}/run.py`, 100)),

@@ -102,6 +102,19 @@ export interface SanitizeWikiPlanOptions {
 	trustStatus: boolean;
 }
 
+function keepsOwnedCoverage(previous: readonly WikiPlanPage[], revised: readonly WikiPlanPage[]): boolean {
+	const trim = (source: string): string => source.replace(/\/+$/, "");
+	const claims = revised.filter((page) => page.path !== "architecture.md").flatMap((page) => page.sources.map(trim));
+	const surviving = new Set(revised.map((page) => page.path));
+	return previous.every((page) => {
+		if (page.path === "architecture.md" || surviving.has(page.path)) return true;
+		return page.sources.some((source) => {
+			const path = trim(source);
+			return claims.some((claim) => claim === path || path.startsWith(`${claim}/`));
+		});
+	});
+}
+
 /**
  * Parse a plan, preferring harness-owned progress from `previous` for any page
  * whose path and specification survived. Returns null when nothing usable is left, so the caller
@@ -169,6 +182,8 @@ export function sanitizeWikiPlan(
 		ownerCount(pages) > ownerCeiling
 	)
 		return null;
+	// A revision that silently drops owned coverage would retire those pages, so keep the previous plan instead.
+	if (!options.trustStatus && previous && !keepsOwnedCoverage(previous.pages, pages)) return null;
 	const retiredPages = [
 		...new Set([
 			...(previous?.retiredPages ?? (options.trustStatus ? stringList(value.retiredPages, MAX_PLAN_PAGES) : [])),

@@ -988,7 +988,10 @@ describe("wiki generation outcomes", () => {
 				const dir = spec.writeRoots?.[0] as string;
 				const plan = readWikiPlanFile(dir);
 				assert.ok(plan?.pages[0]);
-				plan.pages = [{ ...plan.pages[0], intent: "Explain the linked detail" }];
+				const [kept, dropped] = plan.pages;
+				assert.ok(kept && dropped);
+				// The retired page's sources move onto the survivor so the revision keeps ownership coverage.
+				plan.pages = [{ ...kept, intent: "Explain the linked detail", sources: [...kept.sources, ...dropped.sources] }];
 				writeWikiPlanFile(dir, plan);
 			}),
 			true,
