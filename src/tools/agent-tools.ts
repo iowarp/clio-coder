@@ -25,8 +25,13 @@ import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
-import { type CallActionDescriptor, describeCallAction } from "../domains/safety/call-target.js";
+import {
+	type CallActionDescriptor,
+	describeCallAction,
+	sanitizeCallTargetText,
+} from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import { redactSecretString } from "../domains/safety/redaction.js";
 import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { validateEngineToolArguments } from "../engine/ai.js";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../engine/types.js";
@@ -39,6 +44,7 @@ import {
 	toolResultContextText,
 } from "./result-disposition.js";
 import { surfaceSpecPlacement, withGatewayForCapabilities } from "./surface.js";
+import { truncateUtf8 } from "./truncate-utf8.js";
 
 /**
  * Lightweight per-call observability hook. Default no-op so unused
@@ -53,8 +59,75 @@ export interface ToolTelemetry {
 
 export type ToolOutcome = "ok" | "error" | "blocked";
 
+export interface ToolAuditFacts {
+	target: string;
+	targetTruncated?: true;
+	offset?: number;
+	limit?: number;
+	tail?: number;
+	startLine?: number | null;
+	endLine?: number | null;
+	rangeUnit?: "physical-lines" | "rendered-lines";
+	partialLine?: boolean;
+	returnedBytes?: number;
+	observationBytes?: number;
+	truncated?: boolean;
+	poolLimitBytes?: number;
+	poolUsedBeforeBytes?: number;
+	poolExhausted?: boolean;
+}
+
+export function toolAuditFacts(
+	tool: string,
+	args: Record<string, unknown>,
+	result?: ToolResult,
+): ToolAuditFacts | null {
+	if (![ToolNames.Read, ToolNames.Edit, ToolNames.Write].some((name) => name === tool) || typeof args.path !== "string")
+		return null;
+	const target = sanitizeCallTargetText(redactSecretString(args.path));
+	const audit: ToolAuditFacts = {
+		target: truncateUtf8(target, 4096, "…"),
+		...(Buffer.byteLength(target) > 4096 ? { targetTruncated: true } : {}),
+	};
+	for (const key of ["offset", "limit", "tail"] as const) {
+		const value = args[key];
+		if (tool === ToolNames.Read && typeof value === "number" && Number.isFinite(value) && value >= 0) audit[key] = value;
+	}
+	if (!result) return audit;
+	audit.returnedBytes =
+		Buffer.byteLength(toolResultContextText(result)) +
+		(result.kind === "ok" ? (result.images ?? []).reduce((bytes, image) => bytes + Buffer.byteLength(image.data), 0) : 0);
+	const details = result.details;
+	const observation = details?.observation;
+	if (isRecord(observation)) {
+		if (typeof observation.shownBytes === "number") audit.observationBytes = observation.shownBytes;
+		if (typeof observation.truncated === "boolean") audit.truncated = observation.truncated;
+		const pool = observation.budget;
+		if (isRecord(pool)) {
+			if (typeof pool.limitBytes === "number") audit.poolLimitBytes = pool.limitBytes;
+			if (typeof pool.usedBeforeBytes === "number") audit.poolUsedBeforeBytes = pool.usedBeforeBytes;
+			if (typeof pool.exhausted === "boolean") audit.poolExhausted = pool.exhausted;
+		}
+	}
+	const range = details?.readRange;
+	if (isRecord(range)) {
+		if (typeof range.startLine === "number" || range.startLine === null) audit.startLine = range.startLine;
+		if (typeof range.endLine === "number" || range.endLine === null) audit.endLine = range.endLine;
+		if (range.unit === "physical-lines" || range.unit === "rendered-lines") audit.rangeUnit = range.unit;
+		if (typeof range.partialLine === "boolean") audit.partialLine = range.partialLine;
+	}
+	const shaped = details?.resultSize;
+	if (isRecord(shaped) && shaped.truncated === true) {
+		audit.truncated = true;
+		audit.startLine = null;
+		audit.endLine = null;
+	}
+	return audit;
+}
+
 export interface ToolStartEvent {
 	tool: string;
+	audit?: ToolAuditFacts;
 	/**
 	 * The engine's id for this call, when the producer has one. New producers
 	 * put the same id on start and finish so concurrent calls of one tool remain
@@ -71,16 +144,15 @@ export interface ToolStartEvent {
 	startedAt: number;
 	/**
 	 * What this call is doing, as a bounded redacted descriptor composed here
-	 * where the arguments are trusted. This is the only account of a worker's
-	 * arguments that may cross the NDJSON stdout seam; the arguments themselves
-	 * never do, so an operator surface reads a verb and an object it can show,
-	 * never an argument object it would have to sanitize itself.
+	 * where the arguments are trusted. Structured path audit facts travel separately; raw arguments never cross
+	 * this telemetry seam.
 	 */
 	action?: CallActionDescriptor;
 }
 
 export interface ToolFinishEvent {
 	tool: string;
+	audit?: ToolAuditFacts;
 	/**
 	 * The engine's id for this call, when the caller supplied one through
 	 * `invokeOptions`. Consumers that correlate this authoritative outcome back
@@ -166,7 +238,8 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	// Stamped onto both lifecycle events so a concurrent finish resolves only
 	// the start for its own engine call. Direct callers may legitimately omit it.
 	const callId = input.invokeOptions?.toolCallId;
-	const withCallId = callId === undefined ? {} : { toolCallId: callId };
+	const audit = toolAuditFacts(spec.name, args);
+	const withCallId = { ...(callId === undefined ? {} : { toolCallId: callId }), ...(audit ? { audit } : {}) };
 	// The one seam that holds validated arguments and publishes telemetry, so it
 	// is where the redacted descriptor is composed. Everything downstream of here
 	// sees the descriptor and never the arguments.
@@ -225,9 +298,11 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			verdict.kind === "blocked" && "rejection" in verdict.decision ? verdict.decision.rejection : undefined;
 		throw new Error(formatModelRejection(verdict.reason, rejection));
 	}
+	const resultAudit = toolAuditFacts(spec.name, args, verdict.result);
+	const withResultAudit = { ...withCallId, ...(resultAudit ? { audit: resultAudit } : {}) };
 	if (verdict.result.kind === "error") {
 		emitFinish(telemetry, spec.name, executedMs, "error", {
-			...withCallId,
+			...withResultAudit,
 			reason: verdict.result.message,
 			decision: verdict.decision,
 		});
@@ -257,14 +332,14 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
 		emitFinish(telemetry, spec.name, executedMs, "ok", {
-			...withCallId,
+			...withResultAudit,
 			terminate: true,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
 	} else {
 		emitFinish(telemetry, spec.name, executedMs, "ok", {
-			...withCallId,
+			...withResultAudit,
 			decision: verdict.decision,
 			...(skillActivation ? { skillActivation } : {}),
 		});
@@ -279,6 +354,7 @@ function emitFinish(
 	outcome: ToolOutcome,
 	extra?: {
 		reason?: string;
+		audit?: ToolAuditFacts;
 		terminate?: boolean;
 		decision?: SafetyDecision;
 		deniedPark?: true;
@@ -295,7 +371,8 @@ function emitFinish(
 		outcome,
 	};
 	if (extra?.toolCallId !== undefined) event.toolCallId = extra.toolCallId;
-	if (extra?.reason !== undefined) event.reason = extra.reason;
+	if (extra?.reason !== undefined) event.reason = sanitizeCallTargetText(redactSecretString(extra.reason)).slice(0, 350);
+	if (extra?.audit !== undefined) event.audit = extra.audit;
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.deniedPark === true) event.deniedPark = true;
 	if (extra?.redundantRepeat === true) event.redundantRepeat = true;

@@ -44,7 +44,10 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
+import type { NormalizedTokenUsage } from "../../core/token-split.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
+import type { ToolAuditFacts } from "../../tools/agent-tools.js";
 
 /** Directory name under the state root holding one subdirectory per run. */
 export const RUN_EVENT_JOURNAL_DIR = "runs";
@@ -68,6 +71,10 @@ interface JournalLineBase {
  * and reasoning never appear here.
  */
 export interface RunEventJournalFacts {
+	audit?: ToolAuditFacts;
+	callIndex?: number;
+	usage?: NormalizedTokenUsage;
+	usageScope?: "call" | "run-aggregate";
 	tool?: string;
 	/** Pairs a tool start with its finish when the producer carried an id. */
 	callId?: string;
@@ -483,11 +490,53 @@ export interface RunEventJournalRead {
 	agentId: string | null;
 }
 
+export function parseToolAuditFacts(value: unknown): ToolAuditFacts | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	if (typeof record.target !== "string" || record.target.length === 0) return undefined;
+	const audit: ToolAuditFacts = { target: record.target };
+	for (const key of [
+		"offset",
+		"limit",
+		"tail",
+		"returnedBytes",
+		"observationBytes",
+		"poolLimitBytes",
+		"poolUsedBeforeBytes",
+	] as const) {
+		const count = record[key];
+		if (typeof count === "number" && Number.isFinite(count) && count >= 0) audit[key] = count;
+	}
+	for (const key of ["startLine", "endLine"] as const) {
+		const count = record[key];
+		if (count === null || (typeof count === "number" && Number.isSafeInteger(count) && count >= 1)) audit[key] = count;
+	}
+	for (const key of ["partialLine", "truncated", "poolExhausted"] as const) {
+		if (typeof record[key] === "boolean") audit[key] = record[key];
+	}
+	if (record.targetTruncated === true) audit.targetTruncated = true;
+	if (record.rangeUnit === "physical-lines" || record.rangeUnit === "rendered-lines") audit.rangeUnit = record.rangeUnit;
+	return audit;
+}
+
 function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
 	const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 	const count = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 	const outcome = record.outcome;
+	const audit = parseToolAuditFacts(record.audit);
+	const usage =
+		record.usage && typeof record.usage === "object" && !Array.isArray(record.usage)
+			? (record.usage as Record<string, unknown>)
+			: undefined;
 	return {
+		...(audit ? { audit } : {}),
+		...(count(record.callIndex) && Number.isSafeInteger(record.callIndex) && record.callIndex > 0
+			? { callIndex: record.callIndex }
+			: {}),
+		...(usage
+			? { usage: normalizeTokenUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }) }
+			: {}),
+		...(record.usageScope === "call" || record.usageScope === "run-aggregate" ? { usageScope: record.usageScope } : {}),
 		...(text(record.tool) ? { tool: record.tool } : {}),
 		...(text(record.callId) ? { callId: record.callId } : {}),
 		...(text(record.verb) ? { verb: record.verb } : {}),

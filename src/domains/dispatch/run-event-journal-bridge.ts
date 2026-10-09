@@ -49,10 +49,18 @@ import type {
 import { BusChannels } from "../../core/bus-events.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { normalizeClioCoderEventRecord } from "../../core/naming-events.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import { runTailEntryFromEvent } from "../../tools/dispatch-run-events.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { isThinkingEvent, workerTextDelta } from "../observability/worker-progress.js";
-import { defaultRunEventJournal, type RunEventJournalEntry, type RunEventJournalSink } from "./run-event-journal.js";
+import { sanitizeCallTargetText } from "../safety/call-target.js";
+import { redactSecretString } from "../safety/redaction.js";
+import {
+	defaultRunEventJournal,
+	parseToolAuditFacts,
+	type RunEventJournalEntry,
+	type RunEventJournalSink,
+} from "./run-event-journal.js";
 
 /** Window one coalesced prose line covers. A viewer polls at the same cadence. */
 export const TEXT_COALESCE_MS = 250;
@@ -138,31 +146,25 @@ function toolEntry(type: string, payload: Record<string, unknown>, at: string): 
 	const durationMs = finiteCount(payload.durationMs);
 	const reason = boundedText(payload.reason);
 	const callId = boundedText(payload.toolCallId);
+	const finished = type === "clio_coder_tool_finish" || type === "clio_coder_tool_observation";
+	const audit = parseToolAuditFacts(payload.audit);
+	if (audit) {
+		const target = sanitizeCallTargetText(redactSecretString(audit.target));
+		audit.target = truncateUtf8(target, 4096, "…");
+		if (Buffer.byteLength(target) > 4096) audit.targetTruncated = true;
+	}
 	return {
 		at,
 		type,
 		tool,
+		...(audit ? { audit } : {}),
 		...(callId !== undefined ? { callId } : {}),
 		...(verb !== undefined ? { verb } : {}),
 		...(object !== undefined ? { detail: action?.truncated === true ? `${object}…` : object } : {}),
-		...(type === "clio_coder_tool_finish" && (outcome === "ok" || outcome === "error" || outcome === "blocked")
-			? { outcome }
-			: {}),
-		...(type === "clio_coder_tool_finish" && durationMs !== undefined ? { durationMs } : {}),
-		...(type === "clio_coder_tool_finish" && outcome !== "ok" && reason !== undefined ? { reason } : {}),
+		...(finished && (outcome === "ok" || outcome === "error" || outcome === "blocked") ? { outcome } : {}),
+		...(finished && durationMs !== undefined ? { durationMs } : {}),
+		...(finished && outcome !== "ok" && reason !== undefined ? { reason } : {}),
 	};
-}
-
-/** Tokens one assistant model call processed, the same sum the worker progress fold keeps. */
-function messageTokens(event: Record<string, unknown>): number | undefined {
-	if (!isRecord(event.message) || event.message.role !== "assistant" || !isRecord(event.message.usage)) return undefined;
-	const usage = event.message.usage;
-	const input = finiteCount(usage.input);
-	const output = finiteCount(usage.output);
-	if (input === undefined || output === undefined) return undefined;
-	const tokens = input + output + (finiteCount(usage.cacheRead) ?? 0) + (finiteCount(usage.cacheWrite) ?? 0);
-	// A message with no measured usage (a repair or an aborted call) adds nothing to say.
-	return tokens > 0 ? tokens : undefined;
 }
 
 /**
@@ -170,22 +172,47 @@ function messageTokens(event: Record<string, unknown>): number | undefined {
  * does not keep it. `streamed` says prose deltas already carried this
  * message's text, so its `message_end` keeps only the token count.
  */
-function runFeedEntryFromEvent(event: unknown, streamed: boolean, at: string): RunEventJournalEntry | null {
+function runFeedEntryFromEvent(
+	event: unknown,
+	streamed: boolean,
+	at: string,
+	callIndex?: number,
+): RunEventJournalEntry | null {
 	if (!isRecord(event)) return null;
 	const normalized = normalizeClioCoderEventRecord(event);
 	const type = typeof normalized.type === "string" ? normalized.type : "unknown";
 	if (UNJOURNALED_TYPES.has(type)) return null;
 	const payload = isRecord(normalized.payload) ? normalized.payload : {};
-	if (type === "clio_coder_tool_start" || type === "clio_coder_tool_finish") return toolEntry(type, payload, at);
+	if (type === "clio_coder_tool_start" || type === "clio_coder_tool_finish" || type === "clio_coder_tool_observation")
+		return toolEntry(type, payload, at);
+	if (type === "clio_coder_model_call") {
+		const rawUsage = isRecord(payload.usage) ? payload.usage : {};
+		return {
+			at,
+			type,
+			...(callIndex !== undefined ? { callIndex } : {}),
+			usage: normalizeTokenUsage({ ...rawUsage, estimated: rawUsage.estimated === true || rawUsage.observed === false }),
+			usageScope: "call",
+		};
+	}
 	if (type === "message_end") {
-		const tokens = messageTokens(normalized);
+		const message = isRecord(normalized.message) ? normalized.message : {};
+		const rawUsage = isRecord(message.usage) ? message.usage : {};
+		const aggregate = rawUsage.clioSdkAggregate === true;
+		const usage =
+			callIndex !== undefined || aggregate
+				? normalizeTokenUsage({ ...rawUsage, estimated: rawUsage.estimated === true || rawUsage.observed === false })
+				: undefined;
+		const tokens = usage?.observed ? usage.totalTokens : undefined;
 		const tail = streamed ? null : runTailEntryFromEvent(normalized, at);
-		if (tokens === undefined && tail?.detail === undefined) return null;
+		if (usage === undefined && tail?.detail === undefined) return null;
 		return {
 			at,
 			type,
 			...(tail?.detail !== undefined ? { detail: tail.detail } : {}),
 			...(tokens !== undefined ? { tokens } : {}),
+			...(usage ? { usage, usageScope: aggregate ? ("run-aggregate" as const) : ("call" as const) } : {}),
+			...(callIndex !== undefined ? { callIndex } : {}),
 		};
 	}
 	if (type === "clio_coder_permission_escalated") {
@@ -220,6 +247,7 @@ function runFeedEntryFromEvent(event: unknown, streamed: boolean, at: string): R
 
 /** Prose waiting to be written as one line, and what the run is doing between lines. */
 interface RunFeedState {
+	modelCallIndex: number;
 	text: string;
 	textBytes: number;
 	/** Monotonic instant the first buffered delta arrived. */
@@ -259,7 +287,7 @@ export function attachRunEventJournalBridge(
 	const feedFor = (runId: string): RunFeedState => {
 		let feed = feeds.get(runId);
 		if (feed === undefined) {
-			feed = { text: "", textBytes: 0, since: 0, thinking: false, streamed: false };
+			feed = { modelCallIndex: 0, text: "", textBytes: 0, since: 0, thinking: false, streamed: false };
 			feeds.set(runId, feed);
 		}
 		return feed;
@@ -325,10 +353,19 @@ export function attachRunEventJournalBridge(
 				journal.append(runId, { at: new Date().toISOString(), type: "thinking" });
 				return;
 			}
-			const feed = feeds.get(runId);
+			const feed = feedFor(runId);
+			const callIndex =
+				isRecord(event) &&
+				(event.type === "clio_coder_model_call" ||
+					(event.type === "message_end" &&
+						isRecord(event.message) &&
+						event.message.role === "assistant" &&
+						(!isRecord(event.message.usage) || event.message.usage.clioSdkAggregate !== true)))
+					? ++feed.modelCallIndex
+					: undefined;
 			// Opening the run only once an event survives the feed's filter keeps
 			// a heartbeat-only run from creating an empty journal directory.
-			const entry = runFeedEntryFromEvent(event, feed?.streamed === true, new Date().toISOString());
+			const entry = runFeedEntryFromEvent(event, feed.streamed, new Date().toISOString(), callIndex);
 			if (entry === null) return;
 			ensureOpen(runId, identity.agentId);
 			flushText(runId);

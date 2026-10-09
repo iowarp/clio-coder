@@ -50,3 +50,5 @@ export function normalizeTokenUsage(raw: Record<string, unknown>) {
 		observed,
 	};
 }
+
+export type NormalizedTokenUsage = ReturnType<typeof normalizeTokenUsage>;

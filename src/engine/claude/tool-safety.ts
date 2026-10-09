@@ -9,6 +9,7 @@ import type { SafetyContract, SafetyDecision } from "../../domains/safety/contra
 import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
 import { MAIN_GRANTS_UNAVAILABLE_REASON } from "../../domains/safety/worker-permit.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../../tools/agent-tools.js";
+import { toolAuditFacts } from "../../tools/agent-tools.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 
 export interface MappedClaudeToolCall {
@@ -165,7 +166,7 @@ export function claudeToolsOutsideProfile(allowedTools: ReadonlySet<string>): st
 		.map(([claudeName]) => claudeName);
 }
 
-function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd: string): MappedClaudeToolCall {
+export function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd: string): MappedClaudeToolCall {
 	switch (toolName) {
 		case "Bash":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Bash, args: commandArgs(input, cwd), known: true };
@@ -354,7 +355,9 @@ function emitToolFinish(
 	reasonCode?: string,
 	toolCallId?: string,
 ): void {
+	const audit = toolAuditFacts(mapped.clioToolName, mapped.args);
 	const event: ToolFinishEvent = {
+		...(audit ? { audit } : {}),
 		tool: mapped.clioToolName,
 		...(toolCallId !== undefined ? { toolCallId } : {}),
 		posture: "operating",
@@ -384,7 +387,9 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	// Mapped args are this side's own translation of the subprocess call, so the
 	// descriptor is composed from them here rather than downstream of the seam.
 	const action = describeCallAction(decision.mapped.clioToolName, decision.mapped.args);
+	const audit = toolAuditFacts(decision.mapped.clioToolName, decision.mapped.args);
 	const start: ToolStartEvent = {
+		...(audit ? { audit } : {}),
 		tool: decision.mapped.clioToolName,
 		...(toolCallId !== undefined ? { toolCallId } : {}),
 		posture: "operating",

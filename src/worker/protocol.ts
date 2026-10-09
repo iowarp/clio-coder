@@ -818,6 +818,8 @@ const RECEIPT_BEARING_BULK_TYPES = new Set([
 	"clio_coder_steer_received",
 	"clio_coder_tool_start",
 	"clio_coder_tool_finish",
+	"clio_coder_tool_observation",
+	"clio_coder_model_call",
 	"tool_execution_start",
 	"tool_execution_end",
 	"spawn_error",

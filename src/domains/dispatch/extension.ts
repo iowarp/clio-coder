@@ -777,6 +777,25 @@ function readStringOrNull(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function upstreamResponse(
+	message: Record<string, unknown>,
+	callIndex: number,
+	usageScope: "call" | "run-aggregate",
+): RunReceiptUpstreamResponse {
+	const usage = isRecord(message.usage) ? message.usage : {};
+	const gatewayRouting = gatewayRoutingObservationFromRecord(message);
+	return {
+		...(usageScope === "call" ? { callIndex } : {}),
+		usage: normalizeTokenUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }),
+		usageScope,
+		requestedModelId: readStringOrNull(message.model),
+		responseModelIdObservation: responseModelIdObservationFromRecord(message, "not-observed"),
+		differingResponseModelId: readStringOrNull(message.responseModel),
+		providerResponseId: readStringOrNull(message.responseId),
+		...(gatewayRouting !== null ? { gatewayRouting } : {}),
+	};
+}
+
 function readStringArrayOrNull(value: unknown): ReadonlyArray<string> | null {
 	if (!Array.isArray(value)) return null;
 	const strings = value.filter((entry): entry is string => typeof entry === "string");
@@ -5430,6 +5449,11 @@ export function createDispatchBundle(
 					errorMessage?: unknown;
 				};
 				payload?: {
+					callIndex?: number;
+					model?: unknown;
+					responseModel?: unknown;
+					responseId?: unknown;
+					usage?: unknown;
 					tool?: string;
 					posture?: string;
 					durationMs?: number;
@@ -5462,21 +5486,29 @@ export function createDispatchBundle(
 					finishContractAssistantTurnId = finishEntry.assistantTurnId;
 				}
 			}
-			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-				const u = event.message.usage;
+			if (
+				event.type === "clio_coder_model_call" &&
+				isRecord(event.payload) &&
+				typeof event.payload.callIndex === "number"
+			) {
+				upstreamResponses.push(
+					upstreamResponse(
+						{ ...event.payload, ...(event.payload.responseModel ? { servedModel: event.payload.responseModel } : {}) },
+						event.payload.callIndex,
+						"call",
+					),
+				);
+			}
+			if (event.type === "message_end" && event.message?.role === "assistant") {
+				const u = isRecord(event.message.usage) ? event.message.usage : {};
 				accumulateNativeUsage(tokenMeter, u, null);
-				const requestedModelId = readStringOrNull(event.message.model);
-				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
-				const differingResponseModelId = readStringOrNull(event.message.responseModel);
-				const providerResponseId = readStringOrNull(event.message.responseId);
-				const gatewayRouting = gatewayRoutingObservationFromRecord(event.message);
-				upstreamResponses.push({
-					requestedModelId,
-					responseModelIdObservation,
-					differingResponseModelId,
-					providerResponseId,
-					...(gatewayRouting !== null ? { gatewayRouting } : {}),
-				});
+				upstreamResponses.push(
+					upstreamResponse(
+						event.message,
+						upstreamResponses.length + 1,
+						u.clioSdkAggregate === true ? "run-aggregate" : "call",
+					),
+				);
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
 					if (message !== null) failureMessage = message;
@@ -6790,6 +6822,11 @@ export function createDispatchBundle(
 					errorMessage?: unknown;
 				};
 				payload?: {
+					callIndex?: number;
+					model?: unknown;
+					responseModel?: unknown;
+					responseId?: unknown;
+					usage?: unknown;
 					tool?: string;
 					toolCallId?: string;
 					sequence?: number;
@@ -6961,8 +6998,21 @@ export function createDispatchBundle(
 					escalation: true,
 				});
 			}
-			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-				const u = event.message.usage;
+			if (
+				event.type === "clio_coder_model_call" &&
+				isRecord(event.payload) &&
+				typeof event.payload.callIndex === "number"
+			) {
+				upstreamResponses.push(
+					upstreamResponse(
+						{ ...event.payload, ...(event.payload.responseModel ? { servedModel: event.payload.responseModel } : {}) },
+						event.payload.callIndex,
+						"call",
+					),
+				);
+			}
+			if (event.type === "message_end" && event.message?.role === "assistant") {
+				const u = isRecord(event.message.usage) ? event.message.usage : {};
 				if (lifecycle.runtimeKind === "subprocess") {
 					const evidence = isRecord(u.clioExternal) ? u.clioExternal : null;
 					const stopReason = event.message.stopReason;
@@ -6978,18 +7028,13 @@ export function createDispatchBundle(
 					};
 				}
 				accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
-				const requestedModelId = readStringOrNull(event.message.model);
-				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
-				const differingResponseModelId = readStringOrNull(event.message.responseModel);
-				const providerResponseId = readStringOrNull(event.message.responseId);
-				const gatewayRouting = gatewayRoutingObservationFromRecord(event.message);
-				upstreamResponses.push({
-					requestedModelId,
-					responseModelIdObservation,
-					differingResponseModelId,
-					providerResponseId,
-					...(gatewayRouting !== null ? { gatewayRouting } : {}),
-				});
+				upstreamResponses.push(
+					upstreamResponse(
+						event.message,
+						upstreamResponses.length + 1,
+						u.clioSdkAggregate === true ? "run-aggregate" : "call",
+					),
+				);
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
 					if (message !== null) {

@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
+import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
 import { ALL_TOOL_NAMES, ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
@@ -26,6 +28,7 @@ import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
+import { runEventJournalPath } from "../domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
@@ -35,6 +38,7 @@ import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { redactSecretString } from "../domains/safety/redaction.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
@@ -117,6 +121,7 @@ interface DispatchSummary {
 	errors: number;
 	blocked: number;
 	firstBlockReason: string | null;
+	firstError: string | null;
 	mix: string;
 }
 
@@ -139,15 +144,22 @@ async function drainDispatchEvents(
 	let errors = 0;
 	let blocked = 0;
 	let firstBlockReason: string | null = null;
+	let firstError: string | null = null;
 	// Every event is consumed so finalization cannot block on an unread iterator.
 	for await (const event of events) {
-		if (!isRecord(event) || event.type !== "clio_coder_tool_finish") continue;
+		if (!isRecord(event) || (event.type !== "clio_coder_tool_finish" && event.type !== "clio_coder_tool_observation"))
+			continue;
 		const tool = eventPayloadString(event, "tool");
 		if (!tool) continue;
 		const outcome = eventPayloadString(event, "outcome") ?? "done";
-		completed += 1;
-		tools.set(tool, (tools.get(tool) ?? 0) + 1);
-		if (outcome === "error") errors += 1;
+		if (event.type === "clio_coder_tool_finish") {
+			completed += 1;
+			tools.set(tool, (tools.get(tool) ?? 0) + 1);
+		}
+		if (outcome === "error") {
+			errors += 1;
+			firstError ??= `${tool}: ${summarizeBlockReason(redactSecretString(eventPayloadString(event, "reason") ?? "reason unavailable"))}`;
+		}
 		if (outcome === "blocked") {
 			blocked += 1;
 			firstBlockReason ??= eventPayloadString(event, "reason");
@@ -158,7 +170,7 @@ async function drainDispatchEvents(
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([tool, count]) => `${tool}=${count}`)
 		.join(", ");
-	return { tools: completed, errors, blocked, firstBlockReason, mix };
+	return { tools: completed, errors, blocked, firstBlockReason, firstError, mix };
 }
 
 function summaryDetail(summary: DispatchSummary, startedAtClock: number): string {
@@ -168,7 +180,7 @@ function summaryDetail(summary: DispatchSummary, startedAtClock: number): string
 			: "";
 	return (
 		`${formatElapsed(performance.now() - startedAtClock)}; ${summary.mix || "no tools completed"}` +
-		`${summary.errors > 0 ? `; errors=${summary.errors}` : ""}${blockedDetail}`
+		`${summary.errors > 0 ? `; errors=${summary.errors}${summary.firstError ? ` (${summary.firstError})` : ""}` : ""}${blockedDetail}`
 	);
 }
 
@@ -558,12 +570,49 @@ async function runPagePhase(
 			})
 		: undefined;
 	const written = outcome.ok && evidence?.ok === true && (!repair || stable(evidence.dependencies));
+	if (evidence && outcome.phase === "writer") {
+		const sourceSnapshotHash = createHash("sha256")
+			.update(JSON.stringify(Object.entries(baseline).sort(([a], [b]) => a.localeCompare(b))))
+			.digest("hex");
+		try {
+			if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(outcome.runId)) throw new Error("invalid validation run id");
+			safeResourceWrite(
+				join(dirname(runEventJournalPath(outcome.runId)), "wiki-validation.json"),
+				`${JSON.stringify(
+					{
+						version: 1,
+						page: page.path,
+						attempt: page.attempts + 1,
+						runId: outcome.runId,
+						assignment: kind,
+						validationKind: evidence.validationKind ?? "evidence",
+						ok: evidence.ok,
+						written,
+						reasons: (evidence.allReasons ?? evidence.reasons).map(redactSecretString),
+						sourceSnapshotHash,
+						sourceTreeHash: plan.sourceTreeHash ?? null,
+						sourceGitHead: plan.sourceGitHead ?? null,
+					},
+					null,
+					2,
+				)}\n`,
+				{ encoding: "utf8" },
+			);
+		} catch (error) {
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: `could not record validation for ${page.path}`,
+				detail: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
 	const usage = dispatchUsage(outcome, receipts, kind);
 	const detail =
 		evidence && !evidence.ok
-			? `evidence check failed: ${JSON.stringify(evidence.reasons)}`
+			? `${outcome.detail}; evidence check failed: ${JSON.stringify(evidence.reasons)}`
 			: outcome.ok && repair && !written
-				? "source baseline changed during repair; full writer required next invocation"
+				? `${outcome.detail}; source baseline changed during repair; full writer required next invocation`
 				: outcome.detail;
 	const next: WikiPlan = {
 		...plan,

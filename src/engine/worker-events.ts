@@ -5,6 +5,7 @@
  * events without disturbing pi-agent-core consumers.
  */
 
+import type { NormalizedTokenUsage } from "../core/token-split.js";
 import type { StructuredHelperResult } from "../domains/agents/result-contract.js";
 import type { RunOutcomeCode } from "../domains/dispatch/types.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
@@ -18,6 +19,22 @@ export interface ClioToolStartEvent {
 export interface ClioToolFinishEvent {
 	type: "clio_coder_tool_finish";
 	payload: ToolFinishEvent;
+}
+
+export interface ClioToolObservationEvent {
+	type: "clio_coder_tool_observation";
+	payload: ToolFinishEvent;
+}
+
+export interface ClioModelCallEvent {
+	type: "clio_coder_model_call";
+	payload: {
+		callIndex: number;
+		usage: NormalizedTokenUsage;
+		model: string;
+		responseModel?: string;
+		responseId?: string;
+	};
 }
 
 /** Emitted when the worker's non-stall policy resolves a permission-requiring tool call. */
@@ -152,6 +169,8 @@ export interface ClioHelperResultEvent {
 export type ClioWorkerEvent =
 	| ClioToolStartEvent
 	| ClioToolFinishEvent
+	| ClioToolObservationEvent
+	| ClioModelCallEvent
 	| ClioPermissionResolvedEvent
 	| ClioPermissionEscalatedEvent
 	| ClioPermissionGrantExecutionEvent

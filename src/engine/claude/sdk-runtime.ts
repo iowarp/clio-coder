@@ -16,9 +16,13 @@ import type {
 import { withClaudeCredential } from "../../core/claude-environment.js";
 import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import { resolveClaudeLaunchCredential } from "../../domains/providers/auth/index.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { redactSecretString } from "../../domains/safety/redaction.js";
 import { mainGrantsUnavailable } from "../../domains/safety/worker-permit.js";
 import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
+import { toolAuditFacts } from "../../tools/agent-tools.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -31,6 +35,7 @@ import {
 	claudeToolsOutsideProfile,
 	coerceToolInput,
 	emitClaudeToolPermissionDecision,
+	mapClaudeToolCall,
 } from "./tool-safety.js";
 
 const DEFAULT_CLAUDE_TOOLS = { type: "preset", preset: "claude_code" } as const;
@@ -276,7 +281,7 @@ function buildAssistantMessage(input: {
 	aborted: boolean;
 	errorMessage?: string | undefined;
 }): AgentMessage & { role: "assistant" } {
-	const usage = normalizeUsage(input.result?.usage, input.result?.total_cost_usd ?? 0);
+	const usage = { ...normalizeUsage(input.result?.usage, input.result?.total_cost_usd ?? 0), clioSdkAggregate: true };
 	const message: AgentMessage & { role: "assistant" } = {
 		role: "assistant",
 		content: [{ type: "text", text: input.text }],
@@ -483,6 +488,40 @@ function decideToolUse(
 	});
 }
 
+export function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback {
+	return async (hookInput) => {
+		if (hookInput.hook_event_name !== "PostToolUse" && hookInput.hook_event_name !== "PostToolUseFailure")
+			return { continue: true };
+		const mapped = mapClaudeToolCall(hookInput.tool_name, coerceToolInput(hookInput.tool_input), cwd);
+		const audit = toolAuditFacts(mapped.clioToolName, mapped.args);
+		const failed = hookInput.hook_event_name === "PostToolUseFailure";
+		if (!failed && audit) {
+			const response = coerceToolInput(hookInput.tool_response);
+			const file = coerceToolInput(response.file);
+			if (typeof file.content === "string") audit.returnedBytes = Buffer.byteLength(file.content);
+			if (typeof file.startLine === "number" && typeof file.numLines === "number" && file.numLines > 0) {
+				audit.startLine = file.startLine;
+				audit.endLine = file.startLine + file.numLines - 1;
+				audit.rangeUnit = "physical-lines";
+				if (typeof file.totalLines === "number") audit.truncated = file.numLines < file.totalLines;
+			}
+		}
+		emit({
+			type: "clio_coder_tool_observation",
+			payload: {
+				tool: mapped.clioToolName,
+				toolCallId: hookInput.tool_use_id,
+				posture: "operating",
+				durationMs: hookInput.duration_ms ?? 0,
+				outcome: failed ? "error" : "ok",
+				...(audit ? { audit } : {}),
+				...(failed ? { reason: sanitizeCallTargetText(redactSecretString(hookInput.error)).slice(0, 350) } : {}),
+			},
+		});
+		return { continue: true };
+	};
+}
+
 /** Share one logical permission decision across the SDK hook/callback pair. */
 function decideClaudeSdkToolUseOnce(
 	handled: Map<string, ClaudeToolPermissionDecision>,
@@ -627,6 +666,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	};
 	const canUseTool = buildCanUseTool(permissionGate);
 	const preToolUseHook = buildPreToolUseHook(permissionGate);
+	const postToolUseHook = buildPostToolUseHook(emit, process.cwd());
 
 	const postToolBatchHook: HookCallback = async (hookInput) => {
 		if (hookInput.hook_event_name !== "PostToolBatch" || !budgetGate?.phaseReached()) return { continue: true };
@@ -658,6 +698,8 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		canUseTool,
 		hooks: {
 			PreToolUse: [{ hooks: [preToolUseHook] }],
+			PostToolUse: [{ hooks: [postToolUseHook] }],
+			PostToolUseFailure: [{ hooks: [postToolUseHook] }],
 			...(budgetGate ? { PostToolBatch: [{ hooks: [postToolBatchHook] }] } : {}),
 		},
 		includePartialMessages: true,
@@ -680,6 +722,41 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		let result: SDKResultMessage | null = null;
 		let responseModel: string | undefined;
 		let responseId: string | undefined;
+		const modelCalls = new Map<string, { model?: string; responseId?: string; usage: Record<string, unknown> }>();
+		let currentCall: string | undefined;
+		const captureCall = (message: Record<string, unknown>): void => {
+			if (typeof message.id !== "string") return;
+			currentCall = message.id;
+			const call = modelCalls.get(message.id) ?? { usage: {} };
+			if (typeof message.model === "string") call.model = message.model;
+			call.responseId = message.id;
+			const usage = coerceToolInput(message.usage);
+			for (const key of [
+				"input_tokens",
+				"output_tokens",
+				"cache_read_input_tokens",
+				"cache_creation_input_tokens",
+			] as const) {
+				const count = usage[key];
+				if (typeof count === "number" && Number.isFinite(count) && count >= 0) call.usage[key] = count;
+			}
+			modelCalls.set(message.id, call);
+		};
+		const flushCalls = (): void => {
+			let callIndex = 0;
+			for (const call of modelCalls.values())
+				emit({
+					type: "clio_coder_model_call",
+					payload: {
+						callIndex: ++callIndex,
+						usage: normalizeTokenUsage({ ...normalizeUsage(call.usage) }),
+						model: input.wireModelId,
+						...(call.model ? { responseModel: call.model } : {}),
+						...(call.responseId ? { responseId: call.responseId } : {}),
+					},
+				});
+			modelCalls.clear();
+		};
 
 		emit({ type: "agent_start" } as AgentEvent);
 		try {
@@ -713,10 +790,14 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 					continue;
 				}
 				if (sdkMessage.type === "stream_event") {
+					const event = coerceToolInput((sdkMessage as { event?: unknown }).event);
+					if (event.type === "message_start") captureCall(coerceToolInput(event.message));
+					if (event.type === "message_delta" && currentCall) captureCall({ id: currentCall, usage: event.usage });
 					emitTextDelta(emit, streamState, extractStreamDelta(sdkMessage));
 					continue;
 				}
 				if (sdkMessage.type === "assistant") {
+					captureCall(coerceToolInput((sdkMessage as { message?: unknown }).message));
 					const text = extractAssistantText(sdkMessage);
 					if (text.length > 0 && text.length >= streamState.text.length) {
 						streamState.text = text;
@@ -739,6 +820,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			const error =
 				authFailure ??
 				(resultError(result) || (!result && !aborted ? "Claude Agent SDK ended without a terminal result." : ""));
+			flushCalls();
 			const finalText = streamState.text || resultText(result) || error;
 			const finalMessage = buildAssistantMessage({
 				model: streamState.model,
@@ -757,6 +839,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			if (budgetFailure) return { messages, exitCode: 1 };
 			return { messages, exitCode: aborted || finalMessage.stopReason === "error" ? 1 : 0 };
 		} catch (error) {
+			flushCalls();
 			const messageText = authFailure ?? (error instanceof Error ? error.message : String(error));
 			const finalMessage = buildAssistantMessage({
 				model: streamState.model,

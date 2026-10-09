@@ -13,6 +13,7 @@ import type { GatewayRoutingObservation } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { WorkerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
+import type { NormalizedTokenUsage } from "../../core/token-split.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
@@ -809,6 +810,11 @@ export interface RunReceiptReproducibility {
 }
 
 export interface RunReceiptUpstreamResponse {
+	/** One-based assistant-call index within this run; absent in older receipts. */
+	callIndex?: number;
+	/** Normalized counts; observed=false explicitly records unavailable provider usage. */
+	usage?: NormalizedTokenUsage;
+	usageScope?: "call" | "run-aggregate";
 	requestedModelId: string | null;
 	/**
 	 * What the provider said about its own response model. `not-observed` means

@@ -463,6 +463,7 @@ interface ReadRequest {
 /** A selected, bounded rendering ready for the observation envelope. */
 interface ReadView {
 	output: string;
+	readRange: { startLine: number | null; endLine: number | null; unit: "physical-lines"; partialLine: boolean };
 	shownCount: number;
 	totalCount: number | null;
 	totalBytes: number;
@@ -545,7 +546,15 @@ async function readHead(handle: FileHandle, request: ReadRequest, plan: ReadPlan
 		const lineSize = await firstLineSizeText(handle, startByte, window, windowEnd, size, labelBytes, signal);
 		const linePrefix = label + truncateUtf8(firstLine, cap - labelBytes, "\n[line truncated]");
 		const output = `${linePrefix}\n\n[${numbered ? "Numbered line" : "Line"} ${startIndex + 1} is ${lineSize}, exceeding the ${formatSize(cap)} read limit. Showing the UTF-8 prefix only. Use grep with a narrower literal/regex or edit with exact surrounding text; use shell access only when byte-level inspection is required.]`;
-		return { output, shownCount: 0, totalCount: totalLines, totalBytes, truncated: true, omitNotice: true };
+		return {
+			output,
+			shownCount: 0,
+			totalCount: totalLines,
+			totalBytes,
+			truncated: true,
+			omitNotice: true,
+			readRange: { startLine: offset, endLine: offset, unit: "physical-lines", partialLine: true },
+		};
 	}
 	const endDisplay = startIndex + truncation.outputLines;
 	// More lines follow when the truncation kept fewer lines than the window
@@ -556,6 +565,12 @@ async function readHead(handle: FileHandle, request: ReadRequest, plan: ReadPlan
 	return {
 		output: truncation.content,
 		shownCount: truncation.outputLines,
+		readRange: {
+			startLine: truncation.outputLines > 0 ? offset : null,
+			endLine: truncation.outputLines > 0 ? endDisplay : null,
+			unit: "physical-lines",
+			partialLine: false,
+		},
 		totalCount: totalLines,
 		totalBytes,
 		truncated,
@@ -635,6 +650,12 @@ async function readTail(handle: FileHandle, request: ReadRequest, plan: ReadPlan
 	return {
 		output: truncation.content,
 		shownCount: shownLines,
+		readRange: {
+			startLine: totalLines !== null && size > 0 ? Math.max(1, totalLines - Math.max(1, shownLines) + 1) : null,
+			endLine: size > 0 ? totalLines : null,
+			unit: "physical-lines",
+			partialLine: shownLines === 0 && size > 0,
+		},
 		totalCount: totalLines,
 		totalBytes,
 		truncated,
@@ -735,7 +756,22 @@ async function readDocument(
 		totalBytes: view.totalBytes,
 		truncated: view.truncated,
 		...(view.next !== undefined ? { next: view.next } : {}),
-		details: { file, document: kind },
+		details: {
+			file,
+			document: kind,
+			readRange: {
+				startLine:
+					view.shownCount > 0
+						? request.tail !== null
+							? Math.max(1, view.totalCount - view.shownCount + 1)
+							: request.offset
+						: null,
+				endLine:
+					view.shownCount > 0 ? (request.tail !== null ? view.totalCount : request.offset + view.shownCount - 1) : null,
+				unit: "rendered-lines",
+				partialLine: false,
+			},
+		},
 		reservation,
 		...(options ? { options } : {}),
 	});
@@ -888,7 +924,7 @@ export const readTool: ToolSpec = {
 				truncated: view.truncated,
 				...(view.next !== undefined ? { next: view.next } : {}),
 				...(view.omitNotice || change !== null ? { omitNotice: true } : {}),
-				details: { file, ...(change !== null ? { fileChange: change } : {}) },
+				details: { file, readRange: view.readRange, ...(change !== null ? { fileChange: change } : {}) },
 				reservation,
 				...(options ? { options } : {}),
 			});
