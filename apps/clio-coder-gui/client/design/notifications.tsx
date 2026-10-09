@@ -2,11 +2,12 @@
 // problem-only toast had no way to express. The store is a module singleton rather than React state
 // because the events transport that raises most notices is not a component.
 
+import type { MouseEvent } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiProblem } from "../api/client.js";
 import { useLiveState } from "../interaction/announcer.js";
 import type { Notice, NoticeTone } from "./notification-model.js";
-import { DEFAULT_TTL, problemTone } from "./notification-model.js";
+import { DEFAULT_TTL, noticeAfterDismissal, problemTone } from "./notification-model.js";
 import "../interaction/interaction.css";
 
 export type { Notice, NoticeTone } from "./notification-model.js";
@@ -117,11 +118,32 @@ const TONE_WORDS: Readonly<Record<NoticeTone, string>> = {
 	success: "Done",
 };
 
+/** A pointer press on a dismiss control must not pull focus out of whatever the operator was typing in. */
+const keepFocus = (event: MouseEvent<HTMLButtonElement>) => event.preventDefault();
+
 export function NoticeToasts() {
 	const values = useNotices();
 	const region = useRef<HTMLElement>(null);
 	const [hovered, setHovered] = useState(false);
 	const [focused, setFocused] = useState(false);
+	// Removing the focused Dismiss button drops focus to <body>, so the next notice, or failing that
+	// the element focused before the region was entered, receives it. Timeouts never set this: the
+	// countdown is paused while the region holds focus.
+	const refocus = useRef<string | null>(null);
+	const refocusPending = useRef(false);
+	const enteredFrom = useRef<HTMLElement | null>(null);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the new list is the trigger; the target is read from refs and the DOM.
+	useEffect(() => {
+		if (!refocusPending.current) return;
+		refocusPending.current = false;
+		const next = refocus.current;
+		refocus.current = null;
+		// The id may be gone by now (evicted past five, or replaced), so the entry element is the fallback.
+		const target =
+			(next ? region.current?.querySelector<HTMLElement>(`[data-notice-id="${CSS.escape(next)}"] button`) : null) ??
+			enteredFrom.current;
+		if (target?.isConnected) target.focus();
+	}, [values]);
 	useEffect(() => {
 		setHovered(values.length > 0 && (region.current?.matches(":hover") ?? false));
 		setFocused(values.length > 0 && (region.current?.contains(document.activeElement) ?? false));
@@ -148,7 +170,11 @@ export function NoticeToasts() {
 				aria-label="Notifications"
 				onMouseEnter={() => setHovered(true)}
 				onMouseLeave={() => setHovered(false)}
-				onFocusCapture={() => setFocused(true)}
+				onFocusCapture={(event) => {
+					if (!event.currentTarget.contains(event.relatedTarget) && event.relatedTarget instanceof HTMLElement)
+						enteredFrom.current = event.relatedTarget;
+					setFocused(true);
+				}}
 				onBlurCapture={(event) => {
 					if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
 				}}
@@ -156,7 +182,17 @@ export function NoticeToasts() {
 				{values.length > 1 && (
 					<div className="notice-region__controls">
 						<span>{values.length} notifications</span>
-						<button type="button" onClick={dismissAll}>
+						<button
+							type="button"
+							onMouseDown={keepFocus}
+							onClick={() => {
+								if (region.current?.contains(document.activeElement)) {
+									refocus.current = null;
+									refocusPending.current = true;
+								}
+								dismissAll();
+							}}
+						>
 							Dismiss all
 						</button>
 					</div>
@@ -164,13 +200,27 @@ export function NoticeToasts() {
 				{values.length > 0 && (
 					<div className="notice-region__list">
 						{values.map((notice) => (
-							<article className={`notice notice--${notice.tone}`} key={notice.id}>
+							<article className={`notice notice--${notice.tone}`} data-notice-id={notice.id} key={notice.id}>
 								<div className="notice__heading">
 									<span className="notice__glyph" aria-hidden="true">
 										{GLYPHS[notice.tone]}
 									</span>
 									<strong>{notice.title}</strong>
-									<button type="button" aria-label={`Dismiss ${notice.title}`} onClick={() => dismiss(notice.id)}>
+									<button
+										type="button"
+										onMouseDown={keepFocus}
+										aria-label={`Dismiss ${notice.title}`}
+										onClick={(event) => {
+											if (event.currentTarget.contains(document.activeElement)) {
+												refocus.current = noticeAfterDismissal(
+													values.map((item) => item.id),
+													notice.id,
+												);
+												refocusPending.current = true;
+											}
+											dismiss(notice.id);
+										}}
+									>
 										×
 									</button>
 								</div>
