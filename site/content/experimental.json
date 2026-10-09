@@ -58,5 +58,17 @@
     "basis": "Documented workflow",
     "versionScope": "0.6.0",
     "status": "Advanced, opt-in, new in 0.6.0"
+  },
+  {
+    "slug": "semantic-context-and-recordings",
+    "title": "Search your project by meaning and record worker runs",
+    "description": "Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker's evidence.",
+    "category": "Context",
+    "time": "5 min",
+    "author": "The Clio Coder team",
+    "source": "semantic-context-and-recordings.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.2",
+    "status": "Beta, off by default, new in 0.6.2"
   }
 ]
