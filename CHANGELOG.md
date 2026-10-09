@@ -2,14 +2,47 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.6.2 - 2026-10-09
 
-Candidate notes for 0.6.2-rc.3. This beta is not published from the sprint branch.
+Clio Coder 0.6.2 is the stable release of the 0.6.2 line described under 0.6.2-rc.1 and 0.6.2-rc.2 below. Since 0.6.2-rc.2 it moves to Pi 1.1.0, adds an opt-in semantic context index and worker recording, makes wiki generation reliable and accountable for its cost, and tightens dispatch safety, usage accounting, the desktop app and the terminal interface.
+
+### Engine and semantic context
 
 - Upgrade the Pi engine packages to 1.1.0 for native Haiku 5.5 catalog support and updated Anthropic provider compatibility.
 - Add an opt-in EmbeddingGemma 2 Q8 service and persistent semantic context index for code, scientific inboxes, approved memory, evidence, and recorded dispatch output. The agent and CLI receive bounded, attributed search results; exact profile identities isolate vector spaces, and an explicit offline command reembeds old canonical records under a new profile. Approved API 2 extensions can call the host embedding service through a declared capability without receiving model credentials.
 - Add explicit local or SSH worker recording as a bounded asciicast side channel with redacted evidence exports. Add a checksum-pinned asciinema installer and a previewed user-level fleet provisioning command.
 - Keep background indexing disabled by default. PDF text, notebook outputs, images, mono 16 kHz WAV audio, and bounded timestamped GIF/video still frames are supported where the image route is qualified and FFmpeg is available. Raw video embedding and scanned PDF OCR remain unsupported. See the [semantic context beta guide](docs/guide/semantic-context.md).
+
+### Wiki generation
+
+- Planning is bounded at every depth. Medium plans keep their ownership ceiling, oversized scopes split, detailed scopes subdivide with local ownership, and a planner revision is capped at 64 owners and rejected when it drops owned coverage. Flat directories get distinct, readable group names.
+- Evidence checks parse pages with Marked through one shared reader, so every Markdown link form, fence, citation and layout statement is gated the same way. Links to planned sibling pages and encoded page names validate, and genuine non-citation names no longer fail a page.
+- A page that fails validation gets one bounded repair run with the complete diagnostics before it falls back to normal writing. Unchanged pending drafts are revalidated before any new dispatch, and a draft from a writer stopped by its tool-call cap is judged by the evidence gate.
+- Runs report usage, cost and budget telemetry, include earlier retry attempts in their totals, mark totals incomplete when a ledger is unreadable, and print unreported cache reads instead of a measured zero. Receipts keep tool and model audit facts, and generation exits nonzero when pages remain pending.
+
+### Dispatch, safety and usage
+
+- Attended sessions ask once before test runners execute code the session wrote, and a resumed or forked session counts as written.
+- A writer that overlaps a live writer from another dispatch call is refused, compete and council keep candidates and judges independent, and compete, council and review are discoverable again.
+- Workers verify their permit digest and tool ceiling, receipts record the permit ceiling, and the Claude SDK runtime enforces the admitted call ceiling and refuses escalation instead of downgrading it.
+- Token and cost accounting is reconciled across the harness, fleet consumers, traces and cross-session totals. Partial and unknown totals are labelled, prompt pricing tiers are kept and Sonnet cache reads are priced correctly, and external CLI runs are priced from declared target rates.
+- Telemetry preserves spans, admission and compaction outcomes, and capture loss through shutdown and replay.
+
+### Desktop app
+
+- Notifications reserve layout space, announce once, and keep keyboard focus after a dismissal.
+- Live usage shows the model-call count, completed turns show cost provenance, parked sessions show their last recorded usage, and the approval queue shows each request's position.
+- Markdown math typesets lazily as sanitized MathML, settings keep the selected workspace, and composers and suggestion lists keep their keyboard semantics.
+
+### Terminal interface
+
+- Each task names its status beside its glyph, the detailed settled-turn receipt shows the turn's cost, and the resume picker shows each session's recorded spend.
+- Loop progress rides the composer rail, persistent loops are shown, and scheduled prompts are attributed.
+
+### Packaging and security
+
+- The release check gates package size per payload class, and published bundles no longer carry dangling `sourceMappingURL` comments.
+- Dependencies override katex to 0.18.2 (GHSA-238p-pmpm-9mq7) and upgrade smol-toml to 1.9.0 (GHSA-r4xh-jqrq-34v2).
 
 ## 0.6.2-rc.2 - 2026-10-06
 
