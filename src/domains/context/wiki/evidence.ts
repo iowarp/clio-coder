@@ -86,9 +86,12 @@ export function repairWikiLinks(
 	const repair = (destination: string): string => {
 		const decoded = decodeWikiDestination(destination);
 		// A tail after .md (encoded %23, %3F, whitespace, control or odd characters) is part of the literal file
-		// name a browser requests, so such links are checked as page links. The tail stays inside the last segment
-		// and has no dot, which keeps .mdx, .md.bak and non-page files like img.md%3Fx.png out of the check.
-		if (!decoded || !/\.md(?:[^\w./-][^/.]*)?$/i.test(decoded.path)) return destination;
+		// name a browser requests, so such links are checked as page links. The tail starts with a non-name
+		// character and stays inside the last segment. A tail that ends in a letter-led extension (.png, .ts)
+		// names a non-page asset like img.md%3Fx.png and is skipped; a digit-led ending like %23v2.1 is a version
+		// dot and is still checked. .mdx and .md.bak never match because the tail cannot start with a dot.
+		const tail = decoded ? /\.md(?:([^\w./-][^/]*))?$/i.exec(decoded.path) : null;
+		if (!decoded || !tail || (tail[1] !== undefined && /\.[A-Za-z][A-Za-z0-9]*$/.test(tail[1]))) return destination;
 		const href = decoded.path;
 		const anchor = decoded.suffix;
 		const fromDir = posix.dirname(pagePath);

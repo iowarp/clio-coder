@@ -244,6 +244,8 @@ describe("wiki mechanical evidence gate", () => {
 			["section/page.md", "local.md%E2%80%8B", "local.md\u200b"],
 			["section/page.md", "local.md%25", "local.md%"],
 			["section/page.md", "local.md%2f", "local.md%2f"],
+			["section/page.md", "local.md%23v2.1", "local.md#v2.1"],
+			["section/page.md", "/local.md%3Fv1.0", "/local.md?v1.0"],
 		] as const) {
 			const body = `[Link](${href})`;
 			deepStrictEqual(repairWikiLinks(from, body, rooted), { body, unresolved: [expected] }, href);
