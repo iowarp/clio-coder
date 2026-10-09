@@ -490,7 +490,7 @@ describe("wiki generation outcomes", () => {
 			assert.equal(failedPage?.status, "pending");
 			assert.equal(failedPage?.lastFailure?.phase, "writer");
 			assert.match(failedPage?.lastFailure?.detail ?? "", /repair failed/u);
-			assert.match(failedPage?.lastFailure?.detail ?? "", /evidence check failed/u);
+			assert.match(failedPage?.lastFailure?.detail ?? "", /^repair failed: evidence check failed: \[/u);
 			assert.match(failedPage?.lastFailure?.runId ?? "", /^fixture-/u);
 			const repaired = await runWikiGenerate({
 				cwd,

@@ -757,7 +757,8 @@ async function runPagePhase(
 	const usage = dispatchUsage(outcome, receipts, kind);
 	const detail =
 		evidence && !evidence.ok
-			? `${outcome.detail}; evidence check failed: ${JSON.stringify(evidence.reasons)}`
+			? // Reasons lead because lastFailure.detail is cut to 500 chars, and elapsed time or tool mix must not push them out.
+				`evidence check failed: ${JSON.stringify(evidence.reasons)}; ${outcome.detail}`
 			: outcome.ok && repair && !written
 				? `${outcome.detail}; source baseline changed during repair; full writer required next invocation`
 				: outcome.detail;
