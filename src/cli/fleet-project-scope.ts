@@ -1,4 +1,5 @@
 import { readSettings } from "../core/config.js";
+import { readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
 import { dispatchOwnership } from "../domains/dispatch/ownership.js";
 import type { FleetRunRecord } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
@@ -29,7 +30,16 @@ export function fleetInspectionScope(all: boolean, cwd = process.cwd()) {
 			.map((step) => step.result.terminalRunId)
 			.filter((id): id is string => typeof id === "string");
 		if (record.cwd !== undefined && !ownership.inProject(record.cwd)) return false;
-		return terminalRuns.length > 0 ? terminalRuns.every((id) => seesRunId(id, getRun)) : record.cwd !== undefined;
+		if (terminalRuns.length === 0) return record.cwd !== undefined;
+		// Deterministic steps have their own command records, not model-ledger
+		// rows. Verify their recorded cwd instead of hiding mixed playbooks.
+		const codeSteps = new Map(readCodeStepRecords(record.id).map((step) => [step.runId, step]));
+		return terminalRuns.every((id) => {
+			if (seesRunId(id, getRun)) return true;
+			if (getRun(id) !== null) return false;
+			const code = codeSteps.get(id);
+			return code !== undefined && typeof code.cwd === "string" && ownership.inProject(code.cwd);
+		});
 	};
 	return { all, seesRun, seesRunId, seesRoot };
 }
