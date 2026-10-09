@@ -39,7 +39,14 @@ export const KEYBOARD_HINT = "Alt+A allows once · Alt+R rejects";
 export const bannerEyebrow = (escalated: boolean): string =>
 	escalated ? "APPROVAL WAITING · ESCALATED" : "APPROVAL NEEDED";
 
+import { isAwaitingAnswer } from "./permission-state.js";
+
 export { isAwaitingAnswer } from "./permission-state.js";
+
+export function approvalQueue(permissions: readonly Permission[]) {
+	const pending = permissions.filter(isAwaitingAnswer);
+	return { first: pending[0], position: pending.length > 0 ? `1 of ${pending.length}` : null };
+}
 
 /**
  * The distinction between 'told no' and 'not told no' is a real difference in what the model sees:

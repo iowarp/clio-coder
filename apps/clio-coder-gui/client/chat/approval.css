@@ -33,7 +33,7 @@
 .approval-strip {
 	display: flex;
 	flex: 1;
-	flex-wrap: nowrap;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--space-1) var(--space-3);
 	min-width: 0;

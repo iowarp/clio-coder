@@ -20,6 +20,7 @@ import { useShortcut } from "../interaction/use-shortcut.js";
 import {
 	approvalActions,
 	approvalAnnouncement,
+	approvalQueue,
 	bannerEyebrow,
 	CARD_EYEBROW,
 	clampText,
@@ -104,7 +105,7 @@ export function useAnswerApproval(client: Client, sessionId: string) {
 }
 
 export const pendingPermission = (session: SessionSnapshot): Permission | undefined =>
-	session.permissions.find(isAwaitingAnswer);
+	approvalQueue(session.permissions).first;
 
 /** The permission gating this exact call, matched on the contract's direct link. */
 export const permissionForCall = (session: SessionSnapshot, item: TimelineItem): Permission | undefined =>
@@ -354,7 +355,8 @@ function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, vari
 export function ApprovalBanner({ client, session }: { client: Client; session: SessionSnapshot }) {
 	const answer = useAnswerApproval(client, session.id);
 	const answering = useIsMutating({ mutationKey: permissionMutationKey(session.id) }) > 0;
-	const permission = pendingPermission(session);
+	const queue = approvalQueue(session.permissions);
+	const permission = queue.first;
 	const answerSent = useAnswerSent(session.id, permission?.id);
 	const call = permission ? session.timeline.find((item) => item.toolCallId === permission.toolCallId) : undefined;
 	const now = useSecond(permission !== undefined);
@@ -373,8 +375,8 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 	}, [id]);
 	useEffect(() => {
 		if (id === null) return;
-		announce(approvalAnnouncement({ title, kind }), "assertive");
-	}, [id, title, kind]);
+		announce(`${approvalAnnouncement({ title, kind })} Request ${queue.position}.`, "assertive");
+	}, [id, title, kind, queue.position]);
 	// The declared window, not the observed wait: say what the product promised.
 	useEffect(() => {
 		announceEscalation(escalated && escalationWindow !== null ? escalationWindow : null);
@@ -398,7 +400,9 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 					<span className="approval-strip__glyph" aria-hidden="true">
 						!
 					</span>
-					<span className="approval-strip__eyebrow">{escalated ? "Approval waiting" : "Approval needed"}</span>
+					<span className="approval-strip__eyebrow">
+						{escalated ? "Approval waiting" : "Approval needed"} · {queue.position}
+					</span>
 					<strong className="approval-strip__title" title={permission.title}>
 						{permission.title}
 					</strong>
@@ -430,7 +434,7 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 				permission={permission}
 				call={call}
 				answer={answer}
-				eyebrow={bannerEyebrow(escalated)}
+				eyebrow={`${bannerEyebrow(escalated)} · ${queue.position}`}
 				hint={KEYBOARD_HINT}
 				variant="banner"
 			/>
