@@ -110,6 +110,9 @@ function formatElapsed(ms: number): string {
 }
 
 const BLOCK_REASON_MAX_CHARS = 80;
+// Same bounds as the diagnostics a writer prompt carries, so the sidecar cannot outgrow what the writer saw.
+const SIDECAR_REASON_LIMIT = 32;
+const SIDECAR_REASON_MAX_CHARS = 1000;
 
 /** First sentence of a block reason, bounded so one line stays one line. */
 function summarizeBlockReason(reason: string): string {
@@ -719,8 +722,11 @@ async function runPagePhase(
 	const authorRunId = outcome.phase === "writer" ? (outcome.attempts?.terminalRunId ?? outcome.runId) : undefined;
 	if (evidence && authorRunId !== undefined) {
 		const sourceSnapshotHash = createHash("sha256")
-			.update(JSON.stringify(Object.entries(baseline).sort(([a], [b]) => a.localeCompare(b))))
+			.update(JSON.stringify(Object.entries(baseline).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))))
 			.digest("hex");
+		const allReasons = evidence.allReasons ?? evidence.reasons;
+		const reasons = allReasons.slice(0, SIDECAR_REASON_LIMIT);
+		const omittedReasons = allReasons.length - reasons.length;
 		try {
 			if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(authorRunId)) throw new Error("invalid validation run id");
 			safeResourceWrite(
@@ -735,7 +741,8 @@ async function runPagePhase(
 						validationKind: evidence.validationKind ?? "evidence",
 						ok: evidence.ok,
 						written,
-						reasons: (evidence.allReasons ?? evidence.reasons).map(redactSecretString),
+						reasons: reasons.map((reason) => redactSecretString(reason).slice(0, SIDECAR_REASON_MAX_CHARS)),
+						...(omittedReasons > 0 ? { omittedReasons } : {}),
 						sourceSnapshotHash,
 						sourceTreeHash: plan.sourceTreeHash ?? null,
 						sourceGitHead: plan.sourceGitHead ?? null,
