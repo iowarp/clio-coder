@@ -535,6 +535,7 @@ async function runPagePhase(
 					...(input.decisions ? { decisions: input.decisions } : {}),
 					outputDir: input.outputDir,
 					seeded,
+					...(seeded && diagnostic ? { diagnostics: diagnostic.allReasons ?? diagnostic.reasons } : {}),
 				}),
 		route,
 		deadline,
