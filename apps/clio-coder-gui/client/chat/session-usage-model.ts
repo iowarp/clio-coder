@@ -208,6 +208,9 @@ export function usageSummary(
 							label: "Tokens",
 							value: `${tokens(spend.tokens)}${spend.missingTokenCalls ? ` +? (${tokens(spend.missingTokenCalls)} call${spend.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
 						},
+						...(recorded?.session?.calls !== undefined
+							? [{ label: "Model calls", value: tokens(recorded.session.calls) }]
+							: []),
 					]
 				: [];
 	return {
