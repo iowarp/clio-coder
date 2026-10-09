@@ -350,7 +350,7 @@ describe("wiki generation outcomes", () => {
 		assert.ok(attempted[0]?.endsWith("a.md"));
 	});
 	for (const changed of [false, true]) {
-		it(`${changed ? "does not credit" : "credits without dispatch"} a pending valid draft with ${changed ? "changed" : "unchanged"} source bytes`, async () => {
+		it(`${changed ? "writes immediately" : "credits without dispatch"} a pending valid draft with ${changed ? "changed" : "unchanged"} source bytes`, async () => {
 			await initialize();
 			const dir = join(cwd, ".clio-coder/wiki-staging-pending");
 			mkdirSync(dir);
@@ -365,28 +365,81 @@ describe("wiki generation outcomes", () => {
 			if (changed) writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");
 			let dispatches = 0;
 			const result = await run(
-				generator(() => {
+				generator((spec, path) => {
 					dispatches++;
+					assert.equal(spec.agentId, "wiki-writer");
+					assert.ok(path?.endsWith("a.md"));
+					assert.ok(path);
+					writeFileSync(path, content("a", 2));
 				}),
 			);
-			assert.equal(dispatches, 0);
-			assert.equal(result.pending, changed ? 1 : 0);
-			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, changed ? 1 : 3);
-			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, changed ? "pending" : "written");
+			assert.equal(dispatches, changed ? 1 : 0);
+			assert.equal(result.pending, 0);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, changed ? 2 : 3);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "written");
 			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure, undefined);
-			if (changed) {
-				await run(
-					generator((_spec, path) => {
-						dispatches++;
-						assert.ok(path);
-						assert.ok(path.endsWith("a.md"));
-						writeFileSync(path, content("a", 2));
-					}),
-				);
-				assert.equal(dispatches, 1, "changed baseline requires a full writer on the next invocation");
-			}
 		});
 	}
+	for (const attempts of [1, 3]) {
+		it(`requires normal writing for a newly resolved changed body dependency with ${attempts} previous attempts`, async () => {
+			await initialize();
+			const dir = join(cwd, ".clio-coder/wiki-staging-body-dependency");
+			mkdirSync(dir);
+			const saved = readWikiMeta(cwd)?.plan;
+			assert.ok(saved?.pages[0]);
+			saved.pages[0].status = "pending";
+			saved.pages[0].attempts = attempts;
+			saved.pages[0].lastFailure = { phase: "validation", detail: "Historical gate failure", runId: "successful-writer" };
+			assert.deepEqual(saved.pages[0].dependencies, ["src/a.ts"]);
+			writeWikiPlanFile(dir, saved);
+			writeFileSync(join(dir, "a.md"), `${content("a", 1)}See \`b.ts\` for b version 1.\n`);
+			writeFileSync(join(dir, "b.md"), content("b", 1));
+			writeFileSync(join(cwd, "src/b.ts"), "export const b = 2;\n");
+			let dispatches = 0;
+			const write = generator((spec, path) => {
+				assert.equal(spec.agentId, "wiki-writer");
+				assert.ok(path);
+				dispatches++;
+				writeFileSync(path, path.endsWith("a.md") ? `${content("a", 1)}See \`b.ts\` for b version 2.\n` : content("b", 2));
+			});
+			const result = await run(write);
+			assert.equal(result.pending, attempts === 3 ? 1 : 0);
+			assert.equal(dispatches, attempts === 3 ? 1 : 2, "B is refreshed; A requires available normal-writer admission");
+			if (attempts === 3) {
+				assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure, undefined);
+				const stillPending = await run(write);
+				assert.equal(stillPending.pending, 1, "replacing the baseline cannot make the stale draft reusable");
+				assert.equal(dispatches, 1);
+				const retried = await runWikiGenerate({ cwd, model: "fixture", retryPending: true, generate: write });
+				assert.equal(retried.pending, 0);
+				assert.equal(dispatches, 2);
+			}
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, attempts + 1);
+		});
+	}
+	it("writes a missing validation-failed draft immediately", async () => {
+		await initialize();
+		const dir = join(cwd, ".clio-coder/wiki-staging-missing");
+		mkdirSync(dir);
+		const saved = readWikiMeta(cwd)?.plan;
+		assert.ok(saved?.pages[0]);
+		saved.pages[0].status = "pending";
+		saved.pages[0].lastFailure = { phase: "validation", detail: "Historical gate failure", runId: "successful-writer" };
+		writeWikiPlanFile(dir, saved);
+		writeFileSync(join(dir, "b.md"), content("b", 1));
+		let dispatches = 0;
+		const result = await run(
+			generator((spec, path) => {
+				assert.equal(spec.agentId, "wiki-writer");
+				assert.ok(path);
+				dispatches++;
+				writeFileSync(path, content("a", 2));
+			}),
+		);
+		assert.equal(dispatches, 1);
+		assert.equal(result.pending, 0);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 2);
+	});
 	it("checkpoints authored JS aliases against the actual TypeScript source bytes", async () => {
 		await initialize(["src/a.js"]);
 		assert.equal(wikiStaleness(cwd).state, "fresh");

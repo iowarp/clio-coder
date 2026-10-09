@@ -80,8 +80,6 @@ export interface WikiGenerateInput {
 	retryPending?: boolean;
 	/** Explicitly reconsider page structure even when all source evidence is current. */
 	replan?: boolean;
-	/** Validation drafts that need a full writer on the next invocation. */
-	deferredPages?: ReadonlyArray<string>;
 	/** Indexed areas no existing page covers, offered to a planning pass. */
 	unclaimedAreas: ReadonlyArray<WikiPlanPage>;
 	gitHead?: string | null;
@@ -392,7 +390,7 @@ function resolvePlan(input: {
 	sourceContent: WikiSourceContent;
 	gitHead: string | null;
 	allowDraftReuse: boolean;
-}): { plan: WikiPlan; resumed: boolean; unclaimedAreas: WikiPlanPage[]; deferredPages: string[] } {
+}): { plan: WikiPlan; resumed: boolean; unclaimedAreas: WikiPlanPage[] } {
 	const staged = input.adopted ? readWikiPlanFile(input.stagingDir) : null;
 	const previous = staged ?? (input.mode === "update" ? input.previousPlan : undefined);
 	if (previous) {
@@ -405,7 +403,6 @@ function resolvePlan(input: {
 				: undefined;
 		const gitAvailable = changedPathsSince(input.cwd, staged?.sourceGitHead ?? partialHead ?? input.gitHead) !== null;
 		const existing = new Set(wikiMarkdownFilesInDir(input.stagingDir));
-		const deferredPages: string[] = [];
 		const plan = {
 			...previous,
 			pages: previous.pages.map((page) => {
@@ -422,7 +419,6 @@ function resolvePlan(input: {
 							...(pageSources.get(page.path) ?? []),
 						])
 					) {
-						deferredPages.push(page.path);
 						const pending = { ...page };
 						delete pending.lastFailure;
 						return pending;
@@ -433,13 +429,16 @@ function resolvePlan(input: {
 						sourceRoot: input.cwd,
 					});
 					if (
-						!evidence.ok ||
 						!wikiSourcesMatch(previous.sourceContent, input.sourceContent, [
 							...page.sources,
 							...(evidence.dependencies ?? []),
 						])
-					)
-						return page;
+					) {
+						const pending = { ...page };
+						delete pending.lastFailure;
+						return pending;
+					}
+					if (!evidence.ok) return page;
 					const revalidated = { ...page, status: "written" as const, dependencies: evidence.dependencies ?? [] };
 					delete revalidated.lastFailure;
 					return revalidated;
@@ -477,12 +476,11 @@ function resolvePlan(input: {
 		};
 		return {
 			plan,
-			deferredPages,
 			resumed: staged !== null,
 			unclaimedAreas: staged ? [] : unclaimedCandidates(previous, input.candidate, pageSources),
 		};
 	}
-	return { plan: input.candidate, resumed: false, unclaimedAreas: [], deferredPages: [] };
+	return { plan: input.candidate, resumed: false, unclaimedAreas: [] };
 }
 
 /**
@@ -632,7 +630,6 @@ export async function runWikiGenerate(
 				codewiki,
 				generation,
 				plan: resolved.plan,
-				deferredPages: depthChanged || input.replan ? [] : resolved.deferredPages,
 				resumed:
 					!input.replan &&
 					!depthChanged &&

@@ -501,58 +501,52 @@ async function runPagePhase(
 					sourceRoot: input.cwd,
 				})
 			: undefined;
+	if (repair && (!seeded || !plan.sourceContent || !stable(diagnostic?.dependencies))) repair = false;
 	const kind = repair ? "repair" : "writer";
 	input.progress?.({
 		phase: "generate",
 		status: "started",
 		message: `${repair ? "repairing" : "writing"} ${page.path} (${position.index}/${position.total})`,
 	});
-	const outcome: WikiDispatchOutcome =
-		repair && (!seeded || !plan.sourceContent || !stable())
-			? {
-					ok: false,
-					phase: "admission",
-					detail: "repair deferred: draft missing or source baseline changed; full writer required next invocation",
-				}
-			: await runWikiDispatch({
-					dispatch,
-					cwd: input.cwd,
+	const outcome = await runWikiDispatch({
+		dispatch,
+		cwd: input.cwd,
+		outputDir: input.outputDir,
+		artifactPath: relative(input.cwd, join(input.outputDir, page.path)),
+		...(repair ? { repairSources: sources } : {}),
+		task: repair
+			? buildWikiRepairPrompt({
 					outputDir: input.outputDir,
-					artifactPath: relative(input.cwd, join(input.outputDir, page.path)),
-					...(repair ? { repairSources: sources } : {}),
-					task: repair
-						? buildWikiRepairPrompt({
-								outputDir: input.outputDir,
-								page,
-								draftHash: createHash("sha256")
-									.update(readFileSync(join(input.outputDir, page.path)))
-									.digest("hex"),
-								diagnostics: diagnostic?.reasons ?? [],
-								sources,
-							})
-						: buildWikiPagePrompt({
-								depth: input.generation.depth,
-								cwd: input.cwd,
-								mode: input.mode,
-								codewiki: input.codewiki,
-								page,
-								siblings: plan.pages,
-								...(input.decisions ? { decisions: input.decisions } : {}),
-								outputDir: input.outputDir,
-								seeded,
-							}),
-					route,
-					deadline,
-					onHeartbeat: ({ elapsedMs, tools }) =>
-						input.progress?.({
-							phase: "generate",
-							status: "running",
-							message: `still ${repair ? "repairing" : "writing"} ${page.path} (${position.index}/${position.total}, ${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
-							...(repair
-								? {}
-								: { detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer` }),
-						}),
-				});
+					page,
+					draftHash: createHash("sha256")
+						.update(readFileSync(join(input.outputDir, page.path)))
+						.digest("hex"),
+					diagnostics: diagnostic?.reasons ?? [],
+					sources,
+				})
+			: buildWikiPagePrompt({
+					depth: input.generation.depth,
+					cwd: input.cwd,
+					mode: input.mode,
+					codewiki: input.codewiki,
+					page,
+					siblings: plan.pages,
+					...(input.decisions ? { decisions: input.decisions } : {}),
+					outputDir: input.outputDir,
+					seeded,
+				}),
+		route,
+		deadline,
+		onHeartbeat: ({ elapsedMs, tools }) =>
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: `still ${repair ? "repairing" : "writing"} ${page.path} (${position.index}/${position.total}, ${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
+				...(repair
+					? {}
+					: { detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer` }),
+			}),
+	});
 	const evidence = outcome.ok
 		? inspectWikiPageEvidence({
 				pagePath: page.path,
@@ -654,7 +648,7 @@ async function generateWikiWithDocumenter(
 	signal?.throwIfAborted();
 	writeWikiPlanFile(input.outputDir, plan);
 
-	const queue = pendingPages(plan, input.retryPending).filter((page) => !input.deferredPages?.includes(page.path));
+	const queue = pendingPages(plan, input.retryPending);
 	if (queue.length === 0) {
 		const pending = plan.pages.filter((page) => page.status !== "written").length;
 		input.progress?.({
