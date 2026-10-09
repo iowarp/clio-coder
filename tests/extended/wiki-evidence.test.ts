@@ -85,6 +85,9 @@ describe("wiki mechanical evidence gate", () => {
 			"[Title](target.md 'Optional title')",
 			"[Title](target.md (Optional title))",
 			"[Angle](<target.md#heading>)",
+			"[Multiline](\ntarget.md)",
+			'[Multiline]( \r\n  <target.md#heading>\r\n"Optional title"\r\n)',
+			"[Reference][target]\n[target]:\n  target.md",
 			'[Both](<target.md> "Optional `code` title")',
 			'[Reference][target]\n[target]: target.md "Optional title"',
 			'[Collapsed][]\n[Collapsed]: <target.md#heading> "Optional title"',
@@ -126,6 +129,24 @@ describe("wiki mechanical evidence gate", () => {
 				body,
 			);
 		}
+		for (const separator of ["\n\n", "\n \n", "\r\n\t\r\n"]) {
+			const body = `Unclosed \` tick.${separator}[Missing](missing.md) [Target](target.md)${separator}Another \` tick.`;
+			deepStrictEqual(repairWikiLinks("section/page.md", body, wikiLinks), {
+				body: body.replace("target.md", "../target.md"),
+				unresolved: ["missing.md"],
+			});
+			strictEqual(
+				validateWikiPageEvidence({
+					sourceRoot: root,
+					pagePath: "section/page.md",
+					content: page("src/main.ts", body),
+					wikiLinks,
+				}).ok,
+				false,
+			);
+		}
+		deepStrictEqual(repairWikiLinks("section/page.md", "[Not a link](\n\nmissing.md)", wikiLinks).unresolved, []);
+
 		deepStrictEqual(repairWikiLinks("section/page.md", "Unclosed ` tick: [Missing](missing.md)", wikiLinks).unresolved, [
 			"missing.md",
 		]);

@@ -68,7 +68,11 @@ function inlineCodeRanges(prose: string): Array<{ start: number; end: number }> 
 	const nextByLength = new Map<number, number>();
 	const closers = new Map<number, number>();
 	for (let index = ticks.length - 1; index >= 0; index--) {
-		const length = ticks[index]?.[0].length ?? 0;
+		const current = ticks[index];
+		const following = ticks[index + 1];
+		if (current && following && /\r?\n[ \t]*\r?\n/.test(prose.slice(current.index + current[0].length, following.index)))
+			nextByLength.clear();
+		const length = current?.[0].length ?? 0;
 		const next = nextByLength.get(length);
 		if (next !== undefined) closers.set(index, next);
 		nextByLength.set(length, index);
@@ -131,8 +135,8 @@ export function repairWikiLinks(
 	};
 	const repaired = mapWikiProse(body, (prose) => {
 		for (const pattern of [
-			/(\[[^\]\n]*\]\([ \t]*)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*)?\))/g,
-			/(^ {0,3}\[[^\]\n]+\]:[ \t]*)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*)?)(?=\r?$)/gm,
+			/(\[[^\]\n]*\]\([ \t]*(?:\r?\n[ \t]*)?)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:\r?\n[ \t]*)?(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*(?:\r?\n[ \t]*)?)?\))/g,
+			/(^ {0,3}\[[^\]\n]+\]:[ \t]*(?:\r?\n[ \t]*)?)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*)?)(?=\r?$)/gm,
 		]) {
 			const code = inlineCodeRanges(prose);
 			prose = prose.replace(
