@@ -264,6 +264,28 @@ describe("wiki mechanical evidence gate", () => {
 		}
 	});
 
+	it("repairs repeated codespans only when every occurrence is an intended citation", () => {
+		const body =
+			"# Café `main.ts`\r\n\r\nSee `main.ts`.\r\n\r\n> `main.ts` 🧪\r\n\r\n| Source |\r\n| --- |\r\n| `main.ts` |\r\n";
+		const citations = { "main.ts": "src/main.ts" };
+		const repaired = repairWikiCitations(body, citations);
+		deepStrictEqual(repaired, { body: body.replaceAll("`main.ts`", "`src/main.ts`"), diagnostics: [] });
+		deepStrictEqual(repairWikiCitations(repaired.body, citations), repaired);
+		strictEqual(check(page("src/main.ts", body)).ok, true);
+		for (const opaque of [
+			"```ts\n`main.ts`\n```",
+			"    `main.ts`",
+			'[Label](target.md "`main.ts`")',
+			"[`main.ts`](target.md)",
+			"`` `main.ts` ``",
+		]) {
+			const original = `See \`main.ts\` and \`main.ts\`.\n\n${opaque}\n`;
+			const result = repairWikiCitations(original, citations);
+			strictEqual(result.body, original, opaque);
+			strictEqual(result.diagnostics.length, 1, opaque);
+		}
+	});
+
 	it("rejects a patch when re-lexing changes Markdown beyond the intended citation", () => {
 		const body = "See `main.ts` and preserve 🧪 prose.";
 		const result = repairWikiCitations(body, { "main.ts": "src/a`file.ts" });

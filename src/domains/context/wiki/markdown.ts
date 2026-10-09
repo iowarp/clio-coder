@@ -53,7 +53,10 @@ function signature(value: unknown, changes: ReadonlyMap<Token, string>): unknown
 	const change = changes.get(value as Token);
 	return Object.fromEntries(
 		Object.entries(object)
-			.filter(([key]) => key !== "raw" && !(key === "text" && ("tokens" in object || object.type === "table")))
+			.filter(
+				([key]) =>
+					key !== "raw" && !(key === "text" && object.type !== "link" && ("tokens" in object || object.type === "table")),
+			)
 			.map(([key, entry]) => [
 				key,
 				change !== undefined && (key === "href" || (key === "text" && object.type === "codespan"))
@@ -63,7 +66,7 @@ function signature(value: unknown, changes: ReadonlyMap<Token, string>): unknown
 	);
 }
 
-/** Marked normalizes newlines and containers; only exact, unique source spans are safe to edit. */
+/** Marked normalizes source; repeated codespans require every raw occurrence to survive token verification. */
 export function patchWikiMarkdown(
 	body: string,
 	inspection: WikiMarkdown,
@@ -75,47 +78,64 @@ export function patchWikiMarkdown(
 			body,
 			diagnostics: ["Page exceeds the 512-edit Markdown repair limit; canonicalize references before retrying."],
 		};
-	const spans = new Map<string, number>();
-	const patches: Array<{ start: number; end: number; value: string; edit: WikiMarkdownEdit }> = [];
+	const groups = new Map<string, WikiMarkdownEdit[]>();
+	for (const edit of edits) {
+		const group = groups.get(edit.token.raw) ?? [];
+		group.push(edit);
+		groups.set(edit.token.raw, group);
+	}
+	const changes = new Map<Token, string>();
+	const patches: Array<{ start: number; end: number; value: string }> = [];
 	const failed = (edit: WikiMarkdownEdit): void => {
 		const before = edit.token.type === "codespan" ? edit.token.text : edit.token.href;
 		const diagnostic = `Repair ${JSON.stringify(before)} to ${JSON.stringify(edit.value)} manually; no safe exact Markdown span.`;
 		if (!diagnostics.includes(diagnostic)) diagnostics.push(diagnostic);
 	};
-	for (const edit of edits) {
-		const { token } = edit;
+	for (const group of groups.values()) {
+		const first = group[0];
+		if (!first) continue;
+		const { token, value } = first;
 		const before = token.type === "codespan" ? token.text : token.href;
-		let start = spans.get(token.raw);
-		if (start === undefined) {
-			start = body.indexOf(token.raw);
-			if (start >= 0 && body.indexOf(token.raw, start + 1) !== -1) start = -1;
-			spans.set(token.raw, start);
-		}
 		const offset = token.raw.indexOf(before);
-		if (!before || start < 0 || offset < 0 || token.raw.indexOf(before, offset + 1) !== -1) {
-			failed(edit);
+		const starts: number[] = [];
+		for (let start = body.indexOf(token.raw); start >= 0; start = body.indexOf(token.raw, start + 1)) {
+			starts.push(start);
+			if (starts.length > 512) break;
+		}
+		if (
+			!before ||
+			!token.raw ||
+			starts.length === 0 ||
+			starts.length > 512 ||
+			(token.type !== "codespan" && starts.length !== 1) ||
+			offset < 0 ||
+			token.raw.indexOf(before, offset + 1) !== -1 ||
+			group.some((edit) => edit.value !== value || edit.token.type !== token.type)
+		) {
+			for (const edit of group) failed(edit);
 			continue;
 		}
-		patches.push({ start: start + offset, end: start + offset + before.length, value: edit.value, edit });
+		for (const start of starts) patches.push({ start: start + offset, end: start + offset + before.length, value });
+		for (const edit of group) {
+			changes.set(edit.token, value);
+			for (const user of edit.users ?? []) changes.set(user, value);
+		}
 	}
 	patches.sort((a, b) => a.start - b.start);
 	if (patches.some((patch, index) => index > 0 && patch.start < (patches[index - 1]?.end ?? 0))) {
-		for (const patch of patches) failed(patch.edit);
+		for (const edit of edits) failed(edit);
 		return { body, diagnostics };
 	}
 	if (patches.length === 0) return { body, diagnostics };
-	const changes = new Map<Token, string>();
 	let proposed = body;
 	for (const patch of [...patches].reverse()) {
 		proposed = proposed.slice(0, patch.start) + patch.value + proposed.slice(patch.end);
-		changes.set(patch.edit.token, patch.value);
-		for (const user of patch.edit.users ?? []) changes.set(user, patch.value);
 	}
 	if (
 		JSON.stringify(signature(inspection.tokens, changes)) !==
 		JSON.stringify(signature(markdown.lexer(proposed), new Map()))
 	) {
-		for (const patch of patches) failed(patch.edit);
+		for (const edit of edits) failed(edit);
 		return { body, diagnostics };
 	}
 	return { body: proposed, diagnostics };

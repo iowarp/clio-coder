@@ -358,7 +358,11 @@ describe("contracts/context lifecycle", () => {
 		);
 		ok(report.issues.some((issue) => issue.kind === "repair"));
 		const pending = readFileSync(join(wiki, "section/unsafe.md"), "utf8");
-		ok(readWikiPage({ pagePath: "section/unsafe.md", content: pending }).body.startsWith(unsafe));
+		ok(
+			readWikiPage({ pagePath: "section/unsafe.md", content: pending }).body.startsWith(
+				unsafe.replaceAll("`main.ts`", "`src/main.ts`"),
+			),
+		);
 		ok(readFileSync(join(wiki, "quickstart.md"), "utf8").includes("unsafe.md) (pending draft)"));
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
 		strictEqual(readFileSync(join(wiki, "section/safe.md"), "utf8"), safe);
