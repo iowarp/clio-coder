@@ -152,17 +152,36 @@ export function NoticeToasts() {
 		setPaused(hovered || focused);
 		return () => setPaused(false);
 	}, [hovered, focused]);
-	const urgent = [...values].reverse().find((notice) => notice.tone === "error" || notice.tone === "warning");
-	const calm = [...values].reverse().find((notice) => notice.tone === "info" || notice.tone === "success");
+	// The live text follows arrivals only. Deriving it from the newest remaining notice would make a
+	// dismissal swap in an older one, which a screen reader announces as if it were new.
+	const announced = useRef(new Map<string, number>());
+	const [alertText, setAlertText] = useState("");
+	const [statusText, setStatusText] = useState("");
+	useEffect(() => {
+		const fresh = values.filter((notice) => announced.current.get(notice.id) !== notice.at);
+		announced.current = new Map(values.map((notice) => [notice.id, notice.at]));
+		const isUrgent = (notice: Notice) => notice.tone === "error" || notice.tone === "warning";
+		const newest = (list: readonly Notice[], urgent: boolean) =>
+			[...list].reverse().find((notice) => isUrgent(notice) === urgent);
+		const spoken = (notice: Notice) =>
+			`${TONE_WORDS[notice.tone]}. ${notice.title}${notice.detail ? `. ${notice.detail}` : ""}`;
+		// Emptying the text once nothing of that kind remains lets an identical later notice be heard.
+		const arrivedUrgent = newest(fresh, true);
+		if (arrivedUrgent) setAlertText(spoken(arrivedUrgent));
+		else if (!newest(values, true)) setAlertText("");
+		const arrivedCalm = newest(fresh, false);
+		if (arrivedCalm) setStatusText(spoken(arrivedCalm));
+		else if (!newest(values, false)) setStatusText("");
+	}, [values]);
 	return (
 		<>
 			{/* The toasts themselves are not a live region: a toast that is its own `role="alert"`
 			    re-announces on every re-render and cannot express a polite tone. */}
 			<div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-				{calm ? `${TONE_WORDS[calm.tone]}. ${calm.title}${calm.detail ? `. ${calm.detail}` : ""}` : ""}
+				{statusText}
 			</div>
 			<div className="sr-only" role="alert" aria-atomic="true">
-				{urgent ? `${TONE_WORDS[urgent.tone]}. ${urgent.title}${urgent.detail ? `. ${urgent.detail}` : ""}` : ""}
+				{alertText}
 			</div>
 			<section
 				ref={region}
