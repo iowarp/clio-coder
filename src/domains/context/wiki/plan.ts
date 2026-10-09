@@ -322,18 +322,32 @@ function prefixGroups(files: CodewikiFile[], level: number, limit: number): Code
 	return out;
 }
 
+/** A stem for naming only: role markers such as `.test` or a leading `test_` are dropped. */
+function nameStem(path: string): string {
+	const stem = fileStem(path);
+	const cleaned = stem.replace(/^test_/, "").replace(/[._-](?:test|spec)$/, "");
+	return cleaned.length > 0 ? cleaned : stem;
+}
+
+function firstToLastName(files: ReadonlyArray<CodewikiFile>): string {
+	const first = files[0];
+	const last = files[files.length - 1];
+	if (!first || !last) return "files";
+	return `${slugSegment(nameStem(first.path))}-to-${slugSegment(nameStem(last.path))}`;
+}
+
 /** The page name of one flat group: its shared stem prefix, else its first and last stems. */
 function flatGroupName(files: ReadonlyArray<CodewikiFile>): string {
 	const first = files[0];
 	const last = files[files.length - 1];
 	if (!first || !last) return "files";
-	if (files.length === 1) return slugSegment(fileStem(first.path));
+	if (files.length === 1) return slugSegment(nameStem(first.path));
 	const firstTokens = stemTokens(first.path);
 	let prefix = 0;
 	while (prefix < firstTokens.length && files.every((file) => stemTokens(file.path)[prefix] === firstTokens[prefix]))
 		prefix += 1;
 	if (prefix > 0) return slugSegment(firstTokens.slice(0, prefix).join("-"));
-	return `${slugSegment(fileStem(first.path))}-to-${slugSegment(fileStem(last.path))}`;
+	return firstToLastName(files);
 }
 
 /** Owners for the direct files of one directory, and the files of that scope they leave behind. */
@@ -345,14 +359,22 @@ function flatOwners(
 	const isDirect = (file: CodewikiFile): boolean => areaForPath(file.path, Number.MAX_SAFE_INTEGER) === dir;
 	const direct = files.filter(isDirect).sort(byPath);
 	const rest = files.filter((file) => !isDirect(file));
-	const groups = prefixGroups(direct, 0, limit).map((group): Area => {
+	const grouped = prefixGroups(direct, 0, limit);
+	const names = grouped.map(flatGroupName);
+	const groups = grouped.map((group, position): Area => {
 		const first = group[0] as CodewikiFile;
 		const last = group[group.length - 1] as CodewikiFile;
 		return {
 			key: `${dir}#${first.path}`,
 			files: group,
 			lines: sumLines(group),
-			group: { dir, name: flatGroupName(group), first: baseName(first.path), last: baseName(last.path) },
+			group: {
+				dir,
+				name:
+					names.filter((name) => name === names[position]).length > 1 ? firstToLastName(group) : (names[position] ?? ""),
+				first: baseName(first.path),
+				last: baseName(last.path),
+			},
 		};
 	});
 	return { groups, rest };

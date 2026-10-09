@@ -655,12 +655,13 @@ test("detailed splits a flat directory into prefix-named groups with full owners
 	];
 	const plan = buildCandidatePlan(index(files), "detailed");
 	const paths = plan.pages.map((page) => page.path);
-	assert.ok(paths.includes("tests/extended/wiki.md"), paths.join(","));
-	assert.ok(paths.includes("tests/extended/agent.md"), paths.join(","));
-	assert.ok(paths.includes("tests/extended/zeta-test.md"), paths.join(","));
-	assert.ok(!paths.some((path) => /part-\d/.test(path)));
+	assert.ok(paths.includes("tests/extended/wiki-part0-to-wiki-part1.md"), paths.join(","));
+	assert.ok(paths.includes("tests/extended/wiki-part4-to-wiki-part5.md"), paths.join(","));
+	assert.ok(paths.includes("tests/extended/zeta.md"), paths.join(","));
+	assert.ok(!paths.some((path) => /part-\d/.test(path) || /-test/.test(path) || /-\d\.md$/.test(path)), paths.join(","));
+	assert.ok(paths.includes("tests/extended/agent-part0-to-agent-part1.md"), paths.join(","));
 	assert.equal(ownedFileCount(plan), files.length);
-	const wiki = plan.pages.find((page) => page.path === "tests/extended/wiki.md");
+	const wiki = plan.pages.find((page) => page.path === "tests/extended/wiki-part0-to-wiki-part1.md");
 	assert.ok(wiki);
 	assert.ok(wiki.sources.every((path) => path.includes("wiki-part")));
 	assert.match(wiki.intent, /Assigned areas: tests\/extended \(wiki-part0\.test\.ts to wiki-part1\.test\.ts\)\.$/u);
