@@ -847,6 +847,7 @@ try {
 		await page.locator(".chat-transcript").evaluate((element) => {
 			element.scrollTop = element.scrollHeight;
 		});
+		await page.locator(".jump-to-latest").waitFor({ state: "detached" });
 
 		// Complete accounting lives with the turn outcome, not as a repeated line above the
 		// composer. Its native disclosure must work from the keyboard and remain accessible open.
