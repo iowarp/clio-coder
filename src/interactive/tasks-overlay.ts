@@ -70,8 +70,11 @@ function formatTaskProofLine(board: TaskBoardSnapshot, width: number): string {
 function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string {
 	const theme = clioTheme();
 	const unverified = unverifiedTaskChecks(task);
+	// The status word renders beside the glyph so state never rests on shape or
+	// color alone (NO_COLOR, screen readers). An unverified completion keeps its
+	// "done" word and gains the warning glyph plus the trailing "unverified".
 	const presentation = unverified
-		? { glyph: GLYPH.phaseBlocked, token: "warning" as const }
+		? { glyph: GLYPH.phaseBlocked, token: "warning" as const, label: STATUS_PRESENTATION[task.status].label }
 		: STATUS_PRESENTATION[task.status];
 	const glyph = theme.fg(presentation.token, presentation.glyph);
 	const title = selected
@@ -81,7 +84,7 @@ function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string
 			: muted(task.title);
 	const cursor = selected === undefined ? "" : `${selectionMark(selected)} `;
 	return fitRow(
-		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${taskOriginLabel(task)}${unverified ? " · unverified" : ""}`)}`,
+		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${presentation.label} · ${taskOriginLabel(task)}${unverified ? " · unverified" : ""}`)}`,
 		width,
 	);
 }
