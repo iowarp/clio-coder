@@ -1,11 +1,14 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
-import { mapWikiProse, readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
+import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
 import { isGeneratedWikiFile, WIKI_INDEX, WIKI_QUICKSTART, wikiMarkdownFilesInDir } from "./layout.js";
+import type { WikiMarkdownEdit } from "./markdown.js";
+import { decodeWikiDestination, inspectWikiMarkdown, patchWikiMarkdown, repairWikiCitations } from "./markdown.js";
 
 export interface WikiPageEvidenceInput {
 	pagePath: string;
@@ -70,51 +73,21 @@ export function wikiLinkInventory(dir: string): WikiLinkInventory {
 	return { targets, unavailable: new Set(files.filter((path) => !targets.has(path))) };
 }
 
-function inlineCodeRanges(prose: string): Array<{ start: number; end: number }> {
-	const ticks = [...prose.matchAll(/`+/g)];
-	const nextByLength = new Map<number, number>();
-	const closers = new Map<number, number>();
-	for (let index = ticks.length - 1; index >= 0; index--) {
-		const current = ticks[index];
-		const following = ticks[index + 1];
-		if (current && following && /\r?\n[ \t]*\r?\n/.test(prose.slice(current.index + current[0].length, following.index)))
-			nextByLength.clear();
-		const length = current?.[0].length ?? 0;
-		const next = nextByLength.get(length);
-		if (next !== undefined) closers.set(index, next);
-		nextByLength.set(length, index);
-	}
-	const ranges: Array<{ start: number; end: number }> = [];
-	for (let index = 0; index < ticks.length; index++) {
-		const opening = ticks[index];
-		const close = closers.get(index);
-		const closing = close === undefined ? undefined : ticks[close];
-		if (!opening || !closing || close === undefined) continue;
-		let slashes = 0;
-		for (let before = opening.index - 1; before >= 0 && prose[before] === "\\"; before--) slashes++;
-		if (slashes % 2 !== 0) continue;
-		ranges.push({ start: opening.index, end: closing.index + closing[0].length });
-		index = close;
-	}
-	return ranges;
-}
-
 export function repairWikiLinks(
 	pagePath: string,
 	body: string,
 	inventory: WikiLinkInventory,
-): { body: string; unresolved: string[] } {
+): { body: string; unresolved: string[]; diagnostics?: string[] } {
 	const { targets, unavailable } = inventory;
 	const unresolved: string[] = [];
 	const repair = (destination: string): string => {
-		const angle = destination.startsWith("<");
-		const path = angle ? destination.slice(1, -1) : destination;
-		const match = /^(?![a-z][a-z\d+.-]*:|\/\/|#)(.+\.md)(#[\s\S]*)?$/i.exec(path);
-		if (!match) return destination;
-		const href = match[1] ?? "";
-		const anchor = match[2] ?? "";
+		const decoded = decodeWikiDestination(destination);
+		if (!decoded?.path.toLowerCase().endsWith(".md")) return destination;
+		const href = decoded.path;
+		const anchor = decoded.suffix;
 		const fromDir = posix.dirname(pagePath);
-		const target = posix.normalize(posix.join(fromDir, href));
+		// A leading slash names the wiki root. Joining it onto fromDir would certify a same-directory sibling.
+		const target = posix.normalize(posix.isAbsolute(href) ? href.slice(1) : posix.join(fromDir, href));
 		if (!target.startsWith("..") && targets.has(target)) return destination;
 		let replacement: string | undefined;
 		const rootPath = posix.normalize(href);
@@ -137,120 +110,28 @@ export function repairWikiLinks(
 			unresolved.push(href);
 			return destination;
 		}
-		const repaired = `${posix.relative(fromDir, replacement)}${anchor}`;
-		return angle ? `<${repaired}>` : repaired;
-	};
-	const repaired = mapWikiProse(body, (prose) => {
-		for (const pattern of [
-			/(\[[^\]\n]*\]\([ \t]*(?:\r?\n[ \t]*)?)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:\r?\n[ \t]*)?(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*(?:\r?\n[ \t]*)?)?\))/g,
-			/(^ {0,3}\[[^\]\n]+\]:[ \t]*(?:\r?\n[ \t]*)?)(<[^<>\n]+>|(?:\\.|[^\s()<>]|\([^()\n]*\))+)([ \t]*(?:(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*)?)(?=\r?$)/gm,
-		]) {
-			const code = inlineCodeRanges(prose);
-			prose = prose.replace(
-				pattern,
-				(link: string, opening: string, destination: string, closing: string, offset: number) =>
-					code.some((range) => offset >= range.start && offset < range.end)
-						? link
-						: `${opening}${repair(destination)}${closing}`,
-			);
-		}
-		return prose;
-	});
-	return { body: repaired, unresolved };
-}
-
-/** Recognize a small expression grammar; never combine literals from separate expressions. */
-function layoutConstructions(text: string): Set<string> {
-	const identifier = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
-	const lexemes = [
-		...text.matchAll(
-			/#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?:[fFrRbBuU]{0,2})(?:"""[\s\S]*?"""|'''[\s\S]*?''')|[fFrR]?(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|`(?:\\.|[^`\\])*`|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|[^\s]/g,
-		),
-	];
-	const tokens = lexemes.map((match) => match[0]);
-	let depth = 0;
-	const depths = tokens.map((token) => {
-		const before = depth;
-		if (token === "(" || token === "[") depth++;
-		else if (token === ")" || token === "]") depth--;
-		return before;
-	});
-	const paths = new Set<string>();
-	const placeholder = (name: string): string => `<${name.split(".").at(-1)}>`;
-	const atom = (start: number): { value: string; end: number } | null => {
-		const token = tokens[start] ?? "";
-		if (identifier.test(token)) {
-			if (tokens[start + 1] !== "(") return { value: placeholder(token), end: start + 1 };
-			if (!/^(?:Path|pathlib\.Path|os\.path\.join|path(?:\.posix)?\.join)$/.test(token)) return null;
-			const parts: string[] = [];
-			let end = start + 2;
-			while (end < tokens.length) {
-				const part = atom(end);
-				if (!part) return null;
-				parts.push(part.value);
-				end = part.end;
-				if (tokens[end] === ")") return { value: parts.join("/"), end: end + 1 };
-				if (tokens[end] !== ",") return null;
-				end++;
-			}
-			return null;
-		}
-		const quoted = /^([fFrR]?)(["'`])([\s\S]*)\2$/.exec(token);
-		if (!quoted || /[\\\n]/.test(quoted[3] ?? "") || token.includes('"""') || token.includes("'''")) return null;
-		let value = quoted[3] ?? "";
-		if (quoted[1]?.toLowerCase() === "f" || quoted[2] === "`") {
-			const interpolation = quoted[2] === "`" ? /\$\{([^{}]*)\}/g : /\{([^{}]*)\}/g;
-			let supported = true;
-			value = value.replace(interpolation, (_match, name: string) => {
-				if (!identifier.test(name)) supported = false;
-				return placeholder(name);
-			});
-			if (!supported || /[{}]/.test(value)) return null;
-		}
-		return { value, end: start + 1 };
-	};
-	const atBoundary = (start: number, end: number): boolean => {
-		const previous = tokens[start - 1];
-		if (previous && /^(?:[+*%&|^!?~.-]|and|or|not|in|is)$/.test(previous)) return false;
-		while (/^(?:[)\]}]|\/\*)/.test(tokens[end] ?? "")) end++;
-		const next = tokens[end];
-		if (next === undefined || /^(?:[,;:]|#)/.test(next)) return true;
-		const last = lexemes[end - 1];
-		const following = lexemes[end];
-		return (
-			last !== undefined &&
-			following !== undefined &&
-			/\n/.test(text.slice(last.index + last[0].length, following.index)) &&
-			depths[end] === 0 &&
-			identifier.test(next) &&
-			!/^(?:and|or|else|in|is)$/.test(next)
+		const repaired = encodeURI(posix.relative(fromDir, replacement)).replace(
+			/[?#()]/g,
+			(char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
 		);
+		return `${repaired}${anchor}`;
 	};
-
-	for (let index = 0; index < tokens.length; index++) {
-		let expression = atom(index);
-		if (!expression) continue;
-		let operator: string | undefined;
-		let supported = true;
-		while (tokens[expression.end] === "/" || tokens[expression.end] === "+") {
-			const nextOperator: string | undefined = tokens[expression.end];
-			const next = atom(expression.end + 1);
-			if (!next) {
-				supported = false;
-				break;
-			}
-			if (operator !== undefined && operator !== nextOperator) supported = false;
-			operator = nextOperator;
-			expression = { value: expression.value + (operator === "/" ? "/" : "") + next.value, end: next.end };
-		}
-		if (supported && atBoundary(index, expression.end)) {
-			paths.add(expression.value);
-			// An opaque base directory can be omitted; literal path components cannot.
-			if (/^<[\w$]+>\//.test(expression.value)) paths.add(expression.value.replace(/^<[\w$]+>\//, ""));
-		}
-		index = expression.end - 1;
+	const inspection = inspectWikiMarkdown(body);
+	const edits = new Map<WikiMarkdownEdit["token"], WikiMarkdownEdit>();
+	for (const { token, definition } of inspection.links) {
+		const value = repair(token.href);
+		if (value === token.href) continue;
+		const target = definition ?? token;
+		const edit = edits.get(target) ?? { token: target, value, users: [] };
+		if (definition) edit.users?.push(token);
+		edits.set(target, edit);
 	}
-	return paths;
+	const repaired = patchWikiMarkdown(body, inspection, [...edits.values()]);
+	return {
+		body: repaired.body,
+		unresolved: [...new Set(unresolved)],
+		...(repaired.diagnostics.length ? { diagnostics: repaired.diagnostics } : {}),
+	};
 }
 
 /**
@@ -276,7 +157,9 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	const coverageGaps = metadata.coverage_gaps ?? [];
 	for (const gap of coverageGaps) fail(`Coverage gap: ${gap}`);
 	if (input.wikiLinks) {
-		for (const href of repairWikiLinks(input.pagePath, body, input.wikiLinks).unresolved) {
+		const links = repairWikiLinks(input.pagePath, body, input.wikiLinks);
+		for (const diagnostic of links.diagnostics ?? []) fail(diagnostic);
+		for (const href of links.unresolved) {
 			fail(`Repair unresolved wiki link ${JSON.stringify(href)} in ${input.pagePath}; its target page is unavailable.`);
 		}
 	}
@@ -321,26 +204,25 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		if (/[:#]/.test(reference))
 			fail(`Use a plain file path in sources/tests: ${JSON.stringify(reference)}; put line/symbol citations in the body.`);
 	}
-	mapWikiProse(body, (line) => {
-		for (const match of line.matchAll(/`([^`\s]+)`/g)) {
-			const cited = match[1] ?? "";
-			// A filename extension distinguishes a file citation from a symbol or a
-			// recorded decision ref. Include extensionless conventional repo files.
-			const pathLike = cited.includes("/") && /\.[\w-]+(?=[:#]|$)/.test(cited);
-			const rootFile =
-				/^[^/:#]+\.(?:[cm]?[jt]sx?|py|rs|go|c|h|cpp|hpp|java|rb|sh|json|ya?ml|toml|md|txt|ini|cfg|xml|html|css|sql)(?=[:#]|$)/i.test(
-					cited,
-				);
-			if (
-				!/^[a-z][a-z\d+.-]*:\/\//i.test(cited) &&
-				(pathLike || rootFile || /^(?:Makefile|Dockerfile|LICENSE)(?=[:#]|$)/.test(cited))
-			) {
-				references.add(cited);
-				bodyReferences.add(cited);
-			}
+	for (const token of inspectWikiMarkdown(body).citations) {
+		const cited = token.text;
+		if (/\s/.test(cited)) continue;
+		// A filename extension distinguishes a file citation from a symbol or a
+		// recorded decision ref. Include extensionless conventional repo files.
+		const pathLike = cited.includes("/") && /\.[\w-]+(?=[:#]|$)/.test(cited);
+		const rootFile =
+			/^[^/:#]+\.(?:[cm]?[jt]sx?|py|rs|go|c|h|cpp|hpp|java|rb|sh|json|ya?ml|toml|md|txt|ini|cfg|xml|html|css|sql)(?=[:#]|$)/i.test(
+				cited,
+			);
+		if (
+			!/^[a-z][a-z\d+.-]*:\/\//i.test(cited) &&
+			(pathLike || rootFile || /^(?:Makefile|Dockerfile|LICENSE)(?=[:#]|$)/.test(cited))
+		) {
+			references.add(cited);
+			bodyReferences.add(cited);
 		}
-		return line;
-	});
+	}
+
 	if (references.size > 512) {
 		fail("Page exceeds the 512-reference evidence-check limit; split or shorten it before retrying.");
 		return {
@@ -490,23 +372,47 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		}
 		return false;
 	};
-	const constructionsByFile = new Map<string, Set<string>>();
+	let trackedFiles: string[] | undefined;
+	// Each tracked name is resolved at most once per validation, however many globs match it.
+	const regularFileCache = new Map<string, boolean>();
+	const isContainedRegularFile = (file: string): boolean => {
+		const known = regularFileCache.get(file);
+		if (known !== undefined) return known;
+		let valid = false;
+		try {
+			const real = realpathSync(resolve(root, file));
+			valid = within(root, real) && statSync(real).isFile();
+		} catch {
+			// A tracked path that no longer resolves cannot ground a layout.
+		}
+		regularFileCache.set(file, valid);
+		return valid;
+	};
 	const groundedLayout = (cited: string): boolean => {
 		if (isAbsolute(cited) || cited.includes("\\") || cited.split("/").includes("..")) return false;
-		const literal = (value: string): RegExp => new RegExp(`(?<![\\w/.-])${escapeRegex(value)}(?![\\w/-]|\\.\\w)`);
+		const literal = new RegExp(`(?<![\\w/.-])${escapeRegex(cited)}(?![\\w/-]|\\.\\w)`);
 		const glob = /[*?[]/.test(cited);
-		const template = /<[A-Za-z_][\w-]*>/.test(cited);
-		if (glob && !template) return listedFiles().some((file) => posix.matchesGlob(file, cited));
-		return [...declaredFiles].some((path) => {
-			const text = sourceText(path) ?? "";
-			if (literal(cited).test(text)) return true;
-			let constructions = constructionsByFile.get(path);
-			if (!constructions) {
-				constructions = layoutConstructions(text);
-				constructionsByFile.set(path, constructions);
+		const template = /<[A-Za-z_][\w-]*>|[{}]/.test(cited);
+		if (glob && !template) {
+			if (trackedFiles === undefined) {
+				try {
+					trackedFiles = execFileSync("git", ["ls-files", "--cached", "-z"], {
+						cwd: root,
+						encoding: "utf8",
+						maxBuffer: 128 * 1024 * 1024,
+						stdio: ["ignore", "pipe", "ignore"],
+					})
+						.split("\0")
+						.filter(Boolean);
+				} catch {
+					// A repository without a tracked inventory cannot establish a glob.
+					trackedFiles = [];
+				}
 			}
-			return constructions.has(cited);
-		});
+			// The index keeps deleted paths and symlinks, so a match must still be a contained regular file.
+			return trackedFiles.some((file) => posix.matchesGlob(file, cited) && isContainedRegularFile(file));
+		}
+		return [...declaredFiles].some((path) => literal.test(sourceText(path) ?? ""));
 	};
 	for (const reference of references) {
 		const label = JSON.stringify(reference);
@@ -525,7 +431,8 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 				!declaredReferences.has(reference) &&
 				match[2] === undefined &&
 				match[4] === undefined &&
-				verifiedTestSelector(cited)
+				verifiedTestSelector(cited) &&
+				groundedLayout(cited)
 			)
 				continue;
 			let source = resolveSourcePath(resolve(input.sourceRoot), cited);
@@ -599,6 +506,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			fail(`Cannot inspect ${label}; restore readable repository evidence or remove the unsupported reference.`);
 		}
 	}
+	for (const diagnostic of repairWikiCitations(body, resolvedCitations).diagnostics) fail(diagnostic);
 	if (dependencies.size === 0)
 		fail("Cite at least one existing repository file in sources/tests or as a backticked source path.");
 	return {

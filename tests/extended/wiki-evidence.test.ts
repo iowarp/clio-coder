@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,8 @@ import {
 	repairWikiLinks,
 	validateWikiPageEvidence,
 } from "../../src/domains/context/wiki/evidence.js";
+
+import { repairWikiCitations } from "../../src/domains/context/wiki/markdown.js";
 
 let sandbox: string;
 let root: string;
@@ -27,6 +30,8 @@ beforeEach(() => {
 	writeFileSync(join(root, "tests/main.test.ts"), "test\n");
 	writeFileSync(join(root, "package.json"), "{}\n");
 	writeFileSync(join(root, "Makefile"), "all:\n");
+	execFileSync("git", ["init", "-q"], { cwd: root });
+	execFileSync("git", ["add", "."], { cwd: root });
 });
 afterEach(() => rmSync(sandbox, { recursive: true, force: true }));
 
@@ -86,12 +91,11 @@ describe("wiki mechanical evidence gate", () => {
 			"[Title](target.md (Optional title))",
 			"[Angle](<target.md#heading>)",
 			"[Multiline](\ntarget.md)",
-			'[Multiline]( \r\n  <target.md#heading>\r\n"Optional title"\r\n)',
-			"[Reference][target]\n[target]:\n  target.md",
+			"[Reference][target]\n\n[target]:\n  target.md",
 			'[Both](<target.md> "Optional `code` title")',
-			'[Reference][target]\n[target]: target.md "Optional title"',
-			'[Collapsed][]\n[Collapsed]: <target.md#heading> "Optional title"',
-			"[Shortcut]\n[Shortcut]: target.md",
+			'[Reference][target]\n\n[target]: target.md "Optional title"',
+			'[Collapsed][]\n\n[Collapsed]: <target.md#heading> "Optional title"',
+			"[Shortcut]\n\n[Shortcut]: target.md",
 		]) {
 			deepStrictEqual(repairWikiLinks("section/page.md", body, wikiLinks), {
 				body: body.replace("target.md", "../target.md"),
@@ -150,6 +154,139 @@ describe("wiki mechanical evidence gate", () => {
 		deepStrictEqual(repairWikiLinks("section/page.md", "Unclosed ` tick: [Missing](missing.md)", wikiLinks).unresolved, [
 			"missing.md",
 		]);
+	});
+
+	it("inspects parser containers and block boundaries while keeping indented code opaque", () => {
+		const wikiLinks = { targets: new Set(["target.md"]), unavailable: new Set<string>() };
+		for (const body of [
+			"Opening ` tick.\n# Heading\n[Broken](missing.md)\nClosing ` tick.",
+			"[Multiline\nlabel](missing.md)",
+			"[Use][ref]\n\n> [ref]: missing.md",
+			"- > [Nested](missing.md)",
+			"| Link |\n| --- |\n| [Broken](missing.md) |",
+		]) {
+			deepStrictEqual(repairWikiLinks("area.md", body, wikiLinks).unresolved, ["missing.md"], body);
+		}
+		const opaque = "    [Example](missing.md) `missing.ts`\n\n- Item\n\n      [Nested code](missing.md) `missing.py`";
+		deepStrictEqual(repairWikiLinks("area.md", opaque, wikiLinks), { body: opaque, unresolved: [] });
+		strictEqual(check(page("src/main.ts", opaque)).ok, true);
+		for (const body of [
+			"# `missing.ts`",
+			"> - ``missing.ts``",
+			"| Source |\n| --- |\n| `missing.ts` |",
+			"See `\nmissing.ts\n`.",
+		]) {
+			strictEqual(check(page("src/main.ts", body)).ok, false, body);
+		}
+	});
+
+	it("patches used reference definitions once, including blockquotes and normalized labels", () => {
+		const inventory = { targets: new Set(["target.md"]), unavailable: new Set<string>() };
+		for (const body of [
+			'[One][REF] and [ref][] and [ref].\n\n> [ref]: target.md "Title"',
+			"[Two\nlines](target.md)",
+			"- > [Nested](target.md)",
+		]) {
+			const repaired = repairWikiLinks("section/page.md", body, inventory);
+			deepStrictEqual(repaired, { body: body.replace("target.md", "../target.md"), unresolved: [] });
+			deepStrictEqual(repairWikiLinks("section/page.md", repaired.body, inventory), repaired);
+		}
+		deepStrictEqual(repairWikiLinks("section/page.md", "[unused]: missing.md", inventory), {
+			body: "[unused]: missing.md",
+			unresolved: [],
+		});
+	});
+
+	it("decodes Markdown escapes, entities and URL paths before inventory lookup", () => {
+		const inventory = {
+			targets: new Set(["target.md", "a&b.md", "two words.md", "a(b).md", "©.md", "a#b.md", "€uro.md"]),
+			unavailable: new Set<string>(),
+		};
+		for (const href of [
+			"target%2emd",
+			"target&#46;md",
+			"target&period;md",
+			"a&amp;b.md",
+			"two%20words.md",
+			"&copy;.md",
+			"a%23b.md",
+			"&#128;uro.md",
+			"target.md?view=1#part",
+			"a\\(b\\).md",
+		]) {
+			const body = `[Link](${href})`;
+			deepStrictEqual(repairWikiLinks("page.md", body, inventory), { body, unresolved: [] }, href);
+		}
+		deepStrictEqual(repairWikiLinks("page.md", "[Missing](missing%2emd)", inventory).unresolved, ["missing.md"]);
+		const sibling = { targets: new Set(["section/local.md"]), unavailable: new Set<string>() };
+		const rooted = { targets: new Set(["section/local.md", "local.md"]), unavailable: new Set<string>() };
+		for (const [href, expected] of [
+			["/local.md", "/local.md"],
+			["/../local.md", "/../local.md"],
+			["%2Flocal.md", "%2Flocal.md"],
+			["%2flocal.md", "%2flocal.md"],
+			["sub%2Flocal.md", "sub%2Flocal.md"],
+			["sub%5Clocal.md", "sub%5Clocal.md"],
+		] as const) {
+			const body = `[Link](${href})`;
+			const missing = repairWikiLinks("section/page.md", body, sibling);
+			deepStrictEqual(missing, { body, unresolved: [expected] }, href);
+			const present = repairWikiLinks("section/page.md", body, rooted);
+			deepStrictEqual(present, { body, unresolved: href === "/local.md" ? [] : [expected] }, href);
+		}
+	});
+
+	it("preserves CRLF and Unicode and diagnoses normalized or ambiguous repairs", () => {
+		const inventory = { targets: new Set(["target.md"]), unavailable: new Set<string>() };
+		const stable = "# Café 🧪\r\n\r\n\r\n[Résumé](target.md)\r\n  ";
+		deepStrictEqual(repairWikiLinks("section/page.md", stable, inventory), {
+			body: stable.replace("target.md", "../target.md"),
+			unresolved: [],
+		});
+		for (const body of [
+			'[Multiline]( \r\n  <target.md#heading>\r\n"Optional title"\r\n)',
+			"[Repeat](target.md) [Repeat](target.md)",
+			"- > [Nested\n  > label](target.md)",
+			"[target.md](target.md)",
+		]) {
+			const repaired = repairWikiLinks("section/page.md", body, inventory);
+			strictEqual(repaired.body, body);
+			strictEqual((repaired.diagnostics?.length ?? 0) > 0, true, body);
+			strictEqual(
+				validateWikiPageEvidence({
+					sourceRoot: root,
+					pagePath: "section/page.md",
+					content: page("src/main.ts", body),
+					wikiLinks: inventory,
+				}).ok,
+				false,
+			);
+		}
+	});
+
+	it("rejects a patch when re-lexing changes Markdown beyond the intended citation", () => {
+		const body = "See `main.ts` and preserve 🧪 prose.";
+		const result = repairWikiCitations(body, { "main.ts": "src/a`file.ts" });
+		strictEqual(result.body, body);
+		strictEqual(result.diagnostics.length, 1);
+	});
+
+	it("accepts exact source occurrences without certifying their runtime meaning", () => {
+		for (const text of ["// Layout: verdict-<tier>.json", 'path = "verdict-<tier>.json".replace("json", "yaml")']) {
+			writeFileSync(join(root, "src/main.ts"), text);
+			strictEqual(check(page("src/main.ts", "Layout: `verdict-<tier>.json`.")).ok, true);
+			strictEqual(check(page("package.json", "Layout: `verdict-<tier>.json`.")).ok, false);
+		}
+		writeFileSync(join(root, "untracked.json"), "{}");
+		strictEqual(check(page("src/main.ts", "Layout: `untracked*.json`.")).ok, false);
+		strictEqual(check(page("src/main.ts", "Layout: `src/*.ts`.")).ok, true);
+		writeFileSync(join(root, "src/gone.cfg"), "x");
+		writeFileSync(join(sandbox, "outside.txt"), "x");
+		symlinkSync(join(sandbox, "outside.txt"), join(root, "src/escape.lnk"));
+		execFileSync("git", ["add", "src/gone.cfg", "src/escape.lnk"], { cwd: root });
+		rmSync(join(root, "src/gone.cfg"));
+		strictEqual(check(page("src/main.ts", "Layout: `src/gone*.cfg`.")).ok, false);
+		strictEqual(check(page("src/main.ts", "Layout: `src/escape*.lnk`.")).ok, false);
 	});
 
 	it("exposes individually valid body rewrites even when another citation fails", () => {
@@ -233,7 +370,7 @@ describe("wiki mechanical evidence gate", () => {
 		strictEqual(check(page("package.json", "See `src/*.ts:1`.")).ok, false);
 	});
 
-	it("grounds templates and runtime paths in one ordered construction", () => {
+	it("requires exact template spelling rather than inferred expression values", () => {
 		writeFileSync(
 			join(root, "src/main.ts"),
 			'output = f"verdict-{tier}.json"\nraw = trial_dir / "raw" / "metrics.json"\n' +
@@ -246,11 +383,7 @@ describe("wiki mechanical evidence gate", () => {
 			"research/directives/<campaign_id>.yaml",
 			"measure/<tier>/*/block-*/measurements.json",
 		]) {
-			deepStrictEqual(check(page("src/main.ts", `The runtime layout is \`${name}\`.`)), {
-				ok: true,
-				reasons: [],
-				dependencies: ["src/main.ts"],
-			});
+			strictEqual(check(page("src/main.ts", `The runtime layout is \`${name}\`.`)).ok, false, name);
 			strictEqual(check(page("package.json", `The runtime layout is \`${name}\`.`)).ok, false, name);
 			strictEqual(check(page("src/main.ts", `See \`${name}:1\`.`)).ok, false, name);
 			strictEqual(check(page(name)).ok, false, name);
@@ -286,7 +419,7 @@ describe("wiki mechanical evidence gate", () => {
 			"directives/<campaign_id>.yaml",
 			"raw/metrics.json",
 		]) {
-			strictEqual(check(page("src/main.ts", `Layout: \`${name}\`.`)).ok, true, name);
+			strictEqual(check(page("src/main.ts", `Layout: \`${name}\`.`)).ok, false, name);
 		}
 		for (const name of [
 			"lineage/<campaign_id>.yaml",
@@ -304,7 +437,7 @@ describe("wiki mechanical evidence gate", () => {
 		}
 	});
 
-	it("recognizes join calls, Path chains, template literals and concatenation without mixing expressions", () => {
+	it("rejects synthesized templates from joins, Path chains, literals and concatenation", () => {
 		for (const expression of [
 			'os.path.join(root, "lineage", f"{campaign_id}.jsonl")',
 			'Path(root, "lineage") / f"{campaign_id}.jsonl"',
@@ -320,7 +453,7 @@ describe("wiki mechanical evidence gate", () => {
 			'root / "lineage" / f"{campaign_id}.jsonl"\nif condition:\n    next_statement()',
 		]) {
 			writeFileSync(join(root, "src/main.ts"), `output = ${expression}\n`);
-			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.jsonl`.")).ok, true, expression);
+			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.jsonl`.")).ok, false, expression);
 			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.yaml`.")).ok, false, expression);
 			strictEqual(check(page("src/main.ts", "Layout: `lineage/lineage/<campaign_id>.jsonl`.")).ok, false, expression);
 		}
@@ -505,6 +638,7 @@ describe("wiki mechanical evidence gate", () => {
 	it("verifies test selectors against the nearest workspace package and a declared matching test", () => {
 		mkdirSync(join(root, "apps/gui/tests"), { recursive: true });
 		writeFileSync(join(root, "apps/gui/tests/view.test.ts"), "test\n");
+		execFileSync("git", ["add", "apps"], { cwd: root });
 		const manifest = join(root, "apps/gui/package.json");
 		writeFileSync(manifest, '{"scripts":{"test":"node --test tests/*.test.ts tests/*.test.tsx"}}');
 		const content = "---\ntests: [apps/gui/tests/view.test.ts]\n---\nCI discovers `tests/*.test.ts`.";

@@ -92,33 +92,6 @@ export function stripFrontmatter(content: string): { block: string | null; body:
 	return { block: match[1] ?? "", body: content.slice(match[0].length) };
 }
 
-export function mapWikiProse(body: string, transform: (prose: string) => string): string {
-	let fence = "";
-	const chunks: string[] = [];
-	let prose: string[] = [];
-	for (const line of body.split("\n")) {
-		const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
-		if (marker || fence) {
-			if (prose.length > 0) {
-				chunks.push(transform(prose.join("\n")));
-				prose = [];
-			}
-			chunks.push(line);
-			if (marker) {
-				if (!fence) fence = marker;
-				else if (
-					marker[0] === fence[0] &&
-					marker.length >= fence.length &&
-					/^\s*$/.test(line.trimStart().slice(marker.length))
-				)
-					fence = "";
-			}
-		} else prose.push(line);
-	}
-	if (prose.length > 0) chunks.push(transform(prose.join("\n")));
-	return chunks.join("\n");
-}
-
 /**
  * The first real paragraph of a body, collapsed to one line. Used as a fallback
  * summary when the author supplied none, so a directory index still says
@@ -219,25 +192,9 @@ function renderList(name: string, values: ReadonlyArray<string>): string[] {
 }
 
 /** Render a deterministic front-matter block. Empty lists are omitted. */
-function renderFrontmatter(metadata: WikiPageMetadata): string {
+export function renderFrontmatter(metadata: WikiPageMetadata): string {
 	const lines = [`title: ${JSON.stringify(metadata.title)}`];
 	if (metadata.summary.length > 0) lines.push(`summary: ${JSON.stringify(metadata.summary)}`);
 	for (const field of LIST_FIELDS) lines.push(...renderList(field, metadata[field] ?? []));
 	return `---\n${lines.join("\n")}\n---\n`;
-}
-
-/**
- * Rebuild a page from repaired metadata and its body, guaranteeing the body
- * opens with an H1 that matches the metadata title. Without the H1 the page
- * reads as a fragment and every title fallback in the codebase records the
- * filename instead of a name.
- */
-export function renderWikiPage(metadata: WikiPageMetadata, body: string): string {
-	const trimmed = body.replace(/^\s+/, "").replace(/\s+$/, "");
-	// Matched directly rather than through `wikiPageHeading`, which strips a
-	// leading front-matter block: this body has none, and a page opening on a
-	// `---` horizontal rule would otherwise have its first section eaten.
-	const hasHeading = /^#\s+\S/m.test(trimmed);
-	const withHeading = hasHeading ? trimmed : `# ${metadata.title}\n\n${trimmed}`;
-	return `${renderFrontmatter(metadata)}\n${withHeading}\n`;
 }

@@ -88,9 +88,11 @@ Grounding rules:
   the body. Omit it when none apply; never invent a decision ref or a missing rationale.
 - Cite source paths in backticks: `src/domains/dispatch/validation.ts`. Prefer a stable path plus
   a symbol name over a line number; use `path:line` only when the exact location is load-bearing.
-- A backticked standalone path is a repository citation and must exist. Use plain quoted text
-  for artifact names, naming patterns, and absent paths, with a separate citation to the
-  enforcing source or test.
+- A backticked standalone path must resolve to a repository file, occur with that exact spelling
+  in a cited source, or be a plain glob matching tracked repository files. Source-text occurrence
+  establishes only the spelling, not the resulting runtime path. Put synthesized templates and
+  invented artifact names in plain quoted prose or fenced examples, with a separate citation to
+  the enforcing source or test. Do not infer a path spelling from joined strings or expressions.
 - Use repository-relative file paths in prose even when describing a relative import. A module's
   import specifier is relative to that module, and copying it as a file citation can escape the
   repository root. Name the resolved repository file instead. Quote test glob selectors inside

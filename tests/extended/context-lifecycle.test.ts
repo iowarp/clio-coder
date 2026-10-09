@@ -251,11 +251,14 @@ describe("contracts/context lifecycle", () => {
 			"[Local anchor](#details)",
 		])
 			ok(repaired.includes(link), link);
-		deepStrictEqual(report.issues, [
-			{ page: "tests/extended.md", kind: "link", reference: "old/shared.md" },
-			{ page: "tests/extended.md", kind: "link", reference: "missing.md" },
-		]);
-		ok(repaired.includes("<!-- clio-coder:wiki unresolved links: old/shared.md, missing.md -->"));
+		deepStrictEqual(
+			report.issues.filter((issue) => issue.kind === "link"),
+			[
+				{ page: "tests/extended.md", kind: "link", reference: "old/shared.md" },
+				{ page: "tests/extended.md", kind: "link", reference: "missing.md" },
+			],
+		);
+		ok(repaired.includes("<!-- clio-coder:wiki unresolved links: old/shared.md, missing.md;"));
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
 		strictEqual(readFileSync(page, "utf8"), repaired);
 	});
@@ -280,12 +283,12 @@ describe("contracts/context lifecycle", () => {
 				"# Architecture\n",
 				"See `tests/view.test.ts::Suite::case`, `src/main.js:1-2:main`, and `main.js#L1-L2`.",
 				"Names: `index.ts`, `settings.yaml`, `verdict-<tier>.json`, `src/*.ts`, and `toString`.",
-				"```ts\nconst file = `src/main.js:1-2:main`;\n```",
-				"~~~text\n`main.js#L1-L2`\n~~~",
-				"~~~markdown\n~~~text\n`main.js#L1-L2`\n~~~~ \nAfter tilde: `main.js#L1-L2`.",
-				"```markdown\n````text\n`main.js#L1-L2`\n```\nAfter backtick: `main.js#L1-L2`.",
-				"````text\n```ts\n`src/main.js:1-2:main`\n```\n````",
-				"```text\n`main.js#L1-L2`",
+				"```ts\nconst file = `fenced.js`;\n```",
+				"~~~text\n`fenced.js`\n~~~",
+				"~~~markdown\n~~~text\n`fenced.js`\n~~~~ \nAfter tilde: `main.js#L2`.",
+				"```markdown\n````text\n`fenced.js`\n```\nAfter backtick: `main.js:1`.",
+				"````text\n```ts\n`fenced.js`\n```\n````",
+				"```text\n`fenced.js`",
 			].join("\n"),
 		);
 		const plan = { version: 1 as const, overview: "", pages: [] };
@@ -295,19 +298,71 @@ describe("contracts/context lifecycle", () => {
 			canonical.includes(
 				"See `apps/gui/tests/view.test.ts::Suite::case`, `src/main.ts:1-2:main`, and `src/main.ts#L1-L2`.",
 			),
+			canonical,
 		);
 		const { metadata } = readWikiPage({ pagePath: "architecture.md", content: canonical });
 		deepStrictEqual(metadata.sources, ["src/main.ts"]);
 		deepStrictEqual(metadata.tests, ["apps/gui/tests/view.test.ts"]);
 		ok(canonical.includes("Names: `index.ts`, `settings.yaml`, `verdict-<tier>.json`, `src/*.ts`, and `toString`."));
-		ok(canonical.includes("```ts\nconst file = `src/main.js:1-2:main`;\n```"));
-		ok(canonical.includes("~~~text\n`main.js#L1-L2`\n~~~"));
-		ok(canonical.includes("~~~markdown\n~~~text\n`main.js#L1-L2`\n~~~~ \nAfter tilde: `src/main.ts#L1-L2`."));
-		ok(canonical.includes("```markdown\n````text\n`main.js#L1-L2`\n```\nAfter backtick: `src/main.ts#L1-L2`."));
-		ok(canonical.includes("````text\n```ts\n`src/main.js:1-2:main`\n```\n````"));
-		ok(canonical.includes("```text\n`main.js#L1-L2`"));
+		ok(canonical.includes("```ts\nconst file = `fenced.js`;\n```"));
+		ok(canonical.includes("~~~text\n`fenced.js`\n~~~"));
+		ok(canonical.includes("~~~markdown\n~~~text\n`fenced.js`\n~~~~ \nAfter tilde: `src/main.ts#L2`."));
+		ok(canonical.includes("```markdown\n````text\n`fenced.js`\n```\nAfter backtick: `src/main.ts:1`."));
+		ok(canonical.includes("````text\n```ts\n`fenced.js`\n```\n````"));
+		ok(canonical.includes("```text\n`fenced.js`"));
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
 		strictEqual(readFileSync(page, "utf8"), canonical);
+	});
+
+	it("preserves authored body bytes and keeps unsafe repairs pending across assembly", () => {
+		const wiki = join(isolated.dir, ".clio-coder/wiki");
+		mkdirSync(join(wiki, "section"), { recursive: true });
+		mkdirSync(join(isolated.dir, "src"), { recursive: true });
+		writeFileSync(join(isolated.dir, "src/main.ts"), "source\n");
+		writeFileSync(join(wiki, "target.md"), "# Target\n\nTarget details.\n");
+		writeFileSync(join(wiki, "section/local.md"), "# Local\n\nLocal details.\n");
+		const body = "\r\n# Café 🧪\r\n\r\n\r\nRésumé: `main.ts` and [Target](target.md).\r\n\r\n  ";
+		const unsafe = "# Draft\r\n\r\n[Target](\r\n target.md) and `main.ts` twice: `main.ts`.\r\n";
+		for (const [name, text] of [
+			["safe", body],
+			["unsafe", unsafe],
+			["rooted", "# Rooted\n\n[Root](/local.md) and `main.ts`.\n"],
+		]) {
+			writeFileSync(join(wiki, `section/${name}.md`), `---\nsources: [src/main.ts]\n---\n${text}`);
+		}
+		const plan = {
+			version: 1 as const,
+			overview: "",
+			pages: ["safe", "unsafe", "rooted"].map((name) => ({
+				path: `section/${name}.md`,
+				title: name,
+				intent: "",
+				sources: ["src/main.ts"],
+				status: "written" as const,
+				attempts: 1,
+			})),
+		};
+		const report = assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		const safe = readFileSync(join(wiki, "section/safe.md"), "utf8");
+		strictEqual(
+			readWikiPage({ pagePath: "section/safe.md", content: safe }).body,
+			body.replace("`main.ts`", "`src/main.ts`").replace("target.md", "../target.md"),
+		);
+		strictEqual(plan.pages[0]?.status, "written");
+		strictEqual(plan.pages[1]?.status, "pending");
+		// /local.md names the wiki root, so section/local.md must not satisfy it.
+		strictEqual(plan.pages[2]?.status, "pending");
+		deepStrictEqual(
+			report.issues.filter((issue) => issue.page === "section/rooted.md" && issue.kind === "link"),
+			[{ page: "section/rooted.md", kind: "link", reference: "/local.md" }],
+		);
+		ok(report.issues.some((issue) => issue.kind === "repair"));
+		const pending = readFileSync(join(wiki, "section/unsafe.md"), "utf8");
+		ok(readWikiPage({ pagePath: "section/unsafe.md", content: pending }).body.startsWith(unsafe));
+		ok(readFileSync(join(wiki, "quickstart.md"), "utf8").includes("unsafe.md) (pending draft)"));
+		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		strictEqual(readFileSync(join(wiki, "section/safe.md"), "utf8"), safe);
+		strictEqual(readFileSync(join(wiki, "section/unsafe.md"), "utf8"), pending);
 	});
 
 	it("writes canonical wiki repair markers and consumes the released marker", () => {
@@ -322,7 +377,7 @@ describe("contracts/context lifecycle", () => {
 		const plan = { version: 1 as const, overview: "", pages: [] };
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
 		const canonical = readFileSync(page, "utf8");
-		strictEqual(canonical.includes("<!-- clio-coder:wiki unresolved links: missing.md -->"), true);
+		strictEqual(canonical.includes("<!-- clio-coder:wiki unresolved links: missing.md;"), true);
 		strictEqual(canonical.includes("<!-- clio:wiki"), false);
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
 		strictEqual(readFileSync(page, "utf8"), canonical);

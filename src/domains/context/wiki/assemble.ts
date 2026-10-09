@@ -18,7 +18,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, posix, relative } from "node:path";
 import type { WikiLinkInventory } from "./evidence.js";
 import { repairWikiLinks, validateWikiPageEvidence, wikiLinkInventory } from "./evidence.js";
-import { mapWikiProse, readWikiPage, renderWikiPage, resolveSourcePath, type WikiPageMetadata } from "./frontmatter.js";
+import type { WikiPageMetadata } from "./frontmatter.js";
+import { readWikiPage, resolveSourcePath } from "./frontmatter.js";
 import {
 	isGeneratedWikiFile,
 	listWikiPagesInDir,
@@ -27,22 +28,15 @@ import {
 	type WikiPage,
 	wikiMarkdownFilesInDir,
 } from "./layout.js";
+import { renderWikiPage, repairWikiCitations } from "./markdown.js";
 import type { WikiPlan, WikiPlanPage } from "./plan.js";
 
-/**
- * A backticked repository path in prose, optionally with `:line` or a trailing
- * `:symbol`. This is the citation form the page fragments ask for, so it is the
- * form checked here.
- */
-const SOURCE_CITATION =
-	/`((?:src|tests?|scripts|benchmarks|docs|packages|apps|lib|config|\.github)\/[^`\s:#]+)(?::(\d+)(?:-\d+)?)?(?::[A-Za-z_$][\w$.-]*)?`/g;
-
 /** Marker line carrying a page's unrepaired references; regenerated every pass. */
-const REPAIR_NOTE = /^<!-- (?:clio-coder|clio):wiki .*-->$/gm;
+const REPAIR_NOTE = /(?:\r?\n)?^<!-- (?:clio-coder|clio):wiki [^\r\n]*-->\r?$(?:\n)?/gm;
 
 export interface WikiPageIssue {
 	page: string;
-	kind: "link" | "citation" | "coverage";
+	kind: "link" | "citation" | "coverage" | "repair";
 	reference: string;
 }
 
@@ -69,15 +63,17 @@ function writeText(filePath: string, text: string): void {
 }
 
 function stripRepairNotes(body: string): string {
-	return body.replace(REPAIR_NOTE, "").replace(/\n{3,}/g, "\n\n");
+	return body.replace(REPAIR_NOTE, "");
 }
 
 function renderRepairNote(issues: ReadonlyArray<WikiPageIssue>): string {
 	const links = issues.filter((issue) => issue.kind === "link").map((issue) => issue.reference);
 	const citations = issues.filter((issue) => issue.kind === "citation").map((issue) => issue.reference);
+	const repairs = issues.filter((issue) => issue.kind === "repair").map((issue) => issue.reference);
 	const parts: string[] = [];
 	if (links.length > 0) parts.push(`unresolved links: ${[...new Set(links)].join(", ")}`);
 	if (citations.length > 0) parts.push(`unresolved sources: ${[...new Set(citations)].join(", ")}`);
+	if (repairs.length > 0) parts.push(`manual repairs: ${[...new Set(repairs)].join("; ")}`);
 	return parts.length === 0 ? "" : `\n<!-- clio-coder:wiki ${parts.join("; ")} -->\n`;
 }
 
@@ -103,26 +99,24 @@ function repairPage(
 		issues.push({ page: relPath, kind: "coverage", reference: gap });
 	const evidence = validateWikiPageEvidence({ pagePath: relPath, content: original, sourceRoot });
 	const resolvedCitations = evidence.resolvedCitations ?? {};
-	body = mapWikiProse(body, (line) =>
-		line.replace(/`([^`\s]+)`/g, (token: string, cited: string) =>
-			Object.hasOwn(resolvedCitations, cited) ? `\`${resolvedCitations[cited]}\`` : token,
-		),
-	);
-	for (const cited of parsed.unresolvedPaths) {
-		issues.push({ page: relPath, kind: "citation", reference: cited });
+	const citations = repairWikiCitations(body, resolvedCitations);
+	body = citations.body;
+	for (const diagnostic of citations.diagnostics) issues.push({ page: relPath, kind: "repair", reference: diagnostic });
+	const reported = new Set([
+		...citations.diagnostics,
+		...(parsed.metadata.coverage_gaps ?? []).map((gap) => `Coverage gap: ${gap}`),
+	]);
+	for (const diagnostic of evidence.allReasons ?? evidence.reasons) {
+		if (!reported.has(diagnostic)) issues.push({ page: relPath, kind: "citation", reference: diagnostic });
 	}
-	for (const match of body.matchAll(SOURCE_CITATION)) {
-		const cited = match[1] ?? "";
-		if (resolveSourcePath(sourceRoot, cited) === null) {
-			// The publication gate also understands imports and verified test
-			// selectors. Assembly must not relabel their evidence as unresolved.
-			if (!evidence.ok) issues.push({ page: relPath, kind: "citation", reference: cited });
-		}
-	}
+
 	const links = repairWikiLinks(relPath, body, knownPages);
 	for (const href of links.unresolved) issues.push({ page: relPath, kind: "link", reference: href });
 
-	const rebuilt = `${renderWikiPage(parsed.metadata, links.body).trimEnd()}\n${renderRepairNote(issues)}`;
+	for (const diagnostic of links.diagnostics ?? [])
+		issues.push({ page: relPath, kind: "repair", reference: diagnostic });
+
+	const rebuilt = `${renderWikiPage(parsed.metadata, links.body)}${renderRepairNote(issues)}`;
 	if (rebuilt !== original) writeText(filePath, rebuilt);
 	return { metadata: parsed.metadata, changed: rebuilt !== original, issues };
 }
@@ -275,14 +269,17 @@ export function assembleWikiTree(input: AssembleWikiInput): WikiAssemblyReport {
 	const onDisk = new Set(assembled.map((page) => page.path));
 	input.plan.pages = input.plan.pages.map((page) => {
 		if (page.status !== "written") return page;
-		const broken = issues.filter((issue) => issue.page === page.path && issue.kind === "link");
+		const broken = issues.filter(
+			(issue) =>
+				issue.page === page.path && (issue.kind === "link" || issue.kind === "repair" || issue.kind === "citation"),
+		);
 		const gaps = issues.filter((issue) => issue.page === page.path && issue.kind === "coverage");
 		if (onDisk.has(page.path) && broken.length === 0 && gaps.length === 0) return page;
 		const detail =
 			gaps.length > 0
 				? `Coverage gaps: ${gaps.map((issue) => issue.reference).join("; ")}`
 				: broken.length > 0
-					? `Unresolved wiki links: ${broken.map((issue) => issue.reference).join(", ")}`
+					? `Unresolved wiki evidence or repairs: ${broken.map((issue) => issue.reference).join(", ")}`
 					: "Wiki page is empty or missing after assembly.";
 		return {
 			...page,

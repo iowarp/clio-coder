@@ -1,7 +1,8 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Codewiki } from "../../src/domains/context/codewiki/schema.js";
-import { readWikiPage, renderWikiPage } from "../../src/domains/context/wiki/frontmatter.js";
+import { readWikiPage } from "../../src/domains/context/wiki/frontmatter.js";
+import { renderWikiPage } from "../../src/domains/context/wiki/markdown.js";
 import { buildWikiPagePrompt } from "../../src/domains/context/wiki/prompts.js";
 import type { DecisionLedgerEntry } from "../../src/domains/session/entries.js";
 import { agentDecision } from "../harness/decision.js";

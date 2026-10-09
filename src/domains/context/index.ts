@@ -85,7 +85,6 @@ export {
 export { assembleWikiTree, type WikiAssemblyReport, type WikiPageIssue } from "./wiki/assemble.js";
 export {
 	readWikiPage,
-	renderWikiPage,
 	type WikiPageDocument,
 	type WikiPageMetadata,
 } from "./wiki/frontmatter.js";
@@ -108,6 +107,7 @@ export {
 	wikiDir,
 	wikiMarkdownFilesInDir,
 } from "./wiki/layout.js";
+export { renderWikiPage } from "./wiki/markdown.js";
 export {
 	computeWikiContentHash,
 	computeWikiContentHashOfDir,

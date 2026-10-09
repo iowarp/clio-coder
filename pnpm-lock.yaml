@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  marked: 18.0.11
   esbuild: 0.28.1
   dompurify: 3.4.16
   fast-uri@<3.1.8: 3.1.8
@@ -71,9 +72,15 @@ importers:
       diff:
         specifier: 9.0.0
         version: 9.0.0
+      entities:
+        specifier: 7.0.1
+        version: 7.0.1
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
+      marked:
+        specifier: 18.0.11
+        version: 18.0.11
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
@@ -1784,6 +1791,10 @@ packages:
   encoding@0.1.13:
     resolution: {integrity: sha512-ETBauow1T35Y/WZMkio9jiM0Z5xjHHmJ4XmjZOq1l/dXz3lr2sRn87nJy20RupqSh1F2m3HHPSp8ShIPQJrJ3A==}
 
+  entities@7.0.1:
+    resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
+    engines: {node: '>=0.12'}
+
   env-paths@2.2.1:
     resolution: {integrity: sha512-+h1lkLKhZMTYjog1VEpJNG7NZJWcuc2DDk/qsqSTRRCOXiLjeQ1d1/udrUGhqMxUgAlwKNZ0cf2uqan5GLuS2A==}
     engines: {node: '>=6'}
@@ -2218,11 +2229,6 @@ packages:
   make-fetch-happen@14.0.3:
     resolution: {integrity: sha512-QMjGbFTP0blj97EeidG5hk/QhKQ3T4ICckQGLgz38QF7Vgbk6e6FTARN8KhKxyBbWn8R0HU+bnw8aSoFPD4qtQ==}
     engines: {node: ^18.17.0 || >=20.5.0}
-
-  marked@16.4.2:
-    resolution: {integrity: sha512-TI3V8YYWvkVf3KJe1dRkpnjs68JUPyEa5vjKrp1XEEJUAOaQc+Qj+L1qWbPd0SJuAdQkFU0h73sXXqwDYxsiDA==}
-    engines: {node: '>= 20'}
-    hasBin: true
 
   marked@18.0.11:
     resolution: {integrity: sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw==}
@@ -4574,6 +4580,8 @@ snapshots:
       iconv-lite: 0.6.3
     optional: true
 
+  entities@7.0.1: {}
+
   env-paths@2.2.1: {}
 
   err-code@2.0.3: {}
@@ -5048,8 +5056,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  marked@16.4.2: {}
-
   marked@18.0.11: {}
 
   math-intrinsics@1.1.0: {}
@@ -5077,7 +5083,7 @@ snapshots:
       fastdom: 1.0.12
       katex: 0.18.2
       khroma: 2.1.0
-      marked: 16.4.2
+      marked: 18.0.11
       roughjs: 4.6.6
       stylis: 4.4.0
       ts-dedent: 2.3.0
