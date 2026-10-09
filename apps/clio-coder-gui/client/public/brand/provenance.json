@@ -11,6 +11,7 @@
 	"projection": {
 		"source": "site/export-brand.mjs",
 		"designSha256": "3ac20c87fad09db521621c5ac57fe6c5184b120897ede3d347e991ab8624f5d9",
+		"encoders": { "pngquant": "2.18.0", "Pillow": "12.1.0", "libwebp": "1.6.0" },
 		"padding": "Square app icons center the mark within a 94% safe area; the header mark is unchanged.",
 		"sha256": {
 			"clio-coder-logo.webp": "0a9ad4f1015c4c0bb17dbe952841c915a39ca0cf5fc9ec06f403d1673357bd23",
