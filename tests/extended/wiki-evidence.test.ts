@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { validateWikiPageEvidence } from "../../src/domains/context/wiki/evidence.js";
+import { inspectWikiPageEvidence, validateWikiPageEvidence } from "../../src/domains/context/wiki/evidence.js";
 
 let sandbox: string;
 let root: string;
@@ -27,6 +27,36 @@ beforeEach(() => {
 afterEach(() => rmSync(sandbox, { recursive: true, force: true }));
 
 describe("wiki mechanical evidence gate", () => {
+	it("shares repairable link and generated-index targets while excluding empty and missing pages", () => {
+		const outputDir = join(root, ".clio-coder/wiki");
+		mkdirSync(join(outputDir, "section"), { recursive: true });
+		mkdirSync(join(outputDir, "empty"));
+		writeFileSync(join(outputDir, "target.md"), page());
+		writeFileSync(join(outputDir, "empty/page.md"), "# Empty\n<!-- no content -->\n");
+		writeFileSync(join(outputDir, "empty/index.md"), "# Stale index\n\nOld navigation.\n");
+		const valid = page(
+			"src/main.ts",
+			"[Root](target.md#heading), [Section](index.md), [Wiki](../index.md), " +
+				"[External](https://example.com/missing.md), [Local](#heading).\n```md\n[Example](missing.md)\n```",
+		);
+		writeFileSync(join(outputDir, "section/page.md"), valid);
+		const input = { sourceRoot: root, outputDir, pagePath: "section/page.md" };
+		strictEqual(inspectWikiPageEvidence(input).ok, true);
+		writeFileSync(
+			join(outputDir, "section/page.md"),
+			`${valid}\n[Empty](../empty/page.md) [Stale](../empty/index.md) [Missing](missing.md)\n`,
+		);
+		const invalid = inspectWikiPageEvidence(input);
+		strictEqual(invalid.ok, false);
+		strictEqual(invalid.reasons.length, 3);
+		for (const target of ["../empty/page.md", "../empty/index.md", "missing.md"]) {
+			strictEqual(
+				invalid.reasons.some((reason) => reason.includes(target)),
+				true,
+			);
+		}
+	});
+
 	it("exposes individually valid body rewrites even when another citation fails", () => {
 		const result = check(page("src/main.ts", "See `src/main.js:1-3`, `main.js#L2`, `main.js:9`, and `missing.py`."));
 		strictEqual(result.ok, false);

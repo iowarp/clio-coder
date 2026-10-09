@@ -153,6 +153,53 @@ describe("wiki generation outcomes", () => {
 			for (const source of invalid) assert.equal(writerTask.includes(`- ${source}\n`), false, source);
 		});
 	}
+	it("publishes draft labels and counts from the same statuses as metadata after link repair and dropped pages", async () => {
+		const result = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			generate(input) {
+				mkdirSync(join(input.outputDir, "section"), { recursive: true });
+				writeFileSync(join(input.outputDir, "a.md"), `${content("a", 1)}\n[Empty](section/empty.md)\n`);
+				writeFileSync(join(input.outputDir, "b.md"), `${content("b", 1)}\n[Section](section/index.md)\n`);
+				writeFileSync(join(input.outputDir, "section/empty.md"), "# Empty\n");
+				writeFileSync(join(input.outputDir, "section/extra.md"), content("extra", 1));
+				writeFileSync(join(input.outputDir, "draft.md"), `${content("a", 1)}\n[Missing](missing.md)\n`);
+				writeWikiPlanFile(input.outputDir, {
+					...input.plan,
+					pages: [
+						{ ...page("a"), status: "written", attempts: 1 },
+						{ ...page("b"), status: "written", attempts: 1 },
+						{ ...page("extra"), path: "section/empty.md", status: "written", attempts: 1 },
+						{
+							...page("a"),
+							path: "draft.md",
+							lastFailure: { phase: "writer", detail: "writer failed", runId: "failed-run" },
+						},
+					],
+				});
+			},
+		});
+		assert.equal(result.pending, 4);
+		const meta = readWikiMeta(cwd);
+		assert.equal(meta?.generation?.pagesWritten, 1);
+		assert.equal(meta?.generation?.pagesPlanned, 5);
+		assert.equal(meta?.plan?.pages.find((entry) => entry.path === "a.md")?.lastFailure?.phase, "validation");
+		assert.match(
+			meta?.plan?.pages.find((entry) => entry.path === "a.md")?.lastFailure?.detail ?? "",
+			/section\/empty.md/,
+		);
+		assert.equal(meta?.plan?.pages.find((entry) => entry.path === "b.md")?.status, "written");
+		assert.equal(meta?.plan?.pages.find((entry) => entry.path === "draft.md")?.lastFailure?.phase, "writer");
+		assert.equal(existsSync(join(cwd, ".clio-coder/wiki/section/empty.md")), false);
+		for (const name of ["quickstart.md", "index.md"]) {
+			const navigation = readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8");
+			assert.match(navigation, /1 complete, 4 pending/);
+			assert.match(navigation, /\[a\]\(a.md\) \(pending draft\)/i);
+			assert.doesNotMatch(navigation, /\[b\]\(b.md\) \(pending draft\)/i);
+		}
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/section/index.md"), "utf8"), /0 complete, 2 pending/);
+	});
+
 	it("keeps successful writers with invalid evidence pending and makes their next repair actionable", async () => {
 		const onePage: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
 		for (const [version, invalid] of [
@@ -401,7 +448,7 @@ describe("wiki generation outcomes", () => {
 		assert.equal(wikiStaleness(cwd).state, "stale");
 		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8"), /a version 1/u);
 	});
-	it("persists new pending pages and attempts when page content is unchanged", async () => {
+	it("updates navigation for new pending pages while preserving existing page content and attempts", async () => {
 		await initialize();
 		const before = readWikiMeta(cwd);
 		const result = await run(
@@ -415,14 +462,14 @@ describe("wiki generation outcomes", () => {
 			}),
 			true,
 		);
-		assert.equal(result.status, "noop");
+		assert.equal(result.status, "generated");
 		assert.equal(result.pending, 1);
 		const after = readWikiMeta(cwd);
 		assert.equal(after?.plan?.pages.length, 3);
 		assert.equal(after?.plan?.pages[2]?.attempts, 1);
 		assert.equal(after?.generation?.pagesWritten, 2);
-		assert.equal(after?.updatedAt, before?.updatedAt);
-		assert.equal(after?.contentHash, before?.contentHash);
+		assert.notEqual(after?.contentHash, before?.contentHash);
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/quickstart.md"), "utf8"), /2 complete, 1 pending/);
 		const nextAttempts: string[] = [];
 		await run(
 			generator((_spec, path) => {

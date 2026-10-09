@@ -90,6 +90,22 @@ export function stripFrontmatter(content: string): { block: string | null; body:
 	return { block: match[1] ?? "", body: content.slice(match[0].length) };
 }
 
+export function mapWikiProse(body: string, transform: (line: string) => string): string {
+	let fence = "";
+	return body
+		.split("\n")
+		.map((line) => {
+			const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+			if (marker) {
+				if (!fence) fence = marker;
+				else if (marker[0] === fence[0] && marker.length >= fence.length) fence = "";
+				return line;
+			}
+			return fence ? line : transform(line);
+		})
+		.join("\n");
+}
+
 /**
  * The first real paragraph of a body, collapsed to one line. Used as a fallback
  * summary when the author supplied none, so a directory index still says

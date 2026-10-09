@@ -1,14 +1,16 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, matchesGlob, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, matchesGlob, posix, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
-import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
+import { mapWikiProse, readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
+import { isGeneratedWikiFile, WIKI_INDEX, WIKI_QUICKSTART, wikiMarkdownFilesInDir } from "./layout.js";
 
 export interface WikiPageEvidenceInput {
 	pagePath: string;
 	content: string;
 	sourceRoot: string;
+	wikiLinks?: WikiLinkInventory;
 }
 
 export interface WikiPageEvidenceResult {
@@ -24,6 +26,81 @@ export interface WikiPageEvidenceResult {
 function within(root: string, path: string): boolean {
 	const rel = relative(root, path).replace(/\\/g, "/");
 	return rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel);
+}
+
+export interface WikiLinkInventory {
+	targets: ReadonlySet<string>;
+	unavailable: ReadonlySet<string>;
+}
+
+export function wikiLinkInventory(dir: string): WikiLinkInventory {
+	const targets = new Set([WIKI_QUICKSTART, WIKI_INDEX]);
+	const files = wikiMarkdownFilesInDir(dir);
+	for (const pagePath of files) {
+		if (isGeneratedWikiFile(pagePath)) continue;
+		let body: string;
+		try {
+			body = stripFrontmatter(readFileSync(resolve(dir, pagePath), "utf8")).body;
+		} catch {
+			continue;
+		}
+		if (
+			!body
+				.replace(/<!--[\s\S]*?-->/g, "")
+				.replace(/^\s*#.*$/gm, "")
+				.trim()
+		)
+			continue;
+		targets.add(pagePath);
+		let section = posix.dirname(pagePath);
+		while (section !== ".") {
+			targets.add(`${section}/${WIKI_INDEX}`);
+			section = posix.dirname(section);
+		}
+	}
+	return { targets, unavailable: new Set(files.filter((path) => !targets.has(path))) };
+}
+
+export function repairWikiLinks(
+	pagePath: string,
+	body: string,
+	inventory: WikiLinkInventory,
+): { body: string; unresolved: string[] } {
+	const { targets, unavailable } = inventory;
+	const unresolved: string[] = [];
+	const repaired = mapWikiProse(body, (line) =>
+		line.replace(
+			/(\[[^\]]*\]\()(?![a-z][a-z\d+.-]*:|\/\/|#)([^)\s]+\.md)(#[^)\s]*)?\)/gi,
+			(link: string, opening: string, href: string, anchor: string = "") => {
+				const fromDir = posix.dirname(pagePath);
+				const target = posix.normalize(posix.join(fromDir, href));
+				if (!target.startsWith("..") && targets.has(target)) return link;
+				let replacement: string | undefined;
+				const rootPath = posix.normalize(href);
+				if (!posix.isAbsolute(href) && !unavailable.has(target) && !unavailable.has(rootPath)) {
+					if (targets.has(rootPath)) replacement = rootPath;
+					else {
+						const parts = rootPath.split("/");
+						while (parts.length > 0) {
+							const suffix = parts.join("/");
+							const matches = [...targets].filter((page) => page === suffix || page.endsWith(`/${suffix}`));
+							if (matches.length > 0) {
+								if (matches.length === 1) replacement = matches[0];
+								break;
+							}
+							parts.shift();
+						}
+					}
+				}
+				if (replacement === undefined) {
+					unresolved.push(href);
+					return link;
+				}
+				return `${opening}${posix.relative(fromDir, replacement)}${anchor})`;
+			},
+		),
+	);
+	return { body: repaired, unresolved };
 }
 
 /**
@@ -43,6 +120,11 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return { ok: false, reasons: ["Page exceeds the 2 MiB evidence-check limit; split or shorten it before retrying."] };
 	}
 	const { body, metadata } = readWikiPage({ pagePath: input.pagePath, content: input.content });
+	if (input.wikiLinks) {
+		for (const href of repairWikiLinks(input.pagePath, body, input.wikiLinks).unresolved) {
+			fail(`Repair unresolved wiki link ${JSON.stringify(href)} in ${input.pagePath}; its target page is unavailable.`);
+		}
+	}
 	if (
 		body
 			.replace(/<!--[\s\S]*?-->/g, "")
@@ -380,6 +462,7 @@ export function inspectWikiPageEvidence(input: {
 			pagePath: input.pagePath,
 			content: readFileSync(path, "utf8"),
 			sourceRoot: input.sourceRoot,
+			wikiLinks: wikiLinkInventory(input.outputDir),
 		});
 	} catch {
 		return { ok: false, reasons: ["writer finished without a readable planned page file"] };

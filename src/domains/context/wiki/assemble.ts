@@ -16,8 +16,9 @@
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, posix, relative } from "node:path";
-import { validateWikiPageEvidence } from "./evidence.js";
-import { readWikiPage, renderWikiPage, resolveSourcePath, type WikiPageMetadata } from "./frontmatter.js";
+import type { WikiLinkInventory } from "./evidence.js";
+import { repairWikiLinks, validateWikiPageEvidence, wikiLinkInventory } from "./evidence.js";
+import { mapWikiProse, readWikiPage, renderWikiPage, resolveSourcePath, type WikiPageMetadata } from "./frontmatter.js";
 import {
 	isGeneratedWikiFile,
 	listWikiPagesInDir,
@@ -26,7 +27,7 @@ import {
 	type WikiPage,
 	wikiMarkdownFilesInDir,
 } from "./layout.js";
-import type { WikiPlan } from "./plan.js";
+import type { WikiPlan, WikiPlanPage } from "./plan.js";
 
 /**
  * A backticked repository path in prose, optionally with `:line` or a trailing
@@ -35,9 +36,6 @@ import type { WikiPlan } from "./plan.js";
  */
 const SOURCE_CITATION =
 	/`((?:src|tests?|scripts|benchmarks|docs|packages|apps|lib|config|\.github)\/[^`\s:#]+)(?::(\d+)(?:-\d+)?)?(?::[A-Za-z_$][\w$.-]*)?`/g;
-
-/** A relative Markdown link to another page, ignoring external and anchor-only hrefs. */
-const INTERNAL_LINK = /(\[[^\]]*\]\()(?![a-z][a-z\d+.-]*:|\/\/|#)([^)\s]+\.md)(#[^)\s]*)?\)/gi;
 
 /** Marker line carrying a page's unrepaired references; regenerated every pass. */
 const REPAIR_NOTE = /^<!-- (?:clio-coder|clio):wiki .*-->$/gm;
@@ -94,35 +92,20 @@ function repairPage(
 	dir: string,
 	sourceRoot: string,
 	relPath: string,
-	knownPages: ReadonlySet<string>,
-): { metadata: WikiPageMetadata; changed: boolean; issues: WikiPageIssue[]; empty: boolean } {
+	knownPages: WikiLinkInventory,
+): { metadata: WikiPageMetadata; changed: boolean; issues: WikiPageIssue[] } {
 	const filePath = join(dir, relPath);
 	const original = readText(filePath);
 	const parsed = readWikiPage({ pagePath: relPath, content: original, sourceRoot });
 	let body = stripRepairNotes(parsed.body);
-	if (body.replace(/^#.*$/gm, "").trim().length === 0) {
-		return { metadata: parsed.metadata, changed: false, issues: [], empty: true };
-	}
-
 	const issues: WikiPageIssue[] = [];
 	const evidence = validateWikiPageEvidence({ pagePath: relPath, content: original, sourceRoot });
 	const resolvedCitations = evidence.resolvedCitations ?? {};
-	let fence = "";
-	body = body
-		.split("\n")
-		.map((line) => {
-			const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
-			if (marker) {
-				if (!fence) fence = marker;
-				else if (marker[0] === fence[0] && marker.length >= fence.length) fence = "";
-				return line;
-			}
-			if (fence) return line;
-			return line.replace(/`([^`\s]+)`/g, (token: string, cited: string) => {
-				return Object.hasOwn(resolvedCitations, cited) ? `\`${resolvedCitations[cited]}\`` : token;
-			});
-		})
-		.join("\n");
+	body = mapWikiProse(body, (line) =>
+		line.replace(/`([^`\s]+)`/g, (token: string, cited: string) =>
+			Object.hasOwn(resolvedCitations, cited) ? `\`${resolvedCitations[cited]}\`` : token,
+		),
+	);
 	for (const cited of parsed.unresolvedPaths) {
 		issues.push({ page: relPath, kind: "citation", reference: cited });
 	}
@@ -134,37 +117,12 @@ function repairPage(
 			if (!evidence.ok) issues.push({ page: relPath, kind: "citation", reference: cited });
 		}
 	}
-	const linkedBody = body.replace(INTERNAL_LINK, (link: string, opening: string, href: string, anchor: string = "") => {
-		const fromDir = posix.dirname(relPath);
-		const target = posix.normalize(posix.join(fromDir, href));
-		if (!target.startsWith("..") && knownPages.has(target)) return link;
-		let replacement: string | undefined;
-		if (!posix.isAbsolute(href)) {
-			const rootPath = posix.normalize(href);
-			if (knownPages.has(rootPath)) replacement = rootPath;
-			else {
-				const parts = rootPath.split("/");
-				while (parts.length > 0) {
-					const suffix = parts.join("/");
-					const matches = [...knownPages].filter((page) => page === suffix || page.endsWith(`/${suffix}`));
-					if (matches.length > 0) {
-						if (matches.length === 1) replacement = matches[0];
-						break;
-					}
-					parts.shift();
-				}
-			}
-		}
-		if (replacement === undefined) {
-			issues.push({ page: relPath, kind: "link", reference: href });
-			return link;
-		}
-		return `${opening}${linkTo(fromDir, replacement)}${anchor})`;
-	});
+	const links = repairWikiLinks(relPath, body, knownPages);
+	for (const href of links.unresolved) issues.push({ page: relPath, kind: "link", reference: href });
 
-	const rebuilt = `${renderWikiPage(parsed.metadata, linkedBody).trimEnd()}\n${renderRepairNote(issues)}`;
+	const rebuilt = `${renderWikiPage(parsed.metadata, links.body).trimEnd()}\n${renderRepairNote(issues)}`;
 	if (rebuilt !== original) writeText(filePath, rebuilt);
-	return { metadata: parsed.metadata, changed: rebuilt !== original, issues, empty: false };
+	return { metadata: parsed.metadata, changed: rebuilt !== original, issues };
 }
 
 function linkTo(fromDir: string, target: string): string {
@@ -185,6 +143,12 @@ function codeList(values: ReadonlyArray<string>, limit: number): string {
 interface AssembledPage {
 	path: string;
 	metadata: WikiPageMetadata;
+	status: WikiPlanPage["status"];
+}
+
+function completionSummary(pages: ReadonlyArray<WikiPlanPage>): string {
+	const complete = pages.filter((page) => page.status === "written").length;
+	return `${complete} complete, ${pages.length - complete} pending.`;
 }
 
 /**
@@ -200,7 +164,8 @@ function renderQuickstart(sourceRoot: string, plan: WikiPlan, pages: ReadonlyArr
 	if (plan.overview.trim().length > 0) lines.push(plan.overview.trim(), "");
 	lines.push(
 		`This wiki is generated by \`clio-coder context wiki\` from ${content.length} page${content.length === 1 ? "" : "s"}. ` +
-			"Each page opens with front matter naming the sources, symbols, and tests it documents.",
+			"Front matter may name sources, symbols, tests, and validation commands.",
+		completionSummary(plan.pages),
 		"",
 		"## Pages",
 		"",
@@ -214,7 +179,9 @@ function renderQuickstart(sourceRoot: string, plan: WikiPlan, pages: ReadonlyArr
 		}
 		const indent = section === "." ? "" : "  ";
 		const summary = page.metadata.summary.length > 0 ? ` — ${page.metadata.summary}` : "";
-		lines.push(`${indent}- [${page.metadata.title}](${page.path})${summary}`);
+		lines.push(
+			`${indent}- [${page.metadata.title}](${page.path})${page.status === "written" ? "" : " (pending draft)"}${summary}`,
+		);
 	}
 	const routable = content.filter(
 		(page) => page.metadata.sources.length > 0 || page.metadata.symbols.length > 0 || page.metadata.tests.length > 0,
@@ -229,7 +196,7 @@ function renderQuickstart(sourceRoot: string, plan: WikiPlan, pages: ReadonlyArr
 		);
 		for (const page of routable) {
 			lines.push(
-				`| ${escapeCell(page.metadata.title)} | [${escapeCell(page.metadata.title)}](${page.path}) ` +
+				`| ${escapeCell(page.metadata.title)} | [${escapeCell(page.metadata.title)}](${page.path})${page.status === "written" ? "" : " (pending draft)"} ` +
 					`| ${codeList(page.metadata.sources, 3)} | ${codeList(page.metadata.symbols, 3)} ` +
 					`| ${codeList(page.metadata.tests, 2)} | ${codeList(page.metadata.validate, 1)} |`,
 			);
@@ -239,13 +206,20 @@ function renderQuickstart(sourceRoot: string, plan: WikiPlan, pages: ReadonlyArr
 }
 
 /** Generate one directory's `index.md` from the pages and sections beneath it. */
-function renderIndex(dir: string, pages: ReadonlyArray<AssembledPage>, sections: ReadonlyArray<string>): string {
+function renderIndex(
+	dir: string,
+	pages: ReadonlyArray<AssembledPage>,
+	sections: ReadonlyArray<string>,
+	statuses: ReadonlyArray<WikiPlanPage>,
+): string {
 	const title = dir === "." ? "Wiki" : dir.split("/").join(" / ");
-	const lines = [`# ${title}`, ""];
+	const lines = [`# ${title}`, "", completionSummary(statuses), ""];
 	if (pages.length > 0) {
 		for (const page of pages) {
 			const summary = page.metadata.summary.length > 0 ? ` — ${page.metadata.summary}` : "";
-			lines.push(`- [${page.metadata.title}](${linkTo(dir, page.path)})${summary}`);
+			lines.push(
+				`- [${page.metadata.title}](${linkTo(dir, page.path)})${page.status === "written" ? "" : " (pending draft)"}${summary}`,
+			);
 		}
 		lines.push("");
 	}
@@ -263,6 +237,7 @@ export interface AssembleWikiInput {
 	dir: string;
 	/** Repository root, used to check cited source paths. */
 	sourceRoot: string;
+	/** Updated in place with assembly downgrades before the caller publishes metadata. */
 	plan: WikiPlan;
 }
 
@@ -274,15 +249,14 @@ export interface AssembleWikiInput {
 export function assembleWikiTree(input: AssembleWikiInput): WikiAssemblyReport {
 	const { dir, sourceRoot } = input;
 	const authored = wikiMarkdownFilesInDir(dir).filter((relPath) => !isGeneratedWikiFile(relPath));
-	const knownPages = new Set([...authored, WIKI_QUICKSTART]);
+	const knownPages = wikiLinkInventory(dir);
 	const assembled: AssembledPage[] = [];
 	const issues: WikiPageIssue[] = [];
 	const dropped: string[] = [];
 	let repaired = 0;
 
 	for (const relPath of authored) {
-		const result = repairPage(dir, sourceRoot, relPath, knownPages);
-		if (result.empty) {
+		if (!knownPages.targets.has(relPath)) {
 			// An empty page is not a wiki page. Removing it lets the plan record
 			// the page as still owed rather than shipping a stub that reads as
 			// documented coverage.
@@ -290,12 +264,44 @@ export function assembleWikiTree(input: AssembleWikiInput): WikiAssemblyReport {
 			dropped.push(relPath);
 			continue;
 		}
+		const result = repairPage(dir, sourceRoot, relPath, knownPages);
 		if (result.changed) repaired += 1;
 		issues.push(...result.issues);
-		assembled.push({ path: relPath, metadata: result.metadata });
+		assembled.push({ path: relPath, metadata: result.metadata, status: "pending" });
 	}
 
-	writeText(join(dir, WIKI_QUICKSTART), renderQuickstart(sourceRoot, input.plan, assembled));
+	const onDisk = new Set(assembled.map((page) => page.path));
+	input.plan.pages = input.plan.pages.map((page) => {
+		if (page.status !== "written") return page;
+		const broken = issues.filter((issue) => issue.page === page.path && issue.kind === "link");
+		if (onDisk.has(page.path) && broken.length === 0) return page;
+		return {
+			...page,
+			status: "pending",
+			lastFailure: {
+				phase: "validation",
+				detail: (broken.length > 0
+					? `Unresolved wiki links: ${broken.map((issue) => issue.reference).join(", ")}`
+					: "Wiki page is empty or missing after assembly."
+				).slice(0, 500),
+			},
+		};
+	});
+	const statuses = new Map(input.plan.pages.map((page) => [page.path, page]));
+	for (const page of assembled) {
+		page.status = statuses.get(page.path)?.status ?? "pending";
+		if (!statuses.has(page.path))
+			statuses.set(page.path, {
+				path: page.path,
+				title: page.metadata.title,
+				intent: "",
+				sources: [],
+				status: "pending",
+				attempts: 0,
+			});
+	}
+	const effectivePlan = { ...input.plan, pages: [...statuses.values()] };
+	writeText(join(dir, WIKI_QUICKSTART), renderQuickstart(sourceRoot, effectivePlan, assembled));
 
 	const directories = new Set<string>(["."]);
 	for (const page of assembled) {
@@ -311,7 +317,15 @@ export function assembleWikiTree(input: AssembleWikiInput): WikiAssemblyReport {
 			.filter((candidate) => candidate !== "." && posix.dirname(candidate) === directory)
 			.sort();
 		const indexPath = directory === "." ? WIKI_INDEX : `${directory}/${WIKI_INDEX}`;
-		writeText(join(dir, indexPath), renderIndex(directory, pagesHere, sectionsHere));
+		writeText(
+			join(dir, indexPath),
+			renderIndex(
+				directory,
+				pagesHere,
+				sectionsHere,
+				effectivePlan.pages.filter((page) => directory === "." || page.path.startsWith(`${directory}/`)),
+			),
+		);
 	}
 
 	// Clear indexes left by a section that no longer has pages, so navigation
