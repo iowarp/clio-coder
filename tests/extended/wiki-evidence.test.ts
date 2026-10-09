@@ -153,6 +153,24 @@ describe("wiki mechanical evidence gate", () => {
 		strictEqual(check(page("src/main.ts:1")).ok, false);
 	});
 
+	it("names the received type when source or test frontmatter is not a path list", () => {
+		for (const field of ["sources", "tests"]) {
+			for (const [value, received] of [
+				["null", "null"],
+				["src/main.ts", "string"],
+				["123", "number"],
+				["{}", "object"],
+				["[src/main.ts, null]", "array with invalid entries"],
+			]) {
+				const result = check(`---\n${field}: ${value}\n---\nSee \`src/main.ts\`.`);
+				strictEqual(result.ok, false);
+				deepStrictEqual(result.reasons, [
+					`Repair frontmatter ${field}: use a list of nonempty repository-relative file paths; received ${received}.`,
+				]);
+			}
+		}
+	});
+
 	it("checks inclusive line bounds, zero, reversed, malformed and absent final-newline cases", () => {
 		for (const ref of [
 			"src/main.ts:0",

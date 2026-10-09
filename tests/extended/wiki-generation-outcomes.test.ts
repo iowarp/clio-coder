@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -96,6 +106,52 @@ describe("wiki generation outcomes", () => {
 			}),
 		);
 		assert.equal(result.pending, 0);
+	}
+	for (const resumed of [false, true]) {
+		it(`validates ${resumed ? "resumed" : "newly authored"} plan anchors before dispatching writers`, async () => {
+			writeFileSync(join(isolated.dir, "outside.ts"), "outside\n");
+			symlinkSync(join(isolated.dir, "outside.ts"), join(cwd, "src/escape.ts"));
+			symlinkSync(join(cwd, "src/a.ts"), join(cwd, "src/alias.ts"));
+			const invalid = ["src/missing.ts", "../outside.ts", "src/escape.ts", "src", join(cwd, "src/a.ts")];
+			const plan: WikiPlan = {
+				version: 1,
+				overview: "Fixture",
+				pages: [{ ...page("a"), sources: ["src/a.ts", "src/alias.ts", ...invalid], status: "written", attempts: 3 }],
+			};
+			const requests: JobSpec[] = [];
+			const checkpoints: Array<WikiPlan | null> = [];
+			const outputDir = join(cwd, ".clio-coder/wiki-staging-anchors");
+			mkdirSync(outputDir, { recursive: true });
+			writeWikiPlanFile(outputDir, resumed ? plan : { ...plan, pages: [page("a")] });
+			const saved = readWikiPlanFile(outputDir);
+			assert.ok(saved);
+			await generator((spec, path) => {
+				requests.push(spec);
+				if (!path) writeWikiPlanFile(outputDir, plan);
+				else {
+					checkpoints.push(readWikiPlanFile(outputDir));
+					writeFileSync(path, content("a", 1));
+				}
+			})({
+				cwd,
+				outputDir,
+				mode: resumed ? "update" : "init",
+				resumed,
+				plan: saved,
+				unclaimedAreas: [],
+				codewiki: { version: 5, language: "typescript", files: [], symbols: [], edges: [] },
+				generation: { requestedDepth: "simple", depth: "simple", sourceFiles: 1, sourceLines: 1, plan: saved },
+			});
+			assert.equal(readWikiPlanFile(outputDir)?.pages[0]?.status, "written");
+			assert.equal(requests.length, resumed ? 1 : 2);
+			assert.equal(checkpoints.length, 1);
+			assert.deepEqual(checkpoints[0]?.pages[0]?.sources, ["src/a.ts", "src/alias.ts"]);
+			assert.equal(checkpoints[0]?.pages[0]?.status, "pending");
+			assert.equal(checkpoints[0]?.pages[0]?.attempts, 0);
+			const writerTask = requests.at(-1)?.task ?? "";
+			assert.ok(writerTask.includes("- src/a.ts\n- src/alias.ts"));
+			for (const source of invalid) assert.equal(writerTask.includes(`- ${source}\n`), false, source);
+		});
 	}
 	it("keeps successful writers with invalid evidence pending and makes their next repair actionable", async () => {
 		const onePage: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
