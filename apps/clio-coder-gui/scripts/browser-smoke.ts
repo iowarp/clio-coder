@@ -984,7 +984,14 @@ try {
 		}
 		async function openDrill(name: string) {
 			await openPane();
-			await pane.locator(".pane-card__open", { hasText: name }).click();
+			const disclosure = pane.locator(".pane-card--disclosure", {
+				has: page.locator(".pane-card__label", { hasText: new RegExp(`^${name}$`) }),
+			});
+			if (await disclosure.count()) {
+				if (!(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open)))
+					await disclosure.locator(":scope > summary").click();
+				await disclosure.getByRole("button", { name: `Open ${name.toLowerCase()}`, exact: true }).click();
+			} else await pane.locator(".pane-card__open", { hasText: name }).click();
 			await pane.getByRole("button", { name: "Back to Session", exact: true }).waitFor();
 		}
 		async function closePane() {
