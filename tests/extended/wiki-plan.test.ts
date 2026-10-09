@@ -151,3 +151,118 @@ test("medium and detailed retain their directory granularity and minimum line th
 		["architecture.md", "alpha/first.md", "beta/first.md", "alpha/second.md"],
 	);
 });
+
+test("medium recursively splits oversized scopes and folds small children into their local remainder", () => {
+	const files = [
+		file("src/suite/main.py", 100, "entry"),
+		file("src/suite/alpha/run.py", 5000),
+		file("src/suite/beta/first/run.py", 4500),
+		file("src/suite/beta/second/run.py", 4500),
+		file("src/suite/support/tiny.py", 100),
+		file("other/large.py", 30_000),
+		file("launch.py", 20),
+		file("tools/helper.py", 100),
+	];
+	const plan = buildCandidatePlan(index(files), "medium");
+	assert.deepEqual(
+		plan.pages.map((page) => page.path),
+		[
+			"architecture.md",
+			"other.md",
+			"suite/alpha.md",
+			"suite/beta/first.md",
+			"suite/beta/second.md",
+			"suite.md",
+			"root.md",
+		],
+	);
+	const suite = plan.pages.find((page) => page.path === "suite.md");
+	assert.ok(suite);
+	assert.deepEqual(suite.sources, ["src/suite/main.py", "src/suite/support/tiny.py"]);
+	assert.deepEqual(scopeCounts(suite.intent), [2, 200]);
+	assert.match(suite.intent, /src\/suite\/support/);
+	const root = plan.pages.find((page) => page.path === "root.md");
+	assert.ok(root);
+	assert.deepEqual(scopeCounts(root.intent), [2, 120]);
+	assert.deepEqual(root.sources, ["tools/helper.py", "launch.py"]);
+	const owners = plan.pages.slice(1).flatMap((page) => page.sources);
+	assert.equal(owners.length, files.length);
+	assert.deepEqual(new Set(owners), new Set(files.map((item) => item.path)));
+	assert.deepEqual(buildCandidatePlan(index([...files].reverse()), "medium"), plan);
+});
+
+test("medium child thresholds use their parent scope and skip directories without a meaningful boundary", () => {
+	const plan = buildCandidatePlan(
+		index([
+			file("elsewhere/large.py", 1_000_000),
+			file("src/flow/main.py", 34_000),
+			file("src/flow/nested/inner/first/run.py", 4500),
+			file("src/flow/nested/inner/second/run.py", 4500),
+		]),
+		"medium",
+	);
+	assert.deepEqual(
+		plan.pages.map((page) => page.path),
+		["architecture.md", "elsewhere.md", "flow.md", "flow/nested/inner/first.md", "flow/nested/inner/second.md"],
+	);
+	assert.deepEqual(
+		plan.pages.slice(1).map((page) => scopeCounts(page.intent)),
+		[
+			[1, 1_000_000],
+			[1, 34_000],
+			[1, 4500],
+			[1, 4500],
+		],
+	);
+});
+
+test("medium keeps the split trigger at 8000 lines and preserves simple and detailed policies", () => {
+	const files = [file("src/suite/alpha/run.py", 4000), file("src/suite/beta/run.py", 4000)];
+	assert.deepEqual(
+		buildCandidatePlan(index(files), "medium").pages.map((page) => page.path),
+		["architecture.md", "suite.md"],
+	);
+	const larger = index([...files, file("src/suite/main.py", 1)]);
+	assert.deepEqual(
+		buildCandidatePlan(larger, "medium").pages.map((page) => page.path),
+		["architecture.md", "suite/alpha.md", "suite/beta.md", "suite.md"],
+	);
+	assert.deepEqual(
+		buildCandidatePlan(larger, "simple").pages.map((page) => page.path),
+		["architecture.md"],
+	);
+	assert.deepEqual(
+		buildCandidatePlan(larger, "detailed").pages.map((page) => page.path),
+		["architecture.md", "suite/alpha.md", "suite/beta.md"],
+	);
+});
+
+test("medium subdivision respects the plan page limit without dropping ownership", () => {
+	const files = Array.from({ length: 10 }, (_, group) =>
+		Array.from({ length: 20 }, (_, child) => file(`src/group-${group}/child-${child}/run.py`, 1000)),
+	).flat();
+	const plan = buildCandidatePlan(index(files), "medium");
+	assert.ok(plan.pages.length <= 200);
+	assert.ok(plan.pages.length > 10);
+	assert.deepEqual(
+		plan.pages.slice(1).reduce<[number, number]>(
+			(sum, page) => {
+				const [count = 0, lines = 0] = scopeCounts(page.intent);
+				return [sum[0] + count, sum[1] + lines];
+			},
+			[0, 0],
+		),
+		[200, 200_000],
+	);
+});
+
+test("medium local remainders retain direct parent files even when children sort first", () => {
+	const files = [file("big/main.py", 50_000), file("src/small/child.py", 100), file("src/main.py", 10)];
+	const plan = buildCandidatePlan(index(files), "medium");
+	assert.deepEqual(
+		plan.pages.map((page) => page.path),
+		["architecture.md", "big.md", "source.md"],
+	);
+	assert.deepEqual(scopeCounts(pageAt(plan, 2).intent), [2, 110]);
+	assert.deepEqual(pageAt(plan, 2).sources, ["src/small/child.py", "src/main.py"]);
+});

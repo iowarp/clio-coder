@@ -104,6 +104,9 @@ export interface DepthStrategy {
 /** Most source files named on one page's prompt. Keeps a page dispatch small. */
 const MAX_PAGE_SOURCES = 8;
 
+export const MAX_PLAN_PAGES = 200;
+const MEDIUM_SPLIT_LINES = 8_000;
+
 interface Area {
 	key: string;
 	files: CodewikiFile[];
@@ -182,6 +185,65 @@ function collectAreas(source: ReadonlyArray<CodewikiFile>, areaDepth: number): A
 	return [...byKey.values()].sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
 }
 
+function mediumOwnership(areas: Area[], threshold: number): Area[] {
+	const included = areas.filter((area) => area.lines >= threshold);
+	const selected = included.length > 0 ? included : areas.slice(0, 1);
+	const owned = new Map(
+		selected.slice(0, MAX_PLAN_PAGES - 2).map((area) => [area.key, { ...area, files: [...area.files] }]),
+	);
+	const selectedKeys = new Set(owned.keys());
+	for (const area of areas) {
+		if (selectedKeys.has(area.key)) continue;
+		const ancestor = [...owned.keys()]
+			.filter((key) => area.key.startsWith(`${key}/`))
+			.sort((a, b) => b.length - a.length || a.localeCompare(b))[0];
+		const parent = area.key.split("/").slice(0, -1).join("/") || ".";
+		const key = owned.has(area.key)
+			? area.key
+			: (ancestor ?? (owned.has(parent) || owned.size < MAX_PLAN_PAGES - 2 ? parent : "."));
+		const host = owned.get(key) ?? { key, files: [], lines: 0 };
+		host.files.push(...area.files);
+		host.lines += area.lines;
+		owned.set(key, host);
+	}
+	const result = [...owned.values()].sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
+	for (let position = 0; position < result.length; position += 1) {
+		const area = result[position];
+		if (!area || area.lines <= MEDIUM_SPLIT_LINES) continue;
+		const { areaShare, minAreaLines } = WIKI_DEPTH_STRATEGY.medium;
+		const childThreshold = Math.max(minAreaLines, Math.floor(area.lines * areaShare));
+		let childDepth = area.key === "." ? 1 : area.key.split("/").length + 1;
+		let children = collectAreas(area.files, childDepth);
+		while (children.length === 1 && children[0]?.key !== area.key) {
+			const child = children[0];
+			const next = collectAreas(area.files, childDepth + 1);
+			if (next.length === 1 && next[0]?.key === child?.key) break;
+			children = next;
+			childDepth += 1;
+		}
+		const substantial = children.filter((child) => child.key !== area.key && child.lines >= childThreshold);
+		const keys = new Set(substantial.map((child) => child.key));
+		const remainder = children.filter((child) => !keys.has(child.key));
+		const split = [
+			...substantial,
+			...(remainder.length > 0
+				? [
+						{
+							key: area.key,
+							files: remainder.flatMap((child) => child.files),
+							lines: remainder.reduce((sum, child) => sum + child.lines, 0),
+						},
+					]
+				: []),
+		];
+		if (split.length < 2 || result.length - 1 + split.length >= MAX_PLAN_PAGES) continue;
+		result.splice(position, 1, ...split);
+		position -= 1;
+	}
+	for (const area of result) area.files.sort((a, b) => a.path.localeCompare(b.path));
+	return result.sort((a, b) => b.lines - a.lines || a.key.localeCompare(b.key));
+}
+
 /**
  * The architecture page every wiki gets. It is the one page whose subject is
  * the repository rather than a directory. With separate area pages it is
@@ -229,10 +291,12 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 	const included = areas.filter((area) => area.lines >= threshold);
 	// If every area is below threshold, the largest hosts the folded coverage.
 	// At simple depth a single ownership group shares the architecture page.
-	const selected = included.length > 0 ? included : areas.slice(0, 1);
+	const selected =
+		depth === "medium" ? mediumOwnership(areas, threshold) : included.length > 0 ? included : areas.slice(0, 1);
 	const selectedKeys = new Set(selected.map((area) => area.key));
 	const extras = new Map<string, CodewikiFile[]>();
 	for (const area of areas) {
+		if (depth === "medium") break;
 		if (selectedKeys.has(area.key)) continue;
 		const ancestor = selected.find((candidate) => area.key.startsWith(`${candidate.key}/`));
 		const host = ancestor?.key ?? selected[0]?.key;
@@ -257,7 +321,10 @@ export function buildCandidatePlan(codewiki: Codewiki, depth: ResolvedWikiDepth)
 		return {
 			path: pagePathForArea(area.key),
 			title: titleForArea(area.key),
-			intent: intentForScope(files, areaDepth),
+			intent: intentForScope(
+				files,
+				depth === "medium" ? (area.key === "." ? 1 : area.key.split("/").length + 1) : areaDepth,
+			),
 			sources: rankedSources(files),
 			status: "pending",
 			attempts: 0,

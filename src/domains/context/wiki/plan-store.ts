@@ -14,6 +14,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
 import type { WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
+import { MAX_PLAN_PAGES } from "./plan.js";
 import { parseWikiSourceContent } from "./source-content.js";
 
 /** Dispatches one page may receive across all runs before it is left alone. */
@@ -21,9 +22,6 @@ export const MAX_PAGE_ATTEMPTS = 3;
 
 /** Longest authored intent kept, so one bad entry cannot bloat a page prompt. */
 const MAX_INTENT_CHARS = 600;
-
-/** Most pages a plan may carry, bounding an authored rewrite's blast radius. */
-const MAX_PLAN_PAGES = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
