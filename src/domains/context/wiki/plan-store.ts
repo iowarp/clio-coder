@@ -16,6 +16,7 @@ import type { Codewiki } from "../codewiki/schema.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
 import type { ResolvedWikiDepth, WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
 import {
+	MAX_DETAILED_OWNERSHIP_PAGES,
 	MAX_MEDIUM_OWNERSHIP_PAGES,
 	MAX_PLAN_INTENT_CHARS,
 	MAX_PLAN_PAGES,
@@ -154,11 +155,18 @@ export function sanitizeWikiPlan(
 	const ownerCount = (list: readonly { path: string }[]): number =>
 		list.filter((page) => page.path !== "architecture.md").length;
 	// Retaining a previous plan that is already over the ceiling enforces nothing, so only reject growth past it.
+	const ownerCeiling =
+		previous?.depth === "medium"
+			? MAX_MEDIUM_OWNERSHIP_PAGES
+			: previous?.depth === "detailed"
+				? MAX_DETAILED_OWNERSHIP_PAGES
+				: undefined;
 	if (
 		!options.trustStatus &&
-		previous?.depth === "medium" &&
-		ownerCount(previous.pages) <= MAX_MEDIUM_OWNERSHIP_PAGES &&
-		ownerCount(pages) > MAX_MEDIUM_OWNERSHIP_PAGES
+		previous &&
+		ownerCeiling !== undefined &&
+		ownerCount(previous.pages) <= ownerCeiling &&
+		ownerCount(pages) > ownerCeiling
 	)
 		return null;
 	const retiredPages = [

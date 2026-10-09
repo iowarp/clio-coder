@@ -554,6 +554,11 @@ test("over-limit authored medium plans retain the last plan while legacy checkpo
 		});
 		assert.equal(sanitizeWikiPlan(revise(26), legacy, { trustStatus: false })?.pages.length, 27);
 		assert.equal(sanitizeWikiPlan(revise(31), legacy, { trustStatus: false })?.pages.length, 32);
+		const detailedPrior = { ...prior, depth: "detailed" as const };
+		assert.equal(sanitizeWikiPlan(revise(64), detailedPrior, { trustStatus: false })?.pages.length, 65);
+		assert.equal(sanitizeWikiPlan(revise(65), detailedPrior, { trustStatus: false }), null);
+		const detailedLegacy = { ...legacy, depth: "detailed" as const, pages: revise(70).pages };
+		assert.equal(sanitizeWikiPlan(revise(71), detailedLegacy, { trustStatus: false })?.pages.length, 72);
 	} finally {
 		isolated.restore();
 	}
