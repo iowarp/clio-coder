@@ -166,6 +166,40 @@ describe("wiki generation outcomes", () => {
 			}
 		});
 	}
+	for (const [attempts, retryPending] of [
+		[2, false],
+		[3, true],
+		[0, true],
+	] as const) {
+		it(`refuses an extra repair after a writer with ${attempts} prior attempts and retryPending=${retryPending}`, async () => {
+			await initialize();
+			const dir = join(cwd, ".clio-coder/wiki-staging-repair-limit");
+			mkdirSync(dir);
+			const saved = readWikiMeta(cwd)?.plan;
+			assert.ok(saved?.pages[0]);
+			saved.pages[0].status = "pending";
+			saved.pages[0].attempts = attempts;
+			saved.pages[0].lastFailure = { phase: "writer", detail: "Previous writer failed", runId: "failed-writer" };
+			writeWikiPlanFile(dir, saved);
+			writeFileSync(join(dir, "a.md"), content("a", 1));
+			writeFileSync(join(dir, "b.md"), content("b", 1));
+			const requests: string[] = [];
+			const result = await runWikiGenerate({
+				cwd,
+				model: "fixture",
+				retryPending,
+				generate: generator((spec, path) => {
+					assert.ok(path);
+					requests.push(spec.agentId ?? "");
+					writeFileSync(path, `${content("a", 1)}See \`src/missing.ts\`.\n`);
+				}),
+			});
+			assert.deepEqual(requests, ["wiki-writer"]);
+			assert.equal(result.pending, 1);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, attempts + 1);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure?.phase, "validation");
+		});
+	}
 	for (const resumed of [false, true]) {
 		it(`validates ${resumed ? "resumed" : "newly authored"} plan anchors before dispatching writers`, async () => {
 			writeFileSync(join(isolated.dir, "outside.ts"), "outside\n");

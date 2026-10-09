@@ -592,9 +592,22 @@ async function runPagePhase(
 		total: position.total,
 		detail: `${repair ? "repair; " : ""}${detail}${usage}`,
 	});
-	if (!repair && outcome.ok && evidence && !evidence.ok && (!deadline || deadline.remainingMs() > 0)) {
+	if (
+		!repair &&
+		!input.retryPending &&
+		outcome.ok &&
+		evidence &&
+		!evidence.ok &&
+		(!deadline || deadline.remainingMs() > 0)
+	) {
 		const pending = next.pages.find((entry) => entry.path === page.path);
-		if (pending) return runPagePhase(dispatch, input, next, pending, route, position, deadline, receipts, true);
+		if (
+			pending &&
+			pending.attempts < MAX_PAGE_ATTEMPTS &&
+			existsSync(join(input.outputDir, page.path)) &&
+			stable(evidence.dependencies)
+		)
+			return runPagePhase(dispatch, input, next, pending, route, position, deadline, receipts, true);
 	}
 	return next;
 }
