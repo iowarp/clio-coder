@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Codewiki, CodewikiFile } from "../../src/domains/context/codewiki/schema.js";
 import { buildCandidatePlan, planWikiGeneration, type WikiPlan } from "../../src/domains/context/wiki/plan.js";
+import { sanitizePagePath, sanitizeWikiPlan } from "../../src/domains/context/wiki/plan-store.js";
 
 function file(path: string, loc: number, role: CodewikiFile["role"] = "module"): CodewikiFile {
 	return { id: path, path, loc, role, lang: "python", hash: "fixture", imports: [] };
@@ -265,4 +266,34 @@ test("medium local remainders retain direct parent files even when children sort
 	);
 	assert.deepEqual(scopeCounts(pageAt(plan, 2).intent), [2, 110]);
 	assert.deepEqual(pageAt(plan, 2).sources, ["src/small/child.py", "src/main.py"]);
+});
+
+test("candidate ownership survives reserved navigation names, long paths and slug collisions", () => {
+	const long = "a".repeat(210);
+	for (const fixture of [
+		index([file("src/pkg/index/run.py", 4500), file("src/pkg/worker/run.py", 4500)]),
+		index([
+			file("index/main.py", 4500),
+			file("quickstart/main.py", 4500),
+			file(`${long}-one/main.py`, 4500),
+			file(`${long}-two/main.py`, 4500),
+		]),
+	]) {
+		const plan = buildCandidatePlan(fixture, "medium");
+		const saved = sanitizeWikiPlan(plan);
+		assert.ok(saved);
+		assert.deepEqual(
+			saved.pages.map((page) => page.path),
+			plan.pages.map((page) => page.path),
+		);
+		for (const page of plan.pages) assert.equal(sanitizePagePath(page.path), page.path);
+		assert.equal(new Set(plan.pages.map((page) => page.path)).size, plan.pages.length);
+		assert.deepEqual(
+			new Set(saved.pages.slice(1).flatMap((page) => page.sources)),
+			new Set(fixture.files.map((item) => item.path)),
+		);
+		assert.deepEqual(buildCandidatePlan(index([...fixture.files].reverse()), "medium"), plan);
+	}
+	assert.equal(sanitizePagePath("pkg/index.md"), null);
+	assert.equal(sanitizePagePath("quickstart.md"), null);
 });

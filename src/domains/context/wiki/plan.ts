@@ -17,6 +17,7 @@
  */
 
 import type { Codewiki, CodewikiFile } from "../codewiki/schema.js";
+import { isGeneratedWikiFile } from "./layout.js";
 import type { WikiSourceContent } from "./source-content.js";
 
 export type WikiDepth = "auto" | "simple" | "medium" | "detailed";
@@ -105,6 +106,7 @@ export interface DepthStrategy {
 const MAX_PAGE_SOURCES = 8;
 
 export const MAX_PLAN_PAGES = 200;
+export const MAX_PLAN_PATH_CHARS = 200;
 const MEDIUM_SPLIT_LINES = 8_000;
 
 interface Area {
@@ -154,7 +156,13 @@ function areaSegments(area: string): string[] {
 
 /** Turn an index area into a page path; nesting follows the repository's. */
 export function pagePathForArea(area: string): string {
-	return `${areaSegments(area).map(slugSegment).join("/")}.md`;
+	let stem = areaSegments(area)
+		.map(slugSegment)
+		.join("/")
+		.slice(0, MAX_PLAN_PATH_CHARS - 3)
+		.replace(/\/+$/, "");
+	if (isGeneratedWikiFile(`${stem}.md`)) stem = `${stem.slice(0, MAX_PLAN_PATH_CHARS - 8).replace(/\/+$/, "")}-area`;
+	return `${stem}.md`;
 }
 
 function titleForArea(area: string): string {
@@ -350,7 +358,11 @@ function dedupePagePaths(plan: WikiPlan): WikiPlan {
 		let path = page.path;
 		let suffix = 2;
 		while (seen.has(path)) {
-			path = page.path.replace(/\.md$/, `-${suffix}.md`);
+			const ending = `-${suffix}.md`;
+			path = `${page.path
+				.slice(0, -3)
+				.slice(0, MAX_PLAN_PATH_CHARS - ending.length)
+				.replace(/\/+$/, "")}${ending}`;
 			suffix += 1;
 		}
 		seen.add(path);

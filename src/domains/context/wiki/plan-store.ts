@@ -14,7 +14,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { isGeneratedWikiFile, WIKI_PLAN_FILE } from "./layout.js";
 import type { WikiPageFailure, WikiPageStatus, WikiPlan, WikiPlanPage } from "./plan.js";
-import { MAX_PLAN_PAGES } from "./plan.js";
+import { MAX_PLAN_PAGES, MAX_PLAN_PATH_CHARS } from "./plan.js";
 import { parseWikiSourceContent } from "./source-content.js";
 
 /** Dispatches one page may receive across all runs before it is left alone. */
@@ -51,7 +51,7 @@ export function sanitizePagePath(value: unknown): string | null {
 	const raw = usableString(value);
 	if (raw === null) return null;
 	const normalized = raw.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
-	if (!normalized.endsWith(".md") || normalized.length > 200) return null;
+	if (!normalized.endsWith(".md") || normalized.length > MAX_PLAN_PATH_CHARS) return null;
 	const segments = normalized.split("/");
 	if (
 		segments.some((segment) => segment.length === 0 || segment === "." || segment === ".." || segment.startsWith("."))
