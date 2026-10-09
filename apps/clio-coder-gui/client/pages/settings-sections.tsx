@@ -41,7 +41,7 @@ function SettingsPageFrame({
 				</div>
 			</div>
 			{before}
-			{(selection.workspaces.data?.length ?? 0) > 1 ? <WorkspacePicker selection={selection} /> : null}
+			{(selection.workspaces.data?.length ?? 0) > 1 ? <WorkspacePicker selection={{ ...selection, id }} /> : null}
 			{id ? (
 				<SettingsControlsView key={`${id}:${scope}`} client={client} workspaceId={id} scope={scope} />
 			) : selection.workspaces.isPending ? (
