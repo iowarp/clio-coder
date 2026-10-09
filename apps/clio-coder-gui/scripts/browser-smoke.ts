@@ -27,8 +27,8 @@ const { values } = parseArgs({
 });
 const widths = values.widths.split(",").map(Number);
 assert.ok(
-	widths.length > 0 && widths.every((width) => [1600, 1050, 390, 320].includes(width)),
-	"widths: 1600, 1050, 390, 320",
+	widths.length > 0 && widths.every((width) => [1600, 1050, 400, 390, 320].includes(width)),
+	"widths: 1600, 1050, 400, 390, 320",
 );
 const scratch = fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
 await mkdir(scratch, { recursive: true });
@@ -166,7 +166,7 @@ try {
 					getComputedStyle(document.body).color ===
 					((document.documentElement.dataset.theme ??
 						(matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark"
-						? "rgb(240, 236, 225)"
+						? "rgb(242, 243, 242)"
 						: "rgb(26, 22, 18)"),
 			);
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -224,7 +224,7 @@ try {
 		}
 		async function leaveSettings() {
 			await revealSidebar();
-			await page.locator(".wb-sidebar").getByRole("link", { name: "Back to app", exact: true }).click();
+			await page.locator(".wb-sidebar").getByRole("link", { name: "Back to work", exact: true }).click();
 			await page.getByRole("navigation", { name: "Settings", exact: true }).waitFor({ state: "detached" });
 		}
 		// Dark checks follow the device preference; the explicit choice is exercised on General below.
