@@ -216,6 +216,8 @@ interface WikiAttempts {
 	/** Total attempts, terminal included. */
 	count: number;
 	earlier: ReadonlyArray<WikiEarlierAttempt>;
+	/** Set when the ledger lookup failed, so earlier attempts may exist whose usage is unknown. */
+	incomplete?: true;
 }
 
 type WikiDispatchOutcome =
@@ -275,7 +277,9 @@ function collectWikiAttempts(
 		}
 		return { terminalRunId, count: earlier.length + 1, earlier };
 	} catch {
-		return undefined;
+		// A ledger failure must not fail the page, but silently reporting single-receipt totals would
+		// undercount retried dispatches, so the outcome is flagged and renders as incomplete usage.
+		return { terminalRunId: terminal?.runId ?? rootRunId, count: 1, earlier: [], incomplete: true };
 	}
 }
 
@@ -289,7 +293,12 @@ const USAGE_FIELDS = [
 ] as const;
 
 type WikiUsage = Pick<RunReceipt, (typeof USAGE_FIELDS)[number][0]>;
-type WikiReceipts = Array<{ receipt: WikiRunUsage | undefined; kind: "writer" | "repair" }>;
+type WikiReceipts = Array<{
+	receipt: WikiRunUsage | undefined;
+	kind: "writer" | "repair";
+	/** The attempt ledger was unreadable, so this dispatch may have unrecorded earlier attempts. */
+	unrecoveredAttempts?: true;
+}>;
 const ATTEMPT_LINE_LIMIT = 4;
 
 function usageDetail(usage: WikiUsage): string {
@@ -304,10 +313,14 @@ function dispatchUsage(
 	if (outcome.phase === "admission") return "";
 	const receipt = outcome.receipt;
 	const attempts = outcome.attempts;
-	receipts.push({ receipt, kind });
+	receipts.push({ receipt, kind, ...(attempts?.incomplete ? { unrecoveredAttempts: true as const } : {}) });
 	for (const earlier of attempts?.earlier ?? []) receipts.push({ receipt: earlier.usage, kind });
 	const runId = attempts?.terminalRunId ?? outcome.runId;
-	const breakdown = attempts && attempts.count > 1 ? attemptsBreakdown(attempts, receipt) : "";
+	const breakdown = attempts?.incomplete
+		? "; earlier attempts unrecoverable; all-attempt tokens total unknown (incomplete)"
+		: attempts && attempts.count > 1
+			? attemptsBreakdown(attempts, receipt)
+			: "";
 	if (!receipt) return `; run=${runId}; usage unavailable${breakdown}`;
 	const provenance = receipt.costProvenance;
 	return (
@@ -339,7 +352,11 @@ function invocationUsage(receipts: WikiReceipts): string {
 	let unknown = 0;
 	let incomplete = 0;
 	let missingUsage = 0;
-	for (const { receipt } of receipts) {
+	for (const { receipt, unrecoveredAttempts } of receipts) {
+		if (unrecoveredAttempts && receipt) {
+			incomplete += 1;
+			missingUsage += 1;
+		}
 		if (!receipt) {
 			unknown += 1;
 			incomplete += 1;

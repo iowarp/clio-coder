@@ -322,3 +322,65 @@ it("records the validation sidecar and last failure under the terminal run of a 
 		isolated.restore();
 	}
 });
+
+it("flags usage as incomplete when the attempt ledger cannot be read", async () => {
+	const isolated = await isolateClioEnv("wiki-ledger-failure-");
+	try {
+		const cwd = isolated.dir;
+		const outputDir = join(cwd, ".clio-coder/wiki-staging");
+		mkdirSync(outputDir, { recursive: true });
+		writeFileSync(join(cwd, "package.json"), "{}\n");
+		const plan: WikiPlan = {
+			version: 1,
+			overview: "Ledger failure fixture",
+			pages: [
+				{ path: "a.md", title: "a", intent: "Explain a", sources: ["package.json"], status: "pending", attempts: 0 },
+			],
+		};
+		const terminal = {
+			runId: "ledger-0",
+			exitCode: 1,
+			tokenCount: 10,
+			missingTokenCalls: 0,
+			costUsd: 0,
+			costProvenance: "known",
+		};
+		const dispatch = {
+			abort() {},
+			assignments: {
+				get() {
+					throw new Error("ledger unavailable");
+				},
+			},
+			getRun: () => null,
+			async dispatch() {
+				return {
+					runId: "ledger-0",
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve(terminal),
+				};
+			},
+		} as unknown as DispatchContract;
+		const details: string[] = [];
+		const summaries: string[] = [];
+		await modelWikiGenerate({ dispatch })({
+			cwd,
+			outputDir,
+			mode: "init",
+			resumed: false,
+			plan,
+			unclaimedAreas: [],
+			codewiki: { version: 5, language: "typescript", files: [], symbols: [], edges: [] },
+			generation: { requestedDepth: "simple", depth: "simple", sourceFiles: 1, sourceLines: 1, plan },
+			progress(event) {
+				if (event.message === "wiki invocation usage") summaries.push(event.detail ?? "");
+				else if (event.detail?.includes("; run=")) details.push(event.detail);
+			},
+		});
+		assert.ok(details.length > 0);
+		for (const detail of details) assert.match(detail, /earlier attempts unrecoverable.*\(incomplete\)/u);
+		assert.match(summaries[0] ?? "", /incomplete usage breakdown=[1-9]\d* runs/u);
+	} finally {
+		isolated.restore();
+	}
+});
