@@ -171,6 +171,11 @@ try {
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const builder = new AxeBuilder({ page });
 			const axe = await builder.analyze();
+			assert.deepEqual(
+				axe.violations.filter((item) => item.id === "aria-allowed-role"),
+				[],
+				`${name} has an invalid ARIA role at ${width}px`,
+			);
 			const serious = axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical");
 			const overflow = await page.evaluate(
 				() => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -952,7 +957,23 @@ try {
 			.getByRole("option", { name: /^\/context/ })
 			.first()
 			.waitFor();
+		const firstSuggestion = await composerField.getAttribute("aria-activedescendant");
+		assert.ok(firstSuggestion);
+		await composerField.press("ArrowDown");
+		const nextSuggestion = await composerField.getAttribute("aria-activedescendant");
+		assert.ok(nextSuggestion);
+		assert.notEqual(nextSuggestion, firstSuggestion, "plain arrows did not move the active suggestion");
+		assert.equal(await composerField.evaluate((element) => document.activeElement === element), true);
 		await check("slash-palette");
+		await composerField.press("Shift+ArrowUp");
+		assert.deepEqual(
+			await composerField.evaluate((element) => {
+				const field = element as HTMLTextAreaElement;
+				return [field.selectionStart, field.selectionEnd];
+			}),
+			[0, 1],
+			"Shift+ArrowUp did not select text while the slash palette was open",
+		);
 		await page.keyboard.press("Escape");
 		await slashList.waitFor({ state: "detached" });
 		// A typed command line is parsed against the catalog and previewed; nothing runs until Enter.
