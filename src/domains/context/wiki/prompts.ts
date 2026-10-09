@@ -247,8 +247,9 @@ function scopedSymbols(codewiki: Codewiki, sources: ReadonlyArray<string>, cwd: 
 						(a, b) =>
 							Number(b.exported === true) - Number(a.exported === true) ||
 							a.line - b.line ||
-							a.name.localeCompare(b.name) ||
-							a.kind.localeCompare(b.kind),
+							// Plain comparison keeps the anchor order identical across locales and ICU builds.
+							(a.name < b.name ? -1 : a.name > b.name ? 1 : 0) ||
+							(a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0),
 					)
 			: [];
 		return { path, file, symbols, count: 0 };
