@@ -84,7 +84,7 @@ const failures: string[] = [],
 // The last run uses Chrome's native 200% page zoom in a fresh profile. Its layout viewport
 // is 800 CSS pixels inside a 1600px window; neither CSS zoom nor pinch scaling is applied.
 const runs = [...(values["zoom-only"] ? [] : widths.map((width) => ({ width, zoom: 1 }))), { width: 800, zoom: 2 }];
-const statuses: { path: string; status: number }[] = [];
+const statuses: { method: string; path: string; status: number }[] = [];
 const zoomMeasurements: { outerWidth: number; innerWidth: number; devicePixelRatio: number; visualScale: number }[] =
 	[];
 let zoomContext: BrowserContext | null = null;
@@ -155,7 +155,12 @@ try {
 			);
 		});
 		page.on("response", (response) => {
-			if (response.status() >= 400) statuses.push({ path: new URL(response.url()).pathname, status: response.status() });
+			if (response.status() >= 400)
+				statuses.push({
+					method: response.request().method(),
+					path: new URL(response.url()).pathname,
+					status: response.status(),
+				});
 		});
 		async function check(name: string, checkedPage = page) {
 			await checkedPage.evaluate(() => document.fonts.ready);
@@ -1646,7 +1651,9 @@ try {
 		statuses.filter(
 			(item) =>
 				!(item.path === "/api/workspaces" && item.status === 422) &&
-				!(item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) &&
+				// The harness Clio does not expose session history, so the read refuses. The same path also
+				// creates a session, and a refused create must still fail the run.
+				!(item.method === "GET" && item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) &&
 				!(item.status === 401 && firstReads.includes(item.path)),
 		),
 		[],
