@@ -506,7 +506,10 @@ async function runPagePhase(
 	}
 	if (
 		repair &&
-		(!seeded || !plan.sourceContent || !stable(diagnostic?.dependencies ?? diagnostic?.resolvedDependencies))
+		(!seeded ||
+			!plan.sourceContent ||
+			diagnostic?.validationKind === "coverage" ||
+			!stable(diagnostic?.dependencies ?? diagnostic?.resolvedDependencies))
 	)
 		repair = false;
 	const kind = repair ? "repair" : "writer";
@@ -583,7 +586,7 @@ async function runPagePhase(
 			if (written) delete nextPage.lastFailure;
 			else
 				nextPage.lastFailure = {
-					phase: repair ? "writer" : outcome.ok ? "validation" : outcome.phase,
+					phase: repair || evidence?.validationKind === "coverage" ? "writer" : outcome.ok ? "validation" : outcome.phase,
 					detail: (repair ? `repair failed: ${detail}; full writer required next invocation` : detail)
 						.replace(/\s+/gu, " ")
 						.slice(0, 500),
@@ -607,6 +610,7 @@ async function runPagePhase(
 		outcome.ok &&
 		evidence &&
 		!evidence.ok &&
+		evidence.validationKind !== "coverage" &&
 		(!deadline || deadline.remainingMs() > 0)
 	) {
 		const pending = next.pages.find((entry) => entry.path === page.path);

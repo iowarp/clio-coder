@@ -330,6 +330,84 @@ describe("wiki generation outcomes", () => {
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure, undefined);
 	});
 
+	for (const resumed of [false, true]) {
+		it(`routes ${resumed ? "saved" : "fresh"} coverage failures to normal writing without repair`, async () => {
+			const gap = "Inspect the admission rejection branch and its focused test.";
+			const draft = content("a", 1).replace("---\n#", `coverage_gaps:\n  - ${JSON.stringify(gap)}\n---\n#`);
+			const plan: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
+			if (resumed) {
+				await initialize();
+				const dir = join(cwd, ".clio-coder/wiki-staging-coverage");
+				mkdirSync(dir);
+				const saved = readWikiMeta(cwd)?.plan;
+				assert.ok(saved?.pages[0]);
+				saved.pages[0].status = "pending";
+				saved.pages[0].lastFailure = { phase: "validation", detail: gap, runId: "successful-writer" };
+				writeWikiPlanFile(dir, saved);
+				writeFileSync(join(dir, "a.md"), draft);
+				writeFileSync(join(dir, "b.md"), content("b", 1));
+			}
+			const requests: string[] = [];
+			const result = await run(
+				generator((spec, path) => {
+					requests.push(spec.agentId ?? "");
+					if (!path) writeWikiPlanFile(spec.writeRoots?.[0] as string, plan);
+					else writeFileSync(path, draft);
+				}),
+			);
+			assert.deepEqual(requests, resumed ? ["wiki-writer"] : ["wiki-writer", "wiki-writer"]);
+			assert.equal(result.pending, 1);
+			const pending = readWikiMeta(cwd)?.plan?.pages[0];
+			assert.equal(pending?.attempts, resumed ? 2 : 1);
+			assert.equal(pending?.lastFailure?.phase, "writer");
+			assert.match(pending?.lastFailure?.detail ?? "", /Coverage gap/u);
+			let calls = 0;
+			const completed = await run(
+				generator((spec, path) => {
+					assert.equal(spec.agentId, "wiki-writer");
+					assert.ok(path);
+					calls++;
+					writeFileSync(path, content("a", 2));
+				}),
+			);
+			assert.equal(calls, 1);
+			assert.equal(completed.pending, 0);
+		});
+	}
+	for (const fixed of [false, true]) {
+		it(`blocks reuse of a broken wiki link and ${fixed ? "credits" : "rejects"} the gated repair`, async () => {
+			await initialize();
+			const dir = join(cwd, ".clio-coder/wiki-staging-link");
+			mkdirSync(dir);
+			const saved = readWikiMeta(cwd)?.plan;
+			assert.ok(saved?.pages[0]);
+			saved.pages[0].status = "pending";
+			saved.pages[0].attempts = 3;
+			saved.pages[0].lastFailure = { phase: "validation", detail: "Historical gate failure", runId: "successful-writer" };
+			const draft = `${content("a", 1)}[Missing](missing.md)\n`;
+			writeWikiPlanFile(dir, saved);
+			writeFileSync(join(dir, "a.md"), draft);
+			writeFileSync(join(dir, "b.md"), content("b", 1));
+			let calls = 0;
+			const repair = generator((spec, path) => {
+				assert.equal(spec.agentId, "wiki-repair");
+				assert.ok(path);
+				assert.match(spec.task, /Repair unresolved wiki link/u);
+				assert.match(spec.task, /missing\.md/u);
+				calls++;
+				writeFileSync(path, fixed ? `${content("a", 1)}[Existing page](b.md)\n` : draft);
+			});
+			const result = await run(repair);
+			assert.equal(calls, 0);
+			assert.equal(result.pending, 1, "the shared link gate blocks zero-dispatch reuse before exhausted filtering");
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 3);
+			const retried = await runWikiGenerate({ cwd, model: "fixture", retryPending: true, generate: repair });
+			assert.equal(calls, 1);
+			assert.equal(retried.pending, fixed ? 0 : 1);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 4);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, fixed ? "written" : "pending");
+		});
+	}
 	it("keeps successful writers with invalid evidence pending and makes their next repair actionable", async () => {
 		const onePage: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
 		for (const [version, invalid] of [

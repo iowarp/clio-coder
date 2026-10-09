@@ -429,6 +429,7 @@ function resolvePlan(input: {
 						sourceRoot: input.cwd,
 					});
 					if (
+						evidence.validationKind === "coverage" ||
 						!wikiSourcesMatch(previous.sourceContent, input.sourceContent, [
 							...page.sources,
 							...(evidence.dependencies ?? evidence.resolvedDependencies ?? []),
