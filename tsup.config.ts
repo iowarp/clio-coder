@@ -101,7 +101,7 @@ export default defineConfig({
 	// external imports still execute eagerly, so `clio-coder --version` would pay the
 	// full module-load tax.
 	splitting: true,
-	sourcemap: true,
+	sourcemap: false,
 	metafile: true,
 	clean: true,
 	dts: false,
