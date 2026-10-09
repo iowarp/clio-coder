@@ -126,12 +126,12 @@ describe("wiki mechanical evidence gate", () => {
 		strictEqual(check(page("package.json", "See `src/*.ts:1`.")).ok, false);
 	});
 
-	it("grounds templates and runtime paths in delimited parts from one declared source", () => {
+	it("grounds templates and runtime paths in one ordered construction", () => {
 		writeFileSync(
 			join(root, "src/main.ts"),
 			'output = f"verdict-{tier}.json"\nraw = trial_dir / "raw" / "metrics.json"\n' +
 				'path = "research" / "directives" / f"{campaign_id}.yaml"\n' +
-				'measure = root / "measure" / tier\nmeasure.glob("*/block-*/measurements.json")\n',
+				'measure = root / "measure" / tier / "*/block-*/measurements.json"\n',
 		);
 		for (const name of [
 			"verdict-<tier>.json",
@@ -161,6 +161,70 @@ describe("wiki mechanical evidence gate", () => {
 			check("---\nsources: [src/main.ts, tests/main.test.ts]\n---\nThe layout is `verdict-<tier>.json`.").ok,
 			false,
 		);
+	});
+
+	it("rejects unrelated literals, wrong suffixes, reordered paths and repeated components", () => {
+		writeFileSync(
+			join(root, "src/main.ts"),
+			'lineage = self.research_dir / "lineage" / f"{self.campaign_id}.jsonl"\n' +
+				'steering = self.research_dir / "steering" / f"{self.campaign_id}.jsonl"\n' +
+				'directive = self.research_dir / "directives" / f"{self.campaign_id}.yaml"\n' +
+				'raw = trial_dir / "raw" / "metrics.json"\n' +
+				'prefix = "detached"; suffix = "result.json"\n' +
+				'measure = root / "measure" / tier\nmeasure.glob("*/block-*/measurements.json")\n',
+		);
+		for (const name of [
+			"lineage/<campaign_id>.jsonl",
+			"steering/<campaign_id>.jsonl",
+			"directives/<campaign_id>.yaml",
+			"raw/metrics.json",
+		]) {
+			strictEqual(check(page("src/main.ts", `Layout: \`${name}\`.`)).ok, true, name);
+		}
+		for (const name of [
+			"lineage/<campaign_id>.yaml",
+			"steering/<campaign_id>.yaml",
+			"<campaign_id>/lineage.jsonl",
+			"lineage/lineage/<campaign_id>.jsonl",
+			"raw/raw/metrics.json",
+			"raw/<invented>/metrics.json",
+			"metrics.json/raw/metrics.json",
+			"detached/result.json",
+			"detached/<id>/result.json",
+			"measure/<tier>/*/block-*/measurements.json",
+		]) {
+			strictEqual(check(page("src/main.ts", `Layout: \`${name}\`.`)).ok, false, name);
+		}
+	});
+
+	it("recognizes join calls, Path chains, template literals and concatenation without mixing expressions", () => {
+		for (const expression of [
+			'os.path.join(root, "lineage", f"{campaign_id}.jsonl")',
+			'Path(root, "lineage") / f"{campaign_id}.jsonl"',
+			`path.posix.join(root, "lineage", \`\${campaign_id}.jsonl\`)`,
+			`\`lineage/\${campaign_id}.jsonl\``,
+			'"lineage/" + campaign_id + ".jsonl"',
+		]) {
+			writeFileSync(join(root, "src/main.ts"), `output = ${expression}\n`);
+			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.jsonl`.")).ok, true, expression);
+			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.yaml`.")).ok, false, expression);
+			strictEqual(check(page("src/main.ts", "Layout: `lineage/lineage/<campaign_id>.jsonl`.")).ok, false, expression);
+		}
+		for (const expression of [
+			'"lineage/" + transform(campaign_id) + ".jsonl"',
+			'build_path("lineage", campaign_id, ".jsonl")',
+			'"lineage" / campaign_id + ".jsonl"',
+			'f"lineage/{transform(campaign_id)}.jsonl"',
+			'f"lineage/{campaign_id}.jsonl" + ".yaml"',
+		]) {
+			writeFileSync(join(root, "src/main.ts"), `output = ${expression}\n`);
+			strictEqual(check(page("src/main.ts", "Layout: `lineage/<campaign_id>.jsonl`.")).ok, false, expression);
+		}
+	});
+
+	it("rejects unmatched plain globs even when a declared source contains the exact literal", () => {
+		writeFileSync(join(root, "src/main.ts"), 'glob = "missing/**/*.json"\n');
+		strictEqual(check(page("src/main.ts", "Layout: `missing/**/*.json`.")).ok, false);
 	});
 
 	it("accepts readable pages without a mandatory template and resolves JS source aliases", () => {
@@ -287,8 +351,8 @@ describe("wiki mechanical evidence gate", () => {
 	});
 
 	it("accepts declared source literals as mentions while rejecting fabricated or unverified citations", () => {
-		writeFileSync(join(root, "src/main.ts"), 'const config = "settings.yaml"; const example = "[project]/src/a.ts";\n');
-		const content = page("src/main.ts", "The names are `settings.yaml` and `[project]/src/a.ts`.");
+		writeFileSync(join(root, "src/main.ts"), 'const config = "settings.yaml"; const example = "<project>/src/a.ts";\n');
+		const content = page("src/main.ts", "The names are `settings.yaml` and `<project>/src/a.ts`.");
 		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["src/main.ts"] });
 		strictEqual(check(content.replace("settings.yaml", "fabricated.yaml")).ok, false);
 		strictEqual(check(page("package.json", "The name is `settings.yaml`.")).ok, false);

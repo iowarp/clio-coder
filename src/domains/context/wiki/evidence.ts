@@ -1,6 +1,6 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, matchesGlob, posix, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
 import { mapWikiProse, readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
@@ -103,6 +103,74 @@ export function repairWikiLinks(
 		),
 	);
 	return { body: repaired, unresolved };
+}
+
+/** Recognize a small expression grammar; never combine literals from separate expressions. */
+function layoutConstructions(text: string): Set<string> {
+	const identifier = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+	const tokens = [
+		...text.matchAll(
+			/#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(?:[fFrRbBuU]{0,2})(?:"""[\s\S]*?"""|'''[\s\S]*?''')|[fFrR]?(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|`(?:\\.|[^`\\])*`|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|[^\s]/g,
+		),
+	].map((match) => match[0]);
+	const paths = new Set<string>();
+	const placeholder = (name: string): string => `<${name.split(".").at(-1)}>`;
+	const atom = (start: number): { value: string; end: number } | null => {
+		const token = tokens[start] ?? "";
+		if (identifier.test(token)) {
+			if (tokens[start + 1] !== "(") return { value: placeholder(token), end: start + 1 };
+			if (!/^(?:Path|pathlib\.Path|os\.path\.join|path(?:\.posix)?\.join)$/.test(token)) return null;
+			const parts: string[] = [];
+			let end = start + 2;
+			while (end < tokens.length) {
+				const part = atom(end);
+				if (!part) return null;
+				parts.push(part.value);
+				end = part.end;
+				if (tokens[end] === ")") return { value: parts.join("/"), end: end + 1 };
+				if (tokens[end] !== ",") return null;
+				end++;
+			}
+			return null;
+		}
+		const quoted = /^([fFrR]?)(["'`])([\s\S]*)\2$/.exec(token);
+		if (!quoted || /[\\\n]/.test(quoted[3] ?? "") || token.includes('"""') || token.includes("'''")) return null;
+		let value = quoted[3] ?? "";
+		if (quoted[1]?.toLowerCase() === "f" || quoted[2] === "`") {
+			const interpolation = quoted[2] === "`" ? /\$\{([^{}]*)\}/g : /\{([^{}]*)\}/g;
+			let supported = true;
+			value = value.replace(interpolation, (_match, name: string) => {
+				if (!identifier.test(name)) supported = false;
+				return placeholder(name);
+			});
+			if (!supported || /[{}]/.test(value)) return null;
+		}
+		return { value, end: start + 1 };
+	};
+	for (let index = 0; index < tokens.length; index++) {
+		let expression = atom(index);
+		if (!expression) continue;
+		let operator: string | undefined;
+		let supported = true;
+		while (tokens[expression.end] === "/" || tokens[expression.end] === "+") {
+			const nextOperator: string | undefined = tokens[expression.end];
+			const next = atom(expression.end + 1);
+			if (!next) {
+				supported = false;
+				break;
+			}
+			if (operator !== undefined && operator !== nextOperator) supported = false;
+			operator = nextOperator;
+			expression = { value: expression.value + (operator === "/" ? "/" : "") + next.value, end: next.end };
+		}
+		if (supported) {
+			paths.add(expression.value);
+			// An opaque base directory can be omitted; literal path components cannot.
+			if (/^<[\w$]+>\//.test(expression.value)) paths.add(expression.value.replace(/^<[\w$]+>\//, ""));
+		}
+		index = expression.end - 1;
+	}
+	return paths;
 }
 
 /**
@@ -328,25 +396,22 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		}
 		return false;
 	};
+	const constructionsByFile = new Map<string, Set<string>>();
 	const groundedLayout = (cited: string): boolean => {
 		if (isAbsolute(cited) || cited.includes("\\") || cited.split("/").includes("..")) return false;
 		const literal = (value: string): RegExp => new RegExp(`(?<![\\w/.-])${escapeRegex(value)}(?![\\w/-]|\\.\\w)`);
-		const fragments = cited
-			.split(/<[A-Za-z_][\w-]*>/)
-			.map((fragment) => fragment.replace(/^\/+|\/+$/g, ""))
-			.filter(Boolean);
 		const glob = /[*?[]/.test(cited);
-		if (glob && !cited.includes("<") && listedFiles().some((file) => matchesGlob(file, cited))) return true;
+		const template = /<[A-Za-z_][\w-]*>/.test(cited);
+		if (glob && !template) return listedFiles().some((file) => posix.matchesGlob(file, cited));
 		return [...declaredFiles].some((path) => {
 			const text = sourceText(path) ?? "";
 			if (literal(cited).test(text)) return true;
-			if (glob && !cited.includes("<")) return false;
-			return (
-				fragments.length > 0 &&
-				fragments.every(
-					(fragment) => literal(fragment).test(text) || fragment.split("/").every((part) => literal(part).test(text)),
-				)
-			);
+			let constructions = constructionsByFile.get(path);
+			if (!constructions) {
+				constructions = layoutConstructions(text);
+				constructionsByFile.set(path, constructions);
+			}
+			return constructions.has(cited);
 		});
 	};
 	for (const reference of references) {
