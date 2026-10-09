@@ -100,3 +100,19 @@ for (const schemaFallback of [false, true]) {
 		}
 	});
 }
+
+test("legacy scope inference refuses absolute paths glued to key separators instead of reading them as relative", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "clio-coder-legacy-absolute-"));
+	try {
+		for (const task of ["Read key:/data/x.txt", "Summarize path=/etc/hosts"]) {
+			throws(
+				() => resolveDispatchPathScope({ agentId: "researcher", executionRole: "researcher", task, cwd }),
+				/legacy_scope_path_absolute/u,
+				task,
+			);
+		}
+		resolveDispatchPathScope({ agentId: "researcher", executionRole: "researcher", task: "Read key:data/x.txt", cwd });
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
