@@ -857,7 +857,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			// 1. Pristine isolated home/project check BEFORE installing any library package:
 			// The pristine agents CLI before install is the decisive packaged-runtime assertion.
 			// It verifies the packaged binary in an isolated child environment, ensuring that
-			// the packaged runtime discovers all 14 built-in agent recipes and resolves their
+			// the packaged runtime discovers all 15 built-in agent recipes and resolves their
 			// bound skills against the installed package library/skills root before any
 			// library packages are installed.
 			const pristineBuiltinSpecs = (await libraryJson(["agents", "--all"])) as Array<{ id: string; skills: string[] }>;
@@ -866,11 +866,11 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				.filter((name) => name.endsWith(".md"))
 				.map((name) => name.slice(0, -3))
 				.sort();
-			strictEqual(builtinSourceIds.length, 14, "expected 14 built-in agent recipes");
+			strictEqual(builtinSourceIds.length, 15, "expected 15 built-in agent recipes");
 			deepStrictEqual(
 				pristineBuiltinSpecs.map((spec) => spec.id).sort(),
 				builtinSourceIds,
-				"pristine environment must list all 14 built-in agent recipes",
+				"pristine environment must list all 15 built-in agent recipes",
 			);
 			const builtinSpecsWithSkills = pristineBuiltinSpecs.filter((spec) => spec.skills.length > 0);
 			ok(builtinSpecsWithSkills.length > 0, "built-in recipes must declare bound skills");
@@ -887,7 +887,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					pristineDiagnostics,
 				);
 				deepStrictEqual(pristineDiagnostics, [], "loading built-in recipes must emit no diagnostics");
-				strictEqual(pristineRecipes.length, 14, "must load all 14 built-in agent recipes through actual loader");
+				strictEqual(pristineRecipes.length, 15, "must load all 15 built-in agent recipes through actual loader");
 
 				for (const recipe of pristineRecipes) {
 					if (recipe.skills.length > 0) {
