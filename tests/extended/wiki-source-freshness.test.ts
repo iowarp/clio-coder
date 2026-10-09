@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { computeFingerprint } from "../../src/domains/context/fingerprint.js";
 import { runWikiGenerate, type WikiGenerate } from "../../src/domains/context/wiki/generate.js";
-import { readWikiMeta, writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
+import { computeWikiContentHash, readWikiMeta, writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import { writeWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import { changedPathsSince, wikiStaleness } from "../../src/domains/context/wiki/staleness.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -111,7 +111,12 @@ describe("wiki source freshness without a usable Git comparison", () => {
 			failure.apply();
 			changeSource();
 			const before = readWikiMeta(cwd);
-			const prose = readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8");
+			assert.ok(before);
+			const prose = ["a.md", "b.md"].map((name) => readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8"));
+			const navigation = ["index.md", "quickstart.md"].map((name) => ({
+				name,
+				body: readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8"),
+			}));
 			const failed = await run((input) => {
 				assert.deepEqual(
 					input.plan.pages.map((page) => page.status),
@@ -126,10 +131,29 @@ describe("wiki source freshness without a usable Git comparison", () => {
 					pages: input.plan.pages.map((page) => ({ ...page, attempts: page.attempts + 1 })),
 				});
 			});
-			assert.equal(failed.status, "noop");
+			assert.equal(failed.status, "generated", "publishing pending navigation changes the wiki bytes");
 			assert.equal(failed.pending, 2);
-			assert.equal(readWikiMeta(cwd)?.sourceTreeHash, before?.sourceTreeHash);
-			assert.equal(readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8"), prose);
+			const failedMeta = readWikiMeta(cwd);
+			assert.ok(failedMeta);
+			assert.equal(failedMeta.sourceTreeHash, before.sourceTreeHash, "failed refresh cannot certify new source bytes");
+			assert.equal(failedMeta.gitHead, before.gitHead);
+			assert.notEqual(failedMeta.contentHash, before.contentHash);
+			assert.equal(failedMeta.contentHash, computeWikiContentHash(cwd));
+			assert.notEqual(failedMeta.updatedAt, before.updatedAt);
+			assert.deepEqual(
+				["a.md", "b.md"].map((name) => readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8")),
+				prose,
+			);
+			for (const { name, body } of navigation) {
+				assert.match(body, /2 complete, 0 pending/u);
+				assert.equal(
+					readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8"),
+					body
+						.replace("2 complete, 0 pending.", "0 complete, 2 pending.")
+						.replace(/(\[[AB]\]\([ab]\.md\))/gu, "$1 (pending draft)"),
+					"only completion counts and pending labels change in navigation",
+				);
+			}
 			await assertVerdict("stale");
 			const recovered = await run((input) => {
 				assert.deepEqual(
@@ -145,16 +169,30 @@ describe("wiki source freshness without a usable Git comparison", () => {
 					pages: input.plan.pages.map((page) => ({ ...page, status: "written", attempts: page.attempts + 1 })),
 				});
 			});
-			assert.equal(recovered.status, "noop");
+			assert.equal(recovered.status, "generated", "successful revalidation republishes complete navigation");
 			assert.equal(recovered.pending, 0);
 			assert.equal(readWikiMeta(cwd)?.sourceTreeHash, computeFingerprint(cwd).treeHash);
-			assert.equal(readWikiMeta(cwd)?.updatedAt, before?.updatedAt);
+			assert.equal(readWikiMeta(cwd)?.contentHash, before.contentHash);
+			assert.equal(readWikiMeta(cwd)?.contentHash, computeWikiContentHash(cwd));
+			assert.notEqual(readWikiMeta(cwd)?.updatedAt, failedMeta.updatedAt);
+			assert.deepEqual(
+				["a.md", "b.md"].map((name) => readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8")),
+				prose,
+			);
+			for (const { name, body } of navigation)
+				assert.equal(readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8"), body);
 			await assertVerdict(failure.name === "missing current HEAD" ? "stale" : "fresh");
 		});
 		it(`requires revalidation of matching covered sources with ${failure.name}`, async () => {
 			await initialize();
 			failure.apply();
 			const before = readWikiMeta(cwd);
+			assert.ok(before);
+			const prose = ["a.md", "b.md"].map((name) => readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8"));
+			const navigation = ["index.md", "quickstart.md"].map((name) => ({
+				name,
+				body: readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8"),
+			}));
 			const verdict = await assertVerdict("stale");
 			assert.match(verdict.warning ?? "", failure.warning);
 			const result = await run((input) => {
@@ -163,10 +201,34 @@ describe("wiki source freshness without a usable Git comparison", () => {
 					["pending", "pending"],
 				);
 			});
-			assert.equal(result.status, "noop");
+			assert.equal(
+				result.status,
+				"generated",
+				"uncertified pages must publish pending navigation even with matching sources",
+			);
 			assert.equal(result.pending, 2);
-			assert.equal(readWikiMeta(cwd)?.contentHash, before?.contentHash);
-			assert.equal(readWikiMeta(cwd)?.updatedAt, before?.updatedAt);
+			const after = readWikiMeta(cwd);
+			assert.ok(after);
+			assert.notEqual(after.contentHash, before.contentHash);
+			assert.equal(after.contentHash, computeWikiContentHash(cwd));
+			assert.notEqual(after.updatedAt, before.updatedAt);
+			assert.equal(after.sourceTreeHash, before.sourceTreeHash);
+			assert.equal(after.gitHead, before.gitHead);
+			assert.deepEqual(
+				["a.md", "b.md"].map((name) => readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8")),
+				prose,
+			);
+			for (const { name, body } of navigation) {
+				assert.match(body, /2 complete, 0 pending/u);
+				assert.equal(
+					readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8"),
+					body
+						.replace("2 complete, 0 pending.", "0 complete, 2 pending.")
+						.replace(/(\[[AB]\]\([ab]\.md\))/gu, "$1 (pending draft)"),
+					"only completion counts and pending labels change in navigation",
+				);
+			}
+			await assertVerdict("stale");
 		});
 	}
 	it("revalidates a dirty-source publication after rollback even when Git confirms no changed paths", async () => {
