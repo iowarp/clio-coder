@@ -20,12 +20,14 @@ import {
 	writeWikiPlanFile,
 } from "../domains/context/wiki/plan-store.js";
 import { buildWikiPagePrompt, buildWikiPlanPrompt } from "../domains/context/wiki/prompts.js";
+import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
+import { renderCostAmount } from "../domains/observability/cost.js";
 import { createObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
@@ -168,7 +170,65 @@ function summaryDetail(summary: DispatchSummary, startedAtClock: number): string
 
 type WikiDispatchOutcome =
 	| { ok: false; phase: "admission"; detail: string }
-	| { ok: boolean; phase: "writer"; detail: string; runId: string };
+	| { ok: boolean; phase: "writer"; detail: string; runId: string; receipt?: RunReceipt };
+
+const USAGE_FIELDS = [
+	["tokenCount", "total"],
+	["inputTokenCount", "input"],
+	["outputTokenCount", "output"],
+	["cacheReadTokenCount", "cache read"],
+	["cacheWriteTokenCount", "cache write"],
+	["missingTokenCalls", "missing-usage calls"],
+] as const;
+
+type WikiUsage = Pick<RunReceipt, (typeof USAGE_FIELDS)[number][0]>;
+type WikiReceipts = Array<RunReceipt | undefined>;
+
+function usageDetail(usage: WikiUsage): string {
+	return USAGE_FIELDS.map(([key, label]) => `${label}=${usage[key] ?? "unknown"}`).join(", ");
+}
+
+function dispatchUsage(outcome: WikiDispatchOutcome, receipts: WikiReceipts): string {
+	if (outcome.phase === "admission") return "";
+	const receipt = outcome.receipt;
+	receipts.push(receipt);
+	if (!receipt) return `; run=${outcome.runId}; usage unavailable`;
+	const provenance = receipt.costProvenance;
+	return (
+		`; run=${outcome.runId}; tokens: ${usageDetail(receipt)}; cost=${renderCostAmount(receipt.costUsd, provenance, receipt.costSummary)} (${provenance})` +
+		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "")
+	);
+}
+
+function invocationUsage(receipts: WikiReceipts): string {
+	if (receipts.length === 0) return "no worker runs admitted; no usage recorded";
+	const totals: WikiUsage = { tokenCount: 0 };
+	let known = 0;
+	let estimated = 0;
+	let unknown = 0;
+	let incomplete = 0;
+	let missingUsage = 0;
+	for (const receipt of receipts) {
+		if (!receipt) {
+			unknown += 1;
+			incomplete += 1;
+			missingUsage += 1;
+			continue;
+		}
+		for (const [key] of USAGE_FIELDS) totals[key] = (totals[key] ?? 0) + (receipt[key] ?? 0);
+		if (USAGE_FIELDS.some(([key]) => receipt[key] === undefined)) incomplete += 1;
+		if (receipt.missingTokenCalls === undefined) missingUsage += 1;
+		if (receipt.costProvenance === "unknown") unknown += 1;
+		else if (receipt.costProvenance === "estimated") estimated += receipt.costUsd;
+		else known += receipt.costUsd;
+	}
+	return (
+		`${receipts.length} dispatched runs; reported tokens: ${usageDetail(totals)}` +
+		`; incomplete usage breakdown=${incomplete} runs; missing-usage count unknown=${missingUsage} runs` +
+		`; reported cost subtotals: known=${renderCostAmount(known, "known")}, estimated=${renderCostAmount(estimated, "estimated")}; unknown cost=${unknown} runs` +
+		((totals.missingTokenCalls ?? 0) > 0 || incomplete > 0 ? "; usage/cost totals may be incomplete" : "")
+	);
+}
 
 interface WikiDeadline {
 	at: number;
@@ -272,16 +332,18 @@ async function runWikiDispatch(input: {
 		HEARTBEAT_MS,
 	);
 	heartbeat.unref();
+	let receipt: RunReceipt | undefined;
 	try {
 		const summary = await drainDispatchEvents(handle.events, (tools) => {
 			completedTools = tools;
 		});
-		const receipt = await handle.finalPromise;
+		receipt = await handle.finalPromise;
 		if (timedOut || safetyDeadline.timedOut())
 			return {
 				ok: false,
 				phase: "writer",
 				runId: handle.runId,
+				receipt,
 				detail: `${timedOut ? "timed out: explicit wiki deadline reached" : safetyDeadline.message()}; ${summaryDetail(summary, startedAtClock)}`,
 			};
 		if (receipt.exitCode !== 0) {
@@ -290,13 +352,14 @@ async function runWikiDispatch(input: {
 				ok: false,
 				phase: "writer",
 				runId: handle.runId,
+				receipt,
 				detail: `${receiptFailure(receipt)}; ${summaryDetail(summary, startedAtClock)}`,
 			};
 		}
-		return { ok: true, phase: "writer", runId: handle.runId, detail: summaryDetail(summary, startedAtClock) };
+		return { ok: true, phase: "writer", runId: handle.runId, receipt, detail: summaryDetail(summary, startedAtClock) };
 	} catch (err) {
 		if (!timedOut) input.dispatch.abort(handle.runId);
-		await handle.finalPromise.catch(() => undefined);
+		receipt = await handle.finalPromise.catch(() => undefined);
 		const reason = timedOut
 			? "timed out: explicit wiki deadline reached"
 			: safetyDeadline.timedOut()
@@ -308,6 +371,7 @@ async function runWikiDispatch(input: {
 			ok: false,
 			phase: "writer",
 			runId: handle.runId,
+			...(receipt ? { receipt } : {}),
 			detail: `${reason}; ${formatElapsed(performance.now() - startedAtClock)}`,
 		};
 	} finally {
@@ -333,6 +397,7 @@ async function runPlanPhase(
 	input: WikiGenerateInput,
 	route: WikiModelRoute,
 	deadline: WikiDeadline | undefined,
+	receipts: WikiReceipts,
 ): Promise<WikiPlan> {
 	input.progress?.({ phase: "generate", status: "started", message: "planning wiki pages" });
 	const outcome = await runWikiDispatch({
@@ -361,13 +426,14 @@ async function runPlanPhase(
 	});
 	const revised = readAuthoredWikiPlan(input.outputDir, input.plan);
 	const plan = revised ?? input.plan;
+	const usage = dispatchUsage(outcome, receipts);
 	input.progress?.({
 		phase: "generate",
-		status: "running",
+		status: "completed",
 		message: outcome.ok
 			? `plan has ${plan.pages.length} page${plan.pages.length === 1 ? "" : "s"}`
 			: "planner did not finish; using the indexed candidate plan",
-		detail: outcome.detail,
+		detail: outcome.detail + usage,
 	});
 	return plan;
 }
@@ -381,6 +447,7 @@ async function runPagePhase(
 	route: WikiModelRoute,
 	position: { index: number; total: number },
 	deadline: WikiDeadline | undefined,
+	receipts: WikiReceipts,
 ): Promise<WikiPlan> {
 	const seeded = existsSync(join(input.outputDir, page.path));
 	input.progress?.({
@@ -424,6 +491,7 @@ async function runPagePhase(
 			})
 		: undefined;
 	const written = outcome.ok && evidence?.ok === true;
+	const usage = dispatchUsage(outcome, receipts);
 	const detail = evidence && !evidence.ok ? `evidence check failed: ${evidence.reasons.join("; ")}` : outcome.detail;
 	const next: WikiPlan = {
 		...plan,
@@ -448,11 +516,11 @@ async function runPagePhase(
 	writeWikiPlanFile(input.outputDir, next);
 	input.progress?.({
 		phase: "generate",
-		status: "running",
+		status: "completed",
 		message: `${written ? "wrote" : "could not write"} ${page.path} (${position.index}/${position.total})`,
 		current: position.index,
 		total: position.total,
-		detail,
+		detail: detail + usage,
 	});
 	return next;
 }
@@ -460,6 +528,7 @@ async function runPagePhase(
 async function generateWikiWithDocumenter(
 	dispatch: DispatchContract,
 	input: WikiGenerateInput,
+	receipts: WikiReceipts,
 	route: WikiModelRoute = {},
 	deadline?: WikiDeadline,
 	signal?: AbortSignal,
@@ -501,7 +570,7 @@ async function generateWikiWithDocumenter(
 
 	// Keep page paths stable while updating their source evidence. Only new
 	// areas, a changed depth, or --replan need the repository-wide planner.
-	if (!input.resumed) plan = checkAnchors(await runPlanPhase(dispatch, { ...input, plan }, route, deadline));
+	if (!input.resumed) plan = checkAnchors(await runPlanPhase(dispatch, { ...input, plan }, route, deadline, receipts));
 	signal?.throwIfAborted();
 	writeWikiPlanFile(input.outputDir, plan);
 
@@ -555,6 +624,7 @@ async function generateWikiWithDocumenter(
 				total: queue.length,
 			},
 			deadline,
+			receipts,
 		);
 	}
 }
@@ -572,7 +642,7 @@ async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded:
 		SessionDomainModule,
 		createObservabilityDomainModule({ dispatchTrace: false }),
 		SchedulingDomainModule,
-		DispatchDomainModule,
+		createDispatchDomainModule({ journalRunEvents: true }),
 	]);
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
@@ -685,13 +755,23 @@ export async function withWikiDispatchLifecycle(
 export function modelWikiGenerate(options: ModelWikiGenerateOptions = {}): WikiGenerate {
 	return async (input) => {
 		const deadline = explicitWikiDeadline(options);
-		if (options.dispatch) {
-			await generateWikiWithDocumenter(options.dispatch, input, options.route, deadline);
-			return;
+		const receipts: WikiReceipts = [];
+		try {
+			if (options.dispatch) {
+				await generateWikiWithDocumenter(options.dispatch, input, receipts, options.route, deadline);
+				return;
+			}
+			const { dispatch, loaded } = await loadWikiDispatch();
+			await withWikiDispatchLifecycle({ dispatch, stop: () => loaded.stop() }, (signal) =>
+				generateWikiWithDocumenter(dispatch, input, receipts, options.route, deadline, signal),
+			);
+		} finally {
+			input.progress?.({
+				phase: "generate",
+				status: "completed",
+				message: "wiki invocation usage",
+				detail: invocationUsage(receipts),
+			});
 		}
-		const { dispatch, loaded } = await loadWikiDispatch();
-		await withWikiDispatchLifecycle({ dispatch, stop: () => loaded.stop() }, (signal) =>
-			generateWikiWithDocumenter(dispatch, input, options.route, deadline, signal),
-		);
 	};
 }

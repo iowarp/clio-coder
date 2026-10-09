@@ -234,7 +234,7 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 	}
 
 	const authoredMaximum = input.policy.maximum ?? input.policy;
-	return freezeEnvelope({
+	const envelope: RunToolBudgetEnvelope = {
 		version: 1,
 		enforcement:
 			input.enforcement === "external-one-shot"
@@ -268,7 +268,9 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 			...(effectiveRevision === undefined ? {} : { revision: effectiveRevision }),
 		},
 		reasons,
-	});
+	};
+	if (input.enforcement !== "external-one-shot") envelope.effective = workerBudgetFromEnvelope(envelope);
+	return freezeEnvelope(envelope);
 }
 
 /**
@@ -317,7 +319,7 @@ export function formatEffectiveBudget(envelope: RunToolBudgetEnvelope): string {
 			: envelope.enforcement.perTool === "advisory"
 				? "native per-tool observed/advisory"
 				: "native per-tool enforced";
-	return `${budget.toolCalls}/${budget.readReserve}${revision}, ${budget.mode === "advisory" ? "advisory baseline" : "lifetime cap"} ${budget.hardCap}, synthesis=${budget.synthesis ? "on" : "off"}; ${enforcement}`;
+	return `${budget.toolCalls}/${budget.readReserve}${revision}, ${budget.mode === "advisory" ? "advisory baseline" : "lifetime cap"} ${budget.hardCap}${budget.ceiling === undefined ? "" : `, worker ceiling ${budget.ceiling}`}, synthesis=${budget.synthesis ? "on" : "off"}; ${enforcement}`;
 }
 
 export function formatBudgetReasons(envelope: RunToolBudgetEnvelope): string {
@@ -374,6 +376,16 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 			return undefined;
 		}
 		if (value.effective.mode !== undefined && value.effective.mode !== "advisory" && value.effective.mode !== "enforced")
+			return undefined;
+		const ceiling = value.effective.ceiling;
+		if (
+			ceiling !== undefined &&
+			(value.effective.mode !== "advisory" ||
+				typeof ceiling !== "number" ||
+				!Number.isSafeInteger(ceiling) ||
+				ceiling !==
+					Math.max(effectivePhase.toolCalls, revision?.toolCalls ?? 0, Math.min(maximum.toolCalls, value.effective.hardCap)))
+		)
 			return undefined;
 		if (
 			maximum.toolCalls < defaultPhase.toolCalls ||
@@ -472,6 +484,7 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 				...effectivePhase,
 				synthesis: value.effective.synthesis,
 				hardCap: value.effective.hardCap,
+				...(ceiling === undefined ? {} : { ceiling }),
 				...(revision === undefined ? {} : { revision }),
 			},
 			reasons,
