@@ -481,6 +481,7 @@ export function SessionOverview({
 						{plan.rows.map((row) => (
 							<li key={row.id} data-tone={row.tone}>
 								<PlanGlyph tone={row.tone} />
+								<span className="sr-only">{row.word}: </span>
 								<span>
 									{row.title}
 									{row.reason ? <small>{row.reason}</small> : null}
