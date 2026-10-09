@@ -147,10 +147,14 @@ export function sanitizeWikiPlan(
 		});
 	}
 	if (pages.length === 0) return null;
+	const ownerCount = (list: readonly { path: string }[]): number =>
+		list.filter((page) => page.path !== "architecture.md").length;
+	// Retaining a previous plan that is already over the ceiling enforces nothing, so only reject growth past it.
 	if (
 		!options.trustStatus &&
 		previous?.depth === "medium" &&
-		pages.filter((page) => page.path !== "architecture.md").length > MAX_MEDIUM_OWNERSHIP_PAGES
+		ownerCount(previous.pages) <= MAX_MEDIUM_OWNERSHIP_PAGES &&
+		ownerCount(pages) > MAX_MEDIUM_OWNERSHIP_PAGES
 	)
 		return null;
 	const retiredPages = [

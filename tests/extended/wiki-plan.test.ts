@@ -533,6 +533,22 @@ test("over-limit authored medium plans retain the last plan while legacy checkpo
 		assert.equal(sanitizeWikiPlan({ ...oversized, pages: owners }, prior, { trustStatus: false }), null);
 		writeWikiPlanFile(isolated.dir, { ...prior, pages: [pageAt(prior, 0), ...owners.slice(0, 24)] });
 		assert.equal(readAuthoredWikiPlan(isolated.dir, prior)?.pages.length, 25);
+		const legacy = {
+			...prior,
+			pages: [
+				pageAt(prior, 0),
+				...Array.from({ length: 30 }, (_, position) => ({ ...owner, path: `legacy-${position}.md` })),
+			],
+		};
+		const revise = (count: number) => ({
+			...prior,
+			pages: [
+				pageAt(prior, 0),
+				...Array.from({ length: count }, (_, position) => ({ ...owner, path: `revised-${position}.md` })),
+			],
+		});
+		assert.equal(sanitizeWikiPlan(revise(26), legacy, { trustStatus: false })?.pages.length, 27);
+		assert.equal(sanitizeWikiPlan(revise(31), legacy, { trustStatus: false })?.pages.length, 32);
 	} finally {
 		isolated.restore();
 	}
