@@ -37,6 +37,8 @@ export interface WikiPageMetadata {
 	validate: string[];
 	/** Stable refs for recorded decisions cited in the body. */
 	decisions?: string[];
+	/** Uninspected central assignments that prevent this page from being complete. */
+	coverage_gaps?: string[];
 }
 
 export interface WikiPageDocument {
@@ -49,7 +51,7 @@ export interface WikiPageDocument {
 
 const FRONTMATTER_BLOCK = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
-const LIST_FIELDS = ["sources", "symbols", "tests", "invariants", "validate", "decisions"] as const;
+const LIST_FIELDS = ["sources", "symbols", "tests", "invariants", "validate", "decisions", "coverage_gaps"] as const;
 
 /** Longest generated summary, so an index line stays one line. */
 const SUMMARY_MAX_CHARS = 240;
@@ -185,6 +187,7 @@ export function readWikiPage(input: ReadWikiPageInput): WikiPageDocument {
 		invariants: stringList(authored.invariants),
 		validate: stringList(authored.validate),
 		...(authored.decisions === undefined ? {} : { decisions: stringList(authored.decisions) }),
+		...(authored.coverage_gaps === undefined ? {} : { coverage_gaps: stringList(authored.coverage_gaps) }),
 	};
 	const unresolvedPaths: string[] = [];
 	for (const field of ["sources", "tests"] as const) {

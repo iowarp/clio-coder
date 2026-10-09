@@ -27,6 +27,23 @@ beforeEach(() => {
 afterEach(() => rmSync(sandbox, { recursive: true, force: true }));
 
 describe("wiki mechanical evidence gate", () => {
+	it("classifies declared coverage gaps as substantive failures even when mechanical evidence passes", () => {
+		const content = page().replace(
+			"---\n#",
+			'coverage_gaps:\n  - "Inspect the admission rejection branch and its test."\n---\n#',
+		);
+		const result = check(content);
+		strictEqual(result.ok, false);
+		strictEqual(result.validationKind, "coverage");
+		strictEqual(result.dependencies, undefined);
+		deepStrictEqual(result.reasons, ["Coverage gap: Inspect the admission rejection branch and its test."]);
+		strictEqual(check(`${content}\nSee \`missing.py\`.`).validationKind, "coverage");
+		strictEqual(check(page().replace("---\n#", "coverage_gaps: []\n---\n#")).ok, true);
+		for (const invalid of ["null", '"not a list"', '[""]', "[123]"]) {
+			strictEqual(check(page().replace("---\n#", `coverage_gaps: ${invalid}\n---\n#`)).ok, false);
+		}
+	});
+
 	it("shares repairable link and generated-index targets while excluding empty and missing pages", () => {
 		const outputDir = join(root, ".clio-coder/wiki");
 		mkdirSync(join(outputDir, "section"), { recursive: true });

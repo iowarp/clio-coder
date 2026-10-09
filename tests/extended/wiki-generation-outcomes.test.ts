@@ -200,6 +200,38 @@ describe("wiki generation outcomes", () => {
 		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/section/index.md"), "utf8"), /0 complete, 2 pending/);
 	});
 
+	it("preserves substantive coverage gaps as pending drafts until a writer completes the assignment", async () => {
+		const gap = "Inspect the admission rejection branch and its focused test.";
+		const draft = content("a", 1).replace("---\n#", `coverage_gaps:\n  - ${JSON.stringify(gap)}\n---\n#`);
+		const result = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			generate(input) {
+				writeFileSync(join(input.outputDir, "a.md"), draft);
+				writeWikiPlanFile(input.outputDir, { ...input.plan, pages: [{ ...page("a"), status: "written", attempts: 1 }] });
+			},
+		});
+		assert.equal(result.pending, 1);
+		assert.equal(readWikiMeta(cwd)?.generation?.pagesWritten, 0);
+		assert.match(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure?.detail ?? "", /Coverage gaps:/);
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8"), /coverage_gaps:/);
+		assert.match(readFileSync(join(cwd, ".clio-coder/wiki/quickstart.md"), "utf8"), /0 complete, 1 pending/);
+		let calls = 0;
+		const completed = await runWikiGenerate({
+			cwd,
+			model: "fixture",
+			retryPending: true,
+			generate: generator((_spec, path) => {
+				assert.ok(path);
+				calls++;
+				writeFileSync(path, content("a", 2));
+			}),
+		});
+		assert.equal(calls, 1);
+		assert.equal(completed.pending, 0);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure, undefined);
+	});
+
 	it("keeps successful writers with invalid evidence pending and makes their next repair actionable", async () => {
 		const onePage: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
 		for (const [version, invalid] of [

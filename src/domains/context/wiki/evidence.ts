@@ -21,6 +21,8 @@ export interface WikiPageEvidenceResult {
 	dependencies?: string[];
 	/** Changed body citations that passed individually, even when another reference failed. */
 	resolvedCitations?: Record<string, string>;
+	/** Coverage failures require substantive writing, not a mechanical repair pass. */
+	validationKind?: "coverage";
 }
 
 function within(root: string, path: string): boolean {
@@ -120,6 +122,8 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return { ok: false, reasons: ["Page exceeds the 2 MiB evidence-check limit; split or shorten it before retrying."] };
 	}
 	const { body, metadata } = readWikiPage({ pagePath: input.pagePath, content: input.content });
+	const coverageGaps = metadata.coverage_gaps ?? [];
+	for (const gap of coverageGaps) fail(`Coverage gap: ${gap}`);
 	if (input.wikiLinks) {
 		for (const href of repairWikiLinks(input.pagePath, body, input.wikiLinks).unresolved) {
 			fail(`Repair unresolved wiki link ${JSON.stringify(href)} in ${input.pagePath}; its target page is unavailable.`);
@@ -140,14 +144,15 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			if (typeof fields !== "object" || fields === null || Array.isArray(fields)) {
 				fail("Repair the YAML frontmatter as a metadata mapping before retrying.");
 			} else {
-				for (const field of ["sources", "tests"] as const) {
+				for (const field of ["sources", "tests", "coverage_gaps"] as const) {
 					const value = (fields as Record<string, unknown>)[field];
 					if (
 						value !== undefined &&
 						(!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim()))
 					) {
 						const received = value === null ? "null" : Array.isArray(value) ? "array with invalid entries" : typeof value;
-						fail(`Repair frontmatter ${field}: use a list of nonempty repository-relative file paths; received ${received}.`);
+						const entries = field === "coverage_gaps" ? "coverage gap descriptions" : "repository-relative file paths";
+						fail(`Repair frontmatter ${field}: use a list of nonempty ${entries}; received ${received}.`);
 					}
 				}
 			}
@@ -188,14 +193,14 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	}
 	if (references.size > 512) {
 		fail("Page exceeds the 512-reference evidence-check limit; split or shorten it before retrying.");
-		return { ok: false, reasons };
+		return { ok: false, reasons, ...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}) };
 	}
 	let root: string;
 	try {
 		root = realpathSync(input.sourceRoot);
 	} catch {
 		fail("Repository root is unavailable; restore access and retry evidence validation.");
-		return { ok: false, reasons };
+		return { ok: false, reasons, ...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}) };
 	}
 	const dependencies = new Set<string>();
 	const resolvedCitations: Record<string, string> = {};
@@ -442,6 +447,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		reasons,
 		...(reasons.length === 0 ? { dependencies: [...dependencies].sort() } : {}),
 		...(Object.keys(resolvedCitations).length > 0 ? { resolvedCitations } : {}),
+		...(coverageGaps.length > 0 ? { validationKind: "coverage" } : {}),
 	};
 }
 

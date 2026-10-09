@@ -31,6 +31,20 @@ function records(text: string): Array<Record<string, unknown>> {
 }
 
 describe("wiki page decision prompts", () => {
+	it("preserves coverage gaps through metadata repair and requires qualified central-workflow coverage", () => {
+		const content =
+			'---\nsources: []\ncoverage_gaps:\n  - "Inspect the caller and the failure-path assertion."\n---\n# Area\n\nDraft details.\n';
+		const parsed = readWikiPage({ pagePath: "area.md", content });
+		const repaired = renderWikiPage(parsed.metadata, parsed.body);
+		deepStrictEqual(readWikiPage({ pagePath: "area.md", content: repaired }).metadata.coverage_gaps, [
+			"Inspect the caller and the failure-path assertion.",
+		]);
+		const text = prompt([]);
+		match(text, /caller -> arguments -> enforcing\s+branch -> observable outcome/);
+		match(text, /Coverage gaps prevent completion and require normal writing/);
+		match(text, /compare every frontmatter invariant with the body's conditions/);
+	});
+
 	it("carries recorded arguments, origin, timestamp and refs and instructs citation", async () => {
 		const entry = await agentDecision();
 		const text = prompt([entry]);

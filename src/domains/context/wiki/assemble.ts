@@ -42,7 +42,7 @@ const REPAIR_NOTE = /^<!-- (?:clio-coder|clio):wiki .*-->$/gm;
 
 export interface WikiPageIssue {
 	page: string;
-	kind: "link" | "citation";
+	kind: "link" | "citation" | "coverage";
 	reference: string;
 }
 
@@ -99,6 +99,8 @@ function repairPage(
 	const parsed = readWikiPage({ pagePath: relPath, content: original, sourceRoot });
 	let body = stripRepairNotes(parsed.body);
 	const issues: WikiPageIssue[] = [];
+	for (const gap of parsed.metadata.coverage_gaps ?? [])
+		issues.push({ page: relPath, kind: "coverage", reference: gap });
 	const evidence = validateWikiPageEvidence({ pagePath: relPath, content: original, sourceRoot });
 	const resolvedCitations = evidence.resolvedCitations ?? {};
 	body = mapWikiProse(body, (line) =>
@@ -274,16 +276,20 @@ export function assembleWikiTree(input: AssembleWikiInput): WikiAssemblyReport {
 	input.plan.pages = input.plan.pages.map((page) => {
 		if (page.status !== "written") return page;
 		const broken = issues.filter((issue) => issue.page === page.path && issue.kind === "link");
-		if (onDisk.has(page.path) && broken.length === 0) return page;
+		const gaps = issues.filter((issue) => issue.page === page.path && issue.kind === "coverage");
+		if (onDisk.has(page.path) && broken.length === 0 && gaps.length === 0) return page;
+		const detail =
+			gaps.length > 0
+				? `Coverage gaps: ${gaps.map((issue) => issue.reference).join("; ")}`
+				: broken.length > 0
+					? `Unresolved wiki links: ${broken.map((issue) => issue.reference).join(", ")}`
+					: "Wiki page is empty or missing after assembly.";
 		return {
 			...page,
 			status: "pending",
 			lastFailure: {
 				phase: "validation",
-				detail: (broken.length > 0
-					? `Unresolved wiki links: ${broken.map((issue) => issue.reference).join(", ")}`
-					: "Wiki page is empty or missing after assembly."
-				).slice(0, 500),
+				detail: detail.slice(0, 500),
 			},
 		};
 	});

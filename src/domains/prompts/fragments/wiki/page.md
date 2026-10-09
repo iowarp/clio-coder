@@ -55,6 +55,15 @@ dependency; and at least one focused test, including its actual input, options, 
 manifest, a README, a directory listing, or an import list is discovery evidence, not
 implementation evidence.
 
+For each central workflow assigned by the page intent, trace caller -> arguments -> enforcing
+branch -> observable outcome, including a focused test's actual inputs and assertions. Imports,
+entry points, and helper inventories alone do not finish an assigned workflow. If a central
+assignment remains uninspected, preserve the useful draft and declare each missing part in a
+nonempty `coverage_gaps` frontmatter list, for example
+`coverage_gaps: ["The assigned admission workflow's rejection branch and its test remain uninspected."]`.
+Coverage gaps prevent completion and require normal writing, not mechanical repair. Omit the key
+when no central assignment remains uncovered; never remove a gap merely to pass validation.
+
 What the body must contain, in whatever order fits the subject:
 - What this area does; include intent or rationale only when explicitly supported.
 - What owns it: exact source paths and the important symbols in them.
@@ -91,7 +100,9 @@ Grounding rules:
   Do not link to a page that is not on that list; it does not exist.
 - Separate implemented behavior from partial, planned, or unverified behavior. Verify exact
   commands, configuration keys, test filenames, and CI claims against their current definitions
-  before publishing them. Omit unsupported behavior or explicitly label it as unverified; never
+  before publishing them. Uncertainty labels are appropriate for incidental claims; an uninspected
+  central assignment belongs in `coverage_gaps`. Omit unsupported incidental behavior or explicitly
+  label it as unverified; never
   fill a requested section with invented behavior, tests, callers, or dependencies. The same
   accuracy requirement applies at every depth; shorter coverage does not permit weaker evidence.
 - The codewiki index is a navigation aid, never factual authority.
@@ -108,7 +119,11 @@ per-call boundary, not the end of this page's work. If a tool result says a call
 and not executed, inspect the file as needed and reissue a smaller complete call. Preserve
 sections already written, and keep front matter consistent with the finished body. Only
 publish behavior you can support with source reads. When the page is written and grounded,
-stop and say so in one line; there is no report to file, because the file you wrote is the result.
+compare every frontmatter invariant with the body's conditions and the cited enforcing implementation.
+Carry scope, lifecycle, configuration, and failure conditions into each invariant; narrow or remove
+any invariant broader than the evidence. Recheck every central assignment and retain any unresolved
+`coverage_gaps`. Then stop and say so in one line; there is no report to file, because the file you
+wrote is the result.
 
 Style: dense, factual, complete sentences, no marketing prose. Do not use the pattern
 "[noun] - [parenthetical clause]"; use a full sentence or a colon instead.
