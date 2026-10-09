@@ -1597,7 +1597,7 @@ try {
 			.click();
 		await openDialog.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
 		await openDialog.getByRole("button", { name: "Open", exact: true }).click();
-		const toast = page.locator(".notice-region .notice");
+		const toast = page.locator(".notice-region .notice", { hasText: "validation" });
 		await toast.waitFor();
 		assert.match(await toast.innerText(), /validation/);
 		assert.match(await toast.innerText(), /Reference: [0-9a-f-]+/);
