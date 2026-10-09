@@ -9,6 +9,7 @@ import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter
 import { isGeneratedWikiFile, WIKI_INDEX, WIKI_QUICKSTART, wikiMarkdownFilesInDir } from "./layout.js";
 import type { WikiMarkdownEdit } from "./markdown.js";
 import { decodeWikiDestination, inspectWikiMarkdown, patchWikiMarkdown, repairWikiCitations } from "./markdown.js";
+import type { WikiPlan } from "./plan.js";
 
 export interface WikiPageEvidenceInput {
 	pagePath: string;
@@ -45,8 +46,8 @@ export interface WikiLinkInventory {
 	unavailable: ReadonlySet<string>;
 }
 
-export function wikiLinkInventory(dir: string): WikiLinkInventory {
-	const targets = new Set([WIKI_QUICKSTART, WIKI_INDEX]);
+export function wikiLinkInventory(dir: string, plannedPages: readonly string[] = []): WikiLinkInventory {
+	const targets = new Set([WIKI_QUICKSTART, WIKI_INDEX, ...plannedPages]);
 	const files = wikiMarkdownFilesInDir(dir);
 	for (const pagePath of files) {
 		if (isGeneratedWikiFile(pagePath)) continue;
@@ -64,6 +65,8 @@ export function wikiLinkInventory(dir: string): WikiLinkInventory {
 		)
 			continue;
 		targets.add(pagePath);
+	}
+	for (const pagePath of targets) {
 		let section = posix.dirname(pagePath);
 		while (section !== ".") {
 			targets.add(`${section}/${WIKI_INDEX}`);
@@ -525,6 +528,7 @@ export function inspectWikiPageEvidence(input: {
 	pagePath: string;
 	outputDir: string;
 	sourceRoot: string;
+	plan?: WikiPlan;
 }): WikiPageEvidenceResult {
 	const fail = (reason: string): WikiPageEvidenceResult => ({
 		ok: false,
@@ -544,7 +548,10 @@ export function inspectWikiPageEvidence(input: {
 				pagePath: input.pagePath,
 				content: content.toString("utf8"),
 				sourceRoot: input.sourceRoot,
-				wikiLinks: wikiLinkInventory(input.outputDir),
+				wikiLinks: wikiLinkInventory(
+					input.outputDir,
+					input.plan?.pages.map((page) => page.path),
+				),
 			}),
 			draftHash: createHash("sha256").update(content).digest("hex"),
 		};

@@ -489,6 +489,7 @@ async function runPagePhase(
 				pagePath: page.path,
 				outputDir: input.outputDir,
 				sourceRoot: input.cwd,
+				plan,
 			})
 		: undefined;
 	for (const dependency of diagnostic?.dependencies ?? diagnostic?.resolvedDependencies ?? []) {
@@ -551,6 +552,7 @@ async function runPagePhase(
 				pagePath: page.path,
 				outputDir: input.outputDir,
 				sourceRoot: input.cwd,
+				plan,
 			})
 		: undefined;
 	const written = outcome.ok && evidence?.ok === true && (!repair || stable(evidence.dependencies));

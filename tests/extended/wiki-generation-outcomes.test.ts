@@ -108,6 +108,66 @@ describe("wiki generation outcomes", () => {
 		);
 		assert.equal(result.pending, 0);
 	}
+	for (const target of ["written", "pending draft", "empty", "missing"] as const) {
+		it(`validates links to a later planned sibling before it becomes ${target} and applies publication statuses`, async () => {
+			const plan: WikiPlan = {
+				version: 1,
+				overview: "Fixture",
+				pages: [page("a"), { ...page("b"), path: "section/b.md" }],
+			};
+			const requests: string[] = [];
+			const links = "[Sibling](section/b.md#details) and [Reference][sibling].\n\n[sibling]: section/b.md#details\n";
+			const result = await run(
+				generator((spec, path) => {
+					if (!path) {
+						const outputDir = spec.writeRoots?.[0] as string;
+						mkdirSync(join(outputDir, "section"), { recursive: true });
+						if (target !== "missing") writeFileSync(join(outputDir, "section/b.md"), "# B\n");
+						writeWikiPlanFile(outputDir, plan);
+						return;
+					}
+					assert.equal(spec.agentId, "wiki-writer", "a planned forward link does not trigger mechanical repair");
+					if (path.endsWith("a.md")) {
+						requests.push("a.md");
+						writeFileSync(path, `${content("a", 1)}${links}`);
+						return;
+					}
+					requests.push("section/b.md");
+					const checkpoint = readWikiPlanFile(join(path, "../.."));
+					assert.equal(checkpoint?.pages[0]?.status, "written", "the earlier page validates before its sibling is written");
+					assert.equal(checkpoint?.pages[0]?.attempts, 1);
+					if (target === "written" || target === "pending draft")
+						writeFileSync(path, `${content("b", 1)}[Earlier](../a.md)\n`);
+					return target === "written" ? 0 : 1;
+				}),
+			);
+			assert.deepEqual(requests, ["a.md", "section/b.md"]);
+			const available = target === "written" || target === "pending draft";
+			const complete = target === "written" ? 2 : available ? 1 : 0;
+			assert.equal(result.pending, 2 - complete);
+			const saved = readWikiMeta(cwd);
+			assert.deepEqual(
+				saved?.plan?.pages.map((entry) => entry.status),
+				[available ? "written" : "pending", target === "written" ? "written" : "pending"],
+			);
+			assert.equal(saved?.generation?.pagesWritten, complete);
+			assert.equal(existsSync(join(cwd, ".clio-coder/wiki/section/b.md")), available);
+			assert.ok(readFileSync(join(cwd, ".clio-coder/wiki/a.md"), "utf8").includes(links));
+			if (!available) assert.match(saved?.plan?.pages[0]?.lastFailure?.detail ?? "", /section\/b\.md/u);
+			for (const name of ["index.md", "quickstart.md"]) {
+				const navigation = readFileSync(join(cwd, ".clio-coder/wiki", name), "utf8");
+				assert.ok(navigation.includes(`${complete} complete, ${2 - complete} pending.`));
+				if (target === "pending draft" && name === "quickstart.md")
+					assert.match(navigation, /\[B\]\(section\/b\.md\) \(pending draft\)/u);
+				if (!available) assert.doesNotMatch(navigation, /\[B\]\(section\/b\.md\)/u);
+			}
+			if (target === "pending draft") {
+				const section = readFileSync(join(cwd, ".clio-coder/wiki/section/index.md"), "utf8");
+				assert.match(section, /0 complete, 1 pending/u);
+				assert.match(section, /\[B\]\(b\.md\) \(pending draft\)/u);
+			}
+		});
+	}
 	for (const resultKind of ["invalid", "valid", "failed receipt"] as const) {
 		const succeeds = resultKind === "valid";
 		it(`dispatches one bounded repair with complete diagnostics and ${succeeds ? "credits its validated edit" : `keeps ${resultKind} pending`}`, async () => {

@@ -431,6 +431,7 @@ function resolvePlan(input: {
 						pagePath: page.path,
 						outputDir: input.stagingDir,
 						sourceRoot: input.cwd,
+						plan: previous,
 					});
 					if (
 						evidence.validationKind === "coverage" ||
@@ -452,6 +453,7 @@ function resolvePlan(input: {
 					pagePath: page.path,
 					outputDir: input.stagingDir,
 					sourceRoot: input.cwd,
+					plan: previous,
 				});
 				const sources = [
 					...page.sources,
