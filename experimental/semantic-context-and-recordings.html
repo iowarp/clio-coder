@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Search your project by meaning and record worker runs — Clio Coder experimental</title><meta name="description" content="Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker&#39;s evidence."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html"><link rel="alternate" hreflang="en" href="https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html"><link rel="alternate" hreflang="x-default" href="https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html"><meta property="og:title" content="Search your project by meaning and record worker runs — Clio Coder experimental"><meta property="og:description" content="Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker&#39;s evidence."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Search your project by meaning and record worker runs — Clio Coder experimental"><meta name="twitter:description" content="Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker&#39;s evidence."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"Article","@id":"https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html#page","name":"Search your project by meaning and record worker runs — Clio Coder experimental","description":"Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker's evidence.","url":"https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"Search your project by meaning and record worker runs","mainEntityOfPage":"https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html","author":{"@type":"Person","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Experimental","item":"https://coder.iowarp.ai/experimental.html"},{"@type":"ListItem","position":3,"name":"Search your project by meaning and record worker runs","item":"https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html" aria-current="page">Experimental</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html" aria-current="page">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/experimental.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All experimental</a><p class="guide-review">Beta, off by default, new in 0.6.2</p><p class="eyebrow"><span class="chapter">Context</span>5 min read</p><h1>Search your project by meaning and record worker runs</h1><p class="lede">Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker&#39;s evidence.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.2</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal</dd></div><div><dt class="eyebrow">Basis</dt><dd>Documented workflow</dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a>
+<a href="#build-an-index">Build an index</a>
+<a href="#read-a-result">Read a result</a>
+<a href="#keep-the-index-current">Keep the index current</a>
+<a href="#record-a-worker-run">Record a worker run</a></details><p>Clio Coder 0.6.2 can keep a local index of your project that you search by meaning instead of exact words. It covers code maps, wiki pages, approved memory, evidence bundles, recorded worker output, and folders of experiment data you register. Clio Coder can also record what a dispatched worker displayed, as a redacted terminal cast in that run&#39;s evidence. Both start off.</p>
+<aside class="guide-note"><p class="eyebrow">Beta in v0.6.2</p><p>Semantic context and worker recording are new in v0.6.2 and off by default. Commands, supported formats, and the index layout may change between releases. Ordinary startup scans and embeds nothing until you configure the feature.</p>
+</aside><section class="guide-needs"><h2 id="before-you-start">Before you start</h2>
+<ul>
+<li>A Clio Coder target that serves the EmbeddingGemma 2 Q8 model through a llama.cpp embedding server or a LiteLLM proxy you already run. Clio Coder does not start one.</li>
+<li>The SHA-256 of the model file, and of its multimodal projector if you want images or audio.</li>
+<li><code>ffmpeg</code> on <code>PATH</code> if you want still frames sampled from GIF or video files.</li>
+</ul>
+</section><h2 id="build-an-index">Build an index</h2>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="pin-the-model-and-check-the-route">Pin the model and check the route</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder semantic configure \
+  --target local-embed --model embeddinggemma-2-q8 \
+  --asset-identity sha256:&lt;model-sha256&gt; \
+  --projector-identity sha256:&lt;projector-sha256&gt; \
+  --modality text --modality image --modality audio \
+  --qualify</code></pre></div>
+<p>Use your own target and model names. <code>--qualify</code> sends fixed canary requests for each modality you chose and pins the text canary in the profile. It proves that the route accepts those requests and returns vectors of the expected shape. It does not measure retrieval quality, and it cannot read the model file&#39;s actual hash.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="register-a-folder">Register a folder</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder semantic inbox preview ./experiment-data
+clio-coder semantic inbox add ./experiment-data --id experiments</code></pre></div>
+<p>Preview lists file types and the estimated work before anything is saved. Clio Coder honors ignore files, refuses symlinks and credential-shaped files, and applies the project&#39;s read policy. It never indexes a folder you did not register. Add <code>--scope user</code> to register an inbox for every project.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="refresh-and-search">Refresh and search</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder semantic refresh
+clio-coder semantic status
+clio-coder semantic search &quot;Which run produced the delayed oscillation?&quot; --limit 5</code></pre></div>
+<p><code>refresh</code> is an explicit, bounded job. An interrupted or partly failed refresh keeps the last complete generation and reports what is still pending. An unchanged refresh reuses its vectors.</p>
+</div></li></ol><h2 id="read-a-result">Read a result</h2>
+<p>Each hit names the exact path and, where it applies, the line, page, notebook cell, video frame, or audio offset. It carries a short excerpt and the generation it came from, and evidence and recording hits carry an evidence id. Search narrows where to look. Clio Coder still reads the original file, code, or receipt before it makes a claim.</p>
+<p>In a session, the agent searches through its <code>context</code> tool with bounded filters for source kind, run, dates, media type, and count. A question that mixes a run manifest, a code symbol, and a plot works better as one search per source. If the embedding route is down, search falls back to lexical candidates from the last complete generation.</p>
+<div class="guide-compare"><div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Indexed in this beta</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code and text</td>
+<td>Source files, typed code map records, and wiki pages</td>
+</tr>
+<tr>
+<td>Documents</td>
+<td>PDF pages with extractable text, notebook sources and outputs</td>
+</tr>
+<tr>
+<td>Images</td>
+<td>PNG, JPEG, and WebP</td>
+</tr>
+<tr>
+<td>Audio</td>
+<td>Bounded mono 16 kHz WAV</td>
+</tr>
+<tr>
+<td>Video</td>
+<td>Timestamped still frames sampled from GIF, MP4, WebM, and MOV</td>
+</tr>
+<tr>
+<td>Not supported</td>
+<td>Raw video, reasoning across frames, scanned PDF OCR, and other audio formats</td>
+</tr>
+</tbody></table></div>
+</div><h2 id="keep-the-index-current">Keep the index current</h2>
+<p>Add <code>--background</code> to <code>semantic configure</code> to refresh at session start and after code map changes. It is off by default, yields to foreground inference, and checkpoints when interrupted. On a shared route that holds one model at a time, weigh the chat load before you turn it on.</p>
+<p>The index lives in your cache directory, with one namespace per project and embedding profile. Code, memory, and evidence stay where they are, so deleting the cache removes only derived data.</p>
+<p>A changed serving build, model file, projector, or preprocessing recipe needs a new qualification and gets its own namespace. <code>clio-coder semantic reembed --profile embeddinggemma-2-q8-768 --from &lt;old-profile-identity&gt;</code> embeds the old records again under the new profile. Old vectors are never copied into it.</p>
+<h2 id="record-a-worker-run">Record a worker run</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 4"><code class="language-sh">clio-coder run --agent scout --record &quot;Check the experiment on the worker node&quot;</code></pre></div>
+<p>In a session, the dispatch tool accepts <code>record: true</code> for a call or a single task, including work placed on an SSH node. Clio Coder writes a bounded display stream beside the worker&#39;s own protocol. It copies a redacted <code>.cast</code> into the run&#39;s evidence bundle with the run, node, timestamps, byte count, and SHA-256.</p>
+<p>A capture error or a partial run is labeled incomplete. The sealed receipt, not the recording, decides whether the worker succeeded.</p>
+<p>Capture needs no extra program. For playback, <code>clio-coder tools install asciinema</code> installs a checksum-pinned asciinema. <code>clio-coder fleet nodes tools install &lt;node&gt; asciinema</code> previews the same user-level install on a worker node, and <code>--yes</code> performs it without sudo. asciinema is GPL-3.0-or-later, and its license and exact source ship with the pinned install.</p>
+<section class="guide-limits"><p class="eyebrow"><span class="chapter">Boundaries</span></p><ul>
+<li>Similarity finds candidates. It is not proof of a scientific result or of a worker&#39;s success, and receipts and memory approval rules stay authoritative.</li>
+<li>Matching model and projector hashes do not make vectors compatible across serving stacks. Keep each stack&#39;s index separate.</li>
+<li>An extension can request embeddings only when its manifest declares the service and you approve it, and it never receives the target&#39;s credentials.</li>
+<li>A recording is bounded, timed terminal output. It is not a video of the screen.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="https://github.com/iowarp/clio-coder/blob/v0.6.2/docs/guide/semantic-context.md">Semantic context beta guide <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/experimental/remote-workers-and-clusters.html">Remote workers and clusters <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/docs/guide/configuration-and-targets.html">Connect a model <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#before-you-start">Before you start</a>
+<a href="#build-an-index">Build an index</a>
+<a href="#read-a-result">Read a result</a>
+<a href="#keep-the-index-current">Keep the index current</a>
+<a href="#record-a-worker-run">Record a worker run</a></aside></div><div class="tutorial-end"><p class="caption">By The Clio Coder team · Clio Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

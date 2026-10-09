@@ -34,7 +34,7 @@
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install on a cluster</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/v0.6.1/docs/guide/hpc-clusters.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/hpc-clusters.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install-without-root">Install without root</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install on a cluster</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/e4b3c7b18e20db767cdc92139b85dac6d1219d1a/docs/guide/hpc-clusters.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/hpc-clusters.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install-without-root">Install without root</a>
 <a href="#old-glibc-proxies-and-quotas">Old glibc, proxies, and quotas</a>
 <a href="#verified-downloads">Verified downloads</a>
 <a href="#airgapped-sites-and-your-own-node">Airgapped sites and your own Node</a></details><h1 id="install-on-a-cluster">Install on a cluster</h1>
@@ -55,7 +55,7 @@ clio-coder doctor</code></pre></div>
 <p>Point <code>CLIO_CODER_NODE_MIRROR</code> at a mirror laid out like nodejs.org/dist, <code>CLIO_CODER_NODE_UNOFFICIAL_MIRROR</code> at one for the glibc 2.17 build, and <code>npm_config_registry</code> at a registry mirror for the package&#39;s dependencies. A Node mirror can be a <code>file://</code> URL on a shared filesystem.</p>
 <p>If the site already provides Node 22.19 or newer, you can install with its npm instead: <code>npm install -g @iowarp/clio-coder</code>. When an older <code>node</code> comes first on <code>PATH</code>, set <code>CLIO_CODER_NODE</code> to the newer binary.</p>
 <p>Pick versions with <code>--version</code> or <code>--channel</code>, and undo an upgrade with <code>--rollback</code>. The full guide covers the mirror variables; <code>sh install.sh --help</code> lists every option.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/v0.6.1" data-source-version="0.6.1" data-source-ref="v0.6.1" data-source-commit="eb11be1857846bbd2234b60524f346e6d9ef7d6c">Guide to v0.6.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/e4b3c7b18e20db767cdc92139b85dac6d1219d1a" data-source-version="0.6.2" data-source-ref="e4b3c7b18e20db767cdc92139b85dac6d1219d1a" data-source-commit="e4b3c7b18e20db767cdc92139b85dac6d1219d1a">Guide to v0.6.2</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#install-without-root">Install without root</a>
 <a href="#old-glibc-proxies-and-quotas">Old glibc, proxies, and quotas</a>
 <a href="#verified-downloads">Verified downloads</a>
