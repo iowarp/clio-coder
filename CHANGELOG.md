@@ -4,14 +4,16 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## 0.6.2 - 2026-10-09
 
-Clio Coder 0.6.2 is the stable release of the 0.6.2 line described under 0.6.2-rc.1 and 0.6.2-rc.2 below. Since 0.6.2-rc.2 it moves to Pi 1.1.0, adds an opt-in semantic context index and worker recording, makes wiki generation reliable and accountable for its cost, and tightens dispatch safety, usage accounting, the desktop app and the terminal interface.
+Clio Coder 0.6.2 is the first stable release since 0.6.1 and includes everything published in 0.6.2-rc.1 and 0.6.2-rc.2. It separates plugins from extensions: a plugin carries content, and an extension is Clio code that runs in its own sandboxed process and loads only after you approve the capabilities it declares. Fleet contracts are now playbooks, proactive memory runs on the chat route within that route's budget, `/loop` schedules turns and command polls, `/reload` and `/restart` apply changes in place, and the desktop app gains an integrated window title and Manage context. The [0.6.2-rc.1 and 0.6.2-rc.2 entries](https://github.com/iowarp/clio-coder/blob/v0.6.2/CHANGELOG.md#062-rc2---2026-10-06) list those changes in full.
+
+Since 0.6.2-rc.2, Clio Coder moves to Pi 1.1.0, adds an opt-in semantic context index and worker recording, makes wiki generation reliable and accountable for its cost, and tightens dispatch safety, usage accounting, the desktop app and the terminal interface.
 
 ### Engine and semantic context
 
 - Upgrade the Pi engine packages to 1.1.0 for native Haiku 5.5 catalog support and updated Anthropic provider compatibility.
 - Add an opt-in EmbeddingGemma 2 Q8 service and persistent semantic context index for code, scientific inboxes, approved memory, evidence, and recorded dispatch output. The agent and CLI receive bounded, attributed search results; exact profile identities isolate vector spaces, and an explicit offline command reembeds old canonical records under a new profile. Approved API 2 extensions can call the host embedding service through a declared capability without receiving model credentials.
 - Add explicit local or SSH worker recording as a bounded asciicast side channel with redacted evidence exports. Add a checksum-pinned asciinema installer and a previewed user-level fleet provisioning command.
-- Keep background indexing disabled by default. PDF text, notebook outputs, images, mono 16 kHz WAV audio, and bounded timestamped GIF/video still frames are supported where the image route is qualified and FFmpeg is available. Raw video embedding and scanned PDF OCR remain unsupported. See the [semantic context beta guide](docs/guide/semantic-context.md).
+- Keep background indexing disabled by default. PDF text, notebook outputs, images, mono 16 kHz WAV audio, and bounded timestamped GIF/video still frames are supported where the image route is qualified and FFmpeg is available. Raw video embedding and scanned PDF OCR remain unsupported. See the [semantic context beta guide](https://github.com/iowarp/clio-coder/blob/v0.6.2/docs/guide/semantic-context.md).
 
 ### Wiki generation
 
