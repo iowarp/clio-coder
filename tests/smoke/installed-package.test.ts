@@ -973,7 +973,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 
 			// 3. Load the installed skill and bundle alongside built-in recipes.
 			const allAgents = (await libraryJson(["agents", "--all"])) as Array<{ id: string; skills: string[] }>;
-			strictEqual(allAgents.length, 20, "must expose exactly 20 agent recipes total");
+			strictEqual(allAgents.length, 21, "must expose exactly 21 agent recipes total");
 
 			withIsolatedState(libraryHome, () => {
 				const loadedSkills = loadSkills({ cwd: libraryProject, home: libraryHome, configDir: join(libraryHome, "config") });
