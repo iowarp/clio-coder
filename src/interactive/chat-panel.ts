@@ -3,7 +3,10 @@ import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assist
 import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
+import { normalizeTokenUsage } from "../core/token-split.js";
 import { ToolNames } from "../core/tool-names.js";
+import { aggregateCostAmounts, type CostAggregate, formatCostAggregate } from "../domains/observability/cost.js";
+import { resolveCostProvenance } from "../domains/providers/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import type { ViewArtifact } from "../domains/session/view-artifacts.js";
@@ -20,7 +23,7 @@ import {
 } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "../session-control/chat-loop.js";
-import { extractText, isSelfExplainingAbort } from "../session-control/chat-loop-messages.js";
+import { extractText, isSelfExplainingAbort, sumRunUsage } from "../session-control/chat-loop-messages.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { editPreviewDiff } from "./mutation-preview.js";
@@ -143,6 +146,8 @@ export interface ChatPanelTurnUsage {
 	cacheWriteTokens: number;
 	reasoningTokens?: number;
 	reasoningTokenProvenance?: ReasoningTokenProvenance;
+	/** Priced spend with its provenance; absent when the call was never invoked. */
+	costSummary?: CostAggregate;
 	/** Model calls the totals were summed over; absent when the count is unknown. */
 	modelCalls?: number;
 	/** Why the run's prompt cache was expected to be cold (`prompt_recompiled`, …). */
@@ -544,6 +549,17 @@ function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 		turnUsage.reasoningTokens = reasoning.tokens;
 		turnUsage.reasoningTokenProvenance = reasoning.provenance;
 	}
+	const rawUsage = ((message as { usage?: unknown }).usage ?? {}) as Record<string, unknown>;
+	if (rawUsage.callInvoked !== false) {
+		turnUsage.costSummary = aggregateCostAmounts([
+			{
+				usd: sumRunUsage([message as AgentMessage]).costUsd,
+				provenance: resolveCostProvenance(rawUsage.costProvenance, "unknown"),
+				apiCalls: 1,
+				...(normalizeTokenUsage(rawUsage).observed ? {} : { missingTokenCalls: 1 }),
+			},
+		]);
+	}
 	return turnUsage;
 }
 
@@ -559,10 +575,12 @@ function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefi
 	let found = false;
 	let provider = false;
 	let estimated = false;
+	const costs: CostAggregate[] = [];
 	for (const message of messages) {
 		const usage = assistantUsage(message);
 		if (!usage) continue;
 		found = true;
+		if (usage.costSummary !== undefined) costs.push(usage.costSummary);
 		total.modelCalls = (total.modelCalls ?? 0) + (usage.modelCalls ?? 1);
 		total.inputTokens += usage.inputTokens;
 		total.outputTokens += usage.outputTokens;
@@ -576,6 +594,11 @@ function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefi
 		}
 	}
 	if (!found) return undefined;
+	if (costs.length > 0) {
+		total.costSummary = aggregateCostAmounts(
+			costs.map((costSummary) => ({ usd: 0, provenance: "unknown", costSummary })),
+		);
+	}
 	if (provider || estimated)
 		total.reasoningTokenProvenance = provider && estimated ? "mixed" : provider ? "provider" : "estimated";
 	return total;
@@ -1053,6 +1076,8 @@ function renderTurnUsageLine(
 	if (view.tokens > 0 && view.provenance !== "unmeasured") {
 		facts.push(`reasoning ${view.provenance === "provider" ? "" : "≈"}${tokens(view.tokens)}`);
 	}
+	const cost = formatCostAggregate(usage.costSummary);
+	if (cost !== null) facts.push(cost);
 	if (usage.cacheReadTokens === 0 && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
 		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
 	}
