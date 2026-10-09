@@ -70,7 +70,7 @@ jobs:
     needs: prepare
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Use runner scratch for temporary files
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
