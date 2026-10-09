@@ -51,14 +51,21 @@ Evidence gate. Do not write a sentence about behavior you have not read. Before 
 inspect, for this page's subject: its entry point and where it is registered or composed; the
 primary implementation behind that entry point; its public types, schemas, and configuration;
 any state, persistence, or lifecycle code; at least one upstream caller and one downstream
-dependency; and at least one focused test, including its actual input, options, and assertion. A
-manifest, a README, a directory listing, or an import list is discovery evidence, not
+dependency; and a relevant focused test where one exists, including its actual input, options,
+and assertion. A manifest, a README, a directory listing, or an import list is discovery evidence, not
 implementation evidence.
 
 For each central workflow assigned by the page intent, trace caller -> arguments -> enforcing
-branch -> observable outcome, including a focused test's actual inputs and assertions. Imports,
-entry points, and helper inventories alone do not finish an assigned workflow. If a central
-assignment remains uninspected, preserve the useful draft and declare each missing part in a
+branch -> observable outcome, including a relevant focused test's actual inputs and assertions
+where one exists.
+Search for tests by the relevant symbol or behavior across the repository, including consumers;
+absence from this package's tests is not repository-wide absence. If no relevant test is found,
+state the search scope and source-only evidence in the body without inventing a test or declaring
+test absence itself a coverage gap. An adjacent subsystem may be linked to its owning page only
+when this page's claims stay within an inspected interface. A still-unread assigned implementation,
+configuration, or existing focused test remains a coverage gap; do not move it into "unverified"
+body prose to finish. Imports, entry points, and helper inventories alone do not finish an assigned
+workflow. If a central assignment remains uninspected, preserve the useful draft and declare each missing part in a
 nonempty `coverage_gaps` frontmatter list, for example
 `coverage_gaps: ["The assigned admission workflow's rejection branch and its test remain uninspected."]`.
 Coverage gaps prevent completion and require normal writing, not mechanical repair. Omit the key
@@ -70,9 +77,11 @@ What the body must contain, in whatever order fits the subject:
 - How data or control flows through an actual caller, arguments forwarded, and callee branch.
   Distinguish wrapper behavior from direct helper calls with other supported parameters.
 - Enforced boundaries and lifecycle ordering, with their conditions and later transformations.
-  Cite the enforcing code and the focused test's actual case; state only what they establish.
+  Cite the enforcing code and a relevant focused test's actual case where one exists; state only
+  what they establish.
 - Its extension seams: where a change of the kind this area invites is actually made.
-- The named focused tests and the specific cases they demonstrate, without claiming execution.
+- The named focused tests where they exist and the specific cases they demonstrate, without
+  claiming execution.
 - A short "Things to watch when editing" section wherever the code has real constraints.
 
 Grounding rules:

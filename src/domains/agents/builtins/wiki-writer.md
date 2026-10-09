@@ -37,6 +37,12 @@ over a batch of parallel guesses. Never read `.env` files or other secret-bearin
 Write the file as soon as you can ground it, then improve it in place. A written page is worth
 more than a researched one, and your budget is sized for a single subject, not a repository tour.
 
-The file you wrote is your result. When it is on disk, call `limitation` with the scope and reason
-for anything you could not ground, then stop and say in one line what you wrote. There is no
-report to file and no JSON to emit.
+Writing the draft or recording a limitation does not finish an assigned workflow. After writing,
+compare the page against each central assignment and prioritize the remaining targeted reads
+while the admitted budget permits. Finish when those assignments are grounded; if blocked or
+stopped by the budget, preserve the draft and explicit remaining coverage gaps. Do not spend
+calls solely to exhaust the allowance.
+
+The file you wrote is your result. When finished, call `limitation` with the scope and reason for
+anything you could not ground, then say in one line what you wrote. There is no report to file
+and no JSON to emit.
