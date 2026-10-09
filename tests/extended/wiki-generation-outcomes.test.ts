@@ -575,6 +575,37 @@ describe("wiki generation outcomes", () => {
 		assert.equal(retried.pending, 0);
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 4);
 	});
+	it("keeps a non-regular first draft local and admits the next page", async () => {
+		await initialize();
+		const dir = join(cwd, ".clio-coder/wiki-staging-non-regular");
+		mkdirSync(join(dir, "a.md"), { recursive: true });
+		const saved = readWikiMeta(cwd)?.plan;
+		assert.ok(saved);
+		for (const entry of saved.pages) {
+			entry.status = "pending";
+			entry.lastFailure = { phase: "validation", detail: "Historical gate failure", runId: "successful-writer" };
+		}
+		writeWikiPlanFile(dir, saved);
+		writeFileSync(join(dir, "b.md"), `${content("b", 1)}See \`src/b.ts:999\`.\n`);
+		const requests: string[] = [];
+		const result = await run(
+			generator((spec, path) => {
+				assert.ok(path);
+				requests.push(path.endsWith("a.md") ? "a" : "b");
+				if (path.endsWith("a.md")) {
+					assert.equal(spec.agentId, "wiki-writer");
+					return 1;
+				}
+				assert.equal(spec.agentId, "wiki-repair");
+				writeFileSync(path, content("b", 2));
+			}),
+		);
+		assert.deepEqual(requests, ["a", "b"]);
+		assert.equal(result.status, "generated");
+		assert.equal(result.pending, 1);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "pending");
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[1]?.status, "written");
+	});
 	it("writes a missing validation-failed draft immediately", async () => {
 		await initialize();
 		const dir = join(cwd, ".clio-coder/wiki-staging-missing");

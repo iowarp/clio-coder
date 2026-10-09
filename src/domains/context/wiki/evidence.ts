@@ -1,4 +1,5 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
+import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { parse } from "yaml";
@@ -25,6 +26,8 @@ export interface WikiPageEvidenceResult {
 	allReasons?: string[];
 	/** Changed body citations that passed individually, even when another reference failed. */
 	resolvedCitations?: Record<string, string>;
+	/** Digest of the contained, regular draft bytes read by the shared inspector. */
+	draftHash?: string;
 	/** Coverage failures require substantive writing, not a mechanical repair pass. */
 	validationKind?: "coverage";
 }
@@ -627,12 +630,16 @@ export function inspectWikiPageEvidence(input: {
 		if (!within(realpathSync(input.outputDir), path) || !stat.isFile())
 			return fail("planned page must be a regular file inside wiki staging");
 		if (stat.size > 2 * 1024 * 1024) return fail("page exceeds the 2 MiB evidence-check limit; split or shorten it");
-		return validateWikiPageEvidence({
-			pagePath: input.pagePath,
-			content: readFileSync(path, "utf8"),
-			sourceRoot: input.sourceRoot,
-			wikiLinks: wikiLinkInventory(input.outputDir),
-		});
+		const content = readFileSync(path);
+		return {
+			...validateWikiPageEvidence({
+				pagePath: input.pagePath,
+				content: content.toString("utf8"),
+				sourceRoot: input.sourceRoot,
+				wikiLinks: wikiLinkInventory(input.outputDir),
+			}),
+			draftHash: createHash("sha256").update(content).digest("hex"),
+		};
 	} catch {
 		return fail("writer finished without a readable planned page file");
 	}

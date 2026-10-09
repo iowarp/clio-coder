@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
@@ -12,7 +11,6 @@ import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
 import { pageSourceIndex } from "../domains/context/wiki/assemble.js";
 import { inspectWikiPageEvidence } from "../domains/context/wiki/evidence.js";
-import { resolveSourcePath } from "../domains/context/wiki/frontmatter.js";
 import type { WikiGenerate, WikiGenerateInput } from "../domains/context/wiki/generate.js";
 import type { WikiPlan, WikiPlanPage } from "../domains/context/wiki/plan.js";
 import {
@@ -482,33 +480,24 @@ async function runPagePhase(
 			...(pageSourceIndex(input.outputDir, input.cwd).get(page.path) ?? []),
 		]),
 	];
-	if (seeded) {
-		for (const match of readFileSync(join(input.outputDir, page.path), "utf8").matchAll(/`([^`\s]+)`/g)) {
-			const cited = resolveSourcePath(input.cwd, (match[1] ?? "").split(/[:#]/, 1)[0] ?? "");
-			if (cited) {
-				const path = relative(input.cwd, cited).replace(/\\/g, "/");
-				if (!sources.includes(path)) sources.push(path);
-			}
-		}
-	}
 	const stable = (dependencies: readonly string[] = []): boolean => {
 		const current = captureWikiSourceContent(input.cwd);
 		return wikiSourcesMatch(baseline, current) && wikiSourcesMatch(baseline, current, [...sources, ...dependencies]);
 	};
-	const diagnostic =
-		repair && seeded
-			? inspectWikiPageEvidence({
-					pagePath: page.path,
-					outputDir: input.outputDir,
-					sourceRoot: input.cwd,
-				})
-			: undefined;
+	const diagnostic = seeded
+		? inspectWikiPageEvidence({
+				pagePath: page.path,
+				outputDir: input.outputDir,
+				sourceRoot: input.cwd,
+			})
+		: undefined;
 	for (const dependency of diagnostic?.dependencies ?? diagnostic?.resolvedDependencies ?? []) {
 		if (!sources.includes(dependency)) sources.push(dependency);
 	}
+	const draftHash = diagnostic?.draftHash ?? "";
 	if (
 		repair &&
-		(!seeded ||
+		(!draftHash ||
 			!plan.sourceContent ||
 			diagnostic?.validationKind === "coverage" ||
 			!stable(diagnostic?.dependencies ?? diagnostic?.resolvedDependencies))
@@ -530,9 +519,7 @@ async function runPagePhase(
 			? buildWikiRepairPrompt({
 					outputDir: input.outputDir,
 					page,
-					draftHash: createHash("sha256")
-						.update(readFileSync(join(input.outputDir, page.path)))
-						.digest("hex"),
+					draftHash,
 					diagnostics: diagnostic?.allReasons ?? diagnostic?.reasons ?? [],
 					sources,
 				})
