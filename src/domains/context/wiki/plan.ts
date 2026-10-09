@@ -47,6 +47,12 @@ export interface WikiPlanPage {
 	attempts: number;
 	/** Last unsuccessful outcome, retained across publication and authored replanning. */
 	lastFailure?: WikiPageFailure;
+	/**
+	 * Harness-owned audit marker: the writer was stopped by the tool-call cap after a successful
+	 * mutation, and the draft was accepted because it passed the evidence gate. Cleared whenever the
+	 * page is rewritten normally or leaves the written state.
+	 */
+	completedAfterCap?: true;
 }
 
 export interface WikiPlan {

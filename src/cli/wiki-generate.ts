@@ -301,8 +301,11 @@ type WikiReceipts = Array<{
 	kind: "writer" | "repair";
 	/** The attempt ledger was unreadable, so this dispatch may have unrecorded earlier attempts. */
 	unrecoveredAttempts?: true;
+	/** Page accepted after a tool-call cap stopped its writer; surfaced in the invocation summary. */
+	completedAfterCapPage?: string;
 }>;
 const ATTEMPT_LINE_LIMIT = 4;
+const CAPPED_PAGE_LIMIT = 5;
 
 function usageDetail(usage: WikiUsage): string {
 	return USAGE_FIELDS.map(([key, label]) => `${label}=${usage[key] ?? "unknown"}`).join(", ");
@@ -373,6 +376,7 @@ function invocationUsage(receipts: WikiReceipts): string {
 		else if (receipt.costProvenance === "estimated") estimated += receipt.costUsd;
 		else known += receipt.costUsd;
 	}
+	const capped = receipts.flatMap((run) => (run.completedAfterCapPage ? [run.completedAfterCapPage] : []));
 	return (
 		`${receipts.length} dispatched runs; reported tokens: ${usageDetail(totals)}` +
 		(receipts.some((run) => run.kind === "repair")
@@ -380,7 +384,10 @@ function invocationUsage(receipts: WikiReceipts): string {
 			: "") +
 		`; incomplete usage breakdown=${incomplete} runs; missing-usage count unknown=${missingUsage} runs` +
 		`; reported cost subtotals: known=${renderCostAmount(known, "known")}, estimated=${renderCostAmount(estimated, "estimated")}; unknown cost=${unknown} runs` +
-		((totals.missingTokenCalls ?? 0) > 0 || incomplete > 0 ? "; usage/cost totals may be incomplete" : "")
+		((totals.missingTokenCalls ?? 0) > 0 || incomplete > 0 ? "; usage/cost totals may be incomplete" : "") +
+		(capped.length > 0
+			? `; pages completed after tool-call cap=${capped.length} (${capped.slice(0, CAPPED_PAGE_LIMIT).join(", ")}${capped.length > CAPPED_PAGE_LIMIT ? `, +${capped.length - CAPPED_PAGE_LIMIT} more` : ""})`
+			: "")
 	);
 }
 
@@ -784,7 +791,11 @@ async function runPagePhase(
 			});
 		}
 	}
+	const receiptIndex = receipts.length;
 	const usage = dispatchUsage(outcome, receipts, kind);
+	const completedAfterCap = written && !outcome.ok;
+	const capReceipt = receipts[receiptIndex];
+	if (completedAfterCap && capReceipt) capReceipt.completedAfterCapPage = page.path;
 	const detail =
 		evidence && !evidence.ok
 			? // Reasons lead because lastFailure.detail is cut to 500 chars, and elapsed time or tool mix must not push them out.
@@ -809,6 +820,8 @@ async function runPagePhase(
 					: {}),
 				attempts: entry.attempts + (outcome.phase === "writer" ? 1 : 0),
 			};
+			if (completedAfterCap) nextPage.completedAfterCap = true;
+			else delete nextPage.completedAfterCap;
 			if (written) delete nextPage.lastFailure;
 			else
 				nextPage.lastFailure = {
@@ -825,7 +838,7 @@ async function runPagePhase(
 	input.progress?.({
 		phase: "generate",
 		status: "completed",
-		message: `${written ? (repair ? "repaired" : "wrote") : repair ? "could not repair" : "could not write"} ${page.path} (${position.index}/${position.total})`,
+		message: `${written ? (repair ? "repaired" : "wrote") : repair ? "could not repair" : "could not write"} ${page.path}${completedAfterCap ? " after tool-call cap" : ""} (${position.index}/${position.total})`,
 		current: position.index,
 		total: position.total,
 		detail: `${repair ? "repair; " : ""}${detail}${usage}`,

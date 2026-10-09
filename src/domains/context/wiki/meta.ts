@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { type WikiPage, wikiDir, wikiMarkdownFilesInDir } from "./layout.js";
 import type { ResolvedWikiDepth, WikiDepth, WikiPlan } from "./plan.js";
-import { sanitizeWikiPlan } from "./plan-store.js";
+import { sanitizeWikiPlan, withoutStaleCapMarkers } from "./plan-store.js";
 
 /**
  * What the generator observed and chose for this artifact. Page and section
@@ -194,7 +194,7 @@ export function writeWikiMetaInDir(dir: string, meta: WikiMeta): void {
 		contentHash: meta.contentHash,
 		pages: normalizePages(meta.pages),
 		...(meta.generation !== undefined ? { generation: { ...meta.generation } } : {}),
-		...(meta.plan !== undefined ? { plan: meta.plan } : {}),
+		...(meta.plan !== undefined ? { plan: withoutStaleCapMarkers(meta.plan) } : {}),
 	};
 	safeResourceWrite(join(dir, "meta.json"), `${JSON.stringify(normalized)}\n`, { encoding: "utf8" });
 }

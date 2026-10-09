@@ -132,6 +132,9 @@ export function sanitizeWikiPlan(
 		const recorded = options.trustStatus ? parsedStatus(entry.status) : null;
 		const recordedAttempts = options.trustStatus ? parsedAttempts(entry.attempts) : null;
 		const lastFailure = prior?.lastFailure ?? (options.trustStatus ? parsedFailure(entry.lastFailure) : undefined);
+		// Harness-owned like attempts: an authored plan never sets it, and it only describes a written page.
+		const capMarked = prior ? prior.completedAfterCap === true : options.trustStatus && entry.completedAfterCap === true;
+		const status = changedSpec ? "pending" : (prior?.status ?? recorded ?? "pending");
 		const dependencies =
 			prior?.dependencies ?? (options.trustStatus ? stringList(entry.dependencies, Number.POSITIVE_INFINITY) : []);
 		seen.add(path);
@@ -141,9 +144,10 @@ export function sanitizeWikiPlan(
 			intent,
 			sources,
 			...(dependencies.length > 0 ? { dependencies } : {}),
-			status: changedSpec ? "pending" : (prior?.status ?? recorded ?? "pending"),
+			status,
 			attempts: changedSpec ? 0 : (prior?.attempts ?? recordedAttempts ?? 0),
 			...(!changedSpec && (prior?.status ?? recorded) !== "written" && lastFailure ? { lastFailure } : {}),
+			...(status === "written" && capMarked ? { completedAfterCap: true as const } : {}),
 		});
 	}
 	if (pages.length === 0) return null;
@@ -219,8 +223,27 @@ export function readAuthoredWikiPlan(dir: string, previous: WikiPlan): WikiPlan 
 	return document === undefined ? null : sanitizeWikiPlan(document, previous, { trustStatus: false });
 }
 
+/**
+ * Persistence invariant: completedAfterCap only describes a written page. Resets to pending happen
+ * in several modules and carry the marker through object spreads, and audits read the JSON on disk
+ * directly, so the strip happens at every write rather than at each reset site.
+ */
+export function withoutStaleCapMarkers(plan: WikiPlan): WikiPlan {
+	if (!plan.pages.some((page) => page.status !== "written" && page.completedAfterCap !== undefined)) return plan;
+	return {
+		...plan,
+		pages: plan.pages.map((page) => {
+			if (page.status === "written" || page.completedAfterCap === undefined) return page;
+			const { completedAfterCap: _stale, ...rest } = page;
+			return rest;
+		}),
+	};
+}
+
 export function writeWikiPlanFile(dir: string, plan: WikiPlan): void {
-	safeResourceWrite(wikiPlanPath(dir), `${JSON.stringify(plan, null, 2)}\n`, { encoding: "utf8" });
+	safeResourceWrite(wikiPlanPath(dir), `${JSON.stringify(withoutStaleCapMarkers(plan), null, 2)}\n`, {
+		encoding: "utf8",
+	});
 }
 
 export function validateWikiPlanAnchors(

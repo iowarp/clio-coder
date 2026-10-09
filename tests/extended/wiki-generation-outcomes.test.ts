@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import type { WikiModelRoute } from "../../src/cli/wiki-generate.js";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
-import { computeWikiContentHash, readWikiMeta } from "../../src/domains/context/wiki/meta.js";
+import { computeWikiContentHash, readWikiMeta, writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import type { WikiPlan, WikiPlanPage } from "../../src/domains/context/wiki/plan.js";
 import { readWikiPlanFile, sanitizeWikiPlan, writeWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import { wikiCompleteness, wikiStaleness } from "../../src/domains/context/wiki/staleness.js";
@@ -304,12 +304,22 @@ describe("wiki generation outcomes", () => {
 			writeFileSync(join(dir, "a.md"), content("a", 1));
 			writeFileSync(join(dir, "b.md"), content("b", 1));
 		}
-		const resume = (generate: ReturnType<typeof generator>) =>
-			runWikiGenerate({ cwd, model: "fixture", retryPending: true, generate });
+		const resume = (
+			generate: ReturnType<typeof generator>,
+			progress?: (event: { message: string; detail?: string }) => void,
+		) =>
+			runWikiGenerate({
+				cwd,
+				model: "fixture",
+				retryPending: true,
+				generate,
+				...(progress ? { onProgress: progress } : {}),
+			});
 
 		it("writes a capped run whose draft passes the evidence gate without another dispatch", async () => {
 			await seedPending();
 			const requests: string[] = [];
+			const events: Array<{ message: string; detail?: string }> = [];
 			const result = await resume(
 				generator((spec, path) => {
 					assert.ok(path);
@@ -317,10 +327,78 @@ describe("wiki generation outcomes", () => {
 					writeFileSync(path, content("a", 2));
 					return capped(true);
 				}),
+				(event) => events.push(event),
 			);
 			assert.deepEqual(requests, ["wiki-writer"]);
 			assert.equal(result.pending, 0);
 			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "written");
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.completedAfterCap, true);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[1]?.completedAfterCap, undefined);
+			assert.ok(events.some((event) => /^wrote a\.md after tool-call cap \(/u.test(event.message)));
+			const summary = events.find((event) => event.message === "wiki invocation usage");
+			assert.match(summary?.detail ?? "", /pages completed after tool-call cap=1 \(a\.md\)/u);
+		});
+
+		it("clears the cap marker when a later normal writer rewrites the page", async () => {
+			await seedPending();
+			await resume(
+				generator((_spec, path) => {
+					assert.ok(path);
+					writeFileSync(path, content("a", 2));
+					return capped(true);
+				}),
+			);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.completedAfterCap, true);
+			writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");
+			const events: Array<{ message: string; detail?: string }> = [];
+			await runWikiGenerate({
+				cwd,
+				model: "fixture",
+				onProgress: (event) => events.push(event),
+				generate: generator((_spec, path) => {
+					assert.ok(path);
+					writeFileSync(path, content("a", 3));
+				}),
+			});
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "written");
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.completedAfterCap, undefined);
+			assert.doesNotMatch(
+				events.find((event) => event.message === "wiki invocation usage")?.detail ?? "",
+				/tool-call cap/u,
+			);
+		});
+
+		it("never persists the cap marker on a page that is not written", async () => {
+			await seedPending();
+			await resume(
+				generator((_spec, path) => {
+					assert.ok(path);
+					writeFileSync(path, content("a", 2));
+					return capped(true);
+				}),
+			);
+			const rawPlan = () => JSON.parse(readFileSync(join(cwd, ".clio-coder/wiki/meta.json"), "utf8")).plan as WikiPlan;
+			assert.equal(rawPlan().pages[0]?.completedAfterCap, true);
+			const stale = structuredClone(rawPlan());
+			assert.ok(stale.pages[0]);
+			stale.pages[0].status = "pending";
+			const dir = join(cwd, ".clio-coder/wiki-staging-reset");
+			mkdirSync(dir);
+			writeWikiPlanFile(dir, stale);
+			const onDisk = JSON.parse(readFileSync(join(dir, "_plan.json"), "utf8")) as WikiPlan;
+			assert.equal(onDisk.pages[0]?.status, "pending");
+			assert.equal("completedAfterCap" in (onDisk.pages[0] ?? {}), false);
+			const meta = readWikiMeta(cwd);
+			assert.ok(meta);
+			writeWikiMeta(cwd, { ...meta, plan: stale });
+			const rawMeta = rawPlan();
+			assert.equal(rawMeta.pages[0]?.status, "pending");
+			assert.equal("completedAfterCap" in (rawMeta.pages[0] ?? {}), false);
+		});
+
+		it("never marks a normally completed page", async () => {
+			await initialize();
+			for (const entry of readWikiMeta(cwd)?.plan?.pages ?? []) assert.equal(entry.completedAfterCap, undefined);
 		});
 
 		it("records a capped run with an invalid draft as a validation failure and repairs it next", async () => {
@@ -1183,6 +1261,11 @@ describe("wiki generation outcomes", () => {
 			],
 		};
 		assert.deepEqual(sanitizeWikiPlan(authored, prior, { trustStatus: false })?.pages, prior.pages);
+		const forged = { ...authored, pages: [{ ...authored.pages[0], completedAfterCap: true }] };
+		assert.deepEqual(sanitizeWikiPlan(forged, prior, { trustStatus: false })?.pages, prior.pages);
+		const fresh = { ...forged, pages: [{ ...forged.pages[0], lastFailure: undefined }] };
+		assert.equal(sanitizeWikiPlan(fresh, undefined, { trustStatus: false })?.pages[0]?.completedAfterCap, undefined);
+		assert.equal(sanitizeWikiPlan(fresh, undefined, { trustStatus: true })?.pages[0]?.completedAfterCap, true);
 	});
 	it("accepts successful unchanged-content validation and reads completed checkpoint progress", async () => {
 		await initialize();
