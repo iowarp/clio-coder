@@ -1,14 +1,41 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { it } from "node:test";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
+import { parseFrontmatter } from "../../src/domains/agents/frontmatter.js";
+import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import type { WikiGenerateInput } from "../../src/domains/context/wiki/generate.js";
 import { readWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
+import { resolveToolBudgetEnvelope, workerBudgetFromEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+it("caps the dedicated repair recipe at ten calls without a revision allowance", () => {
+	const file = new URL("../../src/domains/agents/builtins/wiki-repair.md", import.meta.url);
+	const recipe = parseAgentRecipeSchema({
+		id: "wiki-repair",
+		source: "builtin",
+		filepath: file.pathname,
+		...parseFrontmatter(readFileSync(file, "utf8"), file.pathname),
+	});
+	assert.deepEqual(recipe.tools, ["read", "edit", "grep"]);
+	const policy = recipe.budget;
+	assert.ok(policy);
+	const envelope = resolveToolBudgetEnvelope({
+		recipeId: recipe.id,
+		policy,
+		request: { toolCalls: 10, readReserve: 4 },
+		hardCap: 120,
+		hasReadTool: true,
+		retry: false,
+		revision: false,
+	});
+	assert.equal(workerBudgetFromEnvelope(envelope).ceiling, 10);
+	assert.equal(envelope.effective.revision, undefined);
+});
 
 function fixtureInput(cwd: string): WikiGenerateInput {
 	const outputDir = join(cwd, ".clio-coder", "wiki-staging");

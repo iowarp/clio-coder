@@ -80,7 +80,7 @@ function parsedFailure(value: unknown): WikiPageFailure | undefined {
 	if (!isRecord(value)) return undefined;
 	const phase = value.phase;
 	if (phase !== "admission" && phase !== "writer" && phase !== "validation") return undefined;
-	const detail = usableString(value.detail)?.replace(/\s+/gu, " ").slice(0, 500);
+	const detail = usableString(value.detail);
 	if (!detail) return undefined;
 	const runId = usableString(value.runId)?.slice(0, 120);
 	return { phase, detail, ...(runId ? { runId } : {}) };

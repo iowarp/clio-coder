@@ -1,15 +1,18 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
-import { ToolNames } from "../core/tool-names.js";
+import { ALL_TOOL_NAMES, ToolNames } from "../core/tool-names.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
+import { pageSourceIndex } from "../domains/context/wiki/assemble.js";
 import { inspectWikiPageEvidence } from "../domains/context/wiki/evidence.js";
+import { resolveSourcePath } from "../domains/context/wiki/frontmatter.js";
 import type { WikiGenerate, WikiGenerateInput } from "../domains/context/wiki/generate.js";
 import type { WikiPlan, WikiPlanPage } from "../domains/context/wiki/plan.js";
 import {
@@ -19,7 +22,8 @@ import {
 	validateWikiPlanAnchors,
 	writeWikiPlanFile,
 } from "../domains/context/wiki/plan-store.js";
-import { buildWikiPagePrompt, buildWikiPlanPrompt } from "../domains/context/wiki/prompts.js";
+import { buildWikiPagePrompt, buildWikiPlanPrompt, buildWikiRepairPrompt } from "../domains/context/wiki/prompts.js";
+import { captureWikiSourceContent, wikiSourcesMatch } from "../domains/context/wiki/source-content.js";
 import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
@@ -54,6 +58,7 @@ const PLAN_ESTIMATE_MS = 8 * 60 * 1000;
 const RUN_ESTIMATE_MS = 60 * 60 * 1000;
 
 export interface WikiModelRoute {
+	workerProfile?: string;
 	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
@@ -77,8 +82,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * and every page writer are pinned identically, so a wiki never silently mixes
  * models across its own pages.
  */
-function routeFields(route: WikiModelRoute): Pick<JobSpec, "target" | "model" | "thinkingLevel"> {
+function routeFields(route: WikiModelRoute): Pick<JobSpec, "target" | "model" | "thinkingLevel" | "workerProfile"> {
 	return {
+		...(route.workerProfile !== undefined ? { workerProfile: route.workerProfile } : {}),
 		...(route.target !== undefined ? { target: route.target } : {}),
 		...(route.model !== undefined ? { model: route.model } : {}),
 		...(route.thinkingLevel !== undefined ? { thinkingLevel: route.thinkingLevel } : {}),
@@ -182,16 +188,20 @@ const USAGE_FIELDS = [
 ] as const;
 
 type WikiUsage = Pick<RunReceipt, (typeof USAGE_FIELDS)[number][0]>;
-type WikiReceipts = Array<RunReceipt | undefined>;
+type WikiReceipts = Array<{ receipt: RunReceipt | undefined; kind: "writer" | "repair" }>;
 
 function usageDetail(usage: WikiUsage): string {
 	return USAGE_FIELDS.map(([key, label]) => `${label}=${usage[key] ?? "unknown"}`).join(", ");
 }
 
-function dispatchUsage(outcome: WikiDispatchOutcome, receipts: WikiReceipts): string {
+function dispatchUsage(
+	outcome: WikiDispatchOutcome,
+	receipts: WikiReceipts,
+	kind: "writer" | "repair" = "writer",
+): string {
 	if (outcome.phase === "admission") return "";
 	const receipt = outcome.receipt;
-	receipts.push(receipt);
+	receipts.push({ receipt, kind });
 	if (!receipt) return `; run=${outcome.runId}; usage unavailable`;
 	const provenance = receipt.costProvenance;
 	return (
@@ -208,7 +218,7 @@ function invocationUsage(receipts: WikiReceipts): string {
 	let unknown = 0;
 	let incomplete = 0;
 	let missingUsage = 0;
-	for (const receipt of receipts) {
+	for (const { receipt } of receipts) {
 		if (!receipt) {
 			unknown += 1;
 			incomplete += 1;
@@ -224,6 +234,9 @@ function invocationUsage(receipts: WikiReceipts): string {
 	}
 	return (
 		`${receipts.length} dispatched runs; reported tokens: ${usageDetail(totals)}` +
+		(receipts.some((run) => run.kind === "repair")
+			? `; repair runs=${receipts.filter((run) => run.kind === "repair").length}`
+			: "") +
 		`; incomplete usage breakdown=${incomplete} runs; missing-usage count unknown=${missingUsage} runs` +
 		`; reported cost subtotals: known=${renderCostAmount(known, "known")}, estimated=${renderCostAmount(estimated, "estimated")}; unknown cost=${unknown} runs` +
 		((totals.missingTokenCalls ?? 0) > 0 || incomplete > 0 ? "; usage/cost totals may be incomplete" : "")
@@ -264,6 +277,7 @@ async function runWikiDispatch(input: {
 	task: string;
 	/** Caller-owned page path, relative to cwd; the planner remains unbound. */
 	artifactPath?: string;
+	repairSources?: readonly string[];
 	route: WikiModelRoute;
 	deadline: WikiDeadline | undefined;
 	/** Liveness signal while the dispatch runs, already throttled by the caller. */
@@ -279,11 +293,16 @@ async function runWikiDispatch(input: {
 		// The repository is readable; only this staging tree is writable. Declare
 		// those paths directly so absolute filenames in prompt prose cannot become
 		// legacy scope tokens (including a sentence-ending period).
-		const scope = declaredScopeIntent({ readRoots: ["."], writeRoots: [asDirectoryPathBoundary(stagingRoot)] });
+		const repair = input.repairSources !== undefined;
+		const writeRoots = repair && input.artifactPath ? [input.artifactPath] : [asDirectoryPathBoundary(stagingRoot)];
+		const scope = declaredScopeIntent({
+			readRoots: repair && input.artifactPath ? [input.artifactPath, ...(input.repairSources ?? [])] : ["."],
+			writeRoots,
+		});
 		if (!scope.ok) throw new Error(`${scope.reason}: ${scope.message}`);
 		handle = await input.dispatch.dispatch({
 			intent: scope.intent,
-			agentId: WIKI_AGENT_ID,
+			agentId: repair ? "wiki-repair" : WIKI_AGENT_ID,
 			executionRole: "builder",
 			task: input.task,
 			...(input.artifactPath !== undefined
@@ -299,10 +318,14 @@ async function runWikiDispatch(input: {
 			// embeds `git status` and `git log` verbatim, and the staging dir is
 			// under the gitignored `.clio-coder/`, so `op=diff` cannot see the pages this
 			// run is writing.
-			denyTools: [ToolNames.Git],
+			denyTools: repair
+				? ALL_TOOL_NAMES.filter((tool) => tool !== ToolNames.Read && tool !== ToolNames.Grep && tool !== ToolNames.Edit)
+				: [ToolNames.Git],
+			...(repair ? { budget: { toolCalls: 10, readReserve: 4 } } : {}),
 			// Containment: the worker safety seam blocks any write-class tool call
 			// whose target escapes the staging dir.
-			writeRoots: [asDirectoryPathBoundary(input.outputDir)],
+			writeRoots:
+				repair && input.artifactPath ? [join(input.cwd, input.artifactPath)] : [asDirectoryPathBoundary(input.outputDir)],
 			// Only an explicit caller deadline constrains admission; recipe estimates
 			// must not become assignment deadlines or restart for each page.
 			...(input.deadline ? { assignmentDeadlineAt: input.deadline.at } : {}),
@@ -438,7 +461,7 @@ async function runPlanPhase(
 	return plan;
 }
 
-/** Write one page, then checkpoint the plan so the work survives whatever follows. */
+/** Write or repair one page, then checkpoint its actual publication outcome. */
 async function runPagePhase(
 	dispatch: DispatchContract,
 	input: WikiGenerateInput,
@@ -448,41 +471,88 @@ async function runPagePhase(
 	position: { index: number; total: number },
 	deadline: WikiDeadline | undefined,
 	receipts: WikiReceipts,
+	repair = page.lastFailure?.phase === "validation" && Boolean(page.lastFailure.runId),
 ): Promise<WikiPlan> {
 	const seeded = existsSync(join(input.outputDir, page.path));
+	const baseline = plan.sourceContent ?? captureWikiSourceContent(input.cwd);
+	const sources = [
+		...new Set([
+			...page.sources,
+			...(page.dependencies ?? []),
+			...(pageSourceIndex(input.outputDir, input.cwd).get(page.path) ?? []),
+		]),
+	];
+	if (seeded) {
+		for (const match of readFileSync(join(input.outputDir, page.path), "utf8").matchAll(/`([^`\s]+)`/g)) {
+			const cited = resolveSourcePath(input.cwd, (match[1] ?? "").split(/[:#]/, 1)[0] ?? "");
+			if (cited) {
+				const path = relative(input.cwd, cited).replace(/\\/g, "/");
+				if (!sources.includes(path)) sources.push(path);
+			}
+		}
+	}
+	const stable = (dependencies: readonly string[] = []): boolean =>
+		wikiSourcesMatch(baseline, captureWikiSourceContent(input.cwd), [...sources, ...dependencies]);
+	const diagnostic =
+		repair && seeded
+			? inspectWikiPageEvidence({
+					pagePath: page.path,
+					outputDir: input.outputDir,
+					sourceRoot: input.cwd,
+				})
+			: undefined;
+	const kind = repair ? "repair" : "writer";
 	input.progress?.({
 		phase: "generate",
 		status: "started",
-		message: `writing ${page.path} (${position.index}/${position.total})`,
+		message: `${repair ? "repairing" : "writing"} ${page.path} (${position.index}/${position.total})`,
 	});
-	const outcome = await runWikiDispatch({
-		dispatch,
-		cwd: input.cwd,
-		outputDir: input.outputDir,
-		artifactPath: relative(input.cwd, join(input.outputDir, page.path)),
-		task: buildWikiPagePrompt({
-			depth: input.generation.depth,
-			cwd: input.cwd,
-			mode: input.mode,
-			codewiki: input.codewiki,
-			page,
-			siblings: plan.pages,
-			...(input.decisions ? { decisions: input.decisions } : {}),
-			outputDir: input.outputDir,
-			seeded,
-		}),
-		route,
-		deadline,
-		onHeartbeat: ({ elapsedMs, tools }) =>
-			input.progress?.({
-				phase: "generate",
-				status: "running",
-				message: `still writing ${page.path} (${position.index}/${position.total}, ${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
-				detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer`,
-			}),
-	});
-	// Keep failed refresh prose available, but require both a successful writer
-	// and mechanically valid evidence before crediting a page as completed.
+	const outcome: WikiDispatchOutcome =
+		repair && (!seeded || !plan.sourceContent || !stable())
+			? {
+					ok: false,
+					phase: "admission",
+					detail: "repair deferred: draft missing or source baseline changed; full writer required next invocation",
+				}
+			: await runWikiDispatch({
+					dispatch,
+					cwd: input.cwd,
+					outputDir: input.outputDir,
+					artifactPath: relative(input.cwd, join(input.outputDir, page.path)),
+					...(repair ? { repairSources: sources } : {}),
+					task: repair
+						? buildWikiRepairPrompt({
+								outputDir: input.outputDir,
+								page,
+								draftHash: createHash("sha256")
+									.update(readFileSync(join(input.outputDir, page.path)))
+									.digest("hex"),
+								diagnostics: diagnostic?.reasons ?? [],
+								sources,
+							})
+						: buildWikiPagePrompt({
+								depth: input.generation.depth,
+								cwd: input.cwd,
+								mode: input.mode,
+								codewiki: input.codewiki,
+								page,
+								siblings: plan.pages,
+								...(input.decisions ? { decisions: input.decisions } : {}),
+								outputDir: input.outputDir,
+								seeded,
+							}),
+					route,
+					deadline,
+					onHeartbeat: ({ elapsedMs, tools }) =>
+						input.progress?.({
+							phase: "generate",
+							status: "running",
+							message: `still ${repair ? "repairing" : "writing"} ${page.path} (${position.index}/${position.total}, ${formatElapsed(elapsedMs)}, ${tools} tool calls)`,
+							...(repair
+								? {}
+								: { detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer` }),
+						}),
+				});
 	const evidence = outcome.ok
 		? inspectWikiPageEvidence({
 				pagePath: page.path,
@@ -490,11 +560,17 @@ async function runPagePhase(
 				sourceRoot: input.cwd,
 			})
 		: undefined;
-	const written = outcome.ok && evidence?.ok === true;
-	const usage = dispatchUsage(outcome, receipts);
-	const detail = evidence && !evidence.ok ? `evidence check failed: ${evidence.reasons.join("; ")}` : outcome.detail;
+	const written = outcome.ok && evidence?.ok === true && (!repair || stable(evidence.dependencies));
+	const usage = dispatchUsage(outcome, receipts, kind);
+	const detail =
+		evidence && !evidence.ok
+			? `evidence check failed: ${JSON.stringify(evidence.reasons)}`
+			: outcome.ok && repair && !written
+				? "source baseline changed during repair; full writer required next invocation"
+				: outcome.detail;
 	const next: WikiPlan = {
 		...plan,
+		sourceContent: baseline,
 		pages: plan.pages.map((entry) => {
 			if (entry.path !== page.path) return entry;
 			const nextPage: WikiPlanPage = {
@@ -506,8 +582,8 @@ async function runPagePhase(
 			if (written) delete nextPage.lastFailure;
 			else
 				nextPage.lastFailure = {
-					phase: outcome.ok ? "validation" : outcome.phase,
-					detail: detail.replace(/\s+/gu, " ").slice(0, 500),
+					phase: repair ? "writer" : outcome.ok ? "validation" : outcome.phase,
+					detail: repair ? `repair failed: ${detail}; full writer required next invocation` : detail,
 					...(outcome.phase === "writer" ? { runId: outcome.runId } : {}),
 				};
 			return nextPage;
@@ -517,11 +593,15 @@ async function runPagePhase(
 	input.progress?.({
 		phase: "generate",
 		status: "completed",
-		message: `${written ? "wrote" : "could not write"} ${page.path} (${position.index}/${position.total})`,
+		message: `${written ? (repair ? "repaired" : "wrote") : repair ? "could not repair" : "could not write"} ${page.path} (${position.index}/${position.total})`,
 		current: position.index,
 		total: position.total,
-		detail: detail + usage,
+		detail: `${repair ? "repair; " : ""}${detail}${usage}`,
 	});
+	if (!repair && outcome.ok && evidence && !evidence.ok && (!deadline || deadline.remainingMs() > 0)) {
+		const pending = next.pages.find((entry) => entry.path === page.path);
+		if (pending) return runPagePhase(dispatch, input, next, pending, route, position, deadline, receipts, true);
+	}
 	return next;
 }
 
@@ -574,7 +654,7 @@ async function generateWikiWithDocumenter(
 	signal?.throwIfAborted();
 	writeWikiPlanFile(input.outputDir, plan);
 
-	const queue = pendingPages(plan, input.retryPending);
+	const queue = pendingPages(plan, input.retryPending).filter((page) => !input.deferredPages?.includes(page.path));
 	if (queue.length === 0) {
 		const pending = plan.pages.filter((page) => page.status !== "written").length;
 		input.progress?.({
@@ -629,7 +709,7 @@ async function generateWikiWithDocumenter(
 	}
 }
 
-async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded: LoadResult }> {
+async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded: LoadResult; workerProfile?: string }> {
 	const loaded = await loadDomains([
 		ConfigDomainModule,
 		ResourcesDomainModule,
@@ -649,7 +729,8 @@ async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded:
 		await loaded.stop();
 		throw new Error("wiki writer dispatch unavailable");
 	}
-	return { dispatch, loaded };
+	const workerProfile = loaded.getContract<ConfigContract>("config")?.get().fleet?.agentProfiles?.[WIKI_AGENT_ID];
+	return { dispatch, loaded, ...(workerProfile ? { workerProfile } : {}) };
 }
 
 /**
@@ -674,7 +755,8 @@ export async function resolveDocumenterModelId(route: WikiModelRoute = {}): Prom
 		// `placement.ts` reads. Falling back to another agent's binding here would
 		// record a model in wiki metadata that no dispatch ever ran.
 		const bindingProfileName = workers?.agentProfiles?.[WIKI_AGENT_ID];
-		const profile = bindingProfileName ? workers?.profiles?.[bindingProfileName] : undefined;
+		const profileName = route.workerProfile ?? bindingProfileName;
+		const profile = profileName ? workers?.profiles?.[profileName] : undefined;
 		const targetId = route.target ?? profile?.target ?? workers?.default?.target ?? settings.targets?.[0]?.id ?? null;
 		if (!targetId) return UNRESOLVED_DOCUMENTER_MODEL;
 		const target = providers.getTarget(targetId);
@@ -761,9 +843,10 @@ export function modelWikiGenerate(options: ModelWikiGenerateOptions = {}): WikiG
 				await generateWikiWithDocumenter(options.dispatch, input, receipts, options.route, deadline);
 				return;
 			}
-			const { dispatch, loaded } = await loadWikiDispatch();
+			const { dispatch, loaded, workerProfile } = await loadWikiDispatch();
+			const route = { ...(workerProfile ? { workerProfile } : {}), ...options.route };
 			await withWikiDispatchLifecycle({ dispatch, stop: () => loaded.stop() }, (signal) =>
-				generateWikiWithDocumenter(dispatch, input, receipts, options.route, deadline, signal),
+				generateWikiWithDocumenter(dispatch, input, receipts, route, deadline, signal),
 			);
 		} finally {
 			input.progress?.({

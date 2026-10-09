@@ -80,6 +80,8 @@ export interface WikiGenerateInput {
 	retryPending?: boolean;
 	/** Explicitly reconsider page structure even when all source evidence is current. */
 	replan?: boolean;
+	/** Validation drafts that need a full writer on the next invocation. */
+	deferredPages?: ReadonlyArray<string>;
 	/** Indexed areas no existing page covers, offered to a planning pass. */
 	unclaimedAreas: ReadonlyArray<WikiPlanPage>;
 	gitHead?: string | null;
@@ -389,7 +391,8 @@ function resolvePlan(input: {
 	previousPlan: WikiPlan | undefined;
 	sourceContent: WikiSourceContent;
 	gitHead: string | null;
-}): { plan: WikiPlan; resumed: boolean; unclaimedAreas: WikiPlanPage[] } {
+	allowDraftReuse: boolean;
+}): { plan: WikiPlan; resumed: boolean; unclaimedAreas: WikiPlanPage[]; deferredPages: string[] } {
 	const staged = input.adopted ? readWikiPlanFile(input.stagingDir) : null;
 	const previous = staged ?? (input.mode === "update" ? input.previousPlan : undefined);
 	if (previous) {
@@ -402,20 +405,28 @@ function resolvePlan(input: {
 				: undefined;
 		const gitAvailable = changedPathsSince(input.cwd, staged?.sourceGitHead ?? partialHead ?? input.gitHead) !== null;
 		const existing = new Set(wikiMarkdownFilesInDir(input.stagingDir));
+		const deferredPages: string[] = [];
 		const plan = {
 			...previous,
 			pages: previous.pages.map((page) => {
 				if (page.status !== "written") {
+					if (page.lastFailure?.phase !== "validation") return page;
 					if (
-						page.lastFailure?.phase !== "validation" ||
+						!input.allowDraftReuse ||
+						!page.lastFailure.runId ||
+						page.attempts === 0 ||
 						!existing.has(page.path) ||
 						!wikiSourcesMatch(previous.sourceContent, input.sourceContent, [
 							...page.sources,
 							...(page.dependencies ?? []),
 							...(pageSources.get(page.path) ?? []),
 						])
-					)
-						return page;
+					) {
+						deferredPages.push(page.path);
+						const pending = { ...page };
+						delete pending.lastFailure;
+						return pending;
+					}
 					const evidence = inspectWikiPageEvidence({
 						pagePath: page.path,
 						outputDir: input.stagingDir,
@@ -466,11 +477,12 @@ function resolvePlan(input: {
 		};
 		return {
 			plan,
+			deferredPages,
 			resumed: staged !== null,
 			unclaimedAreas: staged ? [] : unclaimedCandidates(previous, input.candidate, pageSources),
 		};
 	}
-	return { plan: input.candidate, resumed: false, unclaimedAreas: [] };
+	return { plan: input.candidate, resumed: false, unclaimedAreas: [], deferredPages: [] };
 }
 
 /**
@@ -562,6 +574,7 @@ export async function runWikiGenerate(
 			previousPlan: existingMeta?.plan,
 			sourceContent,
 			gitHead: existingMeta?.gitHead ?? null,
+			allowDraftReuse: !depthChanged && !input.replan,
 		});
 		if (input.retryPending && !resolved.resumed && !existingMeta?.plan) {
 			if (!staging.adopted) removeDir(staging.dir);
@@ -619,6 +632,7 @@ export async function runWikiGenerate(
 				codewiki,
 				generation,
 				plan: resolved.plan,
+				deferredPages: depthChanged || input.replan ? [] : resolved.deferredPages,
 				resumed:
 					!input.replan &&
 					!depthChanged &&

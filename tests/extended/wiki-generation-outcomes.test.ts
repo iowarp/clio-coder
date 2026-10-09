@@ -14,6 +14,7 @@ import {
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import type { WikiModelRoute } from "../../src/cli/wiki-generate.js";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
 import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
 import { computeWikiContentHash, readWikiMeta } from "../../src/domains/context/wiki/meta.js";
@@ -34,12 +35,12 @@ const page = (name: string): WikiPlanPage => ({
 });
 const content = (name: string, version: number) =>
 	`---\ntitle: ${name.toUpperCase()}\nsources:\n  - src/${name}.ts\n---\n# ${name.toUpperCase()}\n\n${name} version ${version}.\n`;
-function generator(action: (spec: JobSpec, path: string | undefined) => number | undefined) {
+function generator(action: (spec: JobSpec, path: string | undefined) => number | undefined, route?: WikiModelRoute) {
 	let sequence = 0;
 	const dispatch = {
 		abort() {},
 		async dispatch(spec: JobSpec) {
-			const path = /Write the file `([^`]+)` and nothing else\./u.exec(spec.task)?.[1];
+			const path = /(?:Write the file|Repair the existing draft at) `([^`]+)` and nothing else\./u.exec(spec.task)?.[1];
 			const exitCode = action(spec, path) ?? 0;
 			return {
 				runId: `fixture-${++sequence}`,
@@ -48,7 +49,7 @@ function generator(action: (spec: JobSpec, path: string | undefined) => number |
 			};
 		},
 	} as unknown as DispatchContract;
-	return modelWikiGenerate({ dispatch });
+	return modelWikiGenerate({ dispatch, ...(route ? { route } : {}) });
 }
 
 describe("wiki generation outcomes", () => {
@@ -106,6 +107,64 @@ describe("wiki generation outcomes", () => {
 			}),
 		);
 		assert.equal(result.pending, 0);
+	}
+	for (const resultKind of ["invalid", "valid", "failed receipt"] as const) {
+		const succeeds = resultKind === "valid";
+		it(`dispatches one bounded repair with complete diagnostics and ${succeeds ? "credits its validated edit" : `keeps ${resultKind} pending`}`, async () => {
+			const plan: WikiPlan = { version: 1, overview: "Fixture", pages: [page("a")] };
+			const invalid = content("a", 1) + Array.from({ length: 8 }, (_, n) => `See \`src/missing-${n}.ts\`.\n`).join("");
+			const requests: JobSpec[] = [];
+			const result = await run(
+				generator(
+					(spec, path) => {
+						requests.push(spec);
+						assert.equal(spec.workerProfile, "writer-profile");
+						assert.equal(spec.target, "explicit-target");
+						if (!path) {
+							writeWikiPlanFile(spec.writeRoots?.[0] as string, plan);
+							return;
+						}
+						if (spec.agentId === "wiki-repair") {
+							assert.deepEqual(spec.budget, { toolCalls: 10, readReserve: 4 });
+							assert.deepEqual(spec.writeRoots, [path]);
+							assert.equal(spec.denyTools?.includes("write"), true);
+							assert.equal(spec.denyTools?.includes("code_nav"), true);
+							assert.equal(spec.denyTools?.includes("edit"), false);
+							const data = /```json\s+([\s\S]*?)\s+```/u.exec(spec.task)?.[1];
+							assert.ok(data);
+							const diagnostics = JSON.parse(data).diagnostics;
+							assert.equal(diagnostics.length, 8);
+							assert.ok(JSON.stringify(diagnostics).length > 500);
+							assert.match(diagnostics.at(-1), /missing-7/u);
+							assert.doesNotMatch(spec.task, /Read every one|Indexed symbols|Repository guidance/u);
+							assert.equal(spec.intent?.readRoots.includes("."), false);
+						}
+						writeFileSync(path, spec.agentId === "wiki-repair" && resultKind !== "invalid" ? content("a", 2) : invalid);
+						if (spec.agentId === "wiki-repair" && resultKind === "failed receipt") return 1;
+					},
+					{ workerProfile: "writer-profile", target: "explicit-target" },
+				),
+			);
+			assert.deepEqual(
+				requests.map((spec) => spec.agentId),
+				["wiki-writer", "wiki-writer", "wiki-repair"],
+			);
+			assert.equal(result.pending, succeeds ? 0 : 1);
+			const saved = readWikiMeta(cwd)?.plan?.pages[0];
+			assert.equal(saved?.attempts, 2);
+			assert.equal(saved?.status, succeeds ? "written" : "pending");
+			if (!succeeds) {
+				assert.match(saved?.lastFailure?.detail ?? "", /repair failed/u);
+				await run(
+					generator((spec, path) => {
+						assert.equal(spec.agentId, "wiki-writer");
+						assert.ok(path);
+						writeFileSync(path, content("a", 3));
+					}),
+				);
+				assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "written");
+			}
+		});
 	}
 	for (const resumed of [false, true]) {
 		it(`validates ${resumed ? "resumed" : "newly authored"} plan anchors before dispatching writers`, async () => {
@@ -249,7 +308,8 @@ describe("wiki generation outcomes", () => {
 			assert.equal(result.pending, 1);
 			const failedPage = readWikiMeta(cwd)?.plan?.pages[0];
 			assert.equal(failedPage?.status, "pending");
-			assert.equal(failedPage?.lastFailure?.phase, "validation");
+			assert.equal(failedPage?.lastFailure?.phase, "writer");
+			assert.match(failedPage?.lastFailure?.detail ?? "", /repair failed/u);
 			assert.match(failedPage?.lastFailure?.detail ?? "", /evidence check failed/u);
 			assert.match(failedPage?.lastFailure?.runId ?? "", /^fixture-/u);
 			const repaired = await runWikiGenerate({
@@ -297,6 +357,7 @@ describe("wiki generation outcomes", () => {
 			const saved = readWikiMeta(cwd)?.plan;
 			assert.ok(saved?.pages[0]);
 			saved.pages[0].status = "pending";
+			saved.pages[0].attempts = changed ? 1 : 3;
 			saved.pages[0].lastFailure = { phase: "validation", detail: "Historical gate failure", runId: "successful-writer" };
 			writeWikiPlanFile(dir, saved);
 			writeFileSync(join(dir, "a.md"), content("a", 1));
@@ -304,18 +365,26 @@ describe("wiki generation outcomes", () => {
 			if (changed) writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;\n");
 			let dispatches = 0;
 			const result = await run(
-				generator((_spec, path) => {
+				generator(() => {
 					dispatches++;
-					assert.ok(path);
-					assert.ok(changed && path.endsWith("a.md"));
-					assert.equal(readWikiPlanFile(dir)?.pages[0]?.status, "pending");
-					writeFileSync(path, content("a", 2));
 				}),
 			);
-			assert.equal(dispatches, changed ? 1 : 0);
-			assert.equal(result.pending, 0);
-			assert.deepEqual(readWikiMeta(cwd)?.plan?.pages[0]?.dependencies, ["src/a.ts"]);
+			assert.equal(dispatches, 0);
+			assert.equal(result.pending, changed ? 1 : 0);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, changed ? 1 : 3);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, changed ? "pending" : "written");
 			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure, undefined);
+			if (changed) {
+				await run(
+					generator((_spec, path) => {
+						dispatches++;
+						assert.ok(path);
+						assert.ok(path.endsWith("a.md"));
+						writeFileSync(path, content("a", 2));
+					}),
+				);
+				assert.equal(dispatches, 1, "changed baseline requires a full writer on the next invocation");
+			}
 		});
 	}
 	it("checkpoints authored JS aliases against the actual TypeScript source bytes", async () => {
