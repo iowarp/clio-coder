@@ -104,7 +104,7 @@ describe("interop discovery and adoption", () => {
 		mkdirSync(path.dirname(adapterPackage), { recursive: true });
 		writeFileSync(adapterPackage, JSON.stringify({ version: "1.12.0" }));
 		strictEqual(await presence(), "unknown");
-		writeFileSync(adapterPackage, JSON.stringify({ version: "1.10.0" }));
+		writeFileSync(adapterPackage, JSON.stringify({ version: "2.1.1" }));
 		strictEqual(await presence(), "present");
 	});
 	it("reads Codex cache marketplace and activation evidence", () => {
