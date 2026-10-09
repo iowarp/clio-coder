@@ -35,7 +35,16 @@ const page = (name: string): WikiPlanPage => ({
 });
 const content = (name: string, version: number) =>
 	`---\ntitle: ${name.toUpperCase()}\nsources:\n  - src/${name}.ts\n---\n# ${name.toUpperCase()}\n\n${name} version ${version}.\n`;
-function generator(action: (spec: JobSpec, path: string | undefined) => number | undefined, route?: WikiModelRoute) {
+/** A faux terminal receipt for runs that fail with a coded outcome and tool activity. */
+interface FauxReceipt {
+	exitCode: number;
+	outcomeCode?: string;
+	mutatingSucceeded?: boolean;
+}
+function generator(
+	action: (spec: JobSpec, path: string | undefined) => number | FauxReceipt | undefined,
+	route?: WikiModelRoute,
+) {
 	let sequence = 0;
 	const dispatch = {
 		abort() {},
@@ -45,11 +54,19 @@ function generator(action: (spec: JobSpec, path: string | undefined) => number |
 			)?.[1];
 			// Repair prompts cite the draft relative to the job cwd; resolve it like a real worker would.
 			const path = prompted ? resolve(spec.cwd ?? process.cwd(), prompted) : undefined;
-			const exitCode = action(spec, path) ?? 0;
+			const acted = action(spec, path) ?? 0;
+			const faux = typeof acted === "number" ? { exitCode: acted } : acted;
+			const receipt = {
+				exitCode: faux.exitCode,
+				...(faux.outcomeCode !== undefined ? { outcomeCode: faux.outcomeCode } : {}),
+				...(faux.mutatingSucceeded !== undefined
+					? { toolActivity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: faux.mutatingSucceeded } }
+					: {}),
+			};
 			return {
 				runId: `fixture-${++sequence}`,
 				events: (async function* () {})(),
-				finalPromise: Promise.resolve({ exitCode }),
+				finalPromise: Promise.resolve(receipt),
 			};
 		},
 	} as unknown as DispatchContract;
@@ -268,6 +285,97 @@ describe("wiki generation outcomes", () => {
 			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.lastFailure?.phase, "validation");
 		});
 	}
+	describe("tool-call cap after a write", () => {
+		const capped = (mutatingSucceeded?: boolean): FauxReceipt => ({
+			exitCode: 1,
+			outcomeCode: "worker_tool_call_cap_exhausted",
+			...(mutatingSucceeded !== undefined ? { mutatingSucceeded } : {}),
+		});
+		async function seedPending() {
+			await initialize();
+			const dir = join(cwd, ".clio-coder/wiki-staging-capped");
+			mkdirSync(dir);
+			const saved = readWikiMeta(cwd)?.plan;
+			assert.ok(saved?.pages[0]);
+			saved.pages[0].status = "pending";
+			saved.pages[0].attempts = 0;
+			saved.pages[0].lastFailure = { phase: "writer", detail: "Previous writer failed", runId: "failed-writer" };
+			writeWikiPlanFile(dir, saved);
+			writeFileSync(join(dir, "a.md"), content("a", 1));
+			writeFileSync(join(dir, "b.md"), content("b", 1));
+		}
+		const resume = (generate: ReturnType<typeof generator>) =>
+			runWikiGenerate({ cwd, model: "fixture", retryPending: true, generate });
+
+		it("writes a capped run whose draft passes the evidence gate without another dispatch", async () => {
+			await seedPending();
+			const requests: string[] = [];
+			const result = await resume(
+				generator((spec, path) => {
+					assert.ok(path);
+					requests.push(spec.agentId ?? "");
+					writeFileSync(path, content("a", 2));
+					return capped(true);
+				}),
+			);
+			assert.deepEqual(requests, ["wiki-writer"]);
+			assert.equal(result.pending, 0);
+			assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "written");
+		});
+
+		it("records a capped run with an invalid draft as a validation failure and repairs it next", async () => {
+			await seedPending();
+			const first = await resume(
+				generator((_spec, path) => {
+					assert.ok(path);
+					writeFileSync(path, `${content("a", 2)}See \`src/missing.ts\`.\n`);
+					return capped(true);
+				}),
+			);
+			assert.equal(first.pending, 1);
+			const failed = readWikiMeta(cwd)?.plan?.pages[0];
+			assert.equal(failed?.status, "pending");
+			assert.equal(failed?.lastFailure?.phase, "validation");
+			assert.match(failed?.lastFailure?.detail ?? "", /worker_tool_call_cap_exhausted/u);
+			assert.match(failed?.lastFailure?.runId ?? "", /^fixture-/u);
+			const requests: string[] = [];
+			const repaired = await resume(
+				generator((spec, path) => {
+					assert.ok(path);
+					requests.push(spec.agentId ?? "");
+					writeFileSync(path, content("a", 2));
+				}),
+			);
+			assert.deepEqual(requests, ["wiki-repair"]);
+			assert.equal(repaired.pending, 0);
+		});
+
+		for (const mutatingSucceeded of [false, undefined]) {
+			it(`keeps a capped run with mutatingSucceeded=${mutatingSucceeded} a writer failure`, async () => {
+				await seedPending();
+				const first = await resume(
+					generator((_spec, path) => {
+						assert.ok(path);
+						writeFileSync(path, content("a", 2));
+						return capped(mutatingSucceeded);
+					}),
+				);
+				assert.equal(first.pending, 1);
+				const failed = readWikiMeta(cwd)?.plan?.pages[0];
+				assert.equal(failed?.lastFailure?.phase, "writer");
+				assert.match(failed?.lastFailure?.detail ?? "", /worker_tool_call_cap_exhausted/u);
+				const requests: string[] = [];
+				await resume(
+					generator((spec, path) => {
+						assert.ok(path);
+						requests.push(spec.agentId ?? "");
+						writeFileSync(path, content("a", 2));
+					}),
+				);
+				assert.deepEqual(requests, ["wiki-writer"]);
+			});
+		}
+	});
 	for (const resumed of [false, true]) {
 		it(`validates ${resumed ? "resumed" : "newly authored"} plan anchors before dispatching writers`, async () => {
 			writeFileSync(join(isolated.dir, "outside.ts"), "outside\n");

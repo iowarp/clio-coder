@@ -709,7 +709,15 @@ async function runPagePhase(
 					: { detail: `page estimate ${Math.round(PAGE_ESTIMATE_MS / 60000)}m; healthy work may continue longer` }),
 			}),
 	});
-	const evidence = outcome.ok
+	// A tool-call cap hit after a successful write or edit still leaves a draft on disk. Only the
+	// evidence gate can judge it, and discarding it forces a full writer (~1M tokens) where a
+	// validation or bounded repair costs a fraction. The receipt keeps the cap in the run detail.
+	const delivered =
+		outcome.ok ||
+		(outcome.phase === "writer" &&
+			outcome.receipt?.outcomeCode === "worker_tool_call_cap_exhausted" &&
+			outcome.receipt.toolActivity?.mutatingSucceeded === true);
+	const evidence = delivered
 		? inspectWikiPageEvidence({
 				pagePath: page.path,
 				outputDir: input.outputDir,
@@ -717,7 +725,7 @@ async function runPagePhase(
 				plan,
 			})
 		: undefined;
-	const written = outcome.ok && evidence?.ok === true && (!repair || stable(evidence.dependencies));
+	const written = delivered && evidence?.ok === true && (!repair || stable(evidence.dependencies));
 	// dispatch() returns the first attempt's id; after a transient retry the page was authored by the terminal run.
 	const authorRunId = outcome.phase === "writer" ? (outcome.attempts?.terminalRunId ?? outcome.runId) : undefined;
 	if (evidence && authorRunId !== undefined) {
@@ -766,7 +774,7 @@ async function runPagePhase(
 		evidence && !evidence.ok
 			? // Reasons lead because lastFailure.detail is cut to 500 chars, and elapsed time or tool mix must not push them out.
 				`evidence check failed: ${JSON.stringify(evidence.reasons)}; ${outcome.detail}`
-			: outcome.ok && repair && !written
+			: delivered && repair && !written
 				? `${outcome.detail}; source baseline changed during repair; full writer required next invocation`
 				: outcome.detail;
 	const next: WikiPlan = {
@@ -789,7 +797,7 @@ async function runPagePhase(
 			if (written) delete nextPage.lastFailure;
 			else
 				nextPage.lastFailure = {
-					phase: repair || evidence?.validationKind === "coverage" ? "writer" : outcome.ok ? "validation" : outcome.phase,
+					phase: repair || evidence?.validationKind === "coverage" ? "writer" : delivered ? "validation" : outcome.phase,
 					detail: (repair ? `repair failed: ${detail}; full writer required next invocation` : detail)
 						.replace(/\s+/gu, " ")
 						.slice(0, 500),
@@ -810,7 +818,7 @@ async function runPagePhase(
 	if (
 		!repair &&
 		!input.retryPending &&
-		outcome.ok &&
+		delivered &&
 		evidence &&
 		!evidence.ok &&
 		evidence.validationKind !== "coverage" &&
