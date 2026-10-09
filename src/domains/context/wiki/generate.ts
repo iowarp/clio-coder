@@ -405,7 +405,34 @@ function resolvePlan(input: {
 		const plan = {
 			...previous,
 			pages: previous.pages.map((page) => {
-				if (page.status !== "written") return page;
+				if (page.status !== "written") {
+					if (
+						page.lastFailure?.phase !== "validation" ||
+						!existing.has(page.path) ||
+						!wikiSourcesMatch(previous.sourceContent, input.sourceContent, [
+							...page.sources,
+							...(page.dependencies ?? []),
+							...(pageSources.get(page.path) ?? []),
+						])
+					)
+						return page;
+					const evidence = inspectWikiPageEvidence({
+						pagePath: page.path,
+						outputDir: input.stagingDir,
+						sourceRoot: input.cwd,
+					});
+					if (
+						!evidence.ok ||
+						!wikiSourcesMatch(previous.sourceContent, input.sourceContent, [
+							...page.sources,
+							...(evidence.dependencies ?? []),
+						])
+					)
+						return page;
+					const revalidated = { ...page, status: "written" as const, dependencies: evidence.dependencies ?? [] };
+					delete revalidated.lastFailure;
+					return revalidated;
+				}
 				const evidence = inspectWikiPageEvidence({
 					pagePath: page.path,
 					outputDir: input.stagingDir,
