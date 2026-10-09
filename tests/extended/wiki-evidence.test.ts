@@ -37,14 +37,67 @@ describe("wiki mechanical evidence gate", () => {
 		strictEqual(check(content.replace("`../src/main.js`", "`../../outside.ts`")).ok, false);
 	});
 
-	it("accepts a test selector only when a package command declares it and a verified test matches", () => {
+	it("records a test selector's package evidence and accepts a matching layout glob without a command", () => {
 		writeFileSync(join(root, "package.json"), '{"scripts":{"test":"node --test tests/*.test.ts"}}');
 		const content = "---\ntests: [tests/main.test.ts]\n---\nCI discovers `tests/*.test.ts`.";
 		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["package.json", "tests/main.test.ts"] });
 		strictEqual(check(content.replace("tests/*.test.ts", "tests/missing-*.test.ts")).ok, false);
 		strictEqual(check("---\ntests: [tests/*.test.ts]\n---\nA page.").ok, false);
 		writeFileSync(join(root, "package.json"), "{}");
-		strictEqual(check(content).ok, false);
+		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["tests/main.test.ts"] });
+	});
+
+	it("accepts matching repository globs as mentions but rejects absent matches and glob evidence", () => {
+		for (const glob of ["src/*.ts", "**/main.ts", "src/ma?n.ts", "src/[m]ain.ts"]) {
+			deepStrictEqual(check(page("package.json", `The layout includes \`${glob}\`.`)), {
+				ok: true,
+				reasons: [],
+				dependencies: ["package.json"],
+			});
+		}
+		for (const glob of ["src/missing-*.ts", "missing/**/*.json", "../*.ts"]) {
+			strictEqual(check(page("package.json", `The layout includes \`${glob}\`.`)).ok, false, glob);
+		}
+		strictEqual(check(page("src/*.ts")).ok, false);
+		strictEqual(check("The layout includes `src/*.ts`.").ok, false);
+		strictEqual(check(page("package.json", "See `src/*.ts:1`.")).ok, false);
+	});
+
+	it("grounds templates and runtime paths in delimited parts from one declared source", () => {
+		writeFileSync(
+			join(root, "src/main.ts"),
+			'output = f"verdict-{tier}.json"\nraw = trial_dir / "raw" / "metrics.json"\n' +
+				'path = "research" / "directives" / f"{campaign_id}.yaml"\n' +
+				'measure = root / "measure" / tier\nmeasure.glob("*/block-*/measurements.json")\n',
+		);
+		for (const name of [
+			"verdict-<tier>.json",
+			"raw/metrics.json",
+			"research/directives/<campaign_id>.yaml",
+			"measure/<tier>/*/block-*/measurements.json",
+		]) {
+			deepStrictEqual(check(page("src/main.ts", `The runtime layout is \`${name}\`.`)), {
+				ok: true,
+				reasons: [],
+				dependencies: ["src/main.ts"],
+			});
+			strictEqual(check(page("package.json", `The runtime layout is \`${name}\`.`)).ok, false, name);
+			strictEqual(check(page("src/main.ts", `See \`${name}:1\`.`)).ok, false, name);
+			strictEqual(check(page(name)).ok, false, name);
+		}
+		for (const name of ["invented-<tier>.json", "verdict-<tier>.missing.json", "raw/invented.json"]) {
+			strictEqual(check(page("src/main.ts", `The runtime layout is \`${name}\`.`)).ok, false, name);
+		}
+		writeFileSync(join(root, "src/main.ts"), 'output = f"preverdict-{tier}.json"\n');
+		strictEqual(check(page("src/main.ts", "The layout is `verdict-<tier>.json`.")).ok, false);
+		writeFileSync(join(root, "src/main.ts"), 'output = f"verdict-{tier}.jsonl"\n');
+		strictEqual(check(page("src/main.ts", "The layout is `verdict-<tier>.json`.")).ok, false);
+		writeFileSync(join(root, "src/main.ts"), 'prefix = "verdict-"\n');
+		writeFileSync(join(root, "tests/main.test.ts"), 'suffix = ".json"\n');
+		strictEqual(
+			check("---\nsources: [src/main.ts, tests/main.test.ts]\n---\nThe layout is `verdict-<tier>.json`.").ok,
+			false,
+		);
 	});
 
 	it("accepts readable pages without a mandatory template and resolves JS source aliases", () => {
@@ -190,9 +243,13 @@ describe("wiki mechanical evidence gate", () => {
 		strictEqual(check(content.replace("tests/*.test.ts`", "tests/*.test.tsx`")).ok, false);
 		writeFileSync(join(root, "package.json"), '{"scripts":{"test":"node --test apps/gui/tests/*.test.ts"}}');
 		writeFileSync(manifest, "{}");
-		strictEqual(check(content.replace("`tests/*.test.ts`", "`apps/gui/tests/*.test.ts`")).ok, false);
+		deepStrictEqual(check(content.replace("`tests/*.test.ts`", "`apps/gui/tests/*.test.ts`")), {
+			ok: true,
+			reasons: [],
+			dependencies: ["apps/gui/tests/view.test.ts"],
+		});
 		writeFileSync(manifest, "invalid json");
-		strictEqual(check(content).ok, false);
+		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["apps/gui/tests/view.test.ts"] });
 	});
 
 	it("deduplicates declared aliases by their verified canonical file", () => {

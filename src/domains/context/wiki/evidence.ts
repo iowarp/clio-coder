@@ -1,6 +1,6 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, matchesGlob, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
 import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
@@ -236,6 +236,27 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		}
 		return false;
 	};
+	const groundedLayout = (cited: string): boolean => {
+		if (isAbsolute(cited) || cited.includes("\\") || cited.split("/").includes("..")) return false;
+		const literal = (value: string): RegExp => new RegExp(`(?<![\\w/.-])${escapeRegex(value)}(?![\\w/-]|\\.\\w)`);
+		const fragments = cited
+			.split(/<[A-Za-z_][\w-]*>/)
+			.map((fragment) => fragment.replace(/^\/+|\/+$/g, ""))
+			.filter(Boolean);
+		const glob = /[*?[]/.test(cited);
+		if (glob && !cited.includes("<") && listedFiles().some((file) => matchesGlob(file, cited))) return true;
+		return [...declaredFiles].some((path) => {
+			const text = sourceText(path) ?? "";
+			if (literal(cited).test(text)) return true;
+			if (glob && !cited.includes("<")) return false;
+			return (
+				fragments.length > 0 &&
+				fragments.every(
+					(fragment) => literal(fragment).test(text) || fragment.split("/").every((part) => literal(part).test(text)),
+				)
+			);
+		});
+	};
 	for (const reference of references) {
 		const label = JSON.stringify(reference.slice(0, 160));
 		const match =
@@ -267,15 +288,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 				source = repositoryFileEndingWith(cited);
 			}
 			if (source === null) {
-				const literal = new RegExp(`(?<![\\w/.-])${escapeRegex(cited)}(?![\\w/-]|\\.\\w)`);
-				if (
-					mention &&
-					!isAbsolute(cited) &&
-					!cited.includes("\\") &&
-					!cited.split("/").includes("..") &&
-					[...declaredFiles].some((path) => literal.test(sourceText(path) ?? ""))
-				)
-					continue;
+				if (mention && groundedLayout(cited)) continue;
 				fail(`Replace or remove unresolved repository reference ${label}; inspect the current file path.`);
 				continue;
 			}
