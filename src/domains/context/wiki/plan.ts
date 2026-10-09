@@ -329,11 +329,12 @@ function nameStem(path: string): string {
 	return cleaned.length > 0 ? cleaned : stem;
 }
 
-function firstToLastName(files: ReadonlyArray<CodewikiFile>): string {
+function firstToLastName(files: ReadonlyArray<CodewikiFile>, raw = false): string {
 	const first = files[0];
 	const last = files[files.length - 1];
 	if (!first || !last) return "files";
-	return `${slugSegment(nameStem(first.path))}-to-${slugSegment(nameStem(last.path))}`;
+	const stem = raw ? fileStem : nameStem;
+	return `${slugSegment(stem(first.path))}-to-${slugSegment(stem(last.path))}`;
 }
 
 /** The page name of one flat group: its shared stem prefix, else its first and last stems. */
@@ -360,7 +361,18 @@ function flatOwners(
 	const direct = files.filter(isDirect).sort(byPath);
 	const rest = files.filter((file) => !isDirect(file));
 	const grouped = prefixGroups(direct, 0, limit);
-	const names = grouped.map(flatGroupName);
+	let names = grouped.map(flatGroupName);
+	// Groups of one directory must not share a name: retry colliding ones with fuller names.
+	const fallbacks: Array<(group: CodewikiFile[]) => string> = [
+		(group) => (group.length === 1 ? slugSegment(fileStem(group[0]?.path ?? "")) : firstToLastName(group)),
+		(group) => (group.length === 1 ? slugSegment(fileStem(group[0]?.path ?? "")) : firstToLastName(group, true)),
+	];
+	for (const fallback of fallbacks) {
+		const current = names;
+		names = current.map((name, position) =>
+			current.filter((other) => other === name).length > 1 ? fallback(grouped[position] ?? []) : name,
+		);
+	}
 	const groups = grouped.map((group, position): Area => {
 		const first = group[0] as CodewikiFile;
 		const last = group[group.length - 1] as CodewikiFile;
@@ -370,8 +382,7 @@ function flatOwners(
 			lines: sumLines(group),
 			group: {
 				dir,
-				name:
-					names.filter((name) => name === names[position]).length > 1 ? firstToLastName(group) : (names[position] ?? ""),
+				name: names[position] ?? "",
 				first: baseName(first.path),
 				last: baseName(last.path),
 			},
@@ -424,9 +435,15 @@ function boundedOwnership(areas: Area[], threshold: number, bounds: OwnershipBou
 		const remainder = children.filter((child) => !keys.has(child.key));
 		const remainderFiles = remainder.flatMap((child) => child.files);
 		const remainderLines = remainder.reduce((sum, child) => sum + child.lines, 0);
-		const withRemainder = (parts: Area[], files: CodewikiFile[]): Area[] =>
-			files.length > 0 ? [...parts, { key: area.key, files, lines: sumLines(files) }] : parts;
+		const withRemainder = (parts: Area[], files: CodewikiFile[], key = area.key): Area[] =>
+			files.length > 0 ? [...parts, { key, files, lines: sumLines(files) }] : parts;
 		const candidates: Area[][] = [];
+		// One child and no remainder is no directory boundary: split that child's direct files instead.
+		const [onlyChild] = substantial;
+		if (bounds.flat && onlyChild && substantial.length === 1 && remainder.length === 0) {
+			const flat = flatOwners(onlyChild.key, onlyChild.files, splitLines);
+			candidates.push(withRemainder(flat.groups, flat.rest, onlyChild.key));
+		}
 		if (bounds.flat && remainderLines > splitLines) {
 			const flat = flatOwners(area.key, remainderFiles, splitLines);
 			candidates.push(withRemainder([...substantial, ...flat.groups], flat.rest));

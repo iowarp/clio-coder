@@ -708,3 +708,34 @@ test("medium keeps a flat directory as one owner", () => {
 		["architecture.md", "tests/extended.md"],
 	);
 });
+
+test("detailed splits a flat directory behind a single-child chain", () => {
+	const chains = [
+		[...[1, 2, 3, 4].map((n) => file(`src/a/b/c/x${n}.ts`, 3000)), file("src/a/other/o.ts", 200)],
+		[1, 2, 3, 4].map((n) => file(`src/a/b/c/d/x${n}.ts`, 3000)),
+	].flat();
+	for (const files of [chains.slice(0, 5), chains.slice(5)]) {
+		const plan = buildCandidatePlan(index(files), "detailed");
+		assert.equal(ownedFileCount(plan), files.length);
+		for (const page of plan.pages.slice(1)) assert.ok((scopeCounts(page.intent)[1] ?? 0) <= 4000, page.path);
+		assert.ok(plan.pages.length > 3, plan.pages.map((page) => page.path).join(","));
+		assert.deepEqual(buildCandidatePlan(index([...files].reverse()), "detailed"), plan);
+	}
+});
+
+test("detailed keeps colliding flat group names distinct without numeric suffixes", () => {
+	const files = [
+		file("lib/foo.ts", 3000),
+		file("lib/foo.test.ts", 3000),
+		file("lib/zzz.ts", 3000),
+		file("index.ts", 3000),
+		file("index.test.ts", 3000),
+		file("other/main.py", 40_000),
+	];
+	const plan = buildCandidatePlan(index(files), "detailed");
+	const paths = plan.pages.map((page) => page.path);
+	for (const expected of ["lib/foo.md", "lib/foo-test.md", "index-area.md", "index-test.md"])
+		assert.ok(paths.includes(expected), paths.join(","));
+	assert.ok(!paths.some((path) => /-to-|-\d\.md$/.test(path) && /foo|index/.test(path)), paths.join(","));
+	assert.equal(ownedFileCount(plan), files.length);
+});
