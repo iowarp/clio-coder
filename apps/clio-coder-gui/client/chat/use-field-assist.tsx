@@ -119,7 +119,7 @@ export function useFieldAssist({
 			if (event.nativeEvent.isComposing) return false;
 			const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 			if (open) {
-				if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+				if ((event.key === "ArrowDown" || event.key === "ArrowUp") && plain) {
 					event.preventDefault();
 					setIndex((active + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length);
 					return true;

@@ -973,7 +973,7 @@ export const Composer = memo(function Composer({
 						if (paletteOpen && !event.nativeEvent.isComposing) {
 							const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 							const count = matches.length;
-							if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+							if ((event.key === "ArrowDown" || event.key === "ArrowUp") && plain) {
 								event.preventDefault();
 								setActiveIndex((active + (event.key === "ArrowDown" ? 1 : -1) + count) % count);
 								return;
@@ -995,7 +995,7 @@ export const Composer = memo(function Composer({
 						const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 						if (mentionOpen && !event.nativeEvent.isComposing) {
 							const count = suggestions.length;
-							if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+							if ((event.key === "ArrowDown" || event.key === "ArrowUp") && plain) {
 								event.preventDefault();
 								setMentionIndex((mentionActive + (event.key === "ArrowDown" ? 1 : -1) + count) % count);
 								return;
