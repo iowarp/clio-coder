@@ -11,6 +11,7 @@ import {
 import { runContextRefresh } from "../../src/domains/context/refresh.js";
 import { readClioState, writeClioState } from "../../src/domains/context/state.js";
 import { assembleWikiTree } from "../../src/domains/context/wiki/assemble.js";
+import { readWikiPage } from "../../src/domains/context/wiki/frontmatter.js";
 import {
 	appendContextSnapshot,
 	captureContextSnapshot,
@@ -257,6 +258,52 @@ describe("contracts/context lifecycle", () => {
 		ok(repaired.includes("<!-- clio-coder:wiki unresolved links: old/shared.md, missing.md -->"));
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
 		strictEqual(readFileSync(page, "utf8"), repaired);
+	});
+
+	it("publishes canonical body citations while preserving suffixes, mentions, fences and source metadata", () => {
+		const wiki = join(isolated.dir, ".clio-coder", "wiki");
+		for (const path of [".clio-coder/wiki", "src", "other", "apps/gui/tests"]) {
+			mkdirSync(join(isolated.dir, path), { recursive: true });
+		}
+		for (const path of ["src/index.ts", "other/index.ts", "apps/gui/tests/view.test.ts"]) {
+			writeFileSync(join(isolated.dir, path), "source\n");
+		}
+		writeFileSync(
+			join(isolated.dir, "src/main.ts"),
+			'const artifact = "settings.yaml";\nconst path = "verdict-" + tier + ".json";\n',
+		);
+		const page = join(wiki, "architecture.md");
+		writeFileSync(
+			page,
+			[
+				"---\ntitle: Architecture\nsources:\n  - src/main.ts\ntests:\n  - apps/gui/tests/view.test.ts\n---",
+				"# Architecture\n",
+				"See `tests/view.test.ts::Suite::case`, `src/main.js:1-2:main`, and `main.js#L1-L2`.",
+				"Names: `index.ts`, `settings.yaml`, `verdict-<tier>.json`, `src/*.ts`, and `toString`.",
+				"```ts\nconst file = `src/main.js:1-2:main`;\n```",
+				"~~~text\n`main.js#L1-L2`\n~~~",
+				"````text\n```ts\n`src/main.js:1-2:main`\n```\n````",
+				"```text\n`main.js#L1-L2`",
+			].join("\n"),
+		);
+		const plan = { version: 1 as const, overview: "", pages: [] };
+		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		const canonical = readFileSync(page, "utf8");
+		ok(
+			canonical.includes(
+				"See `apps/gui/tests/view.test.ts::Suite::case`, `src/main.ts:1-2:main`, and `src/main.ts#L1-L2`.",
+			),
+		);
+		const { metadata } = readWikiPage({ pagePath: "architecture.md", content: canonical });
+		deepStrictEqual(metadata.sources, ["src/main.ts"]);
+		deepStrictEqual(metadata.tests, ["apps/gui/tests/view.test.ts"]);
+		ok(canonical.includes("Names: `index.ts`, `settings.yaml`, `verdict-<tier>.json`, `src/*.ts`, and `toString`."));
+		ok(canonical.includes("```ts\nconst file = `src/main.js:1-2:main`;\n```"));
+		ok(canonical.includes("~~~text\n`main.js#L1-L2`\n~~~"));
+		ok(canonical.includes("````text\n```ts\n`src/main.js:1-2:main`\n```\n````"));
+		ok(canonical.includes("```text\n`main.js#L1-L2`"));
+		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
+		strictEqual(readFileSync(page, "utf8"), canonical);
 	});
 
 	it("writes canonical wiki repair markers and consumes the released marker", () => {

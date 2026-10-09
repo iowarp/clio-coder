@@ -85,7 +85,7 @@ function renderRepairNote(issues: ReadonlyArray<WikiPageIssue>): string {
 
 /**
  * Repair one page in place and report what it still points at that is not
- * there. Prose is never rewritten: an unresolved reference is recorded in a
+ * there. An unresolved reference is recorded in a
  * marker comment and dropped from the machine-readable metadata, so the next
  * update run gets a precise repair list without this pass editing sentences it
  * cannot understand.
@@ -99,13 +99,30 @@ function repairPage(
 	const filePath = join(dir, relPath);
 	const original = readText(filePath);
 	const parsed = readWikiPage({ pagePath: relPath, content: original, sourceRoot });
-	const body = stripRepairNotes(parsed.body);
+	let body = stripRepairNotes(parsed.body);
 	if (body.replace(/^#.*$/gm, "").trim().length === 0) {
 		return { metadata: parsed.metadata, changed: false, issues: [], empty: true };
 	}
 
 	const issues: WikiPageIssue[] = [];
-	let validBodyEvidence: boolean | undefined;
+	const evidence = validateWikiPageEvidence({ pagePath: relPath, content: original, sourceRoot });
+	const resolvedCitations = evidence.resolvedCitations ?? {};
+	let fence = "";
+	body = body
+		.split("\n")
+		.map((line) => {
+			const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+			if (marker) {
+				if (!fence) fence = marker;
+				else if (marker[0] === fence[0] && marker.length >= fence.length) fence = "";
+				return line;
+			}
+			if (fence) return line;
+			return line.replace(/`([^`\s]+)`/g, (token: string, cited: string) => {
+				return Object.hasOwn(resolvedCitations, cited) ? `\`${resolvedCitations[cited]}\`` : token;
+			});
+		})
+		.join("\n");
 	for (const cited of parsed.unresolvedPaths) {
 		issues.push({ page: relPath, kind: "citation", reference: cited });
 	}
@@ -114,8 +131,7 @@ function repairPage(
 		if (resolveSourcePath(sourceRoot, cited) === null) {
 			// The publication gate also understands imports and verified test
 			// selectors. Assembly must not relabel their evidence as unresolved.
-			validBodyEvidence ??= validateWikiPageEvidence({ pagePath: relPath, content: original, sourceRoot }).ok;
-			if (!validBodyEvidence) issues.push({ page: relPath, kind: "citation", reference: cited });
+			if (!evidence.ok) issues.push({ page: relPath, kind: "citation", reference: cited });
 		}
 	}
 	const linkedBody = body.replace(INTERNAL_LINK, (link: string, opening: string, href: string, anchor: string = "") => {

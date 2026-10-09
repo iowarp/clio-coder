@@ -27,10 +27,26 @@ beforeEach(() => {
 afterEach(() => rmSync(sandbox, { recursive: true, force: true }));
 
 describe("wiki mechanical evidence gate", () => {
+	it("exposes individually valid body rewrites even when another citation fails", () => {
+		const result = check(page("src/main.ts", "See `src/main.js:1-3`, `main.js#L2`, `main.js:9`, and `missing.py`."));
+		strictEqual(result.ok, false);
+		strictEqual(result.dependencies, undefined);
+		deepStrictEqual(result.resolvedCitations, {
+			"src/main.js:1-3": "src/main.ts:1-3",
+			"main.js#L2": "src/main.ts#L2",
+		});
+		strictEqual(check(page("src/main.js", "Source metadata is not a body citation.")).resolvedCitations, undefined);
+	});
+
 	it("resolves a real relative import from a declared source without accepting escaping or invented imports", () => {
 		writeFileSync(join(root, "tests/main.test.ts"), 'import { main } from "../src/main.js";\n');
 		const content = "---\nsources: [src/main.ts]\ntests: [tests/main.test.ts]\n---\nThe test imports `../src/main.js`.";
-		deepStrictEqual(check(content), { ok: true, reasons: [], dependencies: ["src/main.ts", "tests/main.test.ts"] });
+		deepStrictEqual(check(content), {
+			ok: true,
+			reasons: [],
+			dependencies: ["src/main.ts", "tests/main.test.ts"],
+			resolvedCitations: { "../src/main.js": "src/main.ts" },
+		});
 		strictEqual(check(content.replace("`../src/main.js`", "`../src/invented.js`")).ok, false);
 		writeFileSync(join(sandbox, "outside.ts"), "outside\n");
 		writeFileSync(join(root, "tests/main.test.ts"), 'import "../../outside.ts";\n');
@@ -105,6 +121,7 @@ describe("wiki mechanical evidence gate", () => {
 			ok: true,
 			reasons: [],
 			dependencies: ["src/main.ts", "tests/main.test.ts"],
+			resolvedCitations: { "src/main.js:1-3": "src/main.ts:1-3" },
 		});
 		strictEqual(check("See `package.json:1` and `Makefile`. No frontmatter is required.").ok, true);
 	});
@@ -115,6 +132,7 @@ describe("wiki mechanical evidence gate", () => {
 			ok: true,
 			reasons: [],
 			dependencies: ["package.json", "src/main.ts"],
+			resolvedCitations: { "src/main.js:1": "src/main.ts:1", "src/alias.ts": "src/main.ts" },
 		});
 		const failed = check(page("src/main.ts", "See `missing.py`."));
 		strictEqual(failed.ok, false);
@@ -127,7 +145,16 @@ describe("wiki mechanical evidence gate", () => {
 			check(
 				"---\nsources: [src/main.js]\ntests: [tests/main.test.ts]\n---\nSee `main.js:1-3`, `main.ts#L2`, and `main.test.ts:1`.",
 			),
-			{ ok: true, reasons: [], dependencies: ["src/main.ts", "tests/main.test.ts"] },
+			{
+				ok: true,
+				reasons: [],
+				dependencies: ["src/main.ts", "tests/main.test.ts"],
+				resolvedCitations: {
+					"main.js:1-3": "src/main.ts:1-3",
+					"main.ts#L2": "src/main.ts#L2",
+					"main.test.ts:1": "tests/main.test.ts:1",
+				},
+			},
 		);
 		mkdirSync(join(root, "slugify"));
 		for (const name of ["special.py", "__init__.py", "__version__.py"]) {
@@ -138,7 +165,16 @@ describe("wiki mechanical evidence gate", () => {
 				"---\nsources: [slugify/special.py, slugify/__init__.py, slugify/__version__.py]\n---\n" +
 					"The package re-exports `special.py` through `__init__.py`.\n\n## Metadata from `__version__.py`\n",
 			),
-			{ ok: true, reasons: [], dependencies: ["slugify/__init__.py", "slugify/__version__.py", "slugify/special.py"] },
+			{
+				ok: true,
+				reasons: [],
+				dependencies: ["slugify/__init__.py", "slugify/__version__.py", "slugify/special.py"],
+				resolvedCitations: {
+					"special.py": "slugify/special.py",
+					"__init__.py": "slugify/__init__.py",
+					"__version__.py": "slugify/__version__.py",
+				},
+			},
 		);
 	});
 
@@ -176,6 +212,7 @@ describe("wiki mechanical evidence gate", () => {
 				ok: true,
 				reasons: [],
 				dependencies: ["package.json", `src/nested/${authored}`],
+				resolvedCitations: { [reference]: `src/nested/${authored}` },
 			});
 		}
 		rmSync(join(root, "src/nested/main.ts"));
@@ -183,6 +220,7 @@ describe("wiki mechanical evidence gate", () => {
 			ok: true,
 			reasons: [],
 			dependencies: ["package.json", "src/main.ts"],
+			resolvedCitations: { "main.js": "src/main.ts" },
 		});
 	});
 
@@ -258,6 +296,7 @@ describe("wiki mechanical evidence gate", () => {
 			ok: true,
 			reasons: [],
 			dependencies: ["src/main.ts"],
+			resolvedCitations: { "main.ts:1": "src/main.ts:1", "alias.ts:2": "src/main.ts:2" },
 		});
 	});
 

@@ -17,6 +17,8 @@ export interface WikiPageEvidenceResult {
 	reasons: string[];
 	/** Canonical repository-relative evidence files, present only after successful validation. */
 	dependencies?: string[];
+	/** Changed body citations that passed individually, even when another reference failed. */
+	resolvedCitations?: Record<string, string>;
 }
 
 function within(root: string, path: string): boolean {
@@ -76,6 +78,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 
 	const declaredReferences = new Set([...metadata.sources, ...metadata.tests]);
 	const references = new Set(declaredReferences);
+	const bodyReferences = new Set<string>();
 	for (const reference of references) {
 		if (/[:#]/.test(reference))
 			fail(
@@ -98,6 +101,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 			(pathLike || rootFile || /^(?:Makefile|Dockerfile|LICENSE)(?=[:#]|$)/.test(cited))
 		) {
 			references.add(cited);
+			bodyReferences.add(cited);
 		}
 	}
 	if (references.size > 512) {
@@ -112,6 +116,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return { ok: false, reasons };
 	}
 	const dependencies = new Set<string>();
+	const resolvedCitations: Record<string, string> = {};
 	const declaredFiles = new Set<string>();
 	const declaredFilesByName = new Map<string, Set<string>>();
 	const linesByFile = new Map<string, number>();
@@ -311,7 +316,8 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 					declaredFilesByName.set(name, files);
 				}
 			}
-			dependencies.add(relative(root, real).split("\\").join("/"));
+			const canonical = relative(root, real).split("\\").join("/");
+			dependencies.add(canonical);
 			const startText = match[2] ?? match[4];
 			if (startText !== undefined) {
 				if (stat.size > 4 * 1024 * 1024) {
@@ -337,7 +343,11 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 					fail(
 						`Repair line range in ${label}: the current file has ${lines} lines; use an existing ordered range starting at 1.`,
 					);
+					continue;
 				}
+			}
+			if (bodyReferences.has(reference) && canonical !== cited) {
+				resolvedCitations[reference] = `${canonical}${reference.slice(cited.length)}`;
 			}
 		} catch {
 			fail(`Cannot inspect ${label}; restore readable repository evidence or remove the unsupported reference.`);
@@ -345,7 +355,12 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 	}
 	if (dependencies.size === 0)
 		fail("Cite at least one existing repository file in sources/tests or as a backticked source path.");
-	return reasons.length === 0 ? { ok: true, reasons, dependencies: [...dependencies].sort() } : { ok: false, reasons };
+	return {
+		ok: reasons.length === 0,
+		reasons,
+		...(reasons.length === 0 ? { dependencies: [...dependencies].sort() } : {}),
+		...(Object.keys(resolvedCitations).length > 0 ? { resolvedCitations } : {}),
+	};
 }
 
 /** Read a planned staging page with bounded IO before validating original evidence. */
