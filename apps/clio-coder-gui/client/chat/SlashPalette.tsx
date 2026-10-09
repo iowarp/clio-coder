@@ -1,6 +1,6 @@
 /**
  * The composer's slash palette and the dialog its session actions open in. Every decision lives in
- * `slash-model.ts`; the keyboard is owned by the composer's textarea, which is the combobox, so the
+ * `slash-model.ts`; the keyboard is owned by the composer's textarea, so the
  * list here only renders and answers the mouse.
  */
 
@@ -40,7 +40,7 @@ export function SlashPalette({
 	}, [activeId]);
 	return (
 		<div className="slash-palette">
-			<div className="slash-palette__list" id={listId} role="listbox" aria-label="Slash commands">
+			<div className="slash-palette__list" id={listId} role="listbox" aria-label="Slash commands" tabIndex={0}>
 				{entries.map((entry, index) => {
 					const heading = index === 0 || entries[index - 1]?.group !== entry.group ? entry.group : null;
 					return (
@@ -51,7 +51,7 @@ export function SlashPalette({
 								</div>
 							) : null}
 							{/* The textarea keeps focus and owns every key; the row is an activedescendant option. */}
-							{/* biome-ignore lint/a11y/useKeyWithClickEvents: the combobox textarea owns every key. */}
+							{/* biome-ignore lint/a11y/useKeyWithClickEvents: the textarea owns every key. */}
 							{/* biome-ignore lint/a11y/useFocusableInteractive: an activedescendant option must not be a tab stop. */}
 							<div
 								id={slashOptionId(listId, entry)}

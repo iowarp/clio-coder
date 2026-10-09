@@ -1,7 +1,7 @@
 /**
  * The list that opens over the composer for a typed `@` (this workspace's files and folders, and the
  * running agents a message can steer) and for the next word of a `/command` line. It shares the
- * slash palette's sheet and rows, and like it only renders; the textarea is the combobox and owns
+ * slash palette's sheet and rows, and like it only renders; the textarea owns
  * every key.
  */
 
@@ -46,9 +46,9 @@ export function SuggestionPalette({
 	}, [listId, activeIndex]);
 	return (
 		<div className="slash-palette">
-			<div className="slash-palette__list" id={listId} role="listbox" aria-label={label}>
+			<div className="slash-palette__list" id={listId} role="listbox" aria-label={label} tabIndex={0}>
 				{rows.map((row, index) => (
-					// biome-ignore lint/a11y/useKeyWithClickEvents: the combobox textarea owns every key.
+					// biome-ignore lint/a11y/useKeyWithClickEvents: the textarea owns every key.
 					// biome-ignore lint/a11y/useFocusableInteractive: an activedescendant option must not be a tab stop.
 					<div
 						key={row.id}

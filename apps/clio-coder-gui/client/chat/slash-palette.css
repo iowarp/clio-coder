@@ -21,6 +21,10 @@
 	overflow: auto;
 	overscroll-behavior: contain;
 }
+.slash-palette .slash-palette__list:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: -2px;
+}
 .slash-palette__group {
 	padding: var(--space-2) var(--space-2) var(--space-1);
 	color: var(--ink-muted);
