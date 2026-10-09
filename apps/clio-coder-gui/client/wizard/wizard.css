@@ -136,8 +136,7 @@
 	max-width: 760px;
 }
 
-/* ---- the scene: the site's .clio-scene, a black frame on a fine boundary in the dark theme and the
-   mark on paper in the light one, its caption below in copper mono like the site's companion captions - */
+/* The black-matte frame is shown in both themes, with its caption below in copper mono. */
 .wizard-stage {
 	display: grid;
 	gap: var(--space-4);
@@ -153,15 +152,6 @@
 }
 .wizard-stage[data-scene="finale"] .wizard-stage__frame {
 	aspect-ratio: 16 / 9;
-}
-/* The light films are authored on the site's raised-paper matte and composited with darken, so the mark sits
-   directly on the page, the way the site shows it. No black frame, no boundary. */
-.wizard-stage[data-theme="light"] .wizard-stage__frame {
-	border-color: transparent;
-	background: var(--paper);
-}
-.wizard-stage[data-theme="light"] .wizard-stage__film {
-	mix-blend-mode: darken;
 }
 .wizard-stage__poster,
 .wizard-stage__film {
