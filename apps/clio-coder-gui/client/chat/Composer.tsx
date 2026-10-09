@@ -887,9 +887,7 @@ export const Composer = memo(function Composer({
 					id={fieldId}
 					ref={field}
 					className="composer__field"
-					role="combobox"
 					aria-autocomplete="list"
-					aria-expanded={paletteOpen || mentionOpen}
 					{...(paletteOpen
 						? {
 								"aria-controls": listId,

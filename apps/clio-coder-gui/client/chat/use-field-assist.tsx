@@ -17,9 +17,7 @@ export interface FieldAssist {
 	readonly palette: ReactNode;
 	/** Spread onto the textarea beside its own props. */
 	readonly fieldProps: {
-		readonly role: "combobox";
 		readonly "aria-autocomplete": "list";
-		readonly "aria-expanded": boolean;
 		readonly "aria-controls"?: string;
 		readonly "aria-activedescendant"?: string;
 		readonly onSelect: (event: { currentTarget: HTMLTextAreaElement }) => void;
@@ -107,9 +105,7 @@ export function useFieldAssist({
 			/>
 		) : null,
 		fieldProps: {
-			role: "combobox",
 			"aria-autocomplete": "list",
-			"aria-expanded": open,
 			...(open ? { "aria-controls": listId, "aria-activedescendant": suggestionOptionId(listId, active) } : {}),
 			onSelect: (event) => setCaret(event.currentTarget.selectionStart),
 		},
