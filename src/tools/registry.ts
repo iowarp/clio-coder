@@ -45,7 +45,7 @@ import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js"
 import type { ToolPresentationPolicy } from "./presentation.js";
 import type { ToolResultDigest, ToolResultDisposition } from "./result-disposition.js";
 import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
-import { type ToolPlacement, toolSpecPlacement } from "./surface.js";
+import { effectiveToolCall, type ToolPlacement, toolSpecPlacement } from "./surface.js";
 
 /**
  * Tool registry. Admission point for every tool call. Delegates classification
@@ -120,6 +120,8 @@ export interface ToolMetadata {
 	uiLabel: string;
 	/** Whether automatic recovery may safely retry an unfinished call. */
 	retrySafety: ToolRetrySafety;
+	/** Read-only idempotent MCP polling: bounded by call budgets rather than repetition. */
+	repeatableRead?: boolean;
 	/** Expected result-size behavior at the registry boundary. */
 	resultSizePolicy: ToolResultSizePolicy;
 	/** Independent operator-presentation and model-context policy for this result. */
@@ -961,6 +963,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			result,
 			resultDigest,
 			deps.flow?.carried() ?? null,
+			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata?.repeatableRead === true,
 		);
 		const effects = deps.middleware.runHook(input).effects;
 		try {
@@ -1061,6 +1064,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			result,
 			resultDigest,
 			deps.flow?.carried() ?? null,
+			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata?.repeatableRead === true,
 		);
 		const input = durationMs === undefined ? built : { ...built, metadata: { ...built.metadata, durationMs } };
 		let effects: ReadonlyArray<MiddlewareEffect>;
@@ -2092,11 +2096,13 @@ function buildToolHookInput(
 	result: ToolResult | undefined,
 	resultDigest: ToolResultDigest | undefined,
 	carriedFlow: FlowRestrictionSet | null,
+	repeatableRead: boolean,
 ): MiddlewareHookInput {
 	const metadata: Record<string, MiddlewareMetadataValue> = {
 		posture,
 		actionClass: decision.classification.actionClass,
 		decisionKind: decision.kind,
+		repeatableRead,
 	};
 	// Stable call identity for repetition detectors (engine/loop-guard.ts).
 	// Computed for before_tool only; after_tool consumers identify the call

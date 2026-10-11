@@ -1,6 +1,7 @@
 import type { TSchema } from "typebox";
 import type { DynamicToolName } from "../../core/tool-names.js";
 import { mcpToolName } from "../../core/tool-names.js";
+import { mcpToolActionClass } from "../../domains/gateway/mcp/action-classes.js";
 import type {
 	McpCatalogIdentity,
 	McpClient,
@@ -63,7 +64,8 @@ const SLURM_CONFIRM_TOOLS = new Set([
 	"deallocate_slurm_nodes",
 ]);
 
-function actionClassFor(declaration: GatewayMcpServer, toolName: string): McpTrustActionClass {
+function actionClassFor(declaration: GatewayMcpServer, tool: NamedTool): McpTrustActionClass {
+	const toolName = tool.name;
 	if (declaration.scope === "client") return "unknown";
 	const override = Object.hasOwn(declaration.toolActionClasses, toolName)
 		? declaration.toolActionClasses[toolName]
@@ -73,7 +75,7 @@ function actionClassFor(declaration: GatewayMcpServer, toolName: string): McpTru
 		if (SLURM_CONFIRM_TOOLS.has(toolName)) return "execute";
 		if (SLURM_READ_TOOLS.has(toolName)) return "read";
 	}
-	return declaration.trust.actionClass;
+	return mcpToolActionClass(declaration, { name: tool.name, annotations: tool.annotations ?? null });
 }
 
 function requiresConfirmation(declaration: GatewayMcpServer, toolName: string): boolean {
@@ -85,7 +87,7 @@ function requiresConfirmation(declaration: GatewayMcpServer, toolName: string): 
  * declared servers once per session, launches a server only when it is
  * trusted and only when the first find, describe, or call needs it, registers
  * each of its tools in the registry as `mcp_<id>__<tool>` (placement gateway,
- * action class from the trust record), and closes every client it opened at
+ * action class from operator policy or advisory hints), and closes every client it opened at
  * session end. Launching a server does not sandbox it; the trust record is the
  * operator's explicit acceptance of that.
  */
@@ -251,6 +253,7 @@ interface OwnedConnection {
 }
 
 interface ServerState {
+	recovery?: Promise<void>;
 	declaration: GatewayMcpServer;
 	client: McpClient | null;
 	connection: OwnedConnection | null;
@@ -276,6 +279,7 @@ function catalogRemedy(id: string): string {
 interface NamedTool {
 	name: string;
 	description: string;
+	annotations?: Record<string, unknown> | null;
 }
 
 function objectiveOf(tool: NamedTool): string {
@@ -291,7 +295,7 @@ function describeTool(declaration: GatewayMcpServer, tool: NamedTool): string {
 	if (declaration.scope === "client") {
 		return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id}, supplied by the ACP client for this session. Its calls use the gateway's unknown action class and session autonomy.`;
 	}
-	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${actionClassFor(declaration, tool.name)}; launching it does not sandbox it.`;
+	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${actionClassFor(declaration, tool)}; launching it does not sandbox it.`;
 }
 
 /** Remedies name the CLI first: it exists in every session, interactive or not. */
@@ -417,7 +421,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 
 	const makeSpec = (state: ServerState, tool: McpToolDescriptor, name: DynamicToolName): ToolSpec => {
 		const { declaration } = state;
-		const trustClass = actionClassFor(declaration, tool.name);
+		const trustClass = actionClassFor(declaration, tool);
 		const timeoutMs = declaration.timeoutMs ?? options.requestTimeoutMs;
 		const spec: ToolSpec = {
 			name,
@@ -432,6 +436,8 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				objective: objectiveOf(tool),
 				uiLabel: `${declaration.id}/${tool.name}`,
 				retrySafety: "unknown",
+				repeatableRead:
+					trustClass === "read" && tool.annotations?.readOnlyHint === true && tool.annotations?.idempotentHint === true,
 				// The session cap alone (64 KiB) let one search result spend a sixth
 				// of a 131k window. Bound MCP output like the built-in observation
 				// tools; the full text is offloaded and stays readable by path.
@@ -444,11 +450,12 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				costLatency: "local_slow",
 			},
 			async run(args, invokeOptions): Promise<ToolResult> {
+				await discover(state, invokeOptions?.signal);
 				const client = state.client;
 				if (client === null || client.state().status !== "ready") {
 					return {
 						kind: "error",
-						message: `${name}: mcp server ${declaration.id} is not connected${state.failure ? ` (${state.failure})` : ""}; a server that exited stays closed for this session`,
+						message: `${name}: mcp server ${declaration.id} is not connected${state.failure ? ` (${state.failure})` : ""}; the next call can retry the trusted declaration`,
 					};
 				}
 				try {
@@ -570,7 +577,23 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	const discover = async (state: ServerState, signal?: AbortSignal): Promise<void> => {
 		const aborted = () => new McpError("aborted", "MCP discovery aborted");
 		if (signal?.aborted) throw aborted();
-		if (closed || state.failure !== null || state.declaration.trust.status !== "trusted") return;
+		if (closed || state.declaration.trust.status !== "trusted") return;
+		if (state.failure !== null || state.recovery !== undefined) {
+			// Concurrent callers share recovery; never overlap process groups or
+			// replay the failed call. Discovery revalidates the live tool list.
+			state.recovery ??= (async () => {
+				await closeClient(state);
+				state.connection = null;
+				state.client = null;
+				state.failure = null;
+				for (const name of state.registered) registry.unregister?.(name);
+				state.registered = [];
+				state.unregistrable = [];
+			})();
+			await state.recovery;
+			delete state.recovery;
+			if (closed || signal?.aborted) return;
+		}
 		state.connection ??= startConnection(state);
 		const connection = state.connection;
 		const onAbort = (): void => {
@@ -674,7 +697,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			entries.push({
 				name,
 				description: describeTool(declaration, tool),
-				actionClass: actionClassFor(declaration, tool.name),
+				actionClass: actionClassFor(declaration, tool),
 			});
 		}
 		return entries;
@@ -763,7 +786,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			if (owner === null) return { metadata: null, reason: `no declared MCP server owns ${name}` };
 			const { declaration } = owner;
 			const toolName = name.slice(`mcp_${declaration.id}__`.length);
-			const actionClass = actionClassFor(declaration, toolName);
+
 			if (declaration.trust.status !== "trusted") {
 				const remedy = mcpTrustRemedy(declaration.id);
 				return {
@@ -779,7 +802,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						serverId: declaration.id,
 						description: registered.description,
 						parameters: registered.parameters as Record<string, unknown>,
-						actionClass,
+						actionClass: registered.baseActionClass as McpTrustActionClass,
 						provenance: "live",
 						truncated: owner.truncated,
 					},
@@ -820,7 +843,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					serverId: declaration.id,
 					description: describeTool(declaration, tool),
 					parameters: tool.inputSchema,
-					actionClass,
+					actionClass: actionClassFor(declaration, tool),
 					provenance: "cached",
 					truncated: catalog.truncated,
 				},
@@ -837,11 +860,6 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					listing: listingFor(state),
 					reason: `mcp server ${id} is ${trust.status} (${trust.reason}); it is never launched until trusted: run ${remedy.remedy} (${remedy.interactiveRemedy} in an interactive session)`,
 				};
-			}
-			// A server that already failed this session stays failed. Refresh is a
-			// scoped discovery request, not a reconnect policy.
-			if (state.failure !== null) {
-				return { listing: listingFor(state), reason: `mcp server ${id} failed: ${state.failure}` };
 			}
 			await discover(state, invokeOptions?.signal);
 			return {

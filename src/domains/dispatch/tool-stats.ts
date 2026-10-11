@@ -100,6 +100,7 @@ const MUTATING_ACTION_CLASSES: ReadonlySet<ActionClass> = new Set([
 	"dispatch",
 	"system_modify",
 	"git_destructive",
+	"destructive",
 ]);
 
 export function summarizeToolActivity(

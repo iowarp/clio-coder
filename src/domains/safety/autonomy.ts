@@ -126,6 +126,7 @@ export function mapAutonomy(
 			// unknown here prevents read-class domain tools from becoming a net
 			// confirm rail before that substitution can happen.
 			return level === "yolo" ? "allow" : "ask";
+		case "destructive":
 		case "system_modify":
 			// The safety engine has already checked protected paths and damage
 			// control. Its ordinary system-change confirmation belongs to default.

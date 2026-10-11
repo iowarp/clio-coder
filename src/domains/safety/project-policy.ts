@@ -57,6 +57,7 @@ const ACTION_CLASSES = new Set<ActionClass>([
 	"dispatch",
 	"system_modify",
 	"git_destructive",
+	"destructive",
 	"unknown",
 ]);
 const PATH_POLICY_KEYS = ["zeroAccessPaths", "readOnlyPaths", "noWritePaths", "noDeletePaths"] as const;

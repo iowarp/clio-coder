@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { JobCreateInput, JobOwner, JobRecord, JobRunner } from "../core/job-types.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
-import { snapshotTurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
+import { snapshotTurnConstraints, turnAllowsTool, turnDelegatesTool } from "../core/turn-constraints.js";
 import { normalizeJobSpec } from "../domains/scheduling/index.js";
 import type { JobController, JobExecutionContext, JobRunResult } from "../domains/scheduling/job-types.js";
 import { StringEnum } from "../engine/ai.js";
@@ -35,7 +35,7 @@ function jobToolResult(job: JobRecord): ToolResult {
 	const bounds = `${job.spec.count === null ? "deadline bound" : `${job.spec.count} starts`}; timeout=${job.spec.timeoutMs}ms${job.spec.deadlineAt === null ? "" : `; deadline=${new Date(job.spec.deadlineAt).toISOString()}`}`;
 	return {
 		kind: "ok",
-		output: `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; ${job.spec.runner.kind}; every=${job.spec.intervalMs}ms; ${bounds}; ${scope}${job.nextDueAt === null ? "" : `; next due=${new Date(job.nextDueAt).toISOString()}`}${job.delivery ? `; delivery=${job.delivery.state}` : ""}`,
+		output: `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; ${job.spec.runner.kind}; every=${job.spec.intervalMs}ms; ${bounds}; ${scope}${job.spec.constraints?.allowedTools === undefined ? "" : `; allow=${JSON.stringify(job.spec.constraints.allowedTools)}`}${job.nextDueAt === null ? "" : `; next due=${new Date(job.nextDueAt).toISOString()}`}${job.delivery ? `; delivery=${job.delivery.state}` : ""}`,
 		details: { job },
 	};
 }
@@ -56,6 +56,7 @@ export function createJobTool(deps: JobToolDeps): {
 		"timeout_ms",
 		"for_ms",
 		"prompt",
+		"allow",
 		"argv",
 		"cwd",
 		"until",
@@ -141,7 +142,19 @@ export function createJobTool(deps: JobToolDeps): {
 					duration > 7 * 24 * 60 * 60 * 1000)
 			)
 				throw new Error("job: for_ms must be 1000 ms through seven days.");
-			const constraints = snapshotTurnConstraints(deps.constraints());
+			const inherited = snapshotTurnConstraints(deps.constraints());
+			if (args.allow !== undefined && runner.kind !== "main") throw new Error("job: allow applies only to runner=main.");
+			const requested =
+				args.allow === undefined ? undefined : snapshotTurnConstraints({ allowedTools: args.allow as string[] });
+			const constraints =
+				requested === undefined
+					? inherited
+					: snapshotTurnConstraints({
+							...inherited,
+							allowedTools: (requested.allowedTools ?? []).filter((name) => turnAllowsTool(inherited, name)),
+							// A job cannot dispatch wider workers through a narrow parent set.
+							delegatedTools: (requested.allowedTools ?? []).filter((name) => turnDelegatesTool(inherited, name)),
+						});
 			const input: JobCreateInput = {
 				intervalMs: args.every_ms,
 				runner,
@@ -165,7 +178,7 @@ export function createJobTool(deps: JobToolDeps): {
 		name: ToolNames.Job,
 		placement: "gateway",
 		description:
-			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. Bare main jobs default to five starts, first after one interval. Each occurrence rechecks current policy; scheduling approval never approves future effects. Observe with monitor(job_id=...).",
+			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. Bare main jobs default to five starts, first after one interval. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
 		parameters: Type.Object({
 			action: StringEnum(["create", "pause", "resume", "stop", "cancel"]),
 			job_id: Type.Optional(Type.String()),
@@ -175,6 +188,7 @@ export function createJobTool(deps: JobToolDeps): {
 			timeout_ms: Type.Optional(Type.Integer({ minimum: 1000 })),
 			for_ms: Type.Optional(Type.Integer({ minimum: 1000 })),
 			prompt: Type.Optional(Type.String()),
+			allow: Type.Optional(Type.Array(Type.String({ pattern: "^[a-zA-Z0-9_.-]+$" }))),
 			argv: Type.Optional(Type.Array(Type.String())),
 			cwd: Type.Optional(Type.String()),
 			until: Type.Optional(
@@ -259,9 +273,14 @@ export function createJobTool(deps: JobToolDeps): {
 					artifact.kind === "create" ? (artifact.input.constraints ?? null) : artifact.job.spec.constraints;
 				const refusal = deps.admissionRefusal?.(runner, artifact.owner, constraints);
 				if (refusal) return { kind: "error", message: `job: ${refusal}` };
+				const currentConstraints = deps.constraints();
 				const verdict = await deps.registry.invoke(
 					{ tool: ToolNames.Job, args },
-					{ ...options, origin: "harness", ...(constraints === null ? {} : { turnConstraints: constraints }) },
+					{
+						...options,
+						origin: "harness",
+						...(currentConstraints === undefined ? {} : { turnConstraints: currentConstraints }),
+					},
 				);
 				return verdict.kind === "ok" ? verdict.result : { kind: "error", message: `job: ${verdict.reason}` };
 			} finally {

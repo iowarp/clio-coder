@@ -376,7 +376,13 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	if (spec.capabilityClass === "artifact-write") {
 		for (const tool of spec.tools) {
 			const action = classify({ tool }).actionClass;
-			if (action === "execute" || action === "dispatch" || action === "system_modify" || action === "git_destructive") {
+			if (
+				action === "execute" ||
+				action === "dispatch" ||
+				action === "system_modify" ||
+				action === "destructive" ||
+				action === "git_destructive"
+			) {
 				errors.push(`artifact-write agent '${spec.id}' requests ${action} tool '${tool}'`);
 			}
 			if (action === "write" && tool !== ToolNames.Artifact) {
@@ -387,7 +393,13 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	if (spec.capabilityClass === "verification") {
 		for (const tool of spec.tools) {
 			const action = classify({ tool }).actionClass;
-			if (action === "write" || action === "dispatch" || action === "system_modify" || action === "git_destructive") {
+			if (
+				action === "write" ||
+				action === "dispatch" ||
+				action === "system_modify" ||
+				action === "destructive" ||
+				action === "git_destructive"
+			) {
 				errors.push(`verification agent '${spec.id}' must not request ${action} tool '${tool}'`);
 			}
 			if (tool === ToolNames.Bash)

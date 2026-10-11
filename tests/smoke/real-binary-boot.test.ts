@@ -186,12 +186,25 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 	let server: Server;
 	let endpoint: string;
 
+	const chatRequests: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
 	before(async () => {
 		server = createServer((request, response) => {
 			response.setHeader("content-type", "application/json");
 			if (request.url === "/lmstudio-greeting") response.end(JSON.stringify({ lmstudio: true }));
 			else if (request.url === "/v1/models") response.end(JSON.stringify({ data: [{ id: "release-model" }] }));
-			else {
+			else if (request.url === "/v1/chat/completions") {
+				let body = "";
+				request.on("data", (chunk) => {
+					body += chunk;
+				});
+				request.on("end", () => {
+					chatRequests.push(JSON.parse(body));
+					response.setHeader("content-type", "text/event-stream");
+					response.end(
+						`data: ${JSON.stringify({ model: "release-model", choices: [{ index: 0, delta: { content: "Autonomy fixture confirmed." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+					);
+				});
+			} else {
 				response.statusCode = 404;
 				response.end(JSON.stringify({ error: "not found" }));
 			}
@@ -265,7 +278,12 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			writeFileSync(join(home.root, "config", "settings.yaml"), V1_SETTINGS);
 			strictEqual((await run(["upgrade"], home.env)).code, 0);
 			const settingsPath = join(home.root, "config", "settings.yaml");
-			writeFileSync(settingsPath, readFileSync(settingsPath, "utf8").replace("http://127.0.0.1:1234", endpoint));
+			writeFileSync(
+				settingsPath,
+				readFileSync(settingsPath, "utf8")
+					.replace("http://127.0.0.1:1234", endpoint)
+					.replace(/^ {2}autonomy: default$/mu, "  autonomy: yolo"),
+			);
 			const saved = readFileSync(settingsPath, "utf8");
 
 			const bogus = await run(["--autonomy", "unsupported"], home.env);
@@ -275,7 +293,22 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			strictEqual(dropped.code, 2, dropped.output);
 			match(dropped.output, /clio-coder run --autonomy default/u);
 
-			await reachEditor(launch(["--autonomy", "default"], { ...home.env, CLIO_CODER_INTERACTIVE: "1" }));
+			const cli = launch(["--autonomy", "default"], { ...home.env, CLIO_CODER_INTERACTIVE: "1" });
+			try {
+				await cli.waitFor(/Ask Clio/u, 30_000);
+				cli.child.stdin.write("AUTONOMY_DEFAULT_OVERRIDES_SAVED_YOLO\r");
+				await cli.waitFor(/Autonomy fixture confirmed/u, 30_000);
+				const chat = chatRequests.find((row) =>
+					JSON.stringify(row.messages).includes("AUTONOMY_DEFAULT_OVERRIDES_SAVED_YOLO"),
+				);
+				ok(chat);
+				const system = chat.messages.find((message) => message.role === "system");
+				match(String(system?.content), /Autonomy: default\./u);
+				cli.child.stdin.write("\u0004");
+				strictEqual((await cli.waitForExit()).code, 0);
+			} finally {
+				await cli.stop();
+			}
 			strictEqual(readFileSync(settingsPath, "utf8"), saved, "a one-session override must not rewrite settings.yaml");
 		} finally {
 			home.cleanup();

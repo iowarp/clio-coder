@@ -777,6 +777,7 @@ const ACTION_CLASS_FALLBACK: Readonly<Record<string, ToolClass>> = {
 	execute: "execute",
 	system_modify: "execute",
 	git_destructive: "execute",
+	destructive: "execute",
 	dispatch: "delegate",
 };
 

@@ -74,7 +74,8 @@ export function jobAuthorityRefusal(
 	const refusal = deps.hostRefusal() ?? deps.trustRefusal();
 	if (refusal !== null) return refusal;
 	if (!deps.isCurrent(owner)) return "The creator session, cwd or generation is no longer current.";
-	const constraints = jobTurnConstraints(stored, deps.constraints());
+	const currentConstraints = deps.constraints();
+	const constraints = jobTurnConstraints(stored, currentConstraints);
 	if (runner.kind === "command" && !turnAllowsTool(constraints, ToolNames.Bash))
 		return "Executable command effects are outside the creating or current task's admitted tool scope.";
 	try {
@@ -93,7 +94,10 @@ export function jobAuthorityRefusal(
 		capability: { tool: ToolNames.Job },
 		effects,
 		cwd: owner.cwd,
-		...(constraints === undefined ? {} : { constraints: { turnConstraints: constraints } }),
+		// Scheduling admission belongs to the current host scope. The stored
+		// occurrence scope may deliberately exclude job itself; it constrains
+		// tools inside submitMachineTurn, not the controller's scheduling seam.
+		...(currentConstraints === undefined ? {} : { constraints: { turnConstraints: currentConstraints } }),
 		...(deps.sessionCodeConsentPending?.() === true ? { sessionCodeConsentPending: true } : {}),
 	});
 	return admission.kind === "allow"

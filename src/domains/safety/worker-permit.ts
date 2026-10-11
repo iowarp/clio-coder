@@ -170,14 +170,25 @@ function capabilityClassCeilingErrors(capabilityClass: AgentCapabilityClass, too
 				if (action !== "read") errors.push(`read-only ceiling excludes ${action} tool ${tool}`);
 				break;
 			case "artifact-write":
-				if (action === "execute" || action === "system_modify" || action === "git_destructive") {
+				if (
+					action === "execute" ||
+					action === "system_modify" ||
+					action === "destructive" ||
+					action === "git_destructive"
+				) {
 					errors.push(`artifact-write ceiling excludes ${action} tool ${tool}`);
 				} else if (action === "write" && tool !== ToolNames.Artifact) {
 					errors.push(`artifact-write ceiling allows only the artifact write, not ${tool}`);
 				}
 				break;
 			case "verification":
-				if (action === "write" || action === "system_modify" || action === "git_destructive" || tool === ToolNames.Bash) {
+				if (
+					action === "write" ||
+					action === "system_modify" ||
+					action === "destructive" ||
+					action === "git_destructive" ||
+					tool === ToolNames.Bash
+				) {
 					errors.push(`verification ceiling excludes ${tool}; checks run through typed verification`);
 				}
 				break;

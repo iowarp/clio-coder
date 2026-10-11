@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { mcpCommandOutput } from "../../src/cli/mcp.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import {
 	canonicalProjectRoot,
@@ -15,7 +16,9 @@ import {
 	untrustMcpServer,
 } from "../../src/domains/gateway/mcp/index.js";
 import { mcpCatalogPath } from "../../src/domains/gateway/mcp/metadata-cache.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
+import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
@@ -81,11 +84,18 @@ function wire(
 	level: AutonomyLevel = "yolo",
 	readOnly = false,
 	wrapClient?: (client: McpClient) => McpClient,
+	pollBudget?: { soft: number; hard: number },
 ): Wired {
 	const clients: McpClient[] = [];
 	const parks: string[] = [];
+	const safety = createWorkerSafety({ cwd: scene.project });
+	const middleware = createMiddlewareBundle({
+		registrations:
+			pollBudget === undefined ? [] : [createLoopGuardRegistration({ safety, turnToolCallBudget: pollBudget })],
+	}).contract;
 	const registry = createRegistry({
-		safety: createWorkerSafety({ cwd: scene.project }),
+		safety,
+		middleware,
 		autonomy: () => level,
 		...(readOnly ? { readOnly: true } : {}),
 	});
@@ -95,7 +105,12 @@ function wire(
 		registry,
 		requestTimeoutMs: 5_000,
 		clientFactory: (spec, options) => {
-			const client = createMcpStdioClient(spec, { ...options, initializeTimeoutMs: 5_000, killGraceMs: 200 });
+			const client = createMcpStdioClient(spec, {
+				...options,
+				initializeTimeoutMs: 5_000,
+				killGraceMs: 200,
+				cancelGraceMs: 50,
+			});
 			clients.push(client);
 			return wrapClient?.(client) ?? client;
 		},
@@ -143,6 +158,86 @@ describe("gateway MCP capabilities", () => {
 		await Promise.all(open.splice(0).map((source) => source.close()));
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 		env.restore();
+	});
+
+	for (const mode of ["normal", "ignore-cancellation"] as const) {
+		it(`keeps the next call usable after abort (${mode})`, async () => {
+			const scene = scenario();
+			writeConfig(scene.project, scene.markerPath, mode);
+			// User declarations are trusted by authorship, including recovery.
+			writeFileSync(join(scene.configDir, "mcp.yaml"), readFileSync(join(scene.project, ".clio-coder", "mcp.yaml")));
+			const { registry, source, clients } = wire(scene);
+			open.push(source);
+			await source.ensure("mcp_fake__sleep");
+			const abort = new AbortController();
+			const active = registry.invoke(
+				{ tool: ToolNames.Gateway, args: { op: "call", capability: "mcp_fake__sleep", args: { ms: 20_000 } } },
+				{ signal: abort.signal },
+			);
+			await waitFor(() => clients[0]?.stderrTail().includes("sleep start") === true);
+			abort.abort();
+			const canceled = await active;
+			ok(canceled.kind !== "ok" || canceled.result.kind === "error");
+			const next = await registry.invoke({
+				tool: ToolNames.Gateway,
+				args: { op: "call", capability: ECHO, args: { after: true } },
+			});
+			deepStrictEqual(payloadOf(next), { after: true });
+			strictEqual(clients.length, mode === "normal" ? 1 : 2);
+			if (mode !== "normal") strictEqual(processAlive(clients[0]?.pid), false);
+		});
+	}
+
+	it("uses advisory annotations live and cached, with operator overrides", async () => {
+		const scene = scenario();
+		writeFileSync(join(scene.configDir, "mcp.yaml"), readFileSync(join(scene.project, ".clio-coder", "mcp.yaml")));
+		const { source, registry } = wire(scene);
+		open.push(source);
+		await source.refresh("fake");
+		strictEqual(registry.get("mcp_fake__sleep" as ToolName)?.baseActionClass, "read");
+		strictEqual(registry.get("mcp_fake__fail" as ToolName)?.baseActionClass, "destructive");
+		strictEqual(registry.get(ECHO as ToolName)?.baseActionClass, "unknown");
+		const listed = mcpCommandOutput(["list"], { cwd: scene.project, configDir: scene.configDir });
+		ok(listed.text.includes("mcp_fake__sleep actionClass=read"));
+		ok(listed.text.includes("mcp_fake__fail actionClass=destructive"));
+		await source.close();
+		const fresh = wire(scene);
+		open.push(fresh.source);
+		strictEqual(fresh.source.metadata("mcp_fake__sleep").metadata?.actionClass, "read");
+		strictEqual(fresh.clients.length, 0);
+		const declaration = readFileSync(join(scene.configDir, "mcp.yaml"), "utf8");
+		writeFileSync(
+			join(scene.configDir, "mcp.yaml"),
+			declaration.replace(
+				"  - id: fake",
+				"  - id: fake\n    actionClass: execute\n    toolActionClasses: {sleep: unknown}",
+			),
+		);
+		const overridden = wire(scene);
+		open.push(overridden.source);
+		await overridden.source.refresh("fake");
+		strictEqual(overridden.registry.get("mcp_fake__sleep" as ToolName)?.baseActionClass, "unknown");
+		strictEqual(overridden.registry.get("mcp_fake__fail" as ToolName)?.baseActionClass, "execute");
+	});
+
+	it("bounds identical read-only idempotent polls by a turn budget and resets between occurrences", async () => {
+		const scene = scenario();
+		writeFileSync(join(scene.configDir, "mcp.yaml"), readFileSync(join(scene.project, ".clio-coder", "mcp.yaml")));
+		const { registry, source } = wire(scene, "yolo", false, undefined, { soft: 5, hard: 7 });
+		open.push(source);
+		await source.ensure("mcp_fake__sleep");
+		const call = { tool: ToolNames.Gateway, args: { op: "call", capability: "mcp_fake__sleep", args: { ms: 1 } } };
+		for (let i = 0; i < 4; i++) {
+			const verdict = await registry.invoke(call, { turnId: "poll-turn" });
+			strictEqual(verdict.kind, "ok");
+		}
+		const limited = await registry.invoke(call, { turnId: "poll-turn" });
+		strictEqual(limited.kind, "blocked");
+		if (limited.kind === "blocked") ok(limited.reason.includes("tool-call budget"), limited.reason);
+		for (let i = 0; i < 6; i++) {
+			const verdict = await registry.invoke(call, { turnId: `job-occurrence-${i}` });
+			strictEqual(verdict.kind, "ok");
+		}
 	});
 
 	it("keeps structured-only MCP results visible through the gateway", async () => {

@@ -386,17 +386,21 @@ User-level model profile overrides live at `<configDir>/model-profiles.yaml`, no
 
 ## Local stdio MCP configuration and trust
 
-User MCP declarations are stored at `<config>/mcp.yaml`; project declarations are stored at `.clio-coder/mcp.yaml`. The declaration contract is implemented in [`src/domains/gateway/mcp/config.ts`](../../src/domains/gateway/mcp/config.ts). A server entry accepts `id`, `command`, `args`, `cwd`, `env`, `timeoutMs`, `actionClass` and `toolActionClasses`; `toolActionClasses` maps individual tool names to `read`, `execute` or `unknown` and overrides the server class for those tools.
+User MCP declarations are stored at `<config>/mcp.yaml`; project declarations are stored at `.clio-coder/mcp.yaml`. The declaration contract is implemented in [`src/domains/gateway/mcp/config.ts`](../../src/domains/gateway/mcp/config.ts). A server entry accepts `id`, `command`, `args`, `cwd`, `env`, `timeoutMs`, `actionClass` and `toolActionClasses`; `toolActionClasses` maps individual tool names to `read`, `execute`, `destructive` or `unknown` and overrides the server class for those tools.
 
 | Declaration | Launch rule |
 | --- | --- |
-| User scope | Trusted by file ownership; actions still pass through tool policy. Set `actionClass: read` for an operator-reviewed read-only server, or `actionClass: execute` for an executing server. Omitted classes remain `unknown` and require approval. |
+| User scope | Trusted by file ownership; actions still pass through tool policy. Set `actionClass: read` for an operator-reviewed read-only server, or `actionClass: execute` for an executing server. When the server-wide class is omitted, `readOnlyHint: true` supplies `read` and `destructiveHint: true` supplies `destructive`. Other tools remain `unknown`. These are advisory defaults; an explicit server class or per-tool override takes precedence. |
 | Project scope | Does not launch until an operator trusts the declaration with `clio-coder mcp trust <id>` or `/mcp trust <id>`. |
 | Trust record | User-owned `<config>/mcp-trust.json`, bound to project root, server id, and declaration digest. |
 | Changed declaration | Editing command, args, cwd, environment, timeout, or tool action classes makes trust stale; review and trust it again. |
-| Trust boundary | Trust enables launch; it is not operating-system isolation. Server annotations do not grant authority. |
+| Trust boundary | Trust enables launch; it is not operating-system isolation. Annotations never authorize launching an untrusted server. Calls still pass through turn scope, tool policy and autonomy. |
 
 Only user declarations may set `actionClass`; project declarations receive their class from the explicit trust record. Classify the entire server by its most powerful tool, since the declaration applies to every tool it exposes. For example, a locally installed literature-search server whose tools only query or transform citation metadata can use `actionClass: read` to work in `yolo` without a headless approval dead end.
+
+`clio-coder mcp list` includes recorded per-tool action classes. Use `clio-coder mcp list --refresh` to connect trusted servers, read their current annotations and update the catalogs. Cached hints are advisory and are combined with the current operator declarations when listed. Project trust records remain authoritative, including an `unknown` class.
+
+Interrupting an MCP call sends `notifications/cancelled` with its request id. Clio checks responsiveness with a bounded `ping`, retains responsive connections, and tears down unresponsive connections. The next gateway call lazily reconnects the same trusted declaration after cleanup. Clio never automatically replays the cancelled call. Read-only, idempotent tools may repeat identical polling arguments within the turn's tool-call budget.
 
 Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust.ts`](../../src/domains/gateway/mcp/trust.ts). The model-facing discovery and call contract is in [gateway tool usage](tool-usage.md).
 

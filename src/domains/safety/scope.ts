@@ -46,7 +46,7 @@ export const WORKSPACE_SCOPE: ScopeSpec = {
 };
 
 export const CONFIRMED_SCOPE: ScopeSpec = {
-	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch", "system_modify"]),
+	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch", "system_modify", "destructive"]),
 	allowedWriteRoots: [asDirectoryPathBoundary(path.resolve(process.cwd()))],
 	allowNetwork: true,
 	allowDispatch: true,

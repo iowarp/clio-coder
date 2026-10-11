@@ -28,8 +28,13 @@ export const MCP_TRUST_CAPS = Object.freeze({
 	records: 256,
 });
 
-export type McpTrustActionClass = "read" | "execute" | "unknown";
-export const MCP_TRUST_ACTION_CLASSES: ReadonlyArray<McpTrustActionClass> = ["read", "execute", "unknown"];
+export type McpTrustActionClass = "read" | "execute" | "destructive" | "unknown";
+export const MCP_TRUST_ACTION_CLASSES: ReadonlyArray<McpTrustActionClass> = [
+	"read",
+	"execute",
+	"destructive",
+	"unknown",
+];
 
 export interface McpTrustRecord {
 	/** Canonical (realpath) project root the record applies to. */

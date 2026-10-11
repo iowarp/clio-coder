@@ -6,6 +6,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { writeTranscriptExport } from "../../src/domains/session/transcript-export.js";
 import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
@@ -130,4 +131,47 @@ test("export writes Markdown to a named .md path with fences longer than any in 
 			text: "no active session to export",
 		});
 	});
+});
+
+test("Markdown and HTML exports retain each assistant model and the switch divider", async () => {
+	const scratch = await isolateClioEnv("clio-model-export-");
+	try {
+		const entries: SessionEntry[] = [
+			{
+				kind: "message",
+				role: "assistant",
+				payload: { provider: "litellm", model: "qwopus-fixture", text: "First answer" },
+			},
+			{ kind: "modelChange", provider: "anthropic", modelId: "haiku-fixture" },
+			{
+				kind: "message",
+				role: "assistant",
+				payload: { provider: "anthropic", model: "haiku-fixture", text: "Second answer" },
+			},
+		].map((entry, i) => ({
+			...entry,
+			turnId: `turn-${i}`,
+			parentTurnId: i === 0 ? null : `turn-${i - 1}`,
+			timestamp: "2026-10-09T00:00:00Z",
+		})) as SessionEntry[];
+		for (const format of ["md", "html"]) {
+			const path = join(scratch.dir, `models.${format}`);
+			const result = writeTranscriptExport({
+				sessionId: "synthetic",
+				cwd: scratch.dir,
+				path,
+				leafTurnId: () => null,
+				readEntries: () => entries,
+			});
+			assert.equal(result.level, "success");
+			const output = readFileSync(path, "utf8");
+			assert.match(output, /litellm · qwopus-fixture/u);
+			assert.match(output, /anthropic · haiku-fixture/u);
+			assert.match(output, /Model changed/u);
+			assert.ok(output.indexOf("qwopus-fixture") < output.indexOf("First answer"));
+			assert.ok(output.lastIndexOf("haiku-fixture") < output.indexOf("Second answer"));
+		}
+	} finally {
+		scratch.restore();
+	}
 });

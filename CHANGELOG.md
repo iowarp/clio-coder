@@ -2,6 +2,15 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixes
+
+- Interrupt in-flight MCP calls with `notifications/cancelled` and a bounded responsiveness check, keeping responsive servers available. Trusted servers that fail reconnect lazily after cleanup on the next gateway call; cancelled calls are never automatically replayed.
+- Use MCP annotations as advisory action-class defaults for untouched user declarations, preserving operator overrides. Keep boolean hints in tool catalogs, show per-tool classes in `mcp list`, and support `mcp list --refresh` to refresh them. Repeated read-only idempotent polls spend the normal call budget instead of triggering the identical-argument loop guard.
+- Attribute assistant turns to their recorded provider and model in live and resumed terminal transcripts, copied views, Markdown exports and HTML exports. Export model changes at their recorded positions.
+- Accept an explicit `allow` capability list on main-runner jobs, intersect it with inherited task constraints, enforce it on every occurrence regardless of autonomy, and show it in job creation and monitor output. Rejected tools use the existing turn-constraint audit trail.
+
 ## 0.6.2 - 2026-10-09
 
 Clio Coder 0.6.2 is the first stable release since 0.6.1 and includes everything published in 0.6.2-rc.1 and 0.6.2-rc.2. It separates plugins from extensions: a plugin carries content, and an extension is Clio code that runs in its own sandboxed process and loads only after you approve the capabilities it declares. Fleet contracts are now playbooks, proactive memory runs on the chat route within that route's budget, `/loop` schedules turns and command polls, `/reload` and `/restart` apply changes in place, and the desktop app gains an integrated window title and Manage context. The [0.6.2-rc.1 and 0.6.2-rc.2 entries](https://github.com/iowarp/clio-coder/blob/v0.6.2/CHANGELOG.md#062-rc2---2026-10-06) list those changes in full.

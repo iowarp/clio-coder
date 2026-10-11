@@ -67,8 +67,10 @@ export interface McpServerDeclaration {
 	env: Record<string, string>;
 	timeoutMs: number | null;
 	/** Operator-declared effect class; project servers use the separate trust record. */
-	actionClass: "read" | "execute" | "unknown";
-	toolActionClasses: Record<string, "read" | "execute" | "unknown">;
+	actionClass: "read" | "execute" | "destructive" | "unknown";
+	toolActionClasses: Record<string, "read" | "execute" | "destructive" | "unknown">;
+	/** Whether the user explicitly supplied a server-wide class, including unknown. */
+	actionClassExplicit?: boolean;
 	/** sha256 of the canonical declaration; a trust record binds to it. */
 	digest: string;
 }
@@ -97,8 +99,8 @@ interface DeclaredServerFields {
 	cwd: string | null;
 	env: Record<string, string>;
 	timeoutMs: number | null;
-	actionClass: "read" | "execute" | "unknown";
-	toolActionClasses: Record<string, "read" | "execute" | "unknown">;
+	actionClass: "read" | "execute" | "destructive" | "unknown";
+	toolActionClasses: Record<string, "read" | "execute" | "destructive" | "unknown">;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -123,7 +125,7 @@ export function mcpServerDigest(fields: {
 	cwd: string | null;
 	env: Readonly<Record<string, string>>;
 	timeoutMs: number | null;
-	toolActionClasses?: Readonly<Record<string, "read" | "execute" | "unknown">>;
+	toolActionClasses?: Readonly<Record<string, "read" | "execute" | "destructive" | "unknown">>;
 }): string {
 	const canonical = JSON.stringify({
 		id: fields.id,
@@ -319,12 +321,13 @@ function validateServer(
 		value.actionClass !== undefined &&
 		value.actionClass !== "read" &&
 		value.actionClass !== "execute" &&
+		value.actionClass !== "destructive" &&
 		value.actionClass !== "unknown"
 	) {
-		return new Error(`${location}.actionClass must be read, execute, or unknown`);
+		return new Error(`${location}.actionClass must be read, execute, destructive, or unknown`);
 	}
-	const actionClass = (value.actionClass ?? "unknown") as "read" | "execute" | "unknown";
-	const toolActionClasses = Object.create(null) as Record<string, "read" | "execute" | "unknown">;
+	const actionClass = (value.actionClass ?? "unknown") as "read" | "execute" | "destructive" | "unknown";
+	const toolActionClasses = Object.create(null) as Record<string, "read" | "execute" | "destructive" | "unknown">;
 	if (value.toolActionClasses !== undefined) {
 		if (!isRecord(value.toolActionClasses)) return new Error(`${location}.toolActionClasses must be a mapping`);
 		const entries = Object.entries(value.toolActionClasses);
@@ -335,8 +338,8 @@ function validateServer(
 			if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(name)) {
 				return new Error(`${location}.toolActionClasses has invalid tool name '${name}'`);
 			}
-			if (cls !== "read" && cls !== "execute" && cls !== "unknown") {
-				return new Error(`${location}.toolActionClasses.${name} must be read, execute, or unknown`);
+			if (cls !== "read" && cls !== "execute" && cls !== "destructive" && cls !== "unknown") {
+				return new Error(`${location}.toolActionClasses.${name} must be read, execute, destructive, or unknown`);
 			}
 			toolActionClasses[name] = cls;
 		}
@@ -418,6 +421,7 @@ export function parseMcpConfigText(text: string, input: McpConfigTextInput): Mcp
 			env: fields.env,
 			timeoutMs: fields.timeoutMs,
 			actionClass: fields.actionClass,
+			actionClassExplicit: Object.hasOwn(value, "actionClass"),
 			toolActionClasses: fields.toolActionClasses,
 			digest: mcpServerDigest(fields),
 		});

@@ -1,3 +1,5 @@
+import { mcpToolName } from "../core/tool-names.js";
+import { mcpToolActionClass } from "../domains/gateway/mcp/action-classes.js";
 import {
 	MCP_TRUST_ACTION_CLASSES,
 	type McpTrustActionClass,
@@ -6,12 +8,14 @@ import {
 	trustMcpServer,
 	untrustMcpServer,
 } from "../domains/gateway/mcp/index.js";
+import { readMcpServerCatalog } from "../domains/gateway/mcp/metadata-cache.js";
+import { canonicalProjectRoot } from "../domains/gateway/mcp/trust.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder mcp <command>
 
 Commands:
-  clio-coder mcp list [--json]
+  clio-coder mcp list [--refresh] [--json]
   clio-coder mcp trust <id> [--action-class <class>] [--json]
   clio-coder mcp untrust <id> [--json]
 
@@ -19,7 +23,9 @@ Action classes: ${MCP_TRUST_ACTION_CLASSES.join(", ")}
 
 JSON responses (--json):
   list: {servers: [...], diagnostics: [...], trustDiagnostics: [...]}
-    Each server includes its declaration and trust {status, actionClass, reason?}.
+    Each server includes its declaration, trust {status, actionClass, reason?},
+    and cached tools with per-tool actionClass. --refresh lists trusted servers
+    live and updates their catalogs; untrusted declarations are never launched.
   trust: {ok: true, record: {projectRoot, id, digest, actionClass, trustedAt}}
   untrust: {ok: true, removed: boolean}
   errors: {ok: false, message: string}
@@ -47,11 +53,49 @@ export function mcpCommandOutput(
 	try {
 		const [command, id, ...rest] = argv;
 		if (command === "list" && id === undefined) {
-			const result = resolveMcpServers(options);
+			const resolved = resolveMcpServers(options);
+			const result = {
+				...resolved,
+				servers: resolved.servers.map((server) => {
+					const catalog =
+						server.trust.status !== "trusted"
+							? null
+							: readMcpServerCatalog({
+									projectRoot: canonicalProjectRoot(options.cwd),
+									scope: server.scope,
+									declarationPath: server.path,
+									serverId: server.id,
+									digest: server.digest,
+									cwd: server.cwd,
+								});
+					return {
+						...server,
+						tools:
+							catalog?.tools.flatMap((tool) => {
+								const capability = mcpToolName(server.id, tool.name);
+								return capability === null
+									? []
+									: [
+											{
+												name: tool.name,
+												capability,
+												actionClass: mcpToolActionClass(server, { ...tool, annotations: tool.annotations ?? null }),
+											},
+										];
+							}) ?? [],
+						catalog: catalog === null ? "missing" : "cached",
+					};
+				}),
+			};
 			const lines = result.servers.map(
 				(server) =>
 					`${server.id} scope=${server.scope} command=${JSON.stringify([server.command, ...server.args])} cwd=${JSON.stringify(server.cwd)} trust=${server.trust.status}${"reason" in server.trust ? ` (${server.trust.reason})` : ""} actionClass=${server.trust.actionClass}`,
 			);
+			for (const server of result.servers) {
+				for (const tool of server.tools) lines.push(`  ${tool.capability} actionClass=${tool.actionClass}`);
+				if (server.trust.status === "trusted" && server.catalog === "missing")
+					lines.push("  no recorded tool catalog; use clio-coder mcp list --refresh");
+			}
 			lines.push(...result.diagnostics.map((entry) => `${entry.path}: ${entry.message}`), ...result.trustDiagnostics);
 			return {
 				code: result.diagnostics.length || result.trustDiagnostics.length ? 1 : 0,
@@ -92,13 +136,42 @@ export function mcpCommandOutput(
 	}
 }
 
-export function runMcpCommand(argv: ReadonlyArray<string>): number {
+export async function runMcpCommand(argv: ReadonlyArray<string>): Promise<number> {
 	if (argv.includes("--help") || argv.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
 	}
 	const json = argv.includes("--json");
-	const result = mcpCommandOutput(argv.filter((arg) => arg !== "--json"));
+	let refreshFailure: string | null = null;
+	const refresh =
+		argv[0] === "list" &&
+		argv.includes("--refresh") &&
+		argv.slice(1).every((arg) => arg === "--refresh" || arg === "--json");
+	if (refresh) {
+		const [{ createMcpCapabilitySource }, { createRegistry }, { createWorkerSafety }] = await Promise.all([
+			import("../tools/gateway/mcp-capabilities.js"),
+			import("../tools/registry.js"),
+			import("../engine/worker-tools.js"),
+		]);
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: process.cwd() }) });
+		const source = createMcpCapabilitySource({ cwd: process.cwd(), registry });
+		try {
+			const listing = await source.list();
+			refreshFailure =
+				listing.servers
+					.filter((server) => server.status === "failed")
+					.map((server) => `${server.id}: ${server.reason}`)
+					.join("; ") || null;
+		} finally {
+			await source.close();
+		}
+	}
+	const result = mcpCommandOutput(argv.filter((arg) => arg !== "--json" && (!refresh || arg !== "--refresh")));
+	if (refreshFailure !== null) {
+		result.code = 1;
+		result.text += `\n${refreshFailure}`;
+		(result.data as { trustDiagnostics: string[] }).trustDiagnostics.push(refreshFailure);
+	}
 	if (json) process.stdout.write(`${JSON.stringify(result.data, null, 2)}\n`);
 	else if (result.code && argv[0] !== "list") printError(result.text);
 	else process.stdout.write(`${result.text}\n`);

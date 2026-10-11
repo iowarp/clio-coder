@@ -82,6 +82,7 @@ const ACTION_CLASS_PURPOSE: Readonly<Partial<Record<ActionClass, string>>> = {
 	execute: "Run commands, programs or external actions whose effects depend on what they run.",
 	dispatch: "Start, steer or collect worker agents.",
 	system_modify: "Change machine, harness or settings state outside the workspace.",
+	destructive: "Delete or irreversibly change external state.",
 	git_destructive: "Rewrite or discard version control history or uncommitted work.",
 };
 
@@ -252,7 +253,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		allowDirect = false,
 	): Promise<{ spec: ToolSpec } | { spec: null; message: string }> => {
 		let spec = registry.get(name as ToolName);
-		if (spec === undefined && isMcpToolName(name) && deps.mcp) {
+		if (isMcpToolName(name) && deps.mcp) {
 			const ensured = await deps.mcp.ensure(name, options?.signal ? { signal: options.signal } : {});
 			if (ensured.spec === null)
 				return { spec: null, message: `gateway: ${ensured.reason ?? `unknown capability ${name}`}` };

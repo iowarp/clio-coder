@@ -1515,6 +1515,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
 				}
 
+				// Idempotent read-only polls may return the same cursor indefinitely.
+				// They still spend the worker cap and the per-turn soft/hard budget.
+				if (input.metadata?.repeatableRead === true) return evaluateTurnBudget(input, now) ?? [];
+
 				// Identical-repeat detection runs BEFORE the volume budget so verbatim
 				// retries of budget-blocked calls still reach the detector. Its tighter
 				// interrupt (a couple of blocks per turn) is what ends the retry spiral

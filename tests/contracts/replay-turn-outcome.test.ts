@@ -15,6 +15,7 @@ import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { appendOperatorCommand } from "../../src/interactive/command-output.js";
+import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
@@ -992,4 +993,70 @@ test("orientation is persisted before the first model call while operator text s
 		loop.dispose();
 		await loop.whenSettled();
 	}
+});
+
+// These records are synthetic; model identity must come from each assistant,
+// even when the session's current route and header have changed.
+test("a mid-session model switch attributes both replayed assistant turns", () => {
+	const output = replay([
+		{ role: "user", payload: { text: "First request" } },
+		{
+			role: "assistant",
+			payload: {
+				provider: "litellm",
+				model: "dynamo/qwopus-fixture",
+				content: [{ type: "text", text: "First answer" }],
+				usage,
+				stopReason: "stop",
+			},
+		},
+		{ role: "user", payload: { text: "Second request" } },
+		{
+			role: "assistant",
+			payload: {
+				provider: "anthropic",
+				model: "haiku-fixture",
+				content: [{ type: "text", text: "Second answer" }],
+				usage,
+				stopReason: "stop",
+			},
+		},
+	]);
+	assert.match(output, /litellm · dynamo\/qwopus-fixture/u);
+	assert.match(output, /anthropic · haiku-fixture/u);
+	assert.ok(output.indexOf("qwopus-fixture") < output.indexOf("First answer"));
+	assert.ok(output.indexOf("haiku-fixture") > output.indexOf("First answer"));
+	assert.ok(output.indexOf("haiku-fixture") < output.indexOf("Second answer"));
+});
+
+test("live assistant model attribution survives copied and HTML transcript views", () => {
+	const panel = createChatPanel();
+	for (const [provider, model] of [
+		["litellm", "qwopus-fixture"],
+		["anthropic", "haiku-fixture"],
+	]) {
+		panel.appendUser(`Request for ${model}`);
+		panel.applyEvent({ type: "agent_start" } as never);
+		const message = {
+			role: "assistant",
+			provider,
+			model,
+			content: [{ type: "text", text: "Answer" }],
+			usage,
+			stopReason: "stop",
+		};
+		panel.applyEvent({ type: "message_start", message } as never);
+		panel.applyEvent({ type: "message_end", message } as never);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as never);
+	}
+	const copied = panel.render(120).map(stripTerminalSequences).join("\n");
+	assert.match(copied, /litellm · qwopus-fixture/u);
+	assert.match(copied, /anthropic · haiku-fixture/u);
+	const html = renderSessionHtml({
+		sessionId: "synthetic",
+		exportedAt: "2026-10-09T00:00:00Z",
+		ansiLines: panel.render(120),
+	});
+	assert.match(html, /litellm · qwopus-fixture/u);
+	assert.match(html, /anthropic · haiku-fixture/u);
 });

@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { assistantModelLabel } from "../core/assistant-model.js";
 import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assistant-prose.js";
 import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
@@ -355,6 +356,7 @@ type TranscriptEntry =
 	| { role: "retryStatus"; status: RetryStatusPayload; at: number }
 	| {
 			role: "assistant";
+			models?: string[];
 			segments: AssistantSegment[];
 			/**
 			 * `segments.length` when the current model call began, so `message_end`
@@ -1305,6 +1307,8 @@ function renderEntryLines(
 		return [];
 	}
 	const blocks: TurnBlock[] = [];
+	if (entry.models?.length)
+		blocks.push({ kind: "prose", lines: renderNoticeRow(`[model] ${entry.models.join(" → ")}`, "info", width) });
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	// Reasoning stays between the prose and actions that surround it, one block
 	// per run of it: stretches that nothing visible separates read as one. A run
@@ -2490,6 +2494,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "message_start" && event.message.role === "assistant") {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
+				const model = assistantModelLabel(event.message);
+				if (model !== null && !assistant.models?.includes(model)) {
+					assistant.models ??= [];
+					assistant.models.push(model);
+				}
 				assistant.messageStartSegmentIndex = assistant.segments.length;
 				markDirty();
 				return;
@@ -2668,6 +2677,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				// message_end rewrites exactly one entry: the assistant it lands on.
 				invalidateEntryCache(assistant);
+				const model = assistantModelLabel(event.message);
+				if (model !== null && !assistant.models?.includes(model)) {
+					assistant.models ??= [];
+					assistant.models.push(model);
+				}
 				if (usage !== undefined) assistant.turnUsage = usage;
 				if (terminalError.length > 0) assistant.isError = true;
 				// The message is settled, so whatever reasoning it streamed is closed.

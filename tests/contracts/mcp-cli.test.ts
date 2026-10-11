@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { it } from "node:test";
 import {
@@ -30,7 +30,7 @@ it("lists, trusts, detects stale declarations, untrusts and returns error exits"
 				tsx,
 				"--input-type=module",
 				"-e",
-				`import { runMcpCommand } from ${JSON.stringify(module)}; process.exitCode = runMcpCommand(${JSON.stringify(args)});`,
+				`import { runMcpCommand } from ${JSON.stringify(module)}; process.exitCode = await runMcpCommand(${JSON.stringify(args)});`,
 			],
 			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8" },
 		);
@@ -224,4 +224,48 @@ it("fails verifiers validate when a catalog id collides with a package script an
 	const malformed = validateProject({ ".clio-coder/verifiers.yaml": "version: 2\nchecks: not-a-list\n" });
 	strictEqual(malformed.status, 1);
 	match(malformed.stderr, /production catalog parser rejected/);
+});
+
+it("refreshes trusted MCP catalogs and lists annotation-derived tool classes", () => {
+	const scratch = makeScratchHome("clio-mcp-cli-refresh-");
+	try {
+		const project = join(scratch.dir, "project");
+		mkdirSync(join(project, ".clio-coder"), { recursive: true });
+		mkdirSync(join(scratch.dir, "config"), { recursive: true });
+		const marker = join(scratch.dir, "untrusted-launched");
+		writeFileSync(
+			join(scratch.dir, "config", "mcp.yaml"),
+			`version: 1\nservers:\n  - id: fake\n    command: ${JSON.stringify(process.execPath)}\n    args: [${JSON.stringify(resolve("tests/fixtures/mcp-fake-server.mjs"))}]\n`,
+		);
+		writeFileSync(
+			join(project, ".clio-coder", "mcp.yaml"),
+			`version: 1\nservers:\n  - id: untrusted\n    command: ${JSON.stringify(process.execPath)}\n    args: ["-e", ${JSON.stringify(`require('fs').writeFileSync(${JSON.stringify(marker)}, 'launched')`)}]\n`,
+		);
+		const module = resolve("src/cli/mcp.ts");
+		const run = (args: string[]) =>
+			spawnSync(
+				process.execPath,
+				[
+					"--import",
+					import.meta.resolve("tsx"),
+					"--input-type=module",
+					"-e",
+					`import { runMcpCommand } from ${JSON.stringify(module)}; process.exitCode = await runMcpCommand(${JSON.stringify(args)});`,
+				],
+				{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
+			);
+		const refreshed = run(["list", "--refresh", "--json"]);
+		strictEqual(refreshed.status, 0, refreshed.stderr);
+		const data = JSON.parse(refreshed.stdout);
+		const fake = data.servers.find((server: { id: string }) => server.id === "fake");
+		strictEqual(fake.tools.find((tool: { name: string }) => tool.name === "sleep").actionClass, "read");
+		strictEqual(fake.tools.find((tool: { name: string }) => tool.name === "fail").actionClass, "destructive");
+		strictEqual(existsSync(marker), false);
+		const cached = run(["list"]);
+		strictEqual(cached.status, 0);
+		match(cached.stdout, /mcp_fake__sleep actionClass=read/u);
+		match(cached.stdout, /mcp_fake__fail actionClass=destructive/u);
+	} finally {
+		scratch.cleanup();
+	}
 });

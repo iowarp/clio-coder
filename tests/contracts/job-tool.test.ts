@@ -2,15 +2,20 @@ import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/st
 import { unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { Type } from "typebox";
 import type { JobCreateInput, JobOwner, JobRecord } from "../../src/core/job-types.js";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
 import { createJobController } from "../../src/domains/scheduling/job-controller.js";
 import { jobIsComplete } from "../../src/domains/scheduling/job-model.js";
 import type { JobController, JobRunnerPorts, JobStore } from "../../src/domains/scheduling/job-types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createJobRuntime } from "../../src/entry/job-runtime.js";
+import type { ChatLoop } from "../../src/session-control/chat-loop.js";
+import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
 import { createJobTool } from "../../src/tools/job.js";
 import { prepareJobCommand } from "../../src/tools/job-command.js";
+import { createJobMonitorTool } from "../../src/tools/monitor-jobs.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -521,6 +526,141 @@ describe("job ownership, scheduling and execution settlement", () => {
 		if (refused.result.kind === "error") match(refused.result.message, /unsupported field/);
 		strictEqual(host.list(owner).length, 1);
 	});
+	it("enforces a main job allowlist on every YOLO occurrence and audits denials", async () => {
+		const allowed = ["mcp_zulipchat-grc__poll_agent_events", "mcp_zulipchat-grc__send_message"];
+		const safety = createWorkerSafety({ cwd: scratch.dir });
+		const audits: ToolCallAuditInput[] = [];
+		safety.audit.recordToolCall = (row) => audits.push(row);
+		const registry = createRegistry({ safety, autonomy: () => "yolo" });
+		registerCoreTools(registry);
+		let effects = 0;
+		for (const name of [ToolNames.Bash, ToolNames.Read, ...allowed, "mcp_zulipchat-grc__other"] as const) {
+			registry.register({
+				name: name as ToolName,
+				description: "fixture effect",
+				parameters: Type.Object({}),
+				baseActionClass: name === ToolNames.Bash ? "execute" : "read",
+				async run() {
+					effects++;
+					return { kind: "ok", output: "done" };
+				},
+			});
+		}
+		let occurrences = 0;
+		const chat = {
+			machineTurnAvailable: () => true,
+			async submitMachineTurn(request: import("../../src/session-control/job-turn-types.js").MachineTurnRequest) {
+				ok(request.onStarting());
+				occurrences++;
+				deepStrictEqual(request.constraints?.allowedTools, [...allowed].sort());
+				ok(request.constraints);
+				for (const tool of [ToolNames.Bash, ToolNames.Read, "mcp_zulipchat-grc__other"]) {
+					const denied = await registry.invoke(
+						{ tool, args: tool === ToolNames.Bash ? { command: "date -u" } : {} },
+						{ turnConstraints: request.constraints, turnId: request.executionId },
+					);
+					strictEqual(denied.kind, "blocked");
+				}
+				const wrappedDenial = await registry.invoke(
+					{ tool: ToolNames.Gateway, args: { op: "call", capability: ToolNames.Read, args: {} } },
+					{ turnConstraints: request.constraints, turnId: request.executionId },
+				);
+				ok(wrappedDenial.kind !== "ok" || wrappedDenial.result.kind === "error");
+				for (const capability of allowed) {
+					const admitted = await registry.invoke(
+						{ tool: ToolNames.Gateway, args: { op: "call", capability, args: {} } },
+						{ turnConstraints: request.constraints, turnId: request.executionId },
+					);
+					strictEqual(admitted.kind, "ok");
+					if (admitted.kind === "ok") strictEqual(admitted.result.kind, "ok");
+				}
+				return { status: "succeeded" as const, turnId: request.executionId, text: "polled" };
+			},
+		} as unknown as ChatLoop;
+		const runtime = createJobRuntime({
+			chat: () => chat,
+			isCurrent: () => true,
+			constraints: () => undefined,
+			safety,
+			autonomy: () => "yolo",
+			hostRefusal: () => null,
+			trustRefusal: () => null,
+			permissionPending: () => false,
+			runCommand: async () => {
+				throw new Error("unexpected command job");
+			},
+			notice: () => {},
+		});
+		const host = make(runtime);
+		const jobTool = createJobTool({
+			controller: host,
+			registry,
+			owner: () => owner,
+			constraints: () => undefined,
+			hostRefusal: () => null,
+		});
+		registry.register(jobTool.spec);
+		const result = await jobTool.invoke({
+			action: "create",
+			runner: "main",
+			every_ms: 1000,
+			count: 2,
+			prompt: "Poll mentions",
+			allow: allowed,
+		});
+		strictEqual(result.kind, "ok", JSON.stringify(result));
+		allowed.push("bash"); // Caller mutation cannot widen persisted authority.
+		const created = present(host.list(owner)[0]);
+		strictEqual(created.spec.constraints?.allowedTools?.length, 2);
+		allowed.pop();
+		const monitor = createJobMonitorTool({
+			invoke: jobTool.invoke,
+			list: () => host.list(owner),
+			status: (id) => host.get(id, owner),
+			subscribe: () => () => {},
+		});
+		const status = await monitor.run({ job_id: created.id });
+		ok(status.kind === "ok" && status.output.includes('allow=["mcp_zulipchat-grc__poll_agent_events"'));
+		for (let i = 0; i < 2; i++) {
+			clock += 1000;
+			host.tick();
+			for (let n = 0; n < 10; n++) await settle();
+		}
+		strictEqual(occurrences, 2);
+		strictEqual(effects, 4, "only the two allowlisted calls per occurrence ran");
+		for (const tool of [ToolNames.Bash, ToolNames.Read, "mcp_zulipchat-grc__other"]) {
+			strictEqual(
+				audits.filter((row) => row.tool === tool && row.decision === "blocked" && row.reasonCode === "turn_constraint")
+					.length,
+				2,
+			);
+		}
+	});
+
+	it("job allow cannot widen creating or delegated constraints", async () => {
+		const host = make();
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch.dir }), autonomy: () => "yolo" });
+		const tool = createJobTool({
+			controller: host,
+			registry,
+			owner: () => owner,
+			constraints: () => ({ allowedTools: [ToolNames.Job, ToolNames.Read], delegatedTools: [] }),
+			hostRefusal: () => null,
+		});
+		registry.register(tool.spec);
+		const result = await tool.invoke({
+			action: "create",
+			runner: "main",
+			every_ms: 1000,
+			prompt: "Read",
+			allow: [ToolNames.Read, ToolNames.Bash],
+		});
+		strictEqual(result.kind, "ok");
+		const stored = present(host.list(owner)[0]).spec.constraints;
+		deepStrictEqual(stored?.allowedTools, [ToolNames.Read]);
+		deepStrictEqual(stored?.delegatedTools, []);
+	});
+
 	it("does not turn job admission into permission for an unknown command", async () => {
 		const host = make();
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch.dir }) });

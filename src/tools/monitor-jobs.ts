@@ -5,7 +5,7 @@ import { monitorToolSurface } from "./monitor-surface.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 
 function jobLine(job: JobRecord): string {
-	return `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; runner=${job.spec.runner.kind}; starts=${job.starts}/${job.spec.count ?? "deadline"}; settled=${job.settled}; every=${job.spec.intervalMs}ms; timeout=${job.spec.timeoutMs}ms; next=${job.nextDueAt === null ? "none" : new Date(job.nextDueAt).toISOString()}; active=${job.active?.id ?? "none"}; pending=${job.pending?.id ?? "none"}${job.pendingReason ? ` (${job.pendingReason})` : ""}; delivery=${job.delivery?.state ?? "none"}; complete=${jobIsComplete(job)}; costUsd=${job.costUsd ?? "not measured"}${job.persistenceError ? `; persistence=${job.persistenceError}` : ""}`;
+	return `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; runner=${job.spec.runner.kind}; allow=${job.spec.constraints?.allowedTools === undefined ? "inherited" : JSON.stringify(job.spec.constraints.allowedTools)}; starts=${job.starts}/${job.spec.count ?? "deadline"}; settled=${job.settled}; every=${job.spec.intervalMs}ms; timeout=${job.spec.timeoutMs}ms; next=${job.nextDueAt === null ? "none" : new Date(job.nextDueAt).toISOString()}; active=${job.active?.id ?? "none"}; pending=${job.pending?.id ?? "none"}${job.pendingReason ? ` (${job.pendingReason})` : ""}; delivery=${job.delivery?.state ?? "none"}; complete=${jobIsComplete(job)}; costUsd=${job.costUsd ?? "not measured"}${job.persistenceError ? `; persistence=${job.persistenceError}` : ""}`;
 }
 
 export function listJobMonitor(jobs: JobOperations): ToolResult {

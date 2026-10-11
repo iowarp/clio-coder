@@ -41,6 +41,8 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 export const DEFAULT_STDERR_TAIL_BYTES = 16 * 1024;
 export const DEFAULT_RESULT_TEXT_BYTES = 1024 * 1024;
 export const DEFAULT_KILL_GRACE_MS = 3_000;
+/** Bound for checking server responsiveness after cancelling an in-flight call. */
+export const DEFAULT_CANCEL_GRACE_MS = 1_000;
 /** Bytes accepted for the server's stdin but not yet flushed before the client fails with `overload`. */
 export const DEFAULT_MAX_OUTBOUND_BYTES = 4 * 1024 * 1024;
 /** Tools accepted from one server before pagination stops. */
@@ -72,6 +74,8 @@ export interface McpClientOptions {
 	maxResultTextBytes?: number;
 	/** Cap on bytes queued for a server that is not reading its stdin; crossing it fails the client. */
 	maxOutboundBytes?: number;
+	/** Time allowed for the server to answer ping after a cancellation notification. */
+	cancelGraceMs?: number;
 	/** Delay between SIGTERM and SIGKILL on close. */
 	killGraceMs?: number;
 	/** Wait for the group to disappear after SIGKILL before the teardown is reported incomplete. */
@@ -113,7 +117,7 @@ export interface McpToolDescriptor {
 	title: string | null;
 	description: string;
 	inputSchema: Record<string, unknown>;
-	/** Server-declared hints; advisory only, never a safety input. */
+	/** Server-declared hints; advisory defaults, overridden by operator policy. */
 	annotations: Record<string, unknown> | null;
 }
 
@@ -746,17 +750,41 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 				signal?.removeEventListener("abort", onAbort);
 				finish();
 			};
+			let cancelling = false;
 			const cancel = (error: McpError): void => {
 				const entry = pending.get(id);
-				if (entry === undefined) return;
-				const stopServer = method === "tools/call" && entry.sent;
-				settle(() => {
-					if (stopServer) {
-						// PERF W3: a sent call owns server work until group teardown settles.
+				if (entry === undefined || cancelling) return;
+				cancelling = true;
+				if (timer !== null) clearTimeout(timer);
+				signal?.removeEventListener("abort", onAbort);
+				if (method !== "tools/call" || !entry.sent) {
+					settle(() => reject(error));
+					return;
+				}
+				const stop = (): void => {
+					settle(() => {
 						fail(error);
 						void close().then(() => reject(error));
-					} else reject(error);
-				});
+					});
+				};
+				// Timeouts still terminate work that exceeded its execution bound.
+				if (error.code !== "aborted") {
+					stop();
+					return;
+				}
+				// Cancellation has no required acknowledgement. A terminal response
+				// or a bounded ping confirms a usable transport; neither retries the
+				// cancelled tool, which may already have produced side effects.
+				entry.resolve = () => settle(() => reject(error));
+				entry.reject = () => settle(() => reject(error));
+				enqueueOutbound(
+					{ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: error.message } },
+					null,
+				);
+				void request("ping", undefined, Math.max(1, options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS)).then(
+					() => settle(() => reject(error)),
+					() => stop(),
+				);
 			};
 			const onAbort = (): void => cancel(new McpError("aborted", `${method} aborted`));
 			pending.set(id, {

@@ -1560,6 +1560,7 @@ const WORKSPACE_CHANGING_CLASSES: ReadonlySet<string> = new Set([
 	"write",
 	"system_modify",
 	"git_destructive",
+	"destructive",
 	"dispatch",
 ]);
 

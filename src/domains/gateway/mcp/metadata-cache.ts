@@ -69,6 +69,7 @@ export interface McpCachedTool {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
+	annotations?: Record<string, unknown> | null;
 }
 
 export interface McpServerCatalog {
@@ -125,7 +126,21 @@ function decodeTool(value: unknown): McpCachedTool | null {
 	if (Buffer.byteLength(description, "utf8") > MCP_METADATA_CACHE_CAPS.descriptionBytes) return null;
 	if (!isRecord(inputSchema)) return null;
 	if (Buffer.byteLength(JSON.stringify(inputSchema), "utf8") > MCP_METADATA_CACHE_CAPS.schemaBytes) return null;
-	return { name, description, inputSchema };
+	const annotations = value.annotations;
+	if (annotations !== undefined && annotations !== null && !isRecord(annotations)) return null;
+	if (
+		isRecord(annotations) &&
+		Buffer.byteLength(JSON.stringify(annotations), "utf8") > MCP_METADATA_CACHE_CAPS.schemaBytes
+	)
+		return null;
+	const hints = isRecord(annotations)
+		? Object.fromEntries(
+				["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"].flatMap((key) =>
+					typeof annotations[key] === "boolean" ? [[key, annotations[key]]] : [],
+				),
+			)
+		: {};
+	return { name, description, inputSchema, ...(Object.keys(hints).length === 0 ? {} : { annotations: hints }) };
 }
 
 /** Decode a whole file or reject it. A single bad tool fails the catalog: half a listing is not a listing. */
@@ -214,7 +229,12 @@ export function writeMcpServerCatalog(
 	if (listing.tools.length > MCP_METADATA_CACHE_CAPS.tools) return false;
 	const tools: McpCachedTool[] = [];
 	for (const tool of listing.tools) {
-		const encoded = decodeTool({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema });
+		const encoded = decodeTool({
+			name: tool.name,
+			description: tool.description,
+			inputSchema: tool.inputSchema,
+			annotations: tool.annotations,
+		});
 		// A tool the decoder would reject on the way back in is dropped rather
 		// than written, so a round trip is never the thing that invalidates a file.
 		if (encoded !== null) tools.push(encoded);

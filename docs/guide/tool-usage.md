@@ -1127,3 +1127,24 @@ A turn may make 3 consult calls. The tool changes nothing. It returns `answered:
 ## Headless declared verifier commands
 
 Declared and derived checks pass through the conservative action classifier and autonomy policy, and are admitted exactly as `bash` admits the same command. The policy engine resolves the call with the tool's own resolver, so the argv it scans, including any model `args`, is the argv that runs. A recognized test runner such as `python -m pytest` resolved through PATH runs in both modes. An unrecognized argv, such as `uv run python -m unittest discover -s tests` or an absolute interpreter path, asks in `default`, where a headless run denies it, and runs in `yolo`. Non-bare argv and project `requireConfirmation` entries also ask in `default` and run in `yolo`; damage-control rules still ask or block in both modes. Declaring a check does not bypass those gates. A TUI verify approval card names the resolved command beside the check id when resolution succeeds. Prepare the environment before the run and inspect actual verifier receipts before claiming edit-and-verify success.
+
+## Bounded main-runner jobs
+
+A `job` with `runner: "main"` repeats its prompt on the main conversation lane. Prompt wording does not restrict capabilities. Set `allow` to an explicit list of capability names to enforce a tool boundary on every occurrence, including in YOLO:
+
+```json
+{
+  "action": "create",
+  "runner": "main",
+  "every_ms": 30000,
+  "count": 10,
+  "timeout_ms": 60000,
+  "prompt": "Poll agent events and respond to new mentions.",
+  "allow": [
+    "mcp_zulipchat-grc__poll_agent_events",
+    "mcp_zulipchat-grc__send_message"
+  ]
+}
+```
+
+Call this capability through `gateway(op="call", capability="job", args=...)`. The allowlist is saved with the job and intersected with its creator's and current host constraints. It permits the gateway transport for the named capabilities; naming `gateway` alone does not authorize the tools behind it. Shell, file, dispatch and other MCP capabilities are denied unless included, and denials enter the tool audit. `allow: []` creates a main job with no tool capabilities. The create result and `monitor(job_id=...)` show the stored allowlist. To widen a job, create a new one; resume preserves its bounds.

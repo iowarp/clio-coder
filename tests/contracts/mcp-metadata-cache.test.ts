@@ -91,10 +91,14 @@ describe("MCP metadata cache", () => {
 			),
 		);
 		const text = readFileSync(mcpCatalogPath(id, cacheDir), "utf8");
-		for (const forbidden of ["command", "args", "env", "actionClass", "trust", "timeoutMs", "annotations"]) {
+		for (const forbidden of ["command", "args", "env", "actionClass", "trust", "timeoutMs"]) {
 			ok(!text.includes(forbidden), `${forbidden} must not reach the cache file`);
 		}
-		// The catalog is not an authority record; a server hint cannot become one.
+		// Advisory hints survive the cache; operator trust remains separate.
+		deepStrictEqual(readMcpServerCatalog(id, { cacheDir })?.tools[0]?.annotations, {
+			destructiveHint: false,
+			readOnlyHint: true,
+		});
 		strictEqual(readMcpServerCatalog(id, { cacheDir })?.tools[0]?.name, "read_file");
 	});
 

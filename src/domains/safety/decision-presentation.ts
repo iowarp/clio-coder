@@ -100,6 +100,7 @@ const ACTION_CLASSES = new Set<ActionClass>([
 	"dispatch",
 	"system_modify",
 	"git_destructive",
+	"destructive",
 	"unknown",
 ]);
 
@@ -120,6 +121,7 @@ function actionConsequence(actionClass: ActionClass): {
 		case "execute":
 		case "dispatch":
 			return { affectedScope: "workspace", reversibility: "limited" };
+		case "destructive":
 		case "system_modify":
 		case "git_destructive":
 		case "unknown":

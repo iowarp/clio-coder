@@ -1483,6 +1483,7 @@ const ACTION_CLASSES = new Set<ActionClass>([
 	"execute",
 	"system_modify",
 	"git_destructive",
+	"destructive",
 	"dispatch",
 ]);
 

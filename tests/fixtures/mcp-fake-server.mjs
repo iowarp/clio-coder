@@ -26,13 +26,18 @@ const PAGE_ONE = [
 		description: "Echo the arguments as JSON text.",
 		inputSchema: { type: "object", properties: { text: { type: "string" } } },
 	},
-	{ name: "fail", description: "Report a tool error.", inputSchema: { type: "object" } },
+	{
+		name: "fail",
+		description: "Report a tool error.",
+		inputSchema: { type: "object" },
+		annotations: { readOnlyHint: false, destructiveHint: true },
+	},
 	{
 		name: "sleep",
 		title: "Sleeper",
 		description: "Sleep for ms.",
 		inputSchema: { type: "object", properties: { ms: { type: "number" } } },
-		annotations: { readOnlyHint: true },
+		annotations: { readOnlyHint: true, idempotentHint: true },
 	},
 ];
 const PAGE_TWO = [
@@ -49,6 +54,7 @@ const PAGE_TWO = [
 	{ name: "flood_requests", description: "Stop reading stdin and flood requests.", inputSchema: { type: "object" } },
 ];
 
+const pendingSleeps = new Map();
 const pendingServerRequests = new Map();
 let serverRequestId = 0;
 const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
@@ -78,7 +84,16 @@ function handleToolCall(id, params) {
 			return;
 		case "sleep":
 			process.stderr.write("sleep start\n");
-			setTimeout(() => reply(id, { content: [{ type: "text", text: "slept" }] }), Number(args.ms ?? 0));
+			pendingSleeps.set(
+				id,
+				setTimeout(
+					() => {
+						pendingSleeps.delete(id);
+						reply(id, { content: [{ type: "text", text: "slept" }] });
+					},
+					Number(args.ms ?? 0),
+				),
+			);
 			return;
 		case "media":
 			reply(id, {
@@ -223,8 +238,18 @@ function handleMessage(message) {
 		}
 		return;
 	}
+	if (message.method === "notifications/cancelled") {
+		process.stderr.write(`cancelled ${message.params?.requestId}\n`);
+		if (mode === "ignore-sigterm" || mode === "ignore-cancellation") return;
+		clearTimeout(pendingSleeps.get(message.params?.requestId));
+		pendingSleeps.delete(message.params?.requestId);
+		return;
+	}
 	if (message.id === undefined) return;
 	switch (message.method) {
+		case "ping":
+			if (mode !== "ignore-sigterm" && mode !== "ignore-cancellation") reply(message.id, {});
+			return;
 		case "initialize":
 			if (mode === "silent-init") return;
 			if (mode === "exit-on-init") process.exit(7);

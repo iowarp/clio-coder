@@ -262,7 +262,7 @@ describe("mcp stdio client", () => {
 		);
 		const sleep = listing.tools[2];
 		strictEqual(sleep?.title, "Sleeper");
-		deepStrictEqual(sleep?.annotations, { readOnlyHint: true });
+		deepStrictEqual(sleep?.annotations, { readOnlyHint: true, idempotentHint: true });
 		strictEqual(listing.tools[1]?.title, null);
 		deepStrictEqual(listing.tools[1]?.inputSchema, { type: "object" });
 	});
@@ -381,8 +381,23 @@ describe("mcp stdio client", () => {
 		strictEqual(await rejectsWithCode(c.callTool("echo", {}), "timeout"), error);
 	});
 
+	it("cancels a sent long poll and keeps the same server usable", async () => {
+		const c = client();
+		await c.initialize();
+		const pid = c.pid;
+		const controller = new AbortController();
+		const call = c.callTool("sleep", { ms: 20_000 }, { signal: controller.signal });
+		await waitFor(() => c.stderrTail().includes("sleep start"));
+		controller.abort();
+		await rejectsWithCode(call, "aborted");
+		await waitFor(() => c.stderrTail().includes("cancelled "));
+		strictEqual(c.state().status, "ready");
+		strictEqual(c.pid, pid);
+		strictEqual((await c.callTool("echo", { after: "abort" })).isError, false);
+	});
+
 	it("cancelled sent call ends owned server work", async () => {
-		const c = client("ignore-sigterm");
+		const c = client("ignore-sigterm", { cancelGraceMs: 50 });
 		await c.initialize();
 		const early = new AbortController();
 		early.abort();

@@ -16,7 +16,15 @@ import { extractCommandPathWalks } from "./protected-artifacts.js";
  * owns the mapping from (tool, args) to an ActionClass.
  */
 
-export type ActionClass = "read" | "write" | "execute" | "dispatch" | "system_modify" | "git_destructive" | "unknown";
+export type ActionClass =
+	| "read"
+	| "write"
+	| "execute"
+	| "dispatch"
+	| "system_modify"
+	| "git_destructive"
+	| "destructive"
+	| "unknown";
 
 export interface ClassifierCall {
 	tool: string;

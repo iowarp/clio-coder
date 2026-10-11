@@ -226,3 +226,71 @@ test("real worker preserves the length-limited thought through contract repair a
 		env.restore();
 	}
 });
+
+// A completed call is replayed with both its signed reasoning and tool_calls;
+// the following tool result must stay paired with the exact 32-character id.
+test("LiteLLM completion replay retains completed reasoning and tool calls", async () => {
+	const model = fixtureModel();
+	const id = "0123456789abcdef0123456789abcdef";
+	const assistant: AssistantMessage = {
+		...interrupted(model),
+		stopReason: "toolUse",
+		content: [
+			{ type: "thinking", thinking: reasoning, thinkingSignature: "reasoning_content" },
+			{ type: "toolCall", id, name: "poll_agent_events", arguments: { cursor: "same", wait_seconds: 20 } },
+		],
+	};
+	const context: Context = {
+		messages: [
+			{ role: "user", content: "Poll once.", timestamp: 0 },
+			assistant,
+			{
+				role: "toolResult",
+				toolCallId: id,
+				toolName: "poll_agent_events",
+				content: [{ type: "text", text: "No events; same cursor." }],
+				isError: false,
+				timestamp: 2,
+			},
+		],
+	};
+	const before = structuredClone(context);
+	let request:
+		| {
+				messages: Array<
+					WireMessage & {
+						tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+						tool_call_id?: string;
+					}
+				>;
+		  }
+		| undefined;
+	const result = await openAICompletionsApiProvider
+		.streamSimple(model, context, {
+			apiKey: "fixture",
+			reasoning: "xhigh",
+			maxTokens: 128,
+			fetch: async (_url, init) => {
+				request = JSON.parse(String(init?.body));
+				return new Response(response({ content: "Poll completed." }), { headers: { "content-type": "text/event-stream" } });
+			},
+		})
+		.result();
+	strictEqual(result.stopReason, "stop");
+	ok(request);
+	const sentAssistant = request.messages.find((message) => message.role === "assistant");
+	ok(sentAssistant);
+	strictEqual(sentAssistant.reasoning_content, reasoning);
+	deepStrictEqual(sentAssistant.tool_calls, [
+		{
+			id,
+			type: "function",
+			function: { name: "poll_agent_events", arguments: JSON.stringify({ cursor: "same", wait_seconds: 20 }) },
+		},
+	]);
+	const sentResult = request.messages.find((message) => message.role === "tool");
+	ok(sentResult);
+	strictEqual(sentResult.tool_call_id, id);
+	strictEqual(sentResult.content, "No events; same cursor.");
+	deepStrictEqual(context, before);
+});

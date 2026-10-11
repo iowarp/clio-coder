@@ -11,6 +11,7 @@
  */
 
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { assistantModelLabel } from "../../core/assistant-model.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
@@ -23,7 +24,7 @@ const MAX_RESULT_CHARS = 8000;
 
 export type TranscriptBlock =
 	| { kind: "request"; text: string }
-	| { kind: "response"; text: string; reasoning: boolean }
+	| { kind: "response"; text: string; reasoning: boolean; model: string | null }
 	| { kind: "tool"; name: string; args: string; viaGateway: boolean }
 	| { kind: "result"; name: string; text: string; failed: boolean; viaGateway: boolean }
 	| { kind: "note"; title: string; text: string };
@@ -109,6 +110,14 @@ function transcriptBlocks(input: TranscriptExportInput): { blocks: TranscriptBlo
 				});
 			continue;
 		}
+		if (entry.kind === "modelChange") {
+			blocks.push({
+				kind: "note",
+				title: "Model changed",
+				text: `${entry.target ? `${entry.target} · ` : ""}${entry.provider} · ${entry.modelId}`,
+			});
+			continue;
+		}
 		if (entry.kind !== "message") continue;
 		const payload = isRecord(entry.payload) ? entry.payload : null;
 		if (entry.role === "user") {
@@ -120,7 +129,8 @@ function transcriptBlocks(input: TranscriptExportInput): { blocks: TranscriptBlo
 		}
 		if (entry.role === "assistant") {
 			const { text, reasoning } = messageText(entry);
-			if (text.trim().length > 0 || reasoning) blocks.push({ kind: "response", text, reasoning });
+			const model = assistantModelLabel(entry.payload);
+			if (text.trim().length > 0 || reasoning || model !== null) blocks.push({ kind: "response", text, reasoning, model });
 			continue;
 		}
 		const toolCallId = typeof payload?.toolCallId === "string" ? payload.toolCallId : null;
@@ -176,6 +186,7 @@ function renderTranscriptMarkdown(input: TranscriptExportInput): { text: string;
 		if (block.kind === "request") lines.push("## Request", "", fenced(block.text, "text"), "");
 		if (block.kind === "response") {
 			lines.push("## Clio Coder", "");
+			if (block.model !== null) lines.push(fenced(`Model: ${block.model}`, "text"), "");
 			if (block.reasoning) lines.push("_Reasoning was reported for this reply and is not included._", "");
 			if (block.text.trim().length > 0) lines.push(block.text, "");
 		}
@@ -222,6 +233,7 @@ function renderTranscriptHtml(input: TranscriptExportInput): { text: string; tur
 		if (block.kind === "request") body.push(`<h2>Request</h2><div class="request">${escapeHtml(block.text)}</div>`);
 		if (block.kind === "response") {
 			body.push("<h2>Clio Coder</h2>");
+			if (block.model !== null) body.push(`<p class="meta">Model: ${escapeHtml(block.model)}</p>`);
 			if (block.reasoning) body.push('<p class="meta">Reasoning was reported for this reply and is not included.</p>');
 			if (block.text.trim().length > 0) body.push(`<div class="response">${escapeHtml(block.text)}</div>`);
 		}

@@ -367,7 +367,7 @@ describe("mcp server trust", () => {
 		match(user.ok ? "" : user.message, /user-scope declaration; it is trusted by authorship/);
 		const badClass = trustMcpServer({ cwd: project, configDir, id: "files", actionClass: "root" as never });
 		ok(!badClass.ok);
-		match(badClass.ok ? "" : badClass.message, /actionClass must be one of read, execute, unknown/);
+		match(badClass.ok ? "" : badClass.message, /actionClass must be one of read, execute, destructive, unknown/);
 		writeProjectConfig(project, "version: 1\nservers:\n  - id: files\n    command: a b\n");
 		const broken = trustMcpServer({ cwd: project, configDir, id: "files" });
 		ok(!broken.ok);
