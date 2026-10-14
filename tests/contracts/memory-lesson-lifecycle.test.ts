@@ -169,7 +169,7 @@ async function closedSessionRuntime(source: CompletedLessonSource, complete: () 
 		cwd: () => cwd,
 		settings: () => ({ enabled: true, observations: { enabled: false }, maxOutputTokens: 512, timeoutMs: 5000 }),
 		lessonSource: () => null,
-		closedLessonSource: async (sessionId) => (sessionId === scope.sessionId ? { scope, source } : null),
+		closedLessonSource: (sessionId) => (sessionId === scope.sessionId ? { scope, source } : null),
 		source: () => null,
 		usableHistoryTokens: () => 0,
 		client: {
@@ -178,9 +178,6 @@ async function closedSessionRuntime(source: CompletedLessonSource, complete: () 
 			backgroundEndpointBusy: () => false,
 		},
 	});
-	// Discovery reads markers and ledgers asynchronously, then the queue is ready.
-	runtime.pendingWork(true);
-	await new Promise<void>((resolve) => setTimeout(resolve, 50));
 	return {
 		runtime,
 		marker: () => readRetention(marker),

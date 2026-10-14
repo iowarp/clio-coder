@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { MemoryCommitScope } from "./commit-state.js";
@@ -55,7 +55,7 @@ export interface MemoryRuntimeInfrastructure {
 	 * from its own ledger, or null for another workspace's or an unreadable one.
 	 * Session owns the reading.
 	 */
-	closedLessonSource?(sessionId: string): Promise<{ scope: MemoryCommitScope; source: CompletedLessonSource } | null>;
+	closedLessonSource?(sessionId: string): { scope: MemoryCommitScope; source: CompletedLessonSource } | null;
 	getLessonJudge?(): MemoryLessonJudge | null;
 	settings(): { enabled: boolean; observations: { enabled: boolean }; maxOutputTokens: number; timeoutMs: number };
 	/** Session owns active ancestry, original bytes and checkpoint lineage. */
@@ -129,8 +129,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	 * repeated the whole validator discovery the lesson would have saved.
 	 */
 	#closedQueue: { scope: MemoryCommitScope; source: CompletedLessonSource }[] = [];
-	#closedDiscovery: Promise<void> | null = null;
-	#discovering = false;
+	#closedDiscovered = false;
 	/** The job in flight belongs to a closed session; navigation does not cancel it. */
 	#orphanJob = false;
 	#promptSelection: MemoryPromptSelection | null = null;
@@ -361,15 +360,11 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	 * the routed client still yields when the memory endpoint is the turn's own.
 	 */
 	pendingWork(foreground = false): boolean {
-		// Interrupted retentions come before historical mining: a live cold start spent its
-		// first seconds re-mining the closed session while its finished-in-a-second retention waited.
-		if (this.#startDiscovery()) return true;
 		if (foreground) return this.#controller === null && this.#retentionWork(true) !== null;
 		return this.#controller !== null || this.#work() !== null || this.#retentionWork() !== null;
 	}
 
 	async runIdleStep(foreground = false): Promise<MemoryStepLaunchOutcome> {
-		if (this.#startDiscovery()) await this.#closedDiscovery;
 		if (this.#controller) return "none";
 		const work = foreground ? null : this.#work();
 		const infra = this.#infrastructure;
@@ -625,27 +620,18 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		};
 	}
 
-	/** Starts the once-per-process disk discovery; true while it is still reading. */
-	#startDiscovery(): boolean {
-		const infra = this.#infrastructure;
-		if (this.#closedDiscovery === null && infra?.settings().enabled && !this.#disposed) {
-			this.#discovering = true;
-			this.#closedDiscovery = this.#discoverInterrupted(infra)
-				.catch(() => {
-					// Discovery is best effort: history review still covers every past session.
-				})
-				.finally(() => {
-					this.#discovering = false;
-				});
-		}
-		return this.#discovering;
-	}
-
 	/** The next closed session whose retention a process started and never settled. */
 	#nextClosedSession(
 		infra: MemoryRuntimeInfrastructure,
 		currentSessionId: string | null,
 	): { scope: MemoryCommitScope; source: CompletedLessonSource } | null {
+		// Read synchronously, so the guardian's first step already sees interrupted retentions
+		// ahead of historical mining: a live cold start spent its first seconds re-mining the
+		// closed session while that session's one-second retention waited behind it.
+		if (!this.#closedDiscovered) {
+			this.#closedDiscovered = true;
+			this.#discoverInterrupted(infra, currentSessionId);
+		}
 		for (let next = this.#closedQueue.shift(); next; next = this.#closedQueue.shift()) {
 			if (next.scope.sessionId === currentSessionId) continue;
 			if (!retentionSettled(readRetention(retentionPath(infra.stateDir(), next.scope, next.source)))) return next;
@@ -658,12 +644,12 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	 * when that session belongs to this workspace and still ends on the task the
 	 * marker was written for. No count or age bound: each marker settles once.
 	 */
-	async #discoverInterrupted(infra: MemoryRuntimeInfrastructure): Promise<void> {
+	#discoverInterrupted(infra: MemoryRuntimeInfrastructure, currentSessionId: string | null): void {
 		if (!infra.closedLessonSource) return;
 		const directory = join(infra.stateDir(), "memory", "retention");
 		let names: string[];
 		try {
-			names = await readdir(directory);
+			names = readdirSync(directory);
 		} catch {
 			return; /* No retention ever ran here. */
 		}
@@ -672,12 +658,22 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			if (!name.endsWith(".json")) continue;
 			const marker = readRetention(join(directory, name));
 			const sessionId = (marker as { sessionId?: unknown } | null)?.sessionId;
-			if (marker && typeof sessionId === "string" && marker.revision && !retentionSettled(marker))
+			if (
+				marker &&
+				typeof sessionId === "string" &&
+				sessionId !== currentSessionId &&
+				marker.revision &&
+				!retentionSettled(marker)
+			)
 				unsettled.set(sessionId, marker.revision);
 		}
 		for (const [sessionId, revision] of unsettled) {
-			if (this.#disposed) return;
-			const closed = await infra.closedLessonSource(sessionId).catch(() => null);
+			let closed: ReturnType<NonNullable<MemoryRuntimeInfrastructure["closedLessonSource"]>> = null;
+			try {
+				closed = infra.closedLessonSource(sessionId);
+			} catch {
+				// An unreadable ledger leaves its task to history review.
+			}
 			if (closed && closed.source.revision === revision) this.#closedQueue.push(closed);
 		}
 	}

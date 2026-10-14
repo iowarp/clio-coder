@@ -1,6 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
@@ -2705,12 +2704,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		lessonSource: () => {
 			return memoryActiveEntries()?.lesson ?? null;
 		},
-		closedLessonSource: async (sessionId) => {
+		closedLessonSource: (sessionId) => {
 			const ledger = sessionLedgersForRoots(clioStateDir(), [memoryWorkspaceRoot()]).find(
 				(candidate) => candidate.sessionId === sessionId,
 			);
 			if (!ledger) return null;
-			const read = parseSessionEntries(await readFile(ledger.path, "utf8"), ledger.path);
+			const read = parseSessionEntries(readFileSync(ledger.path, "utf8"), ledger.path);
 			const active = filterEntriesToActivePath(read.entries, undefined);
 			// A restricted ledger is reviewed only under its own session's flow admission.
 			if (
