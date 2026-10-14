@@ -13,6 +13,7 @@ import {
 import type { MemoryRecord } from "../domains/memory/index.js";
 import {
 	approveMemoryRecord,
+	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
 	proposeTaskBankPromotion,
 	rejectMemoryRecord,
@@ -343,6 +344,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const openMemory = (): void => {
 		if (deps.transitions.state !== "closed" || !deps.getTaskMemoryStatus) return;
 		let records: MemoryRecord[] = [];
+		let recordsReadAt = performance.now();
 		try {
 			records = loadMemoryRecordsSync(deps.dataDir);
 		} catch (error) {
@@ -353,24 +355,51 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			);
 		}
 		deps.transitions.state = "memory";
-		deps.transitions.handle = openMemoryOverlayFactory(deps.tui, deps.getTaskMemoryStatus, () => records, {
-			onClose: deps.closeOverlay,
-			onPromote: async (entry, scope) => {
-				const meta = deps.getSessionMeta();
-				if (!meta) throw new Error("memory promotion requires an active session");
-				const result = await proposeTaskBankPromotion(deps.dataDir, { id: meta.id, cwd: meta.cwd }, entry, scope);
-				records = loadMemoryRecordsSync(deps.dataDir);
-				return result;
+		deps.transitions.handle = openMemoryOverlayFactory(
+			deps.tui,
+			deps.getTaskMemoryStatus,
+			() => {
+				// Background retention updates the store while inspection stays open; do one bounded read per refresh.
+				if (performance.now() - recordsReadAt >= 1000) {
+					recordsReadAt = performance.now();
+					try {
+						records = loadMemoryRecordsSync(deps.dataDir);
+					} catch {
+						records = []; /* A failed read must not present stale records as available. */
+					}
+				}
+				return records;
 			},
-			onReview: async (record, action) => {
-				const updated =
-					action === "approve"
-						? await approveMemoryRecord(deps.dataDir, record.id)
-						: await rejectMemoryRecord(deps.dataDir, record.id);
-				records = loadMemoryRecordsSync(deps.dataDir);
-				return updated;
+			{
+				activeRepository: () => {
+					const meta = deps.getSessionMeta();
+					return meta ? canonicalMemoryRepositoryIdentity(meta.cwd) : null;
+				},
+				activeRuntime: () => {
+					const settings = deps.getSettings?.();
+					const targetId = deps.getSessionMeta()?.target ?? settings?.chat.target;
+					const runtime = settings?.targets.find((target) => target.id === targetId)?.runtime;
+					return runtime ? { kind: "runtime", key: runtime } : null;
+				},
+				activeAgent: () => null,
+				onClose: deps.closeOverlay,
+				onPromote: async (entry, scope) => {
+					const meta = deps.getSessionMeta();
+					if (!meta) throw new Error("memory promotion requires an active session");
+					const result = await proposeTaskBankPromotion(deps.dataDir, { id: meta.id, cwd: meta.cwd }, entry, scope);
+					records = loadMemoryRecordsSync(deps.dataDir);
+					return result;
+				},
+				onReview: async (record, action) => {
+					const updated =
+						action === "approve"
+							? await approveMemoryRecord(deps.dataDir, record.id)
+							: await rejectMemoryRecord(deps.dataDir, record.id);
+					records = loadMemoryRecordsSync(deps.dataDir);
+					return updated;
+				},
 			},
-		});
+		);
 		deps.requestRender();
 	};
 

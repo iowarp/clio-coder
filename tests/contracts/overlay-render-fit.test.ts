@@ -70,11 +70,14 @@ test("memory history warnings survive 96-column rendering and cache changes with
 		() => {},
 		() => {},
 	);
+	// Retained telemetry belongs to Diagnostics; Lessons opens without the raw counters.
+	for (let index = 0; index < 3; index++) view.handleInput("\u001b[C");
+	view.handleInput("\u001b[B");
 	const unavailable = view.render(96);
-	match(unavailable.map(stripTerminalSequences).join("\n"), /partial retained spend.*unreadable.*unavailable/u);
+	match(unavailable.map(stripTerminalSequences).join(" "), /partial retained spend.*unreadable.*unavailable/u);
 	spend = { ...spend, readableFiles: 1, llmSteps: 312, totalTokens: 165_499, invalidRows: 1, missingTokenCalls: 2 };
 	const partial = view.render(96);
-	match(partial.map(stripTerminalSequences).join("\n"), /partial retained spend.*unreadable/u);
+	match(partial.map(stripTerminalSequences).join(" "), /partial retained spend.*unreadable/u);
 	spend = { ...spend, unreadableFiles: 0, invalidRows: 0, missingTokenCalls: 0 };
 	const recovered = view.render(96);
 	doesNotMatch(recovered.map(stripTerminalSequences).join("\n"), /partial|unreadable/u);
