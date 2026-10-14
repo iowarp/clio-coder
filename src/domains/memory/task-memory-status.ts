@@ -1,6 +1,8 @@
 import type { EffectiveMemoryRoute } from "../../core/session-routing.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
+import type { RetentionStatus } from "./completion-retention.js";
+import type { MemoryPromptSelection, ObservationStatus } from "./contract.js";
 import type { TaskMemorySnapshot } from "./task-bank.js";
 import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
 import type { TaskMemorySpendSummary } from "./task-memory-spend.js";
@@ -44,6 +46,9 @@ export type TaskMemoryGuardianState = "off" | "idle" | "reviewing" | "waiting-ca
 
 /** Read-only projection shared by operator surfaces. */
 export interface TaskMemoryOperatorStatus {
+	promptSelection?: MemoryPromptSelection | null;
+	observations?: ObservationStatus;
+	retention?: RetentionStatus;
 	enabled: boolean;
 	tier: TaskMemoryTier;
 	route?: EffectiveMemoryRoute;

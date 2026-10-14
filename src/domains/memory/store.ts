@@ -18,6 +18,13 @@ export interface MemoryStoreSnapshot {
 	records: MemoryRecord[];
 }
 
+/** Background writes share their caller's deadline and recheck authority after acquiring the lock. */
+export interface MemoryMutationOptions {
+	signal?: AbortSignal;
+	timeoutMs?: number;
+	isCurrent?: () => boolean;
+}
+
 /** Hash the exact bounded bytes read, so same-size external replacements invalidate selection. */
 export function readMemoryStoreSnapshot(dataDir: string): MemoryStoreSnapshot {
 	const path = memoryStorePath(dataDir);
@@ -123,12 +130,21 @@ function writeMemoryRecordsUnlocked(dataDir: string, records: ReadonlyArray<Memo
 export async function mutateMemoryRecords<T>(
 	dataDir: string,
 	mutate: (records: MemoryRecord[]) => { records: ReadonlyArray<MemoryRecord>; result: T } | { result: T },
+	options: MemoryMutationOptions = {},
 ): Promise<T> {
-	return withStateFileLock(memoryStorePath(dataDir), () => {
-		const outcome = mutate(loadMemoryRecordsSync(dataDir));
-		if ("records" in outcome) writeMemoryRecordsUnlocked(dataDir, outcome.records);
-		return outcome.result;
-	});
+	return withStateFileLock(
+		memoryStorePath(dataDir),
+		() => {
+			options.signal?.throwIfAborted();
+			if (options.isCurrent?.() === false) throw new Error("memory write lost content authority");
+			const outcome = mutate(loadMemoryRecordsSync(dataDir));
+			options.signal?.throwIfAborted();
+			if (options.isCurrent?.() === false) throw new Error("memory write lost content authority");
+			if ("records" in outcome) writeMemoryRecordsUnlocked(dataDir, outcome.records);
+			return outcome.result;
+		},
+		options,
+	);
 }
 
 /** Insert `record` unless the store already holds it or `findExisting` names an equivalent. */
@@ -136,12 +152,17 @@ export async function insertMemoryRecordIfAbsent(
 	dataDir: string,
 	record: MemoryRecord,
 	findExisting?: (records: ReadonlyArray<MemoryRecord>) => MemoryRecord | null,
+	options: MemoryMutationOptions = {},
 ): Promise<{ record: MemoryRecord; created: boolean }> {
-	return mutateMemoryRecords<{ record: MemoryRecord; created: boolean }>(dataDir, (records) => {
-		const existing = records.find((item) => item.id === record.id) ?? findExisting?.(records) ?? null;
-		if (existing !== null) return { result: { record: existing, created: false } };
-		return { records: [...records, record], result: { record, created: true } };
-	});
+	return mutateMemoryRecords<{ record: MemoryRecord; created: boolean }>(
+		dataDir,
+		(records) => {
+			const existing = records.find((item) => item.id === record.id) ?? findExisting?.(records) ?? null;
+			if (existing !== null) return { result: { record: existing, created: false } };
+			return { records: [...records, record], result: { record, created: true } };
+		},
+		options,
+	);
 }
 
 export async function updateMemoryRecord(

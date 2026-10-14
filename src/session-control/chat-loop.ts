@@ -1020,6 +1020,7 @@ export interface CreateChatLoopDeps {
 	 * composition; the loop owns the buffer the reminder lands in.
 	 */
 	registerDeferredReminderSink?: (sink: (message: string, isCurrent?: () => boolean) => void) => void;
+	onMemoryRequestSubmitted?: ((messages: readonly AgentMessage[], systemPrompt?: string) => void) | undefined;
 	/**
 	 * The same seam for findings that are for the operator rather than the model.
 	 * The watchdog uses it: its run settles after the turn it reviewed, and its
@@ -1618,6 +1619,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const turnRuntime = createTurnRuntime({
+		onMemoryRequestSubmitted: deps.onMemoryRequestSubmitted,
 		turnIdentity: () => submitGeneration,
 		interactiveGuidance: deps.interactiveGuidance === true,
 		state,

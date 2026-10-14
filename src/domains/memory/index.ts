@@ -9,6 +9,26 @@ export {
 	decideBackgroundStep,
 } from "./background-budget.js";
 export {
+	buildTurnPrefixUserText,
+	buildUserText,
+	COMPACTION_SYSTEM_PROMPT,
+	COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE,
+	COMPACTION_USER_PROMPT_TEMPLATE,
+} from "./compaction-prompts.js";
+export type { RetentionStatus } from "./completion-retention.js";
+export type {
+	MemoryCompactionOffer,
+	MemoryConsumptionReceipt,
+	MemoryContract,
+	MemoryObservationCommands,
+	MemoryOfferInput,
+	MemoryPromptSelection,
+	ObservationSource,
+	ObservationSourceUnit,
+	ObservationStatus,
+	SessionObservation,
+} from "./contract.js";
+export {
 	buildDispatchMemorySection,
 	DISPATCH_MEMORY_SCOPES,
 	type DispatchMemoryRoute,
@@ -22,9 +42,16 @@ export {
 	type MemoryObservationInput,
 	recordMemoryObservations,
 } from "./guardian-gate.js";
+export { completedLessonSource } from "./history-review.js";
+export { type LessonSubject, lessonSubject } from "./lesson-evidence.js";
+export type { MemoryLessonJudge } from "./lesson-judge.js";
+export { createMemoryLessonJudge } from "./lesson-judge.js";
+export { traceObservation } from "./observation-trace.js";
+export { isMemoryConsumptionReceipt, OBSERVATION_PROMPT } from "./observations.js";
 export {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
+	eligibleMemoryRecords,
 	estimateMemoryTokens,
 	pruneStaleMemory,
 	rejectMemoryRecord,
@@ -44,6 +71,7 @@ export {
 	proposeTaskBankPromotion,
 	validateMemoryScopeSelection,
 } from "./promotion.js";
+export { MEMORY_MAIN_PROMPT_SCOPES } from "./prompt-cache.js";
 export {
 	buildMemoryPromptSection,
 	MEMORY_PROMPT_DEFAULT_MAX_ITEMS,
@@ -73,6 +101,7 @@ export {
 	type PrecomputedMemoryRelevance,
 	rankMemoryByPrecomputedScore,
 } from "./relevance.js";
+export { MemoryRuntime } from "./runtime.js";
 export {
 	loadMemoryRecords,
 	loadMemoryRecordsSync,

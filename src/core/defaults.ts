@@ -583,6 +583,7 @@ export interface ChatSettings extends WorkerTarget {
 
 export interface MemorySettings {
 	enabled: boolean;
+	observations: { enabled: boolean };
 	target: string | null;
 	model: string | null;
 	cadenceToolCalls: number;
@@ -729,6 +730,7 @@ export const DEFAULT_SETTINGS = {
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
+			observations: { enabled: false },
 			target: null as string | null,
 			model: null as string | null,
 			cadenceToolCalls: 10,
@@ -919,6 +921,8 @@ context:
     threshold: 0.8
   memory:
     enabled: true
+    observations:
+      enabled: false
     target: null
     model: null
     cadenceToolCalls: 10

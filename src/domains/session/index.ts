@@ -108,6 +108,7 @@ export type {
 } from "./entries.js";
 export { isSessionEntry, isSessionHeader, SESSION_ENTRY_KINDS } from "./entries.js";
 export { SessionManifest } from "./manifest.js";
+export { observationCheckpoint, observationSourceUnits } from "./memory-source.js";
 export { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "./migrations/index.js";
 export type { ExpectedColdReasonCount, PromptCacheTelemetry } from "./prompt-cache.js";
 export {

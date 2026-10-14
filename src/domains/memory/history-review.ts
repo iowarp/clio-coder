@@ -22,10 +22,91 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { redactSecretString } from "../safety/redaction.js";
+import type { SessionEntry } from "../session/index.js";
 import type { SessionLedgerStat } from "../session/related-ledgers.js";
 import { sessionLedgersForRoots } from "../session/related-ledgers.js";
 import { recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
+import { observationDigest } from "./observations.js";
 import { relatedRepositoryRoots } from "./operations.js";
+
+export interface CompletedLessonSource {
+	readonly revision: string;
+	readonly refs: readonly string[];
+	readonly text: string;
+	readonly succeededCommands: ReadonlySet<string>;
+	readonly observedReads: ReadonlyMap<string, readonly string[]>;
+	/** Every exact shell command the task ran, in order, with its receipt; the host's own recipe evidence. */
+	readonly commandRuns: readonly CommandRun[];
+}
+
+export interface CommandRun {
+	readonly command: string;
+	readonly ok: boolean;
+	/** First diagnostic line of a failed run; empty for a success. */
+	readonly diagnostic: string;
+}
+
+/** Reuse history's evidence renderer for one completed task, including process-to-process resume. */
+export function completedLessonSource(entries: readonly SessionEntry[], root: string): CompletedLessonSource | null {
+	let end = entries.length;
+	// A recall-only new request must not hide the preceding task awaiting retention.
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry?.kind !== "message" || entry.role !== "user") continue;
+		const task = entries.slice(index, end);
+		const lastMessage = [...task].reverse().find((entry) => entry.kind === "message");
+		const terminal = record(lastMessage?.kind === "message" ? lastMessage.payload : null);
+		if (
+			task.some((entry) => entry.kind === "message" && entry.role === "tool_result") &&
+			lastMessage?.kind === "message" &&
+			lastMessage.role === "assistant" &&
+			(typeof terminal.text === "string" ? terminal.text.trim().length > 0 : Array.isArray(terminal.content)) &&
+			(terminal.stopReason === undefined || terminal.stopReason === "stop") &&
+			!(Array.isArray(terminal.content) && terminal.content.some((block) => record(block).type === "toolCall"))
+		) {
+			const source = renderCompletedLessonSource(task, root);
+			if (source) return source;
+		}
+		end = index;
+	}
+	return null;
+}
+
+function renderCompletedLessonSource(entries: readonly SessionEntry[], root: string): CompletedLessonSource | null {
+	const calls = new Map<string, PendingCall>();
+	const lines: string[] = [];
+	const refs: string[] = [];
+	const succeededCommands = new Set<string>();
+	const observedReads = new Map<string, string[]>();
+	const commandRuns: CommandRun[] = [];
+	let worthwhile = false;
+	let sourceReads = 0;
+	let chars = 0;
+	for (let index = 0; index < entries.length; index++) {
+		const entry = entries[index];
+		if (!entry) continue;
+		const rendered = renderEntry(entry as unknown as Record<string, unknown>, calls, new Set(), root, index);
+		if (!rendered) continue;
+		if (rendered.resolves !== null) calls.delete(rendered.resolves);
+		let full = false;
+		for (const item of rendered.items) {
+			// Receipts are evidence whether or not their line fits the model's excerpt.
+			if (item.run !== null) commandRuns.push(item.run);
+			if (item.succeeded !== null) succeededCommands.add(item.succeeded);
+			full ||= chars + item.line.length > 4000;
+			if (full) continue;
+			lines.push(item.line);
+			chars += item.line.length + 1;
+			refs.push(entry.turnId);
+			if (item.read !== null) recordObservedRead(observedReads, item.read.path, item.read.excerpt);
+			if (item.worthReview === "command") worthwhile = true;
+			if (item.worthReview === "source") sourceReads++;
+		}
+	}
+	if (calls.size > 0 || (!worthwhile && sourceReads < SOURCE_READS_WORTH_REVIEW)) return null;
+	const text = lines.join("\n");
+	return { revision: observationDigest([refs, text]), refs, text, succeededCommands, observedReads, commandRuns };
+}
 
 const CURSOR_FILE_VERSION = 1;
 /** Sessions remembered per repository; the oldest cursors fall off first. */
@@ -77,6 +158,8 @@ export interface HistoryReviewSlice {
 	succeededCommands: ReadonlySet<string>;
 	/** Excerpts of successful read results the excerpt showed, by repository-relative path. */
 	observedReads: ReadonlyMap<string, ReadonlyArray<string>>;
+	/** Exact shell commands the excerpt ran, in order, with their receipts. */
+	commandRuns?: ReadonlyArray<CommandRun>;
 	/** Applied by `commit` once the excerpt was actually reviewed. */
 	readonly advance: { key: string; cursor: SessionCursor; seenCalls: string[] };
 }
@@ -177,6 +260,7 @@ export function createHistoryReviewSource(input: {
 								text: read.text,
 								succeededCommands: read.succeededCommands,
 								observedReads: read.observedReads,
+								commandRuns: read.commandRuns,
 								advance: {
 									key: ledger.key,
 									cursor: { offset: read.endOffset, size: ledger.size },
@@ -220,6 +304,7 @@ interface SliceRead {
 	callIds: string[];
 	succeededCommands: Set<string>;
 	observedReads: Map<string, string[]>;
+	commandRuns: CommandRun[];
 }
 
 /**
@@ -242,6 +327,7 @@ function readSlice(
 		callIds: [],
 		succeededCommands: new Set(),
 		observedReads: new Map(),
+		commandRuns: [],
 	};
 	let buffer: Buffer;
 	try {
@@ -265,6 +351,7 @@ function readSlice(
 	const callIds: string[] = [];
 	const succeededCommands = new Set<string>();
 	const observedReads = new Map<string, string[]>();
+	const commandRuns: CommandRun[] = [];
 	let chars = 0;
 	let step = 0;
 	let commandWorth = false;
@@ -285,6 +372,7 @@ function readSlice(
 				callIds,
 				succeededCommands,
 				observedReads,
+				commandRuns,
 			};
 		}
 		const rendering = entry === null ? null : renderEntry(entry, calls, seen, ledger.root, line.start);
@@ -310,6 +398,7 @@ function readSlice(
 					chars += item.line.length + 1;
 				}
 				if (item.succeeded !== null) succeededCommands.add(item.succeeded);
+				if (item.run !== null) commandRuns.push(item.run);
 				if (item.read !== null) recordObservedRead(observedReads, item.read.path, item.read.excerpt);
 				if (item.worthReview === "command") commandWorth = true;
 				else if (item.worthReview === "source") sourceReads += 1;
@@ -346,6 +435,7 @@ function readSlice(
 		callIds,
 		succeededCommands,
 		observedReads,
+		commandRuns,
 	};
 }
 
@@ -374,6 +464,8 @@ interface RenderedItem {
 	read: { path: string; excerpt: string } | null;
 	/** `command` for a non-trivial shell command, `source` for a successful source read, else null. */
 	worthReview: "command" | "source" | null;
+	/** An exact shell command and its receipt; null for anything else or a command shown inexactly. */
+	run: CommandRun | null;
 }
 
 /** Source reads that make a stretch worth review on their own, without a shell command. */
@@ -401,6 +493,7 @@ function renderEntry(
 					succeeded: null,
 					read: null,
 					worthReview: null,
+					run: null,
 				},
 			],
 		};
@@ -458,12 +551,21 @@ function renderOutcome(
 	const command = name === ToolNames.Bash && typeof args.command === "string" ? args.command : null;
 	if (command === null) {
 		const detail = typeof args.path === "string" ? args.path : typeof args.pattern === "string" ? args.pattern : "";
-		const label = shortText(`${name}${detail ? ` ${redactSecretString(detail)}` : ""}`, COMMAND_MAX_CHARS);
+		// Repository-relative, as the lesson prompt asks: an absolute checkout path is
+		// noise that also made two runs of the same session read differently.
+		const shownDetail = typeof args.path === "string" ? (repositoryRelativePath(detail, [root]) ?? detail) : detail;
+		const label = shortText(`${name}${shownDetail ? ` ${redactSecretString(shownDetail)}` : ""}`, COMMAND_MAX_CHARS);
 		// A source investigation can teach a repository fact with no command
 		// behind it. A successful read carries a bounded excerpt so a lesson can
 		// quote it; the quote is verified against the checkout before it counts.
 		const path = !failed && name === ToolNames.Read && detail.length > 0 ? repositoryRelativePath(detail, [root]) : null;
-		const excerpt = path === null ? "" : shortText(redactSecretString(resultText(result)), READ_EXCERPT_MAX_CHARS);
+		// What Clio's own verification route answered is what makes the recipe a
+		// session found next worth keeping: a bare "verify" line hid that it found nothing.
+		const verdict =
+			name === ToolNames.Verify
+				? shortText(redactSecretString(resultText(result).split("\n")[0] ?? ""), DIAGNOSTIC_MAX_CHARS)
+				: "";
+		const excerpt = path === null ? verdict : shortText(redactSecretString(resultText(result)), READ_EXCERPT_MAX_CHARS);
 		return {
 			line: `${label}${failed ? " FAILED" : ""}${excerpt ? ` => ${excerpt}` : ""}`,
 			counted: true,
@@ -471,6 +573,7 @@ function renderOutcome(
 			succeeded: null,
 			read: path === null || excerpt.length === 0 ? null : { path, excerpt },
 			worthReview: !failed && detail.length > 0 ? "source" : null,
+			run: null,
 		};
 	}
 	const redacted = redactSecretString(command);
@@ -490,15 +593,18 @@ function renderOutcome(
 			succeeded: exact ? command : null,
 			read: null,
 			worthReview,
+			run: exact ? { command, ok: true, diagnostic: "" } : null,
 		};
 	}
+	const failure = shortText(redactSecretString(diagnostic(result)), DIAGNOSTIC_MAX_CHARS);
 	return {
-		line: `FAILED: ${shown} => ${shortText(redactSecretString(diagnostic(result)), DIAGNOSTIC_MAX_CHARS)}`,
+		line: `FAILED: ${shown} => ${failure}`,
 		counted: true,
 		callId: id,
 		succeeded: null,
 		read: null,
 		worthReview,
+		run: exact ? { command, ok: false, diagnostic: failure } : null,
 	};
 }
 

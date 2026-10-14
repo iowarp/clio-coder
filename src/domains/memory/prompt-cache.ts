@@ -1,12 +1,20 @@
 import { createHash } from "node:crypto";
+import type { MemoryPromptSelection } from "./contract.js";
 import { canonicalMemoryRepositoryIdentity, eligibleMemoryRecords } from "./operations.js";
-import { buildMemoryPromptSection, type MemoryPromptOptions, selectMemoryForPrompt } from "./prompt-section.js";
+import {
+	inspectMemoryPromptSelection,
+	MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET,
+	type MemoryPromptOptions,
+	renderMemoryPromptSection,
+	selectMemoryForPrompt,
+} from "./prompt-section.js";
 import {
 	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
 	MEMORY_RELEVANCE_VERSION,
 	type PrecomputedMemoryRelevance,
 } from "./relevance.js";
 import { readMemoryStoreSnapshot } from "./store.js";
+import type { MemoryScope } from "./types.js";
 
 /**
  * Key-sorted entries, so two passes that scored the same records the same way
@@ -37,6 +45,7 @@ export interface MemoryPromptRequest {
 }
 
 export interface MemoryPromptReaderOptions {
+	onSelection?: (selection: MemoryPromptSelection) => void;
 	getDataDir: () => string;
 	/** Explicit experiment only; production leaves relevance off. */
 	experimentalRelevance?: boolean;
@@ -78,13 +87,16 @@ export interface MemoryPromptReader {
 	rankingCandidates(request: MemoryPromptRequest): ReadonlyArray<MemoryRankingCandidate> | null;
 }
 
+/** Scopes the main agent's prompt draws from; other eligible scopes reach it only through memory_recall. */
+export const MEMORY_MAIN_PROMPT_SCOPES: ReadonlyArray<MemoryScope> = ["global", "repo", "runtime"];
+
 export function createMemoryPromptReader(options: MemoryPromptReaderOptions): MemoryPromptReader {
 	// Copy options now: mutable caller arrays must not silently change eligibility.
-	const selection = { ...options.selection, scopes: [...(options.selection?.scopes ?? ["global", "repo", "runtime"])] };
+	const selection = { ...options.selection, scopes: [...(options.selection?.scopes ?? MEMORY_MAIN_PROMPT_SCOPES)] };
 	const experimentalRelevance = options.experimentalRelevance === true;
 	const readStore = options.readStore ?? readMemoryStoreSnapshot;
 	let frame: { key: string; section: string } | null = null;
-	let selected: { key: string; section: string } | null = null;
+	let selected: { key: string; section: string; items: MemoryPromptSelection["items"] } | null = null;
 	let pinned: PinnedRanking | null = null;
 	const authorityOf = (request: MemoryPromptRequest) => {
 		const dataDir = options.getDataDir();
@@ -143,15 +155,22 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 				.digest("hex");
 			if (selected?.key === key) section = selected.section;
 			else {
-				const built = buildMemoryPromptSection(snapshot.records, {
+				const built = inspectMemoryPromptSelection(snapshot.records, {
 					...selection,
 					activeRepository,
 					activeRuntime: { kind: "runtime", key: request.runtimeId },
 					...(experimentalRelevance ? { relevance } : {}),
 					...(ranking === undefined ? {} : { precomputedRelevance: ranking }),
 				});
-				section = built.section;
-				selected = Object.freeze({ key, section });
+				section = renderMemoryPromptSection(built.records);
+				const records = new Map(snapshot.records.map((record) => [record.id, record]));
+				const items = built.decisions.flatMap((decision, index) => {
+					const record = records.get(decision.id);
+					return record
+						? [{ id: record.id, text: record.lesson, scope: record.scope, rank: index + 1, reason: decision.reason }]
+						: [];
+				});
+				selected = Object.freeze({ key, section, items });
 				if (ranking !== undefined) {
 					try {
 						options.onRankedSelection?.(built.records.map((record) => record.id));
@@ -159,6 +178,21 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 						// Observation must not cost the section it describes.
 					}
 				}
+			}
+			try {
+				options.onSelection?.({
+					turnId: request.turnId,
+					repository: activeRepository?.key ?? null,
+					runtime: request.runtimeId,
+					model: request.modelId,
+					preparedAt: new Date().toISOString(),
+					submittedAt: null,
+					section,
+					tokenBudget: selection.tokenBudget ?? MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET,
+					items: selected?.items ?? [],
+				});
+			} catch {
+				/* Inspection cannot change which facts the prompt carries. */
 			}
 		} catch {
 			// A failed fresh read revokes old approved content, including its cache.

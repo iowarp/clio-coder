@@ -62,15 +62,14 @@ test("source citations do not replace bank-entry citations for spontaneous remin
 	strictEqual(bank.snapshot().knowledge.length, 1, "phase-one capture survives the reminder gate");
 	const entry = bank.snapshot().knowledge[0];
 	strictEqual(entry?.injectionCount, 0);
-	const cited = await runTaskMemoryPolicy(
-		bank,
-		{
-			complete: async () => ({
-				text: `<operations>[]</operations><context_for_action>[${entry?.id}] Use the polynomial control.</context_for_action>`,
-			}),
-		},
-		input,
-	);
+	const reply = {
+		complete: async () => ({
+			text: `<operations>[]</operations><context_for_action>[${entry?.id}] Use the polynomial control.</context_for_action>`,
+		}),
+	};
+	// A cadence step speaks only for a fact recorded before the session last lost context.
+	strictEqual((await runTaskMemoryPolicy(bank, reply, input)).reason, "no_lost_context");
+	const cited = await runTaskMemoryPolicy(bank, reply, { ...input, contextLostAt: new Date().toISOString() });
 	strictEqual(cited.reason, "intervened");
 	strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 1);
 });

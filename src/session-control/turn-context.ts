@@ -1839,7 +1839,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 	const notifyMemoryCommit: TurnContext["notifyMemoryCommit"] = (commitId, kind, outcome) => {
 		const scope = bindMemoryScope();
-		if (scope) deps.memoryCommitBridge?.notifyContextCommitted({ ...scope, commitId, kind, outcome });
+		if (scope) {
+			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const summary = entries.find(
+				(entry) =>
+					entry.kind === "compactionSummary" &&
+					(entry.turnId === commitId || (kind === "continuity" && entry.continuity?.commit?.entry.turnId === commitId)),
+			);
+			deps.memoryCommitBridge?.notifyContextCommitted({
+				...scope,
+				commitId,
+				kind,
+				outcome,
+				...(summary?.kind === "compactionSummary" && summary.memoryReceipt ? { memoryReceipt: summary.memoryReceipt } : {}),
+			});
+		}
 	};
 	const installMemoryRestoration: TurnContext["installMemoryRestoration"] = (runtime, pendingText) => {
 		const bridge = deps.memoryCommitBridge;
@@ -1901,7 +1915,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		notifyMemoryCommit,
 		installMemoryRestoration,
 		prepareMemoryTurn(runtime, input): void {
-			bindMemoryScope();
+			const scope = bindMemoryScope();
+			const observations = deps.memoryCommitBridge?.observations;
+			if (scope && observations) {
+				const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+				// Only committed receipts matter here; the source units are memory's to build when it needs them.
+				const commits = entries.flatMap((entry) =>
+					entry.kind === "compactionSummary" &&
+					entry.memoryReceipt &&
+					(entry.continuity?.commit?.summaryRef !== entry.turnId ||
+						entries.some(
+							(candidate) =>
+								candidate.kind === "continuityCommit" && candidate.turnId === entry.continuity?.commit?.entry.turnId,
+						))
+						? [{ commitId: entry.turnId, receipt: entry.memoryReceipt }]
+						: [],
+				);
+				if (commits.length > 0) observations.recoverConsumption(scope, commits);
+			}
 			pendingUserImages = [...(input.images ?? [])];
 			if (input.continuation && memoryTurn !== null) return;
 			const sessionId = deps.session?.current()?.id ?? null;

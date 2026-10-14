@@ -118,7 +118,13 @@ Rules:
 - A lesson with neither omits both fields and waits for a person to review it.
 - Use repository-relative paths.
 - Do not repeat or reword a lesson already listed under "Lessons already kept".
-- At most two lessons. Most excerpts teach nothing new: answer <operations>[]</operations> then.`;
+- At most two lessons. Most excerpts teach nothing new: answer <operations>[]</operations> then.
+
+Example. A source read establishes that a repository's verification script requires APP_TEST_RUNTIME=local, then the excerpt shows ok: APP_TEST_RUNTIME=local node scripts/check.mjs. Keep the discovered setup recipe even when verification succeeded on the first attempt:
+<operations>[{"op":"save_lesson","content":"Repository verification requires \`APP_TEST_RUNTIME=local node scripts/check.mjs\`.","command":"APP_TEST_RUNTIME=local node scripts/check.mjs"}]</operations>
+<no_intervention/>
+
+Temporary task tags and progress in that same excerpt are separate facts and do not invalidate a reusable setup recipe.`;
 
 export interface MemoryInterventionPromptInput {
 	task: string;

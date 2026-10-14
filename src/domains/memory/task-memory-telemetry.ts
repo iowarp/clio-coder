@@ -33,6 +33,14 @@ export type TaskMemoryTelemetryTrigger =
 	| "tool_error_streak"
 	| "loop_signal"
 	| "repeated_failure"
+	/** An approved lesson from an earlier session was surfaced at the session's first workspace change. */
+	| "durable_lesson"
+	/** A failed command matched the program and file of a command an approved lesson quotes. */
+	| "durable_lesson_variant"
+	/** Clio's verify tool found no declared or derivable check while an approved lesson quotes a command. */
+	| "durable_lesson_verify"
+	/** The session read, changed or ran a repository file an approved lesson names. */
+	| "durable_lesson_subject"
 	| "turn_end"
 	| "post_compaction"
 	/** The idle guardian reviewed completed activity or repository history between turns. */
@@ -241,6 +249,10 @@ const TRIGGERS = new Set<TaskMemoryTelemetryTrigger>([
 	"tool_error_streak",
 	"loop_signal",
 	"repeated_failure",
+	"durable_lesson",
+	"durable_lesson_variant",
+	"durable_lesson_verify",
+	"durable_lesson_subject",
 	"turn_end",
 	"post_compaction",
 	"idle_review",
@@ -262,6 +274,7 @@ const REASONS = new Set<TaskMemoryPolicyReason>([
 	"uncited",
 	"invalid_path",
 	"resolved_failure",
+	"no_lost_context",
 	"over_budget",
 	"invalid_reminder",
 	"unparseable",

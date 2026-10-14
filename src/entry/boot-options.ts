@@ -32,6 +32,8 @@ export interface HeadlessRunDeadline {
 	expired(): boolean;
 	/** Disarm the timer; a run that settled on its own is no longer bounded. */
 	settle(): void;
+	/** Time left before the limit, so post-turn work never runs past `--timeout`. */
+	remainingMs?(): number;
 }
 
 export interface BootOptions {

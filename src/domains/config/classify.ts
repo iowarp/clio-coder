@@ -44,6 +44,7 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
+	"context.memory.observations.enabled",
 	"turnControl",
 	// Every site resolves its binding per call; consult alone is registered at
 	// startup and is listed as restart-required.

@@ -1,5 +1,6 @@
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import { traceObservation } from "../domains/memory/observation-trace.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
@@ -143,6 +144,7 @@ export type AssistantDeltaEvent =
 	  };
 
 export interface TurnRuntimeDeps {
+	onMemoryRequestSubmitted?: ((messages: readonly AgentMessage[], systemPrompt?: string) => void) | undefined;
 	turnIdentity?: () => unknown;
 	interactiveGuidance?: boolean;
 	state: ChatTurnState;
@@ -586,6 +588,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let apiCallStartedAt: number | null = null;
 		let apiCallFirstDeltaAt: number | null = null;
 		let unsettledSpendUsd = 0;
+		let admittedMessages: readonly AgentMessage[] = [];
+		let admittedSystemPrompt = "";
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
 		const currentRun = (): boolean => runIdentity === deps.turnIdentity?.();
@@ -686,9 +690,22 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed while waiting for budget approval." };
 				}
-				return deps.continuity?.admission() ?? { block: false };
+				traceObservation("actor-input", {
+					sessionId: deps.sessionId?.() ?? null,
+					target: target.target.id,
+					model: target.wireModelId,
+					window: view.effectiveWindow,
+					inputTokens: input,
+					outputTokens: output,
+					context: resolved,
+				});
+				const admission = deps.continuity?.admission() ?? { block: false };
+				admittedMessages = admission.block ? [] : resolved.messages;
+				admittedSystemPrompt = admission.block ? "" : (resolved.systemPrompt ?? "");
+				return admission;
 			},
 			onStreamInvocation: () => {
+				deps.onMemoryRequestSubmitted?.(admittedMessages, admittedSystemPrompt);
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				apiCallStartedAt = performance.now();
 				apiCallFirstDeltaAt = null;

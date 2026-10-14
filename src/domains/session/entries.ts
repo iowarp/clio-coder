@@ -1,3 +1,5 @@
+import type { MemoryConsumptionReceipt } from "../memory/contract.js";
+import { isMemoryConsumptionReceipt } from "../memory/observations.js";
 /**
  * Rich session entry union.
  *
@@ -293,6 +295,7 @@ export function latestSkillContextState(entries: ReadonlyArray<SessionEntry>): S
 }
 
 export interface CompactionSummaryEntry extends BaseSessionEntry {
+	memoryReceipt?: MemoryConsumptionReceipt;
 	kind: "compactionSummary";
 	skillContext?: SkillContextCheckpoint;
 	userContext?: PreservedUserContext;
@@ -879,6 +882,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isOptionalBoolean(v.isSplitTurn) &&
 				(v.skillContext === undefined || isSkillContextCheckpoint(v.skillContext)) &&
 				(v.userContext === undefined || isPreservedUserContext(v.userContext)) &&
+				(v.memoryReceipt === undefined || isMemoryConsumptionReceipt(v.memoryReceipt)) &&
 				(v.continuity === undefined || isContinuityCheckpointPayload(v.continuity))
 			);
 		case "sessionInfo":

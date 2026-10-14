@@ -87,7 +87,7 @@ export function repositoryRelativePath(path: string, roots: ReadonlyArray<string
 	return normalized;
 }
 
-function readInsideRoot(root: string, path: string): string | null {
+export function readInsideRoot(root: string, path: string): string | null {
 	try {
 		const realRoot = realpathSync(root);
 		const target = realpathSync(resolve(realRoot, path));
@@ -119,6 +119,45 @@ export function recordObservedRead(observed: Map<string, string[]>, path: string
 		const oldest = observed.keys().next().value;
 		if (oldest !== undefined) observed.delete(oldest);
 	}
+}
+
+/**
+ * What a lesson is about, read from its own text alone. A lesson kept on
+ * command evidence quotes its exact command in backticks, so a backticked span
+ * with more than one word is a command; a single backticked word is a name.
+ * Paths and environment variables are the other handles an operator searches
+ * by. No model reads this, and nothing outside the text is consulted.
+ */
+export interface LessonSubject {
+	readonly commands: readonly string[];
+	readonly paths: readonly string[];
+	readonly envVars: readonly string[];
+}
+
+export function lessonSubject(text: string): LessonSubject {
+	const spans = [...text.matchAll(/`([^`\n]+)`/gu)].map((match) => (match[1] ?? "").trim()).filter(Boolean);
+	// A span that opens with a flag (`--mode native`) is part of a command, not one.
+	const commands = unique(spans.filter((span) => /\s/u.test(span) && !span.startsWith("-")));
+	const prose = text.replace(/`[^`\n]*`/gu, " ");
+	const pathLike = /^(?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)+\/?$|^[\w@-]+\.[a-z][a-z0-9]{0,5}$/iu;
+	const paths = unique([
+		...spans.filter((span) => !/\s/u.test(span) && pathLike.test(span)),
+		...[...prose.matchAll(/(?:^|[\s(])((?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)+)/gu)].map((match) => match[1] ?? ""),
+		...commands.flatMap((command) => command.split(/\s+/u).filter((word) => pathLike.test(word))),
+	]).filter(Boolean);
+	// Assigned (`NAME=value`), expanded (`$NAME`) or named as one; an all-caps error code is neither.
+	const envVars = unique(
+		[
+			...text.matchAll(
+				/\b([A-Z][A-Z0-9_]{2,})=|\$\{?([A-Z][A-Z0-9_]{2,})|environment variable\s+`?([A-Z][A-Z0-9_]{2,})/gu,
+			),
+		].map((match) => match[1] ?? match[2] ?? match[3] ?? ""),
+	);
+	return { commands, paths, envVars };
+}
+
+function unique(values: readonly string[]): string[] {
+	return [...new Set(values)];
 }
 
 function collapse(value: string): string {

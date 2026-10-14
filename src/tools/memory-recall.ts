@@ -6,6 +6,7 @@ import type { MemoryRecord, MemoryRetrievalOptions } from "../domains/memory/typ
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 export interface MemoryRecallDeps {
+	onRecall?: (ids: readonly string[]) => void;
 	/** The live session task bank; null when the session has none. */
 	bank: () => TaskMemorySnapshot | null;
 	/** The durable store as read now. A throw reports as a tool error. */
@@ -43,6 +44,11 @@ export function createMemoryRecallTool(deps: MemoryRecallDeps): ToolSpec {
 					records: deps.records(),
 					eligibility: deps.eligibility(),
 				});
+				try {
+					deps.onRecall?.(hits.map((hit) => hit.id));
+				} catch {
+					/* Diagnostics never change recall results. */
+				}
 				return { kind: "ok", output: renderMemoryRecall(hits), details: { hits } };
 			} catch (err) {
 				return { kind: "error", message: `memory_recall: ${err instanceof Error ? err.message : String(err)}` };

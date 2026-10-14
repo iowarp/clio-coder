@@ -6,6 +6,9 @@ import { test } from "node:test";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { runTaskMemoryPolicy, type TaskMemoryPolicyInput } from "../../src/domains/memory/task-memory-policy.js";
 
+/** These cases test later gates, so every fact predates the last context loss. */
+const contextLostAt = "9999-01-01T00:00:00.000Z";
+
 const observedProvenance = {
 	producer: "code",
 	source: "canonical-result-disposition",
@@ -24,6 +27,7 @@ test("memory delivery validates workspace file references after applying bank op
 			deterministicTrigger: false,
 			maxTokens: 2000,
 			workspaceRoot,
+			contextLostAt,
 		};
 		const complete = (path: string) => ({
 			complete: async () => ({
@@ -71,6 +75,7 @@ test("a cited failed attempt stays silent after the same operation succeeds", as
 			],
 			deterministicTrigger: false,
 			maxTokens: 2000,
+			contextLostAt,
 		},
 	);
 	strictEqual(result.reason, "resolved_failure");
@@ -107,6 +112,7 @@ test("a cited failed attempt stays silent after the same operation succeeds", as
 			],
 			deterministicTrigger: false,
 			maxTokens: 2000,
+			contextLostAt,
 		},
 	);
 	strictEqual(repeated.reason, "intervened");

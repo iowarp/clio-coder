@@ -1,3 +1,15 @@
+// Direct modules, not the memory barrel: entries and compaction sit in the
+// interactive Stage 0 graph, and the barrel would pull in the whole runtime.
+import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
+import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
+import { traceObservation } from "../../memory/observation-trace.js";
+
+export {
+	COMPACTION_SYSTEM_PROMPT,
+	COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE,
+	COMPACTION_USER_PROMPT_TEMPLATE,
+} from "../../memory/compaction-prompts.js";
+
 import { normalizeTokenUsage } from "../../../core/token-split.js";
 import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
 /**
@@ -42,70 +54,6 @@ interface FileOperations {
 	read: Set<string>;
 	modified: Set<string>;
 }
-
-/**
- * Default system prompt for the summarization call. Kept inline so a
- * session with no `compaction.systemPrompt` override still produces stable
- * output. `COMPACTION_USER_PROMPT_TEMPLATE` is the structured format string
- * appended after the serialized conversation.
- */
-export const COMPACTION_SYSTEM_PROMPT = [
-	"You are a context summarization assistant.",
-	"Read the supplied conversation between a user and an AI coding assistant,",
-	"then emit a structured summary in the exact format shown in the user message.",
-	"Do NOT continue the conversation. Do NOT answer any questions in it.",
-].join(" ");
-
-export const COMPACTION_USER_PROMPT_TEMPLATE = `The messages above are a conversation to summarize. Create a structured context checkpoint another LLM will use to continue the work.
-
-When a <previous-context> block is present, it is the canonical checkpoint and retained suffix from an earlier compaction. Produce one cumulative replacement checkpoint: preserve every still-relevant constraint, decision, active skill, unresolved task, exact identifier, and file-state detail from that block while incorporating the newer conversation.
-
-Use this EXACT format:
-
-## Goal
-[What is the user trying to accomplish?]
-
-## Constraints & Preferences
-- [Any constraints, preferences, or requirements mentioned by the user]
-- [Or "(none)" if none were mentioned]
-
-## Progress
-### Done
-- [x] [Completed tasks/changes]
-
-### In Progress
-- [ ] [Current work]
-
-### Blocked
-- [Issues preventing progress, if any]
-
-## Key Decisions
-- **[Decision]**: [Brief rationale]
-
-## Next Steps
-1. [Ordered list of what should happen next]
-
-## Critical Context
-- [Any data, examples, or references needed to continue]
-- [Or "(none)" if not applicable]
-
-Keep each section concise. Preserve exact file paths, function names, and error messages.
-
-Copy every literal the user stated verbatim into Constraints & Preferences or Critical Context: codewords, passphrases, names, numbers, versions, paths, URLs, identifiers, and decisions the user made. This holds even when the assistant declined to store the value as memory or called it conversation-only. A literal the user asked to be remembered is never droppable.`;
-
-export const COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE = `The messages above are the beginning of the currently active user turn. They will be removed from the live context because the retained suffix starts in the middle of that turn.
-
-When a <previous-context> block is present, it is canonical context from an earlier compaction. Carry its still-relevant constraints, decisions, active skills, unresolved work, exact identifiers, and file state into this checkpoint in addition to the active-turn details below. Do not discard it as unrelated older history.
-
-In addition to that carried-forward context, summarize ONLY the active-turn details needed for another LLM to continue the same request:
-
-- the user's active request
-- tool calls already made in this turn
-- tool results, file paths, commands, errors, and decisions already observed
-- what should happen next
-- every literal the user stated verbatim (codewords, names, numbers, paths, decisions), including any the assistant declined to store as memory
-
-Do NOT answer the user. Do NOT summarize unrelated older history.`;
 
 /** Validate the history checkpoint, never the intentionally different split-turn prompt. */
 function validateHistorySummary(text: string): void {
@@ -152,6 +100,7 @@ export interface CompactionCallObservation {
 }
 
 export interface CompactInput {
+	offerMemory?: (slice: readonly SessionEntry[], ordinary: string) => MemoryCompactionOffer | null;
 	/** Admission after exact request-fit, before each provider call. */
 	beforeSummaryCall?: (() => void | Promise<void>) | undefined;
 	/** Price the proposed replay before persisting the operator-visible figures. */
@@ -208,6 +157,7 @@ export interface CompactInput {
 }
 
 export interface CompactResult {
+	memoryReceipt?: MemoryConsumptionReceipt;
 	/** The paid checkpoint was discarded because it would not reduce context. */
 	noGain?: boolean;
 	skillContext?: SkillContextCheckpoint;
@@ -545,31 +495,6 @@ export function captureSkillContext(
 	return verifiedSkillContextCheckpoint(checkpoint) ? checkpoint : undefined;
 }
 
-function buildPreviousContextPrefix(previousContextText: string): string {
-	const trimmed = previousContextText.trim();
-	return trimmed.length > 0 ? `<previous-context>\n${trimmed}\n</previous-context>\n\n` : "";
-}
-
-/**
- * Manual `/compact <text>` instructions. A trailing "Additional focus" line
- * after the split-turn template's "summarize ONLY" scope was ignored by a live
- * summarizer that dropped the session routes the operator asked it to keep
- * (DF-7), so they now outrank the template and name facts outside the transcript.
- */
-function buildOperatorInstructions(instructions?: string): string {
-	const focus = instructions?.trim();
-	if (!focus) return "";
-	return `\n\n<operator-instructions>\n${focus}\n</operator-instructions>\nThe operator wrote these instructions for this checkpoint. They override the default scope above: keep every fact, value and decision they name in the checkpoint, even when the conversation does not show it.`;
-}
-
-function buildUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
-	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
-}
-
-function buildTurnPrefixUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
-	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
-}
-
 /**
  * Recover the context that the latest compaction left live. A compaction
  * summary is appended after the retained suffix, so on the next pass that
@@ -885,6 +810,13 @@ async function runSummaryStream(
 	input.signal?.throwIfAborted();
 	await input.beforeSummaryCall?.();
 	const timestamp = new Date().toISOString();
+	traceObservation("compaction-input", {
+		systemPrompt,
+		userText,
+		maxTokens: maxTokens ?? null,
+		estimatedInput,
+		contextWindow,
+	});
 	let usage: unknown;
 	let reported: Record<string, unknown> = {};
 	let outcome: CompactionCallObservation["outcome"] = "error";
@@ -1074,14 +1006,40 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 					Math.max(1024, Math.floor(reserveTokens * 0.8)),
 				)
 			: undefined;
+	let memoryOffer: MemoryCompactionOffer | null = null;
+	const represent = (slice: readonly SessionEntry[], previous: string, split: boolean): string => {
+		const ordinary = serializeConversation(slice);
+		const build = (text: string) =>
+			split
+				? buildTurnPrefixUserText(text, input.instructions, previous)
+				: buildUserText(text, input.instructions, previous);
+		const raw = build(ordinary);
+		const offer = memoryOffer === null ? input.offerMemory?.(slice, ordinary) : null;
+		if (!offer?.isCurrent()) return raw;
+		const proposed = build(offer.text);
+		const price = (userText: string) =>
+			estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(userText)] });
+		const fits =
+			input.model.contextWindow > 0 &&
+			price(proposed) + Math.min(maxTokens ?? 1024, 1024) + 64 <= input.model.contextWindow;
+		if (!fits || price(proposed) >= price(raw)) return raw;
+		memoryOffer = offer;
+		offer.onUse?.();
+		traceObservation("offer-used", {
+			receipt: offer.receipt,
+			originalInputTokens: price(raw),
+			substitutedInputTokens: price(proposed),
+			retainedBoundary: firstKept?.turnId ?? null,
+		});
+		return proposed;
+	};
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
 	if (pre.length > 0 || summarizePriorSuffix) {
-		const conversationText = serializeConversation(summarizePriorSuffix ? priorSuffix : pre);
 		const previousText = summarizePriorSuffix
 			? serializeConversation(previousContextEntries.slice(0, 1))
 			: previousContextText;
-		const userText = buildUserText(conversationText, input.instructions, previousText);
+		const userText = represent(summarizePriorSuffix ? priorSuffix : pre, previousText, false);
 		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
 		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
@@ -1089,13 +1047,15 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		summaryParts.push(historySummary.text);
 	}
 	if (turnPrefix.length > 0) {
-		const conversationText = serializeConversation(turnPrefix);
-		const userText = buildTurnPrefixUserText(conversationText, input.instructions, previousContextText);
+		const userText = represent(turnPrefix, previousContextText, true);
 		const prefixSummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, prefixSummary.usage);
 		if (prefixSummary.text.length === 0) throw new Error("compaction returned an empty split-turn summary");
 		summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
 	}
+
+	if (memoryOffer !== null && !(memoryOffer as MemoryCompactionOffer).isCurrent())
+		throw new Error("memory offer became stale during compaction");
 
 	// A generated split summary is not a reliable copy of the active request.
 	// Keep it in the canonical checkpoint so live replay and resume agree.
@@ -1163,6 +1123,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		tokensBefore,
 		messagesSummarized: pre.length + turnPrefix.length + (summarizePriorSuffix ? priorSuffix.length : 0),
 		isSplitTurn: cut.isSplitTurn,
+		...(memoryOffer !== null ? { memoryReceipt: (memoryOffer as MemoryCompactionOffer).receipt } : {}),
 		...(usage !== undefined ? { usage } : {}),
 		...(skillContext !== undefined ? { skillContext } : {}),
 		...(userContext !== undefined ? { userContext } : {}),

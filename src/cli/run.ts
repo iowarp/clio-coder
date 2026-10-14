@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { BusChannels } from "../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
@@ -189,7 +190,13 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 		Math.ceil(seconds * 1000),
 	);
 	timer.unref();
-	return { seconds, expired: () => expired, settle: () => clearTimeout(timer) };
+	const endsAt = performance.now() + seconds * 1000;
+	return {
+		seconds,
+		expired: () => expired,
+		settle: () => clearTimeout(timer),
+		remainingMs: () => Math.max(0, endsAt - performance.now()),
+	};
 }
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {

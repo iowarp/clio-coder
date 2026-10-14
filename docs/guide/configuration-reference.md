@@ -105,6 +105,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.memory.trajectorySteps` | `8` | Integer at least 1. Recent steps considered. | next turn |
 | `context.memory.maxOutputTokens` | `2000` | Integer at least 1. Length cap of one memory note. | next turn |
 | `context.memory.timeoutMs` | `60000` | Integer at least 1. Wait for the memory model. | next turn |
+| `context.memory.observations.enabled` | `false` | Boolean. Prepares source-linked observation notes in the background that a later compaction may use in place of the history they cover. Needs `context.memory.enabled`. | next turn |
 | `context.semantic.enabled` | `false` | Boolean. Exposes the optional semantic search capability after model pins are configured. | next turn |
 | `context.semantic.target` | `null` | Qualified embedding target id; accepts the llama.cpp embedding or LiteLLM runtime. | next semantic request |
 | `context.semantic.model` | `null` | Exact embedding wire model id. | next semantic request |

@@ -37,6 +37,7 @@ import {
 	registerEngineFauxProvider,
 } from "./api-registry.js";
 import { engineModels } from "./models.js";
+import { deterministicSampling } from "./provider-payload.js";
 import type { EngineModel } from "./types.js";
 
 export { StringEnum };
@@ -60,6 +61,12 @@ export interface EngineTextCompletionInput {
 	signal: AbortSignal;
 	timeoutMs: number;
 	apiKey?: string;
+	/**
+	 * Runtime id to request reproducible sampling for (temperature 0, fixed
+	 * seed) where that runtime accepts it. A judgment call that flips on the
+	 * same input is a coin, not a decision.
+	 */
+	deterministicRuntimeId?: string;
 	/** Accounting only: observed before terminal errors throw, never carries response content. */
 	onUsage?: (observation: Pick<EngineTextCompletionResult, "usage" | "backend">) => void;
 }
@@ -101,6 +108,9 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			timeoutMs: input.timeoutMs,
 			...(input.thinkingLevel === "off" ? {} : { reasoning: input.thinkingLevel }),
 			...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+			...(input.deterministicRuntimeId === undefined
+				? {}
+				: deterministicSampling(input.model, input.deterministicRuntimeId)),
 		},
 	).catch((error: unknown) => {
 		input.onUsage?.({

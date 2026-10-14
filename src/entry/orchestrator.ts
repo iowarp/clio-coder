@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
@@ -98,11 +99,15 @@ import { createHistoryReviewSource } from "../domains/memory/history-review.js";
 import {
 	buildDispatchMemorySection,
 	canonicalMemoryRepositoryIdentity,
+	completedLessonSource,
+	createMemoryLessonJudge,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
 	loadMemoryRecordsSync,
 	type MemoryGateOutcome,
 	type MemoryRecord,
+	MemoryRuntime,
+	OBSERVATION_PROMPT,
 	proposeInjectedTaskMemory,
 	readTaskMemorySpendSummary,
 	recordMemoryObservations,
@@ -118,7 +123,6 @@ import {
 import { eligibleMemoryRecords } from "../domains/memory/operations.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { createMemoryRelevance } from "../domains/memory/relevance-source.js";
-import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import {
 	deleteTaskBankSnapshot,
 	loadTaskBankSnapshot,
@@ -152,9 +156,7 @@ import {
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
 import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/memory-guardian.js";
-import { createMemoryGuardian } from "../domains/middleware/memory-guardian.js";
 import {
-	createMemoryInterventionRegistration,
 	MEMORY_INTERVENTION_ACTIVITY_LIMIT,
 	type MemoryDeliveryOutcome,
 	type MemoryKnowledgeReview,
@@ -241,18 +243,24 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
+import { serializeConversation } from "../domains/session/compaction/branch-summary.js";
 import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
 import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
-import { ceilChars } from "../domains/session/context-accounting.js";
+import { ceilChars, estimateAgentContextTokens } from "../domains/session/context-accounting.js";
 import { continuityPayloadFromFold } from "../domains/session/continuity/carry.js";
 import { continuityProjectionTokens, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
-import { SessionDomainModule } from "../domains/session/index.js";
+import {
+	observationCheckpoint,
+	observationSourceUnits,
+	parseSessionEntries,
+	SessionDomainModule,
+} from "../domains/session/index.js";
 import {
 	clearPendingProtectedArtifact,
 	reconcilePendingProtectedArtifacts,
@@ -262,6 +270,7 @@ import {
 	protectedArtifactEntryFromArtifact,
 	protectedArtifactStateFromSessionEntries,
 } from "../domains/session/protected-artifacts.js";
+import { sessionLedgersForRoots } from "../domains/session/related-ledgers.js";
 import { resumedSessionRoute } from "../domains/session/resumed-route.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
@@ -674,6 +683,24 @@ function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: st
 	return { model, refined };
 }
 
+/** A bounded preparation capacity when no foreground actor budget exists. Never activates actor context. */
+function memoryObservationCapacity(providers: ProvidersContract, settings: Readonly<ClioSettings>): number {
+	const route = resolveMemoryRoute(settings);
+	if (!route.target || !route.model) return 0;
+	try {
+		const { model } = prepareBackgroundMemoryModel(providers, route.target, route.model);
+		return Math.max(
+			0,
+			model.contextWindow -
+				estimateAgentContextTokens({ systemPrompt: OBSERVATION_PROMPT, messages: [] }) -
+				settings.context.memory.maxOutputTokens -
+				64,
+		);
+	} catch {
+		return 0; /* An unknown route preserves raw-history fallback. */
+	}
+}
+
 /**
  * One tool-free completion for a System One engine that reads an ordinary chat
  * target, for the runtimes that have no chat-completions wire of their own
@@ -817,6 +844,14 @@ function prepareBackgroundMemoryRoute(
 				if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== endpointKey) {
 					throw new Error("background memory target changed during preparation");
 				}
+				if (request.purpose) {
+					const inputTokens = estimateAgentContextTokens({
+						systemPrompt: request.systemPrompt,
+						messages: [{ role: "user", content: [{ type: "text", text: request.userPrompt }], timestamp: Date.now() }],
+					});
+					if (!(model.contextWindow > 0) || inputTokens + request.maxTokens + 64 > model.contextWindow)
+						throw new TaskMemoryBudgetSkipError("time_budget");
+				}
 				const costProvenance = normalizeCostProvenance(refined.costProvenance);
 				const apiKey = targetRequiresAuth(refined.target, refined.runtime)
 					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
@@ -861,6 +896,10 @@ function prepareBackgroundMemoryRoute(
 							// reasons anyway still works: `completeEngineText` keeps only text
 							// blocks, and the memory output budget leaves room for the preamble.
 							thinkingLevel: "off",
+							// Memory decides what to keep; the same completed task must get the same answer.
+							// A live Ornith review retained a validator recipe in one run and abstained on
+							// the identical trajectory in the next, at the server's default temperature.
+							deterministicRuntimeId: refined.runtimeId,
 							signal: request.signal,
 							timeoutMs: decision.timeoutMs,
 							onUsage: (observation) => {
@@ -1272,6 +1311,7 @@ async function runCompactionFlow(
 		getCeilingUsd?: () => number;
 		/** Information-flow admission of the summarizer request; the block reason or null. */
 		admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
+		memory?: MemoryRuntime;
 	},
 ): Promise<CompactResult | null> {
 	const meta = session.current();
@@ -1350,6 +1390,17 @@ async function runCompactionFlow(
 	try {
 		result = await compact({
 			entries,
+			offerMemory: (slice, ordinary) => {
+				const scope = admission?.memory?.observationStatus().scope;
+				if (!scope) return null;
+				return (
+					admission?.memory?.offerCompaction({
+						source: { ...scope, checkpoint: observationCheckpoint(entries), units: observationSourceUnits(slice) },
+						ordinary,
+						serialize: (refs) => serializeConversation(slice.filter((entry) => refs.includes(entry.turnId))),
+					}) ?? null
+				);
+			},
 			continuityNote,
 			...budget,
 			beforeSummaryCall: async () => {
@@ -1435,6 +1486,7 @@ async function runCompactionFlow(
 		summary: result.summary,
 		...(result.skillContext ? { skillContext: result.skillContext } : {}),
 		...(result.userContext ? { userContext: result.userContext } : {}),
+		...(result.memoryReceipt ? { memoryReceipt: result.memoryReceipt } : {}),
 		tokensBefore: result.tokensBefore,
 		firstKeptTurnId: result.firstKeptTurnId ?? "",
 		messagesSummarized: result.messagesSummarized,
@@ -1521,6 +1573,7 @@ export function createProductionAutoCompact(
 		getCeilingUsd?: () => number;
 		/** Information-flow admission of the summarizer request; the block reason or null. */
 		admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
+		memory?: MemoryRuntime;
 	},
 ): (
 	instructions?: string,
@@ -1805,6 +1858,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const muxEnablement = resolvePanesEnablement(options.panes, options.startupSettings?.interface.panes.enabled);
 	const withPanes = muxInteractive && muxEnablement !== "off" ? await import("./with-panes.js") : null;
 
+	const memoryOwner = new MemoryRuntime();
+	let getMemoryLessonJudge: (() => ReturnType<typeof createMemoryLessonJudge> | null) | null = null;
 	const result = await loadDomains(
 		[
 			options.startupSettings
@@ -1839,6 +1894,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 			AgentsDomainModule,
 			MiddlewareDomainModule,
+			{
+				manifest: { name: "memory", dependsOn: [] },
+				createExtension: () => ({
+					contract: memoryOwner.contract,
+					extension: { start: () => {}, stop: () => memoryOwner.dispose() },
+				}),
+			},
 			SessionDomainModule,
 			ObservabilityDomainModule,
 			SchedulingDomainModule,
@@ -2198,7 +2260,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// static routing line and tasks hint ask for the same board; battery-tested
 	// local models only comply when the instruction rides the user message.
 	middleware.registerHook(createTaskBoardReminderRegistration());
-	const taskMemoryBank = new TaskMemoryBank();
+	const taskMemoryBank = memoryOwner.bank;
 	const memorySettings = (config?.get() ?? readSettings()).context.memory;
 	// Bound late: the registration is built here, but the buffer a deferred
 	// reminder lands in belongs to the chat loop that has not been composed yet.
@@ -2443,8 +2505,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * start it.
 	 */
 	const currentGuardianState = (): MemoryGuardianState => {
-		const state = memoryGuardian?.state() ?? "off";
-		return state !== "off" && memoryIntervention.stepInFlight() ? "reviewing" : state;
+		const state = memoryOwner.contract.guardianState();
+		return state !== "off" && memoryOwner.contract.interventionStatus().stepInFlight ? "reviewing" : state;
 	};
 	const publishGuardianState = (): void => {
 		const state = currentGuardianState();
@@ -2452,8 +2514,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		publishedGuardianState = state;
 		bus.emit(BusChannels.MemoryGuardianChanged, { sessionId: session?.current()?.id ?? null, state });
 	};
-	const memoryIntervention = createMemoryInterventionRegistration({
-		bank: taskMemoryBank,
+	const memoryIntervention = memoryOwner.createIntervention({
 		telemetry: memoryTelemetry,
 		workspaceRoot: memoryWorkspaceRoot,
 		onTurnBoundary: (kind) => memoryGuardian?.wake(kind === "end" ? "turn-end" : "turn-start"),
@@ -2498,6 +2559,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			)
 				.then(reportGateOutcome)
 				.catch(reportMemoryStoreFailure("retired lessons not recorded"));
+		},
+		onDurableLessonOutcomes: ({ sessionId, delivered, held }) => {
+			if (sessionId === undefined) return;
+			void recordMemoryObservations(clioDataDir(), [
+				...delivered.map((memoryId) => ({ memoryId, sessionId, kind: "delivered" as const })),
+				...held.map((memoryId) => ({ memoryId, sessionId, kind: "held" as const })),
+			])
+				.then(reportGateOutcome)
+				.catch(reportMemoryStoreFailure("durable lesson outcomes not recorded"));
 		},
 		onScopeEnd: ({ sessionId, lessons }) => {
 			// A lesson a later step already kept is in the store; the rest are filed
@@ -2553,7 +2623,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const route = resolveMemoryRoute(settings);
 		return settings.context.memory.enabled && Boolean(route.target?.trim()) && Boolean(route.model?.trim());
 	};
-	memoryGuardian = createMemoryGuardian({
+	memoryGuardian = memoryOwner.startGuardian({
 		// A headless run exits after its turn, so there is no idle time to use.
 		enabled: () => options.headless === undefined && memoryRouteAvailable(),
 		isForegroundActive: () => isChatStreaming(),
@@ -2584,6 +2654,114 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		telemetry: historyReviews.telemetry,
 		onStateChange: publishGuardianState,
 	});
+	let memoryProjection: {
+		sessionId: string;
+		pinned: string | null;
+		entries: readonly SessionEntry[];
+		active: readonly SessionEntry[];
+		lesson: ReturnType<typeof completedLessonSource>;
+		observation: {
+			checkpoint: ReturnType<typeof observationCheckpoint>;
+			units: ReturnType<typeof observationSourceUnits>;
+		};
+	} | null = null;
+	const memoryActiveEntries = () => {
+		const meta = session?.current();
+		if (!meta || !session) return null;
+		const entries = session.readEntries();
+		const pinned = meta.pinnedLeafTurnId ?? null;
+		// Session's frozen snapshot changes on append, replacement or external writes. A /tree pin is separate authority.
+		if (
+			memoryProjection?.entries !== entries ||
+			memoryProjection.sessionId !== meta.id ||
+			memoryProjection.pinned !== pinned
+		) {
+			const active = filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined);
+			const checkpointIndex = active.reduce(
+				(last, entry, index) => (entry.kind === "compactionSummary" ? index : last),
+				-1,
+			);
+			memoryProjection = {
+				sessionId: meta.id,
+				pinned,
+				entries,
+				active,
+				lesson: completedLessonSource(active, meta.cwd),
+				observation: {
+					checkpoint: observationCheckpoint(active),
+					units: observationSourceUnits(active.slice(checkpointIndex + 1)),
+				},
+			};
+		}
+		return memoryProjection;
+	};
+	memoryOwner.configure({
+		stateDir: clioStateDir,
+		dataDir: clioDataDir,
+		cwd: memoryWorkspaceRoot,
+		getLessonJudge: () => getMemoryLessonJudge?.() ?? null,
+		observerHistoryTokens: () =>
+			memoryObservationCapacity(providers, effectiveSettingsForDispatch?.() ?? getCurrentSettings()),
+		lessonSource: () => {
+			return memoryActiveEntries()?.lesson ?? null;
+		},
+		closedLessonSource: async (sessionId) => {
+			const ledger = sessionLedgersForRoots(clioStateDir(), [memoryWorkspaceRoot()]).find(
+				(candidate) => candidate.sessionId === sessionId,
+			);
+			if (!ledger) return null;
+			const read = parseSessionEntries(await readFile(ledger.path, "utf8"), ledger.path);
+			const active = filterEntriesToActivePath(read.entries, undefined);
+			// A restricted ledger is reviewed only under its own session's flow admission.
+			if (
+				read.errors.length > 0 ||
+				active.some((entry) => entry.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE)
+			)
+				return null;
+			const source = completedLessonSource(active, ledger.root);
+			return source ? { scope: { sessionId, branchAnchorTurnId: active.at(-1)?.turnId ?? null }, source } : null;
+		},
+
+		settings: () => effectiveSettingsForDispatch?.().context.memory ?? memorySettings,
+		source: () => {
+			const meta = session?.current();
+			const authority = memoryIntervention.captureMemoryAuthority();
+			if (!meta || !session || !authority || authority.scope.sessionId !== meta.id) return null;
+			const projection = memoryActiveEntries();
+			if (!projection) return null;
+			return {
+				...authority.scope,
+				...projection.observation,
+			};
+		},
+		usableHistoryTokens: () => {
+			const budget = chat.inspectLiveBudget();
+			if (
+				budget.status !== "available" ||
+				budget.view.historical ||
+				!budget.view.breakdown ||
+				budget.view.outputReserveTokens === null
+			)
+				return 0;
+			const view = budget.view;
+			return (
+				(view.effectiveWindow ?? 0) -
+				(view.outputReserveTokens ?? 0) -
+				(view.breakdown?.systemPromptTokens ?? 0) -
+				(view.breakdown?.toolSchemaTokens ?? 0) -
+				64
+			);
+		},
+		client: createBackgroundMemoryRouting(
+			providers,
+			() => effectiveSettingsForDispatch?.(),
+			bus,
+			admitMemoryFlow,
+			false,
+			backgroundSessionSpendUsd,
+		),
+		captureStepUsage: captureBackgroundMemoryUsage,
+	});
 	const guardedMemory = memoryGuardian;
 	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
 	const unsubscribeGuardianWakes = [
@@ -2591,32 +2769,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus.on(BusChannels.ConfigHotReload, () => guardedMemory.wake("settings")),
 		bus.on(BusChannels.ConfigNextTurn, () => guardedMemory.wake("settings")),
 	];
-	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(
-		bus,
-		{
-			reset: () => {
-				memoryIntervention.reset();
-				guardedMemory.reset();
-			},
-			dispose: () => {
-				memoryIntervention.dispose();
-				guardedMemory.dispose();
-			},
+	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(bus, memoryOwner, {
+		save: (sessionId) => {
+			saveTaskBankSnapshot(clioStateDir(), sessionId, taskMemoryBank.snapshot());
 		},
-		{
-			save: (sessionId) => {
-				saveTaskBankSnapshot(clioStateDir(), sessionId, taskMemoryBank.snapshot());
-			},
-			restore: (sessionId) => {
-				const snapshot = loadTaskBankSnapshot(clioStateDir(), sessionId);
-				// Consumed on read: a crash after `/tree` cleared the bank must not find
-				// this snapshot again on the next resume.
-				deleteTaskBankSnapshot(clioStateDir(), sessionId);
-				if (snapshot !== null && getCurrentMemoryEnabled()) taskMemoryBank.restore(snapshot);
-			},
-			discard: (sessionId) => deleteTaskBankSnapshot(clioStateDir(), sessionId),
+		restore: (sessionId) => {
+			const snapshot = loadTaskBankSnapshot(clioStateDir(), sessionId);
+			// Consumed on read: a crash after `/tree` cleared the bank must not find
+			// this snapshot again on the next resume.
+			deleteTaskBankSnapshot(clioStateDir(), sessionId);
+			if (snapshot !== null && getCurrentMemoryEnabled()) taskMemoryBank.restore(snapshot);
 		},
-	);
+		discard: (sessionId) => deleteTaskBankSnapshot(clioStateDir(), sessionId),
+	});
 	termination.onDrain(() => {
 		unsubscribeMemoryLoop();
 		for (const off of unsubscribeGuardianWakes) off();
@@ -3187,6 +3352,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return systemOneCore.run(site, object, merged);
 		},
 	};
+	getMemoryLessonJudge = () => (systemOne.bound("consult") ? createMemoryLessonJudge(systemOne) : null);
 	// How each approval the main agent parked was answered, joined to the card's
 	// advisory and the yolo gate by the request id both carried.
 	termination.onDrain(
@@ -3220,6 +3386,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let lastMemoryPromptRuntimeId: string | undefined;
 	const memoryReader = createMemoryPromptReader({
 		getDataDir: clioDataDir,
+		onSelection: (selection) => memoryOwner.recordPromptSelection(selection),
 		// A section built under a ranking joins each record it admitted to that
 		// ranking's call, so the dataset can tell a useful ordering from a neutral one.
 		onRankedSelection: (ids) => {
@@ -3386,6 +3553,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Read-only recall over the stores the main prompt draws from, under the
 		// same repository and runtime gates; the agent scope stays with workers.
 		memoryRecall: {
+			onRecall: (ids) => memoryOwner.recordRecall(ids),
 			bank: () => taskMemoryBank.snapshot(),
 			records: () => loadMemoryRecordsSync(clioDataDir()),
 			eligibility: () => {
@@ -4150,6 +4318,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			});
 		},
 		memoryCommitBridge: memoryIntervention,
+		onMemoryRequestSubmitted: (messages, systemPrompt) =>
+			memoryOwner.recordSubmittedMemoryContext(messages, systemPrompt),
 		registerDeferredReminderSink: (sink) => {
 			deferredMemoryReminderSink = sink;
 		},
@@ -4167,6 +4337,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						headless: options.headless !== undefined,
 						getCeilingUsd: () => getCurrentSettings().safety.limits.sessionCostUsd,
 						admitFlow: admitModelFlow,
+						memory: memoryOwner,
 					}),
 				}
 			: {}),
@@ -4593,6 +4764,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							tier: taskMemoryTier(),
 							bank: taskMemoryBank.snapshot(),
 							stepInFlight: memoryIntervention.stepInFlight(),
+							observations: memoryOwner.contract.observationStatus(),
+							retention: memoryOwner.contract.retentionStatus(),
 						},
 					};
 				},
@@ -5050,6 +5223,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				scopeNotices: (listener) => bus.on(BusChannels.DispatchScopeNotice, listener),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
+			if (code === 0) {
+				const deadline = options.headless.deadline;
+				await memoryOwner.retainTask(
+					"headless",
+					deadline?.expired() ? 0 : Math.min(5000, deadline?.remainingMs?.() ?? 5000),
+				);
+				const meta = session?.current();
+				if (meta) saveTaskBankSnapshot(clioStateDir(), meta.id, taskMemoryBank.snapshot());
+			}
 			await termination.shutdown(code);
 			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 		} finally {
@@ -5146,7 +5328,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		userTasks,
 		getTaskMemoryStatus: () => {
 			const settings = getCurrentSettings();
-			const bank = taskMemoryBank.snapshot();
+			const bank = memoryOwner.contract.taskSnapshot();
 			return {
 				enabled: settings.context.memory.enabled,
 				tier: taskMemoryTier(),
@@ -5154,12 +5336,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				size: taskMemoryBankSize(bank),
 				bank,
 				...projectTaskMemoryActivity(
-					{ activity: memoryIntervention.recentActivity(), lastDecision: memoryIntervention.lastDecision() },
+					memoryOwner.contract.interventionStatus(),
 					historyReviews.recent(session?.current()?.id ?? null),
 					MEMORY_INTERVENTION_ACTIVITY_LIMIT,
 				),
 				stepInFlight: memoryIntervention.stepInFlight(),
 				guardian: currentGuardianState(),
+				observations: memoryOwner.contract.observationStatus(),
+				retention: memoryOwner.contract.retentionStatus(),
+				promptSelection: memoryOwner.contract.promptSelection?.() ?? null,
 				// Fold available retained telemetry across sessions; rotation bounds this history.
 				spend: readTaskMemorySpendSummary(clioStateDir()),
 			};

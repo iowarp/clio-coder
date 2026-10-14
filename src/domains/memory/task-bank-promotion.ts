@@ -15,10 +15,14 @@
  * made by hand from `/memory`.
  */
 
-import { canonicalMemoryRepositoryIdentity } from "./operations.js";
-import { proposeMemoryPromotion } from "./promotion.js";
+import { applyMemoryGate } from "./guardian-gate.js";
+import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord } from "./operations.js";
+import { memoryRecordFromPromotion } from "./promotion.js";
+import type { MemoryMutationOptions } from "./store.js";
+import { mutateMemoryRecords } from "./store.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import type { MemoryRecord, MemoryRepositoryIdentity } from "./types.js";
+import { MEMORY_OBSERVATIONS_MAX } from "./types.js";
 
 export interface ProposeInjectedTaskMemoryInput {
 	/** Session the reminder was produced in. Without one there is no provenance to file under. */
@@ -27,6 +31,10 @@ export interface ProposeInjectedTaskMemoryInput {
 	cwd: string;
 	entries: ReadonlyArray<TaskMemoryEntry>;
 	now?: Date;
+	writeOptions?: MemoryMutationOptions;
+	/** Only a caller that checked concrete source evidence may report a held lesson. */
+	observation?: "held";
+	heldEntryIds?: ReadonlySet<string>;
 }
 
 export interface ProposeInjectedTaskMemoryResult {
@@ -48,25 +56,59 @@ export async function proposeInjectedTaskMemory(
 	// scope, which broadens applicability to every future session and is a claim
 	// a background step may never make on the operator's behalf.
 	if (sessionId === null || sessionId.length === 0 || repository === null) return result;
+	const prepared: { entry: TaskMemoryEntry; record: MemoryRecord }[] = [];
 	for (const entry of input.entries) {
 		if (entry.kind === "status") continue;
 		try {
-			const { record } = await proposeMemoryPromotion(
-				dataDir,
+			const record = memoryRecordFromPromotion(
 				{ kind: "task-bank-entry", sessionId, evidenceRefs: [`session:${sessionId}`], entry },
 				{ scope: "repo", repository },
 				input.now ?? new Date(),
-				// Only lessons are matched, and only on identical text. Task facts and
-				// attempt logs belong to their session.
-				entry.durable === true ? (records) => similarRepositoryLesson(records, repository, entry.content) : undefined,
 			);
-			result.records.push(record);
-			result.recordByEntry.set(entry.id, record);
+			prepared.push({ entry, record });
 		} catch (error) {
+			input.writeOptions?.signal?.throwIfAborted();
+			if (input.writeOptions?.isCurrent?.() === false) throw error;
 			result.errors.push(`${entry.id}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
-	return result;
+	if (!prepared.length) return result;
+	return mutateMemoryRecords(
+		dataDir,
+		(records) => {
+			const updated = [...records];
+			let changed = false;
+			const at = (input.now ?? new Date()).toISOString();
+			for (const item of prepared) {
+				const existing =
+					updated.find((record) => record.id === item.record.id) ??
+					(item.entry.durable === true
+						? (similarRepositoryLesson(updated, repository, item.entry.content) ??
+							sameCommandLesson(updated, repository, item.entry))
+						: null);
+				const record = cloneMemoryRecord(existing ?? item.record);
+				// One verdict per session: a repeat from the same session adds nothing the gate
+				// counts, and stacking it would push older contradictions out of the window.
+				const held =
+					input.observation === "held" &&
+					(input.heldEntryIds === undefined || input.heldEntryIds.has(item.entry.id)) &&
+					!(existing?.observations ?? []).some((seen) => seen.sessionId === sessionId && seen.kind === "held");
+				if (held) {
+					record.observations = [...(record.observations ?? []), { at, sessionId, kind: "held" as const }].slice(
+						-MEMORY_OBSERVATIONS_MAX,
+					);
+					applyMemoryGate(record, at);
+				}
+				changed ||= !existing || held;
+				if (existing) updated[updated.indexOf(existing)] = record;
+				else updated.push(record);
+				result.records.push(record);
+				result.recordByEntry.set(item.entry.id, record);
+			}
+			return changed ? { records: updated, result } : { result };
+		},
+		input.writeOptions,
+	);
 }
 
 /**
@@ -91,6 +133,34 @@ function similarRepositoryLesson(
 				record.repository?.key === repository.key &&
 				record.provenance?.sourceEntryKind === "knowledge" &&
 				normalizeLesson(record.lesson) === wanted,
+		) ?? null
+	);
+}
+
+/**
+ * The repository lesson that already quotes this entry's evidence command.
+ * Command evidence binds a lesson to one exact command the shell ran with exit
+ * 0, so every such lesson claims the same thing: that command works here. Live
+ * sessions filed that one validator recipe as an approved record and a pending
+ * rewording of it, and the rewording waited for review forever. As with exact
+ * text, a rejected record still matches: the operator declined that recipe.
+ * Lessons without command evidence keep the exact-text rule above.
+ */
+function sameCommandLesson(
+	records: ReadonlyArray<MemoryRecord>,
+	repository: MemoryRepositoryIdentity,
+	entry: TaskMemoryEntry,
+): MemoryRecord | null {
+	const command = entry.evidenceCommand?.trim();
+	if (!command) return null;
+	const quoted = `\`${command}\``;
+	return (
+		records.find(
+			(record) =>
+				record.scope === "repo" &&
+				record.repository?.key === repository.key &&
+				record.provenance?.sourceEntryKind === "knowledge" &&
+				record.lesson.includes(quoted),
 		) ?? null
 	);
 }

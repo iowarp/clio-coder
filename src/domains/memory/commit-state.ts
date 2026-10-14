@@ -1,3 +1,4 @@
+import type { MemoryConsumptionReceipt } from "./contract.js";
 import { type MemoryRestorationInput, type MemoryRestorationRender, renderMemoryRestoration } from "./restoration.js";
 
 export interface MemoryCommitScope {
@@ -7,6 +8,7 @@ export interface MemoryCommitScope {
 
 /** The host must verify successful durability/current scope before calling the notifier. */
 export interface SuccessfulMemoryContextCommit extends MemoryCommitScope {
+	readonly memoryReceipt?: MemoryConsumptionReceipt;
 	readonly kind: "continuity" | "summary";
 	readonly commitId: string;
 	readonly outcome: "summarized" | "evicted" | "continuity_only";
@@ -41,7 +43,7 @@ export class MemoryCommitState {
 	#generation: number;
 	#commitEpoch = 0;
 	#disposed = false;
-	#seen = new Map<string, SuccessfulMemoryContextCommit["outcome"]>();
+	#seen = new Map<string, string>();
 	#pending: string | null = null;
 	#issued: MemoryRestorationOffer | null = null;
 
@@ -67,9 +69,10 @@ export class MemoryCommitState {
 		}
 		if (input.commitId.trim().length === 0) throw new Error("memory commit identity must be nonblank");
 		const previous = this.#seen.get(input.commitId);
-		if (previous !== undefined) return previous === input.outcome ? "duplicate" : "conflict";
+		const identity = JSON.stringify([input.outcome, input.memoryReceipt ?? null]);
+		if (previous !== undefined) return previous === identity ? "duplicate" : "conflict";
 		if (this.#commitEpoch === Number.MAX_SAFE_INTEGER) throw new Error("memory commit epoch exhausted");
-		this.#seen.set(input.commitId, input.outcome);
+		this.#seen.set(input.commitId, identity);
 		this.#commitEpoch += 1;
 		this.#pending = input.commitId;
 		this.#issued = null;

@@ -2181,6 +2181,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					const memory = context.memory;
 					issues.unknownKeys("context.memory", memory, [
 						"enabled",
+						"observations",
 						"target",
 						"model",
 						"cadenceToolCalls",
@@ -2191,6 +2192,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("enabled" in memory) {
 						const parsed = expectBoolean(issues, "context.memory.enabled", memory.enabled);
 						if (parsed !== undefined) settings.context.memory.enabled = parsed;
+					}
+					if ("observations" in memory) {
+						if (!isPlainObject(memory.observations)) issues.add("context.memory.observations", "expected a map");
+						else {
+							issues.unknownKeys("context.memory.observations", memory.observations, ["enabled"]);
+							if ("enabled" in memory.observations) {
+								const parsed = expectBoolean(issues, "context.memory.observations.enabled", memory.observations.enabled);
+								if (parsed !== undefined) settings.context.memory.observations.enabled = parsed;
+							}
+						}
 					}
 					if ("target" in memory) {
 						if (memory.target === null) settings.context.memory.target = null;

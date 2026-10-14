@@ -67,6 +67,7 @@ export class TaskMemoryBudgetSkipError extends Error {
 }
 
 export interface TaskMemoryModelRequest {
+	purpose?: "observation" | "reflection" | "lesson";
 	systemPrompt: string;
 	userPrompt: string;
 	maxTokens: number;
@@ -151,6 +152,11 @@ export type TaskMemoryPolicyReason =
 	| "invalid_path"
 	/** A cited failed attempt has since succeeded in the observed trajectory. */
 	| "resolved_failure"
+	/**
+	 * A cadence step (interval, turn end, idle review) cited only facts still in
+	 * the model's context: none was recorded before the session last lost context.
+	 */
+	| "no_lost_context"
 	/** The reminder exceeded the token cap and was dropped rather than truncated. */
 	| "over_budget"
 	/**
@@ -251,6 +257,12 @@ export interface TaskMemoryPolicyInput {
 	suppressIntervention?: boolean;
 	/** Last visible memory reminder, used to keep repeated model output silent. */
 	previousReminder?: string | null;
+	/**
+	 * When the session last lost context to compaction or working-set reduction
+	 * (ISO). Without a deterministic trigger, a reminder must cite a fact last
+	 * touched before then; anything newer is still in front of the model.
+	 */
+	contextLostAt?: string | null;
 	/** Workspace used to verify file references at delivery; defaults to the process workspace. */
 	workspaceRoot?: string;
 	/** Opt-in raw-envelope observer. Absent unless an operator turned tracing on. */
@@ -481,6 +493,9 @@ export async function runTaskMemoryPolicy(
 		);
 		if (!read.ok) return settle("malformed", read.reason, { ...usage, droppedOperations: read.dropped });
 		const priorKnowledge = new Map(bank.snapshot().knowledge.map((entry) => [entry.id, entry.content]));
+		const priorTouched = new Map(
+			[...bank.snapshot().knowledge, ...bank.snapshot().procedural].map((entry) => [entry.id, entry.lastTouchedAt]),
+		);
 		const keptIds = new Set(keptLessons.map((item) => item.id));
 		const retiredLessonIds = read.step.operations.flatMap((operation) =>
 			operation.op === "delete" && keptIds.has(operation.id) ? [operation.id] : [],
@@ -540,6 +555,18 @@ export async function runTaskMemoryPolicy(
 			return settle("gated", "no_repeated_failure", counts);
 		if (!hasCurrentWorkspacePaths(reminder, input.workspaceRoot ?? process.cwd()))
 			return settle("gated", "invalid_path", counts);
+		// A cadence trigger measures nothing about the session, so the reminder must
+		// carry its own reason to speak: a cited fact whose evidence left context.
+		const lostAt = input.contextLostAt ?? null;
+		if (
+			!input.deterministicTrigger &&
+			(lostAt === null ||
+				!citedIds.some((id) => {
+					const touched = priorTouched.get(id);
+					return touched !== undefined && touched <= lostAt;
+				}))
+		)
+			return settle("gated", "no_lost_context", counts);
 		bank.recordInjection(citedIds);
 		return settle("injected", "intervened", { ...counts, reminder });
 	} catch (error) {
@@ -656,6 +683,25 @@ function operationsEndIndex(text: string, from: number): number {
 	return -1;
 }
 
+/**
+ * An operation list whose only defect is the missing final bracket before the
+ * close tag. A live Ornith retention pass wrote two complete, valid operations
+ * as `[{...},{...}</operations>`, and the grounded validator recipe in the first
+ * one was discarded with the bracket. Only that exact defect is repaired: the
+ * text must open an array, and appending `]` must make it valid JSON. Every
+ * operation recovered this way still passes `readOperations`.
+ */
+function unclosedOperationList(body: string): unknown[] | null {
+	const trimmed = body.trim();
+	if (!trimmed.startsWith("[") || trimmed.endsWith("]")) return null;
+	try {
+		const parsed: unknown = JSON.parse(`${trimmed.replace(/,\s*$/u, "")}]`);
+		return Array.isArray(parsed) ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
 type ReadPolicyStepResult =
 	| { ok: true; step: ParsedMemoryStep; dropped: number }
 	| { ok: false; reason: "unparseable" | "all_operations_invalid"; dropped: number };
@@ -678,17 +724,24 @@ function readPolicyStep(
 	if (opensAt === -1) return unparseable;
 	const listAt = opensAt + OPERATIONS_OPEN.length;
 	const listEndsAt = operationsEndIndex(text, listAt);
-	if (listEndsAt === -1) return unparseable;
-	// The close tag is still required. A model that wrote no list at all never
-	// reaches here, and one that wrote a list but no close tag did not produce
-	// the envelope the prompt asks for.
-	const closesAt = text.indexOf(OPERATIONS_CLOSE, listEndsAt);
-	if (closesAt === -1) return unparseable;
+	let closesAt: number;
 	let rawOperations: unknown;
-	try {
-		rawOperations = JSON.parse(text.slice(listAt, listEndsAt)) as unknown;
-	} catch {
-		return unparseable;
+	if (listEndsAt === -1) {
+		closesAt = text.indexOf(OPERATIONS_CLOSE, listAt);
+		const repaired = closesAt === -1 ? null : unclosedOperationList(text.slice(listAt, closesAt));
+		if (repaired === null) return unparseable;
+		rawOperations = repaired;
+	} else {
+		// The close tag is still required. A model that wrote no list at all never
+		// reaches here, and one that wrote a list but no close tag did not produce
+		// the envelope the prompt asks for.
+		closesAt = text.indexOf(OPERATIONS_CLOSE, listEndsAt);
+		if (closesAt === -1) return unparseable;
+		try {
+			rawOperations = JSON.parse(text.slice(listAt, listEndsAt)) as unknown;
+		} catch {
+			return unparseable;
+		}
 	}
 	const read = readOperations(rawOperations, reference, allowed);
 	if (read === null) return unparseable;

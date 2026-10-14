@@ -18,6 +18,7 @@
  */
 
 import { cloneMemoryRecord } from "./operations.js";
+import type { MemoryMutationOptions } from "./store.js";
 import { mutateMemoryRecords } from "./store.js";
 import {
 	MEMORY_OBSERVATIONS_MAX,
@@ -73,6 +74,21 @@ export function evaluateMemoryGate(record: MemoryRecord): MemoryGateVerdict {
 	return held >= MEMORY_GATE_HELD_SESSIONS ? "approve" : "hold";
 }
 
+/** Apply the same verdict whether observations arrive separately or with a new evidence-backed proposal. */
+export function applyMemoryGate(record: MemoryRecord, at: string): MemoryGateVerdict {
+	const verdict = evaluateMemoryGate(record);
+	if (verdict === "approve") {
+		record.approved = true;
+		record.lastVerifiedAt = at;
+		record.approval = { by: "guardian", at };
+	} else if (verdict === "demote") {
+		record.approved = false;
+		Reflect.deleteProperty(record, "approval");
+		record.regressions = [...(record.regressions ?? []), `contradicted after guardian approval at ${at}`];
+	}
+	return verdict;
+}
+
 /**
  * Append observations and apply the gate inside the store's one locked
  * read-modify-write, so concurrent sessions and operator decisions are never
@@ -82,43 +98,45 @@ export async function recordMemoryObservations(
 	dataDir: string,
 	inputs: ReadonlyArray<MemoryObservationInput>,
 	now: Date = new Date(),
+	options: MemoryMutationOptions = {},
 ): Promise<MemoryGateOutcome> {
 	const outcome: MemoryGateOutcome = { approved: [], demoted: [], missing: [] };
 	if (inputs.length === 0) return outcome;
 	const at = now.toISOString();
-	return mutateMemoryRecords(dataDir, (records) => {
-		const byId = new Map(records.map((record) => [record.id, record]));
-		const touched = new Map<string, MemoryRecord>();
-		for (const input of inputs) {
-			const current = touched.get(input.memoryId) ?? byId.get(input.memoryId);
-			if (current === undefined) {
-				outcome.missing.push(input.memoryId);
-				continue;
+	return mutateMemoryRecords(
+		dataDir,
+		(records) => {
+			const byId = new Map(records.map((record) => [record.id, record]));
+			const touched = new Map<string, MemoryRecord>();
+			for (const input of inputs) {
+				const current = touched.get(input.memoryId) ?? byId.get(input.memoryId);
+				if (current === undefined) {
+					outcome.missing.push(input.memoryId);
+					continue;
+				}
+				const next = cloneMemoryRecord(current);
+				const observation: MemoryObservation = { at, sessionId: input.sessionId, kind: input.kind };
+				// One verdict per session and kind: repeats add nothing the gate counts and
+				// would push older contradictions out of the bounded window.
+				if (!(next.observations ?? []).some((seen) => seen.sessionId === input.sessionId && seen.kind === input.kind))
+					next.observations = [...(next.observations ?? []), observation].slice(-MEMORY_OBSERVATIONS_MAX);
+				// A later session that saw an approved lesson hold re-verified it; approval itself does not change.
+				if (input.kind === "held" && next.approved) next.lastVerifiedAt = at;
+				touched.set(next.id, next);
 			}
-			const next = cloneMemoryRecord(current);
-			const observation: MemoryObservation = { at, sessionId: input.sessionId, kind: input.kind };
-			next.observations = [...(next.observations ?? []), observation].slice(-MEMORY_OBSERVATIONS_MAX);
-			touched.set(next.id, next);
-		}
-		if (touched.size === 0) return { result: outcome };
-		for (const record of touched.values()) {
-			const verdict = evaluateMemoryGate(record);
-			if (verdict === "approve") {
-				record.approved = true;
-				record.lastVerifiedAt = at;
-				record.approval = { by: "guardian", at };
-				outcome.approved.push(record);
-			} else if (verdict === "demote") {
-				record.approved = false;
-				Reflect.deleteProperty(record, "approval");
-				// `regressions` already excludes a record from every prompt
-				// (`eligibleMemoryRecords`), so demotion needs no second mechanism.
-				record.regressions = [...(record.regressions ?? []), `contradicted after guardian approval at ${at}`];
-				outcome.demoted.push(record);
+			if (touched.size === 0) return { result: outcome };
+			for (const record of touched.values()) {
+				const verdict = applyMemoryGate(record, at);
+				if (verdict === "approve") {
+					outcome.approved.push(record);
+				} else if (verdict === "demote") {
+					outcome.demoted.push(record);
+				}
 			}
-		}
-		return { records: records.map((record) => touched.get(record.id) ?? record), result: outcome };
-	});
+			return { records: records.map((record) => touched.get(record.id) ?? record), result: outcome };
+		},
+		options,
+	);
 }
 
 /** One verdict per session: a session that saw a contradiction never counts as held. */

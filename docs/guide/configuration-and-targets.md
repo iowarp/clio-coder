@@ -209,6 +209,7 @@ explains worker route selection.
 | `context.memory.trajectorySteps` | `8` | next turn |
 | `context.memory.maxOutputTokens` | `2000` | next turn |
 | `context.memory.timeoutMs` | `60000` | next turn |
+| `context.memory.observations.enabled` | `false` | next turn |
 | `context.semantic.enabled` | `false` | next turn |
 | `context.semantic.target` | `null` | next turn or semantic CLI request |
 | `context.semantic.model` | `null` | next turn or semantic CLI request |
