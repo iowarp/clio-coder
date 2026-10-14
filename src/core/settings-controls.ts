@@ -500,6 +500,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Artifact inboxes",
 		"Registered source folders. Prefer semantic inbox preview/add/remove for guided changes.",
 	],
+	"context.memory.observations.enabled": [
+		"Continuity preparation",
+		"Let the memory model condense older turns in the background so compaction can reuse that record instead of summarizing them again. Needs proactive memory on; off by default.",
+	],
 	"integrations.music.enabled": [
 		"Music pane",
 		"Allow /music to open cliamp in a docked pane and play focus radio. Needs Herdr panes and cliamp; off by default.",
