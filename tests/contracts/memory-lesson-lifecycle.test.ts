@@ -85,7 +85,7 @@ test("a failing variant of a remembered recipe gets the recipe on its failed res
 	}
 });
 
-test("a verification gap and a read of the lesson's own file each bring the recipe, once per session", () => {
+test("a verification gap and a read of the lesson's own file each bring the recipe once, and its own successful run needs none", () => {
 	const root = mkdtempSync(join(tmpdir(), "memory-recipe-triggers-"));
 	mkdirSync(join(root, "scripts"), { recursive: true });
 	writeFileSync(join(root, "scripts", "check.mjs"), "process.exit(2);\n");
@@ -99,7 +99,23 @@ test("a verification gap and a read of the lesson's own file each bring the reci
 		});
 	const verify = make();
 	const reader = make();
+	const runner = make();
 	try {
+		// The prompt's memory section already led this session to the recipe: its
+		// own successful run names the lesson's file and needs no reminder after it.
+		runner.evaluate({ hook: "turn_start", sessionId: "F", text: "Run the validation." });
+		deepStrictEqual(
+			runner.evaluate({
+				hook: "after_tool",
+				sessionId: "F",
+				toolName: "bash",
+				toolCallId: "1",
+				toolArgs: { command: COMMAND },
+				metadata: { resultKind: "ok", actionClass: "execute" },
+				toolResultDetails: { outcome: "success", exitCode: 0 },
+			}),
+			[],
+		);
 		verify.evaluate({ hook: "turn_start", sessionId: "D", text: "Is the project healthy?" });
 		const gap = verify.evaluate({
 			hook: "after_tool",
@@ -129,6 +145,7 @@ test("a verification gap and a read of the lesson's own file each bring the reci
 	} finally {
 		verify.dispose();
 		reader.dispose();
+		runner.dispose();
 		rmSync(root, { recursive: true, force: true });
 	}
 });
