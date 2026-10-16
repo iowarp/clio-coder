@@ -216,5 +216,4 @@ Operator notes are not part of the compiled system prompt. They live in the comp
 - `inputEpoch()` joins the fragment epoch, the agent-catalog revision, the session-source epoch and the hash of the fleet inventory.
 - The session source snapshot freezes project context, rules, the operator profile, the workspace facts, repo awareness and catalogs. A context operation in the workspace or an ancestor, and a config hot-reload, invalidate it. A new session captures its own. The first prompt of a fresh session compiles before the session exists, under an empty id; that capture is parked and adopted by the session created after it, so turns one and two stay byte-identical.
 - A recompile that changes the text appends a `promptRecompiled` ledger entry (previous hash, new hash, token estimate) and a `prompt-manifest.jsonl` record with the section and fragment breakdown.
-- `/view system-prompt` and its ACP read show the last compiled main prompt.
 - Workers have no snapshot. `compileWorkerPrompt` loads rules and the operator profile for the run's working-context paths on each compile and returns `rulesApplied` and `operatorProfileApplied` for receipt provenance.

@@ -164,7 +164,7 @@ import {
 	triageSnapshotMatches,
 	triageUserText,
 } from "./steering-triage.js";
-import type { LiveContextUsage, LiveSystemPrompt } from "./turn-context.js";
+import type { LiveContextUsage } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
@@ -708,7 +708,6 @@ export interface ChatLoop {
 	 * messages), the autocompact reserve, and free space. Composes the live
 	 * estimate with the current turn's prompt segment manifest.
 	 */
-	liveSystemPrompt(): LiveSystemPrompt | null;
 	contextLedger(): ContextLedger;
 	/**
 	 * The published live budget for the next request: one immutable view with
@@ -3393,7 +3392,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 			return snapshotTurnConstraints({ ...constraints, allowedTools });
 		},
-		liveSystemPrompt: () => context.liveSystemPrompt(),
 		contextLedger: () => context.contextLedger(),
 		liveBudget: () => context.liveBudget(),
 		inspectLiveBudget: () => context.inspectLiveBudget(),

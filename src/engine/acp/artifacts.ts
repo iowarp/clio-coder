@@ -43,7 +43,6 @@ export const ACP_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"compaction",
 	"prompt-manifest",
 	"audit",
-	"system-prompt",
 ];
 
 const CATEGORY_SET = new Set<string>(ACP_ARTIFACT_CATEGORIES);
@@ -111,8 +110,6 @@ function expectedFormat(
 			return "json";
 		case "workspace":
 			return artifact.path ? workspaceFormat(artifact.path) : "text";
-		case "system-prompt":
-			return artifact.timestamp > 0 ? "markdown" : "text";
 		default:
 			return "markdown";
 	}

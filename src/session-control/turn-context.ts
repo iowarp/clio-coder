@@ -58,7 +58,7 @@ import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
-import type { CompiledSessionPrompt, LiveSystemPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
+import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import {
 	type ContextWindowDetails,
@@ -241,10 +241,7 @@ export type ExpectedColdReason =
 export type LiveContextUsage = ContextUsageSnapshot &
 	Pick<LiveBudgetView, "revision" | "inputSource" | "historical" | "breakdownSource">;
 
-export type { LiveSystemPrompt };
-
 export interface TurnContext {
-	liveSystemPrompt(): LiveSystemPrompt | null;
 	notifyMemoryCommit(
 		commitId: string,
 		kind: SuccessfulMemoryContextCommit["kind"],
@@ -475,7 +472,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// recompile that changes the prompt text appends a "promptRecompiled"
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
-	let liveSystemPrompt: LiveSystemPrompt | null = null;
 	let sessionPromptKey: string | null = null;
 	let announcedProjectPreloadSession: string | null = null;
 	// The hash this process compiled *for the session that is current now*, and
@@ -633,14 +629,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		compactionThreshold: number | null,
 		extra: Partial<CaptureContextSnapshotInput> = {},
 	): ContextSnapshot => {
-		if (
-			liveSystemPrompt &&
-			turnId !== "pending" &&
-			turnId !== "compaction" &&
-			liveSystemPrompt.compiled.systemPrompt === agentRuntime.agent.state.systemPrompt
-		) {
-			liveSystemPrompt = { ...liveSystemPrompt, sessionId: deps.session?.current()?.id ?? null, turnId };
-		}
 		const details = agentRuntime.runtimeResolution.contextWindowDetails;
 		// The snapshot row belongs to the named Clio session whose ledger it is
 		// appended to; the engine agent's own sessionId is unset in practice.
@@ -1957,7 +1945,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		},
 
-		liveSystemPrompt: () => liveSystemPrompt,
 		captureRuntimeContextSnapshot,
 		persistContextSnapshot,
 		liveContextEstimate,
@@ -2252,14 +2239,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					}
 				}
 
-				liveSystemPrompt = {
-					compiled: result,
-					compiledAt,
-					modelId: agentRuntime.wireModelId,
-					targetId: agentRuntime.targetId,
-					sessionId: sessionId || null,
-					turnId: null,
-				};
 				sessionPrompt = result;
 				sessionPromptHash = result.systemPromptHash;
 				sessionPromptKey = key;
@@ -2529,7 +2508,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		resetForSession(incomingBranchAnchorTurnId: string | null = null): void {
-			liveSystemPrompt = null;
 			memoryTurn = null;
 			memoryAuthorityEpoch += 1;
 			compactionController?.abort();

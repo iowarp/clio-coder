@@ -5122,7 +5122,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										...(dispatch ? { dispatch } : {}),
 										sessionMeta: meta,
 										readSessionEntries: readCurrentSessionEntries,
-										readSystemPrompt: () => chat.liveSystemPrompt(),
 									};
 								},
 							},

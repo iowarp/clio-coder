@@ -123,8 +123,6 @@ function categoryLabel(category: ViewArtifactCategory): string {
 			return "Prompt manifests";
 		case "audit":
 			return "Safety audit rows";
-		case "system-prompt":
-			return "System prompt";
 	}
 }
 
@@ -136,7 +134,6 @@ const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
 	"protected-artifact",
 	"compaction",
 	"prompt-manifest",
-	"system-prompt",
 	"audit",
 ]);
 

@@ -306,7 +306,7 @@ The values are illustrative. No other settings leaf, URL, auth fact, credential 
 
 `_clio-coder/artifacts/list` and `_clio-coder/artifacts/read` serve the terminal's `/view` artifacts to a client (`src/engine/acp/artifacts.ts`). Both read the providers the overlay reads (`src/domains/session/view-artifacts.ts`), so a client lists the same rows with the same titles and reads the same lines. Titles and subtitles pass through the overlay's sanitizer (control sequences stripped, secrets redacted). Bodies travel as loaded. A protected artifact's load renders its protection record and never the file. The provider module loads on first use.
 
-The `clio-coder/artifacts` capability is `{version: 1, list, read, categories, perCategory: 200}`. `categories` names the 12 categories a client may request: `accountability`, `evidence`, `receipt`, `dispatch`, `task-ledger`, `workspace`, `tool-output`, `protected-artifact`, `compaction`, `prompt-manifest`, `audit`, and `system-prompt`. The terminal's `transcript` category is excluded because the client already holds the conversation.
+The `clio-coder/artifacts` capability is `{version: 1, list, read, categories, perCategory: 200}`. `categories` names the 11 categories a client may request: `accountability`, `evidence`, `receipt`, `dispatch`, `task-ledger`, `workspace`, `tool-output`, `protected-artifact`, `compaction`, `prompt-manifest`, and `audit`. The terminal's `transcript` category is excluded because the client already holds the conversation.
 
 `list` accepts `{sessionId, categories?}` and returns `{artifacts, truncated}`, newest first, at most 200 rows per category, with `truncated: true` when any category was cut. A provider that fails is omitted from the list. Each row:
 

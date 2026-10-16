@@ -23,7 +23,6 @@ import {
 import type { EvidenceFinding, EvidenceInspectable, EvidenceOverview, EvidenceSource } from "../evidence/types.js";
 import type { AccountabilitySummary } from "../observability/index.js";
 import { readEvidenceIndex, summarizeEvidenceIndex } from "../observability/index.js";
-import type { LiveSystemPrompt } from "../prompts/compiler.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
 import type { AuditJsonRow, AuditReadResult } from "./archive-readers.js";
@@ -55,8 +54,7 @@ export type ViewArtifactCategory =
 	| "protected-artifact"
 	| "compaction"
 	| "prompt-manifest"
-	| "audit"
-	| "system-prompt";
+	| "audit";
 export type ViewArtifactFormat = "markdown" | "text" | "json";
 
 export interface ViewArtifactLoadResult {
@@ -102,7 +100,6 @@ export interface ArtifactProvider {
 
 export interface ArtifactProviderDeps {
 	readTranscript?: (() => ViewArtifact[]) | undefined;
-	readSystemPrompt?: (() => LiveSystemPrompt | null) | undefined;
 	stateDir: string;
 	dataDir?: string | undefined;
 	dispatch?: Pick<DispatchContract, "listRuns" | "getRun"> | undefined;
@@ -137,7 +134,6 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"compaction",
 	"prompt-manifest",
 	"audit",
-	"system-prompt",
 ] as const;
 
 /** Cap on failure-cause tags rendered in the accountability artifact. */
@@ -1557,84 +1553,6 @@ export class CompactionArtifactProvider implements ArtifactProvider {
 	}
 }
 
-export class SystemPromptArtifactProvider implements ArtifactProvider {
-	readonly category = "system-prompt" as const;
-
-	constructor(private readonly deps: ArtifactProviderDeps) {}
-
-	async list(): Promise<ViewArtifact[]> {
-		const snapshot = this.deps.readSystemPrompt?.();
-		if (!this.deps.readSystemPrompt) return [];
-		if (!snapshot)
-			return [
-				{
-					id: "system-prompt:current",
-					category: this.category,
-					title: "System prompt · not compiled yet",
-					timestamp: 0,
-					load: async () => ({
-						format: "text",
-						lines: [
-							"No system prompt has been compiled for this session in this process yet.",
-							"Send a message to compile it. This entry will then show the complete live prompt.",
-							"Saved prompt manifests contain provenance, not the original prompt text.",
-						],
-					}),
-				},
-			];
-		const { compiled, compiledAt, modelId, targetId, sessionId, turnId } = snapshot;
-		const sizeBytes = Buffer.byteLength(compiled.systemPrompt, "utf8");
-		return [
-			{
-				id: "system-prompt:current",
-				category: this.category,
-				title: "System prompt · current session",
-				timestamp: parseTime(compiledAt),
-				sizeBytes,
-				...(sessionId ? { sessionId } : {}),
-				searchText: [modelId, targetId, compiled.systemPromptHash, ...compiled.fragmentManifest.map((f) => f.id)],
-				load: async () => ({
-					format: "markdown",
-					lines: [
-						`Compiled ${compiledAt} for ${modelId} (${targetId}).`,
-						`Last prepared for turn: ${turnId ?? "not sent yet"}.`,
-						`${sizeBytes.toLocaleString("en-US")} bytes · approximately ${compiled.tokenEstimate.toLocaleString("en-US")} tokens.`,
-						"",
-						`${compiled.fragmentManifest.length} fragments · press i for provenance and unformatted text.`,
-						"",
-						"---",
-						"",
-						...compiled.systemPrompt.split("\n"),
-						"",
-						"---",
-						"",
-						"## Source fragments",
-						"",
-						...compiled.fragmentManifest.map((f) => `- \`${f.id}\``),
-					],
-					details: {
-						format: "text",
-						lines: [
-							`Compiled: ${compiledAt}`,
-							`Model: ${modelId}`,
-							`Target: ${targetId}`,
-							`Session: ${sessionId ?? "not created yet"}`,
-							`Turn: ${turnId ?? "not sent yet"}`,
-							`SHA-256: ${compiled.systemPromptHash}`,
-							`Sections: ${compiled.sections.map((s) => s.id).join(", ")}`,
-							`Fragments: ${compiled.fragmentManifest.map((f) => f.id).join(", ")}`,
-							"",
-							"Exact compiled text (unformatted):",
-							"",
-							...compiled.systemPrompt.split("\n"),
-						],
-					},
-				}),
-			},
-		];
-	}
-}
-
 function promptManifestSearchText(record: SessionPromptCompileRecord): string[] {
 	return [
 		record.systemPromptHash,
@@ -1899,7 +1817,6 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 		new ProtectedArtifactProvider(deps),
 		new CompactionArtifactProvider(deps),
 		new PromptManifestArtifactProvider(deps),
-		new SystemPromptArtifactProvider(deps),
 		new SafetyAuditArtifactProvider(deps),
 	];
 }

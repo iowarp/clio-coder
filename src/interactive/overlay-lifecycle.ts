@@ -492,7 +492,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const scheduling = deps.app.scheduling;
 	const overlayGeneralOpeners = createOverlayGeneralOpeners({
 		readTranscript: () => chatPanel.inspectionArtifacts(),
-		readSystemPrompt: () => deps.app.chat.liveSystemPrompt(),
 		tui,
 		transitions: overlayTransitions,
 		observability: deps.app.observability,

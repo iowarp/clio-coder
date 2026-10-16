@@ -280,7 +280,6 @@ test("Stop fences deferred preparation and compaction before model calls or late
 					strictEqual(modelCalls, 0);
 					strictEqual(session.current()?.id, currentId);
 					strictEqual(publishedReductions, 0);
-					strictEqual(loop.liveSystemPrompt()?.compiled.systemPrompt, undefined);
 					ok(!JSON.stringify(session.readEntries()).includes("late-hash"));
 					strictEqual(
 						session.readEntries().some((entry) => entry.kind === "compactionSummary"),
