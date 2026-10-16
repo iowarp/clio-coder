@@ -616,11 +616,18 @@ export class TraceStore {
 		this.db.close();
 	}
 
-	recordCaptureLoss(kind: "progress" | "package_activity" | "degraded", count = 1): void {
+	recordCaptureLoss(kind: "progress" | "package_activity" | "failed_rows" | "degraded", count = 1): void {
 		this.db
 			.prepare(`INSERT INTO meta(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value=CAST(meta.value AS INTEGER) + CAST(excluded.value AS INTEGER)`)
-			.run(kind === "degraded" ? "capture_degraded" : `capture_dropped_${kind}`, String(count));
+			.run(
+				kind === "degraded"
+					? "capture_degraded"
+					: kind === "failed_rows"
+						? "capture_failed_rows"
+						: `capture_dropped_${kind}`,
+				String(count),
+			);
 	}
 
 	transaction(action: () => void): void {
@@ -1277,7 +1284,7 @@ export class TraceReader {
 	captureCoverage(): TraceCaptureCoverage {
 		const rows = this.db
 			.prepare(
-				"SELECT key, value FROM meta WHERE key IN ('capture_dropped_progress', 'capture_dropped_package_activity', 'capture_degraded')",
+				"SELECT key, value FROM meta WHERE key IN ('capture_dropped_progress', 'capture_dropped_package_activity', 'capture_failed_rows', 'capture_degraded')",
 			)
 			.all() as { key: string; value: string }[];
 		const values = new Map(rows.map((row) => [row.key, Number(row.value)]));
@@ -1287,7 +1294,7 @@ export class TraceReader {
 			status:
 				(values.get("capture_degraded") ?? 0) > 0
 					? "degraded"
-					: (droppedProgress ?? 0) + (droppedPackageActivity ?? 0) > 0
+					: (droppedProgress ?? 0) + (droppedPackageActivity ?? 0) + (values.get("capture_failed_rows") ?? 0) > 0
 						? "known_loss"
 						: "unreported",
 			droppedProgress,
@@ -1475,6 +1482,12 @@ interface ToolStart {
 	blockReason: string | null;
 }
 
+/** Which row a scheduled write carries, for the warning when it alone fails. */
+interface TraceRow {
+	channel: string;
+	runId: string | null;
+}
+
 export function createDispatchTraceMirror(
 	path: string,
 	options: { warn?: (message: string) => void; now?: () => string } = {},
@@ -1503,7 +1516,52 @@ export function createDispatchTraceMirror(
 		store ??= new TraceStore(path);
 		return store;
 	};
-	const schedule = (work: () => void): void => {
+	// Once per channel and run, bounded, so a run whose every row fails is
+	// named without flooding stderr.
+	const warnedRows = new Set<string>();
+	const degrade = (error: unknown): void => {
+		if (!degraded) warn(error instanceof Error ? error.message : String(error));
+		degraded = true;
+		starts.clear();
+		seen.clear();
+		contextWindows.clear();
+		gateRuns.clear();
+		if (store === null) warn("capture degradation could not be recorded: trace database unavailable");
+		else {
+			try {
+				store.recordCaptureLoss("degraded");
+				if (unreportedProgress > 0) store.recordCaptureLoss("progress", unreportedProgress);
+				unreportedProgress = 0;
+			} catch (markerError) {
+				warn(
+					`capture degradation could not be recorded: ${markerError instanceof Error ? markerError.message : String(markerError)}`,
+				);
+			}
+		}
+	};
+	/**
+	 * One row that cannot be written loses that row, never the rest of the
+	 * process's capture. Its transaction already rolled back; the loss is
+	 * counted, the run's in-memory state is dropped so later rows start clean,
+	 * and the warning names the channel and run. Only a store that cannot be
+	 * opened at all degrades capture.
+	 */
+	const rowFailed = (row: TraceRow, error: unknown): void => {
+		const key = `${row.channel}\u0000${row.runId ?? ""}`;
+		if (!warnedRows.has(key) && warnedRows.size < 256) {
+			warnedRows.add(key);
+			warn(
+				`${row.channel} run ${row.runId ?? "(none)"}: ${error instanceof Error ? error.message : String(error)}; that row was not captured and capture continues`,
+			);
+		}
+		if (row.runId !== null) forgetRun(row.runId);
+		try {
+			store?.recordCaptureLoss("failed_rows");
+		} catch (markerError) {
+			degrade(markerError);
+		}
+	};
+	const schedule = (row: TraceRow, work: () => void): void => {
 		if (closed || degraded) return;
 		pendingWrites += 1;
 		chain = chain.then(
@@ -1515,30 +1573,20 @@ export function createDispatchTraceMirror(
 								pendingWrites -= 1;
 								return resolve();
 							}
+							getStore();
+						} catch (error) {
+							degrade(error);
+							pendingWrites -= 1;
+							return resolve();
+						}
+						try {
 							work();
 							if (unreportedProgress > 0) {
 								getStore().recordCaptureLoss("progress", unreportedProgress);
 								unreportedProgress = 0;
 							}
 						} catch (error) {
-							if (!degraded) warn(error instanceof Error ? error.message : String(error));
-							degraded = true;
-							starts.clear();
-							seen.clear();
-							contextWindows.clear();
-							gateRuns.clear();
-							if (store === null) warn("capture degradation could not be recorded: trace database unavailable");
-							else {
-								try {
-									store.recordCaptureLoss("degraded");
-									if (unreportedProgress > 0) store.recordCaptureLoss("progress", unreportedProgress);
-									unreportedProgress = 0;
-								} catch (markerError) {
-									warn(
-										`capture degradation could not be recorded: ${markerError instanceof Error ? markerError.message : String(markerError)}`,
-									);
-								}
-							}
+							rowFailed(row, error);
 						}
 						pendingWrites -= 1;
 						resolve();
@@ -1555,7 +1603,7 @@ export function createDispatchTraceMirror(
 				unreportedProgress += 1;
 				return;
 			}
-			schedule(() => {
+			schedule({ channel, runId: isRecord(raw) && typeof raw.runId === "string" ? raw.runId : null }, () => {
 				if (!isRecord(raw)) return;
 				if (channel === "dispatch.enqueued") {
 					const payload = raw as unknown as DispatchEnqueuedPayload;
@@ -1566,7 +1614,12 @@ export function createDispatchTraceMirror(
 				} else if (channel === "dispatch.started")
 					getStore().startRun(raw as unknown as DispatchStartedPayload, observedAt);
 				else if (channel === "dispatch.progress") {
-					const payload = raw as unknown as DispatchProgressPayload;
+					let payload = raw as unknown as DispatchProgressPayload;
+					// A retry's reset marker travels on the assignment's root id, which
+					// in a fleet is the fleet root and never a run row. It describes the
+					// attempt it starts, whose row the retry's own enqueue wrote first.
+					if (isRecord(payload.event) && payload.event.type === "attempt_start" && typeof payload.event.runId === "string")
+						payload = { ...payload, runId: payload.event.runId };
 					const active = seen.has(payload.runId);
 					recordProgress(getStore(), payload, starts, seen, contextWindows, gateRuns, observedAt);
 					if (!active) forgetRun(payload.runId);
@@ -1582,10 +1635,12 @@ export function createDispatchTraceMirror(
 			// A session turn is low-frequency and every one of its rows is the
 			// record itself rather than display detail, so none of it is eligible
 			// for the progress drop the queue limit applies to dispatch chatter.
-			schedule(() => getStore().recordSessionTurn(trace));
+			schedule({ channel: "session.turn", runId: trace.runId }, () => getStore().recordSessionTurn(trace));
 		},
 		enqueuePackageActivity(activity): void {
-			schedule(() => getStore().recordPackageActivity(activity));
+			schedule({ channel: "package.activity", runId: activity.runId ?? activity.sessionId ?? null }, () =>
+				getStore().recordPackageActivity(activity),
+			);
 		},
 		async flush(): Promise<void> {
 			await chain;

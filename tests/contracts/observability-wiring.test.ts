@@ -91,19 +91,65 @@ it("persists database-wide queue loss and degradation without claiming complete 
 		match(warnings[0] ?? "", /dropped 7/);
 		await mirror.flush();
 		equal(reader.captureCoverage().droppedProgress, 7);
-		mirror.enqueue("dispatch.progress", { runId: "missing", agentId: "coder", event: { type: "log" } });
-		await mirror.flush();
-		equal(reader.captureCoverage().status, "degraded");
-		match(warnings[1] ?? "", /FOREIGN KEY/);
 	} finally {
 		reader.close();
 		await mirror.close();
 	}
 	const reopened = new TraceReader(path);
 	try {
-		deepStrictEqual(reopened.captureCoverage(), { status: "degraded", droppedProgress: 7, droppedPackageActivity: null });
+		deepStrictEqual(reopened.captureCoverage(), {
+			status: "known_loss",
+			droppedProgress: 7,
+			droppedPackageActivity: null,
+		});
 	} finally {
 		reopened.close();
+	}
+});
+
+it("records a fleet retry's attempt marker on its attempt, and one failed row never ends capture", async () => {
+	const path = join(scratch, "fleet-retry.sqlite");
+	const warnings: string[] = [];
+	const mirror = createDispatchTraceMirror(path, { warn: (message) => warnings.push(message) });
+	const run = (runId: string) => ({
+		runId,
+		agentId: "coder",
+		targetId: "local",
+		wireModelId: "model",
+		runtimeId: "fixture",
+		runtimeKind: "http",
+	});
+	mirror.enqueue("dispatch.enqueued", run("a0"));
+	mirror.enqueue("dispatch.started", { ...run("a0"), pid: null });
+	mirror.enqueue("dispatch.failed", { ...run("a0"), outcome: "failure", outcomeDetail: "provider error" });
+	mirror.enqueue("dispatch.enqueued", run("a1"));
+	mirror.enqueue("dispatch.started", { ...run("a1"), pid: null });
+	// The assignment's root id in a fleet is the fleet root, which has no run row.
+	mirror.enqueue("dispatch.progress", {
+		...run("fleet-0123456789ab"),
+		event: { type: "attempt_start", attempt: 1, runId: "a1", previousRunId: "a0", reason: "retry" },
+	});
+	// A row that cannot land alone: its run was never recorded.
+	mirror.enqueue("dispatch.progress", { ...run("missing"), event: { type: "log" } });
+	mirror.enqueue("dispatch.progress", { ...run("a1"), event: { type: "log" } });
+	mirror.enqueue("dispatch.completed", { ...run("a1"), outcome: "success", outcomeDetail: null });
+	await mirror.flush();
+	const reader = new TraceReader(path);
+	try {
+		equal(reader.run("a1")?.status, "success");
+		ok(
+			reader.events("a1").some((event) => event.type === "handoff"),
+			JSON.stringify(reader.events("a1")),
+		);
+		equal(reader.captureCoverage().status, "known_loss");
+		equal(warnings.length, 1, warnings.join("\n"));
+		match(
+			warnings[0] ?? "",
+			/^dispatch\.progress run missing: FOREIGN KEY constraint failed; that row was not captured and capture continues$/,
+		);
+	} finally {
+		reader.close();
+		await mirror.close();
 	}
 });
 
