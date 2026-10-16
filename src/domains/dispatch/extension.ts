@@ -2395,13 +2395,19 @@ function effectiveToolNames(
 
 /**
  * The request's denied tool names, case-normalized the way a declared skill
- * surface is. A name that matches no Clio tool subtracts nothing, which is
- * correct: this list only ever removes, so an unmatched entry is inert rather
- * than an error.
+ * surface is. An MCP name keeps its case: the server's tool name is part of
+ * it and may carry capitals, so lowercasing it would match nothing. A name
+ * that matches no Clio tool subtracts nothing, which is correct: this list
+ * only ever removes, so an unmatched entry is inert rather than an error.
  */
 function deniedToolNames(req: DispatchRequest): ReadonlySet<string> {
 	if (!req.denyTools || req.denyTools.length === 0) return new Set();
-	return new Set(req.denyTools.map((tool) => tool.trim().toLowerCase()));
+	return new Set(
+		req.denyTools.map((tool) => {
+			const name = tool.trim();
+			return isMcpToolName(name) ? name : name.toLowerCase();
+		}),
+	);
 }
 
 function assertTurnConstraintCompatibility(
