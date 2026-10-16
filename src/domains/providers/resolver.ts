@@ -1,6 +1,13 @@
 import type { ProvidersContract } from "./contract.js";
+import { isOrchestratorEligibleRuntime } from "./eligibility.js";
 import { modelIdsForStatus } from "./model-discovery.js";
-import { type ThinkingLevel, VALID_THINKING_LEVELS } from "./types/capability-flags.js";
+import type { ThinkingLevel } from "./types/capability-flags.js";
+import { VALID_THINKING_LEVELS } from "./types/capability-flags.js";
+
+export interface ResolveModelOptions {
+	use?: "chat";
+	preferTarget?: string;
+}
 
 export interface ResolvedModelRef {
 	target: string;
@@ -67,6 +74,7 @@ interface CandidateRef {
 	target: string;
 	model: string;
 	full: string;
+	chatEligible: boolean;
 }
 
 function collectCandidates(providers: ProvidersContract): CandidateRef[] {
@@ -77,32 +85,63 @@ function collectCandidates(providers: ProvidersContract): CandidateRef[] {
 			const key = `${status.target.id}/${model}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
-			out.push({ target: status.target.id, model, full: key });
+			out.push({
+				target: status.target.id,
+				model,
+				full: key,
+				chatEligible:
+					!!status.runtime && isOrchestratorEligibleRuntime(status.runtime) && status.target.capabilities?.chat !== false,
+			});
 		}
 	}
 	return out;
 }
 
-function pickFirst(candidates: CandidateRef[]): { ref: CandidateRef; ambiguous: boolean } | null {
-	if (candidates.length === 0) return null;
-	const head = candidates[0];
-	if (!head) return null;
-	return { ref: head, ambiguous: candidates.length > 1 };
+function matchCandidates(base: string, candidates: CandidateRef[]): CandidateRef[] {
+	const lower = base.toLowerCase();
+	const exactFull = candidates.filter((c) => c.full.toLowerCase() === lower);
+	if (exactFull.length > 0) return exactFull;
+
+	if (GLOB_CHARS.test(base)) {
+		const re = globToRegExp(base);
+		return candidates.filter((c) => re.test(c.full) || re.test(c.model));
+	}
+
+	const exactModel = candidates.filter((c) => c.model.toLowerCase() === lower);
+	if (exactModel.length > 0) return exactModel;
+
+	return candidates.filter((c) => c.model.toLowerCase().includes(lower));
 }
 
 function buildResult(
 	pattern: string,
-	pick: { ref: CandidateRef; ambiguous: boolean } | null,
+	candidates: CandidateRef[],
 	thinkingLevel: ThinkingLevel | undefined,
+	options: ResolveModelOptions,
 ): ResolveModelResult {
-	if (!pick) {
+	if (options.preferTarget !== undefined) {
+		candidates = [
+			...candidates.filter((candidate) => candidate.target === options.preferTarget),
+			...candidates.filter((candidate) => candidate.target !== options.preferTarget),
+		];
+	}
+	const first = candidates[0];
+	if (!first) {
 		return { ref: null, error: `no models match pattern "${pattern}"` };
 	}
-	const ref: ResolvedModelRef = { target: pick.ref.target, model: pick.ref.model };
+	const ref: ResolvedModelRef = { target: first.target, model: first.model };
 	if (thinkingLevel) ref.thinkingLevel = thinkingLevel;
 	const result: ResolveModelResult = { ref };
-	if (pick.ambiguous) {
-		result.warning = `pattern "${pattern}" matched multiple models; using ${pick.ref.full}`;
+	if (candidates.length > 1) {
+		const listed = candidates
+			.slice(0, 3)
+			.map((candidate) => candidate.full)
+			.join(" and ");
+		const remaining = candidates.length > 3 ? ` and ${candidates.length - 3} more` : "";
+		result.warning =
+			options.use === "chat"
+				? `pattern "${pattern}" matched ${listed}${remaining}; using ${first.full}`
+				: `pattern "${pattern}" matched multiple models; using ${first.full}`;
 	}
 	return result;
 }
@@ -119,7 +158,11 @@ function buildResult(
  * before matching and surfaced on the returned ref so callers can apply it
  * to settings.chat.thinkingLevel.
  */
-export function resolveModelReference(rawPattern: string, providers: ProvidersContract): ResolveModelResult {
+export function resolveModelReference(
+	rawPattern: string,
+	providers: ProvidersContract,
+	options: ResolveModelOptions = {},
+): ResolveModelResult {
 	const trimmed = rawPattern.trim();
 	if (!trimmed) return { ref: null, error: "empty pattern" };
 
@@ -129,28 +172,17 @@ export function resolveModelReference(rawPattern: string, providers: ProvidersCo
 		return { ref: null, error: "no targets configured; add one with `clio-coder configure` or `clio-coder targets add`" };
 	}
 
-	const lower = base.toLowerCase();
-
-	const exactFull = candidates.filter((c) => c.full.toLowerCase() === lower);
-	if (exactFull.length > 0) return buildResult(base, pickFirst(exactFull), thinkingLevel);
-
-	if (GLOB_CHARS.test(base)) {
-		const re = globToRegExp(base);
-		const globMatches = candidates.filter((c) => re.test(c.full) || re.test(c.model));
-		return buildResult(base, pickFirst(globMatches), thinkingLevel);
+	// Preserve exact-id precedence before excluding worker-only targets (#416).
+	const allMatches = matchCandidates(base, candidates);
+	const matches = options.use === "chat" ? allMatches.filter((candidate) => candidate.chatEligible) : allMatches;
+	if (options.use === "chat" && matches.length === 0) {
+		const targets = [...new Set(allMatches.map((candidate) => candidate.target))];
+		if (targets.length > 0) {
+			return {
+				ref: null,
+				error: `pattern "${base}" matched ${targets.length === 1 ? "target" : "targets"} ${targets.join(", ")}, but ${targets.length === 1 ? "it is" : "they are"} not chat-eligible; chat needs a loaded HTTP runtime with chat enabled`,
+			};
+		}
 	}
-
-	const slashIdx = base.indexOf("/");
-	if (slashIdx !== -1) {
-		const ep = base.slice(0, slashIdx).toLowerCase();
-		const mdl = base.slice(slashIdx + 1).toLowerCase();
-		const epModel = candidates.filter((c) => c.target.toLowerCase() === ep && c.model.toLowerCase() === mdl);
-		if (epModel.length > 0) return buildResult(base, pickFirst(epModel), thinkingLevel);
-	}
-
-	const exactModel = candidates.filter((c) => c.model.toLowerCase() === lower);
-	if (exactModel.length > 0) return buildResult(base, pickFirst(exactModel), thinkingLevel);
-
-	const partial = candidates.filter((c) => c.model.toLowerCase().includes(lower));
-	return buildResult(base, pickFirst(partial), thinkingLevel);
+	return buildResult(base, matches, thinkingLevel, options);
 }

@@ -490,7 +490,7 @@ function unpricedRunRoutes(settings: Readonly<ClioSettings>, providers: Provider
 	const compaction = settings.context.compaction.model;
 	if (compaction) {
 		try {
-			const selected = resolveModelReference(compaction, providers);
+			const selected = resolveModelReference(compaction, providers, { use: "chat" });
 			if (selected.ref && !selected.warning) routes.push(selected.ref);
 		} catch {
 			// An invalid compaction pattern fails compaction itself with its own message.
@@ -1129,13 +1129,13 @@ async function resolveCompactionModel(
 	if (override !== undefined && override !== null) {
 		let selected: ReturnType<typeof resolveModelReference>;
 		try {
-			selected = resolveModelReference(override, providers);
+			selected = resolveModelReference(override, providers, { use: "chat" });
 		} catch {
 			throw new Error("context.compaction.model is an invalid pattern; set a unique target/model reference");
 		}
 		if (!selected.ref || selected.warning) {
 			throw new Error(
-				"context.compaction.model must match exactly one configured model; set a unique target/model reference",
+				"context.compaction.model must match exactly one chat-eligible configured model; set a unique target/model reference on a loaded HTTP target with chat enabled",
 			);
 		}
 		targetId = selected.ref.target;

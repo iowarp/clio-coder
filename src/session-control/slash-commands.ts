@@ -928,6 +928,7 @@ export interface SessionCommandContext {
 	openModel?: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
+	getChatTarget?: () => string | null | undefined;
 	/**
 	 * Apply a resolved model reference, or hand it to the scope dialog. "pending"
 	 * means the operator has yet to choose session or global and nothing has
@@ -2891,7 +2892,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					const msg = err instanceof Error ? err.message : String(err);
 					ctx.notice("warn", `model refresh failed; resolving cached catalog: ${msg}`);
 				}
-				const result = resolveModelReference(command.pattern, ctx.providers);
+				const chatTarget = ctx.getChatTarget?.();
+				const result = resolveModelReference(command.pattern, ctx.providers, {
+					use: "chat",
+					...(chatTarget != null ? { preferTarget: chatTarget } : {}),
+				});
 				if (!result.ref) {
 					ctx.notice("error", result.error ?? `no match for "${command.pattern}"`);
 					ctx.render?.();

@@ -120,6 +120,7 @@ export {
 	thinkingLevelFromChoiceLabel,
 } from "./model-runtime-capabilities.js";
 export { createRuntimeRegistry, getRuntimeRegistry } from "./registry.js";
+export type { ResolveModelOptions } from "./resolver.js";
 export {
 	type ResolvedModelRef,
 	type ResolveModelResult,
