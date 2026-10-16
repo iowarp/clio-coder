@@ -5,7 +5,8 @@ import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
 import { type AtomicPublishResult, publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
+import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
+import { artifactToolLanding, hookLandingRefusal, publishTargetAdmission } from "./tool-landing.js";
 
 /**
  * The artifact tool: terminal document writers. kind=plan|review|report writes
@@ -52,7 +53,7 @@ async function writeTerminalArtifact(
 	kind: ArtifactKind,
 	args: Record<string, unknown>,
 	cwd: string,
-	admitTarget?: (target: string) => string | null,
+	options: ToolInvokeOptions | undefined,
 ): Promise<ToolResult> {
 	const content = typeof args.content === "string" ? args.content : "";
 	if (content.length === 0) return { kind: "error", message: `artifact: kind=${kind} requires non-empty content` };
@@ -62,6 +63,9 @@ async function writeTerminalArtifact(
 	if (!insideWorkspace(target, cwd)) {
 		return { kind: "error", message: `artifact: path escapes workspace root: ${target}` };
 	}
+	const moved = hookLandingRefusal("artifact", options?.hookLanding, target, cwd);
+	if (moved !== null) return { kind: "error", message: moved };
+	const admitTarget = publishTargetAdmission("artifact", options?.hookLanding, options?.writeTargetViolation);
 	const title = typeof args.title === "string" ? args.title.trim() : "";
 	const body = title.length > 0 && !content.trimStart().startsWith("#") ? `# ${title}\n\n${content}` : content;
 	let published: AtomicPublishResult;
@@ -103,12 +107,13 @@ export function createArtifactTool(deps: ArtifactToolDeps = {}): ToolSpec {
 		}),
 		baseActionClass: "write",
 		executionMode: "sequential",
+		describeHookLanding: (args) => artifactToolLanding(args, cwdFromDeps(deps)),
 		async run(args, options): Promise<ToolResult> {
 			const kind = typeof args.kind === "string" ? args.kind : "";
 			if (!(ARTIFACT_KINDS as ReadonlyArray<string>).includes(kind)) {
 				return { kind: "error", message: `artifact: kind must be plan, review, or report; got '${kind}'` };
 			}
-			return writeTerminalArtifact(kind as ArtifactKind, args, cwdFromDeps(deps), options?.writeTargetViolation);
+			return writeTerminalArtifact(kind as ArtifactKind, args, cwdFromDeps(deps), options);
 		},
 	};
 }

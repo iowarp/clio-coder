@@ -50,6 +50,7 @@ import type {
 import { recordStartupDiagnostic } from "../session-control/startup-diagnostics.js";
 import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
+import { runParkedInterview } from "../tools/extension-interview.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
@@ -89,8 +90,8 @@ import { createSessionTranscript } from "./session-transcript.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.js";
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
-import { runParkedInterview } from "./surfaces/interview.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
+import { renderView } from "./surfaces/view-renderer.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
@@ -638,7 +639,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			// permission card preempts it and it resumes afterwards.
 			interview: (extensionId, interview, signal) =>
 				runParkedInterview(
-					{ ask: (questions, options) => overlayLifecycle.openAskUserOverlayState(questions, options) },
+					{
+						ask: (questions, options) => overlayLifecycle.openAskUserOverlayState(questions, options),
+						renderIntro: (view, width) => renderView(view, width).lines,
+					},
 					interview,
 					{ extensionId, title: extensionId },
 					// The closing cancel still reaches the handler after an abort.

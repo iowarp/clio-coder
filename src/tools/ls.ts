@@ -15,6 +15,7 @@ import {
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { newSearchCompleteness, skipSearchPath } from "./spawn-hygiene.js";
+import { hookLandingRefusal } from "./tool-landing.js";
 import { truncateHead } from "./truncate.js";
 
 const DEFAULT_LIMIT = 500;
@@ -88,6 +89,8 @@ export const lsTool: ToolSpec = {
 	async run(args, options): Promise<ToolResult> {
 		const rootArg = typeof args.path === "string" ? args.path : ".";
 		const root = resolveReadPath(rootArg);
+		const moved = hookLandingRefusal("ls", options?.hookLanding, root);
+		if (moved !== null) return { kind: "error", message: moved };
 		const limit = parseLimit(args.limit);
 
 		try {

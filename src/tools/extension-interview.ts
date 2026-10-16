@@ -1,16 +1,16 @@
-import { validateInterview, validateInterviewStep } from "../../domains/extensions/interview-schema.js";
+import { validateInterview, validateInterviewStep } from "../domains/extensions/interview-schema.js";
 import type {
 	ExtensionOutputV2,
 	Interview,
 	InterviewAnswer,
 	InterviewNext,
 	InterviewStep,
-} from "../../domains/extensions/public-api-v2.js";
-import type { ParkedInterviewResult } from "../../domains/extensions/runtime-hook-bridge.js";
-import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
-import type { ToolInvokeOptions } from "../../tools/registry.js";
-import { createHarnessHold } from "../../tools/registry.js";
-import { renderView } from "./view-renderer.js";
+} from "../domains/extensions/public-api-v2.js";
+import type { ParkedInterviewResult } from "../domains/extensions/runtime-hook-bridge.js";
+import type { View } from "../domains/extensions/view.js";
+import type { AskUserHandler, AskUserQuestion, AskUserResult } from "./ask-user.js";
+import type { ToolInvokeOptions } from "./registry.js";
+import { createHarnessHold } from "./registry.js";
 
 function stepToQuestions(step: InterviewStep): AskUserQuestion[] {
 	return step.questions.map((question) => {
@@ -88,8 +88,14 @@ function initialDrafts(
 	});
 }
 
+/**
+ * Every surface that asks an extension's interview: the terminal's overlay,
+ * and an ACP client's interview channel. Only the terminal can draw a step's
+ * intro view, so a surface without `renderIntro` asks the questions without it.
+ */
 export interface ExtensionInterviewDeps {
 	ask: AskUserHandler;
+	renderIntro?: (view: View, width: number) => string[];
 }
 
 export async function runExtensionInterview(
@@ -141,7 +147,9 @@ export async function runExtensionInterview(
 						title: `${owner.title} · ${active.title}`,
 						step: position,
 						...(active.total === undefined ? {} : { total: active.total }),
-						...(intro === undefined ? {} : { intro: (width: number) => renderView(intro, width).lines }),
+						...(intro === undefined || deps.renderIntro === undefined
+							? {}
+							: { intro: (width: number) => deps.renderIntro?.(intro, width) ?? [] }),
 						initial: initialDrafts(step),
 					},
 				});
@@ -200,4 +208,32 @@ export async function runParkedInterview(
 		answers,
 		text: result.output?.text ?? result.reason ?? (result.outcome === "cancelled" ? "cancelled by the operator" : ""),
 	};
+}
+
+/**
+ * An interview a tool call asked for in a session nobody can answer: a
+ * headless run, or an ACP client that answers no interviews. The extension's
+ * handler still receives the step, cancelled with reason `headless`, so it can
+ * record that no author was available, and its closing text becomes the
+ * result. The call never waits for an answer that cannot come.
+ */
+export async function cancelUnansweredInterview(
+	interview: Interview,
+	onAnswer: (answer: InterviewAnswer) => Promise<InterviewNext>,
+): Promise<ParkedInterviewResult> {
+	const fallback = "no operator can answer an interview in this session";
+	let text = fallback;
+	try {
+		const next = await onAnswer({
+			id: typeof interview?.id === "string" ? interview.id : "",
+			step: typeof interview?.step?.key === "string" ? interview.step.key : "",
+			answers: {},
+			nav: "cancel",
+			reason: "headless",
+		});
+		if ("done" in next && next.done === true && typeof next.text === "string" && next.text.length > 0) text = next.text;
+	} catch (error) {
+		text = `${fallback}; the extension's handler failed: ${error instanceof Error ? error.message : String(error)}`;
+	}
+	return { outcome: "cancelled", answers: {}, text, reason: "headless" };
 }

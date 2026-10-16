@@ -13,6 +13,7 @@ import {
 	type MiddlewareHookRegistration,
 	type MiddlewareRuleDefinition,
 	registrationFromRuleDefinition,
+	registrationMatchesTool,
 	runMiddlewareAsyncRegistrations,
 	runMiddlewareRegistrations,
 	writeMiddlewareDiagnosticToStderr,
@@ -89,7 +90,7 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 					(registration) =>
 						registration.awaited === true &&
 						registration.hooks.includes(hook) &&
-						(registration.toolNames === undefined || (toolName !== undefined && registration.toolNames.includes(toolName))),
+						registrationMatchesTool(registration, toolName),
 				);
 		},
 		runAwaitedHook(input, priorEffects = []) {

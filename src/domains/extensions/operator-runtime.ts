@@ -324,7 +324,8 @@ export class OperatorExtensionRuntime {
 			);
 			if (this.closed || lifetime !== this.lifetime || capturedContext !== contextIdentity(this.context()))
 				throw new Error("session or workspace changed during runtime activation");
-			if (context.mode === "interactive") await this.deliverObservation({ event: "session_open", reason });
+			// A session host (the terminal, a headless run, ACP) opens a session; the one-shot `extensions run` does not.
+			if (this.options.onlyId === undefined) await this.deliverObservation({ event: "session_open", reason });
 			const ready = [...staged.values()].filter((process) => process.state === "ready").length;
 			const degraded = eligible.length - ready;
 			result = {

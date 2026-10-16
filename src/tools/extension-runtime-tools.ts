@@ -19,7 +19,7 @@ function bounded(text: string): string {
 /**
  * Gateway specs for the tools the running api 2 runtimes of one extension
  * generation serve. Registering one never runs package code: a call goes to
- * the live runtime through the bridge the terminal binds, so with no runtime
+ * the live runtime through the bridge its session host binds, so with no runtime
  * the call fails instead of starting one. Placement is the gateway, so the
  * provider's tool schema set is the same before and after a reload.
  *
@@ -65,7 +65,12 @@ export function buildExtensionRuntimeToolSpecs(
 								return { kind: "error", message: `${name}: no operator can answer an interview here`, details: { owner } };
 							const parked = await executor.interview(extensionId, result.interview, options?.signal);
 							const output = bounded(
-								JSON.stringify({ interview: parked.outcome, answers: parked.answers, text: parked.text }),
+								JSON.stringify({
+									interview: parked.outcome,
+									...(parked.reason === undefined ? {} : { reason: parked.reason }),
+									answers: parked.answers,
+									text: parked.text,
+								}),
 							);
 							return parked.outcome === "done"
 								? { kind: "ok", output, details: { owner } }

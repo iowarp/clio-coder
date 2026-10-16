@@ -52,6 +52,13 @@ export interface MiddlewareHookRegistration {
 	hooks: ReadonlyArray<MiddlewareHook>;
 	/** Exact tool names, same matcher semantics as `MiddlewareRuleDefinition.toolNames`. */
 	toolNames?: ReadonlyArray<string>;
+	/**
+	 * Decides, in place of exact `toolNames` membership, whether a call with
+	 * a tool name reaches this registration. Only extension hook registrations
+	 * set it, to match the MCP families their `tools` entries name; settings
+	 * and project hooks keep exact names, so `*` in one stays inert.
+	 */
+	matchesTool?(toolName: string): boolean;
 	/** Synchronous evaluation. A throw is isolated and contributes no effects. */
 	evaluate(input: MiddlewareHookInput, context?: MiddlewareHookEvaluationContext): ReadonlyArray<MiddlewareEffect>;
 	/**
@@ -116,6 +123,22 @@ export type MiddlewareDiagnostic =
 	  };
 
 export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => void;
+
+/** Whether a call reaches a registration's tool filter; one without `toolNames` sees every call. */
+export function registrationMatchesTool(
+	registration: Pick<MiddlewareHookRegistration, "toolNames" | "matchesTool">,
+	toolName: string | undefined,
+): boolean {
+	if (registration.toolNames === undefined) return true;
+	if (toolName === undefined) return false;
+	if (registration.matchesTool === undefined) return registration.toolNames.includes(toolName);
+	try {
+		return registration.matchesTool(toolName);
+	} catch {
+		// A matcher that cannot decide lets its hook see the call, so a gate it filters stays in force.
+		return true;
+	}
+}
 
 /**
  * Default diagnostic sink, and the one the domain loader constructs the
@@ -209,10 +232,7 @@ export function runMiddlewareRegistrations(
 	const ruleIds: string[] = [];
 	for (const registration of registrations) {
 		if (!registration.hooks.includes(input.hook)) continue;
-		if (registration.toolNames !== undefined) {
-			if (input.toolName === undefined) continue;
-			if (!registration.toolNames.includes(input.toolName)) continue;
-		}
+		if (!registrationMatchesTool(registration, input.toolName)) continue;
 		let emitted: ReadonlyArray<MiddlewareEffect>;
 		const startedAt = now();
 		try {
@@ -282,9 +302,7 @@ export async function runMiddlewareAsyncRegistrations(
 		// batch-end after_tool observation carries none, and an extension hook
 		// without a `tools:` filter must not see it as a call of its own.
 		if (registration.awaited === true && isToolHook(input.hook) && input.toolName === undefined) continue;
-		if (registration.toolNames !== undefined) {
-			if (input.toolName === undefined || !registration.toolNames.includes(input.toolName)) continue;
-		}
+		if (!registrationMatchesTool(registration, input.toolName)) continue;
 		let emitted: ReadonlyArray<MiddlewareEffect>;
 		try {
 			emitted = await registration.evaluateAsync(cloneHookInput(input), {
@@ -397,6 +415,7 @@ function cloneHookInput(input: MiddlewareHookInput): MiddlewareHookInput {
 			provenance: { ...input.toolResultDigest.provenance },
 		};
 	}
+	if (input.toolLanding !== undefined) cloned.toolLanding = structuredClone(input.toolLanding);
 	if (input.text !== undefined) cloned.text = input.text.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS);
 	return cloned;
 }

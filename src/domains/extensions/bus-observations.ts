@@ -133,3 +133,50 @@ export function createTurnObservations(observe: (observation: ExtensionObservati
 		},
 	};
 }
+
+/**
+ * Tool and turn facts read from a chat event stream, for session hosts without
+ * the terminal's turn summary (headless `run`, ACP). Only names, ids, outcomes
+ * and usage are read; message content never leaves this function.
+ */
+export function observeChatTurns(
+	onEvent: (handler: (event: unknown) => void) => () => void,
+	turns: ReturnType<typeof createTurnObservations>,
+	targetId: () => string,
+): () => void {
+	const fresh = () => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+	let usage = fresh();
+	let modelId = "";
+	let stopReason = "completed";
+	const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+	return onEvent((raw) => {
+		const event = raw as {
+			type?: unknown;
+			toolCallId?: unknown;
+			toolName?: unknown;
+			isError?: unknown;
+			message?: { role?: unknown; model?: unknown; stopReason?: unknown; usage?: Record<string, unknown> };
+		};
+		if (event.type === "agent_start") {
+			usage = fresh();
+			modelId = "";
+			stopReason = "completed";
+		} else if (event.type === "tool_execution_start" && typeof event.toolCallId === "string") {
+			turns.toolStart(event.toolCallId);
+		} else if (event.type === "tool_execution_end" && typeof event.toolCallId === "string") {
+			turns.toolEnd(typeof event.toolName === "string" ? event.toolName : "", event.toolCallId, event.isError === true);
+		} else if (event.type === "message_end" && event.message?.role === "assistant") {
+			const reported = event.message.usage ?? {};
+			usage = {
+				inputTokens: usage.inputTokens + count(reported.input),
+				outputTokens: usage.outputTokens + count(reported.output),
+				cacheReadTokens: usage.cacheReadTokens + count(reported.cacheRead),
+				cacheWriteTokens: usage.cacheWriteTokens + count(reported.cacheWrite),
+			};
+			if (typeof event.message.model === "string") modelId = event.message.model;
+			if (typeof event.message.stopReason === "string") stopReason = event.message.stopReason;
+		} else if (event.type === "agent_end") {
+			turns.turnEnd({ ...usage, modelId, targetId: targetId(), stopReason });
+		}
+	});
+}

@@ -96,20 +96,91 @@ export type ExtensionObservationV2 =
 	| { event: "workspace_leave"; workspace: string }
 	| { event: "tick"; intervalMs: number };
 
+/** Where a path-taking tool (`read`, `ls`, `grep`, `find`, `write`, `edit`, `artifact`) lands its `path`. */
+export interface ExtensionToolTarget {
+	arg: "path";
+	/**
+	 * The absolute path the tool opens, resolved by the tool's own resolver: a
+	 * leading `@` dropped, Unicode spaces made plain, `~` expanded and every
+	 * link followed, a `..` after a link stepping up from the link's target.
+	 */
+	path: string;
+	/** False when the walk could not finish (a link loop, a component Clio cannot inspect); the tool then fails. */
+	resolved: boolean;
+	/** `path` relative to the workspace with `/` separators, `.` for the workspace itself, or null outside it. */
+	workspacePath: string | null;
+}
+
+/** One worker a dispatch call starts, as dispatch admission parsed it. */
+export interface ExtensionDispatchTask {
+	/**
+	 * `task` in an ordinary fan-out; `builder` and `reviewer` in a review
+	 * loop; `candidate` and `judge` in compete; `member` and `synthesis` in
+	 * council. Gate roles (`reviewer`, `judge`, `member`, `synthesis`) run
+	 * read-only with no write roots.
+	 */
+	role: "task" | "builder" | "reviewer" | "candidate" | "judge" | "member" | "synthesis";
+	/** The recipe the worker runs, with `auto` and an omitted agent already resolved. */
+	agent: string;
+	/**
+	 * The absolute, link-resolved directory the task names in the source
+	 * checkout; its write roots resolve against it. With `worktree`, the
+	 * worker runs at the same path relative to the checkout root inside the
+	 * task worktree the host creates at run time.
+	 */
+	cwd: string;
+	/** The write roots as parsed, relative to `cwd`; empty when the task declares none. */
+	writeRoots: string[];
+	/**
+	 * Where those roots land in the source checkout, absolute and
+	 * link-resolved. Without `worktree` this is the boundary the worker is
+	 * held to; with it, the worker is held to the same roots moved into its
+	 * task worktree, and they reach this checkout only when the worktree merges.
+	 */
+	writeBoundaries: string[];
+	/** The worker runs in a task worktree the host creates at run time, so its writes land there first. */
+	worktree: boolean;
+	readOnly: boolean;
+}
+
+export type ExtensionDispatchCall =
+	| {
+			kind: "tasks";
+			mode: string;
+			/** Every role the plan starts, once each; a council lists each member. */
+			tasks: ExtensionDispatchTask[];
+			/** Present in compete: how many times the `candidate` runs, each in its own worktree. */
+			candidates?: number;
+	  }
+	| { kind: "list" }
+	| { kind: "apply-winner"; branch: string; cwd: string };
+
+/**
+ * Facts Clio resolves for a tool hook, present with `args` (access: tool-args)
+ * on Clio 0.6.3 and later. Earlier hosts send `args` alone, so a hook that
+ * needs a fact checks for it and falls back or refuses.
+ */
+export interface ExtensionToolHookLanding {
+	/** Present for a path-taking tool. */
+	target?: ExtensionToolTarget;
+	/** Present for `dispatch`, once admission parsed the call. */
+	dispatch?: ExtensionDispatchCall;
+}
+
 export type ExtensionHookEvent =
 	| {
 			point: "prompt_submit";
 			/** access: prompt */
 			text?: string;
 	  }
-	| {
+	| ({
 			point: "before_tool";
 			tool: string;
 			turnId: string | null;
 			/** access: tool-args */
 			args?: unknown;
-	  }
-	| {
+	  } & ExtensionToolHookLanding)
+	| ({
 			point: "after_tool";
 			tool: string;
 			turnId: string | null;
@@ -119,7 +190,7 @@ export type ExtensionHookEvent =
 			args?: unknown;
 			/** access: tool-results */
 			result?: string;
-	  }
+	  } & ExtensionToolHookLanding)
 	| {
 			point: "turn_start";
 			turnId: string;

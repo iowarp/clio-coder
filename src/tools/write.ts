@@ -5,6 +5,7 @@ import { type EditDiffResult, generateDiffString } from "./edit-diff.js";
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
+import { hookLandingRefusal, publishTargetAdmission } from "./tool-landing.js";
 
 /** Below this many lines a whole-file rewrite costs about as much as an edit. */
 const PARTIAL_REWRITE_MIN_LINES = 20;
@@ -41,6 +42,9 @@ export const writeTool: ToolSpec = {
 			typeof args.content === "string" ? args.content : args.content === undefined ? null : String(args.content);
 		if (content === null) return { kind: "error", message: "write: missing content argument" };
 		const { path: filePath, physical } = resolveMutationTarget(pathArg);
+		const moved = hookLandingRefusal("write", options?.hookLanding, filePath);
+		if (moved !== null) return { kind: "error", message: moved };
+		const admitTarget = publishTargetAdmission("write", options?.hookLanding, options?.writeTargetViolation);
 		try {
 			const bytes = Buffer.byteLength(content, "utf8");
 			const { file, diff, previousEndedWithNewline, skipDiff, unchanged, partialRewrite } = await withFileMutationQueue(
@@ -73,9 +77,7 @@ export const writeTool: ToolSpec = {
 					}
 					const diffResult = skipDiff ? undefined : generateDiffString(previousContent, content);
 					const diff = diffResult?.diff;
-					const file = await publishFileAtomically(filePath, content, {
-						...(options?.writeTargetViolation ? { admitTarget: options.writeTargetViolation } : {}),
-					});
+					const file = await publishFileAtomically(filePath, content, admitTarget ? { admitTarget } : {});
 					// Only a diffed overwrite can prove the bytes did not change.
 					const unchanged = previous !== null && !skipDiff && previousContent === content;
 					return {

@@ -36,6 +36,7 @@ import type {
 	ExtensionSnapshotDiagnostics,
 	ExtensionsContract,
 	InstalledExtension,
+	McpToolOwnerLookup,
 } from "../domains/extensions/index.js";
 import { EXTENSION_SNAPSHOT_DIAGNOSTIC_MESSAGE_CAP } from "../domains/extensions/index.js";
 import {
@@ -97,6 +98,8 @@ export interface ExtensionReloadCoordinatorDeps {
 	 * a gate never fails closed for want of a runtime that was never started.
 	 */
 	runtimeHooks?: ExtensionRuntimeHookBridge;
+	/** The session gateway's MCP ownership, read by runtime hooks that name one server's tools. */
+	mcpOwner?: McpToolOwnerLookup;
 }
 
 export interface ExtensionReloadCoordinator {
@@ -286,6 +289,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 				generation: candidate.generation,
 				recordReceipt: deps.recordReceipt,
 				...(deps.now !== undefined ? { now: deps.now } : {}),
+				...(deps.mcpOwner !== undefined ? { mcpOwner: deps.mcpOwner } : {}),
 			};
 			const runtimeRegistrations =
 				deps.runtimeHooks === undefined

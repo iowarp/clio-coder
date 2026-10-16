@@ -36,6 +36,7 @@ import {
 	spawnLineStream,
 	validateSearchPatternSize,
 } from "./spawn-hygiene.js";
+import { hookLandingRefusal } from "./tool-landing.js";
 import { GREP_MAX_LINE_LENGTH, truncateHead, truncateLine } from "./truncate.js";
 
 const DEFAULT_LIMIT = 100;
@@ -562,6 +563,8 @@ export const grepTool: ToolSpec = {
 		const context = parseContext(args.context);
 		if (context === null) return { kind: "error", message: "grep: context must be a non-negative number" };
 		const searchPath = resolveReadPath(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
+		const moved = hookLandingRefusal("grep", options?.hookLanding, searchPath);
+		if (moved !== null) return { kind: "error", message: moved };
 		const stat = statIsDirectory(searchPath);
 		if (!stat.ok) return { kind: "error", message: `grep: ${stat.message}` };
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : DEFAULT_LIMIT;

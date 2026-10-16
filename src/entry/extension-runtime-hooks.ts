@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { isAbsolute, relative as relativePath, sep } from "node:path";
 import {
 	capabilityEnvelope,
 	type ExtensionContentAccess,
@@ -5,10 +7,13 @@ import {
 	type ExtensionHookDeclaration,
 	type ExtensionHookEvent,
 	type ExtensionRuntimeHookBridge,
+	type ExtensionToolHookLanding,
 	envelopeDigest,
+	extensionHookToolMatcher,
 	type InstalledExtension,
 	isLoadableExtension,
 	type LoadableExtension,
+	type McpToolOwnerLookup,
 } from "../domains/extensions/index.js";
 import type {
 	HookReceipt,
@@ -27,6 +32,8 @@ export interface ExtensionRuntimeHookOptions {
 	generation: number;
 	recordReceipt: HookReceiptSink;
 	now?: () => number;
+	/** The session gateway's MCP ownership, so an `mcp_<id>__*` hook guards the server a call reaches. */
+	mcpOwner?: McpToolOwnerLookup;
 }
 
 function middlewareEffect(effect: ExtensionEffect, extensionId: string): MiddlewareEffect | null {
@@ -80,7 +87,11 @@ function hookEvent(
 ): ExtensionHookEvent {
 	const turnId = input.turnId ?? null;
 	const tool = input.toolName ?? "";
-	const args = access.includes("tool-args") && input.toolArgs !== undefined ? { args: { ...input.toolArgs } } : {};
+	// The landing is derived from the arguments, so it crosses under the same class.
+	const args =
+		access.includes("tool-args") && input.toolArgs !== undefined
+			? { args: { ...input.toolArgs }, ...landingFields(input.toolLanding) }
+			: {};
 	switch (point) {
 		case "before_tool":
 			return { point, tool, turnId, ...args };
@@ -117,6 +128,53 @@ function hookEvent(
 				...(access.includes("assistant-text") && input.text !== undefined ? { text: input.text } : {}),
 			};
 	}
+}
+
+/** The landing as api 2 hook events carry it; `workspacePath` is relative to the session's workspace. */
+function landingFields(
+	landing: MiddlewareHookInput["toolLanding"],
+): Pick<ExtensionToolHookLanding, "target" | "dispatch"> {
+	if (landing === undefined) return {};
+	const fields: Pick<ExtensionToolHookLanding, "target" | "dispatch"> = {};
+	if (landing.path !== undefined) {
+		let workspace = process.cwd();
+		try {
+			workspace = realpathSync(workspace);
+		} catch {
+			// The process cwd is already physical on every platform Clio runs on; keep it.
+		}
+		const relative = relativePath(workspace, landing.path.path);
+		const inside = relative !== ".." && !relative.startsWith(`..${sep}`) && !isAbsolute(relative);
+		fields.target = {
+			arg: landing.path.arg,
+			path: landing.path.path,
+			resolved: landing.path.resolved,
+			workspacePath: inside ? (relative === "" ? "." : relative.split(sep).join("/")) : null,
+		};
+	}
+	if (landing.dispatch !== undefined) {
+		const dispatch = landing.dispatch;
+		fields.dispatch =
+			dispatch.kind === "tasks"
+				? {
+						kind: "tasks",
+						mode: dispatch.mode,
+						tasks: dispatch.tasks.map((task) => ({
+							role: task.role,
+							agent: task.agent,
+							cwd: task.cwd,
+							writeRoots: [...task.writeRoots],
+							writeBoundaries: [...task.writeBoundaries],
+							worktree: task.worktree,
+							readOnly: task.readOnly,
+						})),
+						...(dispatch.candidates !== undefined ? { candidates: dispatch.candidates } : {}),
+					}
+				: dispatch.kind === "apply-winner"
+					? { kind: "apply-winner", branch: dispatch.branch, cwd: dispatch.cwd }
+					: { kind: "list" };
+	}
+	return fields;
 }
 
 /**
@@ -269,7 +327,9 @@ export function buildExtensionRuntimeHookRegistrations(
 			id,
 			description: `${entry.id} runtime ${point} hook`,
 			hooks: [point],
-			...(hook.tools !== undefined ? { toolNames: [...hook.tools] } : {}),
+			...(hook.tools !== undefined
+				? { toolNames: [...hook.tools], matchesTool: extensionHookToolMatcher(hook.tools, options.mcpOwner) }
+				: {}),
 			awaited: true,
 			evaluate: () => [],
 			async evaluateAsync(input) {

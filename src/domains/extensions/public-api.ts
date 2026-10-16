@@ -23,7 +23,8 @@ export interface ExtensionRuntimeSnapshot {
 	workspace: string;
 	sessionId: string | null;
 	generation: number;
-	mode: "interactive" | "headless";
+	/** The surface hosting the session: the terminal, a headless `run` (or the one-shot `extensions run`), or an ACP client such as the GUI. */
+	mode: "interactive" | "headless" | "acp";
 }
 export interface ExtensionCommandContext {
 	readonly snapshot: Readonly<ExtensionRuntimeSnapshot>;

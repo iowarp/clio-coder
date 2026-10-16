@@ -9,7 +9,9 @@ import { classify } from "../../src/domains/safety/action-classifier.js";
 import { compilePathPolicy, evaluatePathPolicy } from "../../src/domains/safety/path-policy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { withFileMutationQueue } from "../../src/tools/file-mutation-queue.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { pathToolLanding } from "../../src/tools/tool-landing.js";
 import { writeTool } from "../../src/tools/write.js";
 
 /**
@@ -212,6 +214,30 @@ describe("symlink escape admission", () => {
 		);
 		strictEqual(swapped.kind, "error");
 		if (swapped.kind === "error") match(swapped.message, /outside the permitted write roots/u);
+		strictEqual(existsSync(join(root, "other", "probe.txt")), false);
+	});
+
+	// The entry check held the path to the hook-judged landing, but the publish
+	// walked it again after the queue wait and followed a link swapped in meanwhile.
+	it("refuses a publish whose target a link moved off the hook-judged landing after the entry check", async () => {
+		mkdirSync(join(root, "judged"));
+		mkdirSync(join(root, "other"));
+		const path = join(root, "judged", "probe.txt");
+		const hookLanding = pathToolLanding(ToolNames.Write, { path });
+		ok(hookLanding !== null);
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const held = withFileMutationQueue(path, () => gate);
+		const pending = writeTool.run({ path, content: "x" }, { hookLanding });
+		rmSync(join(root, "judged"), { recursive: true });
+		symlinkSync("other", join(root, "judged"));
+		release();
+		await held;
+		const result = await pending;
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") match(result.message, /where its extension hooks judged it; refused/u);
 		strictEqual(existsSync(join(root, "other", "probe.txt")), false);
 	});
 

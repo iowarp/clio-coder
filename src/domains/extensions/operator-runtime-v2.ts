@@ -78,7 +78,7 @@ export interface OperatorRuntimeV2Options {
 }
 
 /** Observations a slow runtime may fall behind by before the oldest is dropped. */
-const OBSERVATION_BACKLOG = 64;
+export const OBSERVATION_BACKLOG = 64;
 /** How long a closing session waits for runtimes to take session_close, so a stuck handler cannot hold a reload or the exit. */
 const SESSION_CLOSE_MS = 1000;
 
@@ -172,9 +172,24 @@ function visibleTo(event: ExtensionObservationV2, access: ReadonlyArray<string>)
 	return event;
 }
 
+/** Waits for the tasks, at most SESSION_CLOSE_MS. */
+async function withinSessionClose(tasks: ReadonlyArray<Promise<unknown>>): Promise<void> {
+	if (tasks.length === 0) return;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	await Promise.race([
+		Promise.all(tasks),
+		new Promise<void>((resolve) => {
+			timer = setTimeout(resolve, SESSION_CLOSE_MS);
+		}),
+	]);
+	clearTimeout(timer);
+}
+
 interface ObservationQueue {
 	events: ExtensionObservationV2[];
 	draining: boolean;
+	/** Settles when the running drain ends. */
+	drained?: Promise<void>;
 }
 
 /**
@@ -203,6 +218,8 @@ export class OperatorExtensionRuntimeV2 {
 	private workspaceEntry: InstalledExtension | undefined;
 	private failures = new Map<string, string>();
 	private queues = new Map<ExtensionRuntimeProcessV2, ObservationQueue>();
+	/** Observations that arrived while a session change awaited its generation; the generation hears them after session_open. */
+	private held: ExtensionObservationV2[] = [];
 	/** Host-driven schedules; a runtime never keeps its own timers or watches. */
 	private ticks = new Map<ExtensionRuntimeProcessV2, ReturnType<typeof setInterval>>();
 	private watches = new Map<ExtensionRuntimeProcessV2, ExtensionGlobWatch>();
@@ -298,16 +315,17 @@ export class OperatorExtensionRuntimeV2 {
 	private limitReason(): string {
 		return `operator runtime limit is ${RUNTIME_V2_LIMITS.processes} across api 1 and api 2; disable another runtime and reload`;
 	}
-	private retire(process: ExtensionRuntimeProcessV2, reason: string): void {
+	/** `after` holds the disposal until it settles; the process is out of the generation at once. */
+	private retire(process: ExtensionRuntimeProcessV2, reason: string, after?: Promise<void>): void {
 		this.activity(process.extension, "runtime_retire", reason, { generation: this.generation });
 		this.disarm(process);
 		this.queues.delete(process);
-		const task = process.dispose(reason);
+		const task = after ? after.then(() => process.dispose(reason)) : process.dispose(reason);
 		this.retired.add(task);
 		void task.finally(() => this.retired.delete(task));
 	}
-	private retireAll(reason: string): void {
-		for (const process of this.processes.values()) this.retire(process, reason);
+	private retireAll(reason: string, after?: Promise<void>): void {
+		for (const process of this.processes.values()) this.retire(process, reason, after);
 		this.processes.clear();
 		this.deferred.clear();
 	}
@@ -372,11 +390,40 @@ export class OperatorExtensionRuntimeV2 {
 		if (restoreWorkspace) this.restoreWorkspace = true;
 		if (this.closed || (!this.processes.size && !this.deferred.size && !this.reloading && !this.queued)) return;
 		this.lifetime++;
-		this.retireAll("session-change");
+		// The session these runtimes served ends here, so each hears session_close
+		// before it is disposed, as on a reload. The send leaves before the fence
+		// clears the generation; nothing reaches the old runtimes after it.
+		this.retireAll("session-change", this.closeSession("session-change"));
+		// What waited for the generation this change replaces belongs to a session no runtime served.
+		this.held = [];
 		// The reload that follows decides whether the workspace survives; a leaf switch keeps it.
 		this.surface.reset(() => true);
 		this.queued = true;
 		this.changed();
+	}
+
+	/** True from a session change that retired every runtime until the next generation commits; also during startup. */
+	get awaitingGeneration(): boolean {
+		return !this.closed && (this.queued || this.reloading) && this.processes.size === 0 && this.deferred.size === 0;
+	}
+
+	/**
+	 * Waits for the generation a session change queued. The queued reload runs
+	 * only at an idle boundary, so a turn that starts right after ACP's
+	 * session/new or a resume would otherwise run with no runtime: gates
+	 * declared onError block refuse everything and runtime tools fail. A session
+	 * host calls this before each hook and tool call, and its `isIdle` admits
+	 * the reload while `awaitingGeneration` holds, since nothing runs to swap out.
+	 */
+	async whenLive(): Promise<void> {
+		for (;;) {
+			if (this.awaitingGeneration && this.queued) void this.reload("session-change");
+			if (!this.reloading) return;
+			// A session change during that reload, or one before this call while it
+			// ran, rejected it and queued the next generation; wait for that one too,
+			// whichever waiter starts it.
+			await this.reloadTask;
+		}
 	}
 
 	/** Reverify at command boundaries and on the slow lifecycle tick, never during paint. */
@@ -452,6 +499,8 @@ export class OperatorExtensionRuntimeV2 {
 		this.reloading = true;
 		this.reloadTask = this.performReload(reason).finally(() => {
 			this.reloading = false;
+			// A commit delivered them; a failed reload with no queued successor has no generation to hand them to.
+			if (!this.awaitingGeneration) this.held = [];
 			this.changed();
 		});
 		return this.reloadTask;
@@ -558,7 +607,10 @@ export class OperatorExtensionRuntimeV2 {
 			);
 			if (this.closed || lifetime !== this.lifetime || !sameContext(key, this.context()))
 				throw new Error("session or workspace changed during runtime activation");
-			if (context.mode === "interactive") {
+			// Every session host (the terminal, a headless run, ACP) arms ticks and
+			// watches and opens the session; the one-shot `extensions run` answers
+			// its command and exits.
+			if (this.options.onlyId === undefined) {
 				for (const [id, process] of staged)
 					process.updateSnapshot({
 						...context,
@@ -568,9 +620,12 @@ export class OperatorExtensionRuntimeV2 {
 					});
 				for (const process of staged.values()) if (this.current(process)) this.arm(process, context.workspace);
 				this.opened = true;
-				this.observe({ event: "session_open", reason });
+				this.deliver({ event: "session_open", reason });
 				const active = this.surface.activeWorkspace;
 				if (active) this.observeOne(active.extensionId, { event: "workspace_enter", workspace: active.workspaceId });
+				const held = this.held;
+				this.held = [];
+				for (const event of held) this.deliver(event);
 			}
 			const ready = [...staged.values()].filter((process) => process.state === "ready").length;
 			const degraded = eligible.length - deferred.size - ready;
@@ -991,6 +1046,16 @@ export class OperatorExtensionRuntimeV2 {
 	 */
 	observe(event: ExtensionObservationV2): void {
 		if (this.closed) return;
+		// A turn that starts right after a session change runs before the
+		// queued generation commits; its turn_start would reach no runtime.
+		if (this.awaitingGeneration && this.options.onlyId === undefined) {
+			if (this.held.length >= OBSERVATION_BACKLOG) this.held.shift();
+			this.held.push(event);
+			return;
+		}
+		this.deliver(event);
+	}
+	private deliver(event: ExtensionObservationV2): void {
 		for (const process of this.processes.values()) this.enqueue(process, event);
 	}
 	private observeOne(extensionId: string, event: ExtensionObservationV2): void {
@@ -1042,7 +1107,7 @@ export class OperatorExtensionRuntimeV2 {
 			this.report(`extension ${process.extension.id} is behind on observations; the oldest was dropped`);
 		}
 		queue.events.push(event);
-		if (!queue.draining) void this.drain(process, queue);
+		if (!queue.draining) queue.drained = this.drain(process, queue);
 	}
 	private async drain(process: ExtensionRuntimeProcessV2, queue: ObservationQueue): Promise<void> {
 		queue.draining = true;
@@ -1065,26 +1130,24 @@ export class OperatorExtensionRuntimeV2 {
 	/**
 	 * Tells the runtimes that declared session_close the session they served is
 	 * ending, before their processes are retired. Delivery skips the queue so
-	 * retirement cannot drop it, and its answer is not applied.
+	 * retirement cannot drop it, and its answer is not applied. What the queue
+	 * still holds for that session, such as the last turn's turn_end, goes
+	 * first: a session change retires the queue at once.
 	 */
 	private async closeSession(reason: "exit" | "reload" | "session-change"): Promise<void> {
 		if (!this.opened) return;
 		this.opened = false;
 		const event: ExtensionObservationV2 = { event: "session_close", reason };
 		const sends = [...this.processes.values()]
-			.filter(
-				(process) => process.state === "ready" && subscribes(process, event.event) && !this.fenced(process.extension.id),
-			)
-			.map((process) => process.observe(event).catch(() => undefined));
-		if (sends.length === 0) return;
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		await Promise.race([
-			Promise.all(sends),
-			new Promise<void>((resolve) => {
-				timer = setTimeout(resolve, SESSION_CLOSE_MS);
-			}),
-		]);
-		clearTimeout(timer);
+			.filter((process) => process.state === "ready" && !this.fenced(process.extension.id))
+			.map(async (process) => {
+				const queue = this.queues.get(process);
+				const pending = queue?.events.splice(0) ?? [];
+				await queue?.drained?.catch(() => undefined);
+				for (const observed of pending) await process.observe(observed).catch(() => undefined);
+				if (subscribes(process, event.event)) await process.observe(event).catch(() => undefined);
+			});
+		await withinSessionClose(sends);
 	}
 
 	/** Operator cancel aborts operator requests; the runtimes keep serving. */
@@ -1093,6 +1156,11 @@ export class OperatorExtensionRuntimeV2 {
 	}
 
 	async dispose(): Promise<void> {
+		// A session host disposes right after its last turn, while that turn's
+		// turn_end is still queued or in flight; it reaches each runtime before
+		// session_close, within the same bound, instead of being cut off.
+		if (!this.closed)
+			await withinSessionClose([...this.queues.values()].flatMap((queue) => (queue.drained ? [queue.drained] : [])));
 		this.closed = true;
 		this.lifetime++;
 		this.cancel();

@@ -89,6 +89,7 @@ import {
 	createExtensionRuntimeHookBridge,
 	type ExtensionsContract,
 	ExtensionsDomainModule,
+	isLoadableExtension,
 } from "../domains/extensions/index.js";
 import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
@@ -2826,12 +2827,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		reloadLibrary: reloadPlugins,
 		extensions: () => extensions?.snapshot()?.packages ?? [],
 	});
-	// Only the TUI hosts api 2 runtimes today, so only it registers their hooks.
-	const runtimeHooks = interactive ? createExtensionRuntimeHookBridge() : undefined;
+	// Every main session hosts api 2 runtimes: the TUI itself, a headless run
+	// and ACP through `startExtensionHost`. Workers never do.
+	const runtimeHooks = createExtensionRuntimeHookBridge();
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
 		middleware,
-		...(runtimeHooks ? { runtimeHooks } : {}),
+		runtimeHooks,
+		// The gateway is registered after this coordinator; the lookup runs at call time.
+		mcpOwner: (tool) => toolBootstrap.mcpCapabilities?.ownerIdOf(tool) ?? null,
 		cwd: () => process.cwd(),
 		recordReceipt: (receipt) => {
 			const sessionId = receipt.sessionId ?? session?.current()?.id;
@@ -3621,10 +3625,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 		}),
 	});
-	// Runtime tools are served only where runtimes run, after the core and
-	// command tools hold their names; the gateway keeps the provider schema set
-	// unchanged as each generation swaps them.
-	if (runtimeHooks) extensionReload.attachRuntimeTools(toolRegistry);
+	// Runtime tools are served after the core and command tools hold their
+	// names; the gateway keeps the provider schema set unchanged as each
+	// generation swaps them.
+	extensionReload.attachRuntimeTools(toolRegistry);
 
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
@@ -4221,25 +4225,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getAutonomy: resolveEffectiveAutonomy,
 		providers,
 		middleware,
-		// Prompt hooks run only where runtime hooks do. The turn_start
-		// observation rides the same seam, so it names the line the operator
-		// typed (or a hook's rewrite of it), never an expanded template body.
-		...(runtimeHooks
-			? {
-					promptSubmit: async ({ typed, text }: { typed: string; text: string }) => {
-						const gate = extensionReload.promptGate();
-						const verdict =
-							gate !== null && gate.size > 0
-								? await gate.run(typed, typed === text)
-								: { kind: "pass" as const, text: typed, notices: [] };
-						const executor = runtimeHooks.current();
-						for (const notice of verdict.notices) executor?.notify(notice);
-						if (verdict.kind === "block") return { kind: "block" as const, reason: verdict.reason };
-						executor?.observeTurnStart?.(verdict.text);
-						return { kind: "pass" as const, text: verdict.text === typed ? text : verdict.text };
-					},
-				}
-			: {}),
+		// The turn_start observation rides the prompt seam, so it names the line
+		// the operator typed (or a hook's rewrite of it), never an expanded
+		// template body.
+		promptSubmit: async ({ typed, text }: { typed: string; text: string }) => {
+			const gate = extensionReload.promptGate();
+			const verdict =
+				gate !== null && gate.size > 0
+					? await gate.run(typed, typed === text)
+					: { kind: "pass" as const, text: typed, notices: [] };
+			const executor = runtimeHooks.current();
+			for (const notice of verdict.notices) executor?.notify(notice);
+			if (verdict.kind === "block") return { kind: "block" as const, reason: verdict.reason };
+			executor?.observeTurnStart?.(verdict.text);
+			return { kind: "pass" as const, text: verdict.text === typed ? text : verdict.text };
+		},
 		middlewareToolChoice,
 		protectedArtifacts: {
 			replace: (state) => protectedArtifactsGuard.replaceState(state),
@@ -4549,6 +4549,43 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		};
 	};
 
+	/**
+	 * The api 2 runtime host of a headless run or an ACP session; the TUI hosts
+	 * its own. Loaded only when an installed api 2 extension could run, so a
+	 * session without one pays nothing. Disposed with the drain, which closes
+	 * the session for each runtime.
+	 */
+	const startSessionExtensionHost = async (
+		mode: "headless" | "acp",
+		ask?: AskUserHandler,
+	): Promise<import("./extension-host.js").ExtensionHost | null> => {
+		if (!extensions) return null;
+		const hostable = (cwd: string) =>
+			extensions.list(cwd, { all: true }).filter((entry) => isLoadableExtension(entry) && entry.runtimeV2 !== undefined);
+		if (hostable(process.cwd()).length === 0) return null;
+		const { startExtensionHost } = await import("./extension-host.js");
+		const host = startExtensionHost({
+			mode,
+			list: hostable,
+			runtimeHooks,
+			bus,
+			chat,
+			sessionId: () => session?.current()?.id ?? null,
+			targetId: () => options.headless?.target ?? getCurrentSettings().chat.target ?? "",
+			frozenTools: toolRegistry
+				.listAll()
+				.flatMap((tool) => (tool.sourceInfo?.extension ? [tool.sourceInfo.extension] : [])),
+			embed: async (request, signal, workspace) => {
+				const { embedForExtension } = await import("../domains/semantic-app/index.js");
+				return embedForExtension({ projectRoot: workspace }, request, signal);
+			},
+			notify: (line) => process.stderr.write(`clio-coder: ${line}\n`),
+			...(ask ? { ask } : {}),
+		});
+		termination.onDrain(() => host.dispose(), { timeoutMs: 6500 });
+		return host;
+	};
+
 	if (options.acp) {
 		// ACP-served sessions get the same routing isolation as interactive
 		// ones, but ACP v1 has no channel for agent-initiated advisory text:
@@ -4582,6 +4619,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		});
 		const acpWorkerRuns = followWorkerRuns(bus);
 		const acpHostToolEvents = createHostToolEvents();
+		// A client that answers no interviews gets each tool interview cancelled
+		// with reason headless, the way a run without an operator does.
+		const acpExtensionAsk = acpInterviews ? askUserBridge : undefined;
+		let acpExtensionHost = await startSessionExtensionHost("acp", acpExtensionAsk);
+		// A session that booted with nothing to host gets its host from the
+		// reload that admits an extension installed later.
+		let acpExtensionHostStart: Promise<void> | undefined;
 		// Built on the first usage read: provider adapters and the quota cache are
 		// not worth constructing for a session that never opens the view.
 		let acpQuota: { read(): Promise<ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>> } | null = null;
@@ -5060,7 +5104,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					? {
 							extensions: {
 								list: () => extensions.list(process.cwd(), { all: true }),
-								reload: () => extensionReload.reload(),
+								// The runtimes restart on the generation this commit published.
+								reload: () => {
+									const outcome = extensionReload.reload();
+									if (outcome.status !== "committed") return outcome;
+									if (acpExtensionHost) void acpExtensionHost.restart();
+									else
+										acpExtensionHostStart ??= startSessionExtensionHost("acp", acpExtensionAsk)
+											.then(
+												(host) => {
+													acpExtensionHost = host;
+												},
+												(err) => {
+													process.stderr.write(
+														`[clio-coder:acp] extension host failed to start: ${err instanceof Error ? err.message : String(err)}\n`,
+													);
+												},
+											)
+											.finally(() => {
+												acpExtensionHostStart = undefined;
+											});
+									return outcome;
+								},
 							},
 						}
 					: {}),
@@ -5165,6 +5230,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// settlement here makes a session append after session stop impossible
 			// by ordering rather than by timing.
 			await beginChatSettlement();
+			// The drain hook that disposes the extension host never runs on this
+			// path either, and its runtime children would keep the process alive
+			// after the client left. Disposal is idempotent.
+			await acpExtensionHostStart;
+			await acpExtensionHost?.dispose();
 			unsubscribeChatShutdown();
 			unsubscribeDispatchShutdown?.();
 			await dispatch.drain();
@@ -5178,6 +5248,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			await result.stop();
 			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 		} finally {
+			// A throw from the serve loop or settlement skips the disposal above,
+			// and the runtime children would still hold the process open.
+			await acpExtensionHostStart;
+			await acpExtensionHost?.dispose();
 			acpWorkerRuns.dispose();
 			unsubscribeAcpRoutingNotices();
 			unsubscribeAcpLoopGuardStop();
@@ -5192,6 +5266,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// durable closing turn the interactive surface produces.
 		const unsubscribeLoopGuardStop = subscribeLoopGuardStop(bus, chat);
 		const headlessPermissionReason = HEADLESS_PERMISSION_DENIED_REASON;
+		let headlessExtensionHost: import("./extension-host.js").ExtensionHost | null = null;
 		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision, meta) => {
 			resolvePermission(
 				{ bus, registry: toolRegistry },
@@ -5241,6 +5316,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				await termination.shutdown(0);
 				return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 			}
+			// Started only for a run that reaches the model, so the early exits
+			// above spawn no runtime. No operator answers here, so a tool's
+			// interview is cancelled with reason headless.
+			headlessExtensionHost = await startSessionExtensionHost("headless");
+			// The first turn's turn_start reaches a runtime only once the startup
+			// generation has committed. A run whose startup failed goes on without runtimes.
+			await headlessExtensionHost?.ready.catch(() => undefined);
 			const fileExpansion = await expandInlineFileReferencesAsync(
 				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,
 				{
@@ -5283,6 +5365,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		} finally {
 			unsubscribeHeadlessPermission();
 			unsubscribeLoopGuardStop();
+			// A run that throws skips the termination drain; the host's runtime
+			// children would otherwise keep the process alive. Disposal is idempotent.
+			await headlessExtensionHost?.dispose();
 		}
 	}
 
@@ -5337,7 +5422,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
-		...(runtimeHooks ? { runtimeHooks } : {}),
+		runtimeHooks,
 		reloadExtensions: () => {
 			const outcome = extensionReload.reload();
 			for (const issue of outcome.diagnostics.entries) reloadClasses.captureIssue(`${issue.type}: ${issue.message}`);

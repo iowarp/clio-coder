@@ -34,6 +34,7 @@ import {
 	spawnLineStream,
 	validateSearchPatternSize,
 } from "./spawn-hygiene.js";
+import { hookLandingRefusal } from "./tool-landing.js";
 import { truncateHead } from "./truncate.js";
 
 const DEFAULT_LIMIT = 500;
@@ -299,6 +300,8 @@ export const findTool: ToolSpec = {
 			return { kind: "error", message: `find: order must be path or mtime; got '${String(args.order)}'` };
 		}
 		const searchPath = resolveReadPath(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
+		const moved = hookLandingRefusal("find", options?.hookLanding, searchPath);
+		if (moved !== null) return { kind: "error", message: moved };
 		if (!existsSync(searchPath)) return { kind: "error", message: `find: path not found: ${searchPath}` };
 		if (!statSync(searchPath).isDirectory()) return { kind: "error", message: `find: not a directory: ${searchPath}` };
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : DEFAULT_LIMIT;

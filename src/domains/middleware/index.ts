@@ -165,6 +165,10 @@ export type {
 	MiddlewareRule,
 	MiddlewareRuleSource,
 	MiddlewareSnapshot,
+	ToolCallDispatchLanding,
+	ToolCallDispatchRole,
+	ToolCallDispatchTask,
+	ToolCallLanding,
 } from "./types.js";
 export {
 	isMiddlewareAnnotationSeverity,

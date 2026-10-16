@@ -7,6 +7,8 @@ export interface ParkedInterviewResult {
 	answers: Record<string, Record<string, string | string[]>>;
 	/** The extension's closing text when it finished, or why the interview ended. */
 	text: string;
+	/** Set when no operator could be asked, so the caller can tell an absent author from a refusal. */
+	reason?: "headless";
 }
 
 /** What the surface that owns api 2 runtimes offers the middleware registrations of their hooks. */

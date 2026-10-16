@@ -25,6 +25,7 @@ import { resolveReadPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { toolResultContextText } from "./result-disposition.js";
 import { isSessionOffloadPath } from "./result-shaping.js";
+import { hookLandingRefusal } from "./tool-landing.js";
 import {
 	DEFAULT_MAX_LINES,
 	formatSize,
@@ -820,6 +821,8 @@ export const readTool: ToolSpec = {
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "read: missing path argument" };
 		const filePath = resolveReadPath(pathArg);
+		const moved = hookLandingRefusal("read", options?.hookLanding, filePath);
+		if (moved !== null) return { kind: "error", message: moved };
 		const defaultDocsWindow = args.offset === undefined && args.limit === undefined && args.tail === undefined;
 		const pages = typeof args.pages === "string" && args.pages.trim().length > 0 ? args.pages : undefined;
 		const member = typeof args.member === "string" && args.member.length > 0 ? args.member : undefined;

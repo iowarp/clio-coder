@@ -5,11 +5,11 @@ import type { View } from "../../domains/extensions/view.js";
 import type { TUI } from "../../engine/tui.js";
 import { truncateToWidth } from "../../engine/tui.js";
 import type { AskUserHandler } from "../../tools/ask-user.js";
+import { runExtensionInterview } from "../../tools/extension-interview.js";
 import type { NotificationInput } from "../footer/notifications.js";
 import type { OverlayLifecycleController } from "../overlay-lifecycle.js";
 import { clioTheme, frame } from "../theme/index.js";
 import type { ExtensionDockHost } from "./extension-dock.js";
-import { runExtensionInterview } from "./interview.js";
 import { renderView } from "./view-renderer.js";
 
 const DRAWING_KEYS = [
@@ -138,7 +138,10 @@ export function createAmbientSurfaces(deps: AmbientDeps): AmbientSurfaces {
 		const controller = new AbortController();
 		interview = controller;
 		void runExtensionInterview(
-			{ ask: ((questions, options) => deps.overlay().openAskUserOverlayState(questions, options)) as AskUserHandler },
+			{
+				ask: ((questions, options) => deps.overlay().openAskUserOverlayState(questions, options)) as AskUserHandler,
+				renderIntro: (view, width) => renderView(view, width).lines,
+			},
 			event.interview,
 			{ extensionId: event.extensionId, title: event.extensionId },
 			(answer) => deps.operator.interview(event.extensionId, answer),

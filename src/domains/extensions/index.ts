@@ -23,6 +23,8 @@ export {
 	envelopeReviewLines,
 	reviewExtensionEnvelope,
 } from "./envelope-review.js";
+export type { McpToolOwnerLookup } from "./hook-tool-match.js";
+export { extensionHookToolMatcher } from "./hook-tool-match.js";
 export {
 	type ClioExtensionManifest,
 	disableExtension,
@@ -61,7 +63,12 @@ export {
 export { ExtensionsManifest } from "./manifest.js";
 export type { ExtensionCapabilityEnvelope, ExtensionHookDeclaration } from "./manifest-v2.js";
 export type { ExtensionHookOutcome } from "./operator-runtime-v2.js";
-export type { ExtensionContentAccess, ExtensionEffect, ExtensionHookEvent } from "./public-api-v2.js";
+export type {
+	ExtensionContentAccess,
+	ExtensionEffect,
+	ExtensionHookEvent,
+	ExtensionToolHookLanding,
+} from "./public-api-v2.js";
 export {
 	createExtensionRuntimeHookBridge,
 	type ExtensionRuntimeHookBridge,

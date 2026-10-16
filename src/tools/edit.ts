@@ -13,6 +13,7 @@ import {
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
+import { hookLandingRefusal, publishTargetAdmission } from "./tool-landing.js";
 
 const DIFF_LIMIT = 1024 * 1024;
 const VALIDATION_CHUNK = 64 * 1024;
@@ -167,6 +168,9 @@ export const editTool: ToolSpec = {
 			return { kind: "error", message: 'edit: provide edits as [{"oldText":"...","newText":"..."}, ...]' };
 		}
 		const { path: filePath, physical } = resolveMutationTarget(pathArg);
+		const moved = hookLandingRefusal("edit", options?.hookLanding, filePath);
+		if (moved !== null) return { kind: "error", message: moved };
+		const admitTarget = publishTargetAdmission("edit", options?.hookLanding, options?.writeTargetViolation);
 
 		try {
 			return await withFileMutationQueue(
@@ -194,9 +198,7 @@ export const editTool: ToolSpec = {
 							diff = generateDiffString(applied.baseContent, applied.newContent);
 						}
 					}
-					const file = await publishFileAtomically(filePath, finalContent, {
-						...(options?.writeTargetViolation ? { admitTarget: options.writeTargetViolation } : {}),
-					});
+					const file = await publishFileAtomically(filePath, finalContent, admitTarget ? { admitTarget } : {});
 					// The validation nudge is point-of-failure conditioning: measured on
 					// a live 35B coder worker, the model edited correctly and then spent
 					// its remaining calls "validating" with navigation tools (code_nav

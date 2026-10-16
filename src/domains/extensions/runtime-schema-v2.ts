@@ -197,7 +197,9 @@ function parseHooks(value: unknown): ExtensionHookDeclaration[] {
 		if (raw.tools !== undefined) {
 			if (on !== "before_tool" && on !== "after_tool") fail(`${path}.tools`, "applies only to a tool hook");
 			const tools = list(raw.tools, `${path}.tools`, 32).map((tool, at) =>
-				named(tool, `${path}.tools[${at}]`, /^[A-Za-z][A-Za-z0-9_.-]*$/, 64),
+				// `*` names only an MCP family the package cannot list by name: every MCP tool (`mcp_*`) or one
+				// server's (`mcp_<id>__*`). A wider prefix would cross server ownership (hook-tool-match.ts).
+				named(tool, `${path}.tools[${at}]`, /^(?:[A-Za-z][A-Za-z0-9_.-]*|mcp_\*|mcp_[a-z0-9][a-z0-9_-]*__\*)$/, 64),
 			);
 			if (tools.length === 0 || new Set(tools).size !== tools.length) fail(`${path}.tools`, "must name each tool once");
 			hook.tools = tools;

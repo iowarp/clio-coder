@@ -63,17 +63,18 @@ export interface AtomicPublishOptions {
 	/** Test seam. Must either perform the rename or throw before publishing. */
 	rename?: (tempPath: string, targetPath: string) => Promise<void>;
 	/**
-	 * Write-root check against the physical target, returning a block reason or
-	 * null. Admission judged the path earlier; a link swapped in since then
-	 * would move the write, so the target is judged again at the publish seam
-	 * before any directory is created and once more after (F3).
+	 * Check against the physical target, returning the refusal or null.
+	 * Admission and the extension hooks judged the path earlier; a link swapped
+	 * in since then would move the write, so the target is judged again at the
+	 * publish seam before any directory is created and once more after (F3).
+	 * Tools build it with `publishTargetAdmission` (`tool-landing.ts`).
 	 */
 	admitTarget?: (targetPath: string) => string | null;
 }
 
 function assertAdmitted(target: string, admitTarget: AtomicPublishOptions["admitTarget"]): void {
 	const reason = admitTarget?.(target) ?? null;
-	if (reason !== null) throw new Error(`Refusing write outside the permitted write roots: ${reason}`);
+	if (reason !== null) throw new Error(reason);
 }
 
 async function resolvePublishTarget(

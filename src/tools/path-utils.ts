@@ -110,3 +110,18 @@ export function resolveReadPath(filePath: string, cwd: string = process.cwd()): 
 	}
 	return resolved;
 }
+
+/**
+ * resolveReadPath, plus where its pick lands. A variant is a new spelling
+ * that can itself name a link, so it is walked again, as spelled: going
+ * through resolveMutationTarget would turn the AM/PM variant's narrow
+ * no-break space plain and walk a file the read never opens.
+ */
+export function resolveReadTarget(
+	filePath: string,
+	cwd: string = process.cwd(),
+): { opened: string; path: string; physical: string | undefined } {
+	const opened = resolveReadPath(filePath, cwd);
+	const physical = canonicalizeRawPath(opened, cwd) ?? undefined;
+	return { opened, path: physical ?? opened, physical };
+}

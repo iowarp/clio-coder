@@ -116,6 +116,48 @@ export type MiddlewareMetadata = Readonly<Record<string, MiddlewareMetadataValue
  */
 export const MIDDLEWARE_HOOK_TEXT_MAX_CHARS = 16_000;
 
+/**
+ * Where a tool call lands, resolved the way its tool resolves it, so a hook
+ * judges the file the tool opens and the workers dispatch starts rather than
+ * re-deriving either from the raw arguments.
+ */
+export interface ToolCallLanding {
+	/** A path-taking tool's `path` argument after `@`, Unicode spaces, `~` and every link, `..` after a link included. */
+	path?: { arg: "path"; path: string; resolved: boolean };
+	dispatch?: ToolCallDispatchLanding;
+}
+
+/**
+ * The part a dispatched worker plays: `task` in an ordinary fan-out, the
+ * builder and its gate reviewer in a review loop, the candidates and their
+ * judge in compete, the members and their synthesis judge in council.
+ */
+export type ToolCallDispatchRole = "task" | "builder" | "reviewer" | "candidate" | "judge" | "member" | "synthesis";
+
+/** One dispatched worker as dispatch admission parsed it. */
+export interface ToolCallDispatchTask {
+	role: ToolCallDispatchRole;
+	agent: string;
+	cwd: string;
+	/** The write roots as parsed, relative to `cwd`. */
+	writeRoots: ReadonlyArray<string>;
+	/** Where those roots land, absolute and link-resolved. */
+	writeBoundaries: ReadonlyArray<string>;
+	worktree: boolean;
+	readOnly: boolean;
+}
+
+export type ToolCallDispatchLanding =
+	| {
+			kind: "tasks";
+			mode: string;
+			/** Every role the plan starts, once each; compete runs the candidate `candidates` times. */
+			tasks: ReadonlyArray<ToolCallDispatchTask>;
+			candidates?: number;
+	  }
+	| { kind: "list" }
+	| { kind: "apply-winner"; branch: string; cwd: string };
+
 export interface MiddlewareHookInput {
 	hook: MiddlewareHook;
 	runId?: string;
@@ -138,6 +180,8 @@ export interface MiddlewareHookInput {
 	toolResultDetails?: Readonly<Record<string, unknown>>;
 	/** Bounded deterministic diagnostic supplied by the result-disposition layer on after_tool. */
 	toolResultDigest?: Readonly<ToolResultDigest>;
+	/** Supplied by the registry to the awaited phase at tool points only, where extension hooks run. */
+	toolLanding?: Readonly<ToolCallLanding>;
 	/**
 	 * Free text attached to the hook occurrence; on turn_end this is the final
 	 * assistant message text. The one typed exception to the scalar `metadata`
