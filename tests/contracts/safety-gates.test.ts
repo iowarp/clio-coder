@@ -163,6 +163,27 @@ describe("safety gate boundary", () => {
 		strictEqual(executionDisposition(policy, ToolNames.Bash, { command: "npm run build" }, "default"), "ask");
 	});
 
+	it("recognizes only exact toolchain version probes", () => {
+		const policy = engine();
+		for (const command of ["node --version", "go version", "python3 -V"]) {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			strictEqual(decision.kind, "allow", command);
+			strictEqual(decision.ruleId, "builtin:version-probe", command);
+			strictEqual(decision.execRecognition, "recognized", command);
+		}
+		for (const command of [
+			"node --version | cat",
+			"./node --version",
+			"npx tsc --version",
+			"node --version extra",
+			"node version",
+			"node --version && git status",
+		]) {
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition, "unrecognized", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "default"), "ask", command);
+		}
+	});
+
 	it("recognizes only safe complete command chains inside the workspace", () => {
 		const policy = engine();
 		const admitted = policy.evaluate({

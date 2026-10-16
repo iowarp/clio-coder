@@ -223,6 +223,51 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 ];
 
 /**
+ * A deny-mode fleet worker ran `node --version`, the call fell to
+ * bash-unrecognized, and the refusal counted toward WORKER_REFUSAL_LIMIT until
+ * the worker ended at three (0.6.3 dogfood). Each tool lists only the spellings
+ * that print a version and exit: `node version`, `python version` and
+ * `make version` run a workspace file or Makefile target, `python -v` starts a
+ * verbose interpreter on stdin, and `yarn version` bumps the package. The
+ * bare tool name is required, so `./node` or `/tmp/node` never matches. The
+ * probe is recognized only standalone, like `git diff --check`: a
+ * BUILTIN_ALLOWLIST entry would also recognize `node --version | cat` and
+ * `node --version && git status` as chain steps.
+ */
+const VERSION_PROBE = versionProbePattern();
+
+function versionProbePattern(): RegExp {
+	const probes: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+		["node", ["--version", "-v"]],
+		["npm", ["--version", "-v"]],
+		["pnpm", ["--version", "-v"]],
+		["yarn", ["--version", "-v"]],
+		["bun", ["--version", "-v"]],
+		["deno", ["--version", "-V"]],
+		["python", ["--version", "-V"]],
+		["python3", ["--version", "-V"]],
+		["pip", ["--version", "-V"]],
+		["pip3", ["--version", "-V"]],
+		["uv", ["--version", "-V"]],
+		["go", ["version"]],
+		["cargo", ["--version", "-V", "version"]],
+		["rustc", ["--version", "-V"]],
+		["ruby", ["--version", "-v"]],
+		["java", ["--version"]],
+		["javac", ["--version"]],
+		["gcc", ["--version"]],
+		["g\\+\\+", ["--version"]],
+		["clang", ["--version"]],
+		["make", ["--version"]],
+		["cmake", ["--version"]],
+		["git", ["--version", "version"]],
+		["tsc", ["--version", "-v"]],
+	];
+	const alternatives = probes.map(([tool, flags]) => `${tool}[ \\t]+(?:${flags.join("|")})`);
+	return new RegExp(`^(?:${alternatives.join("|")})$`);
+}
+
+/**
  * Test runners run without an ask in default and yolo modes (#377). They
  * execute repository-authored code, which the maintainer accepted so a
  * headless run can verify its own work by the project's own command. Every id
@@ -1267,6 +1312,16 @@ function evaluateBashPolicy(
 			ruleId: "builtin:git-diff-check",
 			reasonCode: "builtin:git-diff-check",
 			reasons: ["matched built-in whitespace inspection 'builtin:git-diff-check'"],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "recognized",
+		};
+	}
+	if (VERSION_PROBE.test(recognitionCommand)) {
+		return {
+			kind: "allow",
+			ruleId: "builtin:version-probe",
+			reasonCode: "builtin:version-probe",
+			reasons: ["matched built-in toolchain version probe 'builtin:version-probe'"],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "recognized",
 		};
