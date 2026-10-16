@@ -11304,6 +11304,10 @@
 												},
 												"receiptFacts": {
 													"type": "boolean"
+												},
+												"resume": {
+													"type": "boolean",
+													"const": true
 												}
 											},
 											"additionalProperties": false

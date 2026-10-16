@@ -443,6 +443,7 @@ test("fleet preview compiles the playbook, announces its hash, and dispatches no
 			preview: "_clio-coder/fleet/preview",
 			run: "_clio-coder/fleet/run",
 			receiptFacts: true,
+			resume: true,
 		});
 		const preview = (await agent.call("_clio-coder/fleet/preview", {
 			sessionId: agent.sessionId,

@@ -3509,6 +3509,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 										run: ACP_FLEET_RUN_METHOD,
 										// Terminal dispatch frames carry `_meta[ACP_RECEIPT_META_KEY]` (#ACP-02).
 										receiptFacts: true,
+										resume: true,
 									},
 								}
 							: {}),

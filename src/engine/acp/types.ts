@@ -517,6 +517,8 @@ export const AcpFleetCapability = Type.Object(
 		run: wireMethod,
 		/** Terminal dispatch frames carry `_meta["clio-coder/receipt"]`. */
 		receiptFacts: Type.Optional(Type.Boolean()),
+		/** `preview` and `run` accept `resume`, a prior root whose successful prefix the run replays. */
+		resume: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
