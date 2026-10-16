@@ -510,6 +510,9 @@ export class AuthStorage {
 	}
 
 	private forAuthTarget<T extends AuthStatus>(target: AuthTarget, resolution: T): T {
+		// The kind check guards stored logins (08e75f205). An explicit per-target
+		// `--api-key` is the operator's choice for that target and always wins.
+		if (resolution.source === "runtime-override") return resolution;
 		const required = target.runtimeAuth === "oauth" ? "oauth" : target.requiredCredentialType;
 		if (required && resolution.credentialType !== null && resolution.credentialType !== required) {
 			const { apiKey: _key, ...status } = resolution as T & { apiKey?: string };
