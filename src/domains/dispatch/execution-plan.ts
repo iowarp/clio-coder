@@ -311,11 +311,18 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 		throw new Error("execution plan: writers must be 1 when present");
 	}
 	const steps = canonicalSteps(input.steps);
-	// A plan step's dependents wait on the tasks it generates (spliceExecutionPlan),
-	// so each one is checked against the predecessors it can end up with, before
-	// anything runs rather than when the plan settles.
+	// A plan step's dependents wait on the plan step and on the tasks it
+	// generates (spliceExecutionPlan), so each one is checked against the
+	// predecessors it can end up with, before anything runs rather than when the
+	// plan settles. Once spliced, the generated tasks are listed dependencies
+	// and the plan step counts once.
+	const spliced = new Set(
+		steps.flatMap((step) => (step.kind === "agent" && step.planParentId !== undefined ? [step.planParentId] : [])),
+	);
 	const planTaskBound = new Map(
-		steps.flatMap((step) => (step.kind === "agent" && step.plan !== undefined ? [[step.id, step.plan.maxTasks]] : [])),
+		steps.flatMap((step) =>
+			step.kind === "agent" && step.plan !== undefined && !spliced.has(step.id) ? [[step.id, step.plan.maxTasks + 1]] : [],
+		),
 	);
 	for (const step of steps) {
 		const predecessors = step.dependencies.reduce(
@@ -451,19 +458,14 @@ export function spliceExecutionPlan(
 		...(task.profile !== undefined ? { profile: task.profile } : {}),
 		planParentId: parentId,
 	}));
-	// A step that depends on the plan step builds on what the plan produced,
-	// which is its generated tasks' work. It waits on those tasks instead, and
-	// each task depends on the plan step, so the plan stays its ancestor. Left
-	// alone it shared a wave with the tasks and, as a code step under one
-	// writer, ran before any of them wrote a file.
+	// A step that depends on the plan step builds on what the plan produced:
+	// the plan step's own output and its generated tasks' work. It keeps the
+	// plan step and also waits on those tasks, so it receives both handoffs.
+	// Left waiting only on the plan step it shared a wave with the tasks and,
+	// as a code step under one writer, ran before any of them wrote a file.
 	const insertedIds = inserted.map((task) => task.id);
 	const rewired = plan.steps.map((step) =>
-		step.dependencies.includes(parentId)
-			? {
-					...step,
-					dependencies: [...step.dependencies.filter((dependency) => dependency !== parentId), ...insertedIds],
-				}
-			: step,
+		step.dependencies.includes(parentId) ? { ...step, dependencies: [...step.dependencies, ...insertedIds] } : step,
 	);
 	return compileExecutionPlan({
 		topology: plan.topology,
