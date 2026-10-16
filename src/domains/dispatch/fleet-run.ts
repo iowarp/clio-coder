@@ -379,6 +379,19 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			stepCount: fleetRunRecord.steps.length,
 			manifestDigest,
 		});
+	/**
+	 * Stamp the run's end and write the final record. A write that throws puts
+	 * `endedAt` back, so the seal never names an end that no record on disk carries.
+	 */
+	const writeEndedManifest = async (): Promise<void> => {
+		fleetRunRecord.endedAt = new Date().toISOString();
+		try {
+			await writeManifest();
+		} catch (error) {
+			fleetRunRecord.endedAt = null;
+			throw error;
+		}
+	};
 	/** File one step's terminal run id, whichever kind produced it. */
 	const fileStepAttempt = (terminalRunId: string): Promise<unknown> =>
 		recordAssignmentAttempt(fleetRootId, terminalRunId);
@@ -1119,9 +1132,8 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		};
 		result = await executePlan(livePlan, adapter, input.signal);
 	} catch (error) {
-		fleetRunRecord.endedAt = new Date().toISOString();
 		try {
-			await writeManifest();
+			await writeEndedManifest();
 		} finally {
 			sealEvents(input.signal?.aborted === true ? "aborted" : "failed");
 		}
@@ -1139,13 +1151,15 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	// A step a stop policy left unrun is counted but never succeeded, so a run
 	// that halted early can never reach the required count.
 	const cleanRun = failedLoops.length === 0 && result.skipped.length === 0 && succeededStepCount === required.length;
-	fleetRunRecord.endedAt = new Date().toISOString();
+	let recordWritten = false;
 	try {
-		await writeManifest();
+		await writeEndedManifest();
+		recordWritten = true;
 	} finally {
 		// The seal carries the same verdict the assignment row gets, so a fleet
-		// with a red or skipped step never seals as a success.
-		sealEvents(cleanRun ? "succeeded" : input.signal?.aborted === true ? "aborted" : "failed");
+		// with a red or skipped step never seals as a success. A final record that
+		// could not be written skips the settle, and reconciliation fails the row.
+		sealEvents(cleanRun && recordWritten ? "succeeded" : input.signal?.aborted === true ? "aborted" : "failed");
 	}
 	await settleFleetAssignment(cleanRun);
 	return {

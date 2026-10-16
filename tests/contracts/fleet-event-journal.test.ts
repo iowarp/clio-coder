@@ -173,6 +173,80 @@ test("a fleet with a failed step seals failed", async () => {
 	}
 });
 
+test("a fleet whose final record write throws seals failed without naming an unwritten end", async () => {
+	const env = await isolateClioEnv("clio-coder-fleet-events-lost-");
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-fleet-events-lost-repo-"));
+	try {
+		git(root, "init", "-q");
+		const plan = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "check",
+			maxWorkers: 1,
+			onFailure: "stop",
+			steps: [{ kind: "code", id: "check", commandId: "check", scope: "readonly", dependencies: [] }],
+		});
+		const rootId = "fleet-0123456789ad";
+		// After dispatch the record is serialized twice: the step's settle, then the
+		// final write. The var throws on the second, so only the final write fails.
+		// toJSON sits on the prototype because the journal's canonical encoder
+		// refuses an own function property.
+		let armed = false;
+		let writes = 0;
+		const lossy = Object.create({
+			toJSON() {
+				if (armed && ++writes === 2) throw new Error("disk full");
+				return "v";
+			},
+		});
+		let thrown: unknown = null;
+		try {
+			await executeFleetRun({
+				plan,
+				playbookName: "lost",
+				vars: { lossy } as unknown as Record<string, string>,
+				commands: {
+					version: 1,
+					path: join(root, "commands.yaml"),
+					commands: new Map([
+						[
+							"check",
+							{
+								id: "check",
+								argv: [process.execPath, "-e", "process.exit(0)"],
+								cwd: "",
+								timeoutMs: 10000,
+								env: [],
+								description: "check",
+							},
+						],
+					]),
+				},
+				workspaceRoot: root,
+				fleetRootId: rootId,
+				dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
+				agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
+				attributionEnabled: false,
+				onStepDispatched: () => {
+					armed = true;
+				},
+			});
+		} catch (error) {
+			thrown = error;
+		}
+		ok(thrown instanceof Error && thrown.message === "disk full");
+		const sealed = readFleetEventJournal(rootId)?.lines.at(-1);
+		ok(sealed?.type === "fleet_sealed");
+		strictEqual(sealed.outcome, "failed");
+		const onDisk = readFleetRun(rootId);
+		ok(onDisk);
+		strictEqual(onDisk.endedAt, null);
+		ok(sealed.endedAt !== onDisk.endedAt);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		env.restore();
+	}
+});
+
 test("fleet events prints the stored lines verbatim and ends at the seal", async () => {
 	const env = await isolateClioEnv("clio-coder-fleet-events-cli-");
 	try {
