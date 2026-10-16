@@ -14,6 +14,7 @@
  */
 
 import { setTimeout as delay } from "node:timers/promises";
+import { assignmentProcessOwnerAlive, getStoredAssignment } from "../domains/dispatch/assignment-store.js";
 import {
 	type FleetEventLine,
 	fleetEventJournalPath,
@@ -34,9 +35,46 @@ a rewrite by someone who can write the file.
   --follow  keep reading as the fleet appends; exit after fleet_sealed
   --json    write the stored NDJSON lines verbatim
   --all     read a fleet root from any project
+
+Exit codes: 0 sealed and intact, 1 integrity break or read error, 2 usage,
+4 --follow stopped because the fleet can no longer seal its journal (its root
+record is gone, it ended without a seal, or the process running it is gone).
 `;
 
 const FOLLOW_POLL_MS = 250;
+
+/** A --follow that stopped because the fleet can no longer append its seal. */
+const EXIT_WILL_NOT_SEAL = 4;
+
+export interface FleetEventsIo {
+	out(text: string): void;
+	err(text: string): void;
+}
+
+const PROCESS_IO: FleetEventsIo = {
+	out: (text) => void process.stdout.write(text),
+	err: (text) => void process.stderr.write(text),
+};
+
+/**
+ * Why a followed journal can never be sealed, or null while the fleet can
+ * still append to it. The fleet claims its assignment row before writing its
+ * root record and appends the seal right after the final record write, so a
+ * record that is gone, a record with `endedAt` set, or a row naming no live
+ * process means no seal is coming: the run crashed, its journal was turned off,
+ * or the root predates the journal.
+ */
+function followDeadEnd(rootId: string, journalExists: boolean): string | null {
+	const record = readFleetRun(rootId);
+	if (record === null) return `there is no root record for ${rootId}`;
+	const unsealed = journalExists ? "its event journal is not sealed" : "it has no event journal";
+	if (record.endedAt !== null) return `${rootId} ended at ${record.endedAt} and ${unsealed}`;
+	const assignment = getStoredAssignment(rootId);
+	if (assignment?.status !== "running" || !assignmentProcessOwnerAlive(assignment)) {
+		return `the process running ${rootId} is gone and ${unsealed}`;
+	}
+	return null;
+}
 
 function summary(line: FleetEventLine): string {
 	const head = `${line.seq} ${line.at} ${line.type}`;
@@ -52,59 +90,62 @@ function summary(line: FleetEventLine): string {
 	}
 }
 
-export async function runFleetEvents(args: ReadonlyArray<string>): Promise<number> {
+export async function runFleetEvents(args: ReadonlyArray<string>, io: FleetEventsIo = PROCESS_IO): Promise<number> {
 	let follow = false;
 	let json = false;
 	let all = false;
 	let rootId: string | undefined;
 	for (const arg of args) {
 		if (arg === "--help" || arg === "-h") {
-			process.stdout.write(HELP);
+			io.out(HELP);
 			return 0;
 		}
 		if (arg === "--follow" || arg === "-f") follow = true;
 		else if (arg === "--json") json = true;
 		else if (arg === "--all") all = true;
 		else if (arg.startsWith("-") || rootId !== undefined) {
-			process.stderr.write(`clio-coder fleet events: unexpected argument '${arg}'\n${HELP}`);
+			io.err(`clio-coder fleet events: unexpected argument '${arg}'\n${HELP}`);
 			return 2;
 		} else rootId = arg;
 	}
 	if (rootId === undefined || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(rootId)) {
-		process.stderr.write(`clio-coder fleet events: a fleet root id is required\n${HELP}`);
+		io.err(`clio-coder fleet events: a fleet root id is required\n${HELP}`);
 		return 2;
 	}
 	const record = readFleetRun(rootId);
 	if (record !== null && !all) {
 		const ledger = openLedger();
 		if (!fleetInspectionScope(false).seesRoot(record, (id) => ledger.get(id))) {
-			process.stderr.write(`clio-coder fleet events: ${rootId} belongs to another project; pass --all to read it\n`);
+			io.err(`clio-coder fleet events: ${rootId} belongs to another project; pass --all to read it\n`);
 			return 1;
 		}
 	}
 	let cursor = { offset: 0, seq: 0, prev: null as string | null };
 	let reported = false;
 	let broken = false;
+	let deadEnd: string | null = null;
 	for (;;) {
 		let read: ReturnType<typeof readFleetEventJournal>;
 		try {
 			read = readFleetEventJournal(rootId, cursor);
 		} catch (error) {
-			process.stderr.write(
+			io.err(
 				`clio-coder fleet events: cannot read ${fleetEventJournalPath(rootId)}: ${error instanceof Error ? error.message : String(error)}\n`,
 			);
 			return 1;
 		}
 		if (read === null && cursor.offset === 0 && !follow) {
-			process.stderr.write(`clio-coder fleet events: no event journal at ${fleetEventJournalPath(rootId)}\n`);
+			io.err(`clio-coder fleet events: no event journal at ${fleetEventJournalPath(rootId)}\n`);
 			return 1;
 		}
+		let appended = false;
 		if (read !== null) {
+			appended = read.lines.length > 0;
 			// --json output is imported by other tools, so it never carries a line
 			// past a break; the summary is for a person and shows the rest.
 			if (json && read.broken !== null) {
-				for (const line of read.lines.slice(0, read.verified)) process.stdout.write(`${JSON.stringify(line)}\n`);
-				process.stderr.write(`clio-coder fleet events: journal integrity: ${read.broken}\n`);
+				for (const line of read.lines.slice(0, read.verified)) io.out(`${JSON.stringify(line)}\n`);
+				io.err(`clio-coder fleet events: journal integrity: ${read.broken}\n`);
 				return 1;
 			}
 			// A line past the break may not have the shape summary() reads, so
@@ -112,18 +153,27 @@ export async function runFleetEvents(args: ReadonlyArray<string>): Promise<numbe
 			const verified = read.verified;
 			read.lines.forEach((line, index) => {
 				const text = json ? JSON.stringify(line) : index < verified ? summary(line) : `unverified ${JSON.stringify(line)}`;
-				process.stdout.write(`${text}\n`);
+				io.out(`${text}\n`);
 			});
 			const last = read.lines.at(-1);
 			cursor = { offset: read.offset, seq: last?.seq ?? cursor.seq, prev: last?.digest ?? cursor.prev };
 			if (read.broken !== null && !reported) {
 				reported = true;
 				broken = true;
-				process.stderr.write(`clio-coder fleet events: journal integrity: ${read.broken}\n`);
+				io.err(`clio-coder fleet events: journal integrity: ${read.broken}\n`);
 			}
 			if (read.sealed) return broken ? 1 : 0;
 		}
 		if (!follow) return broken ? 1 : 0;
+		// Only an idle poll asks whether a seal is still coming, and the answer
+		// must repeat on the next idle poll: the fleet stamps endedAt a moment
+		// before it appends the seal.
+		const reason = appended ? null : followDeadEnd(rootId, read !== null);
+		if (reason !== null && reason === deadEnd) {
+			io.err(`clio-coder fleet events: stopped following: ${reason}\n`);
+			return EXIT_WILL_NOT_SEAL;
+		}
+		deadEnd = reason;
 		await delay(FOLLOW_POLL_MS);
 	}
 }

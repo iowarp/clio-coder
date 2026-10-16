@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { runFleetEvents } from "../../src/cli/fleet-events.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import { claimAssignmentVerdict } from "../../src/domains/dispatch/assignment-store.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import {
 	createFleetEventJournal,
@@ -15,7 +17,7 @@ import {
 	readFleetEventJournal,
 } from "../../src/domains/dispatch/fleet-event-journal.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
-import { readFleetRun } from "../../src/domains/dispatch/state.js";
+import { readFleetRun, writeFleetRun } from "../../src/domains/dispatch/state.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function git(root: string, ...args: string[]) {
@@ -218,6 +220,57 @@ test("fleet events prints the stored lines verbatim and ends at the seal", async
 		strictEqual(await pending, 0);
 		strictEqual(printed, readFileSync(fleetEventJournalPath(rootId), "utf8"));
 		strictEqual(printed.trim().split("\n").length, 2);
+	} finally {
+		env.restore();
+	}
+});
+
+test("fleet events --follow stops when the process running the fleet is gone", { timeout: 10000 }, async () => {
+	const env = await isolateClioEnv("clio-coder-fleet-events-gone-");
+	try {
+		const rootId = "fleet-0123456789ad";
+		await claimAssignmentVerdict(rootId, "fleet");
+		// The same pid under another birth token is how a dead, reused pid reads.
+		const storePath = join(clioStateDir(), "assignments.json");
+		const store = JSON.parse(readFileSync(storePath, "utf8"));
+		store.assignments[0].processOwner.processBirthToken = "gone";
+		writeFileSync(storePath, JSON.stringify(store));
+		await writeFleetRun({
+			version: 1,
+			id: rootId,
+			fleet: "f",
+			planHash: "a".repeat(64),
+			stepIds: ["s"],
+			planSteps: [],
+			vars: {},
+			startedAt: "2026-10-01T00:00:00.000Z",
+			endedAt: null,
+			resumedFrom: null,
+			steps: [],
+		});
+		createFleetEventJournal(rootId).append({
+			type: "fleet_started",
+			fleet: "f",
+			planHash: "a".repeat(64),
+			vars: {},
+			resumedFrom: null,
+			replayedStepIds: [],
+			workspaceRoot: env.dir,
+			stepIds: ["s"],
+		});
+		let out = "";
+		let err = "";
+		const code = await runFleetEvents([rootId, "--follow", "--json", "--all"], {
+			out: (text) => {
+				out += text;
+			},
+			err: (text) => {
+				err += text;
+			},
+		});
+		strictEqual(code, 4);
+		ok(err.includes(`the process running ${rootId} is gone`), err);
+		strictEqual(out, readFileSync(fleetEventJournalPath(rootId), "utf8"));
 	} finally {
 		env.restore();
 	}
