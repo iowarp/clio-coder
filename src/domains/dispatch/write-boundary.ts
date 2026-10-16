@@ -468,6 +468,15 @@ function withinRecordedWrite(recorded: ReadonlySet<string>, path: string): boole
 	return false;
 }
 
+/** A scheduler window id as a reader names it: `wave-5` is wave 5 of the plan. */
+function describeWriteBoundaryWindow(window: string): string {
+	const wave = /^wave-(\d+)(?:-writer-(\d+))?$/u.exec(window);
+	if (wave !== null) return wave[2] === undefined ? `wave ${wave[1]}` : `wave ${wave[1]} writer ${wave[2]}`;
+	const revalidation = /^revalidate-(.+)-(\d+)$/u.exec(window);
+	if (revalidation !== null) return `revalidation ${revalidation[2]} of '${revalidation[1]}'`;
+	return `'${window}'`;
+}
+
 /**
  * Compare, roll back, and return the verdict. Never throws for a violation: a
  * violation is evidence the caller records and acts on, not an exception that
@@ -536,11 +545,20 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 								.join("; ")}, so every change outside the declaration was blamed on this window.`,
 					"If the change was legitimate, widen the step's `writes:` declaration to cover it.",
 				];
+	const checkedAt = new Date().toISOString();
+	// A fleet runs its windows one after another, so a change no step in this
+	// window recorded was made by something outside the fleet run while it ran
+	// (another session, an editor, a script). The demo that met this message
+	// read it as the fleet misattributing its own code steps' writes.
+	const steps =
+		input.stepIds.length === 1
+			? `step '${input.stepIds[0]}'`
+			: `steps ${input.stepIds.map((id) => `'${id}'`).join(", ")}`;
 	const concurrentDetail =
 		unattributed.length === 0
 			? []
 			: [
-					`Concurrent changes were seen in this window that no run in it recorded writing: ${unattributed
+					`While ${steps} ran in window ${describeWriteBoundaryWindow(input.window)} (${input.snapshot.capturedAt} to ${checkedAt}), something outside this fleet run changed paths no step of it recorded writing: ${unattributed
 						.map((change) => change.path)
 						.join(", ")}.`,
 					"They were left untouched, because a path this window did not write is not this window's to restore.",
@@ -553,7 +571,7 @@ export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBou
 		allow,
 		baselineHead: input.snapshot.head,
 		capturedAt: input.snapshot.capturedAt,
-		checkedAt: new Date().toISOString(),
+		checkedAt,
 		changedPaths: changes.map((change) => change.path),
 		violations: violations.map((change) => change.path),
 		unattributed: unattributed.map((change) => change.path),
