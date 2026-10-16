@@ -776,10 +776,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					// Declarations and trust are read from the project root admission
 					// used, never from a task worktree that holds neither, and nothing
 					// this run observes is written back to the operator's catalog. The
-					// servers themselves start in this run's tree, under its sandbox.
+					// servers themselves start in this run's tree, under its sandbox:
+					// the task worktree's root, never the subdirectory a dispatch from
+					// one gives as cwd. Without a task worktree the cwd is already the
+					// tree root admission resolved, including a compete candidate's own
+					// worktree, whose source checkout lies outside its write roots.
 					workerMcp = createMcpCapabilitySource({
 						cwd: admitted.projectRoot,
-						launchRoot: input.cwd ?? process.cwd(),
+						launchRoot: input.taskGit?.taskWorktree?.path ?? input.cwd ?? process.cwd(),
 						registry,
 						persistCatalog: false,
 						admitted,

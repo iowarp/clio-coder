@@ -370,4 +370,77 @@ describe("native worker MCP capabilities", () => {
 			await closeServer(server);
 		}
 	});
+
+	it("starts a task worktree run's project server at the worktree root when dispatched from a subdirectory", {
+		timeout: 20_000,
+	}, async () => {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
+		const ENV = "mcp_fake__env" as ToolName;
+		const tools: ToolName[] = [ToolNames.Read, ToolNames.Gateway, ENV];
+		const mcp = resolveWorkerMcpAdmission({ agentId: "scout", projectCwd: project, tools });
+		ok(mcp);
+		const worktree = join(env.dir, "worktree");
+		mkdirSync(join(worktree, "sub"), { recursive: true });
+		const bodies: Array<Record<string, unknown>> = [];
+		const server = createServer(async (req, res) => {
+			bodies.push(JSON.parse(await readRequestBody(req)));
+			const first = bodies.length === 1;
+			const args = JSON.stringify({ op: "call", capability: ENV, args: {} });
+			const delta = first
+				? {
+						role: "assistant",
+						tool_calls: [{ index: 0, id: "mcp-env", type: "function", function: { name: "gateway", arguments: args } }],
+					}
+				: { role: "assistant", content: "Done." };
+			res.setHeader("content-type", "text/event-stream");
+			res.end(
+				`data: ${JSON.stringify({ model: "fixture", choices: [{ index: 0, delta, finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`,
+			);
+		});
+		await new Promise<void>((settle) => server.listen(0, "127.0.0.1", settle));
+		try {
+			const run = startWorkerRun(
+				{
+					agentId: "scout",
+					systemPrompt: "Query the admitted env tool.",
+					task: "Report the server cwd.",
+					target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+					runtime: litellm,
+					wireModelId: "fixture",
+					apiKey: "fixture",
+					thinkingLevel: "off",
+					modelCapabilities: { contextWindow: 131072, maxTokens: 2048, tools: true },
+					allowedTools: tools,
+					budget: { mode: "advisory", toolCalls: 6, readReserve: 0, synthesis: true, hardCap: 20 },
+					noSkills: true,
+					cwd: join(worktree, "sub"),
+					readOnly: true,
+					taskGit: {
+						allowance: "inspect",
+						executePermitted: false,
+						taskWorktree: {
+							root: project,
+							runId: "run-1",
+							path: worktree,
+							branch: "clio-coder/run-1",
+							base: "0000000",
+							ownerToken: "owner",
+						},
+					},
+					mcp,
+				},
+				() => {},
+			);
+			strictEqual((await run.promise).exitCode, 0);
+			const messages = bodies[1]?.messages as Array<{ role: string; content: unknown }>;
+			const toolResult = messages.find((message) => message.role === "tool");
+			ok(toolResult, JSON.stringify(messages));
+			const text = Array.isArray(toolResult.content)
+				? toolResult.content.map((part: { text?: string }) => part.text ?? "").join("")
+				: String(toolResult.content);
+			strictEqual((JSON.parse(text) as { cwd: string }).cwd, worktree);
+		} finally {
+			await closeServer(server);
+		}
+	});
 });
