@@ -442,6 +442,8 @@ export function spliceExecutionPlan(
 	if (parent?.kind !== "agent" || parent.plan === undefined) {
 		throw new Error(`execution plan: '${parentId}' is not a plan step`);
 	}
+	// A splice with no tasks changes nothing, so no dependent is rewired.
+	if (tasks.length === 0) return plan;
 	const inserted: ExecutionPlanStepInput[] = tasks.map((task) => ({
 		kind: "agent",
 		id: task.id,
