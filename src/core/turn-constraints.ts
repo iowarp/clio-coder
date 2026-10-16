@@ -63,6 +63,14 @@ function intersectLists(
 	return first.filter((name) => second.includes(name));
 }
 
+const MODE_BREADTH = { answer: 0, proposal: 1, change: 2 } as const;
+
+function narrowerMode(first: TurnConstraints["mode"], second: TurnConstraints["mode"]): TurnConstraints["mode"] {
+	if (first === undefined) return second;
+	if (second === undefined) return first;
+	return MODE_BREADTH[first] <= MODE_BREADTH[second] ? first : second;
+}
+
 /**
  * A turn's constraints under the session's standing tool limits: the session
  * entry flags of an interactive or ACP session. Every bound only narrows, so
@@ -85,8 +93,11 @@ export function narrowTurnConstraints(
 	const skills = session.skills === "disabled" ? "disabled" : turn.skills;
 	// Once any layer is read-only every narrower one is too (Z1).
 	const readOnly = session.readOnly === true || turn.readOnly === true;
+	// A template's turn carries only allowed-tools, so keeping turn.mode alone
+	// dropped a headless run's own --mode the moment a template expanded.
+	const mode = narrowerMode(session.mode, turn.mode);
 	return {
-		...(turn.mode === undefined ? {} : { mode: turn.mode }),
+		...(mode === undefined ? {} : { mode }),
 		...(delegation === undefined ? {} : { delegation }),
 		...(skills === undefined ? {} : { skills }),
 		...(readOnly ? { readOnly: true as const } : {}),

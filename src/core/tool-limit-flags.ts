@@ -7,9 +7,18 @@
  */
 export function parseToolLimitList(flag: string, value: string): readonly string[] | { error: string } {
 	const names = value === "none" ? [] : value.split(",").map((name) => name.trim());
-	if (names.some((name) => !/^[a-zA-Z0-9_.-]+$/.test(name)))
+	if (names.some((name) => !isToolLimitName(name)))
 		return { error: `${flag} needs comma-separated capability names, or none` };
 	return [...new Set(names)];
+}
+
+/**
+ * The tool-name grammar a limit list accepts. Native template `allowed-tools`
+ * and `delegated-tools` keep names by this same rule, so a template can name
+ * any tool the session flags can.
+ */
+export function isToolLimitName(name: string): boolean {
+	return /^[a-zA-Z0-9_.-]+$/.test(name);
 }
 
 /** The session-wide tool limits an interactive or ACP session was started with. */

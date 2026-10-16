@@ -7,6 +7,7 @@ import {
 } from "../../core/context-operation.js";
 import type { JobRecord } from "../../core/job-types.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { CostAggregate } from "../../domains/observability/cost.js";
 import { accumulateCostAmount, emptyCostAggregate } from "../../domains/observability/cost.js";
 import {
@@ -69,12 +70,7 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
-import {
-	narrowTurnConstraints,
-	snapshotTurnConstraints,
-	type TurnConstraints,
-	turnAllowsTool,
-} from "../../core/turn-constraints.js";
+import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import type { RunReceiptFacts } from "../../domains/dispatch/receipt-facts.js";
 import {
 	readRunReceiptFacts,
@@ -276,6 +272,8 @@ export interface AcpPromptExpansion {
 	workingContextPaths: ReadonlyArray<string>;
 	pendingSkillRequests: ReadonlyArray<unknown>;
 	display?: { text: string; note?: string };
+	/** A prompt template's `allowed-tools`, submitted as the turn's constraint. */
+	constraints?: TurnConstraints;
 }
 
 /** A handoff document awaiting review; nothing has been written while a client holds one. */
@@ -6780,6 +6778,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...(expansion.workingContextPaths.length > 0 ? { workingContextPaths: expansion.workingContextPaths } : {}),
 					...(expansion.pendingSkillRequests.length > 0 ? { pendingSkillRequests: expansion.pendingSkillRequests } : {}),
 					...(expansion.display ? { display: expansion.display } : {}),
+					...(expansion.constraints ? { constraints: expansion.constraints } : {}),
 				});
 			}
 			// A queue send-now interrupted the run this request started and

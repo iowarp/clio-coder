@@ -113,6 +113,21 @@ for (const action of ["interruptFromEditor"] as const) {
 		assert.equal(f.errors.length, 1);
 	});
 }
+// A template with tool constraints sent now while a tool ran was refused by the
+// chat loop, yet the editor was already empty and "queued ahead" was shown.
+it("a send-now the live run refuses keeps its draft and reports nothing queued", async () => {
+	const f = fixture(async (text) => ({ text, images: [], constraints: { allowedTools: ["read"] } }));
+	const notices: string[] = [];
+	f.deps.notify = (_level, text) => notices.push(text);
+	f.deps.chat.runningToolCalls = () => 1;
+	f.deps.askSendNow = async () => "wait";
+	f.deps.chat.submit = async (_text, options) => options?.onRefused?.("constrained-turn-in-flight");
+	f.editor.setText("/review src");
+	f.controller.interruptFromEditor();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(f.editor.getText(), "/review src");
+	assert.deepEqual(notices, []);
+});
 it("large literal paste cannot submit or acquire local-bash provenance on undo/external round trip", () => {
 	const f = fixture();
 	let submissions = 0;

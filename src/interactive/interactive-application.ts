@@ -1196,6 +1196,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openInterop: () => openInteropOverlayState(),
 		openContextReset: () => openContextResetOverlayState(),
 		setEditorText: (text) => editor.setText(text),
+		restoreRefusedDraft: (text) => {
+			if (editor.getText().trim().length === 0) editor.setLiteralText(text);
+		},
 		// What the operator can share is what the operator can see: the panel's
 		// blocks, live or replayed, rather than the reducer's routing table.
 		listWorkerRuns: () => chatPanel.workerStates(),

@@ -17,6 +17,11 @@ export interface ResourceRoot {
 	precedence?: number;
 	/** Whether the resource is usable without an explicit trust opt-in. Defaults to true. */
 	trusted?: boolean;
+	/**
+	 * Written for another harness: an interop or library import, or a loose
+	 * compatibility root. Its frontmatter speaks that harness's tool names.
+	 */
+	foreign?: boolean;
 }
 
 /**
@@ -64,6 +69,7 @@ export function defaultScopedResourceRoots(
 			source: root.source,
 			precedence: COMPAT_RESOURCE_PRECEDENCE.package,
 			trusted: root.trust !== "foreign",
+			...(root.trust === "foreign" ? { foreign: true } : {}),
 			...(root.owner ? { owner: root.owner } : {}),
 		})),
 		{

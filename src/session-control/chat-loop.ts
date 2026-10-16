@@ -541,6 +541,12 @@ export interface ChatSubmitOptions {
 	 */
 	onPreparationVisible?: () => Promise<void>;
 	/**
+	 * Fires when a submission with `constraints` arrives while a turn is live
+	 * and is refused instead of queued, so the editor that consumed it can put
+	 * the draft back rather than report it as queued.
+	 */
+	onRefused?: (reason: string) => void;
+	/**
 	 * Fires once this submit owns the live turn (`isStreaming()` is true) and
 	 * the next queued submit may use streaming queue routing. Stage 0 replay
 	 * awaits it; the loop's own admission gate releases on it.
@@ -2349,10 +2355,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				let mode: SteeringMode = options.origin !== undefined ? "end-of-turn" : (options.steering ?? DEFAULT_STEERING_MODE);
 				let front = options.queueFront === true;
 				const trimmed = text.trim();
+				// A constrained submission is refused below unless the interrupt
+				// lands, so the fallbacks must not announce it as queued.
+				const constrained = options.constraints !== undefined;
+				let refusal: string | null = null;
 				if (mode === "interrupt" && trimmed.length > 0) {
-					const refusal = interruptRefusalReason();
+					refusal = interruptRefusalReason();
 					if (refusal !== null) {
-						emitNotice(`[Clio Coder] interrupt refused: ${refusal}. Queued for the next slot instead.`, "warning");
+						if (!constrained)
+							emitNotice(`[Clio Coder] interrupt refused: ${refusal}. Queued for the next slot instead.`, "warning");
 						mode = "next-slot";
 						front = true;
 					} else {
@@ -2372,20 +2383,24 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						} else {
 							// Something restarted a run while the cancel settled (a
 							// continuation resubmit); do not fight it, deliver at the next slot.
-							emitNotice(
-								"[Clio Coder] a run restarted before the interrupt landed. Queued for the next slot instead.",
-								"warning",
-							);
+							if (!constrained)
+								emitNotice(
+									"[Clio Coder] a run restarted before the interrupt landed. Queued for the next slot instead.",
+									"warning",
+								);
 							mode = "next-slot";
 						}
 					}
 				}
 				if (!interrupted) {
-					if (options.constraints !== undefined) {
+					if (constrained) {
 						emitAdmissionNotice(
-							"A submission with explicit task constraints must start a fresh turn; wait for settlement or interrupt the active run.",
+							`A submission with explicit task constraints must start a fresh turn; ${
+								refusal !== null ? `the interrupt was refused: ${refusal}` : "wait for settlement or interrupt the active run"
+							}.`,
 							"constrained-turn-in-flight",
 						);
+						options.onRefused?.("constrained-turn-in-flight");
 						return;
 					}
 					const hasImages = options.images !== undefined && options.images.length > 0;

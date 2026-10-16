@@ -17,7 +17,7 @@ import {
 	stringField,
 } from "../common-loader.js";
 import { resolvePackageReferences } from "../package-references.js";
-import { projectCompatTrusted } from "../skills/loader.js";
+import { importedToolSurface, projectCompatTrusted, templateToolSurface } from "../skills/loader.js";
 
 export interface PromptTemplate {
 	name: string;
@@ -42,6 +42,19 @@ export interface PromptTemplate {
 	 * records nothing in model-facing session context, and spends no tokens.
 	 */
 	displayOnly: boolean;
+	/**
+	 * Frontmatter `allowed-tools`: core names canonicalized, MCP and extension
+	 * names kept as written (`templateToolSurface`). Every surface
+	 * submits an expanded turn with these as its turn constraint, which only
+	 * intersects the session's limits, so a template narrows and never widens.
+	 */
+	allowedTools?: readonly string[];
+	/**
+	 * Frontmatter `delegated-tools`, parsed like `allowed-tools`: the turn's
+	 * delegation ceiling for dispatched workers. Absent, the turn's own
+	 * `allowedTools` is the ceiling. It only narrows the session's ceiling.
+	 */
+	delegatedTools?: readonly string[];
 }
 
 export interface PromptTemplateRoot {
@@ -54,6 +67,8 @@ export interface PromptTemplateRoot {
 	source?: string;
 	precedence?: number;
 	trusted?: boolean;
+	/** See `ResourceRoot.foreign`; its `allowed-tools` resolve through `importedToolSurface`. */
+	foreign?: boolean;
 }
 
 export interface PromptTemplateList {
@@ -127,6 +142,7 @@ function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): Promp
 				source: `${kind.id}-user`,
 				precedence: COMPAT_RESOURCE_PRECEDENCE.userCompat,
 				trusted: false,
+				foreign: true,
 			});
 		}
 		if (kind.projectPromptRoot !== undefined) {
@@ -136,6 +152,7 @@ function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): Promp
 				source: `${kind.id}-project`,
 				precedence: COMPAT_RESOURCE_PRECEDENCE.projectCompat,
 				trusted: false,
+				foreign: true,
 			});
 		}
 	}
@@ -324,6 +341,14 @@ function loadPromptFile(
 		displayOnly: booleanField(frontmatter, "display-only") ?? booleanField(frontmatter, "displayOnly") ?? false,
 	};
 	if (argumentHint) template.argumentHint = argumentHint;
+	const allowedTools = root.foreign
+		? importedToolSurface(frontmatter, `prompt template ${name}`, filePath, diagnostics)
+		: templateToolSurface(frontmatter, "allowed-tools", filePath, diagnostics);
+	if (allowedTools) template.allowedTools = allowedTools;
+	const delegatedTools = root.foreign
+		? importedToolSurface(frontmatter, `prompt template ${name}`, filePath, diagnostics, "delegated-tools")
+		: templateToolSurface(frontmatter, "delegated-tools", filePath, diagnostics);
+	if (delegatedTools) template.delegatedTools = delegatedTools;
 	return { name, value: template, source: sourceInfo };
 }
 

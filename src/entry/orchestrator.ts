@@ -56,7 +56,7 @@ import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
-import { turnAllowsTool } from "../core/turn-constraints.js";
+import { narrowTurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
@@ -5386,11 +5386,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					missing: "leave",
 				},
 			);
+			// A template's allowed-tools and delegated-tools narrow the run's own
+			// --allow-tools and --delegate-tools scope, never widen it.
+			const template = promptExpansion?.expanded ? promptExpansion.template : undefined;
+			const constraints = narrowTurnConstraints(
+				options.headless.constraints,
+				template?.allowedTools || template?.delegatedTools
+					? {
+							...(template.allowedTools ? { allowedTools: template.allowedTools } : {}),
+							...(template.delegatedTools ? { delegatedTools: template.delegatedTools } : {}),
+						}
+					: undefined,
+			);
 			const images = [...(options.headless.images ?? []), ...fileExpansion.images];
 			const workingContextPaths = [...(options.headless.workingContextPaths ?? []), ...fileExpansion.referencedPaths];
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
-				...(options.headless.constraints ? { constraints: options.headless.constraints } : {}),
+				...(constraints ? { constraints } : {}),
 				...(images.length > 0 ? { images } : {}),
 				...(workingContextPaths.length > 0 ? { workingContextPaths } : {}),
 				...(options.headless.sampling ? { sampling: options.headless.sampling } : {}),

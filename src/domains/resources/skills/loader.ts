@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { CLIO_SELF_DEVELOPMENT_SKILLS, detectClioCoderRepo } from "../../../core/clio-repo.js";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
-import { type ToolName, ToolNames } from "../../../core/tool-names.js";
+import { isToolLimitName } from "../../../core/tool-limit-flags.js";
+import { isMcpToolName, type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { INTEROP_AGENT_KINDS, interopSourceRank, interopUserRoot } from "../../interop/registry.js";
 import { enabledPluginResourceRoots, pluginBaseDir, withPluginDiscoveryPass } from "../../plugins/index.js";
@@ -130,6 +131,8 @@ export interface SkillRoot {
 	precedence?: number;
 	/** Whether discovered skills are model-visible by default. */
 	trusted?: boolean;
+	/** See `ResourceRoot.foreign`; its `allowed-tools` resolve through `importedToolSurface`. */
+	foreign?: boolean;
 	/**
 	 * Directory every discovered skill must resolve inside. A skill root says
 	 * what a repository or an operator's machine offers, so a symlink out of it
@@ -291,6 +294,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			...(root.owner ? { owner: root.owner } : {}),
 			precedence: SKILL_PRECEDENCE.package,
 			trusted: root.trust !== "foreign" || trustProject,
+			...(root.trust === "foreign" ? { foreign: true } : {}),
 		});
 	}
 
@@ -306,6 +310,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			origin: `${kind.skillSource}-user`,
 			precedence: SKILL_PRECEDENCE.userCompat,
 			trusted: false,
+			foreign: true,
 			containment: root.containment,
 		});
 	}
@@ -331,6 +336,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			origin: `${kind.skillSource}-project`,
 			precedence: SKILL_PRECEDENCE.projectCompat,
 			trusted: false,
+			foreign: true,
 			containment: cwd,
 		});
 	}
@@ -455,8 +461,99 @@ function declaredToolSurface(
 	if (tools.length === 0 && key === "allowed-tools") {
 		diagnostics.push({
 			type: "warning",
-			message:
-				"allowed-tools names no tool Clio has, so it narrows nothing; declare Clio tool names to confine this skill",
+			message: "allowed-tools names no tool Clio has, so it narrows nothing; declare Clio tool names to confine it",
+			path: filePath,
+		});
+		return undefined;
+	}
+	return tools.length > 0 ? tools : undefined;
+}
+
+/**
+ * The tool surface a native prompt template's `allowed-tools` or
+ * `delegated-tools` declares, resolved the way `--allow-tools` and
+ * `--delegate-tools` resolve theirs. Reading it through `declaredToolSurface`
+ * dropped every MCP and extension tool name, so a template meant to confine a
+ * turn to read plus one MCP tool could not reach that tool at all. Core names
+ * are canonicalized; any other name valid under the flag grammar is kept
+ * verbatim, because MCP and extension tools register after templates load.
+ * Only a kept name that is neither core nor MCP-form is worth a warning.
+ */
+export function templateToolSurface(
+	frontmatter: Record<string, unknown>,
+	key: string,
+	filePath: string,
+	diagnostics: ResourceDiagnostic[],
+): string[] | undefined {
+	const declared = rawToolListField(frontmatter, key);
+	if (declared === undefined) return undefined;
+	const tools: string[] = [];
+	const deferred: string[] = [];
+	const invalid: string[] = [];
+	for (const entry of declared) {
+		const name = TOOL_NAMES_BY_LOWERCASE.get(entry.toLowerCase()) ?? entry;
+		if (!isToolLimitName(name)) {
+			invalid.push(entry);
+			continue;
+		}
+		if (tools.includes(name)) continue;
+		tools.push(name);
+		if (!TOOL_NAMES_BY_LOWERCASE.has(name) && !isMcpToolName(name)) deferred.push(name);
+	}
+	if (invalid.length > 0) {
+		diagnostics.push({
+			type: "warning",
+			message: `${key} drops ${invalid.length === 1 ? "an entry that is not a tool name" : "entries that are not tool names"}: ${invalid.join(", ")}`,
+			path: filePath,
+		});
+	}
+	if (deferred.length > 0) {
+		diagnostics.push({
+			type: "warning",
+			message: `${key} keeps ${deferred.join(", ")} for an extension tool that registers later; it is no Clio or MCP tool name`,
+			path: filePath,
+		});
+	}
+	if (tools.length === 0 && key === "allowed-tools") {
+		diagnostics.push({
+			type: "warning",
+			message: "allowed-tools names no tool, so it narrows nothing",
+			path: filePath,
+		});
+		return undefined;
+	}
+	return tools.length > 0 ? tools : undefined;
+}
+
+/** `Bash`, or Claude Code's scoped `Bash(git add:*)`, in any case. */
+const FOREIGN_SHELL_ENTRY = /^bash\s*(?:\(.*\))?$/i;
+
+/**
+ * The `allowed-tools` of an imported command or skill, written for the
+ * harness it came from. There `Bash(git add:*)` grants a scoped shell; read
+ * through `declaredToolSurface` it named no Clio tool, so `Bash(git add:*),
+ * Read` narrowed the turn to read alone and an imported commit command could
+ * no longer run git. Clio cannot enforce the scope inside the parentheses, so
+ * any `Bash(...)` maps to the whole bash tool. Narrowing must never take away
+ * a tool the command's own frontmatter grants, so one entry Clio cannot map
+ * means no narrowing at all, with one warning naming the command and entries.
+ */
+export function importedToolSurface(
+	frontmatter: Record<string, unknown>,
+	subject: string,
+	filePath: string,
+	diagnostics: ResourceDiagnostic[],
+	key = "allowed-tools",
+): ToolName[] | undefined {
+	const declared = rawToolListField(frontmatter, key);
+	if (declared === undefined) return undefined;
+	const { tools, unrecognized } = resolveDeclaredTools(
+		declared.map((entry) => (FOREIGN_SHELL_ENTRY.test(entry) ? ToolNames.Bash : entry)),
+	);
+	if (unrecognized.length > 0) {
+		diagnostics.push({
+			type: "warning",
+			message: `${subject} is not narrowed: ${key} names ${unrecognized.length === 1 ? "an entry" : "entries"} Clio cannot map: ${unrecognized.join(", ")}`,
 			path: filePath,
 		});
 		return undefined;
@@ -698,7 +795,9 @@ function loadSkillFile(
 		...(root.owner ? { owner: root.owner } : {}),
 	};
 	const provenance = extractProvenance(parsed.frontmatter);
-	const allowedTools = declaredToolSurface(parsed.frontmatter, "allowed-tools", filePath, diagnostics);
+	const allowedTools = root.foreign
+		? importedToolSurface(parsed.frontmatter, `skill ${name}`, filePath, diagnostics)
+		: declaredToolSurface(parsed.frontmatter, "allowed-tools", filePath, diagnostics);
 	const disallowedTools = declaredToolSurface(parsed.frontmatter, "disallowed-tools", filePath, diagnostics);
 	let content: string;
 	try {
@@ -843,6 +942,7 @@ function loadExplicitSkillPath(
 					...(owner.rootPath ? { rootPath: owner.rootPath, containment: owner.rootPath } : {}),
 					...(owner.plugin !== undefined ? { plugin: owner.plugin } : {}),
 					...(owner.owner ? { owner: owner.owner } : {}),
+					...(owner.foreign ? { foreign: true } : {}),
 					trusted: owner.trusted,
 				}
 			: {}),

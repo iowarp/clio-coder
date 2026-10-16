@@ -2,6 +2,7 @@ import type { runBashCommand } from "../core/bash-exec.js";
 import { combineBashOutput } from "../core/bash-exec.js";
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { runOperatorShellLine } from "../domains/session/operator-shell.js";
@@ -54,6 +55,8 @@ export interface EditorSubmitExpansion {
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	/** The typed line the transcript paints instead of `text`; see `SubmitExpansion.display`. */
 	display?: { text: string; note?: string };
+	/** A prompt template's `allowed-tools`; see `SubmitExpansion.constraints`. */
+	constraints?: TurnConstraints;
 }
 
 export interface EditorSubmitEditor {
@@ -576,14 +579,32 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			// The queue stays queued: a send-now does not undo what the operator
 			// already asked for. Held through the cancel, it lands at the new run's
 			// first slot (or with its first model call, for a flush).
-			if (snapshot.owns()) setLiteralText("");
+			let cleared: ReturnType<typeof captureDraft> | undefined;
+			if (snapshot.owns()) {
+				setLiteralText("");
+				cleared = captureDraft();
+			}
 			deps.ui.requestRender();
+			// Put the draft back only into the editor this send-now emptied; a
+			// draft the operator started since is theirs.
+			const restoreDraft = (): void => {
+				if (cleared?.owns()) setLiteralText(text);
+				deps.ui.requestRender();
+			};
+			// A constrained submission while a turn is live is refused by the chat
+			// loop rather than queued; the operator keeps the draft and sees no
+			// queued notice for it.
+			let refused = false;
 			const paths = submitted.workingContextPaths ?? [];
 			const skillRequests = submitted.pendingSkillRequests ?? [];
 			const common = {
 				...(submitted.display ? { display: submitted.display } : {}),
 				...(paths.length > 0 ? { workingContextPaths: paths } : {}),
 				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
+				...(submitted.constraints ? { constraints: submitted.constraints } : {}),
+				onRefused: () => {
+					refused = true;
+				},
 			};
 			// A tool call in flight is the one case where "now" has a cost the
 			// operator may not want to pay: ask whether to stop it or to wait for
@@ -591,14 +612,19 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			if (deps.chat.interruptRefusal() === null && deps.chat.runningToolCalls() > 0 && deps.askSendNow) {
 				const choice = await deps.askSendNow(deps.chat.runningToolCalls());
 				if (choice === "cancelled") {
-					if (snapshot.owns()) setLiteralText(text);
-					deps.ui.requestRender();
+					restoreDraft();
 					return;
 				}
 				if (choice === "wait") {
 					deps.beforeSemanticBoundary?.("send-now-wait");
 					await deps.chat.submit(submitted.text, { ...common, queueFront: true });
-					deps.notify("info", "queued ahead of everything else; it lands as soon as the running tool returns", "steer:wait");
+					if (refused) restoreDraft();
+					else
+						deps.notify(
+							"info",
+							"queued ahead of everything else; it lands as soon as the running tool returns",
+							"steer:wait",
+						);
 					return;
 				}
 			}
@@ -610,6 +636,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.sessionTranscript.recordSubmittedTurn();
 			deps.beforeSemanticBoundary?.("interrupt-submit");
 			await deps.chat.submit(submitted.text, { steering: "interrupt", ...common });
+			if (refused) restoreDraft();
 			await deps.settleVisibleFrame?.("interrupt-submit-return");
 		})()
 			.catch((err) => {

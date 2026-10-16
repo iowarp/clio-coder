@@ -4,6 +4,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -78,6 +79,8 @@ export interface InteractiveSlashSubmitExpansion {
 	 * leads with `/skill <name>` live and on resume.
 	 */
 	display?: { text: string; note?: string };
+	/** A prompt template's `allowed-tools`; see `SubmitExpansion.constraints`. */
+	constraints?: TurnConstraints;
 }
 
 type SlashChat = Pick<
@@ -210,6 +213,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openInterop?: () => void;
 	openContextReset: () => void;
 	setEditorText: (text: string) => void;
+	/** Puts a refused submission back into the editor when the editor is still empty. */
+	restoreRefusedDraft?: (text: string) => void;
 	/** Worker blocks this session folded, oldest first; `/share` picks a finished one. */
 	listWorkerRuns?: () => ReadonlyArray<WorkerEntryState>;
 	getCwd?: () => string;
@@ -292,6 +297,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		sub: InteractiveSlashSubmitExpansion,
 		awaitAdmission = false,
 		captured = false,
+		draft?: string,
 	): Promise<void> => {
 		try {
 			// A prompt or a steer is the operator asking for what comes next.
@@ -328,6 +334,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				...(sub.images.length > 0 ? { images: sub.images } : {}),
 				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
+				...(sub.constraints ? { constraints: sub.constraints } : {}),
 				// A captured boot record joins the live turn's FIFO follow-up queue so
 				// records keep their order as separate turns. Enter while streaming is
 				// the operator correcting the run, so it rides the next steering slot;
@@ -342,6 +349,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 							},
 						}
 					: {}),
+				// Enter cleared the editor before this constrained turn was refused
+				// for the live run; the operator keeps the line to resend.
+				...(draft !== undefined && deps.restoreRefusedDraft ? { onRefused: () => deps.restoreRefusedDraft?.(draft) } : {}),
 				onAdmitted: () => {
 					rowStatus = "committed";
 					deps.requestRender();
@@ -454,7 +464,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					});
 				return;
 			}
-			await submitExpanded(submitted, true, captured);
+			await submitExpanded(submitted, true, captured, captured ? undefined : text);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);

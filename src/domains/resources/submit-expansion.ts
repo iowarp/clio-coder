@@ -10,6 +10,7 @@ import path from "node:path";
 import { expandInlineFileReferencesAsync } from "../../core/file-references.js";
 import { PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ResourcesContract } from "./contract.js";
 
@@ -28,6 +29,8 @@ export interface SubmitExpansion {
 	 * note names the attached files by their short paths.
 	 */
 	display?: { text: string; note?: string };
+	/** An expanded template's `allowed-tools` and `delegated-tools`, submitted as the turn's constraint. */
+	constraints?: TurnConstraints;
 }
 
 const ATTACHMENT_NOTE_LIMIT = 3;
@@ -71,6 +74,8 @@ export async function expandSubmitText(
 			details: { name: promptExpansion.template.name },
 		});
 	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
+	const allowedTools = promptExpansion?.expanded ? promptExpansion.template.allowedTools : undefined;
+	const delegatedTools = promptExpansion?.expanded ? promptExpansion.template.delegatedTools : undefined;
 	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
 		cwd,
 		includeImages: true,
@@ -95,5 +100,13 @@ export async function expandSubmitText(
 		workingContextPaths: fileExpansion.referencedPaths,
 		pendingSkillRequests: parsed.pendingSkillRequests,
 		...(display ? { display } : {}),
+		...(allowedTools || delegatedTools
+			? {
+					constraints: {
+						...(allowedTools ? { allowedTools } : {}),
+						...(delegatedTools ? { delegatedTools } : {}),
+					},
+				}
+			: {}),
 	};
 }
