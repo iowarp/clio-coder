@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
+import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
@@ -567,6 +568,18 @@ function withheldMergeNotice(receipt: RunReceipt, integrity: ReceiptIntegrityRes
 	return `merge withheld for ${receipt.runId}: its work is committed on branch ${worktree.branch}${commit} and is not merged into the operator's branch. Report it as committed there and not merged, whatever the worker's text says about committing.`;
 }
 
+/** The admission notice for MCP servers the run's sandbox left without network, read back from the sealed receipt. */
+function mcpSandboxNoNetworkNotice(receipt: RunReceipt, integrity: ReceiptIntegrityResult): string | null {
+	const sandbox = receipt.safety?.sandbox;
+	const ceiling = receipt.safety?.permit?.ceiling;
+	if (!integrity.ok || sandbox === undefined || ceiling?.mcp === undefined) return null;
+	const offered = ceiling.mcp.tools.filter((entry) => ceiling.tools.includes(`mcp_${entry.serverId}__${entry.tool}`));
+	return workerMcpNoNetworkNotice(
+		sandbox,
+		offered.map((entry) => entry.serverId),
+	);
+}
+
 /** Totals from integrity-checked receipts, with opaque external tool use kept separate. */
 export function dispatchBatchSummary(runs: ReadonlyArray<CompletedRun>): {
 	observedToolCalls: number;
@@ -611,12 +624,17 @@ export function formatDispatchOutput(
 	const integrityBanners = runs
 		.map((run) => integrityFailureBanner(run))
 		.filter((banner): banner is string => banner !== null);
-	const hostActions = runs
-		.flatMap((run) => [
-			nextHostValidationAction(run.receipt, run.integrity),
-			withheldMergeNotice(run.receipt, run.integrity),
-		])
-		.filter((action): action is string => action !== null);
+	const hostActions = [
+		...new Set(
+			runs
+				.flatMap((run) => [
+					nextHostValidationAction(run.receipt, run.integrity),
+					withheldMergeNotice(run.receipt, run.integrity),
+					mcpSandboxNoNetworkNotice(run.receipt, run.integrity),
+				])
+				.filter((action): action is string => action !== null),
+		),
+	];
 	const batch = dispatchBatchSummary(runs);
 
 	const needsSpotCheck = runs.some((run) => {

@@ -5,10 +5,14 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
 import { configureWorkerProcessSandbox } from "../../src/core/sandbox/worker-process.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { RunReceiptSafetySummary } from "../../src/domains/dispatch/types.js";
 import { resolveWorkerMcpAdmission, workerMcpRuntimeRefusal } from "../../src/domains/dispatch/worker-mcp.js";
 import {
 	canonicalProjectRoot,
@@ -22,11 +26,13 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { resolveWorkerPermit, type WorkerMcpAttestation } from "../../src/domains/safety/worker-permit.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
+import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../../src/tools/gateway/index.js";
 import type { RegistryVerdict } from "../../src/tools/registry.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -194,6 +200,92 @@ describe("native worker MCP capabilities", () => {
 			/the Claude SDK runtime runs its own tool loop/,
 		);
 		strictEqual(clients.length, 0, "admission launched nothing");
+	});
+
+	it("names the server and safety.sandboxNetwork when a sandbox without network will start an admitted MCP server", async () => {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.sandbox = "required";
+		const context = dispatchStubContext({ settings, agentTools: [...TOOLS, ToolNames.Edit, ToolNames.Write] });
+		const notices: Array<{ code: string; message: string }> = [];
+		const unsubscribe = context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+			notices.push(notice);
+		});
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				throw new Error("fixture: admitted");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "Inspect evidence.", cwd: project, executionRole: "builder" }),
+				/fixture: admitted/,
+			);
+		} finally {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		}
+		// A host without a sandbox backend refuses the launch instead, so there is nothing to warn about.
+		const confined = sandboxAvailability().available;
+		strictEqual(notices.length, confined ? 1 : 0, JSON.stringify(notices));
+		if (confined) {
+			strictEqual(notices[0]?.code, "mcp_sandbox_no_network");
+			match(notices[0]?.message ?? "", /MCP server 'fake' starts .*no network.*safety\.sandboxNetwork/);
+		}
+
+		const envelope = fixtureEnvelope("run-mcp");
+		const draft = fixtureReceiptDraft(envelope);
+		const permit: NonNullable<RunReceiptSafetySummary["permit"]> = {
+			version: 1,
+			digest: "fixture",
+			capabilityClass: "read-only",
+			git: "inspect",
+			asks: "deny",
+			approvalAuthority: "main",
+			ceiling: {
+				tools: TOOLS,
+				readOnly: true,
+				writeRoots: [],
+				enforcement,
+				mcp: { projectRoot: project, tools: [{ serverId: "fake", digest: "d", tool: "echo", actionClass: "read" }] },
+			},
+		};
+		const sandbox = {
+			mode: "auto",
+			backend: "bwrap",
+			available: true,
+			writableRoots: [],
+			gitWritablePaths: [],
+			network: false,
+		} as const;
+		const safety: RunReceiptSafetySummary = {
+			decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
+			blockedAttempts: [],
+			permit,
+			sandbox,
+		};
+		draft.safety = safety;
+		const receipt = withReceiptIntegrity(draft, envelope);
+		const integrity = verifyReceiptIntegrity(receipt, envelope);
+		ok(integrity.ok);
+		const summary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId };
+		match(
+			formatDispatchOutput("single", [{ receipt, receiptPath: null, integrity, summary }], 16_384),
+			/MCP server 'fake' starts .*no network.*safety\.sandboxNetwork/,
+		);
+		const networked = withReceiptIntegrity(
+			{ ...draft, safety: { ...safety, sandbox: { ...sandbox, network: true } } },
+			envelope,
+		);
+		const networkedIntegrity = verifyReceiptIntegrity(networked, envelope);
+		ok(
+			!formatDispatchOutput(
+				"single",
+				[{ receipt: networked, receiptPath: null, integrity: networkedIntegrity, summary }],
+				16_384,
+			).includes("safety.sandboxNetwork"),
+		);
 	});
 
 	it("refuses MCP capabilities on a Claude SDK target before it asks to install the SDK", async () => {

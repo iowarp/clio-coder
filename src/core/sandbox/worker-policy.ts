@@ -116,6 +116,25 @@ export function workerSandboxReceipt(
 	};
 }
 
+/**
+ * Admitted MCP servers start under the worker's own sandbox, so with network
+ * off a server fetched by npx or uvx, or one that reaches a remote API or
+ * reads credentials from the masked home, is admitted and then fails on its
+ * first call. Admission and the dispatch result say so once, by server, and
+ * name the setting; the confinement itself is unchanged. Null when no
+ * admitted server runs confined without network.
+ */
+export function workerMcpNoNetworkNotice(
+	sandbox: Pick<WorkerSandboxReceipt, "mode" | "available" | "network">,
+	serverIds: ReadonlyArray<string>,
+): string | null {
+	const ids = [...new Set(serverIds)];
+	if (ids.length === 0 || sandbox.mode === "off" || sandbox.network || sandbox.available === false) return null;
+	const named = ids.map((id) => `'${id}'`).join(", ");
+	const subject = ids.length === 1 ? `MCP server ${named} starts` : `MCP servers ${named} start`;
+	return `[dispatch sandbox] ${subject} inside the worker's OS sandbox with no network, a read-only home and credential directories masked, so a server launched through npx or uvx, or one that needs network or stored credentials, fails on its first call. Set safety.sandboxNetwork: true to give sandboxed worker commands and MCP servers network; the home stays read-only.`;
+}
+
 /** One sentence for the worker's dynamic safety line. */
 export function workerSandboxLine(spec: WorkerSandboxSpec | undefined, availability: SandboxAvailability): string {
 	if (spec === undefined) return "Shell sandbox: off.";

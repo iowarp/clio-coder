@@ -53,7 +53,12 @@ import {
 } from "../../core/response-schema.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import type { WorkerSandboxSpec } from "../../core/sandbox/types.js";
-import { resolveWorkerSandboxSpec, workerSandboxLine, workerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
+import {
+	resolveWorkerSandboxSpec,
+	workerMcpNoNetworkNotice,
+	workerSandboxLine,
+	workerSandboxReceipt,
+} from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { isTestFilePath } from "../../core/test-paths.js";
 import { rawDurationMs } from "../../core/timers.js";
@@ -5025,6 +5030,41 @@ export function createDispatchBundle(
 		}
 	}
 
+	/**
+	 * The default sandbox (auto, no sandboxNetwork) starts admitted MCP servers
+	 * with no network and a masked home, so a server that needs either fails
+	 * only at its first call. The operator hears it at admission instead.
+	 */
+	function announceMcpSandboxNoNetwork(
+		req: DispatchRequest,
+		pathScope: DispatchPathScope,
+		readOnly: boolean,
+		effectiveTools: ReadonlyArray<ToolName>,
+		target: ResolvedTarget,
+		settings: EffectiveSettings,
+		mcp: WorkerMcpAttestation | undefined,
+	): void {
+		const servers = (mcp?.tools ?? [])
+			.filter((entry) => effectiveTools.includes(`mcp_${entry.serverId}__${entry.tool}` as ToolName))
+			.map((entry) => entry.serverId);
+		if (servers.length === 0) return;
+		const sandbox = workerSandboxFor({
+			runtimeKind: target.runtime.kind,
+			req,
+			pathScope,
+			readOnly,
+			allowedTools: effectiveTools,
+			settings,
+		}).spec;
+		if (sandbox === undefined) return;
+		const message = workerMcpNoNetworkNotice(
+			{ mode: sandbox.mode, network: sandbox.network, available: sandboxAvailability().available },
+			servers,
+		);
+		if (message === null) return;
+		context.bus.emit(BusChannels.DispatchScopeNotice, { code: "mcp_sandbox_no_network", level: "warning", message });
+	}
+
 	async function resolveLifecycle(
 		req: DispatchRequest,
 		settings: EffectiveSettings,
@@ -5158,6 +5198,7 @@ export function createDispatchBundle(
 		}
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, writeConfined, req.readOnly === true);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
+		announceMcpSandboxNoNetwork(req, pathScope, readOnly, effectiveTools, target, settings, admission.mcp);
 		const permit = resolveDispatchPermit(
 			req,
 			recipe,
