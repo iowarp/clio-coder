@@ -42,6 +42,7 @@ import { gateRouteCorrelation, requestExecutionRole } from "./execution-role.js"
 import type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
 import { deriveFleetCommitAttribution } from "./fleet-commit-attribution.js";
+import { createFleetEventJournal, fleetManifestDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
 import {
 	decideReviewGate,
@@ -295,6 +296,39 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
 	};
 	await writeFleetRun(fleetRunRecord);
+	const events = createFleetEventJournal(fleetRootId);
+	events.append({
+		type: "fleet_started",
+		fleet: fleetRunRecord.fleet,
+		planHash: fleetRunRecord.planHash,
+		vars: fleetRunRecord.vars,
+		resumedFrom: fleetRunRecord.resumedFrom,
+		replayedStepIds: [...replayed.keys()],
+		workspaceRoot,
+		stepIds: fleetRunRecord.stepIds,
+	});
+	const stepDispatched = (event: FleetRunStepEvent): void => {
+		if (event.replayed !== true) {
+			events.append({
+				type: "step_dispatched",
+				stepId: event.stepId,
+				kind: event.kind,
+				waveIndex: event.waveIndex,
+				assignmentId: event.assignmentId,
+				...(event.agentId !== undefined ? { agentId: event.agentId } : {}),
+				...(event.commandId !== undefined ? { commandId: event.commandId } : {}),
+			});
+		}
+		input.onStepDispatched?.(event);
+	};
+	const sealEvents = (outcome: "completed" | "failed"): void =>
+		events.append({
+			type: "fleet_sealed",
+			outcome,
+			endedAt: fleetRunRecord.endedAt ?? new Date().toISOString(),
+			stepCount: fleetRunRecord.steps.length,
+			manifestDigest: fleetManifestDigest(fleetRunRecord),
+		});
 	// Every step of this run dispatches under `fleetRootId` as its lineage root,
 	// so every agent step also settles the assignment row of that id. One step is
 	// not the run, and letting the last one to finish write the row reported a
@@ -413,7 +447,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			...(step.kind === "agent" ? { agentId: step.agentId } : { commandId: step.commandId }),
 			replayed: true,
 		};
-		input.onStepDispatched?.(event);
+		stepDispatched(event);
 		const replayedCostSummary = receiptsByStep.get(stepId)?.costSummary;
 		input.onStepSettled?.({
 			...event,
@@ -685,7 +719,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				signal?.throwIfAborted();
 				const handle = await dispatch.dispatch(request);
 				const waveIndex = fleetPlanWaveIndex(livePlan, step.id);
-				input.onStepDispatched?.({
+				stepDispatched({
 					stepId: step.id,
 					kind: "agent",
 					waveIndex,
@@ -843,7 +877,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					assignmentId: codeRunId,
 					commandId: command.id,
 				};
-				input.onStepDispatched?.(event);
+				stepDispatched(event);
 				const outcome = await runCodeStep({
 					runId: codeRunId,
 					...(mutatedPaths.size > 0 ? { mutatedPaths: [...mutatedPaths] } : {}),
@@ -959,6 +993,22 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				}
 				fleetRunRecord.steps.push({ stepId: step.id, result: stepResult });
 				await writeFleetRun(fleetRunRecord);
+				// Each settled step is a sealed checkpoint of the manifest just written.
+				events.append({
+					type: "step_settled",
+					stepId: step.id,
+					kind: step.kind,
+					succeeded: stepResult.succeeded,
+					integrityValid: stepResult.integrityValid,
+					terminalRunId: stepResult.terminalRunId,
+					receiptDigest: stepResult.receiptDigest ?? null,
+					recordPath:
+						step.kind === "code"
+							? join(codeStepDir(fleetRootId), `${stepResult.terminalRunId}.json`)
+							: join(clioStateDir(), "receipts", `${stepResult.terminalRunId}.json`),
+					...(stepResult.failureReason !== undefined ? { failureReason: stepResult.failureReason } : {}),
+					manifestDigest: fleetManifestDigest(fleetRunRecord),
+				});
 				// The scheduler settles both kinds of step here, so this is where a
 				// deterministic step enters the assignment: a code step's `code-*` run
 				// id reads exactly like an agent receipt id, and its evidence sits under
@@ -1006,6 +1056,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	} catch (error) {
 		fleetRunRecord.endedAt = new Date().toISOString();
 		await writeFleetRun(fleetRunRecord);
+		sealEvents("failed");
 		// A run the scheduler could not carry to the end never reached a verdict,
 		// and a fleet that threw is not a fleet that worked.
 		await settleFleetAssignment(false);
@@ -1013,6 +1064,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	}
 	fleetRunRecord.endedAt = new Date().toISOString();
 	await writeFleetRun(fleetRunRecord);
+	sealEvents("completed");
 
 	// A loop is judged by whether it converged, not attempt by attempt: a red
 	// verification that a later attempt fixed is the loop working as declared,
