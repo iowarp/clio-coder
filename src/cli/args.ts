@@ -1,5 +1,6 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
+import { parseToolLimitList } from "../core/tool-limit-flags.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
@@ -226,29 +227,16 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			parsed.constraints = { ...parsed.constraints, delegation: "forbidden" };
 			continue;
 		}
-		if (arg === "--allow-tools") {
+		if (arg === "--allow-tools" || arg === "--delegate-tools") {
 			const value = need(arg);
 			if (value !== null) {
-				const names = value === "none" ? [] : value.split(",").map((name) => name.trim());
-				if (names.some((name) => !/^[a-zA-Z0-9_.-]+$/.test(name)))
-					parsed.diagnostics.push({
-						type: "error",
-						message: "--allow-tools needs comma-separated capability names, or none",
-					});
-				else parsed.constraints = { ...parsed.constraints, allowedTools: [...new Set(names)] };
-			}
-			continue;
-		}
-		if (arg === "--delegate-tools") {
-			const value = need(arg);
-			if (value !== null) {
-				const names = value === "none" ? [] : value.split(",").map((name) => name.trim());
-				if (names.some((name) => !/^[a-zA-Z0-9_.-]+$/.test(name)))
-					parsed.diagnostics.push({
-						type: "error",
-						message: "--delegate-tools needs comma-separated capability names, or none",
-					});
-				else parsed.constraints = { ...parsed.constraints, delegatedTools: [...new Set(names)] };
+				const names = parseToolLimitList(arg, value);
+				if ("error" in names) parsed.diagnostics.push({ type: "error", message: names.error });
+				else
+					parsed.constraints = {
+						...parsed.constraints,
+						...(arg === "--allow-tools" ? { allowedTools: names } : { delegatedTools: names }),
+					};
 			}
 			continue;
 		}

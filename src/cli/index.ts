@@ -39,6 +39,8 @@ Usage:
   clio-coder --with-panes         activate the panes extension (terminal panes for workers and tools)
   clio-coder --no-panes           keep panes off even when settings turn them on
   clio-coder --autonomy <level>   start this interactive session at default|yolo
+  clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
+  clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
   clio-coder targets add          add a target interactively or via flags
@@ -189,6 +191,7 @@ async function main(argv: string[]): Promise<number> {
 		panes,
 		demo,
 		autonomy,
+		toolLimits,
 		bootFlags,
 		rest,
 		error: globalFlagError,
@@ -229,6 +232,15 @@ async function main(argv: string[]): Promise<number> {
 		);
 		return 2;
 	}
+	if (toolLimits !== undefined && subcommand) {
+		// A dropped tool limit would widen what the operator meant to allow.
+		printError(
+			subcommand === "run" || subcommand === "acp"
+				? `--allow-tools and --delegate-tools before a subcommand apply to the interactive session only; pass them after it: clio-coder ${subcommand} --allow-tools <names>`
+				: `--allow-tools and --delegate-tools apply to the interactive session, clio-coder run, and clio-coder acp; clio-coder ${subcommand} does not honor them.`,
+		);
+		return 2;
+	}
 	// A `dev` command is judged by the command it names, which is the one that
 	// would have received and dropped the options.
 	const refusal = unhonoredBootFlag(subcommand === "dev" ? subArgs[0] : subcommand, bootFlags);
@@ -243,6 +255,7 @@ async function main(argv: string[]): Promise<number> {
 			...bootOptions,
 			...(demo === undefined ? {} : { demo }),
 			...(autonomy === undefined ? {} : { autonomy }),
+			...(toolLimits === undefined ? {} : { toolLimits }),
 		});
 	}
 

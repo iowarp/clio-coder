@@ -63,7 +63,7 @@ import {
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../core/skill-activation.js";
-import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
+import { narrowTurnConstraints, snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -793,6 +793,13 @@ export interface CreateChatLoopDeps {
 	/** An ACP client that advertised interviews: the prompt offers ask_user without the TUI-only guidance. */
 	operatorInterviews?: boolean;
 	/**
+	 * The session's standing tool limits (`clio-coder --allow-tools`, `clio-coder acp
+	 * --allow-tools`). Every turn's constraints are narrowed by them, and the
+	 * tool surface holds them between turns, so a prewarmed runtime and a
+	 * continuation see the same limit.
+	 */
+	sessionToolLimits?: TurnConstraints;
+	/**
 	 * True for a headless `clio-coder run`. Its permission listener denies every
 	 * approval ask, so the session prompt says so instead of promising a pause.
 	 */
@@ -1111,6 +1118,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const draftRound = deps.runDraftRound ?? runOutOfTurnRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState();
+	const sessionToolLimits = snapshotTurnConstraints(deps.sessionToolLimits);
+	state.currentTurnConstraints = sessionToolLimits;
 	const eggs = createConversationEggs({
 		identity: () => deps.session?.current()?.id ?? null,
 		ensureConversation: () => {
@@ -2419,7 +2428,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await sessionResetSettlement;
 				if (!admissionCurrent()) return;
 				state.currentTurnConstraints =
-					options.requestContinuation === true ? state.currentTurnConstraints : snapshotTurnConstraints(options.constraints);
+					options.requestContinuation === true
+						? state.currentTurnConstraints
+						: snapshotTurnConstraints(narrowTurnConstraints(sessionToolLimits, options.constraints));
 				const previousRunSnapshot = state.lastRunSnapshot;
 				let agentRuntime: AgentRuntime | null;
 				try {
@@ -3386,7 +3397,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			pendingCompactionPaint?.abort();
 			continuity.cancel();
 			void continuity.pause();
-			state.currentTurnConstraints = undefined;
+			state.currentTurnConstraints = sessionToolLimits;
 			if (state.runtime) {
 				state.runtime.agent.abort();
 				(state.runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();

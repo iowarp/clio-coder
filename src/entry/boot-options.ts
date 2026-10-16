@@ -1,6 +1,7 @@
 /** Type-only boot contract kept outside the heavyweight orchestrator graph. */
 
 import type { ClioSettings } from "../core/config.js";
+import type { SessionToolLimits } from "../core/tool-limit-flags.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import type { AutonomyLevel } from "../domains/safety/index.js";
@@ -51,6 +52,11 @@ export interface BootOptions {
 	panes?: "with" | "without";
 	/** Global `--autonomy <level>`: a one-session override for the interactive app; settings.yaml is untouched. */
 	autonomy?: AutonomyLevel;
+	/**
+	 * `--allow-tools`/`--delegate-tools` of the interactive session or `clio-coder acp`:
+	 * every turn of the session runs under them, as `clio-coder run` runs its one task.
+	 */
+	toolLimits?: SessionToolLimits;
 	headless?: {
 		prompt: string;
 		constraints?: TurnConstraints;

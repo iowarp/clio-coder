@@ -4207,6 +4207,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getReadySkillCount,
 		...(options.headless === undefined ? { getRouteSources: () => routeProvenance().active } : {}),
 		interactiveGuidance: !options.headless && !options.acp,
+		// A headless run scopes its one task through `headless.constraints`.
+		...(options.headless === undefined && options.toolLimits !== undefined
+			? { sessionToolLimits: options.toolLimits }
+			: {}),
 		...(acpInterviews ? { operatorInterviews: true } : {}),
 		headless: options.headless !== undefined,
 		// Without a steer channel nothing can reach a headless run mid-turn.

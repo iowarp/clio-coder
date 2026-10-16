@@ -46,6 +46,44 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 	});
 }
 
+function intersectLists(
+	first: readonly string[] | undefined,
+	second: readonly string[] | undefined,
+): readonly string[] | undefined {
+	if (first === undefined) return second;
+	if (second === undefined) return first;
+	return first.filter((name) => second.includes(name));
+}
+
+/**
+ * A turn's constraints under the session's standing tool limits: the session
+ * entry flags of an interactive or ACP session. Every bound only narrows, so
+ * neither a host-supplied turn scope nor a continuation can widen what the
+ * operator limited the session to.
+ */
+export function narrowTurnConstraints(
+	session: TurnConstraints | undefined,
+	turn: TurnConstraints | undefined,
+): TurnConstraints | undefined {
+	if (session === undefined) return turn;
+	if (turn === undefined) return session;
+	const allowedTools = intersectLists(session.allowedTools, turn.allowedTools);
+	// Each side's ceiling falls back to its own tool set, so the narrower one holds.
+	const delegatedTools =
+		session.delegatedTools === undefined && turn.delegatedTools === undefined
+			? undefined
+			: intersectLists(session.delegatedTools ?? session.allowedTools, turn.delegatedTools ?? turn.allowedTools);
+	const delegation = session.delegation === "forbidden" ? "forbidden" : turn.delegation;
+	const skills = session.skills === "disabled" ? "disabled" : turn.skills;
+	return {
+		...(turn.mode === undefined ? {} : { mode: turn.mode }),
+		...(delegation === undefined ? {} : { delegation }),
+		...(skills === undefined ? {} : { skills }),
+		...(allowedTools === undefined ? {} : { allowedTools }),
+		...(delegatedTools === undefined ? {} : { delegatedTools }),
+	};
+}
+
 function isToolNameList(value: unknown): boolean {
 	return (
 		value === undefined ||

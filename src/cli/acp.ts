@@ -1,12 +1,13 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
+import { parseToolLimitList, type SessionToolLimits } from "../core/tool-limit-flags.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS]
+const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--allow-tools NAMES] [--delegate-tools NAMES]
 
 Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
 
@@ -15,6 +16,9 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
   --permission-timeout MS  How long a mediated permission request may wait for the
                            client before the prompt expires. Defaults to the configured
                            integrations.externalAgents.defaults.permissionTimeoutMs.
+  --allow-tools NAMES      Limit the session's tools to these comma-separated
+                           capabilities, as clio-coder run does; none disables all.
+  --delegate-tools NAMES   Limit the tools the session's dispatched workers may hold.
   auth login               Open interactive Quick Connect for terminal ACP authentication.
 
 This command is intended for ACP frontends to spawn. Interactive delegation remains
@@ -24,6 +28,7 @@ available through /agents, /delegate, the dispatch board, and receipts.
 interface AcpFlags {
 	cwd?: string;
 	permissionTimeoutMs?: number;
+	toolLimits?: SessionToolLimits;
 }
 
 /** Parsed flags, or the message explaining why the invocation is not usable. */
@@ -44,6 +49,17 @@ function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 				return `--permission-timeout needs a whole number from 1 to ${MAX_TIMER_DELAY_MS} milliseconds`;
 			}
 			flags.permissionTimeoutMs = ms;
+			index += 1;
+			continue;
+		}
+		if (arg === "--allow-tools" || arg === "--delegate-tools") {
+			if (value === undefined) return `${arg} needs comma-separated capability names, or none`;
+			const names = parseToolLimitList(arg, value);
+			if ("error" in names) return names.error;
+			flags.toolLimits = {
+				...flags.toolLimits,
+				...(arg === "--allow-tools" ? { allowedTools: names } : { delegatedTools: names }),
+			};
 			index += 1;
 			continue;
 		}
@@ -157,6 +173,7 @@ export async function runAcpCommand(
 						...(options.noContextFiles ? { noContextFiles: true } : {}),
 						...(options.noSkills ? { noSkills: true } : {}),
 						...(options.skillPaths && options.skillPaths.length > 0 ? { skillPaths: options.skillPaths } : {}),
+						...(flags.toolLimits === undefined ? {} : { toolLimits: flags.toolLimits }),
 						acp: {
 							transport,
 							handshake,

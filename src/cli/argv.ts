@@ -8,6 +8,7 @@
  */
 
 import chalk from "chalk";
+import { parseToolLimitList, type SessionToolLimits } from "../core/tool-limit-flags.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export function printError(message: string, detail?: string): void {
@@ -75,6 +76,8 @@ export interface GlobalCliFlags {
 	panes?: "with" | "without";
 	/** `--autonomy <level>` before any subcommand: one interactive session at that level. */
 	autonomy?: AutonomyLevel;
+	/** `--allow-tools`/`--delegate-tools` before any subcommand: the interactive session's tool limits. */
+	toolLimits?: SessionToolLimits;
 	/**
 	 * The boot-option flags (`--api-key`, `--skill`, `--no-context-files`/`-nc`,
 	 * `--no-skills`, `--with-panes`, `--no-panes`) as typed, in order, so a
@@ -148,6 +151,7 @@ export function extractGlobalFlags(
 	let demo: boolean | undefined;
 	let panes: "with" | "without" | undefined;
 	let autonomy: AutonomyLevel | undefined;
+	let toolLimits: SessionToolLimits | undefined;
 	const skillPaths: string[] = [];
 	const bootFlags: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
@@ -212,6 +216,25 @@ export function extractGlobalFlags(
 			i += 1;
 			continue;
 		}
+		if (arg === "--allow-tools" || arg === "--delegate-tools") {
+			const value = argv[i + 1];
+			const names = value === undefined || isSubcommand(value) ? null : parseToolLimitList(arg, value);
+			if (names === null || "error" in names) {
+				return {
+					noContextFiles,
+					noSkills,
+					skillPaths,
+					bootFlags,
+					rest,
+					error: names?.error ?? `${arg} requires a value`,
+					...(apiKey === undefined ? {} : { apiKey }),
+					...(panes === undefined ? {} : { panes }),
+				};
+			}
+			toolLimits = { ...toolLimits, ...(arg === "--allow-tools" ? { allowedTools: names } : { delegatedTools: names }) };
+			i += 1;
+			continue;
+		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
 			if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
@@ -252,6 +275,7 @@ export function extractGlobalFlags(
 		...(apiKey === undefined ? {} : { apiKey }),
 		...(panes === undefined ? {} : { panes }),
 		...(autonomy === undefined ? {} : { autonomy }),
+		...(toolLimits === undefined ? {} : { toolLimits }),
 		...(demo === undefined ? {} : { demo }),
 	};
 }
