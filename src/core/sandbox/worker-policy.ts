@@ -121,18 +121,41 @@ export function workerSandboxReceipt(
  * off a server fetched by npx or uvx, or one that reaches a remote API or
  * reads credentials from the masked home, is admitted and then fails on its
  * first call. Admission and the dispatch result say so once, by server, and
- * name the setting; the confinement itself is unchanged. Null when no
- * admitted server runs confined without network.
+ * name the setting; the confinement itself is unchanged. A server the
+ * operator granted network starts with it and is not named, unless admission
+ * withheld the grant because the run can write the server's code; that one
+ * is named with the reason. Null when no admitted server runs confined
+ * without network.
  */
 export function workerMcpNoNetworkNotice(
 	sandbox: Pick<WorkerSandboxReceipt, "mode" | "available" | "network">,
-	serverIds: ReadonlyArray<string>,
+	servers: ReadonlyArray<{ serverId: string; network?: true }>,
+	withheld: ReadonlyArray<{ serverId: string; reason: string }> = [],
 ): string | null {
-	const ids = [...new Set(serverIds)];
-	if (ids.length === 0 || sandbox.mode === "off" || sandbox.network || sandbox.available === false) return null;
-	const named = ids.map((id) => `'${id}'`).join(", ");
-	const subject = ids.length === 1 ? `MCP server ${named} starts` : `MCP servers ${named} start`;
-	return `[dispatch sandbox] ${subject} inside the worker's OS sandbox with no network, a read-only home and credential directories masked, so a server launched through npx or uvx, or one that needs network or stored credentials, fails on its first call. Set safety.sandboxNetwork: true to give sandboxed worker commands and MCP servers network; the home stays read-only.`;
+	const held = new Set(withheld.map((entry) => entry.serverId));
+	const ids = [
+		...new Set(
+			servers.filter((entry) => entry.network !== true && !held.has(entry.serverId)).map((entry) => entry.serverId),
+		),
+	];
+	if (ids.length + withheld.length === 0 || sandbox.mode === "off" || sandbox.network || sandbox.available === false) {
+		return null;
+	}
+	const parts: string[] = [];
+	if (ids.length > 0) {
+		const named = ids.map((id) => `'${id}'`).join(", ");
+		const subject = ids.length === 1 ? `MCP server ${named} starts` : `MCP servers ${named} start`;
+		parts.push(
+			`${subject} inside the worker's OS sandbox with no network, a read-only home and credential directories masked, so a server launched through npx or uvx, or one that needs network or stored credentials, fails on its first call. Grant one server network with clio-coder mcp trust <id> --network (or network: true in a user declaration), or set safety.sandboxNetwork: true for every sandboxed worker command; the home stays read-only.`,
+		);
+	}
+	// A grant the run's write roots voided is not restored by granting it again.
+	for (const entry of withheld) {
+		parts.push(
+			`MCP server '${entry.serverId}' starts without its network grant because ${entry.reason}, so the worker could rewrite the code that would run with network. A project server runs from the run's own tree, so only a read-only dispatch keeps its grant; a user or plugin server keeps it under write roots that exclude its code.`,
+		);
+	}
+	return `[dispatch sandbox] ${parts.join(" ")}`;
 }
 
 /** One sentence for the worker's dynamic safety line. */

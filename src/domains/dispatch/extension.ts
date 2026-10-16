@@ -437,7 +437,13 @@ import {
 	validateJobSpec,
 } from "./validation.js";
 import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
-import { resolveWorkerMcpAdmission, workerMcpRuntimeRefusal, workerMcpScopeRefusal } from "./worker-mcp.js";
+import {
+	resolveWorkerMcpAdmission,
+	type WorkerMcpNetworkWithheld,
+	withholdWritableMcpNetwork,
+	workerMcpRuntimeRefusal,
+	workerMcpScopeRefusal,
+} from "./worker-mcp.js";
 import { adoptWorkerModelLoad } from "./worker-model-loads.js";
 import { prepareWorkerModelMetadata } from "./worker-model-metadata.js";
 import {
@@ -1906,6 +1912,8 @@ interface DispatchAdmissionStage {
 	toolProfile?: ToolProfileName;
 	/** Every MCP capability the recipe names, resolved once from the dispatch's project root. */
 	mcp?: WorkerMcpAttestation;
+	/** Granted servers whose code this run can write, started without network. */
+	mcpNetworkWithheld?: ReadonlyArray<WorkerMcpNetworkWithheld>;
 }
 
 interface DispatchWorkerSpecInput {
@@ -2171,6 +2179,7 @@ function resolveDispatchPermitOnce(
 
 function receiptPermitSummary(
 	permit: WorkerPermit | RecordOnlyWorkerPermit,
+	mcpNetworkWithheld: ReadonlyArray<WorkerMcpNetworkWithheld> = [],
 ): NonNullable<NonNullable<RunReceiptDraft["safety"]>["permit"]> {
 	return {
 		version: permit.version,
@@ -2191,6 +2200,8 @@ function receiptPermitSummary(
 						mcp: {
 							projectRoot: permit.ceiling.mcp.projectRoot,
 							tools: permit.ceiling.mcp.tools.map((entry) => ({ ...entry })),
+							// The dispatch result names a withheld grant from the sealed receipt, not as missing.
+							...(mcpNetworkWithheld.length > 0 ? { networkWithheld: mcpNetworkWithheld.map((entry) => ({ ...entry })) } : {}),
 						},
 					}
 				: {}),
@@ -2746,11 +2757,26 @@ function resolveDispatchAdmissionStage(
 	if (!verdict.admitted) {
 		throw new Error(`dispatch: admission denied: ${verdict.reason}`);
 	}
+	// A project server starts from the run's own tree, so a worker whose write
+	// roots overlap its cwd, an entry file's directory or the project root
+	// could route its traffic through code it wrote. Such a run keeps the
+	// server but not its network grant.
+	let mcpNetworkWithheld: WorkerMcpNetworkWithheld[] = [];
+	if (mcp !== null) {
+		// The write roots the run's sandbox binds (workerSandboxFor), so the grant follows what the worker can write.
+		const readOnly = req.readOnly === true || normalizeAgentSpec(recipe).capabilityClass === "read-only";
+		const treeRoot = req.taskWorktree?.path ?? req.cwd ?? process.cwd();
+		const writeRoots = readOnly ? [] : pathScope.writeBoundaries.length > 0 ? pathScope.writeBoundaries : [treeRoot];
+		const scoped = withholdWritableMcpNetwork(mcp, { writeRoots, launchRoot: treeRoot });
+		mcp = scoped.attestation;
+		mcpNetworkWithheld = scoped.withheld;
+	}
 	return {
 		allowedTools,
 		requestedActions,
 		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
 		...(mcp !== null ? { mcp } : {}),
+		...(mcpNetworkWithheld.length > 0 ? { mcpNetworkWithheld } : {}),
 	};
 }
 
@@ -5165,10 +5191,12 @@ export function createDispatchBundle(
 		target: ResolvedTarget,
 		settings: EffectiveSettings,
 		mcp: WorkerMcpAttestation | undefined,
+		withheld: ReadonlyArray<WorkerMcpNetworkWithheld> = [],
 	): void {
-		const servers = (mcp?.tools ?? [])
-			.filter((entry) => effectiveTools.includes(`mcp_${entry.serverId}__${entry.tool}` as ToolName))
-			.map((entry) => entry.serverId);
+		const servers = (mcp?.tools ?? []).filter((entry) =>
+			effectiveTools.includes(`mcp_${entry.serverId}__${entry.tool}` as ToolName),
+		);
+		const offeredWithheld = withheld.filter((entry) => servers.some((server) => server.serverId === entry.serverId));
 		if (servers.length === 0) return;
 		const sandbox = workerSandboxFor({
 			runtimeKind: target.runtime.kind,
@@ -5182,6 +5210,7 @@ export function createDispatchBundle(
 		const message = workerMcpNoNetworkNotice(
 			{ mode: sandbox.mode, network: sandbox.network, available: sandboxAvailability().available },
 			servers,
+			offeredWithheld,
 		);
 		if (message === null) return;
 		context.bus.emit(BusChannels.DispatchScopeNotice, { code: "mcp_sandbox_no_network", level: "warning", message });
@@ -5329,7 +5358,16 @@ export function createDispatchBundle(
 			admission.mcp,
 		);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
-		announceMcpSandboxNoNetwork(req, pathScope, readOnly, effectiveTools, target, settings, admission.mcp);
+		announceMcpSandboxNoNetwork(
+			req,
+			pathScope,
+			readOnly,
+			effectiveTools,
+			target,
+			settings,
+			admission.mcp,
+			admission.mcpNetworkWithheld,
+		);
 		const permit = resolveDispatchPermit(
 			req,
 			recipe,
@@ -7936,7 +7974,7 @@ export function createDispatchBundle(
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					...(lifecycle.readOnly ? { readOnly: true as const } : {}),
-					permit: receiptPermitSummary(lifecycle.permit),
+					permit: receiptPermitSummary(lifecycle.permit, lifecycle.admission.mcpNetworkWithheld),
 					toolTelemetry: {
 						coverage: toolTelemetryCoverage,
 						ingestionErrors: telemetryIngestionErrors,

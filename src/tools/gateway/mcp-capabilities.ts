@@ -681,6 +681,9 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		const controller = new AbortController();
 		const { declaration } = state;
 		const placement = launchPlacement(declaration);
+		// Only the attestation grants network; a worker never reads it from the declaration it re-resolves.
+		const sandboxNetwork =
+			options.admitted?.tools.some((entry) => entry.serverId === declaration.id && entry.network === true) === true;
 		// PERF W3: reserve ownership before the lazy import, so close can fence acquisition.
 		const loaded = (async () => {
 			const { createMcpConnection } = await import("../../domains/gateway/mcp/connection-lifecycle.js");
@@ -697,6 +700,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						},
 						{
 							workspaceRoot: placement.workspaceRoot,
+							...(sandboxNetwork ? { sandboxNetwork: true } : {}),
 							onFailure: (error) => {
 								state.failure ??= errorMessage(error);
 								void closeClient(state);

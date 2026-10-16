@@ -81,7 +81,10 @@ cancellation, shaping, and evidence still apply. An ordinary gateway call counts
 once; a chain counts its wrapper and each child attempt against the call budget.
 `details.capability` identifies an ordinary call's inner tool. See
 [surface.ts](../../src/tools/surface.ts) for placement. Workers need an admitted
-gateway and an allowed capability; worker registries have no MCP source.
+gateway and an allowed capability. A worker reaches only the exact
+`mcp_<id>__<tool>` capabilities its recipe names, each owned by an
+operator-trusted server; admission resolves them before launch, and the worker
+starts a server only while its declaration digest still matches.
 
 Chains form a dependency graph. Inside arguments,
 `{"$from":"inspect","path":["json","value"]}` selects a previous step's

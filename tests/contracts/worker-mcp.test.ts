@@ -1,15 +1,17 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { mcpCommandOutput } from "../../src/cli/mcp.js";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
-import { configureWorkerProcessSandbox } from "../../src/core/sandbox/worker-process.js";
+import { workerMcpNoNetworkNotice } from "../../src/core/sandbox/worker-policy.js";
+import { configureWorkerProcessSandbox, planSandboxedSpawn } from "../../src/core/sandbox/worker-process.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
@@ -18,7 +20,11 @@ import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceiptSafetySummary } from "../../src/domains/dispatch/types.js";
-import { resolveWorkerMcpAdmission, workerMcpRuntimeRefusal } from "../../src/domains/dispatch/worker-mcp.js";
+import {
+	resolveWorkerMcpAdmission,
+	withholdWritableMcpNetwork,
+	workerMcpRuntimeRefusal,
+} from "../../src/domains/dispatch/worker-mcp.js";
 import {
 	canonicalProjectRoot,
 	createMcpStdioClient,
@@ -37,6 +43,7 @@ import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/w
 import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../../src/tools/gateway/index.js";
 import type { RegistryVerdict } from "../../src/tools/registry.js";
+import { parseWorkerSpec, type WorkerSpec } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
@@ -105,7 +112,7 @@ describe("native worker MCP capabilities", () => {
 		return attestation;
 	}
 
-	function wire(attestation: WorkerMcpAttestation) {
+	function wire(attestation: WorkerMcpAttestation, launches?: Array<{ sandboxNetwork?: boolean }>) {
 		let source!: McpCapabilitySource;
 		const registry = createWorkerToolRegistry(
 			undefined,
@@ -126,6 +133,7 @@ describe("native worker MCP capabilities", () => {
 					persistCatalog: false,
 					admitted: attestation,
 					clientFactory: (spec, options) => {
+						launches?.push(options);
 						const client = createMcpStdioClient(spec, { ...options, initializeTimeoutMs: 5_000, killGraceMs: 200 });
 						clients.push(client);
 						return client;
@@ -317,6 +325,11 @@ describe("native worker MCP capabilities", () => {
 
 		const envelope = fixtureEnvelope("run-mcp");
 		const draft = fixtureReceiptDraft(envelope);
+		const mcp = {
+			projectRoot: project,
+			tools: [{ serverId: "fake", digest: "d", tool: "echo", actionClass: "read" }],
+		};
+		const ceiling = { tools: TOOLS, readOnly: true, writeRoots: [], enforcement, mcp };
 		const permit: NonNullable<RunReceiptSafetySummary["permit"]> = {
 			version: 1,
 			digest: "fixture",
@@ -324,13 +337,7 @@ describe("native worker MCP capabilities", () => {
 			git: "inspect",
 			asks: "deny",
 			approvalAuthority: "main",
-			ceiling: {
-				tools: TOOLS,
-				readOnly: true,
-				writeRoots: [],
-				enforcement,
-				mcp: { projectRoot: project, tools: [{ serverId: "fake", digest: "d", tool: "echo", actionClass: "read" }] },
-			},
+			ceiling,
 		};
 		const sandbox = {
 			mode: "auto",
@@ -367,6 +374,222 @@ describe("native worker MCP capabilities", () => {
 				16_384,
 			).includes("safety.sandboxNetwork"),
 		);
+
+		// A grant the run's write roots voided reads back as withheld, not as never granted.
+		const reason = `this run's write root ${project} overlaps its launch cwd ${project}`;
+		const withheld = withReceiptIntegrity(
+			{
+				...draft,
+				safety: {
+					...safety,
+					permit: {
+						...permit,
+						ceiling: { ...ceiling, mcp: { ...mcp, networkWithheld: [{ serverId: "fake", reason }] } },
+					},
+				},
+			},
+			envelope,
+		);
+		const withheldOutput = formatDispatchOutput(
+			"single",
+			[{ receipt: withheld, receiptPath: null, integrity: verifyReceiptIntegrity(withheld, envelope), summary }],
+			16_384,
+		);
+		match(withheldOutput, /MCP server 'fake' starts without its network grant because this run's write root/);
+		doesNotMatch(withheldOutput, /--network/);
+	});
+
+	it("attests the network grant of a server trusted with --network and leaves it out of the no-network notice", () => {
+		const confined = { mode: "auto", available: true, network: false } as const;
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
+		const granted = admitted();
+		deepStrictEqual(
+			granted.tools.map((entry) => [entry.serverId, entry.network]),
+			[["fake", true]],
+		);
+		strictEqual(workerMcpNoNetworkNotice(confined, granted.tools), null);
+
+		// A re-trust without the flag replaces the record and drops the grant.
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
+		const dropped = admitted();
+		strictEqual(dropped.tools[0]?.network, undefined);
+		match(workerMcpNoNetworkNotice(confined, dropped.tools) ?? "", /MCP server 'fake' starts .*no network/);
+	});
+
+	async function dispatchGranted(agentTools: ToolName[]) {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.sandbox = "required";
+		const context = dispatchStubContext({ settings, agentTools });
+		// The stub coder keeps its git worktree allowance, which a read-only class refuses.
+		const withoutGit = (recipe: AgentRecipe | null): AgentRecipe | null => {
+			if (recipe === null) return null;
+			const { permissions: _git, ...rest } = recipe;
+			return rest;
+		};
+		const getContract = <T extends object>(name: string): T | undefined => {
+			const contract = context.getContract<T>(name);
+			if (name !== "agents" || contract === undefined) return contract;
+			const agents = contract as unknown as AgentsContract;
+			return {
+				...agents,
+				get: (id: string) => withoutGit(agents.get(id)),
+				getSpec: (id: string) => {
+					const recipe = withoutGit(agents.get(id));
+					return recipe ? normalizeAgentSpec(recipe) : null;
+				},
+			} as unknown as T;
+		};
+		const notices: Array<{ code: string; message: string }> = [];
+		const unsubscribe = context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+			notices.push(notice);
+		});
+		let spawned: WorkerSpec | undefined;
+		const bundle = makeDispatchBundle(
+			{ ...context, getContract },
+			{
+				spawnWorker: (spec) => {
+					spawned = spec;
+					throw new Error("fixture: admitted");
+				},
+			},
+		);
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "Inspect evidence.", cwd: project, executionRole: "builder" }),
+				/fixture: admitted/,
+			);
+		} finally {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		}
+		ok(spawned);
+		return { spec: spawned, notices };
+	}
+
+	it("carries a read-only worker's network grant through the worker spec", async () => {
+		// Every tool reads, so the agent's class is read-only and the run has no write root.
+		const { spec } = await dispatchGranted(TOOLS);
+		const parsed = parseWorkerSpec(JSON.parse(JSON.stringify(spec)));
+		deepStrictEqual(
+			parsed.permit?.ceiling.mcp?.tools.map((entry) => [entry.serverId, entry.network]),
+			[["fake", true]],
+		);
+	});
+
+	it("withholds the grant from a writing worker whose write root covers the server's cwd and says why", async () => {
+		const { spec, notices } = await dispatchGranted([...TOOLS, ToolNames.Edit, ToolNames.Write]);
+		deepStrictEqual(
+			spec.permit?.ceiling.mcp?.tools.map((entry) => [entry.serverId, entry.network]),
+			[["fake", undefined]],
+		);
+
+		// A narrow write root beside an in-project entry is code the server can load, so it withholds the grant too.
+		mkdirSync(join(project, "tools"));
+		writeFileSync(join(project, "tools", "server.mjs"), readFileSync(FIXTURE, "utf8"));
+		const file = join(project, ".clio-coder", "mcp.yaml");
+		writeFileSync(
+			file,
+			readFileSync(file, "utf8").replace(`args: [${JSON.stringify(FIXTURE)}]`, "args: [tools/server.mjs]"),
+		);
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
+		const sibling = join(project, "tools", "json.mjs");
+		const scoped = withholdWritableMcpNetwork(admitted(), { writeRoots: [sibling], launchRoot: project });
+		deepStrictEqual(
+			scoped.withheld.map((entry) => entry.serverId),
+			["fake"],
+		);
+		match(scoped.withheld[0]?.reason ?? "", /write root .*json\.mjs overlaps/);
+
+		// A host without a sandbox backend refuses the launch instead, so there is nothing to warn about.
+		if (!sandboxAvailability().available) return;
+		strictEqual(notices.length, 1, JSON.stringify(notices));
+		strictEqual(notices[0]?.code, "mcp_sandbox_no_network");
+		match(
+			notices[0]?.message ?? "",
+			/MCP server 'fake' starts without its network grant because this run's write root .* overlaps its launch cwd/,
+		);
+		doesNotMatch(notices[0]?.message ?? "", /safety\.sandboxNetwork/);
+	});
+
+	it("withholds the grant when the dispatch cwd is a symlink and the write root names the link target", () => {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
+		const link = join(env.dir, "linked");
+		symlinkSync(project, link);
+		const tools = join(realpathSync(project), "tools");
+		mkdirSync(tools);
+		const scoped = withholdWritableMcpNetwork(admitted(), { writeRoots: [`${tools}/`], launchRoot: link });
+		deepStrictEqual(
+			scoped.withheld.map((entry) => entry.serverId),
+			["fake"],
+		);
+		strictEqual(scoped.attestation.tools[0]?.network, undefined);
+	});
+
+	it("starts a server without sandboxNetwork when its trust record grants network but the sealed attestation withholds it", async () => {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
+		const granted = admitted();
+		const { attestation, withheld } = withholdWritableMcpNetwork(granted, { writeRoots: [project], launchRoot: project });
+		deepStrictEqual(
+			withheld.map((entry) => entry.serverId),
+			["fake"],
+		);
+		const launches: Array<{ sandboxNetwork?: boolean }> = [];
+		ok((await wire(attestation, launches).source.ensure(ECHO)).spec);
+		strictEqual(launches.length, 1);
+		strictEqual(launches[0]?.sandboxNetwork, undefined);
+		// The same server under the unwithheld attestation does get the grant, so the source reads the attestation.
+		ok((await wire(granted, launches).source.ensure(ECHO)).spec);
+		strictEqual(launches[1]?.sandboxNetwork, true);
+	});
+
+	it("opens the network namespace only for a granted server's sandboxed process", () => {
+		const tree = join(env.dir, "tree");
+		mkdirSync(tree);
+		configureWorkerProcessSandbox({
+			version: WORKER_SANDBOX_SPEC_VERSION,
+			mode: "required",
+			writableRoots: [`${tree}/`],
+			readOnlyPaths: [],
+			gitWritablePaths: [],
+			readableRoots: [tree],
+			network: false,
+		});
+		try {
+			const command = { argv: [process.execPath, FIXTURE] };
+			const granted = planSandboxedSpawn(command, tree, [], { network: true });
+			const confined = planSandboxedSpawn(command, tree);
+			if (!sandboxAvailability().available) {
+				strictEqual(granted.kind, "refused");
+				return;
+			}
+			ok(granted.kind === "sandboxed" && confined.kind === "sandboxed");
+			strictEqual(granted.args.includes("--unshare-net"), false);
+			strictEqual(confined.args.includes("--unshare-net"), true);
+		} finally {
+			configureWorkerProcessSandbox(undefined);
+		}
+	});
+
+	it("grants nothing for a project declaration's own network field and keeps its trust digest", () => {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
+		const file = join(project, ".clio-coder", "mcp.yaml");
+		writeFileSync(file, readFileSync(file, "utf8").replace("  - id: other", "    network: true\n  - id: other"));
+		const resolved = resolveMcpServers({ cwd: project });
+		const fake = resolved.servers.find((server) => server.id === "fake");
+		deepStrictEqual(fake?.trust, { status: "trusted", actionClass: "read" });
+		ok(
+			resolved.diagnostics.some((entry) =>
+				/servers\[0\]\.network is ignored.*mcp trust fake --network/.test(entry.message),
+			),
+			JSON.stringify(resolved.diagnostics),
+		);
+		strictEqual(admitted().tools[0]?.network, undefined);
+		// The ignored field is advisory, so mcp list must not exit 1 over it.
+		const listed = mcpCommandOutput(["list"], { cwd: project });
+		strictEqual(listed.code, 0, listed.text);
+		match(listed.text, /^fake .* network=false$/m);
 	});
 
 	it("names the write roots and the missing sandbox when they withhold a required execute-class MCP tool", async () => {

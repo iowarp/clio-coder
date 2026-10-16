@@ -1,6 +1,7 @@
 import { mcpToolName } from "../core/tool-names.js";
 import { mcpToolActionClass } from "../domains/gateway/mcp/action-classes.js";
 import type { McpClient } from "../domains/gateway/mcp/client.js";
+import type { McpServerEntryScript, ResolvedMcpServer } from "../domains/gateway/mcp/index.js";
 import {
 	MCP_TRUST_ACTION_CLASSES,
 	type McpTrustActionClass,
@@ -19,7 +20,7 @@ const HELP = `clio-coder mcp <command>
 Commands:
   clio-coder mcp list [--refresh] [--json]
   clio-coder mcp test <id> [--call <tool> [--args <json>]]... [--json]
-  clio-coder mcp trust <id> [--action-class <class>] [--json]
+  clio-coder mcp trust <id> [--action-class <class>] [--network] [--json]
   clio-coder mcp untrust <id> [--json]
 
 Action classes: ${MCP_TRUST_ACTION_CLASSES.join(", ")}
@@ -27,9 +28,14 @@ Action classes: ${MCP_TRUST_ACTION_CLASSES.join(", ")}
 JSON responses (--json):
   list: {servers: [...], diagnostics: [...], trustDiagnostics: [...]}
     Each server includes its declaration, trust {status, actionClass, reason?},
-    and cached tools with per-tool actionClass. --refresh lists trusted servers
-    live and updates their catalogs; untrusted declarations are never launched.
-  test: {ok, server: {id, scope, trust}, protocolVersion, serverInfo,
+    entry (project servers: the project files its trust binds, [] when none),
+    network, networkSource?, and cached tools with per-tool actionClass.
+    network is true when the server holds the worker network grant
+    described under trust; networkSource says whether the trust record (project and
+    plugin servers) or the user declaration granted it. --refresh lists
+    trusted servers live and updates their catalogs; untrusted declarations
+    are never launched. A diagnostic with severity "warning" is advisory.
+  test: {ok, server: {id, scope, trust, network, networkSource?}, protocolVersion, serverInfo,
     tools: [{name, capability, actionClass, serverHint?}], truncated,
     calls: [{tool, isError, text, structuredContent?, refused?, denial?,
       serverPolicyRefusal?} | {tool, error}]}
@@ -41,15 +47,74 @@ JSON responses (--json):
     the calls; a JSON-RPC error answer is that call's error.
     An untrusted or stale declaration is never launched. The supported seam for external
     integration checks; nothing outside Clio needs to import its source.
-  trust: {ok: true, record: {projectRoot, id, digest, actionClass, trustedAt}}
+  trust: {ok: true, record: {projectRoot, id, digest, actionClass, trustedAt, network?,
+    entryScriptHashes?}, entry: [...]}
+    entry lists the project files the record binds: an absolute command,
+    every argument not shaped like a flag and every value a flag carries
+    after = (--require=./a.cjs) that names an existing file in the project.
+    Imports, python -m modules, directories, npx or uvx bins and files named
+    through env such as NODE_OPTIONS or PATH are not bound; a symlink whose
+    target is outside the project is bound by path only. entryScriptHashes
+    maps each bound file to its SHA-256. Bindings are checked when a session or worker takes its MCP
+    snapshot, so an edit is caught from the next session or dispatch.
+    --network lets the server's own sandboxed process reach the network in
+    fleet workers; worker shells keep their policy. On Linux that is the host
+    network namespace (internet, localhost services and abstract unix
+    sockets); on macOS the seatbelt profile allows network. Credential masking
+    is a denylist of known paths, so other secrets readable in the home can
+    leave with the grant. A worker whose write roots contain or lie inside
+    the server's launch cwd, the directory of a file it runs (a project
+    server's bound entry files; every existing file argument of a user or
+    plugin server), or a project server's project root starts it without
+    the grant, which an in-place or worktree writer does for a server in its
+    tree; a read-only worker keeps it. A module the server imports is not
+    bound, so a writer's edit to one persists into a later read-only run
+    that holds the grant. Re-trusting without it drops the grant. An older build sharing the
+    config dir drops network and entryScriptHashes when it rewrites the trust
+    file and sees entry-bound digests as stale.
   untrust: {ok: true, removed: boolean}
   errors: {ok: false, message: string}
 Exit codes: 0 success; 1 operational failure; 2 invalid usage. A test also
  exits 1 when its server fails or one of its calls returns an error.
 List retains its response shape on failure and exits 1 when config or trust
- diagnostics are present. Mutation errors return the error shape with a
- one-line reason. --help prints this text even when --json is supplied.
+ diagnostics other than warnings are present. Mutation errors return the
+ error shape with a one-line reason. --help prints this text even when --json
+ is supplied.
 `;
+
+/**
+ * The worker network grant as one per-server field. Only a trusted server
+ * carries it; a stale record's grant lapses with its trust.
+ */
+function networkGrant(server: ResolvedMcpServer): { network: boolean; networkSource?: "trust" | "declaration" } {
+	if (server.trust.status !== "trusted" || server.trust.network !== true) return { network: false };
+	return { network: true, networkSource: server.scope === "user" ? "declaration" : "trust" };
+}
+
+/** The project files a project server's trust binds; null for a scope that binds none. */
+function boundEntry(server: ResolvedMcpServer): string[] | null {
+	return server.scope === "project" ? (server.entryScripts ?? []).map((entry) => entry.path) : null;
+}
+
+/**
+ * Each binding as the trust record holds it: a symlinked entry names the real
+ * path whose content is hashed, and one whose target is outside the project
+ * is marked as bound by path only, so the printed list matches the record.
+ */
+function entryLabel(entries: ReadonlyArray<McpServerEntryScript>): string {
+	if (entries.length === 0) return "entry=none";
+	const spelled = entries.map((entry) => {
+		if ("error" in entry || entry.realPath === undefined) return entry.path;
+		return "sha256" in entry ? `${entry.path} -> ${entry.realPath}` : `${entry.path} -> ${entry.realPath} (path only)`;
+	});
+	return `entry=${spelled.join(", ")}`;
+}
+
+function networkLabel(grant: ReturnType<typeof networkGrant>): string {
+	return grant.network
+		? `network=true (${grant.networkSource === "trust" ? "trust record" : "user declaration"})`
+		: "network=false";
+}
 
 export interface McpCommandOutput {
 	code: number;
@@ -84,8 +149,11 @@ export function mcpCommandOutput(
 									digest: server.digest,
 									cwd: server.cwd,
 								});
+					const entry = boundEntry(server);
 					return {
 						...server,
+						...(entry !== null ? { entry } : {}),
+						...networkGrant(server),
 						tools:
 							catalog?.tools.flatMap((tool) => {
 								const capability = mcpToolName(server.id, tool.name);
@@ -105,16 +173,22 @@ export function mcpCommandOutput(
 			};
 			const lines = result.servers.map(
 				(server) =>
-					`${server.id} scope=${server.scope}${server.plugin !== undefined ? ` plugin=${server.plugin.id}` : ""} command=${JSON.stringify([server.command, ...server.args])} cwd=${JSON.stringify(server.cwd)} trust=${server.trust.status}${"reason" in server.trust ? ` (${server.trust.reason})` : ""} actionClass=${server.trust.actionClass}`,
+					`${server.id} scope=${server.scope}${server.plugin !== undefined ? ` plugin=${server.plugin.id}` : ""} command=${JSON.stringify([server.command, ...server.args])} cwd=${JSON.stringify(server.cwd)} trust=${server.trust.status}${"reason" in server.trust ? ` (${server.trust.reason})` : ""} actionClass=${server.trust.actionClass}${server.scope === "project" ? ` ${entryLabel(server.entryScripts ?? [])}` : ""} ${networkLabel(server)}`,
 			);
 			for (const server of result.servers) {
 				for (const tool of server.tools) lines.push(`  ${tool.capability} actionClass=${tool.actionClass}`);
 				if (server.trust.status === "trusted" && server.catalog === "missing")
 					lines.push("  no recorded tool catalog; use clio-coder mcp list --refresh");
 			}
-			lines.push(...result.diagnostics.map((entry) => `${entry.path}: ${entry.message}`), ...result.trustDiagnostics);
+			lines.push(
+				...result.diagnostics.map(
+					(entry) => `${entry.severity === "warning" ? "warning: " : ""}${entry.path}: ${entry.message}`,
+				),
+				...result.trustDiagnostics,
+			);
+			const failing = result.diagnostics.filter((entry) => entry.severity !== "warning");
 			return {
-				code: result.diagnostics.length || result.trustDiagnostics.length ? 1 : 0,
+				code: failing.length || result.trustDiagnostics.length ? 1 : 0,
 				text: lines.join("\n") || "mcp: none",
 				data: result,
 			};
@@ -122,24 +196,35 @@ export function mcpCommandOutput(
 		if ((command !== "trust" && command !== "untrust") || !id)
 			return fail(
 				2,
-				"usage: clio-coder mcp list | test <id> [--call <tool> [--args <json>]]... | trust <id> [--action-class <class>] | untrust <id>",
+				"usage: clio-coder mcp list | test <id> [--call <tool> [--args <json>]]... | trust <id> [--action-class <class>] [--network] | untrust <id>",
 			);
 		let actionClass: McpTrustActionClass | undefined;
-		if (rest.length) {
+		let network = false;
+		const flags = [...rest];
+		if (flags.length && command !== "trust") return fail(2, "--action-class and --network apply only to trust");
+		while (flags.length) {
+			const flag = flags.shift();
+			if (flag === "--network" && !network) {
+				network = true;
+				continue;
+			}
+			const value = flags.shift();
 			if (
-				command !== "trust" ||
-				rest.length !== 2 ||
-				rest[0] !== "--action-class" ||
-				!MCP_TRUST_ACTION_CLASSES.includes(rest[1] as McpTrustActionClass)
+				flag !== "--action-class" ||
+				actionClass !== undefined ||
+				!MCP_TRUST_ACTION_CLASSES.includes(value as McpTrustActionClass)
 			)
-				return fail(2, `--action-class must be one of ${MCP_TRUST_ACTION_CLASSES.join(", ")} and applies only to trust`);
-			actionClass = rest[1] as McpTrustActionClass;
+				return fail(
+					2,
+					`trust takes --action-class <${MCP_TRUST_ACTION_CLASSES.join("|")}> and --network, each at most once`,
+				);
+			actionClass = value as McpTrustActionClass;
 		}
 		if (command === "trust") {
-			const result = trustMcpServer({ ...options, id, ...(actionClass ? { actionClass } : {}) });
-			return result.ok
-				? { code: 0, text: `mcp: trusted ${id} ${JSON.stringify(result.record)}`, data: result }
-				: fail(1, result.message);
+			const result = trustMcpServer({ ...options, id, ...(actionClass ? { actionClass } : {}), network });
+			if (!result.ok) return fail(1, result.message);
+			const { entryScripts, ...data } = result;
+			return { code: 0, text: `mcp: trusted ${id} ${entryLabel(entryScripts)} ${JSON.stringify(result.record)}`, data };
 		}
 		const resolved = resolveMcpServers(options);
 		const server = resolved.servers.find((entry) => entry.id === id);
@@ -251,7 +336,7 @@ async function mcpTestOutput(id: string, calls: ReadonlyArray<McpTestCall>): Pro
 	const server = resolveMcpServers({ cwd }).servers.find((entry) => entry.id === id);
 	if (server === undefined) return fail(`no declared MCP server with id '${id}'`);
 	const trust = server.trust;
-	const described = { id: server.id, scope: server.scope, trust };
+	const described = { id: server.id, scope: server.scope, trust, ...networkGrant(server) };
 	if (trust.status !== "trusted")
 		return fail(`server '${id}' is ${trust.status}; it is never launched until trusted: clio-coder mcp trust ${id}`, {
 			server: described,

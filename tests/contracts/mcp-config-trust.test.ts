@@ -9,6 +9,8 @@ import {
 	realpathSync,
 	rmSync,
 	statSync,
+	symlinkSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -358,6 +360,89 @@ describe("mcp server trust", () => {
 		strictEqual(
 			resolveMcpServers({ cwd: project, configDir }).servers.find((server) => server.id === "files")?.trust.status,
 			"untrusted",
+		);
+	});
+
+	it("binds a project server's entry script so editing it makes the trust stale", () => {
+		const { project, configDir } = scratch();
+		writeFileSync(join(project, "tools", "server.mjs"), "console.log('v1');\n");
+		writeProjectConfig(project, PROJECT_CONFIG);
+		ok(trustMcpServer({ cwd: project, configDir, id: "files" }).ok);
+		const files = () => resolveMcpServers({ cwd: project, configDir }).servers.find((server) => server.id === "files");
+		strictEqual(files()?.trust.status, "trusted");
+
+		writeFileSync(join(project, "tools", "server.mjs"), "console.log('swapped');\n");
+		const stale = files()?.trust;
+		strictEqual(stale?.status, "stale");
+		match(stale?.status === "stale" ? stale.reason : "", /entry script 'tools\/server\.mjs' of 'files' changed/);
+
+		// Every in-project file argument binds; an outside file does not end the scan, and a flag-shaped file is a flag.
+		const outsideFile = join(project, "..", "os-release");
+		writeFileSync(outsideFile, "ID=test\n");
+		writeFileSync(join(project, "tools", "a.cjs"), "require('./b.cjs');\n");
+		writeFileSync(join(project, "tools", "--inspect"), "planted\n");
+		writeFileSync(join(project, "tools", "x.mjs"), "import './y.mjs';\n");
+		writeFileSync(join(project, "tools", "c.cjs"), "require('./d.cjs');\n");
+		writeProjectConfig(
+			project,
+			PROJECT_CONFIG.replace(
+				"[server.mjs, --stdio]",
+				`[--env-file=${JSON.stringify(outsideFile)}, --require, ./a.cjs, --import=./x.mjs, -r=./c.cjs, --inspect, server.mjs, --stdio]`,
+			),
+		);
+		deepStrictEqual(
+			files()?.entryScripts?.map((entry) => entry.path),
+			["tools/a.cjs", "tools/x.mjs", "tools/c.cjs", "tools/server.mjs"],
+		);
+		ok(trustMcpServer({ cwd: project, configDir, id: "files" }).ok);
+		strictEqual(files()?.trust.status, "trusted");
+		writeFileSync(join(project, "tools", "a.cjs"), "require('./evil.cjs');\n");
+		const preloaded = files()?.trust;
+		match(preloaded?.status === "stale" ? preloaded.reason : "", /entry script 'tools\/a\.cjs' of 'files' changed/);
+	});
+
+	it("binds an in-project file named with leading dots and a dash-led file after a bare --", () => {
+		const { project, configDir } = scratch();
+		// At the project root the relative path itself begins with two dots.
+		writeFileSync(join(project, "..srv.mjs"), "console.log('a');\n");
+		writeFileSync(join(project, "tools", "-b.mjs"), "console.log('b');\n");
+		writeProjectConfig(project, PROJECT_CONFIG.replace("[server.mjs, --stdio]", "[../..srv.mjs, --, -b.mjs]"));
+		const files = resolveMcpServers({ cwd: project, configDir }).servers.find((server) => server.id === "files");
+		deepStrictEqual(
+			files?.entryScripts?.map((entry) => entry.path),
+			["..srv.mjs", "tools/-b.mjs"],
+		);
+	});
+
+	it("binds where a symlinked entry points, even outside the project, so repointing it makes the trust stale", () => {
+		const { project, configDir } = scratch();
+		const outside = join(project, "..", "outside");
+		mkdirSync(outside);
+		writeFileSync(join(outside, "a.mjs"), "console.log('a');\n");
+		writeFileSync(join(outside, "b.mjs"), "console.log('b');\n");
+		const link = join(project, "tools", "server.mjs");
+		symlinkSync(join(outside, "a.mjs"), link);
+		writeProjectConfig(project, PROJECT_CONFIG);
+		ok(trustMcpServer({ cwd: project, configDir, id: "files" }).ok);
+		const files = () => resolveMcpServers({ cwd: project, configDir }).servers.find((server) => server.id === "files");
+		strictEqual(files()?.trust.status, "trusted");
+
+		unlinkSync(link);
+		symlinkSync(join(outside, "b.mjs"), link);
+		strictEqual(files()?.trust.status, "stale");
+	});
+
+	it("names the entry script when a record trusted before entry binding goes stale", () => {
+		const { project, configDir } = scratch();
+		writeProjectConfig(project, PROJECT_CONFIG);
+		// Without the file the declaration carries no entry script, which is the digest an older trust recorded.
+		ok(trustMcpServer({ cwd: project, configDir, id: "files" }).ok);
+		writeFileSync(join(project, "tools", "server.mjs"), "console.log('v1');\n");
+		const stale = resolveMcpServers({ cwd: project, configDir }).servers.find((server) => server.id === "files")?.trust;
+		strictEqual(stale?.status, "stale");
+		match(
+			stale?.status === "stale" ? stale.reason : "",
+			/trust of 'files' now also covers the entry script 'tools\/server\.mjs'; review it and run clio-coder mcp trust files again/,
 		);
 	});
 

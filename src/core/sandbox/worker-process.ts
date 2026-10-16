@@ -202,6 +202,7 @@ export function planSandboxedSpawn(
 	command: SandboxCommand,
 	cwd: string,
 	typedGitWritablePaths: ReadonlyArray<string> = [],
+	options: { network?: boolean } = {},
 ): SandboxedSpawnPlan {
 	const policy = active;
 	if (policy === null) return { kind: "direct" };
@@ -211,7 +212,9 @@ export function planSandboxedSpawn(
 	let invocation: SandboxInvocation | null;
 	try {
 		invocation = composeWorkerSandboxInvocation(
-			{ ...policy, gitWritablePaths: typedGitWritablePaths },
+			// An attested MCP network grant opens only this one process's network;
+			// the masks, read-only home and write roots stay as the policy sets them.
+			{ ...policy, gitWritablePaths: typedGitWritablePaths, network: policy.network || options.network === true },
 			command,
 			cwd,
 			availability,

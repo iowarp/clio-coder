@@ -46,9 +46,11 @@ export {
 	type McpConfigLoadResult,
 	type McpConfigTextInput,
 	type McpServerDeclaration,
+	type McpServerEntryScript,
 	type McpServerScope,
 	mcpConfigPaths,
 	mcpServerDigest,
+	mcpServerFileArguments,
 	parseMcpConfigText,
 	pluginServerRevocation,
 } from "./config.js";

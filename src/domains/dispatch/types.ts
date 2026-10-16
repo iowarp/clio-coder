@@ -776,7 +776,19 @@ export interface RunReceiptSafetySummary {
 			/** The MCP tools admission attested into the permit, each with the class it runs under. */
 			mcp?: {
 				projectRoot: string;
-				tools: ReadonlyArray<{ serverId: string; digest: string; tool: string; actionClass: string }>;
+				tools: ReadonlyArray<{
+					serverId: string;
+					digest: string;
+					tool: string;
+					actionClass: string;
+					network?: true;
+				}>;
+				/**
+				 * Granted servers whose network grant this run withheld because it could
+				 * write their code. They start under the run's own network policy; with
+				 * safety.sandbox off the server runs unconfined.
+				 */
+				networkWithheld?: ReadonlyArray<{ serverId: string; reason: string }>;
 			};
 		};
 		/**

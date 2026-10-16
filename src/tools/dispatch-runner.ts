@@ -574,10 +574,10 @@ function mcpSandboxNoNetworkNotice(receipt: RunReceipt, integrity: ReceiptIntegr
 	const ceiling = receipt.safety?.permit?.ceiling;
 	if (!integrity.ok || sandbox === undefined || ceiling?.mcp === undefined) return null;
 	const offered = ceiling.mcp.tools.filter((entry) => ceiling.tools.includes(`mcp_${entry.serverId}__${entry.tool}`));
-	return workerMcpNoNetworkNotice(
-		sandbox,
-		offered.map((entry) => entry.serverId),
+	const withheld = (ceiling.mcp.networkWithheld ?? []).filter((entry) =>
+		offered.some((server) => server.serverId === entry.serverId),
 	);
+	return workerMcpNoNetworkNotice(sandbox, offered, withheld);
 }
 
 /** Totals from integrity-checked receipts, with opaque external tool use kept separate. */

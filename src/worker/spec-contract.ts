@@ -932,10 +932,19 @@ function assertMcpAttestationShape(value: unknown, ceilingTools: ReadonlySet<str
 	if (!isAbsolute(root) || root.includes("\0")) throw new Error(`${source}.projectRoot must be an absolute path`);
 	if (!Array.isArray(mcp.tools) || mcp.tools.length === 0) throw new Error(`${source}.tools must be a non-empty array`);
 	const named = new Set<string>();
+	const granted = new Map<string, boolean>();
 	for (const [index, raw] of mcp.tools.entries()) {
 		const entrySource = `${source}.tools[${index}]`;
 		const entry = readRecord(raw, entrySource);
-		exactKeys(entry, ["serverId", "digest", "tool", "actionClass"], entrySource);
+		exactKeys(entry, ["serverId", "digest", "tool", "actionClass", "network"], entrySource);
+		if (entry.network !== undefined && entry.network !== true) throw new Error(`${entrySource}.network must be true`);
+		// The grant is per server; entries that disagree leave the worker unable to say which one holds.
+		const serverId = readString(entry.serverId, `${entrySource}.serverId`);
+		const network = entry.network === true;
+		if ((granted.get(serverId) ?? network) !== network) {
+			throw new Error(`${entrySource}.network disagrees with another entry for MCP server '${serverId}'`);
+		}
+		granted.set(serverId, network);
 		const name = mcpToolName(
 			readString(entry.serverId, `${entrySource}.serverId`),
 			readString(entry.tool, `${entrySource}.tool`),

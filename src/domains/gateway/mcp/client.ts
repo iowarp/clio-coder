@@ -87,6 +87,8 @@ export interface McpClientOptions {
 	onFailure?: (error: McpError) => void;
 	/** Aborting this signal closes the client. */
 	signal?: AbortSignal;
+	/** The worker attested the operator's network grant for this server, so its sandboxed process gets network. */
+	sandboxNetwork?: boolean;
 }
 
 export type McpClientStatus = "idle" | "starting" | "ready" | "closed" | "failed";
@@ -677,7 +679,9 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		// A worker's policy engine admits execute-class calls under write roots on
 		// the promise that bwrap binds every child it starts to those roots, so a
 		// server must not be the one child that escapes them or the network policy.
-		const sandbox = planSandboxedSpawn({ argv: [spec.command, ...(spec.args ?? [])] }, cwd);
+		const sandbox = planSandboxedSpawn({ argv: [spec.command, ...(spec.args ?? [])] }, cwd, [], {
+			network: options.sandboxNetwork === true,
+		});
 		if (sandbox.kind === "refused") {
 			fail(new McpError("spawn", `mcp server ${spec.id} failed to start: ${sandbox.message}`));
 			return false;

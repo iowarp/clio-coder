@@ -1,8 +1,9 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { it } from "node:test";
+import { mcpCommandOutput } from "../../src/cli/mcp.js";
 import {
 	MCP_PROJECT_CONFIG_RELATIVE_PATH,
 	MCP_TRUST_FILENAME,
@@ -45,7 +46,7 @@ it("lists, trusts, detects stale declarations, untrusts and returns error exits"
 		result = run("trust", "files", "--action-class", "read", "--json");
 		strictEqual(result.status, 0, result.stderr);
 		const trusted = JSON.parse(result.stdout);
-		deepStrictEqual(Object.keys(trusted).sort(), ["ok", "record"]);
+		deepStrictEqual(Object.keys(trusted).sort(), ["entry", "ok", "record"]);
 		strictEqual(trusted.ok, true);
 		const record = trusted.record;
 		deepStrictEqual(Object.keys(record).sort(), ["actionClass", "digest", "id", "projectRoot", "trustedAt"]);
@@ -75,7 +76,7 @@ it("lists, trusts, detects stale declarations, untrusts and returns error exits"
 		const help = run("--help").stdout;
 		for (const shape of [
 			"list: {servers: [...], diagnostics: [...], trustDiagnostics: [...]}",
-			"trust: {ok: true, record: {projectRoot, id, digest, actionClass, trustedAt}}",
+			"trust: {ok: true, record: {projectRoot, id, digest, actionClass, trustedAt, network?,\n    entryScriptHashes?}, entry: [...]}",
 			"untrust: {ok: true, removed: boolean}",
 			"errors: {ok: false, message: string}",
 			"0 success; 1 operational failure; 2 invalid usage",
@@ -106,6 +107,35 @@ it("lists, trusts, detects stale declarations, untrusts and returns error exits"
 		result = run("list", "--json");
 		strictEqual(result.status, 1);
 		ok(JSON.parse(result.stdout).diagnostics.length > 0);
+	} finally {
+		scratch.cleanup();
+	}
+});
+
+it("prints the hashed real path of a symlinked entry and marks one bound by path only", () => {
+	const scratch = makeScratchHome("clio-mcp-cli-entry-");
+	const project = join(scratch.dir, "project");
+	const config = join(scratch.dir, "config");
+	const projectConfig = join(project, MCP_PROJECT_CONFIG_RELATIVE_PATH);
+	mkdirSync(dirname(projectConfig), { recursive: true });
+	mkdirSync(join(project, "lib"));
+	mkdirSync(config);
+	const outside = join(scratch.dir, "outside.mjs");
+	writeFileSync(outside, "console.log('outside');\n");
+	writeFileSync(join(project, "lib", "real.mjs"), "console.log('real');\n");
+	symlinkSync(join(project, "lib", "real.mjs"), join(project, "server.mjs"));
+	symlinkSync(outside, join(project, "out.mjs"));
+	writeFileSync(
+		projectConfig,
+		"version: 1\nservers:\n  - id: files\n    command: node\n    args: [server.mjs, out.mjs]\n",
+	);
+	try {
+		const label = `entry=server.mjs -> lib/real.mjs, out.mjs -> ${outside} (path only)`;
+		const trusted = mcpCommandOutput(["trust", "files"], { cwd: project, configDir: config });
+		strictEqual(trusted.code, 0, trusted.text);
+		ok(trusted.text.includes(label), trusted.text);
+		const listed = mcpCommandOutput(["list"], { cwd: project, configDir: config });
+		ok(listed.text.includes(label), listed.text);
 	} finally {
 		scratch.cleanup();
 	}

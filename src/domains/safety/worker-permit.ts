@@ -48,6 +48,12 @@ export interface WorkerMcpToolAttestation {
 	/** The server's own tool name; the capability is `mcp_<serverId>__<tool>`. */
 	tool: string;
 	actionClass: WorkerMcpActionClass;
+	/**
+	 * The operator's network grant for this server, the same on each of its
+	 * entries. Only its sandboxed process gets network; the worker's own
+	 * commands keep the run's policy. Absent unless granted.
+	 */
+	network?: true;
 }
 
 export interface WorkerMcpAttestation {

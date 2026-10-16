@@ -16,6 +16,7 @@ import {
 	existsSync,
 	constants as fsConstants,
 	fstatSync,
+	lstatSync,
 	openSync,
 	readSync,
 	realpathSync,
@@ -50,11 +51,21 @@ export const MCP_CONFIG_CAPS = Object.freeze({
 const ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 const ROOT_FIELDS = new Set(["version", "servers"]);
-const SERVER_FIELDS = new Set(["id", "command", "args", "cwd", "env", "timeoutMs", "actionClass", "toolActionClasses"]);
+const SERVER_FIELDS = new Set([
+	"id",
+	"command",
+	"args",
+	"cwd",
+	"env",
+	"timeoutMs",
+	"actionClass",
+	"toolActionClasses",
+	"network",
+]);
 /** The Agent Plugins `mcp.json` file at a plugin root. */
 export const MCP_PLUGIN_CONFIG_FILENAME = "mcp.json";
 const PLUGIN_ROOT_FIELDS = new Set(["$schema", "mcpServers"]);
-const PLUGIN_SERVER_FIELDS = new Set(["type", "command", "args", "cwd", "env", "timeoutMs"]);
+const PLUGIN_SERVER_FIELDS = new Set(["type", "command", "args", "cwd", "env", "timeoutMs", "network"]);
 const SHELL_EXECUTABLES = new Set([
 	"bash",
 	"cmd",
@@ -100,14 +111,42 @@ export interface McpServerDeclaration {
 	actionClassExplicit?: boolean;
 	/** sha256 of the canonical declaration; a trust record binds to it. */
 	digest: string;
+	/** Set with `entryScripts`: the digest without them, so a record trusted before entry binding gets a specific stale reason. */
+	digestWithoutEntryScript?: string;
+	/**
+	 * The operator's network grant for this server's sandboxed process, read
+	 * only from user config. A project or plugin server takes it from its
+	 * trust record instead, so a repository can never grant itself egress.
+	 * Outside the digest: the grant changes the sandbox, not what runs.
+	 */
+	network?: true;
 	/** Set for a plugin-scope declaration: the plugin whose `mcp.json` declares it. */
 	plugin?: McpServerPlugin;
+	/** Set for a project-scope declaration whose command or any file argument is a file in, or linked from, the project; never empty. */
+	entryScripts?: McpServerEntryScript[];
 }
+
+/**
+ * A project file a project server runs, with its content hash, or the
+ * reason it could not be hashed. Only bound files count; whatever they import
+ * can still change under an existing trust record. `realPath` is set when the
+ * spelled path resolves through a symlink, so repointing the link makes the
+ * record stale; a target outside the project is bound by path only.
+ */
+export type McpServerEntryScript =
+	| { /** Relative to the project root. */ path: string; realPath?: string; sha256: string }
+	| { path: string; realPath: string }
+	| { path: string; realPath?: string; error: string };
 
 export interface McpConfigDiagnostic {
 	scope: McpServerScope;
 	path: string;
 	message: string;
+	/**
+	 * Advisory: the file still loaded and nothing it declares runs differently
+	 * from what was reviewed, so `mcp list` reports it without failing.
+	 */
+	severity?: "warning";
 }
 
 export interface McpConfigLoadResult {
@@ -136,6 +175,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** A declaration cannot grant its own server network; only the operator's trust record can. */
+function networkIgnoredMessage(location: string, id: string): string {
+	return `${location} is ignored: only the operator grants a project or plugin server network, with clio-coder mcp trust ${id} --network`;
+}
+
 function utf8Bytes(value: string): number {
 	return Buffer.byteLength(value, "utf8");
 }
@@ -157,6 +201,8 @@ export function mcpServerDigest(fields: {
 	toolActionClasses?: Readonly<Record<string, "read" | "execute" | "destructive" | "unknown">>;
 	/** A plugin server's plugin tree digest, so any change to the plugin needs a new trust decision. */
 	pluginContentDigest?: string;
+	/** A project server's bound entry files, so a pulled commit cannot swap the code that runs under trust. */
+	entryScripts?: ReadonlyArray<McpServerEntryScript>;
 }): string {
 	const canonical = JSON.stringify({
 		id: fields.id,
@@ -179,6 +225,15 @@ export function mcpServerDigest(fields: {
 				}
 			: {}),
 		...(fields.pluginContentDigest !== undefined ? { pluginContentDigest: fields.pluginContentDigest } : {}),
+		...(fields.entryScripts !== undefined && fields.entryScripts.length > 0
+			? {
+					entryScripts: fields.entryScripts.map((entry) => ({
+						path: entry.path,
+						sha256: "sha256" in entry ? entry.sha256 : null,
+						...(entry.realPath !== undefined ? { realPath: entry.realPath } : {}),
+					})),
+				}
+			: {}),
 	});
 	return createHash("sha256").update(canonical).digest("hex");
 }
@@ -327,11 +382,134 @@ function resolveCwd(raw: string | null, scope: McpServerScope, root: string, loc
 	return { cwd: real, cwdRoot: realRoot };
 }
 
+function sha256OfRegularFile(filePath: string): string | Error {
+	let fd: number;
+	try {
+		fd = openSync(filePath, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+	} catch (error) {
+		return error instanceof Error ? error : new Error(String(error));
+	}
+	try {
+		if (!fstatSync(fd).isFile()) return new Error("not a regular file");
+		const hash = createHash("sha256");
+		const buffer = Buffer.allocUnsafe(64 * 1024);
+		for (;;) {
+			const read = readSync(fd, buffer, 0, buffer.length, null);
+			if (read === 0) break;
+			hash.update(buffer.subarray(0, read));
+		}
+		return hash.digest("hex");
+	} catch (error) {
+		return error instanceof Error ? error : new Error(String(error));
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function isInside(root: string, candidate: string): boolean {
+	const relative = path.relative(root, candidate);
+	// A name that only begins with two dots (`..srv.mjs`) is still inside.
+	return relative.length > 0 && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+/** The first symlink on the way from `root` to `target` that does not resolve, relative to `root`. */
+function danglingLinkOn(root: string, target: string): string | undefined {
+	let current = root;
+	for (const part of path.relative(root, target).split(path.sep)) {
+		current = path.join(current, part);
+		try {
+			if (!lstatSync(current).isSymbolicLink()) continue;
+		} catch {
+			// The component itself is missing, so the path is simply absent.
+			return undefined;
+		}
+		if (!existsSync(current)) return path.relative(root, current);
+	}
+	return undefined;
+}
+
+/**
+ * The paths a server's launch names as files: an absolute command, then every
+ * argument not shaped like a flag and every value a flag carries after `=`
+ * (`--require=./a.cjs`, `-r=./a.cjs`), resolved against the server's cwd. A
+ * flag itself is never a file, so a planted `tools/--inspect` cannot stand in
+ * for the script. Every argument after a bare `--` is a value, since the
+ * program no longer reads it as a flag. A bare command resolves through PATH
+ * and is not listed.
+ */
+export function mcpServerFileArguments(command: string, args: ReadonlyArray<string>, cwd: string): string[] {
+	const files = path.isAbsolute(command) ? [command] : [];
+	let flags = true;
+	for (const arg of args) {
+		if (flags && arg === "--") {
+			flags = false;
+			continue;
+		}
+		const value = flags && arg.startsWith("-") ? arg.slice(arg.indexOf("=") + 1 || arg.length) : arg;
+		if (value.length === 0) continue;
+		files.push(path.resolve(cwd, value));
+	}
+	return files;
+}
+
+/**
+ * The files a project server runs when a pulled commit can change them:
+ * every path from mcpServerFileArguments that names an existing file in the
+ * project, so `node --require ./a.cjs ./s.mjs` binds both files and an
+ * outside file before the script (`--env-file /etc/os-release`) does not end
+ * the scan. A path spelled inside the project binds where it resolves, since
+ * the commit controls any symlink on the way; a dangling link there is an
+ * error. A file both spelled and resolved outside the project root is the
+ * operator's own and is not bound. Imports of a bound file are not followed.
+ */
+function projectEntryScripts(
+	command: string,
+	args: ReadonlyArray<string>,
+	cwd: string,
+	root: string,
+): McpServerEntryScript[] {
+	const candidate = (target: string): McpServerEntryScript | "absent" | "outside" => {
+		const spelledInside = isInside(root, target);
+		let real: string;
+		try {
+			if (!statSync(target).isFile()) return "absent";
+			real = realpathSync(target);
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "ENOENT" || code === "ENOTDIR" || code === "ENAMETOOLONG" || code === "ELOOP") {
+				const dangling = spelledInside ? danglingLinkOn(root, target) : undefined;
+				if (dangling === undefined) return "absent";
+				return { path: path.relative(root, target), error: `dangling symlink '${dangling}'` };
+			}
+			// Present but unstatable, e.g. a directory without search permission: fail closed if it sits in the project.
+			if (!spelledInside) return "outside";
+			return { path: path.relative(root, target), error: error instanceof Error ? error.message : String(error) };
+		}
+		const realInside = isInside(root, real);
+		if (!realInside && !spelledInside) return "outside";
+		if (!realInside) return { path: path.relative(root, target), realPath: real };
+		const relative = path.relative(root, real);
+		const spelled = spelledInside ? path.relative(root, target) : relative;
+		const linked = spelled !== relative ? { realPath: relative } : {};
+		const digest = sha256OfRegularFile(real);
+		return digest instanceof Error
+			? { path: spelled, ...linked, error: digest.message }
+			: { path: spelled, ...linked, sha256: digest };
+	};
+	const bound = new Map<string, McpServerEntryScript>();
+	for (const target of mcpServerFileArguments(command, args, cwd)) {
+		const entry = candidate(target);
+		if (typeof entry === "string" || bound.has(entry.path)) continue;
+		bound.set(entry.path, entry);
+	}
+	return [...bound.values()];
+}
+
 function validateServer(
 	value: unknown,
 	location: string,
 	scope: McpServerScope,
-): { fields: DeclaredServerFields; declaredCwd: string | null } | Error {
+): { fields: DeclaredServerFields; declaredCwd: string | null; network: boolean; networkIgnored: boolean } | Error {
 	if (!isRecord(value)) return new Error(`${location} must be an object`);
 	const unknown = unknownFields(value, SERVER_FIELDS);
 	if (unknown.length > 0) return new Error(`${location} has unknown field(s): ${unknown.join(", ")}`);
@@ -383,9 +561,14 @@ function validateServer(
 		if (typeof value.cwd !== "string") return new Error(`${location}.cwd must be a string`);
 		declaredCwd = value.cwd;
 	}
+	if (value.network !== undefined && typeof value.network !== "boolean") {
+		return new Error(`${location}.network must be true or false`);
+	}
 	return {
 		fields: { id, command, args, cwd: declaredCwd, env, timeoutMs, actionClass, toolActionClasses },
 		declaredCwd,
+		network: scope === "user" && value.network === true,
+		networkIgnored: scope !== "user" && value.network !== undefined,
 	};
 }
 
@@ -431,12 +614,21 @@ export function parseMcpConfigText(text: string, input: McpConfigTextInput): Mcp
 		return diagnostic(`root.servers exceeds the ${MCP_CONFIG_CAPS.servers}-server cap`);
 	}
 	const servers: McpServerDeclaration[] = [];
+	const notes: McpConfigDiagnostic[] = [];
 	const ids = new Map<string, number>();
 	for (const [index, value] of parsed.servers.entries()) {
 		const location = `servers[${index}]`;
 		const validated = validateServer(value, location, input.scope);
 		if (validated instanceof Error) return diagnostic(validated.message);
 		const { fields, declaredCwd } = validated;
+		if (validated.networkIgnored) {
+			notes.push({
+				scope: input.scope,
+				path: input.path,
+				message: networkIgnoredMessage(`${location}.network`, fields.id),
+				severity: "warning",
+			});
+		}
 		const duplicateIndex = ids.get(fields.id);
 		if (duplicateIndex !== undefined) {
 			return diagnostic(`${location}.id duplicates '${fields.id}' from servers[${duplicateIndex}].id`);
@@ -444,6 +636,8 @@ export function parseMcpConfigText(text: string, input: McpConfigTextInput): Mcp
 		const resolved = resolveCwd(declaredCwd, input.scope, input.root, `${location}.cwd`);
 		if (resolved instanceof Error) return diagnostic(resolved.message);
 		ids.set(fields.id, index);
+		const entryScripts =
+			input.scope === "project" ? projectEntryScripts(fields.command, fields.args, resolved.cwd, resolved.cwdRoot) : [];
 		servers.push({
 			id: fields.id,
 			scope: input.scope,
@@ -457,10 +651,13 @@ export function parseMcpConfigText(text: string, input: McpConfigTextInput): Mcp
 			actionClass: fields.actionClass,
 			actionClassExplicit: Object.hasOwn(value, "actionClass"),
 			toolActionClasses: fields.toolActionClasses,
-			digest: mcpServerDigest(fields),
+			digest: mcpServerDigest({ ...fields, entryScripts }),
+			...(entryScripts.length > 0 ? { digestWithoutEntryScript: mcpServerDigest(fields) } : {}),
+			...(validated.network ? { network: true as const } : {}),
+			...(entryScripts.length > 0 ? { entryScripts } : {}),
 		});
 	}
-	return { servers, diagnostics: [] };
+	return { servers, diagnostics: notes };
 }
 
 type BoundedFileRead =
@@ -569,6 +766,9 @@ function loadPluginFile(plugin: {
 		const validated = validateServer({ id, ...declared }, location, "plugin");
 		if (validated instanceof Error) return { servers: [], diagnostics: [diagnostic(validated.message)] };
 		const { fields, declaredCwd } = validated;
+		if (validated.networkIgnored) {
+			diagnostics.push({ ...diagnostic(networkIgnoredMessage(`${location}.network`, fields.id)), severity: "warning" });
+		}
 		const resolved = resolveCwd(declaredCwd, "plugin", plugin.rootPath, `${location}.cwd`);
 		if (resolved instanceof Error) return { servers: [], diagnostics: [diagnostic(resolved.message)] };
 		servers.push({

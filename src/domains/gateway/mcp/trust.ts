@@ -5,9 +5,17 @@
  * for that exact declaration. The record binds the project root, the server
  * id, and the declaration digest: change the command, arguments, environment,
  * cwd, or timeout and the record is stale until the operator re-trusts it.
+ * A project server that runs files inside the project (`node ./tools/x.mjs`)
+ * also binds each entry file's SHA-256, so editing one makes the record stale;
+ * files an entry imports are not covered. An entry reached through a symlink
+ * also binds where the link points, so repointing it makes the record stale.
  * User-scope declarations are trusted by authorship; they carry no record.
  * A plugin's declarations need the same explicit record as a project's, and
  * their digest covers the plugin's content digest.
+ *
+ * A record may also carry the operator's network grant for that server's
+ * sandboxed process in a fleet worker. The grant sits outside the digest and
+ * lasts until untrust or a re-trust without --network replaces the record.
  */
 
 import { realpathSync } from "node:fs";
@@ -18,6 +26,7 @@ import {
 	loadMcpServerConfig,
 	type McpConfigDiagnostic,
 	type McpServerDeclaration,
+	type McpServerEntryScript,
 	readBoundedFileText,
 } from "./config.js";
 
@@ -46,6 +55,10 @@ export interface McpTrustRecord {
 	/** The action class the gateway gives this server's tools. */
 	actionClass: McpTrustActionClass;
 	trustedAt: string;
+	/** Absent unless granted, so version 1 files written before the grant read unchanged. */
+	network?: true;
+	/** Each bound project entry file's hash at trust time, by path, so a stale reason can name the script. */
+	entryScriptHashes?: Record<string, string>;
 }
 
 export interface McpTrustState {
@@ -54,7 +67,12 @@ export interface McpTrustState {
 }
 
 export type McpTrustStatus =
-	| { status: "trusted"; actionClass: McpTrustActionClass }
+	| {
+			status: "trusted";
+			actionClass: McpTrustActionClass;
+			/** The operator granted this server's sandboxed process network in fleet workers. */
+			network?: true;
+	  }
 	| { status: "untrusted"; actionClass: "unknown"; reason: string }
 	| { status: "stale"; actionClass: "unknown"; reason: string };
 
@@ -125,12 +143,25 @@ function parseTrustState(text: string): McpTrustState | Error {
 		if (!isActionClass(raw.actionClass)) {
 			return new Error(`records[${index}].actionClass must be one of ${MCP_TRUST_ACTION_CLASSES.join(", ")}`);
 		}
+		if (raw.network !== undefined && typeof raw.network !== "boolean") {
+			return new Error(`records[${index}].network must be true or false`);
+		}
+		const hashes = raw.entryScriptHashes;
+		if (
+			hashes !== undefined &&
+			(!isRecord(hashes) ||
+				Object.values(hashes).some((value) => typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)))
+		) {
+			return new Error(`records[${index}].entryScriptHashes must map paths to SHA-256 hex digests`);
+		}
 		records.push({
 			projectRoot: raw.projectRoot as string,
 			id: raw.id as string,
 			digest: raw.digest as string,
 			actionClass: raw.actionClass,
 			trustedAt: raw.trustedAt as string,
+			...(raw.network === true ? { network: true as const } : {}),
+			...(isRecord(hashes) ? { entryScriptHashes: { ...(hashes as Record<string, string>) } } : {}),
 		});
 	}
 	return { version: MCP_TRUST_VERSION, records };
@@ -170,9 +201,29 @@ function writeTrustState(records: ReadonlyArray<McpTrustRecord>, configDir?: str
 	return null;
 }
 
+function unreadableEntry(entries: ReadonlyArray<McpServerEntryScript>): { path: string; error: string } | undefined {
+	for (const entry of entries) if ("error" in entry) return entry;
+	return undefined;
+}
+
+function entryPathList(entries: ReadonlyArray<McpServerEntryScript>): string {
+	return entries.map((entry) => `'${entry.path}'`).join(", ");
+}
+
+function unreadableEntryMessage(id: string, entry: { path: string; error: string }): string {
+	return `project-scope server '${id}' runs entry script '${entry.path}', which cannot be read to bind its trust (${entry.error})`;
+}
+
 function trustStatusFor(server: McpServerDeclaration, projectRoot: string, state: McpTrustState): McpTrustStatus {
-	if (server.scope === "user") return { status: "trusted", actionClass: server.actionClass };
-	const record = state.records.find((entry) => entry.projectRoot === projectRoot && entry.id === server.id);
+	if (server.scope === "user") {
+		return { status: "trusted", actionClass: server.actionClass, ...(server.network === true ? { network: true } : {}) };
+	}
+	const entries = server.entryScripts ?? [];
+	const unreadable = unreadableEntry(entries);
+	if (unreadable !== undefined) {
+		return { status: "untrusted", actionClass: "unknown", reason: unreadableEntryMessage(server.id, unreadable) };
+	}
+	const record = state.records.find((item) => item.projectRoot === projectRoot && item.id === server.id);
 	const origin = server.plugin !== undefined ? ` from plugin ${server.plugin.id}` : "";
 	if (record === undefined) {
 		return {
@@ -182,13 +233,35 @@ function trustStatusFor(server: McpServerDeclaration, projectRoot: string, state
 		};
 	}
 	if (record.digest !== server.digest) {
+		if (entries.length > 0 && record.digest === server.digestWithoutEntryScript) {
+			// Trusted before entry binding (386f1fea6): nothing changed but what the trust covers.
+			return {
+				status: "stale",
+				actionClass: "unknown",
+				reason: `trust of '${server.id}' now also covers the entry script${entries.length === 1 ? "" : "s"} ${entryPathList(entries)}; review ${entries.length === 1 ? "it" : "them"} and run clio-coder mcp trust ${server.id} again`,
+			};
+		}
+		const hashes = record.entryScriptHashes;
+		const changed =
+			hashes === undefined
+				? undefined
+				: entries.find(
+						(entry) => "sha256" in entry && Object.hasOwn(hashes, entry.path) && hashes[entry.path] !== entry.sha256,
+					);
+		if (changed !== undefined) {
+			return {
+				status: "stale",
+				actionClass: "unknown",
+				reason: `entry script '${changed.path}' of '${server.id}' changed since it was trusted (trust covers that file, not what it imports); review it and run clio-coder mcp trust ${server.id} again`,
+			};
+		}
 		return {
 			status: "stale",
 			actionClass: "unknown",
-			reason: `declaration of '${server.id}'${origin} changed (command, args, env, cwd, ${server.plugin !== undefined ? "timeout, or the plugin's content" : "or timeout"}) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
+			reason: `declaration of '${server.id}'${origin} changed (command, args, env, cwd, ${server.plugin !== undefined ? "timeout, or the plugin's content" : entries.length > 0 ? "timeout, or entry scripts" : "or timeout"}) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
 		};
 	}
-	return { status: "trusted", actionClass: record.actionClass };
+	return { status: "trusted", actionClass: record.actionClass, ...(record.network === true ? { network: true } : {}) };
 }
 
 export interface ResolvedMcpServers {
@@ -213,10 +286,18 @@ export function resolveMcpServers(options: McpTrustOptions): ResolvedMcpServers 
 export interface TrustMcpServerOptions extends McpTrustOptions {
 	id: string;
 	actionClass?: McpTrustActionClass;
+	/** Grant the server's sandboxed process network in fleet workers; omitting it records no grant. */
+	network?: boolean;
 	now?: () => Date;
 }
 
-export type TrustMcpServerResult = { ok: true; record: McpTrustRecord } | { ok: false; message: string };
+export type TrustMcpServerResult =
+	/**
+	 * `entry` lists the project files the record binds; empty when it pins none.
+	 * `entryScripts` carries each binding's real path and hash for display.
+	 */
+	| { ok: true; record: McpTrustRecord; entry: string[]; entryScripts: McpServerEntryScript[] }
+	| { ok: false; message: string };
 
 /** Record trust for one project-declared server at its current digest. */
 export function trustMcpServer(options: TrustMcpServerOptions): TrustMcpServerResult {
@@ -238,23 +319,29 @@ export function trustMcpServer(options: TrustMcpServerOptions): TrustMcpServerRe
 	if (server.scope === "user") {
 		return { ok: false, message: `server '${options.id}' is a user-scope declaration; it is trusted by authorship` };
 	}
+	const entries = server.entryScripts ?? [];
+	const unreadable = unreadableEntry(entries);
+	if (unreadable !== undefined) return { ok: false, message: unreadableEntryMessage(server.id, unreadable) };
 	const trust = readMcpTrustState(options.configDir);
 	if (trust.diagnostics.length > 0) {
 		return { ok: false, message: `trust state is unusable; repair or remove it first: ${trust.diagnostics.join("; ")}` };
 	}
 	const projectRoot = canonicalProjectRoot(options.cwd);
+	const hashes = Object.fromEntries(entries.flatMap((entry) => ("sha256" in entry ? [[entry.path, entry.sha256]] : [])));
 	const record: McpTrustRecord = {
 		projectRoot,
 		id: server.id,
 		digest: server.digest,
 		actionClass,
 		trustedAt: (options.now?.() ?? new Date()).toISOString(),
+		...(options.network === true ? { network: true as const } : {}),
+		...(Object.keys(hashes).length > 0 ? { entryScriptHashes: hashes } : {}),
 	};
 	const records = trust.state.records.filter((entry) => !(entry.projectRoot === projectRoot && entry.id === server.id));
 	records.push(record);
 	const refused = writeTrustState(records, options.configDir);
 	if (refused !== null) return { ok: false, message: refused };
-	return { ok: true, record };
+	return { ok: true, record, entry: entries.map((entry) => entry.path), entryScripts: entries };
 }
 
 export type UntrustMcpServerResult = { ok: true; removed: boolean } | { ok: false; message: string };
