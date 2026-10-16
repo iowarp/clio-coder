@@ -82,6 +82,7 @@ import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
+import { suspendProcessUntilContinued } from "./process-suspend.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { hydrateResumedSessionPresentation } from "./resumed-session-presentation.js";
@@ -343,6 +344,7 @@ export interface KeyBindingDeps {
 	canExit?: () => boolean;
 	cycleThinking: () => void;
 	requestShutdown: () => void;
+	suspendProcess?: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
 	/** `/files` as a key: open the files pane when closed, close it when open. */
@@ -378,6 +380,10 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 	const feature = ACTION_FEATURES[id];
 	if (feature !== undefined) deps.recordFeature?.(feature);
 	switch (id) {
+		case "clio-coder.suspend":
+			if (!deps.suspendProcess) return false;
+			deps.suspendProcess();
+			return true;
 		case "clio-coder.output.cycle":
 			deps.cycleOutputStyle();
 			return true;
@@ -1313,6 +1319,15 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		presentation.collapseWelcomeDashboard();
 		resetTranscript();
 	};
+	const suspendTerminalAsync = async <T>(run: () => Promise<T>): Promise<T> => {
+		try {
+			tui.stop();
+			return await run();
+		} finally {
+			tui.start();
+			tui.requestRender(true);
+		}
+	};
 	overlayLifecycle = createOverlayLifecycle({
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getQuotaSnapshots: presentation.getQuotaSnapshots,
@@ -1359,15 +1374,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				tui.requestRender(true);
 			}
 		},
-		suspendTerminalAsync: async (run) => {
-			try {
-				tui.stop();
-				return await run();
-			} finally {
-				tui.start();
-				tui.requestRender(true);
-			}
-		},
+		suspendTerminalAsync,
 		onOperatorParked: () => desktopNotifications.approvalParked(),
 	});
 	const {
@@ -1682,6 +1689,15 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		keybindings,
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
+			suspendProcess: () => {
+				if (process.platform === "win32") {
+					notify("info", "Suspend is not supported on Windows.", "keyboard:suspend");
+					return;
+				}
+				void suspendTerminalAsync(suspendProcessUntilContinued).catch((err: unknown) => {
+					notify("error", `Could not suspend: ${err instanceof Error ? err.message : String(err)}`, "keyboard:suspend");
+				});
+			},
 			canExit: () => {
 				if (editor.getText().length > 0) return false;
 				const queue = deps.chat.queuedMessages();

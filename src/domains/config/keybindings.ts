@@ -22,6 +22,7 @@ export interface ClioAppKeybindings {
 	"clio-coder.thinking.cycle": true;
 	"clio-coder.autonomy.toggle": true;
 	"clio-coder.exit": true;
+	"clio-coder.suspend": true;
 	"clio-coder.status.toggle": true;
 	"clio-coder.session.tree": true;
 	"clio-coder.dispatchBoard.toggle": true;
@@ -149,6 +150,13 @@ export const CLIO_APP_KEYBINDINGS = {
 		description: "Exit empty idle composer with no queued messages",
 		scope: "composer",
 		kind: "exit",
+		repeat: false,
+	},
+	"clio-coder.suspend": {
+		defaultKeys: "ctrl+z",
+		description: "Suspend Clio (resume with fg; unavailable on Windows)",
+		scope: "composer",
+		kind: "toggle",
 		repeat: false,
 	},
 	"clio-coder.leader": {

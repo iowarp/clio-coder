@@ -21,6 +21,7 @@ export const CLOSED_ACTION_ORDER = [
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
 export const GLOBAL_ACTION_ORDER = [
+	"clio-coder.suspend",
 	"clio-coder.status.toggle",
 	"clio-coder.thinking.cycle",
 	"clio-coder.session.tree",
@@ -396,6 +397,9 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		}
 		if (deps.routeOverlayKey(data)) return { consume: true };
 		if (overlayOwnsInput(deps.getOverlayState())) {
+			// Unconsumed suspend keys must escape modal focus too (#413).
+			if (deps.matchesAction(data, "clio-coder.suspend"))
+				return deps.dispatchAction("clio-coder.suspend") ? { consume: true } : undefined;
 			if (deps.forwardFocusedInput) {
 				deps.forwardFocusedInput(data);
 				return { consume: true };

@@ -27,6 +27,7 @@ export interface InteractiveInputKeyActionDeps {
 	canExit: () => boolean;
 	cycleThinking: () => void;
 	requestShutdown: () => void;
+	suspendProcess?: () => void;
 	toggleStatus: () => void;
 	toggleDispatchBoard: () => void;
 	toggleFilesPane: () => void;
@@ -66,6 +67,7 @@ export interface InteractiveInputRuntimeDeps {
 	/** Leader entries the host adds that are not keybindings, such as an active workspace's keys. */
 	extraLeaderTargets?: () => ReadonlyArray<{ key: string; label: string; run: () => void }>;
 	actions: {
+		suspendProcess?(): void;
 		canExit(): boolean;
 		cycleOutputStyle(): void;
 		toggleAutonomy?(): void;
@@ -185,6 +187,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			deps.requestRender();
 		},
 		requestShutdown: () => void controller.shutdown(),
+		...(deps.actions.suspendProcess ? { suspendProcess: deps.actions.suspendProcess } : {}),
 		toggleStatus: deps.overlay.toggleFooterDashboardState,
 		toggleDispatchBoard: deps.actions.toggleWorkersDock ?? deps.overlay.toggleDispatchBoardOverlay,
 		openTasks: deps.overlay.openTasksOverlayState,

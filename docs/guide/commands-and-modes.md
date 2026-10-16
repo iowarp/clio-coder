@@ -520,6 +520,7 @@ cancels the underlying owner. The menu does not search as you type.
 | `Alt+K` | Open the queue navigator over the queued messages | `n` |
 | `Alt+Q` | Restore both queue kinds before the current draft, once | `q` |
 | `Ctrl+D` | Delete forward with text; exit only empty and idle with no queued messages | — |
+| `Ctrl+Z` | Suspend Clio Coder; run `fg` in the shell to resume (unavailable on Windows) | — |
 | `Ctrl+G` | Open or close the contextual action menu | — |
 
 `Alt+E` and `Alt+A` drive Herdr docks that hide instead of close; [Panes and the Files Pane](panes-and-files.md#showing-hiding-and-closing-docks) specifies the shared tap model. `Alt+W` is the workers dock key in a pane-host session and is covered in [Fleet Dispatch](fleet-dispatch.md).

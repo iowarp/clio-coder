@@ -379,7 +379,11 @@ export function detectPlatformKeybindingWarnings(
 		const userValue = userBindings[id];
 		const source = userValue === undefined ? "default" : "user";
 		const keys = userValue === undefined ? defaultBindingValue(id) : normalizeBindingValue(userValue);
-		const risky = keys.filter((key) => keyRiskReason(key, support) !== null);
+		const risky = keys.filter((key) => {
+			// Intercepting Ctrl-Z still performs the suspend action (#413).
+			if (id === "clio-coder.suspend" && normalizeKeyForRisk(key) === "ctrl+z") return false;
+			return keyRiskReason(key, support) !== null;
+		});
 		if (risky.length === 0) continue;
 		const firstReason = keyRiskReason(risky[0] ?? "", support) ?? support.reason;
 		if (source === "default" && support.name === "Apple_Terminal" && risky.every(keyUsesAltLetter)) {
