@@ -6,6 +6,7 @@ import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { Playbook } from "../../src/domains/agents/index.js";
+import { cancelStoredAssignment, registerAssignment } from "../../src/domains/dispatch/assignment-store.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import {
 	agentRoleFactsResolver,
@@ -381,6 +382,54 @@ test("a resume refuses a root another workspace launched", async () => {
 			`resume run 'fleet-bbbbbbbbbbbb' predates recorded workspaces, so it cannot be resumed in ${root}`,
 		]);
 		ok(compile(other, "fleet-aaaaaaaaaaaa").ok, "the launching workspace still resumes it");
+	} finally {
+		scratch.restore();
+	}
+});
+
+test("a resume refuses a root whose process still runs it", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-resume-running-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		ok(agents);
+		const records = new Map<string, FleetRunRecord>();
+		const compile = (resume?: string) =>
+			compileFleetRunPreview({
+				workspaceRoot: root,
+				name: "survey",
+				vars: { site: "plot-7" },
+				getAgentSpec: (id) => agents.getSpec(id),
+				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
+				load: () => ({ commands: null, playbook: playbook(root, ["survey", "report"]) }),
+				...(resume !== undefined ? { resume } : {}),
+				readRun: (id) => records.get(id) ?? null,
+			});
+		const fresh = compile();
+		ok(fresh.ok);
+		// endedAt stays null in both phases: a crashed root never stamps it either.
+		records.set("fleet-cccccccccccc", {
+			version: 1,
+			id: "fleet-cccccccccccc",
+			cwd: root,
+			fleet: "survey",
+			planHash: fresh.preview.plan.hash,
+			stepIds: fresh.preview.plan.steps.map((step) => step.id),
+			planSteps: [...fresh.preview.plan.steps],
+			vars: { site: "plot-7" },
+			startedAt: "2026-10-01T00:00:00.000Z",
+			endedAt: null,
+			resumedFrom: null,
+			steps: [],
+		});
+		await registerAssignment("fleet-cccccccccccc");
+		const running = compile("fleet-cccccccccccc");
+		ok(!running.ok);
+		deepStrictEqual(running.diagnostics, [
+			`resume run 'fleet-cccccccccccc' is still running in process ${process.pid}; wait for it to settle or cancel it first`,
+		]);
+		await cancelStoredAssignment("fleet-cccccccccccc");
+		ok(compile("fleet-cccccccccccc").ok, "a settled root resumes");
 	} finally {
 		scratch.restore();
 	}

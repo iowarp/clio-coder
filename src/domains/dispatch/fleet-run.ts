@@ -25,7 +25,13 @@ import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../o
 import type { CostProvenance } from "../providers/index.js";
 import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
-import { claimAssignmentVerdict, recordAssignmentAttempt, settleStoredAssignment } from "./assignment-store.js";
+import {
+	assignmentProcessOwnerAlive,
+	claimAssignmentVerdict,
+	getStoredAssignment,
+	recordAssignmentAttempt,
+	settleStoredAssignment,
+} from "./assignment-store.js";
 import { newCodeRunId, runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
 import type { DispatchContract, DispatchPlanTaskResolution, DispatchRequest } from "./contract.js";
@@ -124,6 +130,7 @@ export type FleetResumeRefusal =
 	| { ok: false; reason: "fleet-name"; priorFleet: string; currentFleet: string }
 	/** `priorCwd` is null for a record written before roots recorded their workspace. */
 	| { ok: false; reason: "workspace"; priorCwd: string | null; currentCwd: string }
+	| { ok: false; reason: "running"; pid: number }
 	| { ok: false; reason: "vars" }
 	| {
 			ok: false;
@@ -172,6 +179,17 @@ export function planFleetResume(
 	// prove where it ran and is refused rather than guessed.
 	if (record.cwd === undefined || canonicalPath(record.cwd) !== canonicalPath(workspaceRoot)) {
 		return { ok: false, reason: "workspace", priorCwd: record.cwd ?? null, currentCwd: workspaceRoot };
+	}
+	// A root still executing would race its own resume over one workspace. A
+	// null endedAt alone is not that proof: a crashed root never stamps it, and
+	// resuming after a crash is the point. Only a live process lease is.
+	const assignment = getStoredAssignment(record.id);
+	if (
+		assignment?.status === "running" &&
+		assignment.processOwner !== undefined &&
+		assignmentProcessOwnerAlive(assignment)
+	) {
+		return { ok: false, reason: "running", pid: assignment.processOwner.pid };
 	}
 	if (sortedVars(record.vars) !== sortedVars(vars)) return { ok: false, reason: "vars" };
 	if (record.planHash !== plan.hash) {

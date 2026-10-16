@@ -291,6 +291,10 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 						? `resume run '${input.resume}' predates recorded workspaces, so it cannot be resumed in ${planned.currentCwd}`
 						: `resume run '${input.resume}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
 				);
+			} else if (planned.reason === "running") {
+				diagnostics.push(
+					`resume run '${input.resume}' is still running in process ${planned.pid}; wait for it to settle or cancel it first`,
+				);
 			} else if (planned.reason === "vars") {
 				diagnostics.push(`resume run '${input.resume}' used different --var values`);
 			} else {

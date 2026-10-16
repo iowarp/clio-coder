@@ -409,6 +409,12 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 						: `resume run '${resumeId}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
 				);
 			}
+			if (planned.reason === "running") {
+				await loaded.stop();
+				return refuse(
+					`resume run '${resumeId}' is still running in process ${planned.pid}; wait for it to settle or cancel it first`,
+				);
+			}
 			if (planned.reason === "vars") {
 				await loaded.stop();
 				return refuse(`resume run '${resumeId}' used different --var values`);
