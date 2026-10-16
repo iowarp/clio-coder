@@ -48,6 +48,6 @@ test("a compiled plan reads as waves of steps with placement, scope and declared
 			["Wave 2", [["command lint", "pnpm lint", ["May change the workspace", "Declares no writes"]]]],
 		],
 	);
-	assert.equal(view.budget, "$0.25 of this session's $5.00 ceiling is spent; the contract asks for up to $1.00.");
+	assert.equal(view.budget, "$0.25 of this session's $5.00 ceiling is spent; the playbook asks for up to $1.00.");
 	assert.equal(view.hash.short, "bbbbbbbbbbbb");
 });
