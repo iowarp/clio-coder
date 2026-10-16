@@ -1,10 +1,12 @@
 import { match, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runPlaybookGraph } from "../../src/cli/playbook-graph.js";
 import { runPlaybookValidate } from "../../src/cli/playbook-validate.js";
+import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /** Run a synchronous CLI entry with its output captured. */
@@ -92,5 +94,42 @@ describe("playbook CLI variables", () => {
 		const malformed = captured(() => runPlaybookValidate(["stage", "--var", "fixture"]));
 		strictEqual(malformed.code, 2);
 		match(malformed.stderr, /--var requires key=value/);
+	});
+
+	it("preflights a route from the trusted project settings layer fleet run reads", () => {
+		writeFileSync(
+			join(root, ".clio-coder", "playbooks", "routed.md"),
+			[
+				"---",
+				"version: 5",
+				"name: routed",
+				'description: "One routed agent step."',
+				"steps:",
+				"  - kind: agent",
+				"    id: build",
+				"    agent: scout",
+				"    target: project-route",
+				"    scope: readonly",
+				"    dependencies: []",
+				"maxWorkers: 1",
+				"onFailure: stop",
+				"---",
+				"",
+				"Build it.",
+				"",
+			].join("\n"),
+		);
+		writeFileSync(
+			join(root, ".clio-coder", "settings.local.yaml"),
+			"version: 2\ntargets:\n  - id: project-route\n    runtime: openai-compat\n    url: http://127.0.0.1:1/v1\n    defaultModel: fixture\n",
+		);
+		// Version 5 enforces write boundaries, which compare a git checkout.
+		execFileSync("git", ["init", "-q"], { cwd: root });
+		const untrusted = captured(() => runPlaybookValidate(["routed"]));
+		strictEqual(untrusted.code, 1);
+		match(untrusted.stderr, /unknown target 'project-route'/);
+		recordProjectSurfaceTrust(root, "settings", captureProjectSurface(root, "settings").contentHash as string);
+		const trusted = captured(() => runPlaybookValidate(["routed"]));
+		strictEqual(trusted.code, 0, `${trusted.stdout}${trusted.stderr}`);
 	});
 });

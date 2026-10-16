@@ -1,4 +1,4 @@
-import { readSettings } from "../core/config.js";
+import { readStrictLayeredSettings } from "../core/settings-layers.js";
 import {
 	loadPlaybook,
 	loadPlaybookCommands,
@@ -31,7 +31,9 @@ export function inspectPlaybook(name: string, vars?: Readonly<Record<string, str
 	const specs = discoverSpecs(cwd);
 	const byId = new Map(specs.map((spec) => [spec.id, spec]));
 	const resolved = new Set<string>();
-	const settings = readSettings();
+	// The same effective stack fleet run boots with, so a target or profile a
+	// trusted project layer declares validates here exactly as it runs there.
+	const settings = readStrictLayeredSettings(cwd).settings;
 	const targetIds = new Set(settings.targets.map((target) => target.id));
 	const profileIds = new Set(Object.keys(settings.fleet?.profiles ?? {}));
 	for (const step of playbook.steps) {
