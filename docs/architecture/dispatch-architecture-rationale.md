@@ -12,7 +12,7 @@ worker execution, and receipts. These responsibilities share the contracts below
 | Whole-plan admission | Preflight and reservation finish before any worker starts. Missing candidates, authority, or verifiable boundaries refuse admission. Manual pins and `failover: none` retain their declared constraints. |
 | Write attribution | The compiler refuses a scheduling wave that mixes boundary-declaring steps with steps that declare none, or that holds more than one step that may write, unless the plan declares the single-writer mode `writers: 1`. A boundary is verified by diffing one shared checkout, so concurrent writers could not be attributed. The scheduler enforces the compiled boundary after the step. |
 | Loop termination | The scheduler marks later loop nodes `unneeded` after a loop terminates, so a declared attempt that was never needed does not run. |
-| Verification freshness | A later workspace step can invalidate an earlier verification. Before a dependent treats it as satisfied, the scheduler reruns the affected check, at most `STALENESS_REVALIDATION_LIMIT` (3) times per verification in one plan. |
+| Verification freshness | A later workspace step can invalidate an earlier verification. Before a dependent treats it as satisfied, the scheduler reruns the affected check, at most once per verification per wave. A plan has finitely many waves, including those its plan steps add, so the reruns are bounded by the plan's own shape. |
 | Receipt authority | The orchestrator validates and seals receipts. Normalized routing intent is included in receipt integrity; quality records are local to the run. |
 
 Pure reducers and helpers can remain separate files within the domain while
