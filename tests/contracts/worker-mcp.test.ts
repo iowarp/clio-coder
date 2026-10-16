@@ -1,10 +1,11 @@
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
 import { configureWorkerProcessSandbox } from "../../src/core/sandbox/worker-process.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
@@ -16,6 +17,7 @@ import {
 	trustMcpServer,
 } from "../../src/domains/gateway/mcp/index.js";
 import { mcpCatalogPath } from "../../src/domains/gateway/mcp/metadata-cache.js";
+import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { resolveWorkerPermit, type WorkerMcpAttestation } from "../../src/domains/safety/worker-permit.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
@@ -192,6 +194,40 @@ describe("native worker MCP capabilities", () => {
 			/the Claude SDK runtime runs its own tool loop/,
 		);
 		strictEqual(clients.length, 0, "admission launched nothing");
+	});
+
+	it("refuses MCP capabilities on a Claude SDK target before it asks to install the SDK", async () => {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
+		// A missing prepared component makes the SDK unavailable; the refusal must
+		// come first, or the operator is asked to install a runtime that is refused.
+		process.env.CLIO_CODER_CLAUDE_SDK_DIR = join(env.dir, "no-sdk");
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [{ id: "sdk", runtime: "claude-sdk", defaultModel: "claude-sonnet-5-5" }];
+		settings.fleet.default.target = "sdk";
+		settings.fleet.default.model = "claude-sonnet-5-5";
+		const context = dispatchStubContext({
+			settings,
+			agentTools: [...TOOLS, ToolNames.Edit, ToolNames.Write],
+			runtime: {
+				id: "claude-sdk",
+				displayName: "Claude SDK",
+				kind: "sdk",
+				auth: "claude-cli",
+				defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+				synthesizeModel: () => ({ id: "claude-sonnet-5-5", provider: "claude-sdk" }) as never,
+			} as never,
+		});
+		const bundle = makeDispatchBundle(context);
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "Inspect evidence.", cwd: project, executionRole: "builder" }),
+				/the Claude SDK runtime runs its own tool loop/,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+			delete process.env.CLIO_CODER_CLAUDE_SDK_DIR;
+		}
 	});
 
 	it("launches only the attested declaration, persists no catalog, and closes it at run end", async () => {

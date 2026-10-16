@@ -5058,6 +5058,10 @@ export function createDispatchBundle(
 				providers,
 			);
 		let target = resolveTarget();
+		// Before the SDK install ask: a runtime that cannot carry the recipe's MCP
+		// capabilities is refused whether or not its SDK is present.
+		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
+		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		if (target.runtime.id === "claude-sdk") {
 			const operator = options?.operatorAsk;
 			await ensureClaudeAgentSdk({
@@ -5105,8 +5109,6 @@ export function createDispatchBundle(
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
 			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
 		}
-		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
-		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
