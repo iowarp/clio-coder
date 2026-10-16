@@ -100,8 +100,8 @@ export interface CoreToolBootstrapDeps {
 	onSkillLoaded?: (name: string) => void;
 	/**
 	 * Local MCP servers the gateway may launch. The session bootstrap builds
-	 * one per process; worker registries carry none, so a worker's gateway
-	 * reaches builtin and extension capabilities only.
+	 * one per process; a worker registry carries one only for the exact MCP
+	 * capabilities its permit attests, launched under the worker's sandbox.
 	 */
 	mcpCapabilities?: McpCapabilitySource;
 	/** A capability the model called through the gateway, so a ranked one can be joined to its ranking as a follow-up. */
