@@ -84,7 +84,6 @@ export {
 	type ExecutionLoopReason,
 	type ExecutionPlanResult,
 	executePlan,
-	STALENESS_REVALIDATION_LIMIT,
 } from "./execution-scheduler.js";
 export {
 	affectsNodeBreaker,

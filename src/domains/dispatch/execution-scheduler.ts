@@ -171,13 +171,6 @@ export interface ExecutionPlanResult {
 }
 
 /**
- * Times one verification may be re-run for staleness inside a single plan. A
- * deterministic command is cheap, but an unbounded revalidation chain is a
- * loop nobody declared, so the plan fails closed instead.
- */
-export const STALENESS_REVALIDATION_LIMIT = 3;
-
-/**
  * A step whose completion can change what a verification measured. A
  * verification does not invalidate itself, and a commit records the tree
  * without editing it; everything else that may write does invalidate.
@@ -487,12 +480,11 @@ export async function executePlan(
 			if (stopped || signal?.aborted) return true;
 			const step = stepsById.get(id);
 			if (step?.kind !== "code") continue;
+			// Revalidation runs at most once per verification per wave, and a plan
+			// has finitely many waves, so the chain is bounded by the plan's own
+			// shape. A fixed cap of 3 aborted any fleet with more than three
+			// workspace waves after a loop, a declared plan, not an undeclared loop.
 			const spent = revalidations.get(id) ?? 0;
-			if (spent >= STALENESS_REVALIDATION_LIMIT) {
-				throw new Error(
-					`execution plan: verification '${id}' exhausted ${STALENESS_REVALIDATION_LIMIT} staleness revalidations`,
-				);
-			}
 			revalidations.set(id, spent + 1);
 			revalidated.push(id);
 			const window = `revalidate-${id}-${spent + 1}`;

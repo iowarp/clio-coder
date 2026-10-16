@@ -521,6 +521,37 @@ describe("execution scheduler lifecycle", () => {
 		deepStrictEqual(outcome.revalidated, ["verify"]);
 	});
 
+	it("revalidates a verification before every later workspace wave, however many the plan declares", async () => {
+		const f = fixture();
+		const log: string[] = [];
+		f.adapter.run = async (step) => {
+			log.push(step.id);
+			return { assignmentId: step.id, result: Promise.resolve(result(step.id)) };
+		};
+		f.adapter.runCode = async (step) => {
+			log.push(step.id);
+			return result(step.id);
+		};
+		const chain = ["m0", "m1", "m2", "m3", "m4"];
+		const p = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "staleness",
+			maxWorkers: 1,
+			onFailure: "stop",
+			steps: [
+				{ kind: "code", id: "verify", commandId: "verify", scope: "readonly", dependencies: [], verification: true },
+				...chain.map((id, index) => ({
+					...step(id, [index === 0 ? "verify" : (chain[index - 1] as string)]),
+					scope: "workspace" as const,
+				})),
+			],
+		});
+		const outcome = await executePlan(p, f.adapter);
+		deepStrictEqual(log, ["verify", "m0", "verify", "m1", "verify", "m2", "verify", "m3", "verify", "m4"]);
+		strictEqual(outcome.revalidated.length, 4);
+		ok(chain.every((id) => outcome.results.get(id)?.succeeded === true));
+	});
+
 	it("runs a plan step's dependents only after the tasks it generated", async () => {
 		const f = fixture();
 		const log: string[] = [];
