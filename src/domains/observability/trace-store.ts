@@ -1485,6 +1485,9 @@ interface ToolStart {
 	blockReason: string | null;
 }
 
+/** Distinct row-failure warnings one trace mirror prints before it only counts them. */
+const ROW_FAILURE_WARNING_LIMIT = 8;
+
 /** Which row a scheduled write carries, for the warning when it alone fails. */
 interface TraceRow {
 	channel: string;
@@ -1519,9 +1522,17 @@ export function createDispatchTraceMirror(
 		store ??= new TraceStore(path);
 		return store;
 	};
-	// Once per channel and run, bounded, so a run whose every row fails is
-	// named without flooding stderr.
+	// Once per channel and run, and at most ROW_FAILURE_WARNING_LIMIT per
+	// process. stderr is the default sink, so a failure that repeats on every
+	// run would otherwise print into the TUI once per run; the rest are summed
+	// at flush and close.
 	const warnedRows = new Set<string>();
+	let unwarnedFailedRows = 0;
+	const reportUnwarnedFailedRows = (): void => {
+		if (unwarnedFailedRows === 0) return;
+		warn(`${unwarnedFailedRows} further trace rows were not captured; their warnings were suppressed`);
+		unwarnedFailedRows = 0;
+	};
 	const degrade = (error: unknown): void => {
 		if (!degraded) warn(error instanceof Error ? error.message : String(error));
 		degraded = true;
@@ -1553,12 +1564,12 @@ export function createDispatchTraceMirror(
 	 */
 	const rowFailed = (row: TraceRow, error: unknown): void => {
 		const key = `${row.channel}\u0000${row.runId ?? ""}`;
-		if (!warnedRows.has(key) && warnedRows.size < 256) {
+		if (!warnedRows.has(key) && warnedRows.size < ROW_FAILURE_WARNING_LIMIT) {
 			warnedRows.add(key);
 			warn(
 				`${row.channel} run ${row.runId ?? "(none)"}: ${error instanceof Error ? error.message : String(error)}; that row was not captured and capture continues`,
 			);
-		}
+		} else unwarnedFailedRows += 1;
 		try {
 			store?.recordCaptureLoss("failed_rows");
 		} catch (markerError) {
@@ -1652,12 +1663,14 @@ export function createDispatchTraceMirror(
 				warn(`dropped ${droppedProgress} display-only progress events because the trace queue was full`);
 				droppedProgress = 0;
 			}
+			reportUnwarnedFailedRows();
 		},
 		async close(): Promise<void> {
 			closed = true;
 			await chain;
 			if (droppedProgress > 0)
 				warn(`dropped ${droppedProgress} display-only progress events because the trace queue was full`);
+			reportUnwarnedFailedRows();
 			store?.close();
 			starts.clear();
 			seen.clear();
