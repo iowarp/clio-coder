@@ -69,7 +69,12 @@ function buildModelScopeItems(): SelectItem[] {
 
 export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps): OverlayHandle {
 	const items = buildModelScopeItems();
-	const list = new SelectList(items, items.length, DEFAULT_SELECT_THEME);
+	// The default 32-column label slot cut "Apply and save for this project"
+	// to "projec"; widen it so every label fits beside its description.
+	const list = new SelectList(items, items.length, DEFAULT_SELECT_THEME, {
+		minPrimaryColumnWidth: 18,
+		maxPrimaryColumnWidth: 40,
+	});
 	list.onSelect = (item: SelectItem): void => {
 		if (item.value === "session" || item.value === "project" || item.value === "global") {
 			deps.onChoose(item.value);
