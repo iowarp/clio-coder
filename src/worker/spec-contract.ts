@@ -3,7 +3,7 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protection.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../core/sandbox/types.js";
-import type { ToolName } from "../core/tool-names.js";
+import { isMcpToolName, mcpToolName, type ToolName } from "../core/tool-names.js";
 import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
@@ -785,7 +785,11 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	const digest = readString(permit.digest, "WorkerSpec.permit.digest");
 	if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error("WorkerSpec.permit.digest must be a sha256 hex digest");
 	const ceiling = readRecord(permit.ceiling, "WorkerSpec.permit.ceiling");
-	exactKeys(ceiling, ["capabilityClass", "tools", "readOnly", "writeRoots", "enforcement"], "WorkerSpec.permit.ceiling");
+	exactKeys(
+		ceiling,
+		["capabilityClass", "tools", "readOnly", "writeRoots", "enforcement", "mcp"],
+		"WorkerSpec.permit.ceiling",
+	);
 	const enforcement = readRecord(ceiling.enforcement, "WorkerSpec.permit.ceiling.enforcement");
 	exactKeys(
 		enforcement,
@@ -800,6 +804,7 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 	readEnum(enforcement.toolNarrowing, "WorkerSpec.permit.ceiling.enforcement.toolNarrowing", ["exact", "none"] as const);
 	readEnum(ceiling.capabilityClass, "WorkerSpec.permit.ceiling.capabilityClass", PERMIT_CAPABILITY_CLASSES);
 	const ceilingTools = new Set(readStringArray(ceiling.tools, "WorkerSpec.permit.ceiling.tools"));
+	assertMcpAttestationShape(ceiling.mcp, ceilingTools);
 	if (typeof ceiling.readOnly !== "boolean") throw new Error("WorkerSpec.permit.ceiling.readOnly must be a boolean");
 	const roots = readStringArray(ceiling.writeRoots, "WorkerSpec.permit.ceiling.writeRoots");
 	const allowance = readRecord(permit.allowance, "WorkerSpec.permit.allowance");
@@ -859,6 +864,47 @@ function validateWorkerPermit(spec: Record<string, unknown>): void {
 		...(permit.trustedUnmediated === true ? { trustedUnmediated: true as const } : {}),
 	});
 	if (sealed !== digest) throw new Error("WorkerSpec.permit.digest does not match the permit");
+}
+
+/**
+ * The ceiling's MCP attestation, when present, names exactly the MCP
+ * capabilities among its tools, once each. The worker launches only what it
+ * names, so a document that drops or adds one must not run.
+ */
+function assertMcpAttestationShape(value: unknown, ceilingTools: ReadonlySet<string>): void {
+	const mcpTools = [...ceilingTools].filter((tool) => isMcpToolName(tool));
+	if (value === undefined) {
+		if (mcpTools.length > 0) {
+			throw new Error(`WorkerSpec.permit.ceiling.mcp is required for MCP capabilities: ${mcpTools.join(", ")}`);
+		}
+		return;
+	}
+	const source = "WorkerSpec.permit.ceiling.mcp";
+	const mcp = readRecord(value, source);
+	exactKeys(mcp, ["projectRoot", "tools"], source);
+	const root = readString(mcp.projectRoot, `${source}.projectRoot`);
+	if (!isAbsolute(root) || root.includes("\0")) throw new Error(`${source}.projectRoot must be an absolute path`);
+	if (!Array.isArray(mcp.tools) || mcp.tools.length === 0) throw new Error(`${source}.tools must be a non-empty array`);
+	const named = new Set<string>();
+	for (const [index, raw] of mcp.tools.entries()) {
+		const entrySource = `${source}.tools[${index}]`;
+		const entry = readRecord(raw, entrySource);
+		exactKeys(entry, ["serverId", "digest", "tool", "actionClass"], entrySource);
+		const name = mcpToolName(
+			readString(entry.serverId, `${entrySource}.serverId`),
+			readString(entry.tool, `${entrySource}.tool`),
+		);
+		if (!/^[0-9a-f]{64}$/.test(readString(entry.digest, `${entrySource}.digest`))) {
+			throw new Error(`${entrySource}.digest must be a sha256 hex digest`);
+		}
+		readEnum(entry.actionClass, `${entrySource}.actionClass`, ["read", "execute", "destructive", "unknown"] as const);
+		if (name === null || !ceilingTools.has(name) || named.has(name)) {
+			throw new Error(`${entrySource} must name one distinct MCP capability of the ceiling`);
+		}
+		named.add(name);
+	}
+	const missing = mcpTools.filter((tool) => !named.has(tool));
+	if (missing.length > 0) throw new Error(`${source} does not attest ${missing.join(", ")}`);
 }
 
 const WORKER_SANDBOX_KEYS = new Set([

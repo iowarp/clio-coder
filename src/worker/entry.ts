@@ -227,6 +227,7 @@ async function main(): Promise<number> {
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
 		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
 		permitAllowance: { ...spec.permit.allowance },
+		...(spec.permit.ceiling.mcp !== undefined ? { mcp: spec.permit.ceiling.mcp } : {}),
 		taskGit: {
 			allowance: spec.permit.allowance.git,
 			// A permit that already runs arbitrary code gains nothing from a repository hook (Q5).

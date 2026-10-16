@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DelegationToolGovernance, WorkerPermissionMode } from "../../core/defaults.js";
-import { ToolNames } from "../../core/tool-names.js";
+import { isMcpToolName, mcpToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnDelegatesTool } from "../../core/turn-constraints.js";
 import { canonicalJson, workerPermitDigest } from "../../worker/protocol.js";
@@ -32,6 +32,36 @@ export interface WorkerPermissionDeclaration {
 	asks?: WorkerAskRoute;
 }
 
+/** The action classes an MCP trust record or declaration can give a tool. */
+export const WORKER_MCP_ACTION_CLASSES = ["read", "execute", "destructive", "unknown"] as const;
+export type WorkerMcpActionClass = (typeof WORKER_MCP_ACTION_CLASSES)[number];
+
+/**
+ * One MCP tool as admission resolved it, without launching anything: the
+ * declaration that owns the name, the digest that declaration had when it was
+ * trusted, and the class the shared classifier gave the tool. The worker
+ * launches only a declaration whose digest still matches.
+ */
+export interface WorkerMcpToolAttestation {
+	serverId: string;
+	digest: string;
+	/** The server's own tool name; the capability is `mcp_<serverId>__<tool>`. */
+	tool: string;
+	actionClass: WorkerMcpActionClass;
+}
+
+export interface WorkerMcpAttestation {
+	/** Canonical project root the declarations and trust records were read from. */
+	projectRoot: string;
+	/** Sorted by capability name. */
+	tools: ReadonlyArray<WorkerMcpToolAttestation>;
+}
+
+/** The capability name an attestation admits. */
+function attestedMcpToolName(entry: Pick<WorkerMcpToolAttestation, "serverId" | "tool">): string | null {
+	return mcpToolName(entry.serverId, entry.tool);
+}
+
 export interface WorkerPermitCeiling {
 	capabilityClass: AgentCapabilityClass;
 	/** Tools this run may ever call: admitted tools the delegation ceiling also covers, sorted. */
@@ -40,6 +70,8 @@ export interface WorkerPermitCeiling {
 	writeRoots: ReadonlyArray<string>;
 	/** What the selected runtime itself enforces for this run. */
 	enforcement: RuntimeEnforcement;
+	/** Present only when the ceiling's tools name MCP capabilities, one attestation per name. */
+	mcp?: WorkerMcpAttestation;
 }
 
 export interface WorkerPermitAllowance {
@@ -155,12 +187,25 @@ export const MAIN_GRANTS_UNAVAILABLE_REASON =
 	"main-agent grants reach only native local workers (fleet.permissions.mode=main); the ask is denied, not sent to the operator";
 
 /** Why a tool list exceeds a capability class's direct ceiling, per the review's class table. */
-function capabilityClassCeilingErrors(capabilityClass: AgentCapabilityClass, tools: ReadonlyArray<string>): string[] {
+function capabilityClassCeilingErrors(
+	capabilityClass: AgentCapabilityClass,
+	tools: ReadonlyArray<string>,
+	mcp: WorkerMcpAttestation | undefined,
+): string[] {
 	const errors: string[] = [];
+	const mcpEntries = new Map(
+		(mcp?.tools ?? []).flatMap((entry) => {
+			const name = attestedMcpToolName(entry);
+			return name === null ? [] : [[name, entry] as const];
+		}),
+	);
 	for (const tool of tools) {
+		const before = errors.length;
 		// The gateway is the transport for capabilities already named; it carries no authority of its own.
 		if (tool === ToolNames.Gateway) continue;
-		const action = classify({ tool }).actionClass;
+		// A name alone carries no MCP class; the attested one runs through the same table.
+		const attested = isMcpToolName(tool) ? mcpEntries.get(tool) : undefined;
+		const action = isMcpToolName(tool) ? (attested?.actionClass ?? "unknown") : classify({ tool }).actionClass;
 		if (action === "dispatch" || tool === ToolNames.AskUser) {
 			errors.push(`${tool} is orchestrator-only and no worker runtime mediates it`);
 			continue;
@@ -197,6 +242,10 @@ function capabilityClassCeilingErrors(capabilityClass: AgentCapabilityClass, too
 			case "internal":
 				break;
 		}
+		if (attested !== undefined && errors.length > before) {
+			errors[errors.length - 1] +=
+				` (MCP server '${attested.serverId}' gives it class ${action}; the server's trust record or declaration sets that class: clio-coder mcp trust ${attested.serverId} --action-class <class>, or toolActionClasses in its declaration)`;
+		}
 	}
 	return errors;
 }
@@ -228,6 +277,8 @@ export interface WorkerPermitInput {
 	hostHelper?: boolean;
 	/** The selected runtime and target, and whether the operator trusts it unmediated. */
 	runtime: { id: string; targetId: string; enforcement: RuntimeEnforcement; trustedUnmediated: boolean };
+	/** Admission's attestation for every MCP capability in `tools`. */
+	mcp?: WorkerMcpAttestation;
 }
 
 /**
@@ -249,7 +300,7 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 	}
 	const declarationErrors = workerPermissionDeclarationErrors(input.capabilityClass, input.declared);
 	if (declarationErrors.length > 0) throw new WorkerPermitAdmissionError(`${who}: ${declarationErrors.join("; ")}`);
-	const ceilingErrors = capabilityClassCeilingErrors(input.capabilityClass, input.tools);
+	const ceilingErrors = capabilityClassCeilingErrors(input.capabilityClass, input.tools, input.mcp);
 	if (ceilingErrors.length > 0) throw new WorkerPermitAdmissionError(`${who}: ${ceilingErrors.join("; ")}`);
 	// Operator decision Q6: a runtime Clio cannot mediate per call takes
 	// write-capable work only when its target is explicitly trusted.
@@ -288,12 +339,29 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 			? route.approvalAuthority
 			: "operator";
 
+	const ceilingTools = [...new Set(input.tools.filter((tool) => turnDelegatesTool(input.turnConstraints, tool)))].sort();
+	const mcpTools = (input.mcp?.tools ?? []).filter((entry) => {
+		const name = attestedMcpToolName(entry);
+		return name !== null && ceilingTools.includes(name);
+	});
+	const unattested = ceilingTools.filter(
+		(tool) => isMcpToolName(tool) && !mcpTools.some((entry) => attestedMcpToolName(entry) === tool),
+	);
+	if (unattested.length > 0) {
+		throw new WorkerPermitAdmissionError(
+			`${who}: MCP capabilities without an admission attestation: ${unattested.join(", ")}`,
+		);
+	}
 	const ceiling: WorkerPermitCeiling = {
 		capabilityClass: input.capabilityClass,
-		tools: [...new Set(input.tools.filter((tool) => turnDelegatesTool(input.turnConstraints, tool)))].sort(),
+		tools: ceilingTools,
 		readOnly: input.readOnly,
 		writeRoots: [...input.writeRoots],
 		enforcement: { ...input.runtime.enforcement },
+		// Absent when no MCP capability is admitted, so every other permit keeps its digest.
+		...(mcpTools.length > 0 && input.mcp !== undefined
+			? { mcp: { projectRoot: input.mcp.projectRoot, tools: mcpTools.map((entry) => ({ ...entry })) } }
+			: {}),
 	};
 	const executeAuthorized =
 		input.operatorAutonomy === "yolo" &&
@@ -317,6 +385,14 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 			...ceiling,
 			tools: Object.freeze([...ceiling.tools]),
 			writeRoots: Object.freeze([...ceiling.writeRoots]),
+			...(ceiling.mcp !== undefined
+				? {
+						mcp: Object.freeze({
+							projectRoot: ceiling.mcp.projectRoot,
+							tools: Object.freeze(ceiling.mcp.tools.map((entry) => Object.freeze({ ...entry }))),
+						}),
+					}
+				: {}),
 		}),
 		allowance: Object.freeze(allowance),
 		digest: workerPermitDigest({

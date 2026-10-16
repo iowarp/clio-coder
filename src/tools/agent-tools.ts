@@ -21,7 +21,7 @@ import { performance } from "node:perf_hooks";
 import type { TSchema } from "typebox";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
-import { ToolNames } from "../core/tool-names.js";
+import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
@@ -545,7 +545,12 @@ export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetr
 		...(input.task !== undefined ? { task: input.task } : {}),
 	};
 	const gatewayNames = input.registry.listGateway().map((spec) => spec.name);
-	const registered = [...input.registry.listRegistered(), ...gatewayNames];
+	// An MCP capability registers only once its server connects, which a worker
+	// does on its first call. Its admitted name still belongs to the surface the
+	// signature attests, and resolving tools must never launch a server for it.
+	const admittedMcp =
+		input.registry.get(ToolNames.Gateway) === undefined ? [] : (input.allowedTools?.filter(isMcpToolName) ?? []);
+	const registered = [...input.registry.listRegistered(), ...gatewayNames, ...admittedMcp];
 	const toolIds = applyToolProfile(registered, input.toolProfile, profileContext);
 	const allowed = input.allowedTools ? new Set<string>(input.allowedTools) : null;
 	const includeInteractiveTools = input.includeInteractiveTools !== false;

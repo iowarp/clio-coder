@@ -25,6 +25,7 @@ import {
 } from "../../domains/gateway/mcp/index.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import { mcpTransportIdentity } from "../../domains/safety/information-flow.js";
+import type { WorkerMcpAttestation } from "../../domains/safety/worker-permit.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
 
@@ -151,6 +152,14 @@ export interface McpCapabilitySourceOptions {
 	requestTimeoutMs?: number;
 	/** Test seam: the client constructor. */
 	clientFactory?: (spec: McpServerSpec, options: McpClientOptions) => McpClient;
+	/** False for a worker: it may read recorded catalogs but never writes operator-owned state. */
+	persistCatalog?: boolean;
+	/**
+	 * A worker's admitted MCP surface. Only the attested declarations are
+	 * launchable, each only while its digest still matches, and each tool runs
+	 * under the class admission sealed into the permit.
+	 */
+	admitted?: WorkerMcpAttestation;
 }
 
 export interface McpCapabilitySource {
@@ -311,6 +320,38 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 
 	const closeClient = (state: ServerState): Promise<McpTeardownOutcome> | undefined => state.connection?.close();
 
+	/**
+	 * A worker keeps every declaration so the owner rule routes exactly as
+	 * admission did, but only an attested one at its attested digest can
+	 * launch. The others read as untrusted for this run and are never started.
+	 */
+	const admittedDeclaration = (declaration: ResolvedMcpServer): ResolvedMcpServer => {
+		const admitted = options.admitted;
+		if (admitted === undefined || declaration.trust.status !== "trusted") return declaration;
+		const attested = admitted.tools.find((entry) => entry.serverId === declaration.id);
+		if (attested === undefined) {
+			return {
+				...declaration,
+				trust: {
+					status: "untrusted",
+					actionClass: "unknown",
+					reason: `MCP server '${declaration.id}' was not admitted for this run`,
+				},
+			};
+		}
+		if (attested.digest !== declaration.digest) {
+			return {
+				...declaration,
+				trust: {
+					status: "stale",
+					actionClass: "unknown",
+					reason: `declaration of '${declaration.id}' changed since this run was admitted; review it, run clio-coder mcp trust ${declaration.id}, and dispatch again`,
+				},
+			};
+		}
+		return declaration;
+	};
+
 	const resolveStates = (): Map<string, ServerState> => {
 		if (states !== null) return states;
 		const resolved = resolveMcpServers({
@@ -325,7 +366,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			resolved.servers.map((declaration) => [
 				declaration.id,
 				{
-					declaration,
+					declaration: admittedDeclaration(declaration),
 					client: null,
 					connection: null,
 					tools: [],
@@ -376,7 +417,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	 * written must never fail the connection that produced it.
 	 */
 	const publishCatalog = (state: ServerState, listing: McpToolListing): void => {
-		if (state.declaration.scope === "client") return;
+		if (state.declaration.scope === "client" || options.persistCatalog === false) return;
 		writeMcpServerCatalog(catalogIdentity(state.declaration), listing);
 		// Drop the memo of whatever the file said before this listing replaced it.
 		state.catalog = undefined;
@@ -384,7 +425,18 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 
 	const makeSpec = (state: ServerState, tool: McpToolDescriptor, name: DynamicToolName): ToolSpec => {
 		const { declaration } = state;
-		const trustClass = actionClassFor(declaration, tool);
+		const liveClass = actionClassFor(declaration, tool);
+		// A worker runs each tool under the class its permit sealed. A server
+		// whose live metadata now classes the tool differently is refused below
+		// rather than judged again here, where no ceiling can see it.
+		const attested = options.admitted?.tools.find(
+			(entry) => entry.serverId === declaration.id && entry.tool === tool.name,
+		);
+		const trustClass = attested?.actionClass ?? liveClass;
+		const classDrift =
+			attested !== undefined && attested.actionClass !== liveClass
+				? `${name}: mcp server ${declaration.id} now gives this tool class ${liveClass}, but this run was admitted with ${attested.actionClass}; dispatch again so admission judges the new class`
+				: null;
 		const confirmationRuleId = mcpToolConfirmationRule(declaration, tool.name);
 		const timeoutMs = declaration.timeoutMs ?? options.requestTimeoutMs;
 		const spec: ToolSpec = {
@@ -414,6 +466,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				costLatency: "local_slow",
 			},
 			async run(args, invokeOptions): Promise<ToolResult> {
+				if (classDrift !== null) return { kind: "error", message: classDrift };
 				await discover(state, invokeOptions?.signal);
 				const client = state.client;
 				if (client === null || client.state().status !== "ready") {

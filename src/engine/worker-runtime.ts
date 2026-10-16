@@ -89,8 +89,13 @@ import {
 } from "../domains/safety/information-flow.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
-import type { WorkerGitAllowance, WorkerPermitAllowance } from "../domains/safety/worker-permit.js";
+import type {
+	WorkerGitAllowance,
+	WorkerMcpAttestation,
+	WorkerPermitAllowance,
+} from "../domains/safety/worker-permit.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
+import { createMcpCapabilitySource, type McpCapabilitySource } from "../tools/gateway/index.js";
 import { createWorkerGitContext } from "../tools/git-exec.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import type { GrantExecutionEvent, RegistryDeps } from "../tools/registry.js";
@@ -227,6 +232,8 @@ export interface WorkerRunInput {
 	onPermission?: "deny" | "fail" | "escalate";
 	/** The permit allowance behind onPermission, so a denial can say why it was not routed. */
 	permitAllowance?: WorkerPermitAllowance;
+	/** The permit's MCP attestation; the worker launches only what it names. */
+	mcp?: WorkerMcpAttestation;
 	/**
 	 * The permit's Git allowance, whether its tools already execute code, and
 	 * the task worktree the host created for this run, if any (Phase C).
@@ -704,7 +711,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// any output of this run reaches its context.
 	let runFlow: FlowRestrictionSet | null = input.flowRestrictions ?? null;
 	let flowBlockReported = false;
+	let workerMcp: McpCapabilitySource | undefined;
 	const workerFlow: NonNullable<RegistryDeps["flow"]> = {
+		mcpTransport: (tool) => workerMcp?.transportOf(tool) ?? null,
 		carried: () => runFlow,
 		refusal: () => null,
 		absorb: (set) => {
@@ -761,6 +770,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			: undefined,
 		input.permitAllowance?.executeAutonomy,
 		workerFlow,
+		input.mcp !== undefined
+			? (registry) => {
+					const admitted = input.mcp as WorkerMcpAttestation;
+					// Declarations and trust are read from the project root admission
+					// used, never from a task worktree that holds neither, and nothing
+					// this run observes is written back to the operator's catalog.
+					workerMcp = createMcpCapabilitySource({ cwd: admitted.projectRoot, registry, persistCatalog: false, admitted });
+					return workerMcp;
+				}
+			: undefined,
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
@@ -1998,6 +2017,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			clearTimeout(synthesisTimer);
 			clearActiveEscalation();
 			unsubscribePermission();
+			// Every server this run launched closes with it; teardown reports go to
+			// stderr inside the source, never to the NDJSON lane.
+			await workerMcp?.close();
 		}
 	})();
 

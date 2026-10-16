@@ -34,6 +34,7 @@ import {
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
+import type { McpCapabilitySource } from "../tools/gateway/index.js";
 import { registerHarnessExtensionTools } from "../tools/harness-extensions.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../tools/registry.js";
@@ -174,6 +175,8 @@ export function createWorkerToolRegistry(
 	executeAutonomy?: "yolo",
 	/** The run's information-flow ledger; absent means an unrestricted run. */
 	flow?: RegistryDeps["flow"],
+	/** The worker-local MCP source, present only when the permit attests MCP capabilities. */
+	mcpSource?: (registry: ToolRegistry) => McpCapabilitySource,
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -201,6 +204,7 @@ export function createWorkerToolRegistry(
 	// without one answers that it has no coordination ledger. The explicit flag
 	// is what keeps that true now that the session registry omits the tool.
 	const registration = registerCoreTools(registry, {
+		...(mcpSource !== undefined ? { mcpCapabilities: mcpSource(registry) } : {}),
 		includeLedgerTools: true,
 		...(workerRecall ? { workerRecall } : {}),
 		...(agentLedger ? { agentLedger } : {}),

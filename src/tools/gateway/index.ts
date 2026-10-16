@@ -387,16 +387,21 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// form is rejected above on a restricted surface, so the two filters
 			// here never have to compose.
 			const scoped = server.length > 0;
-			if (deps.mcp && allowed === null) {
+			if (deps.mcp) {
 				if (refresh) {
 					const result = await deps.mcp.refresh(server, options?.signal ? { signal: options.signal } : {});
 					if (result.reason !== undefined) refreshNote = result.reason;
 				}
 				const catalog = deps.mcp.catalog();
-				servers = scoped ? catalog.servers.filter((entry) => entry.id === server) : catalog.servers;
-				diagnostics = catalog.diagnostics;
-				missing = scoped ? catalog.missing.filter((id) => id === server) : catalog.missing;
+				// A restricted surface reads metadata for its exact admitted
+				// capabilities only, and never lists the servers it may not reach.
+				if (allowed === null) {
+					servers = scoped ? catalog.servers.filter((entry) => entry.id === server) : catalog.servers;
+					diagnostics = catalog.diagnostics;
+					missing = scoped ? catalog.missing.filter((id) => id === server) : catalog.missing;
+				}
 				mcpEntries = catalog.entries
+					.filter((entry) => allowed === null || allowed.has(entry.name))
 					.filter((entry) => !scoped || deps.mcp?.ownerIdOf(entry.name) === server)
 					.map((entry) => ({
 						name: entry.name,

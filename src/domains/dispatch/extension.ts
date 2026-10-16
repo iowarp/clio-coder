@@ -57,7 +57,13 @@ import { resolveWorkerSandboxSpec, workerSandboxLine, workerSandboxReceipt } fro
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { isTestFilePath } from "../../core/test-paths.js";
 import { rawDurationMs } from "../../core/timers.js";
-import { isBuiltinToolName, isHarnessExtensionToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
+import {
+	isBuiltinToolName,
+	isHarnessExtensionToolName,
+	isMcpToolName,
+	type ToolName,
+	ToolNames,
+} from "../../core/tool-names.js";
 import {
 	snapshotTurnConstraints,
 	turnAllowsTool,
@@ -180,7 +186,7 @@ import {
 	recordToolExecutionEffects,
 } from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
-import type { RecordOnlyWorkerPermit } from "../safety/worker-permit.js";
+import type { RecordOnlyWorkerPermit, WorkerMcpAttestation } from "../safety/worker-permit.js";
 import {
 	mainGrantsUnavailable,
 	recordOnlyAcpPermit,
@@ -424,6 +430,7 @@ import {
 	validateJobSpec,
 } from "./validation.js";
 import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
+import { resolveWorkerMcpAdmission, workerMcpRuntimeRefusal, workerMcpScopeRefusal } from "./worker-mcp.js";
 import { adoptWorkerModelLoad } from "./worker-model-loads.js";
 import { prepareWorkerModelMetadata } from "./worker-model-metadata.js";
 import {
@@ -1158,10 +1165,18 @@ function acpToolActionClass(tool: string): ActionClass {
 	return "unknown";
 }
 
-function deriveRequestedActions(tools: ReadonlyArray<ToolName>, safety: SafetyContract): ReadonlyArray<ActionClass> {
+function deriveRequestedActions(
+	tools: ReadonlyArray<ToolName>,
+	safety: SafetyContract,
+	mcp: WorkerMcpAttestation | null = null,
+): ReadonlyArray<ActionClass> {
 	const actions = new Set<ActionClass>();
 	for (const tool of tools) {
-		actions.add(safety.classify({ tool }).actionClass);
+		// An MCP name carries no class of its own; admission attested it once.
+		const attested = isMcpToolName(tool)
+			? mcp?.tools.find((entry) => `mcp_${entry.serverId}__${entry.tool}` === tool)
+			: undefined;
+		actions.add(isMcpToolName(tool) ? (attested?.actionClass ?? "unknown") : safety.classify({ tool }).actionClass);
 	}
 	return [...actions].sort();
 }
@@ -1838,6 +1853,8 @@ interface DispatchAdmissionStage {
 	allowedTools: ReadonlyArray<ToolName>;
 	requestedActions: ReadonlyArray<ActionClass>;
 	toolProfile?: ToolProfileName;
+	/** Every MCP capability the recipe names, resolved once from the dispatch's project root. */
+	mcp?: WorkerMcpAttestation;
 }
 
 interface DispatchWorkerSpecInput {
@@ -2034,8 +2051,9 @@ function resolveDispatchPermit(
 	pathScope: DispatchPathScope,
 	settings: EffectiveSettings,
 	target: ResolvedTarget,
+	mcp?: WorkerMcpAttestation,
 ): WorkerPermit {
-	const permit = resolveDispatchPermitOnce(req, recipe, spec, tools, readOnly, pathScope, settings, target);
+	const permit = resolveDispatchPermitOnce(req, recipe, spec, tools, readOnly, pathScope, settings, target, mcp);
 	// A run started outside the dispatch tool (a slash command, a watchdog, a
 	// host helper) has no main agent waiting on it. Its main-routed asks narrow
 	// to deny, and the permit on the receipt says so.
@@ -2049,6 +2067,7 @@ function resolveDispatchPermit(
 			pathScope,
 			settings,
 			target,
+			mcp,
 		);
 	}
 	return permit;
@@ -2063,6 +2082,7 @@ function resolveDispatchPermitOnce(
 	pathScope: DispatchPathScope,
 	settings: EffectiveSettings,
 	target: ResolvedTarget,
+	mcp?: WorkerMcpAttestation,
 ): WorkerPermit {
 	const contract = dispatchResultContract(req, recipe);
 	const hostHelper =
@@ -2092,6 +2112,7 @@ function resolveDispatchPermitOnce(
 			// from anything the request or the model carries.
 			trustedUnmediated: settings?.targets.find((entry) => entry.id === target.target.id)?.trustedUnmediated === true,
 		},
+		...(mcp !== undefined ? { mcp } : {}),
 	});
 }
 
@@ -2314,9 +2335,12 @@ function effectiveToolNames(
 		target.runtime.kind === "http" && !writeConfined && allowedTools.some(isHarnessExtensionToolName)
 			? enabledHarnessExtensionToolNames(cwd)
 			: new Set<string>();
+	const mediated = target.runtime.kind === "http" && target.runtime.id !== "claude-sdk";
 	const names = allowedTools.filter(
 		(tool): tool is ToolName =>
-			(isBuiltinToolName(tool) || harnessTools.has(tool)) &&
+			// Admission attested every MCP name and refused a runtime that cannot
+			// mediate it, so only a mediated worker still carries one here.
+			(isBuiltinToolName(tool) || harnessTools.has(tool) || (mediated && isMcpToolName(tool))) &&
 			tool !== ToolNames.AskUser &&
 			// consult is registered on the session alone, so a worker registry
 			// never holds it and a recipe naming it would drift the attestation.
@@ -2331,7 +2355,6 @@ function effectiveToolNames(
 	// list gains `gateway` whenever it names one. The worker's own narrowing
 	// (tools/agent-tools.ts effectiveToolNames) applies the same rule, which is
 	// what keeps the approved tool signature equal to the attested one.
-	const mediated = target.runtime.kind === "http" && target.runtime.id !== "claude-sdk";
 	const surface = mediated ? withGatewayForCapabilities(names) : [...new Set(names)];
 	return surface.sort();
 }
@@ -2594,12 +2617,26 @@ function resolveDispatchAdmissionStage(
 			`dispatch: admission denied: agent '${req.agentId}' cannot expose undeclared tools: ${unavailableTools.join(", ")}`,
 		);
 	}
-	const requestedActions = deriveRequestedActions(allowedTools, safety);
+	// A task worktree's checkout holds the declarations and trust records the
+	// operator reviewed; reading them from the worktree would see none of them.
+	const mcp = resolveWorkerMcpAdmission({
+		agentId: req.agentId,
+		projectCwd: req.taskWorktree?.root ?? req.cwd ?? process.cwd(),
+		tools: allowedTools,
+	});
+	const requestedActions = deriveRequestedActions(allowedTools, safety, mcp);
 	const orchScope = pickOrchestratorScope(safety);
 	const workerScope = pickWorkerScope(safety, requestedActions, {
 		...pathScope,
 		writeBoundaries: admissionWriteBoundaries(req, pathScope.writeBoundaries),
 	});
+	const mcpRefusal = workerMcpScopeRefusal(
+		req.agentId,
+		mcp,
+		workerScope.allowedActions,
+		workerScope === safety.scopes.readonly ? "read-only" : "workspace",
+	);
+	if (mcpRefusal !== null) throw new Error(mcpRefusal);
 	const verdict = admit(
 		{
 			requestedScope: workerScope,
@@ -2616,6 +2653,7 @@ function resolveDispatchAdmissionStage(
 		allowedTools,
 		requestedActions,
 		...(req.toolProfile !== undefined ? { toolProfile: req.toolProfile } : {}),
+		...(mcp !== null ? { mcp } : {}),
 	};
 }
 
@@ -5044,6 +5082,8 @@ export function createDispatchBundle(
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
 			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
 		}
+		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
+		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
@@ -5059,7 +5099,17 @@ export function createDispatchBundle(
 		}
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, writeConfined, req.readOnly === true);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
-		const permit = resolveDispatchPermit(req, recipe, spec, effectiveTools, readOnly, pathScope, settings, target);
+		const permit = resolveDispatchPermit(
+			req,
+			recipe,
+			spec,
+			effectiveTools,
+			readOnly,
+			pathScope,
+			settings,
+			target,
+			admission.mcp,
+		);
 		assertMainGrantRoutable(req, target.runtime, permit);
 		const workerPermissionMode = workerPermissionModeForPermit(permit.allowance);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionMode);
@@ -8719,6 +8769,8 @@ export function createDispatchBundle(
 		);
 		assertWorkerContextRequest(req, target.runtime.kind === "http");
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
+		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
+		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
@@ -8744,6 +8796,7 @@ export function createDispatchBundle(
 			pathScope,
 			settings,
 			target,
+			admission.mcp,
 		);
 		assertMainGrantRoutable(req, target.runtime, previewPermit);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionModeForPermit(previewPermit.allowance));

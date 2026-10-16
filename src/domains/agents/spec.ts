@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
+import {
+	type BuiltinToolName,
+	isBuiltinToolName,
+	isMcpToolName,
+	type ToolName,
+	ToolNames,
+} from "../../core/tool-names.js";
 import { type ActionClass, classify } from "../safety/action-classifier.js";
 import { type WorkerPermissionDeclaration, workerPermissionDeclarationErrors } from "../safety/worker-permit.js";
 import type { AgentBudget, AgentRecipe, AgentToolRequirement } from "./recipe.js";
@@ -158,7 +164,9 @@ export function isAgentProduct(value: unknown): value is AgentProduct {
 
 function actionClassesForTools(tools: ReadonlyArray<ToolName>): ReadonlySet<ActionClass> {
 	const actions = new Set<ActionClass>();
-	for (const tool of tools) actions.add(classify({ tool }).actionClass);
+	// An MCP name carries no class until dispatch admission resolves its
+	// server's trust; the permit ceiling then applies the class table to it.
+	for (const tool of tools) if (!isMcpToolName(tool)) actions.add(classify({ tool }).actionClass);
 	return actions;
 }
 
