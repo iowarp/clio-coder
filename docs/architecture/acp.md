@@ -356,7 +356,7 @@ The remaining `_clio-coder/*` methods project terminal views as bounded read mod
 | `_clio-coder/fleet/preview` | `{sessionId, name, vars?}` | `{status: "ready", name, planHash, stepCount, waves, budget, truncated}` or `{status: "refused", diagnostics}`. At most 64 steps. `vars` holds at most 32 strings. |
 | `_clio-coder/fleet/run` | `{sessionId, name, vars?, planHash}` | `{status: "started", fleetRootId, stepCount}`, `{status: "changed", planHash, reason}` when the fresh plan hash differs from `planHash` (nothing dispatched), or `{status: "failed", reason}`. Idle only. |
 
-Asides are refused while a turn runs and are never a turn, a session entry, or a `session/update`. One aside runs at a time.
+Asides run beside a turn in flight over a snapshot of its history and are never a turn, a session entry, or a `session/update`. One aside runs at a time.
 
 ### Steering
 

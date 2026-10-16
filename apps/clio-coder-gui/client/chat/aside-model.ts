@@ -8,14 +8,10 @@ import type { StatusTone } from "../design/status.js";
 type AsideCapability = NonNullable<AgentCapabilities["aside"]>;
 
 /** Why the aside cannot run right now, or null when it can. */
-export function asideBlock(
-	capability: AsideCapability | undefined,
-	sessionOpen: boolean,
-	running: boolean,
-): string | null {
+// A running turn does not block it: the agent answers over a snapshot of the history (#415).
+export function asideBlock(capability: AsideCapability | undefined, sessionOpen: boolean): string | null {
 	if (!capability) return "This Clio Coder build cannot answer beside the conversation.";
 	if (!sessionOpen) return "This task is not open. Open it to ask beside it.";
-	if (running) return "Ask once the turn settles. A side question reads the conversation as it stands, not mid-turn.";
 	return null;
 }
 

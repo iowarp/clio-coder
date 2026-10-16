@@ -204,21 +204,21 @@ test("a refusal from the chat loop is reported, not thrown", async () => {
 	const agent = await peer({
 		ask: async () => ({
 			status: "refused",
-			reason: "a turn is in flight; /btw runs beside the session, not in its queue",
+			reason: "session changed before the request",
 		}),
 		draft: async () => ({
 			status: "refused",
-			reason: "a turn is in flight; /draft runs beside the session, not in its queue",
+			reason: "session changed before the request",
 		}),
 	});
 	try {
 		assert.deepEqual(await agent.call("_clio-coder/aside/ask", { sessionId: agent.sessionId, question: "q" }), {
 			status: "refused",
-			reason: "a turn is in flight; /btw runs beside the session, not in its queue",
+			reason: "session changed before the request",
 		});
 		assert.deepEqual(
 			await agent.call("_clio-coder/aside/draft", { sessionId: agent.sessionId, request: "r", count: 2 }),
-			{ status: "refused", reason: "a turn is in flight; /draft runs beside the session, not in its queue" },
+			{ status: "refused", reason: "session changed before the request" },
 		);
 	} finally {
 		await agent.stop();

@@ -5243,8 +5243,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	});
 
 	// /btw and /draft: one round beside the session at a time, cancellable, and
-	// never a turn. The chat loop refuses while a turn is in flight and says so;
-	// that refusal is a reported outcome, not a protocol error.
+	// never a turn. The chat loop answers beside a turn in flight over a snapshot
+	// of its history (#415); a refusal it reports is an outcome, not a protocol
+	// error.
 	let asideRound: AbortController | null = null;
 	const runAside = async <T>(round: (signal: AbortSignal) => Promise<T>): Promise<T> => {
 		if (asideRound !== null)

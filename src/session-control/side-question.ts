@@ -23,6 +23,7 @@ import {
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { streamSimple } from "../engine/ai.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
+import { stripDeadToolCallMarkup } from "../engine/loop-guard.js";
 import type { AgentMessage, EngineModel, Usage } from "../engine/types.js";
 
 /**
@@ -79,6 +80,12 @@ export interface SideQuestionInput {
 	 * Asked before `beforeRequest`, and again for a schema-free retry.
 	 */
 	admitFlow?: () => string | null;
+	/**
+	 * A turn was in flight when the round was prepared, so a trailing tool call
+	 * may still be running. Only then does the round close it with a synthetic
+	 * result (#415).
+	 */
+	midTurn?: boolean;
 }
 
 /**
@@ -169,7 +176,52 @@ function textFromMessage(message: unknown): string {
  */
 export async function runSideQuestion(input: SideQuestionInput): Promise<SideQuestionResult> {
 	const { question, ...rest } = input;
-	return runOutOfTurnRound({ ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText: question });
+	const result = await runOutOfTurnRound({ ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText: question });
+	// History that used tools, sent with none declared, can make a model imitate
+	// a call as text; the operator gets the reason, not the markup (#415). An
+	// aborted partial was never a finished call, so it keeps only its prose.
+	if (result.aborted) return { ...result, text: stripDeadToolCallMarkup(result.text) };
+	if (result.text.length > 0 && stripDeadToolCallMarkup(result.text).length === 0)
+		return { ...result, text: SIDE_QUESTION_TOOL_CALL_NOTE };
+	return result;
+}
+
+export const SIDE_QUESTION_TOOL_CALL_NOTE = "The model answered with a tool call, which a side question cannot run.";
+
+const PENDING_TOOL_RESULT_TEXT = "No result yet: this tool call was still running when the operator asked this.";
+
+/**
+ * A round taken while a turn is in flight can snapshot history that ends in an
+ * assistant message whose calls have not returned. Pi would fill those with
+ * "No result provided"; the side model is told the truth instead (#415).
+ *
+ * Idle history is left alone: nothing there is still running. An errored or
+ * aborted assistant is never closed either, because Pi's transform drops that
+ * message but keeps the results after it, and an orphan result is a 400.
+ */
+export function closePendingToolCalls(messages: ReadonlyArray<AgentMessage>, midTurn: boolean): AgentMessage[] {
+	const out = [...messages];
+	if (!midTurn) return out;
+	const answered = new Set<unknown>();
+	let index = out.length - 1;
+	for (; index >= 0 && out[index]?.role === "toolResult"; index--)
+		answered.add((out[index] as { toolCallId?: unknown }).toolCallId);
+	const assistant = out[index] as { role?: unknown; content?: unknown; stopReason?: unknown } | undefined;
+	if (assistant?.role !== "assistant" || !Array.isArray(assistant.content)) return out;
+	if (assistant.stopReason === "error" || assistant.stopReason === "aborted") return out;
+	const timestamp = Date.now();
+	for (const block of assistant.content as Array<{ type?: unknown; id?: unknown; name?: unknown }>) {
+		if (block?.type !== "toolCall" || answered.has(block.id)) continue;
+		out.push({
+			role: "toolResult",
+			toolCallId: block.id,
+			toolName: block.name,
+			content: [{ type: "text", text: PENDING_TOOL_RESULT_TEXT }],
+			isError: false,
+			timestamp,
+		} as unknown as AgentMessage);
+	}
+	return out;
 }
 
 interface SchemaBinding {
@@ -224,7 +276,10 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 		messages: [
 			// Pi 0.86 stores prompt/tool declarations in history. This tool-free
 			// round has its own prompt and must not inherit those declarations.
-			...input.messages.filter((message) => message.role !== "system"),
+			...closePendingToolCalls(
+				input.messages.filter((message) => message.role !== "system"),
+				input.midTurn === true,
+			),
 			{ role: "user", content: [{ type: "text", text: input.userText }], timestamp: Date.now() },
 		],
 	};
@@ -243,7 +298,10 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 				// A diffusion frame carries the whole answer so far; the shared partial
 				// can already hold the next frame appended to it.
 				text = readDiffusionFrame(event)?.text ?? textFromMessage(event.partial);
-				input.onDelta?.(text);
+				// Imitated call markup never flashes in the overlay before the
+				// final answer replaces or rejects it (#415).
+				const shown = stripDeadToolCallMarkup(text);
+				if (shown.length > 0) input.onDelta?.(shown);
 				continue;
 			}
 			if (event.type === "done") {

@@ -10,11 +10,10 @@ const capability = {
 	draftCounts: { min: 1, max: 4, default: 3 },
 };
 
-test("an aside is offered only by an open, idle conversation whose agent announced it", () => {
-	assert.match(asideBlock(undefined, true, false) ?? "", /cannot answer beside/);
-	assert.match(asideBlock(capability, false, false) ?? "", /not open/);
-	assert.match(asideBlock(capability, true, true) ?? "", /turn settles/);
-	assert.equal(asideBlock(capability, true, false), null);
+test("an aside is offered by an open conversation whose agent announced it, running or not", () => {
+	assert.match(asideBlock(undefined, true) ?? "", /cannot answer beside/);
+	assert.match(asideBlock(capability, false) ?? "", /not open/);
+	assert.equal(asideBlock(capability, true), null);
 });
 
 test("draft counts start at two, because one draft has nothing to be judged against", () => {

@@ -149,7 +149,7 @@ export function SlashActionDialog({
 				) : action === "handoff" ? (
 					<HandoffPanel {...facts} />
 				) : action === "btw" || action === "draft" ? (
-					<AsidePanel {...facts} only={action === "btw" ? "question" : "draft"} />
+					<AsidePanel client={client} sessionId={sessionId} sessionOpen={sessionOpen} capabilities={capabilities} only={action === "btw" ? "question" : "draft"} />
 				) : action === "extensions" ? (
 					<ExtensionsPanel {...facts} />
 				) : (

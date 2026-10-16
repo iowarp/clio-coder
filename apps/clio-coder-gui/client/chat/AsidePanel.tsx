@@ -20,20 +20,18 @@ export const AsidePanel = memo(function AsidePanel({
 	sessionId,
 	sessionOpen,
 	capabilities,
-	running,
 	only,
 }: {
 	client: Client;
 	sessionId: string;
 	sessionOpen: boolean;
 	capabilities: AgentCapabilities | undefined;
-	running: boolean;
 	/** Render without the disclosure frame, for a host that supplies its own heading. */
 	/** One form alone, for a host opened as the terminal's /btw (question) or /draft. */
 	only?: "question" | "draft";
 }) {
 	const capability = capabilities?.aside;
-	const block = asideBlock(capability, sessionOpen, running);
+	const block = asideBlock(capability, sessionOpen);
 	const questionId = useId();
 	const requestId = useId();
 	const countId = useId();

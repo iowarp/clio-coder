@@ -1779,25 +1779,39 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	/**
 	 * Everything an out-of-turn round needs, or the reason it cannot run.
 	 *
-	 * `/btw` and `/handoff` are the two callers. Both read the compiled history
-	 * the next turn would see, both authenticate exactly the way a turn against
-	 * the same target does, and both are refused rather than queued while a turn
-	 * is in flight, so the admission decision is made once here.
+	 * `/btw`, `/draft`, `/handoff` and the pre-warm are the callers. All read the
+	 * compiled history the next turn would see and authenticate exactly the way
+	 * a turn against the same target does. Whether one runs while a turn is in
+	 * flight is the caller's choice: `/handoff` and the pre-warm pass a refusal,
+	 * while `/btw` and `/draft` pass null and answer beside the running turn
+	 * (#415). Mid-turn the live runtime is taken as it stands, because
+	 * `ensureRuntime` may hot-swap the model, rebuild and abort the agent the
+	 * turn is streaming on, or append a session entry. A submit counts as in
+	 * flight from entry, as it does for the pre-warm, because it is preparing
+	 * that runtime before `state.streaming` flips.
 	 */
 	type OutOfTurnPreparation =
-		| { ok: true; runtime: AgentRuntime; apiKey: string | undefined; origin: ReturnType<SessionContract["current"]> }
+		| {
+				ok: true;
+				runtime: AgentRuntime;
+				apiKey: string | undefined;
+				origin: ReturnType<SessionContract["current"]>;
+				inFlight: boolean;
+		  }
 		| { ok: false; reason: string };
 
 	const prepareOutOfTurnRound = async (
-		inFlightRefusal: string,
+		inFlightRefusal: string | null,
 		signal?: AbortSignal,
 		silent = false,
 	): Promise<OutOfTurnPreparation> => {
-		if (state.streaming) return { ok: false, reason: inFlightRefusal };
+		const inFlight = state.streaming || turnActive;
+		if (inFlight && inFlightRefusal !== null) return { ok: false, reason: inFlightRefusal };
+		if (inFlight && !state.runtime) return { ok: false, reason: "the turn is still starting its runtime; ask again" };
 		const origin = deps.session?.current() ?? null;
 		let agentRuntime: AgentRuntime | null;
 		try {
-			agentRuntime = turnRuntime.ensureRuntime({ silent });
+			agentRuntime = inFlight ? state.runtime : turnRuntime.ensureRuntime({ silent });
 		} catch (err) {
 			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 		}
@@ -1818,7 +1832,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				: LOCAL_SIDE_QUESTION_API_KEY;
 			if ((deps.session?.current()?.id ?? null) !== (origin?.id ?? null))
 				return { ok: false, reason: "session changed before the request" };
-			return { ok: true, runtime: agentRuntime, apiKey, origin };
+			return { ok: true, runtime: agentRuntime, apiKey, origin, inFlight };
 		} catch (err) {
 			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 		}
@@ -3500,14 +3514,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (text.length === 0) {
 				return { status: "refused", reason: "a side question needs a question" };
 			}
-			// Never queued. A side question exists to be answered now, beside a run
-			// the operator is watching; holding it until the run settles would
-			// deliver it after the moment it was asked in had passed.
-			const prepared = await prepareOutOfTurnRound(
-				"a turn is in flight; /btw runs beside the session, not in its queue",
-				options.signal,
-			);
+			// Never queued and, since #415, never refused for a running turn. A side
+			// question exists to be answered now, beside a run the operator is
+			// watching; holding it until the run settles would deliver it after the
+			// moment it was asked in had passed.
+			const prepared = await prepareOutOfTurnRound(null, options.signal);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			// A snapshot, taken now: a running turn keeps appending to the live list
+			// while this round awaits admission and streams.
+			const messages = [...prepared.runtime.agent.state.messages];
 			let result: SideQuestionResult;
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
@@ -3515,10 +3530,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
-						// Read-only: runSideQuestion copies before appending its own
-						// message, so the live agent's history is untouched.
-						messages: prepared.runtime.agent.state.messages,
+						// Read-only: the round appends its own message to this copy, so
+						// the live agent's history is untouched.
+						messages,
 						question: text,
+						midTurn: prepared.inFlight,
 						// The level the session's own next turn would use.
 						thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
@@ -3538,13 +3554,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!Number.isInteger(count) || count < 1 || count > DRAFT_TEMPERATURES.length) {
 				return { status: "refused", reason: `draft count must be 1 to ${DRAFT_TEMPERATURES.length}` };
 			}
-			// Refused, never queued, for the side question's reason: the drafts
-			// answer the session as it stands now.
-			const prepared = await prepareOutOfTurnRound(
-				"a turn is in flight; /draft runs beside the session, not in its queue",
-				options.signal,
-			);
+			// Never queued, for the side question's reason, and run beside a turn in
+			// flight the same way (#415): the drafts answer the session as it stands now.
+			const prepared = await prepareOutOfTurnRound(null, options.signal);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			const messages = [...prepared.runtime.agent.state.messages];
 			const candidates = await Promise.all(
 				DRAFT_TEMPERATURES.slice(0, count).map(async (temperature, index): Promise<DraftCandidate> => {
 					const samplingTemperature = draftTemperature(prepared.runtime.agent.state.model, temperature);
@@ -3560,10 +3574,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 										onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,
-										// Read-only, exactly as the side-question round treats it.
-										messages: prepared.runtime.agent.state.messages,
+										// One snapshot for every candidate, read-only as the side question's is.
+										messages,
 										systemPrompt: sampling.systemPrompt,
 										userText: text,
+										midTurn: prepared.inFlight,
 										maxTokens: DRAFT_MAX_TOKENS,
 										thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 										...(sampling.temperature === undefined ? {} : { temperature: sampling.temperature }),

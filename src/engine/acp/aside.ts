@@ -7,9 +7,10 @@ export { ACP_ASIDE_ASK_METHOD, ACP_ASIDE_CANCEL_METHOD, ACP_ASIDE_DRAFT_METHOD, 
  *
  * Both are rounds beside the session. They read the history the next turn
  * would send, answer the operator, and never become a turn, a session entry or
- * a `session/update`. The host's chat loop runs them and refuses while a turn
- * is in flight; this module only bounds what comes back and labels drafts the
- * way the overlay does, so a client shows the same candidates and verdict.
+ * a `session/update`. The host's chat loop runs them, beside a turn in flight
+ * over a snapshot of its history (#415); this module only bounds what comes
+ * back and labels drafts the way the overlay does, so a client shows the same
+ * candidates and verdict.
  */
 
 export const ACP_ASIDE_DRAFT_COUNTS = { min: 1, max: 4, default: 3 } as const;

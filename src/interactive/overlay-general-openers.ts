@@ -499,7 +499,12 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					session.settle({ kind: "aborted", text: outcome.text });
 					return;
 				}
-				session.settle({ kind: "error", reason: outcome.reason });
+				// A refusal is a question that never reached the model; say so, or the
+				// bare reason reads like a status line (#415).
+				session.settle({
+					kind: "error",
+					reason: outcome.status === "refused" ? `Not answered: ${outcome.reason.replace(/\.?$/u, ".")}` : outcome.reason,
+				});
 			})
 			.catch((error: unknown) => {
 				session.settle({ kind: "error", reason: error instanceof Error ? error.message : String(error) });
