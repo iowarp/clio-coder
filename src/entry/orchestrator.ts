@@ -2788,23 +2788,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		for (const off of unsubscribeGuardianWakes) off();
 		disposeMemoryLifecycle();
 	});
-	// An attended session asks once before a test runner runs code it wrote or
-	// edited (#377 follow-up). The tracker is per session: a park resets it.
-	const sessionCodeConsent = createSessionCodeConsent();
-	// A resumed or forked session may already hold files it wrote before this
-	// process saw them, so it starts as written and asks once; the park that
-	// precedes it clears the previous session's consent.
-	bus.on(BusChannels.SessionParked, ({ reason }) => {
-		sessionCodeConsent.reset();
-		if (reason === "fork") sessionCodeConsent.noteWrite();
-	});
-	bus.on(BusChannels.SessionResumed, () => sessionCodeConsent.noteWrite());
-	// One observer feeds both sinks: any successful write makes the next test
-	// runner ask, and the codewiki refreshes the written paths when the context
-	// domain is loaded.
+	// The main agent's first test runner in an attended session asks before it
+	// runs repository code, whoever wrote that code (#377 follow-up). The
+	// consent is per session: a park or a resume clears it. A headless run
+	// denies every ask, so it keeps #377's allow.
+	const sessionCodeConsent = createSessionCodeConsent({ headless: options.headless !== undefined });
+	bus.on(BusChannels.SessionParked, () => sessionCodeConsent.reset());
+	bus.on(BusChannels.SessionResumed, () => sessionCodeConsent.reset());
+	// The codewiki refreshes the written paths when the context domain is loaded.
 	middleware.registerHook(
 		createFileMutationObserver(({ paths }) => {
-			sessionCodeConsent.noteWrite();
 			contextDomain?.noteFileChanges(paths);
 		}),
 	);
@@ -3023,8 +3016,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			mcpTransport: (tool) => toolBootstrap.mcpCapabilities?.transportOf(tool) ?? null,
 		},
 		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
-		// Headless runs deny every ask, so they keep #377's test-runner allow.
-		...(options.headless === undefined ? { sessionCodeConsent } : {}),
+		sessionCodeConsent,
 		// `acp` takes no read-only flag; only a client ceiling makes its turns read-only.
 		...(acpMode ? { hostReadOnlySource: "acp-ceiling" as const } : {}),
 	});
@@ -3484,7 +3476,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		attended: options.headless === undefined,
 		safety,
 		autonomy: resolveEffectiveAutonomy,
-		...(options.headless === undefined ? { sessionCodeConsentPending: () => sessionCodeConsent.pending() } : {}),
+		sessionCodeConsentPending: () => sessionCodeConsent.pending(),
 		createSession: () => {
 			const settings = getCurrentSettings();
 			session?.create({

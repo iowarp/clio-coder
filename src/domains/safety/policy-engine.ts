@@ -129,8 +129,9 @@ export interface SafetyPolicyDecision {
 	/**
 	 * Set when a built-in test runner is recognized, alone, behind a workspace
 	 * PYTHONPATH, or as one step of a recognized chain. The runner executes
-	 * repository code the session may have authored, so attended admission asks
-	 * once per session before running it after a write (#377 follow-up).
+	 * repository code whoever wrote it, so an attended main session at default
+	 * asks once per session before its first test runner, and a headless run
+	 * keeps #377's allow (#377 follow-up).
 	 */
 	runsWorkspaceCode?: true;
 	/**

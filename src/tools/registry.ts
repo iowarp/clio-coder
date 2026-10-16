@@ -362,8 +362,8 @@ export interface RegistryDeps {
 	/**
 	 * The attended session's test-runner consent (#377 follow-up). Read on every
 	 * main admission, and granted when the operator approves the consent ask.
-	 * Only an attended registry passes it: a headless run denies every ask and
-	 * keeps #377's allow, and workers never consult it.
+	 * The orchestrator passes it on every surface; a headless run's consent is
+	 * never pending, so it keeps #377's allow. Workers never consult it.
 	 */
 	sessionCodeConsent?: Pick<SessionCodeConsent, "pending" | "grant">;
 }
@@ -1173,6 +1173,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				dispatchPlan?: DispatchPlanView;
 		  };
 
+	/** The session's test-runner consent ask, the only obstacle among a call's host effects. */
+	type SessionConsentObstacle = { kind: "session-consent"; label: string; decision: SafetyDecision };
+
 	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
 		const spec = tools.get(call.tool as ToolName);
 		if (!spec) {
@@ -1244,10 +1247,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				),
 			};
 		}
-		const effectRefusal = admitHostEffects(call, spec, admission.decision, level);
-		if (effectRefusal !== null) return effectRefusal;
+		const effectOutcome = admitHostEffects(call, spec, admission, level);
+		if (effectOutcome?.kind === "terminal") return effectOutcome;
 		if (admission.kind === "deny") return { kind: "terminal", verdict: deniedVerdict(call, admission) };
 		if (admission.kind === "allow") {
+			if (effectOutcome !== null) {
+				const decision = sessionConsentParkDecision(call, admission.decision, effectOutcome, dispatchPlan);
+				return { kind: "park", decision, axis: approvalAxisId(decision, level), approvalAuthority: "operator" };
+			}
 			// A confirmed re-admission keeps the `allowed` row safety.evaluate wrote.
 			if (!admission.authorized) recordRegistryDisposition(call, admission.decision, "allowed");
 			return { kind: "execute", spec, decision: admission.decision };
@@ -1256,6 +1263,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			admission.source === "autonomy" && planScale && dispatchPlan !== null
 				? toDispatchPlanAskDecision(admission.netDecision, level, dispatchPlan)
 				: admission.decision;
+		if (effectOutcome !== null) {
+			// One combined ask: approving the call's own autonomy ask also gives the
+			// consent its checks need, so the operator is never asked twice (#377
+			// follow-up).
+			const decision = sessionConsentParkDecision(call, askDecision, effectOutcome, dispatchPlan);
+			return {
+				kind: "park",
+				decision,
+				axis: approvalAxisId(decision, level),
+				approvalAuthority: "operator",
+				...(dispatchPlan !== null ? { dispatchPlan } : {}),
+			};
+		}
 		return {
 			kind: "park",
 			decision: askDecision,
@@ -1400,17 +1420,25 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	 * the operator is asked about the dispatch plan, not about each command it
 	 * implies, and a headless run has nobody to ask. Every effect is evaluated
 	 * so a hard block anywhere wins over an earlier ask.
+	 *
+	 * The session's test-runner consent is the exception when it is the only
+	 * obstacle and the call itself is admitted or asks the operator only through
+	 * autonomy: the effect returns the consent ask, and the caller parks once on
+	 * a decision that approves both, so a fresh attended session can approve it
+	 * there instead of first running a test runner directly.
 	 */
 	const admitHostEffects = (
 		call: ClassifierCall,
 		spec: ToolSpec,
-		decision: SafetyDecision,
+		callAdmission: AdmissionDisposition,
 		level: AutonomyLevel,
-	): Extract<AdmitOutcome, { kind: "terminal" }> | null => {
+	): Extract<AdmitOutcome, { kind: "terminal" }> | SessionConsentObstacle | null => {
+		const decision = callAdmission.decision;
 		const effects = spec.hostEffectCalls?.(call.args ?? {}) ?? [];
 		if (effects.length === 0) return null;
 		let hard: { label: string; cause: string } | null = null;
 		let soft: { label: string; cause: string } | null = null;
+		let consent: { label: string; cause: string; decision: SafetyDecision } | null = null;
 		for (const effect of effects) {
 			const effectSpec = tools.get(effect.call.tool as ToolName);
 			// Each check is admitted exactly as its direct call would be, by the
@@ -1435,9 +1463,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				hard = { label: effect.label, cause: admission.reason };
 				break;
 			}
-			if (soft === null && admission.kind === "ask") soft = { label: effect.label, cause: admission.reason };
+			if (admission.kind !== "ask") continue;
+			if (admission.source === "session-consent") {
+				if (consent === null) consent = { label: effect.label, cause: admission.reason, decision: admission.decision };
+			} else if (soft === null) soft = { label: effect.label, cause: admission.reason };
 		}
-		const refused = hard ?? soft;
+		const consentParks =
+			callAdmission.kind === "allow" ||
+			(callAdmission.kind === "ask" &&
+				callAdmission.source === "autonomy" &&
+				callAdmission.approvalAuthority === "operator");
+		if (hard === null && soft === null && consentParks && consent !== null && consent.decision.kind === "ask") {
+			return { kind: "session-consent", label: consent.label, decision: consent.decision };
+		}
+		const refused = hard ?? soft ?? consent;
 		if (refused === null) return null;
 		const reason = `${call.tool} refused: ${refused.label} would not be admitted as a direct call (${refused.cause})`;
 		const reasonCode = hard !== null ? "host_effect_blocked" : "host_effect_not_admitted";
@@ -1858,6 +1897,18 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					reparkEntry(entry, reparkIndex);
 					continue;
 				}
+				// The operator approved the session's test-runner consent ask; the
+				// consent covers every later test runner this session. It is given
+				// before re-admission, because a dispatch or job that parked on it
+				// re-admits its host checks afresh and must find it given.
+				if (
+					grant !== undefined &&
+					(grant.issuer ?? "operator") === "operator" &&
+					entry.decision.kind === "ask" &&
+					entry.decision.confirmationRuleId === SESSION_CODE_CONSENT_RULE_ID
+				) {
+					deps.sessionCodeConsent?.grant();
+				}
 				const outcome = admit(entry.call, grant, entry.options);
 				if (outcome.kind === "park") {
 					if (observed) {
@@ -1877,16 +1928,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					}
 					entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
 					continue;
-				}
-				// The operator approved the session's test-runner consent ask; the
-				// consent covers every later test runner this session.
-				if (
-					grant !== undefined &&
-					(grant.issuer ?? "operator") === "operator" &&
-					entry.decision.kind === "ask" &&
-					entry.decision.confirmationRuleId === SESSION_CODE_CONSENT_RULE_ID
-				) {
-					deps.sessionCodeConsent?.grant();
 				}
 				const approvedOptions: ToolInvokeOptions | undefined =
 					grant === undefined
@@ -2353,7 +2394,55 @@ function readOnlyDeniedVerdict(
 	return { kind: "blocked", reason: rejection.short, decision: blocked };
 }
 
-/** Tools whose results carry text somebody else wrote: a page, an MCP server's answer, a worker's report. */
+/** One task reads as a task, not a plan: the overlay says what the approval launches. */
+function dispatchPlanApprovalLead(plan: DispatchPlanView): string {
+	const scope = plan.taskCount === 1 ? "this task" : "the whole plan";
+	return `Approving this call approves ${scope}:\n${plan.text}`;
+}
+
+/**
+ * The one parked decision for a call whose host checks need the session's
+ * test-runner consent. It keeps the call's own classification and description,
+ * so the card names the dispatch or job and not the test runner's execute
+ * class, and it carries the consent rail, so approving it gives the consent
+ * before the call re-admits. When the call asked on its own, its ask leads and
+ * the consent is stated as part of the same approval.
+ */
+function sessionConsentParkDecision(
+	call: ClassifierCall,
+	own: SafetyDecision,
+	consent: { label: string; decision: SafetyDecision },
+	plan: DispatchPlanView | null,
+): SafetyDecision {
+	const need = `${consent.label} runs a test runner on repository code this session has not confirmed`;
+	const grants = "Approving also gives this session's test-runner consent, so later test runners run without asking.";
+	const consentAsk = consent.decision.kind === "ask" ? consent.decision : undefined;
+	const ownAsk = own.kind === "ask" ? own : undefined;
+	const lead =
+		ownAsk !== undefined
+			? ownAsk.rejection.detail
+			: plan !== null
+				? dispatchPlanApprovalLead(plan)
+				: `${call.tool} needs the session's test-runner consent.`;
+	const detail = `${lead}\n${need}. ${grants}`;
+	return {
+		kind: "ask",
+		classification: own.classification,
+		confirmationRuleId: SESSION_CODE_CONSENT_RULE_ID,
+		rejection: {
+			short:
+				ownAsk !== undefined
+					? `${ownAsk.rejection.short}; approving also gives the session's test-runner consent (${need})`
+					: `${call.tool} needs the session's test-runner consent: ${need}`,
+			detail,
+			hints: [...(ownAsk?.rejection.hints ?? []), ...(consentAsk?.rejection.hints ?? [])],
+		},
+		...(consentAsk?.policy !== undefined
+			? { policy: { ...consentAsk.policy, reasons: [`${need}. ${grants}`, ...consentAsk.policy.reasons.slice(1)] } }
+			: {}),
+	};
+}
+
 /**
  * Plan-approval ask for a plan-scale dispatch call. The rejection detail IS
  * the plan artifact (topology, per-task agent/model/node), so the approval
@@ -2364,16 +2453,22 @@ function toDispatchPlanAskDecision(
 	level: AutonomyLevel,
 	plan: DispatchPlanView,
 ): SafetyDecision {
+	const single = plan.taskCount === 1;
 	return {
 		kind: "ask",
 		classification: decision.classification,
 		rejection: {
-			short: `dispatch plan needs approval (${plan.topology}, ${plan.taskCount} task(s)) at autonomy ${level}`,
-			detail: `Approving this call approves the whole plan:\n${plan.text}`,
-			hints: [
-				"One approval covers every run in the plan, including remote placements.",
-				"Deny to keep the fleet idle and revise the plan first.",
-			],
+			short: `dispatch plan needs approval (${plan.topology}, ${plan.taskCount} ${single ? "task" : "tasks"}) at autonomy ${level}`,
+			detail: dispatchPlanApprovalLead(plan),
+			hints: single
+				? [
+						"One approval covers this task's run, including its remote placement or failover.",
+						"Deny to keep the fleet idle and revise the task first.",
+					]
+				: [
+						"One approval covers every run in the plan, including remote placements.",
+						"Deny to keep the fleet idle and revise the plan first.",
+					],
 		},
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};

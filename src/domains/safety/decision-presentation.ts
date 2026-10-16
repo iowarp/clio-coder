@@ -294,7 +294,7 @@ function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): strin
 			return "The resulting step can reach people or systems outside the workspace.";
 		case "safety-net":
 			if (isSessionCodeConsent(facts)) {
-				return "This session wrote or edited files, and a test runner executes repository code, those files included, under your account without a sandbox.";
+				return "A test runner executes repository code under your account without a sandbox, whoever wrote it: this session, an earlier one, a worker or a checkout.";
 			}
 			// A gate park is System One's judgment of this one command, not a
 			// standing rule, so "always-on rail" would tell the operator something

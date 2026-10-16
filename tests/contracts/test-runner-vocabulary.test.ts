@@ -220,7 +220,7 @@ describe("test runner vocabulary (#377)", () => {
 		notStrictEqual(disposition(policy, "cd .. && ctest", "default"), "allow");
 	});
 
-	it("asks an attended main session once before a test runner after the session wrote a file", async () => {
+	it("asks the main session once before its first test runner, whoever wrote the code", async () => {
 		for (const command of ["pytest -q tests", "cd build && ctest", "PYTHONPATH=src python3 -m pytest -q"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).runsWorkspaceCode, true, command);
 		}
@@ -236,7 +236,7 @@ describe("test runner vocabulary (#377)", () => {
 			sessionCodeConsentPending: true,
 		});
 		strictEqual(ask.kind === "ask" && `${ask.source}:${ask.approvalAuthority}`, "session-consent:operator");
-		// Headless never passes the flag; yolo and workers are unchanged.
+		// Consent given, yolo and workers are unchanged.
 		for (const unchanged of [
 			evaluateAdmission({ principal: "main", effects: [pytest], safety, autonomy: "default" }),
 			evaluateAdmission({
@@ -275,8 +275,7 @@ describe("test runner vocabulary (#377)", () => {
 					});
 				});
 		});
-		strictEqual((await registry.invoke(pytest)).kind, "ok", "nothing written yet: runs as #377 allows");
-		consent.noteWrite();
+		// Nothing this session wrote: the code is still the repository's, so a fresh session asks.
 		strictEqual((await registry.invoke(pytest)).kind, "blocked");
 		strictEqual((await registry.invoke(pytest)).kind, "blocked", "a denial leaves consent ungiven");
 		answer = "grant";
@@ -288,11 +287,27 @@ describe("test runner vocabulary (#377)", () => {
 			asks.map((meta) => meta.axis),
 			["net:session-code-consent", "net:session-code-consent", "net:session-code-consent"],
 		);
-		strictEqual(runs, 3);
+		strictEqual(runs, 2);
 		// A new session starts over.
 		consent.reset();
-		consent.noteWrite();
 		strictEqual((await registry.invoke(pytest)).kind, "ok");
 		strictEqual(asks.length, 4);
+	});
+
+	it("runs a headless run's test runner without asking, as #377 allows", async () => {
+		const safety = createWorkerSafety({ cwd: scratch });
+		const pytest = { tool: ToolNames.Bash, args: { command: "pytest -q tests", cwd: scratch } };
+		const consent = createSessionCodeConsent({ headless: true });
+		const registry = createRegistry({ safety, autonomy: () => "default", sessionCodeConsent: consent });
+		registry.register({ ...bashTool, run: async () => ({ kind: "ok", output: "ran" }) });
+		const asks: PermissionRequiredMeta[] = [];
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			asks.push(meta);
+			registry.cancelParkedCall(meta.requestId, "a headless run denies every ask");
+		});
+		strictEqual((await registry.invoke(pytest)).kind, "ok");
+		consent.reset();
+		strictEqual((await registry.invoke(pytest)).kind, "ok", "a new session of the run does not ask either");
+		strictEqual(asks.length, 0);
 	});
 });

@@ -100,10 +100,9 @@ export interface AdmissionInput {
 	/** Autonomy inputs a tool declares for itself: ask_user exposure, plan-scale dispatch. */
 	autonomyExtra?: { exposure?: AutonomyExposure; dispatchPlanScale?: boolean };
 	/**
-	 * Main principal at default only. True when an attended session has written
-	 * or edited a file and the operator has not yet consented to test runners
-	 * this session, so a net-tagged test runner asks once instead of running.
-	 * The host decides attended; a headless run never sets it.
+	 * Main principal at default only. True while the operator of an attended
+	 * session has not consented to test runners, so a net-tagged test runner
+	 * asks once instead of running. A headless run never sets it.
 	 */
 	sessionCodeConsentPending?: boolean;
 	/**
@@ -449,20 +448,21 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 }
 
 /**
- * The once-per-session ask before a test runner runs code the session wrote.
- * It carries its own rail id and a policy in ask form, so the card shows why it
- * asks and the grant names the rail; an operator approval re-admits the call
- * at step 3 and the host records the consent.
+ * The once-per-session ask before a test runner runs repository code the
+ * operator has not confirmed. It carries its own rail id and a policy in ask
+ * form, so the card shows why it asks and the grant names the rail; an
+ * operator approval re-admits the call at step 3 and the host records the
+ * consent.
  */
 function sessionCodeConsentAsk(tool: string, netDecision: SafetyDecision, level: AutonomyLevel): AdmissionDisposition {
 	const detail =
-		"This test command runs repository code, including files this session wrote or edited. Approve once to allow test runners for the rest of this session.";
+		"This test command runs repository code, whoever wrote it: this session, an earlier one, a worker or a checkout. Approve once to allow test runners for the rest of this session.";
 	const ask: SafetyDecision = {
 		kind: "ask",
 		classification: netDecision.classification,
 		confirmationRuleId: SESSION_CODE_CONSENT_RULE_ID,
 		rejection: {
-			short: `${tool} needs approval: a test runner after this session wrote or edited files`,
+			short: `${tool} needs approval: a test runner runs repository code this session has not confirmed`,
 			detail,
 			hints: [
 				"Approving runs this call and lets test runners run without asking for the rest of this session.",

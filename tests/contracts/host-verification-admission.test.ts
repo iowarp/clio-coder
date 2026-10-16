@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -6,9 +6,10 @@ import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import { createSessionCodeConsent } from "../../src/domains/safety/session-code-consent.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
-import { createRegistry } from "../../src/tools/registry.js";
+import { createRegistry, type PermissionRequiredMeta } from "../../src/tools/registry.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -149,5 +150,128 @@ it("refuses a dispatch whose host check the direct verify call would not admit, 
 	} finally {
 		finish({ exitCode: 0, signal: null });
 		await bundle.extension.stop?.();
+	}
+});
+
+it("parks an attended dispatch whose test-runner check needs the session's consent, and runs it once approved", async () => {
+	// The command string is policy data only: the stubbed dispatch never runs it.
+	const root = project([{ id: "unit", command: ["pytest", "-q"] }]);
+	const previousCwd = process.cwd();
+	process.chdir(root);
+	try {
+		const consent = createSessionCodeConsent();
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd: root }),
+			autonomy: () => "default",
+			sessionCodeConsent: consent,
+		});
+		let dispatched = 0;
+		const contract = {
+			dispatch: async () => {
+				dispatched += 1;
+				throw new Error("dispatched");
+			},
+		} as unknown as DispatchContract;
+		registry.register(
+			createDispatchTool({
+				dispatch: contract,
+				getAgentSpecs: () => [{ id: "coder", capabilityClass: "workspace-edit" }] as never,
+			}),
+		);
+		const asks: PermissionRequiredMeta[] = [];
+		const details: string[] = [];
+		registry.onPermissionRequired((_call, decision, meta) => {
+			asks.push(meta);
+			details.push(decision.kind === "ask" ? decision.rejection.detail : "");
+			setImmediate(() => {
+				void registry.resumeParkedCalls({
+					actionClass: decision.classification.actionClass,
+					requestId: meta.requestId,
+					requestedBy: "tool:one_shot",
+				});
+			});
+		});
+		const verdict = await registry.invoke({
+			tool: "dispatch",
+			args: {
+				agent: "coder",
+				task: "Edit input.txt.",
+				intent: { version: 2, write_roots: ["input.txt"], verification: [{ check: "unit" }] },
+			},
+		});
+		strictEqual(verdict.kind, "ok", JSON.stringify(verdict));
+		deepStrictEqual(
+			asks.map((meta) => meta.axis),
+			["net:session-code-consent"],
+		);
+		match(details[0] ?? "", /Approving this call approves this task:/);
+		strictEqual(dispatched, 1);
+		strictEqual(consent.pending(), false, "approving the dispatch's ask gives the session's consent");
+	} finally {
+		process.chdir(previousCwd);
+	}
+});
+
+it("asks once for a multi-task dispatch that needs the session's test-runner consent, and runs it after one approval", async () => {
+	// The command string is policy data only: the stubbed dispatch never runs it.
+	const root = project([{ id: "unit", command: ["pytest", "-q"] }]);
+	const previousCwd = process.cwd();
+	process.chdir(root);
+	try {
+		const consent = createSessionCodeConsent();
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd: root }),
+			autonomy: () => "default",
+			sessionCodeConsent: consent,
+		});
+		let dispatched = 0;
+		const contract = {
+			dispatchBatch: async () => {
+				dispatched += 1;
+				throw new Error("dispatched");
+			},
+		} as unknown as DispatchContract;
+		registry.register(
+			createDispatchTool({
+				dispatch: contract,
+				getAgentSpecs: () => [{ id: "coder", capabilityClass: "workspace-edit" }] as never,
+			}),
+		);
+		const asks: Array<{ meta: PermissionRequiredMeta; actionClass: string; detail: string }> = [];
+		registry.onPermissionRequired((_call, decision, meta) => {
+			asks.push({
+				meta,
+				actionClass: decision.classification.actionClass,
+				detail: decision.kind === "ask" ? decision.rejection.detail : "",
+			});
+			setImmediate(() => {
+				void registry.resumeParkedCalls({
+					actionClass: decision.classification.actionClass,
+					requestId: meta.requestId,
+					requestedBy: "tool:one_shot",
+				});
+			});
+		});
+		const intent = (root: string) => ({ version: 2, write_roots: [root], verification: [{ check: "unit" }] });
+		const verdict = await registry.invoke({
+			tool: "dispatch",
+			args: {
+				tasks: [
+					{ agent: "coder", task: "Edit input.txt.", intent: intent("input.txt") },
+					{ agent: "coder", task: "Edit other.txt.", intent: intent("other.txt") },
+				],
+			},
+		});
+		strictEqual(verdict.kind, "ok", JSON.stringify(verdict));
+		deepStrictEqual(
+			asks.map((ask) => [ask.meta.axis, ask.actionClass]),
+			[["net:session-code-consent", "dispatch"]],
+		);
+		match(asks[0]?.detail ?? "", /Approving this call approves the whole plan/);
+		match(asks[0]?.detail ?? "", /Approving also gives this session's test-runner consent/);
+		strictEqual(dispatched, 1, "the approved plan reached dispatch");
+		strictEqual(consent.pending(), false, "the one approval gives the session's consent");
+	} finally {
+		process.chdir(previousCwd);
 	}
 });

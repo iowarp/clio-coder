@@ -22,7 +22,7 @@ export interface JobRuntimeDeps {
 	constraints(): TurnConstraints | undefined;
 	safety: SafetyContract;
 	autonomy(): AutonomyLevel;
-	/** The attended session wrote files and has not consented to test runners yet (#377 follow-up). */
+	/** The attended session has not consented to test runners yet, whoever wrote the code (#377 follow-up). */
 	sessionCodeConsentPending?(): boolean;
 	hostRefusal(): string | null;
 	trustRefusal(): string | null;
