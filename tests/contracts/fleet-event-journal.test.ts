@@ -4,8 +4,10 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runFleetEvents } from "../../src/cli/fleet-events.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import {
+	createFleetEventJournal,
 	fleetEventJournalPath,
 	fleetManifestDigest,
 	readFleetEventJournal,
@@ -99,6 +101,58 @@ test("a fleet appends a hash-chained journal whose settled steps are sealed mani
 		strictEqual(tampered.broken, "line 7 does not extend the chain");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
+		env.restore();
+	}
+});
+
+test("fleet events prints the stored lines verbatim and ends at the seal", async () => {
+	const env = await isolateClioEnv("clio-coder-fleet-events-cli-");
+	try {
+		const rootId = "fleet-abcdefabcdef";
+		const journal = createFleetEventJournal(rootId);
+		journal.append({
+			type: "fleet_started",
+			fleet: "f",
+			planHash: "a".repeat(64),
+			vars: {},
+			resumedFrom: null,
+			replayedStepIds: [],
+			workspaceRoot: env.dir,
+			stepIds: ["s"],
+		});
+		journal.append({
+			type: "fleet_sealed",
+			outcome: "completed",
+			endedAt: "2026-10-01T00:00:00.000Z",
+			stepCount: 0,
+			manifestDigest: "c".repeat(64),
+		});
+		// Appending after the seal is refused, so a follower's EOF is final.
+		journal.append({
+			type: "fleet_sealed",
+			outcome: "failed",
+			endedAt: "2026-10-01T00:00:01.000Z",
+			stepCount: 0,
+			manifestDigest: "d".repeat(64),
+		});
+		const out = process.stdout.write.bind(process.stdout);
+		let printed = "";
+		// Without --follow every write happens before the first await, so the
+		// capture is restored synchronously.
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			printed += String(chunk);
+			return true;
+		}) as typeof process.stdout.write;
+		let pending: Promise<number>;
+		try {
+			pending = runFleetEvents([rootId, "--json", "--all", "--follow"]);
+		} finally {
+			process.stdout.write = out;
+		}
+		strictEqual(await pending, 0);
+		strictEqual(printed, readFileSync(fleetEventJournalPath(rootId), "utf8"));
+		strictEqual(printed.trim().split("\n").length, 2);
+	} finally {
 		env.restore();
 	}
 });

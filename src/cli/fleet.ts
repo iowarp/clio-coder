@@ -101,6 +101,9 @@ Subcommands:
   decisions --json [--all]      emit a bounded window of sealed review and compete gate verdicts
   view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and receipt
   view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
+  events <fleetRootId> [--follow] [--json] [--all]
+                                print a fleet run's live event journal; each settled step is a
+                                sealed manifest checkpoint, and --follow exits after the final seal
   drain [--json]                deny new execution starts for up to one hour
   resume [--json]               reopen dispatch admission immediately
   cancel <runId> [--json] [--reason <text>]
@@ -748,6 +751,9 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 	if (sub === "view" && (args.includes("--help") || args.includes("-h"))) {
 		return (await import("./fleet-view.js")).runFleetView(args.slice(1));
 	}
+	if (sub === "events" && (args.includes("--help") || args.includes("-h"))) {
+		return (await import("./fleet-events.js")).runFleetEvents(args.slice(1));
+	}
 	// Asking for help is not a usage error, and it is not an argument either.
 	// `status|drain|resume --help` answered `unknown flag: --help` on stderr with
 	// status 2, and `run --help` answered its usage the same way. Anywhere on the
@@ -774,6 +780,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return (await import("./fleet-verify.js")).runFleetVerify(args.slice(1));
 		case "view":
 			return (await import("./fleet-view.js")).runFleetView(args.slice(1));
+		case "events":
+			return (await import("./fleet-events.js")).runFleetEvents(args.slice(1));
 		case "drain":
 			return runAdmissionControl("drain", args.slice(1));
 		case "resume":
