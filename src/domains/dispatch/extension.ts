@@ -2462,6 +2462,8 @@ function assertPostRuntimeToolCompatibility(
 	target: ResolvedTarget,
 	writeConfined: boolean,
 	explicitReadOnly: boolean,
+	writeRoots: ReadonlyArray<string>,
+	mcp: WorkerMcpAttestation | undefined,
 ): void {
 	// The shipped coder may use a named subprocess peer. Its native Clio tool
 	// requirements cannot be matched to the peer's opaque tool loop. Keep custom
@@ -2477,12 +2479,19 @@ function assertPostRuntimeToolCompatibility(
 	if (compatibility.compatible) return;
 	// Name the narrowing that removed the tool: blaming the runtime sends the
 	// caller to another model when its own write roots caused the refusal.
+	// An execute-class MCP tool is withheld for the same reason bash is: no OS
+	// sandbox holds it to the write roots.
+	const executeMcp = new Set(
+		(mcp?.tools ?? [])
+			.filter((entry) => entry.actionClass === "execute")
+			.map((entry) => `mcp_${entry.serverId}__${entry.tool}`),
+	);
 	const confined = writeConfined
-		? compatibility.missingRequired.filter((tool) => WRITE_ROOT_REFUSED_TOOLS.has(tool))
+		? compatibility.missingRequired.filter((tool) => WRITE_ROOT_REFUSED_TOOLS.has(tool) || executeMcp.has(tool))
 		: [];
 	const cause =
 		confined.length > 0
-			? `; declared write roots remove ${confined.join(", ")}, so omit write roots or use worktree: true for this agent`
+			? `; declared write roots ${writeRoots.join(", ")} have no OS sandbox enforcing them here, so ${confined.join(", ")} ${confined.length === 1 ? "is" : "are"} withheld. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend, omit write roots, or use worktree: true for this agent`
 			: "";
 	throw new Error(
 		`dispatch: admission denied: agent '${agentId}' is incompatible with runtime '${target.runtime.id}' after tool narrowing; missing required tools: ${compatibility.missingRequired.join(", ")}${cause}`,
@@ -5196,7 +5205,16 @@ export function createDispatchBundle(
 					"[dispatch scope] Narrow write roots have no OS sandbox enforcing them, so bash and verify are withheld and the worker cannot run checks. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend to keep these tools while enforcing the write roots.",
 			});
 		}
-		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, writeConfined, req.readOnly === true);
+		assertPostRuntimeToolCompatibility(
+			req.agentId,
+			spec,
+			effectiveTools,
+			target,
+			writeConfined,
+			req.readOnly === true,
+			pathScope.writeBoundaries,
+			admission.mcp,
+		);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		announceMcpSandboxNoNetwork(req, pathScope, readOnly, effectiveTools, target, settings, admission.mcp);
 		const permit = resolveDispatchPermit(
@@ -8896,6 +8914,8 @@ export function createDispatchBundle(
 			target,
 			writeConfined,
 			req.readOnly === true,
+			pathScope.writeBoundaries,
+			admission.mcp,
 		);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		// Preview refuses exactly what dispatch would: a widening narrowing, an

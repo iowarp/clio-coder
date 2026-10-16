@@ -11,6 +11,7 @@ import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
 import { configureWorkerProcessSandbox } from "../../src/core/sandbox/worker-process.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceiptSafetySummary } from "../../src/domains/dispatch/types.js";
 import { resolveWorkerMcpAdmission, workerMcpRuntimeRefusal } from "../../src/domains/dispatch/worker-mcp.js";
@@ -23,6 +24,7 @@ import {
 import { mcpCatalogPath } from "../../src/domains/gateway/mcp/metadata-cache.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { resolveWorkerPermit, type WorkerMcpAttestation } from "../../src/domains/safety/worker-permit.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
@@ -286,6 +288,43 @@ describe("native worker MCP capabilities", () => {
 				16_384,
 			).includes("safety.sandboxNetwork"),
 		);
+	});
+
+	it("names the write roots and the missing sandbox when they withhold a required execute-class MCP tool", async () => {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "execute" }).ok);
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.sandbox = "off";
+		const context = dispatchStubContext({ settings, agentTools: [...TOOLS, ToolNames.Edit, ToolNames.Write] });
+		const stub = context.getContract<SafetyContract>("safety");
+		ok(stub);
+		// The stub's workspace write root is the test process cwd; this run's is the project.
+		const safety: SafetyContract = {
+			...stub,
+			scopes: { ...stub.scopes, workspace: { ...stub.scopes.workspace, allowedWriteRoots: [`${project}/`] } },
+		};
+		const bundle = makeDispatchBundle({
+			...context,
+			getContract<T extends object>(name: string): T | undefined {
+				return name === "safety" ? (safety as T) : context.getContract<T>(name);
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const scope = declaredScopeIntent({ writeRoots: ["src/a.ts"] });
+			ok(scope.ok);
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					task: "Edit src/a.ts.",
+					cwd: project,
+					executionRole: "builder",
+					intent: scope.intent,
+				}),
+				/missing required tools: mcp_fake__echo; declared write roots \S*src\/a\.ts have no OS sandbox enforcing them here, so mcp_fake__echo is withheld\. Enable safety\.sandbox/,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("refuses MCP capabilities on a Claude SDK target before it asks to install the SDK", async () => {
