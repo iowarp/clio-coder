@@ -144,8 +144,10 @@ export function listFleetRuns(limit = MAX_FLEET_RUN_SCAN): FleetRunRecord[] {
 		return [];
 	}
 	const records: FleetRunRecord[] = [];
-	for (const name of entries.slice(0, MAX_FLEET_RUN_SCAN)) {
-		if (!name.endsWith(".json")) continue;
+	// Filter before capping: every root keeps an `.events.ndjson` journal beside
+	// its record, and those entries must not spend the scan budget.
+	const names = entries.filter((name) => name.endsWith(".json")).slice(0, MAX_FLEET_RUN_SCAN);
+	for (const name of names) {
 		const record = readFleetRun(name.slice(0, -".json".length));
 		if (record !== null) records.push(record);
 	}
