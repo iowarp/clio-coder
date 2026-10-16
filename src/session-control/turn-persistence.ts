@@ -462,6 +462,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				if (retired.length < prior.length) replaceEngineMessages(state.runtime.agent, retired);
 			}
 			state.synthesisToolLock = false;
+			state.toolBudgetLock = false;
 			deps.middlewareToolChoice.reset();
 			startTracedTurn(userTurn.id, text);
 		},
@@ -651,6 +652,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			state.lastTurnId = userTurn.id;
 			state.activeUserTurnId = userTurn.id;
 			state.synthesisToolLock = false;
+			state.toolBudgetLock = false;
 			const sessionId = deps.session.current()?.id ?? null;
 			if (sessionId) {
 				agentRuntime.agent.sessionId = sessionId;

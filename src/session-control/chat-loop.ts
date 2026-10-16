@@ -1748,6 +1748,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const disposition = (payload as { disposition?: unknown } | null)?.disposition;
 			if (disposition === "lockout") state.synthesisToolLock = true;
 		}) ?? null;
+	const unsubscribeToolBudgetLock =
+		deps.bus?.on(BusChannels.ToolBudgetExceeded, () => {
+			state.toolBudgetLock = true;
+		}) ?? null;
 
 	// --- the state machine --------------------------------------------------
 
@@ -3495,6 +3499,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribeConfigNextTurn?.();
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();
+			unsubscribeToolBudgetLock?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
 			context.dispose();

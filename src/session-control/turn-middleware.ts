@@ -403,6 +403,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				turnToolNames: state.turnToolNames.join(","),
 				sharedWorkerNote: state.turnSharedWorkerNote,
 				turnMode: state.currentTurnConstraints?.mode ?? "",
+				toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
 			};
 			if (terminalToolResult !== undefined) {
 				metadata.terminalToolResult = true;

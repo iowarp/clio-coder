@@ -118,6 +118,12 @@ export interface ChatTurnState {
 	 * from the text-only round in transcriptStreamFn). Cleared when the next user turn starts.
 	 */
 	synthesisToolLock: boolean;
+	/**
+	 * The loop guard's soft per-turn tool budget was crossed: every further
+	 * call this turn is blocked, so turn_end reminders must not ask for one.
+	 * Cleared with `synthesisToolLock`.
+	 */
+	toolBudgetLock: boolean;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
 	toolProseAbortReason: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
@@ -167,6 +173,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		interruptedAssistantMessage: null,
 		interruptedUsage: null,
 		synthesisToolLock: false,
+		toolBudgetLock: false,
 		toolProseAbortReason: null,
 		streamStallReason: null,
 		toolProseAssessedChars: 0,

@@ -256,6 +256,9 @@ export function createCitationGroundingRegistration(
 			if (input.hook !== "turn_end") return [];
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
+			// The nudge asks for a re-read; with tools off it would force a call
+			// the loop guard blocks, so the answer stands as written.
+			if (input.metadata?.toolsLocked === true) return [];
 			const text = input.text ?? "";
 			if (evidence.readUnnumbered.size === 0 || text.trim().length === 0) return [];
 			// One nudge per operator turn: the answer after it passes as written.
