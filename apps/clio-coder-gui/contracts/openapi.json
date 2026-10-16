@@ -17665,6 +17665,12 @@
 											}
 										},
 										"maxProperties": 32
+									},
+									"resume": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
 									}
 								},
 								"additionalProperties": false
@@ -17853,6 +17859,10 @@
 																		"profile": {
 																			"type": "string",
 																			"maxLength": 520
+																		},
+																		"replayed": {
+																			"type": "boolean",
+																			"const": true
 																		}
 																	},
 																	"additionalProperties": false
@@ -17892,6 +17902,25 @@
 												},
 												"truncated": {
 													"type": "boolean"
+												},
+												"resume": {
+													"type": "object",
+													"required": ["fromRunId", "replayed"],
+													"properties": {
+														"fromRunId": {
+															"type": "string",
+															"maxLength": 520
+														},
+														"replayed": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"maxLength": 520
+															},
+															"maxItems": 64
+														}
+													},
+													"additionalProperties": false
 												}
 											},
 											"additionalProperties": false
@@ -18067,6 +18096,12 @@
 									"planHash": {
 										"type": "string",
 										"pattern": "^[0-9a-f]{64}$"
+									},
+									"resume": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 128,
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
 									}
 								},
 								"additionalProperties": false

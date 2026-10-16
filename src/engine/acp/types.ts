@@ -1280,6 +1280,8 @@ export type AcpFleetStep = {
 	gate?: { path: string };
 	target?: string;
 	profile?: string;
+	/** A resumed run replays this step's prior sealed result instead of dispatching it. */
+	replayed?: true;
 };
 
 export type AcpFleetPreview =
@@ -1292,6 +1294,8 @@ export type AcpFleetPreview =
 			budget: { ceilingUsd: number; currentUsd: number; playbookUsd: number | null };
 			/** True when steps, lists or displayed text were cut at the wire bounds. */
 			truncated: boolean;
+			/** Present when the run resumes a prior root: the steps it replays, in plan order. */
+			resume?: { fromRunId: string; replayed: string[] };
 	  }
 	| { status: "refused"; name: string; diagnostics: string[] };
 
@@ -2226,6 +2230,7 @@ const wireFleetRunStep = Type.Object(
 		gate: Type.Optional(Type.Object({ path: wireFleetRunText }, closed)),
 		target: Type.Optional(wireFleetRunText),
 		profile: Type.Optional(wireFleetRunText),
+		replayed: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );
@@ -2261,6 +2266,15 @@ export const AcpFleetPreviewSchema = Type.Union([
 				closed,
 			),
 			truncated: Type.Boolean(),
+			resume: Type.Optional(
+				Type.Object(
+					{
+						fromRunId: wireFleetRunText,
+						replayed: Type.Array(wireFleetRunText, { maxItems: 64 }),
+					},
+					closed,
+				),
+			),
 		},
 		closed,
 	),

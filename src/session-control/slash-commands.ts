@@ -192,7 +192,7 @@ type SlashCommandVariant =
 	| { kind: "handoff"; goal: string }
 	| { kind: "handoff-usage" }
 	/** `/fleet run <playbook>`: compile the plan, show it for approval, dispatch on accept. */
-	| { kind: "fleet-run"; name: string; vars: Record<string, string> }
+	| { kind: "fleet-run"; name: string; vars: Record<string, string>; resume?: string }
 	| { kind: "fleet-run-usage"; reason?: string }
 	| { kind: "fleet" }
 	/** `/loop`: a bounded recurring job, or one of its control verbs. The words are parsed by loop-command.ts. */
@@ -675,6 +675,11 @@ export interface PromptReferenceCard {
  * injected at startInteractive construction time; handlers never reach into
  * the TUI, chat loop, or overlay module graph directly.
  */
+/** How `/fleet run` starts: a fresh run, or one that resumes a prior root's successful prefix. */
+export interface FleetRunStartOptions {
+	resume?: string;
+}
+
 export interface SessionCommandContext {
 	eggsCommand?: (action: "status" | "off", id?: string) => string;
 	keyboardActions?: {
@@ -846,7 +851,7 @@ export interface SessionCommandContext {
 	 * target, boundary, budget, and code-step argv for approval, and dispatch
 	 * only what the operator accepted. Absent on a host with no fleet wiring.
 	 */
-	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>) => void;
+	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>, options?: FleetRunStartOptions) => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView?: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
@@ -2192,7 +2197,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: {
 			subcommands: {
 				run: {
-					flags: [{ name: "--var", takesValue: true, repeatable: true, valueName: "key=value" }],
+					flags: [
+						{ name: "--var", takesValue: true, repeatable: true, valueName: "key=value" },
+						{ name: "--resume", takesValue: true, valueName: "runId" },
+					],
 					positionals: [{ name: "playbook", required: true }],
 				},
 			},
@@ -2211,7 +2219,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				if (key.length === 0) return { kind: "fleet-run-usage", reason: "--var requires key=value" };
 				vars[key] = pair.slice(eq + 1);
 			}
-			return { kind: "fleet-run", name, vars };
+			const resume = parsed.flagValues.get("--resume")?.[0];
+			if (resume !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(resume)) {
+				return { kind: "fleet-run-usage", reason: "--resume requires a fleet run id" };
+			}
+			return { kind: "fleet-run", name, vars, ...(resume !== undefined ? { resume } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind === "fleet") {
@@ -2221,7 +2233,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.kind === "fleet-run-usage") {
 				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "fleet");
-				const usage = entry ? usageNotice(entry, "run") : "usage: /fleet run <playbook> [--var key=value ...]";
+				const usage = entry
+					? usageNotice(entry, "run")
+					: "usage: /fleet run <playbook> [--var key=value ...] [--resume runId]";
 				ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
 				return;
 			}
@@ -2230,7 +2244,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				ctx.notice("error", "/fleet run is not wired in this session");
 				return;
 			}
-			ctx.startFleetRun(command.name, command.vars);
+			ctx.startFleetRun(command.name, command.vars, command.resume !== undefined ? { resume: command.resume } : {});
 		},
 	},
 	{

@@ -33,7 +33,10 @@ import { foregroundStreamUsage } from "../providers/index.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep } from "./execution-plan.js";
 import { type AgentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "./execution-role.js";
+import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { compileFleetExecutionPlan } from "./fleet-plan.js";
+import { planFleetResume } from "./fleet-run.js";
+import { type FleetRunRecord, readFleetRun } from "./state.js";
 import { preflightWriteBoundaries } from "./write-boundary-enforcer.js";
 
 /** Where a step would run, as the dispatch domain resolves it today. */
@@ -63,6 +66,8 @@ export interface FleetRunPreviewStep {
 	profile?: string;
 	gate?: { path: string; commandId: string } | { gateId: string; path: string };
 	plan?: { roster: ReadonlyArray<string>; maxTasks: number; proposals: boolean };
+	/** A resumed run replays this step's prior sealed result instead of dispatching it. */
+	replayed?: true;
 }
 
 export interface FleetRunPreviewWave {
@@ -92,6 +97,12 @@ export interface FleetRunPreview {
 	commands: PlaybookCommandRegistry | null;
 	/** Rendered prompt body every agent node carries as its task. */
 	task: string;
+	/** Present when the run resumes a prior one: the validated record and the prefix it replays. */
+	resume?: {
+		fromRunId: string;
+		record: FleetRunRecord;
+		replayed: ReadonlyMap<string, ExecutionStepResult>;
+	};
 }
 
 export type FleetRunPreviewResult =
@@ -121,6 +132,10 @@ export interface FleetRunPreviewInput {
 	}) => FleetRunPreviewRoute | null;
 	/** Playbook and registry loaders, overridable so tests project a fixture. */
 	load?: (workspaceRoot: string, name: string) => { playbook: Playbook; commands: PlaybookCommandRegistry | null };
+	/** A prior root to resume. Every surface validates it here, the way `fleet run --resume` does. */
+	resume?: string;
+	/** Durable fleet ledger lookup, overridable so tests resume a fixture record. */
+	readRun?: (runId: string) => FleetRunRecord | null;
 }
 
 function defaultLoad(
@@ -256,6 +271,33 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		);
 	}
 
+	// Resume is validated against the plan just compiled, so an operator
+	// approves the exact prefix that will be replayed, on every surface.
+	let resume: FleetRunPreview["resume"];
+	if (input.resume !== undefined) {
+		const record = (input.readRun ?? readFleetRun)(input.resume);
+		if (record === null) {
+			diagnostics.push(`resume run '${input.resume}' was not found in the durable fleet ledger`);
+		} else {
+			const planned = planFleetResume(record, plan, playbook, input.vars);
+			if (planned.ok) resume = { fromRunId: input.resume, record, replayed: planned.replayed };
+			else if (planned.reason === "fleet-name") {
+				diagnostics.push(
+					`resume run '${input.resume}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`,
+				);
+			} else if (planned.reason === "vars") {
+				diagnostics.push(`resume run '${input.resume}' used different --var values`);
+			} else {
+				const changed = planned.diff
+					.slice(0, 8)
+					.map((entry) => `step ${entry.index + 1}: ${entry.priorId} -> ${entry.currentId}`);
+				diagnostics.push(
+					`resume run '${input.resume}' was planned from a different plan (prior=${planned.priorHash.slice(0, 12)} current=${planned.currentHash.slice(0, 12)})${changed.length > 0 ? `; ${changed.join("; ")}` : ""}`,
+				);
+			}
+		}
+	}
+
 	// A declared boundary is verified against the checkout, so the checkout has
 	// to be one this can read. Refused here, before any dispatch, rather than
 	// discovered as an unenforceable claim halfway through the run.
@@ -297,6 +339,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 				writes: declared,
 				...(step.loop !== undefined ? { loop: { ...step.loop } } : {}),
 				...(step.gate !== undefined ? { gate: { ...step.gate } } : {}),
+				...(resume?.replayed.has(step.id) === true ? { replayed: true as const } : {}),
 			};
 			if (step.kind === "code") {
 				const command = commands?.commands.get(step.commandId);
@@ -338,6 +381,15 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 				commands: commandBindings,
 				waves,
 				budget,
+				// Absent for a fresh run, so its approval identity is unchanged.
+				...(resume !== undefined
+					? {
+							resume: {
+								fromRunId: resume.fromRunId,
+								replayed: [...resume.replayed].map(([stepId, result]) => [stepId, result.receiptDigest ?? null]),
+							},
+						}
+					: {}),
 			}),
 		)
 		.digest("hex");
@@ -354,6 +406,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 			playbook,
 			commands,
 			task,
+			...(resume !== undefined ? { resume } : {}),
 		},
 	};
 }

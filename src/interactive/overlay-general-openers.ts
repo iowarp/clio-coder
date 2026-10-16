@@ -37,7 +37,7 @@ import type { TUI } from "../engine/tui.js";
 import type { DraftOutcome } from "../session-control/chat-loop.js";
 import type { DraftVerdict } from "../session-control/drafts.js";
 import { draftsToJudge } from "../session-control/drafts.js";
-import type { ContextClearCommandOptions } from "../session-control/slash-commands.js";
+import type { ContextClearCommandOptions, FleetRunStartOptions } from "../session-control/slash-commands.js";
 import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
 import type { createDispatchBoardView } from "./dispatch-board.js";
@@ -195,7 +195,7 @@ export interface OverlayGeneralOpeners {
 	/** `/draft [N] <request>`: N candidates in parallel, judged by a decision model. */
 	openDraft(request: string, count: number): void;
 	/** `/fleet run <playbook> [--var k=v ...]`: preview the plan, then dispatch on approval. */
-	startFleetRun(name: string, vars: Readonly<Record<string, string>>): void;
+	startFleetRun(name: string, vars: Readonly<Record<string, string>>, options?: FleetRunStartOptions): void;
 }
 
 export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): OverlayGeneralOpeners {
@@ -600,7 +600,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	 * contract that fails preflight opens the same overlay with its diagnostics
 	 * and no accept action, so the only exit from a broken plan is to leave it.
 	 */
-	const startFleetRun = (name: string, vars: Readonly<Record<string, string>>): void => {
+	const startFleetRun = (
+		name: string,
+		vars: Readonly<Record<string, string>>,
+		options: FleetRunStartOptions = {},
+	): void => {
 		if (deps.transitions.state !== "closed") return;
 		// Refused, never queued: an approved plan describes the workspace as it
 		// stands, and a turn still in flight is about to change it.
@@ -624,6 +628,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			roleFacts,
 			...(budget ? { budget } : {}),
 			...(deps.loadFleetSources ? { load: deps.loadFleetSources } : {}),
+			...(options.resume !== undefined ? { resume: options.resume } : {}),
 			resolveRoute: fleetRouteResolver(deps.dispatch.preview, roleFacts),
 		});
 
@@ -662,6 +667,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			...(deps.getDecisionBoard ? { getDecisionBoard: deps.getDecisionBoard } : {}),
 			attributionEnabled: deps.getSettings?.().integrations.git.commitAttribution ?? true,
 			vars: preview.vars,
+			...(preview.resume !== undefined
+				? { resume: { record: preview.resume.record, replayed: preview.resume.replayed } }
+				: {}),
 			onStepDispatched: (event) => {
 				deps.setFleetRunPhase?.(event.assignmentId, { wave: event.waveIndex, stepId: event.stepId });
 			},

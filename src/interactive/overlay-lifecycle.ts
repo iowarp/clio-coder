@@ -174,7 +174,11 @@ export interface OverlayLifecycleController {
 	openDraftOverlayState(request: string, count: number): void;
 	/** `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoffState(goal: string): void;
-	startFleetRunState(name: string, vars: Readonly<Record<string, string>>): void;
+	startFleetRunState(
+		name: string,
+		vars: Readonly<Record<string, string>>,
+		options?: import("../session-control/slash-commands.js").FleetRunStartOptions,
+	): void;
 	openModelOverlayState(): void;
 	/** `/model <pattern>` and the picker both land here: choose session or global before anything applies. */
 	openModelScopeState(ref: PendingModelScope): void;

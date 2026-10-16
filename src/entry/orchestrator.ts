@@ -4635,7 +4635,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(agents
 					? {
 							fleet: {
-								preview: (name: string, vars: Readonly<Record<string, string>>) => {
+								preview: (name: string, vars: Readonly<Record<string, string>>, resume?: string) => {
 									const roleFacts = agentRoleFactsResolver((id: string) => agents.getSpec(id));
 									const budget = result.getContract<SchedulingContract>("scheduling")?.preflight();
 									return compileFleetRunPreview({
@@ -4645,6 +4645,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										getAgentSpec: (agentId) => agents.getSpec(agentId),
 										roleFacts,
 										...(budget ? { budget } : {}),
+										...(resume !== undefined ? { resume } : {}),
 										resolveRoute: fleetRouteResolver(dispatch.preview, roleFacts),
 									});
 								},
@@ -4682,6 +4683,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											getDecisionBoard: () => decisionBoard.snapshot(),
 											attributionEnabled: getCurrentSettings().integrations.git.commitAttribution,
 											vars: preview.vars,
+											...(preview.resume !== undefined
+												? { resume: { record: preview.resume.record, replayed: preview.resume.replayed } }
+												: {}),
 											onStepDispatched: admit,
 											onNotice: (text) => process.stderr.write(`[clio-coder:acp] fleet ${preview.name}: ${text}\n`),
 										}).then(

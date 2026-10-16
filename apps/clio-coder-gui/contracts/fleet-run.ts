@@ -20,8 +20,16 @@ const Vars = Type.Record(
 	},
 );
 
-export const FleetPreviewRequest = Type.Object({ name: FleetName, vars: Type.Optional(Vars) }, closed);
-export const FleetRunRequest = Type.Object({ name: FleetName, vars: Type.Optional(Vars), planHash: Hash }, closed);
+// A resumed run replays the named prior root's successful prefix; the agent validates it.
+const ResumeId = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" });
+export const FleetPreviewRequest = Type.Object(
+	{ name: FleetName, vars: Type.Optional(Vars), resume: Type.Optional(ResumeId) },
+	closed,
+);
+export const FleetRunRequest = Type.Object(
+	{ name: FleetName, vars: Type.Optional(Vars), planHash: Hash, resume: Type.Optional(ResumeId) },
+	closed,
+);
 
 const Step = Type.Object(
 	{
@@ -56,6 +64,7 @@ const Step = Type.Object(
 		gate: Type.Optional(Type.Object({ path: text }, closed)),
 		target: Type.Optional(text),
 		profile: Type.Optional(text),
+		replayed: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );

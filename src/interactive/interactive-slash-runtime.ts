@@ -34,6 +34,7 @@ import {
 	type ContextClearCommandOptions,
 	type CouncilDispatchOutcome,
 	dispatchSlashCommand,
+	type FleetRunStartOptions,
 	type InitCommandOptions,
 	type LibraryBrowseRequest,
 	parseSlashCommand,
@@ -172,7 +173,7 @@ export interface InteractiveSlashRuntimeDeps {
 	/** Run one `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoff: (goal: string) => void;
 	/** Run one `/fleet run <playbook>`: approval preview first, dispatch only on accept. */
-	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>) => void;
+	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>, options?: FleetRunStartOptions) => void;
 	/**
 	 * Run one `/council <task>`: the prepared dispatch-tool arguments go through
 	 * the ordinary tool-admission path, so supervised autonomy parks the call and

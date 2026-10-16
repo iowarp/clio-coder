@@ -2,14 +2,17 @@ import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual } from "node:
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { Playbook } from "../../src/domains/agents/index.js";
+import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import {
 	agentRoleFactsResolver,
 	compileFleetRunPreview,
 	type FleetRunPreview,
 } from "../../src/domains/dispatch/index.js";
+import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import {
 	ACP_FLEET_MAX_STEPS,
@@ -19,6 +22,8 @@ import {
 } from "../../src/engine/acp/fleet-run.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { AcpFleetPreviewSchema } from "../../src/engine/acp/types.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -252,6 +257,77 @@ test("fleet approval changes when a registered command's argv changes under the 
 			approved.preview.planHash,
 			"a command id cannot stand in for its invocation",
 		);
+	} finally {
+		scratch.restore();
+	}
+});
+
+test("a resume id compiles the replayed prefix into every surface's approval", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-resume-preview-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		ok(agents);
+		const records = new Map<string, FleetRunRecord>();
+		const compile = (vars: Record<string, string>, resume?: string) =>
+			compileFleetRunPreview({
+				workspaceRoot: root,
+				name: "survey",
+				vars,
+				getAgentSpec: (id) => agents.getSpec(id),
+				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
+				load: () => ({ commands: null, playbook: playbook(root, ["survey", "report"]) }),
+				...(resume !== undefined ? { resume } : {}),
+				readRun: (id) => records.get(id) ?? null,
+			});
+		const fresh = compile({ site: "plot-7" });
+		ok(fresh.ok);
+		records.set("fleet-0123456789ab", {
+			version: 1,
+			id: "fleet-0123456789ab",
+			fleet: "survey",
+			planHash: fresh.preview.plan.hash,
+			stepIds: fresh.preview.plan.steps.map((step) => step.id),
+			planSteps: [...fresh.preview.plan.steps],
+			vars: { site: "plot-7" },
+			startedAt: "2026-10-01T00:00:00.000Z",
+			endedAt: "2026-10-01T00:01:00.000Z",
+			resumedFrom: null,
+			steps: [
+				{
+					stepId: "survey",
+					result: { succeeded: true, integrityValid: true, terminalRunId: "r1", receiptDigest: "d1" } as ExecutionStepResult,
+				},
+			],
+		});
+		const resumed = compile({ site: "plot-7" }, "fleet-0123456789ab");
+		ok(resumed.ok, JSON.stringify(resumed));
+		deepStrictEqual([...(resumed.preview.resume?.replayed.keys() ?? [])], ["survey"]);
+		const steps = resumed.preview.waves.flatMap((wave) => wave.steps);
+		deepStrictEqual(
+			steps.map((step) => [step.stepId, step.replayed === true]),
+			[
+				["survey", true],
+				["report", false],
+			],
+		);
+		notStrictEqual(resumed.preview.planHash, fresh.preview.planHash, "approving a resume is not approving a fresh run");
+		const projected = projectFleetPreview(resumed);
+		ok(projected.status === "ready");
+		deepStrictEqual(projected.resume, { fromRunId: "fleet-0123456789ab", replayed: ["survey"] });
+		ok(Value.Check(AcpFleetPreviewSchema, projected), "the wire schema carries the replayed prefix");
+		const drifted = compile({ site: "plot-8" }, "fleet-0123456789ab");
+		ok(!drifted.ok);
+		deepStrictEqual(drifted.diagnostics, ["resume run 'fleet-0123456789ab' used different --var values"]);
+		const missing = compile({ site: "plot-7" }, "fleet-ffffffffffff");
+		ok(!missing.ok);
+		deepStrictEqual(missing.diagnostics, ["resume run 'fleet-ffffffffffff' was not found in the durable fleet ledger"]);
+		deepStrictEqual(parseSlashCommand("/fleet run survey --var site=plot-7 --resume fleet-0123456789ab"), {
+			kind: "fleet-run",
+			name: "survey",
+			vars: { site: "plot-7" },
+			resume: "fleet-0123456789ab",
+		});
 	} finally {
 		scratch.restore();
 	}

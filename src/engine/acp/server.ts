@@ -5314,9 +5314,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		return vars;
 	};
-	const compileFleet = (control: AcpFleetControl, name: string, vars: Record<string, string>) => {
+	/** A fleet root id, never a path: the durable ledger keys records by it. */
+	const fleetResume = (value: unknown): string | undefined => {
+		if (value === undefined) return undefined;
+		const id = requireBoundedClientString(value, "resume", 128);
+		if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(id) || id.includes("..")) {
+			throw new AcpRequestError(-32602, "resume is invalid", { code: "invalid_params" });
+		}
+		return id;
+	};
+	const compileFleet = (control: AcpFleetControl, name: string, vars: Record<string, string>, resume?: string) => {
 		try {
-			return control.preview(name, vars);
+			return control.preview(name, vars, resume);
 		} catch (error) {
 			options.diagnostics?.(`fleet preview failed: ${acpErrorMessage(error)}`);
 			throw new AcpRequestError(-32603, "fleet preview failed", { code: "internal_error" });
@@ -5327,10 +5336,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	options.transport.onRequest(ACP_FLEET_PREVIEW_METHOD, (params) => {
 		requireInitialized();
 		requireAuthenticated();
-		const request = assertParamKeys(params, new Set(["sessionId", "name", "vars"]));
+		const request = assertParamKeys(params, new Set(["sessionId", "name", "vars", "resume"]));
 		const control = requireFleet();
 		getSession(request);
-		return projectFleetPreview(compileFleet(control, fleetName(request.name), fleetVars(request.vars)));
+		return projectFleetPreview(
+			compileFleet(control, fleetName(request.name), fleetVars(request.vars), fleetResume(request.resume)),
+		);
 	});
 
 	// Start the plan the client approved, and only that plan: it is compiled
@@ -5338,7 +5349,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	options.transport.onRequest(ACP_FLEET_RUN_METHOD, async (params) => {
 		requireInitialized();
 		requireAuthenticated();
-		const request = assertParamKeys(params, new Set(["sessionId", "name", "vars", "planHash"]));
+		const request = assertParamKeys(params, new Set(["sessionId", "name", "vars", "planHash", "resume"]));
 		const control = requireFleet();
 		const bound = getSession(request);
 		// Refused, never queued: an approved plan describes the workspace as it
@@ -5349,7 +5360,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (typeof request.planHash !== "string" || !/^[0-9a-f]{64}$/u.test(request.planHash)) {
 			throw new AcpRequestError(-32602, "planHash is invalid", { code: "invalid_params" });
 		}
-		const result = compileFleet(control, name, vars);
+		const result = compileFleet(control, name, vars, fleetResume(request.resume));
 		if (!result.ok) return projectFleetPreview(result);
 		if (result.preview.planHash !== request.planHash) {
 			return {

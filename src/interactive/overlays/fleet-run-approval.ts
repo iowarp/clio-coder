@@ -53,6 +53,7 @@ function formatWriteBoundary(writes: ReadonlyArray<string> | undefined): string 
 
 /** One step as its facts: kind, who runs it, where, its scope, and its boundary. */
 function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
+	if (step.replayed === true) return `replay ${step.stepId} · prior sealed result, not dispatched`;
 	const loop = step.loop === undefined ? "" : ` (${step.loop.loopId} ${step.loop.role} ${step.loop.attempt})`;
 	if (step.kind === "code") {
 		const gate = step.gate === undefined ? "" : ` · gate path ${step.gate.path}`;
@@ -110,6 +111,14 @@ export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, wid
 	} else {
 		const { preview } = subject;
 		rows.push(theme.fg("annotation", `${preview.name} · plan ${preview.planHash.slice(0, 12)}`));
+		if (preview.resume !== undefined) {
+			const replayed = [...preview.resume.replayed.keys()];
+			const line =
+				replayed.length === 0
+					? `resumes ${preview.resume.fromRunId}: no successful prefix to replay; every step runs`
+					: `resumes ${preview.resume.fromRunId}: replays ${replayed.length} step${replayed.length === 1 ? "" : "s"} (${replayed.join(", ")}), runs the rest`;
+			for (const wrapped of wrapTextWithAnsi(theme.fg("info", line), contentWidth)) rows.push(wrapped);
+		}
 		rows.push(rule(theme, contentWidth));
 		for (const wave of preview.waves) {
 			rows.push(theme.fg("groupHeading", `wave ${wave.index}`));
@@ -120,7 +129,7 @@ export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, wid
 				)) {
 					rows.push(line);
 				}
-				if (step.argv !== undefined) {
+				if (step.argv !== undefined && step.replayed !== true) {
 					rows.push(
 						...wrapTextWithAnsi(
 							theme.fg("annotation", `    argv ${step.argv.map((arg) => JSON.stringify(arg)).join(" ")}`),

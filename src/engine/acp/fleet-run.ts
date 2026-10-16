@@ -30,7 +30,8 @@ const MAX_LIST = 16;
 
 /** What the composition root binds; the server never compiles or dispatches a plan itself. */
 export interface AcpFleetControl {
-	preview(name: string, vars: Readonly<Record<string, string>>): FleetRunPreviewResult;
+	/** `resume` names a prior root whose successful prefix the run replays; the compiler validates it. */
+	preview(name: string, vars: Readonly<Record<string, string>>, resume?: string): FleetRunPreviewResult;
 	/**
 	 * Start an approved, freshly compiled plan. Settles when its first step is
 	 * dispatched, or with the reason when the run ends before dispatching one:
@@ -104,6 +105,7 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 					...(step.gate !== undefined ? { gate: { path: previewText(step.gate.path) } } : {}),
 					...(step.target !== undefined ? { target: previewText(step.target) } : {}),
 					...(step.profile !== undefined ? { profile: previewText(step.profile) } : {}),
+					...(step.replayed === true ? { replayed: true as const } : {}),
 				}),
 			),
 		};
@@ -116,5 +118,13 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 		waves: waves.filter((wave) => wave.steps.length > 0),
 		budget: { ...preview.budget },
 		truncated,
+		...(preview.resume !== undefined
+			? {
+					resume: {
+						fromRunId: previewText(preview.resume.fromRunId),
+						replayed: [...preview.resume.replayed.keys()].slice(0, ACP_FLEET_MAX_STEPS).map((id) => previewText(id)),
+					},
+				}
+			: {}),
 	};
 }

@@ -1157,7 +1157,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		openDraft: (request, count) => openDraftOverlayState(request, count),
 		startHandoff: (goal) => startHandoffState(goal),
-		startFleetRun: (name, vars) => startFleetRunState(name, vars),
+		startFleetRun: (name, vars, options) => startFleetRunState(name, vars, options),
 		openFleetRuns: () => toggleDispatchBoardOverlay(),
 		...(toolRegistry ? { runCouncilDispatch: (args) => dispatchCouncilThroughRegistry(toolRegistry, args) } : {}),
 		openContextView: () => openContextViewOverlayState(),
