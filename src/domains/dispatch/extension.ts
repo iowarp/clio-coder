@@ -2659,9 +2659,11 @@ function resolveDispatchAdmissionStage(
 	}
 	// A task worktree's checkout holds the declarations and trust records the
 	// operator reviewed; reading them from the worktree would see none of them.
+	// A compete candidate carries its checkout only as the protected-artifact
+	// remap's source root, with cwd set to its own worktree.
 	const mcp = resolveWorkerMcpAdmission({
 		agentId: req.agentId,
-		projectCwd: req.taskWorktree?.root ?? req.cwd ?? process.cwd(),
+		projectCwd: req.taskWorktree?.root ?? req.protectedArtifactRemap?.sourceRoot ?? req.cwd ?? process.cwd(),
 		tools: allowedTools,
 	});
 	const requestedActions = deriveRequestedActions(allowedTools, safety, mcp);
