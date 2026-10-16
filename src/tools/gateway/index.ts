@@ -628,16 +628,29 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		};
 	};
 
-	const runDescribe = (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): ToolResult => {
+	const runDescribe = async (
+		args: Record<string, unknown>,
+		options: ToolInvokeOptions | undefined,
+	): Promise<ToolResult> => {
 		const name = typeof args.capability === "string" ? args.capability.trim() : "";
 		if (name.length === 0) return { kind: "error", message: 'gateway: op="describe" requires capability' };
 		const allowed = allowedSet(options);
 		// The admitted wrapper can describe its own transport syntax even when
 		// scope named only an inner capability. This grants no child admission.
 		if (allowed !== null && !allowed.has(name) && name !== ToolNames.Gateway) return outsideSurface(name, allowed);
-		const spec = registry.get(name as ToolName);
+		let spec = registry.get(name as ToolName);
+		if (spec === undefined && isMcpToolName(name) && deps.mcp) {
+			// A restricted surface cannot refresh a catalog (runFind refuses it), so
+			// an admitted name with none recorded launches its own server here, as
+			// a call of that name would, and is described from the live listing.
+			if (allowed === null || deps.mcp.metadata(name).metadata !== null) return describeFromCatalog(name);
+			const ensured = await deps.mcp.ensure(name, options?.signal ? { signal: options.signal } : {});
+			if (ensured.spec === null) {
+				return { kind: "error", message: `gateway: ${ensured.reason ?? `unknown capability ${name}`}` };
+			}
+			spec = ensured.spec;
+		}
 		if (spec === undefined) {
-			if (isMcpToolName(name) && deps.mcp) return describeFromCatalog(name);
 			return {
 				kind: "error",
 				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
