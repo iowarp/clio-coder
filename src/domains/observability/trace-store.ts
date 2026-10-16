@@ -1558,9 +1558,10 @@ export function createDispatchTraceMirror(
 	 * process's capture. Only the failing store transaction rolls back: a write
 	 * split across transactions, such as startRun's upsert and its running
 	 * update, may keep the part that committed. The loss is counted and the
-	 * warning names the channel and run. The run stays tracked, so its later
-	 * rows still land. Only a store that cannot be opened at all degrades
-	 * capture.
+	 * warning names the channel and run. A run that was tracked before the row
+	 * stays tracked, so its later rows still land. Capture degrades only when
+	 * the store cannot be opened at all or the loss marker itself cannot be
+	 * written.
 	 */
 	const rowFailed = (row: TraceRow, error: unknown): void => {
 		const key = `${row.channel}\u0000${row.runId ?? ""}`;
@@ -1636,13 +1637,22 @@ export function createDispatchTraceMirror(
 					if (isRecord(payload.event) && payload.event.type === "attempt_start" && typeof payload.event.runId === "string")
 						payload = { ...payload, runId: payload.event.runId };
 					const active = seen.has(payload.runId);
-					recordProgress(getStore(), payload, starts, seen, contextWindows, gateRuns, observedAt);
-					if (!active) forgetRun(payload.runId);
+					// The forget runs even when the row throws, or a row for a run that
+					// was not tracked leaves its entries in seen and starts for the
+					// life of the process.
+					try {
+						recordProgress(getStore(), payload, starts, seen, contextWindows, gateRuns, observedAt);
+					} finally {
+						if (!active) forgetRun(payload.runId);
+					}
 				} else if (channel === "dispatch.completed" || channel === "dispatch.failed") {
 					const payload = raw as unknown as DispatchFailedPayload;
-					if (channel === "dispatch.completed") getStore().finishRun(payload, true, observedAt);
-					else recordFailure(getStore(), payload, observedAt);
-					if (channel === "dispatch.completed" || payload.reason !== "retry_denied") forgetRun(payload.runId);
+					try {
+						if (channel === "dispatch.completed") getStore().finishRun(payload, true, observedAt);
+						else recordFailure(getStore(), payload, observedAt);
+					} finally {
+						if (channel === "dispatch.completed" || payload.reason !== "retry_denied") forgetRun(payload.runId);
+					}
 				}
 			});
 		},
