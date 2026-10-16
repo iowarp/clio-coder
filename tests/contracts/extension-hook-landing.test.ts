@@ -288,3 +288,31 @@ test("a review dispatch's landing names the reviewer the loop starts, not only t
 		readOnly: true,
 	});
 });
+
+// The landing read readOnly from the request alone, which the parser never sets
+// for a read-only recipe, so a hook saw every scout as a writer and WTF-P kept
+// its own list of read-only agents.
+
+test("a dispatch naming a read-only recipe lands that worker read-only", async (t) => {
+	await hookedRegistry(t, ["dispatch"]);
+	const tool = await admissionOnlyDispatchTool(t);
+	const prepared = tool.prepareAdmissionArguments?.({
+		tasks: JSON.stringify([{ task: "Map where counter.js is used" }]),
+		agent: "scout",
+		intent: { read_roots: [], write_roots: ["real/"] },
+	});
+	ok(prepared);
+	strictEqual(
+		prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT],
+		undefined,
+		String(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]),
+	);
+	const landing = tool.describeHookLanding?.(prepared)?.dispatch;
+	tool.disposeAdmissionArguments?.(prepared);
+	ok(landing?.kind === "tasks");
+	deepStrictEqual(
+		landing.tasks.map((task) => [task.agent, task.readOnly]),
+		[["scout", true]],
+	);
+	deepStrictEqual([landing.tasks[0]?.writeRoots, landing.tasks[0]?.writeBoundaries], [[], []]);
+});

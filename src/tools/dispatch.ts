@@ -43,15 +43,28 @@ function landingCwd(cwd: string | undefined): string {
 	return canonicalizeExistingPath(resolve(process.cwd(), cwd ?? "."));
 }
 
-function writerLanding(request: DispatchRequest, role: ToolCallDispatchRole, worktree: boolean): ToolCallDispatchTask {
+/**
+ * A worker the request names, read-only when the request says so or when its
+ * recipe is a read-only class, the same rule admission applies when it builds
+ * the worker. The parser never sets request.readOnly for a read-only recipe,
+ * so reading the request alone told a hook every scout or oracle could write.
+ * A read-only worker lands with no write roots, since admission binds none.
+ */
+function writerLanding(
+	request: DispatchRequest,
+	role: ToolCallDispatchRole,
+	worktree: boolean,
+	isReadOnlyAgent: (agentId: string) => boolean,
+): ToolCallDispatchTask {
+	const readOnly = request.readOnly === true || isReadOnlyAgent(request.agentId);
 	return {
 		role,
 		agent: request.agentId,
 		cwd: landingCwd(request.cwd),
-		writeRoots: [...(request.writeRoots ?? request.intent?.writeRoots ?? [])],
-		writeBoundaries: canonicalWriteRoots(request),
+		writeRoots: readOnly ? [] : [...(request.writeRoots ?? request.intent?.writeRoots ?? [])],
+		writeBoundaries: readOnly ? [] : canonicalWriteRoots(request),
 		worktree,
-		readOnly: request.readOnly === true,
+		readOnly,
 	};
 }
 
@@ -70,6 +83,7 @@ function readerLanding(role: ToolCallDispatchRole, agent: string, cwd: string | 
 function dispatchHookLanding(
 	snapshot: DispatchExecutionSnapshot | undefined,
 	plan: ResolvedDispatchPlanArtifact | undefined,
+	isReadOnlyAgent: (agentId: string) => boolean,
 ): ToolCallLanding | null {
 	if (snapshot === undefined) return null;
 	if (snapshot.kind === "list") return { dispatch: { kind: "list" } };
@@ -80,11 +94,11 @@ function dispatchHookLanding(
 	const base = snapshot.requests[0];
 	const tasks: ToolCallDispatchTask[] = [];
 	if (base !== undefined && snapshot.review !== undefined) {
-		tasks.push(writerLanding(base, "builder", base.worktree === true));
+		tasks.push(writerLanding(base, "builder", base.worktree === true, isReadOnlyAgent));
 		tasks.push(readerLanding("reviewer", planned("reviewer") ?? gateDeciderAgentId(snapshot.review.reviewer), base.cwd));
 	} else if (base !== undefined && snapshot.compete !== undefined) {
 		// Each candidate runs in a scratch worktree the host creates for it.
-		tasks.push(writerLanding(base, "candidate", true));
+		tasks.push(writerLanding(base, "candidate", true, isReadOnlyAgent));
 		tasks.push(readerLanding("judge", planned("judge") ?? gateDeciderAgentId(snapshot.compete.judge?.agent), base.cwd));
 	} else if (base !== undefined && snapshot.council !== undefined) {
 		const council = snapshot.council;
@@ -101,7 +115,8 @@ function dispatchHookLanding(
 				),
 			);
 	} else {
-		for (const request of snapshot.requests) tasks.push(writerLanding(request, "task", request.worktree === true));
+		for (const request of snapshot.requests)
+			tasks.push(writerLanding(request, "task", request.worktree === true, isReadOnlyAgent));
 	}
 	return {
 		dispatch: {
@@ -155,6 +170,7 @@ export function createDispatchTool(
 			dispatchHookLanding(
 				admission.state.trustedExecutionSnapshots.get(args),
 				admission.state.trustedResolvedPlans.get(args),
+				(agentId) => deps.getAgentSpecs().find((spec) => spec.id === agentId)?.capabilityClass === "read-only",
 			),
 		async run(rawArgs, options) {
 			const args = admission.prepareArguments(rawArgs);
