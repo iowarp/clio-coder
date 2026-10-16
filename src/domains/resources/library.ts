@@ -520,7 +520,10 @@ export function resolveLibraryPackage(
 	const matches = discoverLibrary(options).entries.filter((item) =>
 		source.includes(":") ? libraryEntryRef(item) === source : item.name === source,
 	);
-	if (matches.length > 1) throw new Error(`ambiguous package: ${source}; use kind:name`);
+	if (matches.length > 1) {
+		const refs = [...new Set(matches.map(libraryEntryRef))].sort();
+		throw new Error(`ambiguous package: ${source}; use ${refs.join(" or ")}`);
+	}
 	const entry = matches[0];
 	if (entry) return entry;
 	if (parsePluginGithubSource(source))
