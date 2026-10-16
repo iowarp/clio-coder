@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { mcpToolName, ToolNames } from "../../src/core/tool-names.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -20,6 +20,56 @@ describe("gateway correction contracts", () => {
 		env = await isolateClioEnv("gateway-corrections-");
 	});
 	afterEach(() => env.restore());
+
+	it("reads a request carrying args as a call, never as a discovery listing", async () => {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "yolo" });
+		const capability = mcpToolName("lab", "stage");
+		ok(capability);
+		let calls = 0;
+		registry.register({
+			name: capability,
+			placement: "gateway",
+			description: "Stage a fixture",
+			parameters: Type.Object({ op: Type.String(), id: Type.String() }),
+			baseActionClass: "execute",
+			run: async () => {
+				calls++;
+				return { kind: "ok", output: "staged" };
+			},
+		});
+		registry.register(createGatewayTool({ registry }));
+		const nested = { capability, op: "call", id: "r7" };
+		for (const args of [
+			{ args: nested },
+			{ args: JSON.stringify(nested) },
+			{ args: { id: "r7" } },
+			{ op: "call", args: nested },
+			{ op: "find", args: nested },
+			{ op: "find", query: "stage", args: {} },
+		]) {
+			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
+			ok(verdict.kind === "ok", JSON.stringify(verdict));
+			ok(verdict.result.kind === "error", JSON.stringify(verdict));
+			match(verdict.result.message, /op and capability belong at the top level/);
+			match(verdict.result.message, /No capability was invoked/);
+		}
+		const named = await registry.invoke({ tool: ToolNames.Gateway, args: { args: nested } });
+		ok(named.kind === "ok" && named.result.kind === "error");
+		match(named.result.message, new RegExp(`"capability":"${capability}"`));
+		strictEqual(calls, 0);
+		for (const args of [{}, { query: "stage" }]) {
+			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
+			ok(verdict.kind === "ok" && verdict.result.kind === "ok", JSON.stringify(verdict));
+			match(verdict.result.output, /mcp_lab__stage/);
+		}
+		// A capability's own op argument is valid once the capability is top-level.
+		const valid = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { capability, args: { op: "stage", id: "r7" } },
+		});
+		ok(valid.kind === "ok" && valid.result.kind === "ok", JSON.stringify(valid));
+		strictEqual(calls, 1);
+	});
 
 	it("refuses normalized protected data paths before the reader runs", async () => {
 		const cwd = clioStateDir();

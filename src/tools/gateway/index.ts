@@ -203,12 +203,24 @@ function prepareGatewayArguments(args: Record<string, unknown>): Record<string, 
 			// The body reports the unparseable string.
 		}
 	}
+	// Arguments only ever belong to a call. A request carrying them without a
+	// capability is a call whose envelope was nested inside `args`; reading it
+	// as find answered a mis-wrapped call with a successful discovery listing,
+	// and the model took that as the call having run.
 	if (typeof out.op !== "string") {
-		if (typeof out.capability === "string" && out.args !== undefined) out.op = "call";
+		if (out.args !== undefined) out.op = "call";
 		else if (typeof out.capability === "string") out.op = "describe";
 		else out.op = "find";
 	}
 	return out;
+}
+
+/** The correction for a call whose op or capability went inside `args`. */
+function envelopeHint(args: Record<string, unknown>): string {
+	const nested = isRecord(args.args) ? args.args : null;
+	const named = nested?.capability ?? nested?.name ?? nested?.tool;
+	const capability = typeof named === "string" && named.trim().length > 0 ? named.trim() : "<name>";
+	return `op and capability belong at the top level and args holds only the capability's own arguments: {"op":"call","capability":"${capability}","args":{...}}. No capability was invoked.`;
 }
 
 function firstSentence(text: string): string {
@@ -312,6 +324,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	};
 
 	const runFind = async (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): Promise<ToolResult> => {
+		if (args.args !== undefined) {
+			return { kind: "error", message: `gateway: op="find" takes no args; ${envelopeHint(args)}` };
+		}
 		const rawQuery = typeof args.query === "string" ? args.query.trim() : "";
 		const query = rawQuery.toLowerCase();
 		const server = typeof args.server === "string" ? args.server.trim() : "";
@@ -711,7 +726,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		allowDirect = false,
 	): Promise<ToolResult> => {
 		const name = typeof args.capability === "string" ? args.capability.trim() : "";
-		if (name.length === 0) return { kind: "error", message: 'gateway: op="call" requires capability' };
+		if (name.length === 0) {
+			return { kind: "error", message: `gateway: op="call" requires capability; ${envelopeHint(args)}` };
+		}
 		const allowed = allowedSet(options);
 		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed);
 		const resolved = await resolveCapability(name, options, allowDirect);
