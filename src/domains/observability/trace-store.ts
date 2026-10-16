@@ -56,6 +56,7 @@ export interface TraceCaptureCoverage {
 	status: "known_loss" | "degraded" | "unreported";
 	droppedProgress: number | null;
 	droppedPackageActivity: number | null;
+	failedRows: number | null;
 }
 
 /** Thirty days or 128 MiB, whichever limit the mirror reaches first. */
@@ -1290,15 +1291,17 @@ export class TraceReader {
 		const values = new Map(rows.map((row) => [row.key, Number(row.value)]));
 		const droppedProgress = values.get("capture_dropped_progress") ?? null;
 		const droppedPackageActivity = values.get("capture_dropped_package_activity") ?? null;
+		const failedRows = values.get("capture_failed_rows") ?? null;
 		return {
 			status:
 				(values.get("capture_degraded") ?? 0) > 0
 					? "degraded"
-					: (droppedProgress ?? 0) + (droppedPackageActivity ?? 0) + (values.get("capture_failed_rows") ?? 0) > 0
+					: (droppedProgress ?? 0) + (droppedPackageActivity ?? 0) + (failedRows ?? 0) > 0
 						? "known_loss"
 						: "unreported",
 			droppedProgress,
 			droppedPackageActivity,
+			failedRows,
 		};
 	}
 

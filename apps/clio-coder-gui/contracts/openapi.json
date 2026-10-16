@@ -40702,7 +40702,7 @@
 											"anyOf": [
 												{
 													"type": "object",
-													"required": ["status", "droppedProgress", "droppedPackageActivity"],
+													"required": ["status", "droppedProgress", "droppedPackageActivity", "failedRows"],
 													"properties": {
 														"status": {
 															"anyOf": [
@@ -40731,6 +40731,16 @@
 															]
 														},
 														"droppedPackageActivity": {
+															"anyOf": [
+																{
+																	"type": "number"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"failedRows": {
 															"anyOf": [
 																{
 																	"type": "number"

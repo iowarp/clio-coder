@@ -11,7 +11,7 @@ import { toneForOutcome } from "../../design/status.js";
 export function captureCoverageLabel(coverage: TraceCaptureCoverage | null): string {
 	if (coverage === null || coverage.status === "unreported")
 		return "Capture coverage unreported. Recorded activity does not establish complete capture.";
-	return `Database-wide capture: ${coverage.status === "known_loss" ? "known loss" : "degraded"}. Dropped progress: ${coverage.droppedProgress ?? "unreported"}; dropped package activity: ${coverage.droppedPackageActivity ?? "unreported"}. Per-run and remaining coverage is unreported.`;
+	return `Database-wide capture: ${coverage.status === "known_loss" ? "known loss" : "degraded"}. Dropped progress: ${coverage.droppedProgress ?? "unreported"}; dropped package activity: ${coverage.droppedPackageActivity ?? "unreported"}; failed rows: ${coverage.failedRows ?? "unreported"}. Per-run and remaining coverage is unreported.`;
 }
 
 export interface RunTotal {

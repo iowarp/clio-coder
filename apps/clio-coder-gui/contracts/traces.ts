@@ -13,6 +13,7 @@ export const TraceCaptureCoverage = Type.Object(
 		status: Type.Union([Type.Literal("known_loss"), Type.Literal("degraded"), Type.Literal("unreported")]),
 		droppedProgress: count,
 		droppedPackageActivity: count,
+		failedRows: count,
 	},
 	closed,
 );

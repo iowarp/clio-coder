@@ -25,12 +25,18 @@ test("trace read-only seams, public projections, Date, rowid bounds, and full re
 		status: "unreported",
 		droppedProgress: null,
 		droppedPackageActivity: null,
+		failedRows: null,
 	});
 	assert.match(captureCoverageLabel(status.captureCoverage), /coverage unreported/i);
 	fixture.store.recordCaptureLoss("progress", 5);
 	fixture.store.recordCaptureLoss("package_activity", 3);
 	const loss = await json(await h.request("/api/traces/status"), routes.traceStatus.response);
-	assert.deepEqual(loss.captureCoverage, { status: "known_loss", droppedProgress: 5, droppedPackageActivity: 3 });
+	assert.deepEqual(loss.captureCoverage, {
+		status: "known_loss",
+		droppedProgress: 5,
+		droppedPackageActivity: 3,
+		failedRows: null,
+	});
 	assert.match(captureCoverageLabel(loss.captureCoverage), /Database-wide capture: known loss/);
 	fixture.store.recordCaptureLoss("degraded");
 	const degraded = await json(await h.request("/api/traces/status"), routes.traceStatus.response);

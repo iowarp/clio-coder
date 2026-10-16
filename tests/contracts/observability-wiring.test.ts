@@ -87,7 +87,12 @@ it("persists database-wide queue loss and degradation without claiming complete 
 	await mirror.flush();
 	const reader = new TraceReader(path);
 	try {
-		deepStrictEqual(reader.captureCoverage(), { status: "known_loss", droppedProgress: 7, droppedPackageActivity: null });
+		deepStrictEqual(reader.captureCoverage(), {
+			status: "known_loss",
+			droppedProgress: 7,
+			droppedPackageActivity: null,
+			failedRows: null,
+		});
 		match(warnings[0] ?? "", /dropped 7/);
 		await mirror.flush();
 		equal(reader.captureCoverage().droppedProgress, 7);
@@ -101,6 +106,7 @@ it("persists database-wide queue loss and degradation without claiming complete 
 			status: "known_loss",
 			droppedProgress: 7,
 			droppedPackageActivity: null,
+			failedRows: null,
 		});
 	} finally {
 		reopened.close();
@@ -142,6 +148,7 @@ it("records a fleet retry's attempt marker on its attempt, and one failed row ne
 			JSON.stringify(reader.events("a1")),
 		);
 		equal(reader.captureCoverage().status, "known_loss");
+		equal(reader.captureCoverage().failedRows, 1);
 		equal(warnings.length, 1, warnings.join("\n"));
 		match(
 			warnings[0] ?? "",
@@ -172,6 +179,7 @@ it("counts package losses once per event in the same transaction across writer c
 			status: "unreported",
 			droppedProgress: null,
 			droppedPackageActivity: null,
+			failedRows: null,
 		});
 		first.recordPackageActivity(activity);
 		second.recordPackageActivity(activity);

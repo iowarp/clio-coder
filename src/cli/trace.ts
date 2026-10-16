@@ -198,7 +198,7 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 	try {
 		const capture = reader.captureCoverage();
 		process.stderr.write(
-			`trace capture (database-wide): ${capture.status.replace("_", " ")}; dropped progress=${capture.droppedProgress ?? "unreported"}, dropped package activity=${capture.droppedPackageActivity ?? "unreported"}; per-run and remaining coverage unreported\n`,
+			`trace capture (database-wide): ${capture.status.replace("_", " ")}; dropped progress=${capture.droppedProgress ?? "unreported"}, dropped package activity=${capture.droppedPackageActivity ?? "unreported"}, failed rows=${capture.failedRows ?? "unreported"}; per-run and remaining coverage unreported\n`,
 		);
 		// Every case below is reachable only after `invocationError` accepted the
 		// command and its required positional, so the run id is present wherever
