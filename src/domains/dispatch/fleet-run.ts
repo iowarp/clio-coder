@@ -52,6 +52,7 @@ import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from 
 import { deriveFleetCommitAttribution } from "./fleet-commit-attribution.js";
 import { createFleetEventJournal, fleetManifestDigest, fleetStepEntryDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
+import { acquireFleetWorkspaceLock } from "./fleet-workspace-lock.js";
 import {
 	decideReviewGate,
 	type GateDecisionCorrelation,
@@ -255,6 +256,8 @@ export interface ExecuteFleetRunInput {
 	 * hands a playbook step write or bash (Z1).
 	 */
 	turnConstraints?: TurnConstraints;
+	/** Fires once the workspace lock is held, so a refused run never announces its minted root. */
+	onStarted?: () => void;
 	onStepDispatched?: (event: FleetRunStepEvent) => void;
 	onStepSettled?: (outcome: FleetRunStepOutcome) => void;
 	/** Operator-facing lines the caller renders wherever it shows the run. */
@@ -327,6 +330,24 @@ export function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number 
  * result rather than an exception.
  */
 export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<FleetRunOutcome> {
+	// Taken before the root claims its verdict or writes a record, so a refused
+	// run leaves no durable trace and its minted id never reads as a real root.
+	const lease = await acquireFleetWorkspaceLock({ workspaceRoot: input.workspaceRoot, rootId: input.fleetRootId });
+	try {
+		input.onStarted?.();
+		return await runFleetHoldingWorkspace(input);
+	} finally {
+		await lease.release().catch((error: unknown) => {
+			// The record names this live process, so other processes are refused
+			// here until it exits or its next acquisition retries the release; say
+			// so rather than let the leftover look like a hang.
+			const message = error instanceof Error ? error.message : String(error);
+			input.onNotice?.(`could not release the workspace fleet lock: ${message}`);
+		});
+	}
+}
+
+async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<FleetRunOutcome> {
 	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
 	const decisionRefs = activeDecisionRefs(input.getDecisionBoard?.() ?? []);
 	let livePlan = input.plan;

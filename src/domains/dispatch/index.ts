@@ -118,6 +118,7 @@ export type {
 export { compileFleetRunPreview, fleetRouteResolver } from "./fleet-run-preview.js";
 export type { FleetToolInstallPlan } from "./fleet-tool-install.js";
 export { describeFleetToolInstall, executeFleetToolInstall, prepareFleetToolInstall } from "./fleet-tool-install.js";
+export { FleetWorkspaceBusyError, FleetWorkspaceLockUnavailableError } from "./fleet-workspace-lock.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,

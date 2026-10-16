@@ -4674,6 +4674,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										const attributionEnabled = getCurrentSettings().integrations.git.commitAttribution;
 										acpFleetInFlight = { name: preview.name, fleetRootId };
 										let admitted = false;
+										let started = false;
+										let admissionCap: ReturnType<typeof setTimeout> | undefined;
 										const admit = () => {
 											if (admitted) return;
 											admitted = true;
@@ -4681,9 +4683,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											resolve({ status: "started", fleetRootId });
 										};
 										// A first step that waits on proposals or endpoint capacity is running, not
-										// failed; the answer stops waiting before a client's own deadline does.
-										const admissionCap = setTimeout(admit, 30_000);
-										admissionCap.unref?.();
+										// failed; the answer stops waiting before a client's own deadline does. The
+										// cap starts with the run, so a slow workspace lock never reads as started.
+										const onStarted = () => {
+											started = true;
+											admissionCap = setTimeout(admit, 30_000);
+											admissionCap.unref?.();
+										};
 										const refuse = (reason: string) => {
 											if (admitted) return false;
 											admitted = true;
@@ -4708,6 +4714,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 												? { resume: { record: preview.resume.record, replayed: preview.resume.replayed } }
 												: {}),
 											...(turnConstraints !== undefined ? { turnConstraints } : {}),
+											onStarted,
 											onStepDispatched: admit,
 											onNotice: (text) => process.stderr.write(`[clio-coder:acp] fleet ${preview.name}: ${text}\n`),
 										})
@@ -4719,6 +4726,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 												},
 												(error: unknown) => {
 													const message = error instanceof Error ? error.message : String(error);
+													// The run never started: another process's fleet holds this
+													// workspace, the lock timed out, or the birth token was missing.
+													// The id minted here never ran and is not reported.
+													if (!started && !admitted) {
+														admitted = true;
+														clearTimeout(admissionCap);
+														resolve({ status: "refused", reason: message });
+														return;
+													}
 													if (!refuse(message)) process.stderr.write(`[clio-coder:acp] fleet ${preview.name} failed: ${message}\n`);
 												},
 											)

@@ -66,9 +66,10 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 			},
 			// The session's --delegate-tools limit reaches every worker the run starts.
 			standingTurnConstraints: () => ({ delegatedTools: ["read"] }),
-			runFleet: (input) =>
-				new Promise<FleetRunOutcome>((resolve) => {
-					runLimits.push(input.turnConstraints);
+			runFleet: (input) => {
+				input.onStarted?.();
+				runLimits.push(input.turnConstraints);
+				return new Promise<FleetRunOutcome>((resolve) => {
 					finish = () =>
 						resolve({
 							cleanRun: true,
@@ -76,7 +77,8 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 							requiredStepCount: 1,
 							totalCost: { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: true, calls: 0 },
 						} as unknown as FleetRunOutcome);
-				}),
+				});
+			},
 		};
 		const openers = createOverlayGeneralOpeners(deps as OverlayGeneralOpenersDeps);
 		// A run whose arguments throw before it starts must not leave the

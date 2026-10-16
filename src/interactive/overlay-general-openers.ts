@@ -9,6 +9,7 @@ import {
 	agentRoleFactsResolver,
 	compileFleetRunPreview,
 	executeFleetRun,
+	FleetWorkspaceBusyError,
 	fleetRouteResolver,
 } from "../domains/dispatch/index.js";
 import type { MemoryRecord } from "../domains/memory/index.js";
@@ -692,13 +693,14 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onStepDispatched: (event) => {
 				deps.setFleetRunPhase?.(event.assignmentId, { wave: event.waveIndex, stepId: event.stepId });
 			},
+			onStarted: () =>
+				deps.notify(
+					"info",
+					`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
+					"fleet-run:started",
+				),
 			onNotice: (text) => deps.stderr(`[fleet ${preview.name}] ${text}\n`),
 		};
-		deps.notify(
-			"info",
-			`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
-			"fleet-run:started",
-		);
 		fleetInFlight = { name: preview.name, fleetRootId };
 		void run(args)
 			.then((outcome) => {
@@ -714,6 +716,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			})
 			.catch((error: unknown) => {
 				fleetInFlight = null;
+				if (error instanceof FleetWorkspaceBusyError) {
+					deps.notify("warning", `fleet ${preview.name}: ${error.message}`, "fleet-run:refused");
+					return;
+				}
 				deps.notify(
 					"error",
 					`fleet ${preview.name}: ${error instanceof Error ? error.message : String(error)}`,

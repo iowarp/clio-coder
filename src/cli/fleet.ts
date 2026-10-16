@@ -52,6 +52,8 @@ import {
 	type ExecuteFleetRunInput,
 	executeFleetRun,
 	type FleetRunOutcome,
+	FleetWorkspaceBusyError,
+	FleetWorkspaceLockUnavailableError,
 	planFleetResume,
 	readFleetRun,
 } from "../domains/dispatch/index.js";
@@ -434,9 +436,6 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		resume = { record, replayed: planned.replayed };
 	}
 
-	process.stderr.write(
-		`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
-	);
 	let outcome: FleetRunOutcome;
 	try {
 		outcome = await executeFleetRun({
@@ -450,6 +449,11 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			attributionEnabled: config?.get().integrations.git.commitAttribution ?? true,
 			vars,
 			...(resume !== undefined ? { resume } : {}),
+			onStarted() {
+				process.stderr.write(
+					`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
+				);
+			},
 			onStepSettled(step) {
 				if (step.replayed === true && step.result !== undefined) {
 					if (json) {
@@ -492,13 +496,19 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				}
 			},
 			onNotice(text, kind) {
-				if (kind === "write-boundary") process.stderr.write(`${text}\n`);
-				else if (kind === "gate" && !json) process.stdout.write(`${text}\n`);
+				// A notice without a kind (a failed workspace lock release) goes to stderr like a write boundary.
+				if (kind === "gate") {
+					if (!json) process.stdout.write(`${text}\n`);
+				} else process.stderr.write(`${text}\n`);
 			},
 		});
 	} catch (err) {
 		await dispatch.drain();
 		await loaded.stop();
+		// A busy or unjudgeable workspace lock refuses this run; it is not a usage error, so it exits 1 like the other refusals.
+		if (err instanceof FleetWorkspaceBusyError || err instanceof FleetWorkspaceLockUnavailableError) {
+			return refuse(err.message);
+		}
 		return fail(err instanceof Error ? err.message : String(err));
 	}
 	await dispatch.drain();
