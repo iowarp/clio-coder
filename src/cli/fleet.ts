@@ -102,8 +102,9 @@ Subcommands:
   view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and receipt
   view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
   events <fleetRootId> [--follow] [--json] [--all]
-                                print a fleet run's live event journal; each settled step is a
-                                sealed manifest checkpoint, and --follow exits after the final seal
+                                print a fleet run's live event journal of hash-chained, unsigned
+                                lines; each settled step names the manifest bytes written at that
+                                moment, and --follow exits after fleet_sealed
   drain [--json]                deny new execution starts for up to one hour
   resume [--json]               reopen dispatch admission immediately
   cancel <runId> [--json] [--reason <text>]
