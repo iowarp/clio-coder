@@ -1,8 +1,7 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { parseCommandArgs, substituteArgs } from "../../../engine/prompt-templates.js";
-import { INTEROP_AGENT_KINDS } from "../../interop/registry.js";
+import { INTEROP_AGENT_KINDS, interopUserRoot } from "../../interop/registry.js";
 import {
 	type ResourceCandidate,
 	type ResourceDiagnostic,
@@ -116,13 +115,14 @@ export type PromptTemplateExpansion =
  */
 function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): PromptTemplateRoot[] {
 	const cwd = input.cwd ?? process.cwd();
-	const home = input.home ?? homedir();
 	const trustProject = projectCompatTrusted(input.trustProjectCompatRoots);
 	const compat: PromptTemplateRoot[] = [];
 	for (const kind of INTEROP_AGENT_KINDS) {
-		if (kind.userPromptRoot !== undefined) {
+		// Null under CLIO_CODER_INTEROP_HOME=none; CLAUDE_CONFIG_DIR and its peers move the root (interopUserRoot).
+		const userRoot = kind.userPromptRoot === undefined ? null : interopUserRoot(kind, kind.userPromptRoot, input.home);
+		if (userRoot !== null) {
 			compat.push({
-				path: path.join(home, kind.userPromptRoot),
+				path: userRoot.path,
 				scope: "user",
 				source: `${kind.id}-user`,
 				precedence: COMPAT_RESOURCE_PRECEDENCE.userCompat,

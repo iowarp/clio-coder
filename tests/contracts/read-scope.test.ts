@@ -237,16 +237,23 @@ describe("read scope admission", () => {
 		}
 	});
 
-	it("keeps the interop skill roots and dispatch receipts readable", () => {
+	it("keeps the interop skill roots and dispatch receipts readable unless CLIO_CODER_INTEROP_HOME is none", () => {
+		delete process.env.CLIO_CODER_INTEROP_HOME;
+		// A CLIO_CODER_HOME install still exempts the operator's own interop skill roots.
+		const operatorSkill = { path: join(homedir(), ".claude", "skills", "demo", "SKILL.md") };
 		const engine = createSafetyPolicyEngine({ cwd: root });
-		for (const path of [
-			join(homedir(), ".claude", "skills", "demo", "SKILL.md"),
-			join(env.dir, "state", "receipts", "run-1.json"),
-		]) {
+		for (const path of [operatorSkill.path, join(env.dir, "state", "receipts", "run-1.json")]) {
 			strictEqual(engine.evaluate({ tool: ToolNames.Read, args: { path } }).readScope, undefined, path);
 		}
 		const sibling = join(homedir(), ".claude", "skillsX", "demo.md");
 		strictEqual(engine.evaluate({ tool: ToolNames.Read, args: { path: sibling } }).readScope, "outside-workspace");
+		process.env.CLIO_CODER_INTEROP_HOME = "none";
+		try {
+			const isolated = createSafetyPolicyEngine({ cwd: root });
+			strictEqual(isolated.evaluate({ tool: ToolNames.Read, args: operatorSkill }).readScope, "outside-workspace");
+		} finally {
+			delete process.env.CLIO_CODER_INTEROP_HOME;
+		}
 	});
 
 	it("holds when the workspace itself is reached through a link", () => {

@@ -5,7 +5,7 @@
  * relocated homes before cache lookup or credential detection.
  */
 
-import { isClioHomeRelocated } from "../../core/xdg.js";
+import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
 
 import { ANTHROPIC_MAX_QUOTA_PROVIDER_ID, createAnthropicMaxQuotaProvider } from "./anthropic-max-provider.js";
 import { ANTIGRAVITY_QUOTA_PROVIDER_ID, createAntigravityQuotaProvider } from "./antigravity-provider.js";
@@ -14,11 +14,13 @@ import { CODEX_QUOTA_PROVIDER_ID, createCodexQuotaProvider } from "./codex-provi
 import type { QuotaProvider } from "./types.js";
 
 export function buildQuotaProviders(): QuotaProvider[] {
+	// CLIO_CODER_INTEROP_HOME=none turns off sibling accounts as it does every foreign user root.
+	const implicit = !isClioHomeRelocated() && !interopDisabled();
 	return [
 		createAnthropicMaxQuotaProvider(),
-		...(!isClioHomeRelocated() || process.env.CLAUDE_CONFIG_DIR?.trim() ? [createClaudeCodeQuotaProvider()] : []),
-		...(!isClioHomeRelocated() || process.env.CODEX_HOME?.trim() ? [createCodexQuotaProvider()] : []),
-		...(!isClioHomeRelocated() || process.env.ANTIGRAVITY_HOME?.trim() ? [createAntigravityQuotaProvider()] : []),
+		...(implicit || explicitAgentHome("CLAUDE_CONFIG_DIR") ? [createClaudeCodeQuotaProvider()] : []),
+		...(implicit || explicitAgentHome("CODEX_HOME") ? [createCodexQuotaProvider()] : []),
+		...(implicit || explicitAgentHome("ANTIGRAVITY_HOME") ? [createAntigravityQuotaProvider()] : []),
 		// The copilot adapter attaches here once its credential shape is confirmed.
 	];
 }

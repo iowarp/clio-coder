@@ -6,7 +6,7 @@ import { CLIO_SELF_DEVELOPMENT_SKILLS, detectClioCoderRepo } from "../../../core
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
-import { INTEROP_AGENT_KINDS, interopSourceRank } from "../../interop/registry.js";
+import { INTEROP_AGENT_KINDS, interopSourceRank, interopUserRoot } from "../../interop/registry.js";
 import { enabledPluginResourceRoots, pluginBaseDir, withPluginDiscoveryPass } from "../../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
@@ -296,14 +296,17 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 
 	for (const kind of INTEROP_AGENT_KINDS) {
 		if (kind.userSkillRoot === undefined || kind.skillSource === undefined) continue;
+		// Null under CLIO_CODER_INTEROP_HOME=none; CLAUDE_CONFIG_DIR and its peers move the root (interopUserRoot).
+		const root = interopUserRoot(kind, kind.userSkillRoot, input.home);
+		if (root === null) continue;
 		roots.push({
-			path: path.join(home, kind.userSkillRoot),
+			path: root.path,
 			scope: "user",
 			source: kind.skillSource,
 			origin: `${kind.skillSource}-user`,
 			precedence: SKILL_PRECEDENCE.userCompat,
 			trusted: false,
-			containment: home,
+			containment: root.containment,
 		});
 	}
 

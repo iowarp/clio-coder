@@ -10,7 +10,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isClioHomeRelocated } from "../../core/xdg.js";
+import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
 import type { QuotaProvider, UsageCredits, UsageSnapshot, UsageWindow } from "./types.js";
 import { formatPlan } from "./types.js";
 
@@ -40,9 +40,9 @@ export interface CodexQuotaOptions {
 
 /** Codex's default credential file path. */
 function defaultCodexCredentialsPath(): string | null {
-	const home = process.env.CODEX_HOME?.trim();
+	const home = explicitAgentHome("CODEX_HOME");
 	if (home) return join(home, "auth.json");
-	return isClioHomeRelocated() ? null : join(homedir(), ".codex", "auth.json");
+	return isClioHomeRelocated() || interopDisabled() ? null : join(homedir(), ".codex", "auth.json");
 }
 
 /** Extract the access token and account id from a parsed credential document. */

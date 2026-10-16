@@ -1,11 +1,10 @@
-import { homedir } from "node:os";
 import path from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { canonicalizePath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
 import { expandPath, readPathVariants } from "../../tools/path-utils.js";
-import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
+import { INTEROP_AGENT_KINDS, interopUserRoot } from "../interop/registry.js";
 import { isSameOrDescendant } from "./path-policy.js";
 
 /**
@@ -65,11 +64,10 @@ export function readScopeExemptRoots(): ReadScopeExemptRoot[] {
 	} catch {
 		// A package root that cannot be found exempts nothing.
 	}
-	const home = homedir();
+	// Exactly the user skill roots the loader discovers, so none under CLIO_CODER_INTEROP_HOME=none (interopUserRoot).
 	for (const kind of INTEROP_AGENT_KINDS) {
-		if (kind.userSkillRoot !== undefined) {
-			roots.push({ path: path.join(home, kind.userSkillRoot), operatorOwned: true });
-		}
+		const root = kind.userSkillRoot === undefined ? null : interopUserRoot(kind, kind.userSkillRoot);
+		if (root !== null) roots.push({ path: root.path, operatorOwned: true });
 	}
 	return roots;
 }

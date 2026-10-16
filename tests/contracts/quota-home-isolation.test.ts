@@ -52,6 +52,7 @@ test("BT-006 explicit sibling homes opt in independently and default roots prese
 	const env = await isolateClioEnv();
 	try {
 		process.env.HOME = env.dir;
+		delete process.env.CLIO_CODER_INTEROP_HOME;
 		process.env.XDG_CONFIG_HOME = join(env.dir, "xdg-config");
 		process.env.XDG_DATA_HOME = join(env.dir, "xdg-data");
 		process.env.XDG_STATE_HOME = join(env.dir, "xdg-state");

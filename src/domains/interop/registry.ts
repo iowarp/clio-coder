@@ -1,3 +1,5 @@
+import path from "node:path";
+import { explicitAgentHome, interopUserHome } from "../../core/xdg.js";
 import type { InteropAgentId, InteropAgentKind, InteropInventoryLayout } from "./types.js";
 
 const MARKDOWN_ROOTS: InteropInventoryLayout["roots"] = [
@@ -235,6 +237,57 @@ const BY_ID = new Map<InteropAgentId, InteropAgentKind>(INTEROP_AGENT_KINDS.map(
 
 export function interopAgentKind(id: InteropAgentId): InteropAgentKind | undefined {
 	return BY_ID.get(id);
+}
+
+/**
+ * The directory an agent itself reads as its user root: its home variable
+ * (explicitAgentHome), else `$XDG_CONFIG_HOME/<xdgConfigSubdir>` for an agent
+ * that follows XDG (opencode), else `<home>/<userRoot>`. Inventory, detection
+ * and the skill and prompt loaders all resolve through this, so a skill the
+ * inventory lists is one the loader loads. A null home (CLIO_CODER_INTEROP_HOME=none)
+ * yields undefined.
+ */
+export function interopAgentUserDir(
+	layout: InteropInventoryLayout,
+	home: string | null,
+	env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+	const named = explicitAgentHome(layout.homeEnv, env);
+	if (named !== undefined) return named;
+	if (home === null) return undefined;
+	// The XDG spec ignores a relative XDG_CONFIG_HOME.
+	const xdg = env.XDG_CONFIG_HOME?.trim();
+	return layout.xdgConfigSubdir && xdg && path.isAbsolute(xdg)
+		? path.join(xdg, layout.xdgConfigSubdir)
+		: path.join(home, layout.userRoot);
+}
+
+/**
+ * Where one of an agent's user roots lives (`relative` is home-relative, such as
+ * `.claude/skills`) and the directory that contains it, or null when Clio reads
+ * no foreign user roots. The agent's own home variable (CLAUDE_CONFIG_DIR,
+ * CODEX_HOME, ...) or XDG_CONFIG_HOME for opencode moves every root under its
+ * userRoot, the way the agent and inventory read it (interopAgentUserDir);
+ * otherwise the root sits under interopUserHome. A caller that pins `home`
+ * gets that home and no variable.
+ */
+export function interopUserRoot(
+	kind: InteropAgentKind,
+	relative: string,
+	home?: string,
+): { path: string; containment: string } | null {
+	if (home !== undefined) return { path: path.join(home, relative), containment: home };
+	const userHome = interopUserHome();
+	const layout = kind.inventory;
+	const agentDir = layout === undefined ? undefined : interopAgentUserDir(layout, userHome);
+	// The default location keeps the home as containment; only a moved root is contained by itself.
+	if (layout !== undefined && agentDir !== undefined && userHome !== null) {
+		const root = path.resolve(agentDir);
+		const inner = path.relative(layout.userRoot, relative);
+		if (root !== path.resolve(userHome, layout.userRoot) && !inner.startsWith("..") && !path.isAbsolute(inner))
+			return { path: path.join(root, inner), containment: root };
+	}
+	return userHome === null ? null : { path: path.join(userHome, relative), containment: userHome };
 }
 
 /** Rank of a skill source in the registry order; unknown sources sort last. */

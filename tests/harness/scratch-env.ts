@@ -63,6 +63,7 @@ export function scratchClioEnvVars(dir: string, options: ScratchClioEnvOptions =
 		CLIO_CODER_CONFIG_DIR: join(dir, "config"),
 		CLIO_CODER_STATE_DIR: join(dir, "state"),
 		CLIO_CODER_CACHE_DIR: join(dir, "cache"),
+		CLIO_CODER_INTEROP_HOME: "none",
 	};
 	if (options.requireHomePrefix) env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
 	return env;

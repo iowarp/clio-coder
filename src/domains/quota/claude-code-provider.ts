@@ -14,7 +14,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isClioHomeRelocated } from "../../core/xdg.js";
+import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
 
 import { fetchAnthropicUsage } from "./anthropic-usage.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
@@ -48,9 +48,9 @@ export interface ClaudeCodeQuotaOptions {
 }
 
 function defaultClaudeCredentialsPath(): string | null {
-	const home = process.env.CLAUDE_CONFIG_DIR?.trim();
+	const home = explicitAgentHome("CLAUDE_CONFIG_DIR");
 	if (home) return join(home, ".credentials.json");
-	return isClioHomeRelocated() ? null : join(homedir(), ".claude", ".credentials.json");
+	return isClioHomeRelocated() || interopDisabled() ? null : join(homedir(), ".claude", ".credentials.json");
 }
 
 /** Extract the OAuth access token from a parsed credential document. */

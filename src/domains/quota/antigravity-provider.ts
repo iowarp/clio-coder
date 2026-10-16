@@ -19,7 +19,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isClioHomeRelocated } from "../../core/xdg.js";
+import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
 import type { QuotaProvider, UsageSnapshot, UsageWindow } from "./types.js";
 import { formatPlan } from "./types.js";
 
@@ -56,9 +56,11 @@ export interface AntigravityQuotaOptions {
 }
 
 function defaultCredentialsPath(): string | null {
-	const home = process.env.ANTIGRAVITY_HOME?.trim();
+	const home = explicitAgentHome("ANTIGRAVITY_HOME");
 	if (home) return join(home, "antigravity-oauth-token");
-	return isClioHomeRelocated() ? null : join(homedir(), ".gemini", "antigravity-cli", "antigravity-oauth-token");
+	return isClioHomeRelocated() || interopDisabled()
+		? null
+		: join(homedir(), ".gemini", "antigravity-cli", "antigravity-oauth-token");
 }
 
 function parseCredentials(raw: unknown): AntigravityCredentials | null {

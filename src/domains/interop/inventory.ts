@@ -2,6 +2,7 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
+import { interopAgentUserDir } from "./registry.js";
 import type { InteropAgentKind, InteropInventory, InteropInventoryItem, InteropResourceKind } from "./types.js";
 
 const MAX_FILES = 4096;
@@ -19,7 +20,7 @@ function object(value: unknown): value is Record<string, unknown> {
 /** Only declared configuration/resource roots; never sessions, history or executable modules. */
 export function discoverInteropInventory(
 	kind: InteropAgentKind,
-	home: string,
+	home: string | null,
 	cwd: string,
 	env: NodeJS.ProcessEnv = {},
 ): InteropInventory {
@@ -158,7 +159,8 @@ export function discoverInteropInventory(
 		}
 	};
 
-	scan(home, "user", undefined, layout.userDeclarations ?? [], []);
+	// A null home means CLIO_CODER_INTEROP_HOME=none (interopUserHome): only the workspace is inventoried.
+	if (home !== null) scan(home, "user", undefined, layout.userDeclarations ?? [], []);
 	scan(cwd, "project", undefined, layout.projectDeclarations ?? [], []);
 	if (layout.projectModuleConfig) {
 		const file = path.join(cwd, layout.projectModuleConfig);
@@ -174,14 +176,13 @@ export function discoverInteropInventory(
 				else unknown("Unsupported project executable plugin declaration.");
 			}
 	}
-	const userRoot =
-		env[layout.homeEnv ?? ""] ??
-		(layout.xdgConfigSubdir && env.XDG_CONFIG_HOME
-			? path.join(env.XDG_CONFIG_HOME, layout.xdgConfigSubdir)
-			: path.join(home, layout.userRoot));
+	// The same root the skill and prompt loaders read (interopAgentUserDir).
+	const userRoot = interopAgentUserDir(layout, home, env);
 	const roots: Array<{ root: string; scope: "user" | "project" }> = [
-		{ root: userRoot, scope: "user" },
-		...(layout.additionalUserRoots ?? []).map((root) => ({ root: path.join(home, root), scope: "user" as const })),
+		...(userRoot === undefined ? [] : [{ root: userRoot, scope: "user" as const }]),
+		...(home === null
+			? []
+			: (layout.additionalUserRoots ?? []).map((root) => ({ root: path.join(home, root), scope: "user" as const }))),
 		...layout.projectRoots.map((root) => ({ root: path.join(cwd, root), scope: "project" as const })),
 	];
 	const pluginRoots = new Set<string>();
@@ -324,7 +325,7 @@ export function discoverInteropInventory(
 			search(path.join(root, directory), 0);
 		}
 	}
-	if (layout.settingsRegistry === "codex") {
+	if (userRoot !== undefined && layout.settingsRegistry === "codex") {
 		try {
 			const data = parseToml(inventoryText(path.join(userRoot, "config.toml")));
 			if (object(data.plugins))
@@ -339,7 +340,7 @@ export function discoverInteropInventory(
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") unknown("Cannot parse Codex plugin settings.");
 		}
 	}
-	if (layout.settingsRegistry === "antigravity") {
+	if (userRoot !== undefined && layout.settingsRegistry === "antigravity") {
 		const manifest = json(path.join(userRoot, "import_manifest.json"));
 		if (Array.isArray(manifest?.imports))
 			for (const item of result.items.filter((item) => item.kind === "plugin")) {

@@ -206,6 +206,42 @@ export function isClioHomeRelocated(): boolean {
 	);
 }
 
+/**
+ * True when CLIO_CODER_INTEROP_HOME is `none`: Clio reads no other agent's user
+ * roots at all, not even one an agent home variable such as CLAUDE_CONFIG_DIR
+ * names, and no other agent's quota credentials.
+ */
+export function interopDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env.CLIO_CODER_INTEROP_HOME?.trim() === "none";
+}
+
+/**
+ * The home whose foreign agent directories (`~/.claude/skills`, `~/.codex`, and
+ * the rest of the interop registry) Clio reads as user roots. Unset, that is
+ * the operator's home wherever CLIO_CODER_HOME puts Clio's own directories, so
+ * a CLIO_CODER_HOME install still reads `~/.claude/skills` and an isolated run
+ * that redirects HOME reads its own. CLIO_CODER_INTEROP_HOME names another
+ * home, or `none` for no foreign user roots (interopDisabled). Project roots
+ * (`<cwd>/.claude/skills`) belong to the workspace and are unaffected.
+ */
+export function interopUserHome(env: NodeJS.ProcessEnv = process.env): string | null {
+	if (interopDisabled(env)) return null;
+	const named = env.CLIO_CODER_INTEROP_HOME?.trim();
+	return named ? resolve(named) : homedir();
+}
+
+/**
+ * A per-agent home variable (CLAUDE_CONFIG_DIR, CODEX_HOME, ...) the operator
+ * set is an explicit opt-in to that agent's root on every interop path: quota,
+ * inventory, detection and the skill and prompt loaders. It holds even when
+ * Clio's home is relocated, and CLIO_CODER_INTEROP_HOME=none overrides it.
+ */
+export function explicitAgentHome(name: string | undefined, env: NodeJS.ProcessEnv = process.env): string | undefined {
+	if (interopDisabled(env)) return undefined;
+	const value = name === undefined ? undefined : env[name]?.trim();
+	return value ? value : undefined;
+}
+
 export function clioConfigDir(): string {
 	if (cachedConfigDir) return cachedConfigDir;
 	const dirs = resolveClioDirs();

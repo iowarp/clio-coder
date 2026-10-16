@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { runCommandVector } from "../../core/safe-exec.js";
+import { interopUserHome } from "../../core/xdg.js";
 import { discoverInteropInventory } from "./inventory.js";
-import { INTEROP_AGENT_KINDS } from "./registry.js";
+import { INTEROP_AGENT_KINDS, interopAgentUserDir } from "./registry.js";
 import { readInteropReport } from "./state.js";
 import type {
 	InteropAgentFacts,
@@ -174,7 +175,8 @@ export async function detectInteropAgents(
 	previous?: ReadonlyArray<InteropAgentRecord>,
 ): Promise<InteropReport> {
 	const cwd = path.resolve(input.cwd ?? process.cwd());
-	const home = input.home ?? homedir();
+	// Null under CLIO_CODER_INTEROP_HOME=none: binaries on PATH are still found, no foreign home is read (interopUserHome).
+	const home = input.home ?? interopUserHome();
 	// Standing decisions live in the recorded report. A caller that already holds
 	// a fresher one passes it; everyone else must still see the decisions, or a
 	// declined agent is proposed again on the next run.
@@ -194,10 +196,10 @@ export async function detectInteropAgents(
 		const prior = priorByKind.get(kind.id);
 		const inventoryRoot =
 			input.inventory && kind.inventory
-				? ((input.home === undefined ? process.env[kind.inventory.homeEnv ?? ""] : undefined) ??
-					path.join(home, kind.inventory.userRoot))
+				? interopAgentUserDir(kind.inventory, home, input.home === undefined ? process.env : {})
 				: undefined;
-		const installDir = inventoryRoot && existsSync(inventoryRoot) ? inventoryRoot : installDirOf(kind, home);
+		const installDir =
+			inventoryRoot && existsSync(inventoryRoot) ? inventoryRoot : home === null ? undefined : installDirOf(kind, home);
 		const facts: InteropAgentFacts = {
 			kind: kind.id,
 			presence: resolved.presence,
