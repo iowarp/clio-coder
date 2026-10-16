@@ -148,16 +148,19 @@ export function createFleetEventJournal(
 	return {
 		append(body) {
 			if (off || sealed) return;
-			const unsigned = {
-				v: FLEET_EVENT_JOURNAL_VERSION,
-				seq: seq + 1,
-				at: now(),
-				rootId,
-				prev,
-				...body,
-			} as Omit<FleetEventLine, "digest">;
-			const line = { ...unsigned, digest: lineDigest(unsigned) } as FleetEventLine;
+			let line: FleetEventLine;
+			// Building the line sits inside the try too: append runs in the fleet's
+			// finally blocks, where a throw would replace the run's own error.
 			try {
+				const unsigned = {
+					v: FLEET_EVENT_JOURNAL_VERSION,
+					seq: seq + 1,
+					at: now(),
+					rootId,
+					prev,
+					...body,
+				} as Omit<FleetEventLine, "digest">;
+				line = { ...unsigned, digest: lineDigest(unsigned) } as FleetEventLine;
 				mkdirSync(dirname(path), { recursive: true });
 				appendFileSync(path, `${JSON.stringify(line)}\n`, "utf8");
 			} catch (error) {

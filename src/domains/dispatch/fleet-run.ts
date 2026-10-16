@@ -340,6 +340,14 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		resumedFrom: input.resume?.record.id ?? null,
 		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
 	};
+	// Every step of this run dispatches under `fleetRootId` as its lineage root,
+	// so every agent step also settles the assignment row of that id. One step is
+	// not the run, and letting the last one to finish write the row reported a
+	// green step of a run that aborted at step 2 of 7 as `succeeded`. The run
+	// claims the verdict here and answers for itself at the end. The claim comes
+	// before the root record exists, so a record whose owner is not alive is a
+	// run that will never append to its journal (`fleet events --follow`).
+	await claimAssignmentVerdict(fleetRootId, "fleet");
 	// The digest of the last root record bytes this run wrote, which the final
 	// journal line names.
 	let manifestDigest = fleetManifestDigest(await writeFleetRun(fleetRunRecord));
@@ -349,16 +357,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		return digest;
 	};
 	const events = createFleetEventJournal(fleetRootId);
-	events.append({
-		type: "fleet_started",
-		fleet: fleetRunRecord.fleet,
-		planHash: fleetRunRecord.planHash,
-		vars: fleetRunRecord.vars,
-		resumedFrom: fleetRunRecord.resumedFrom,
-		replayedStepIds: [...replayed.keys()],
-		workspaceRoot,
-		stepIds: fleetRunRecord.stepIds,
-	});
 	const stepDispatched = (event: FleetRunStepEvent): void => {
 		if (event.replayed !== true) {
 			events.append({
@@ -381,12 +379,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			stepCount: fleetRunRecord.steps.length,
 			manifestDigest,
 		});
-	// Every step of this run dispatches under `fleetRootId` as its lineage root,
-	// so every agent step also settles the assignment row of that id. One step is
-	// not the run, and letting the last one to finish write the row reported a
-	// green step of a run that aborted at step 2 of 7 as `succeeded`. The run
-	// claims the verdict here and answers for itself at the end.
-	await claimAssignmentVerdict(fleetRootId, "fleet");
 	/** File one step's terminal run id, whichever kind produced it. */
 	const fileStepAttempt = (terminalRunId: string): Promise<unknown> =>
 		recordAssignmentAttempt(fleetRootId, terminalRunId);
@@ -547,6 +539,18 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		return `clio(${fleetRootId}): ${input.playbookName} ${step.id}`;
 	};
 
+	// The journal opens only here, after the last await outside the scheduler's
+	// try, so every path that writes fleet_started also reaches a seal.
+	events.append({
+		type: "fleet_started",
+		fleet: fleetRunRecord.fleet,
+		planHash: fleetRunRecord.planHash,
+		vars: fleetRunRecord.vars,
+		resumedFrom: fleetRunRecord.resumedFrom,
+		replayedStepIds: [...replayed.keys()],
+		workspaceRoot,
+		stepIds: fleetRunRecord.stepIds,
+	});
 	let result: ExecutionPlanResult;
 	try {
 		const adapter: ExecutionSchedulerAdapter = {
@@ -1116,16 +1120,16 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		result = await executePlan(livePlan, adapter, input.signal);
 	} catch (error) {
 		fleetRunRecord.endedAt = new Date().toISOString();
-		await writeManifest();
-		sealEvents(input.signal?.aborted === true ? "aborted" : "failed");
+		try {
+			await writeManifest();
+		} finally {
+			sealEvents(input.signal?.aborted === true ? "aborted" : "failed");
+		}
 		// A run the scheduler could not carry to the end never reached a verdict,
 		// and a fleet that threw is not a fleet that worked.
 		await settleFleetAssignment(false);
 		throw error;
 	}
-	fleetRunRecord.endedAt = new Date().toISOString();
-	await writeManifest();
-
 	// A loop is judged by whether it converged, not attempt by attempt: a red
 	// verification that a later attempt fixed is the loop working as declared,
 	// and a node a resolved loop made unnecessary never had to run at all.
@@ -1135,9 +1139,14 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	// A step a stop policy left unrun is counted but never succeeded, so a run
 	// that halted early can never reach the required count.
 	const cleanRun = failedLoops.length === 0 && result.skipped.length === 0 && succeededStepCount === required.length;
-	// The seal carries the same verdict the assignment row gets, so a fleet
-	// with a red or skipped step never seals as a success.
-	sealEvents(cleanRun ? "succeeded" : input.signal?.aborted === true ? "aborted" : "failed");
+	fleetRunRecord.endedAt = new Date().toISOString();
+	try {
+		await writeManifest();
+	} finally {
+		// The seal carries the same verdict the assignment row gets, so a fleet
+		// with a red or skipped step never seals as a success.
+		sealEvents(cleanRun ? "succeeded" : input.signal?.aborted === true ? "aborted" : "failed");
+	}
 	await settleFleetAssignment(cleanRun);
 	return {
 		rootId: fleetRootId,
