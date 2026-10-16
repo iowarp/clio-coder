@@ -187,6 +187,8 @@ export interface FleetEventJournalRead {
 /**
  * Complete lines from `offset` on. A trailing partial line (a write in
  * progress) is left for the next read, so a follower never parses half a fact.
+ * Null means no journal file exists; any other read failure, EACCES
+ * included, throws so it is never mistaken for an absent journal.
  */
 export function readFleetEventJournal(
 	rootId: string,
@@ -195,8 +197,9 @@ export function readFleetEventJournal(
 	let text: Buffer;
 	try {
 		text = readFileSync(fleetEventJournalPath(rootId));
-	} catch {
-		return null;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+		throw error;
 	}
 	const lines: FleetEventLine[] = [];
 	let offset = from.offset;
@@ -209,13 +212,20 @@ export function readFleetEventJournal(
 		if (end < 0) break;
 		const raw = text.subarray(offset, end).toString("utf8");
 		offset = end + 1;
-		let line: FleetEventLine;
+		let parsed: unknown;
 		try {
-			line = JSON.parse(raw) as FleetEventLine;
+			parsed = JSON.parse(raw);
 		} catch {
 			broken ??= `line ${seq + 1} is not JSON`;
 			continue;
 		}
+		// Valid JSON that is not an object (`null`, a number, an array) is a
+		// broken line, not a reader crash.
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			broken ??= `line ${seq + 1} is not a journal object`;
+			continue;
+		}
+		const line = parsed as FleetEventLine;
 		const { digest, ...unsigned } = line;
 		if (line.seq !== seq + 1 || line.prev !== prev || digest !== lineDigest(unsigned)) {
 			broken ??= `line ${seq + 1} does not extend the chain`;

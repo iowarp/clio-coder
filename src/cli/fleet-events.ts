@@ -86,7 +86,15 @@ export async function runFleetEvents(args: ReadonlyArray<string>): Promise<numbe
 	let reported = false;
 	let broken = false;
 	for (;;) {
-		const read = readFleetEventJournal(rootId, cursor);
+		let read: ReturnType<typeof readFleetEventJournal>;
+		try {
+			read = readFleetEventJournal(rootId, cursor);
+		} catch (error) {
+			process.stderr.write(
+				`clio-coder fleet events: cannot read ${fleetEventJournalPath(rootId)}: ${error instanceof Error ? error.message : String(error)}\n`,
+			);
+			return 1;
+		}
 		if (read === null && cursor.offset === 0 && !follow) {
 			process.stderr.write(`clio-coder fleet events: no event journal at ${fleetEventJournalPath(rootId)}\n`);
 			return 1;
