@@ -35,6 +35,7 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - Main-runner jobs accept an explicit `allow` capability list. It intersects inherited task constraints, holds on every occurrence regardless of autonomy, and shows in job creation and monitor output.
 - Project extension and plugin trust pins package identities, so reinstalling identical content or disabling a package keeps consent, while a changed trust flag, capability envelope or plugin kind asks again. `config trust extensions` and `config trust plugins` list each package with its origin and trust, disabled ones included. An operator install approves only the records still carrying the content digest it wrote, so a record another writer replaced during the install stays unapproved.
 - A per-target `--api-key` override satisfies an OAuth target again.
+- Exact toolchain version probes such as `node --version`, `go version` and `python3 -V` run without an ask, so a fleet worker in deny mode is no longer ended by them.
 
 ### Fleet
 
@@ -50,6 +51,7 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - A hook can name MCP tools by family with a trailing `*`, and hooks with tool-args access receive the link-resolved path each file tool lands on and the workers a dispatch will start.
 - `clio-coder fleet run` checks every step's route in preflight and refuses a playbook before any step runs when one hooked step's runtime cannot carry a blocking hook.
 - `clio-coder context wiki` and `clio-coder context init` run their workers under the command's own extension host. When that host fails to start and a blocking hook applies, they refuse before dispatching, and `context init` falls back to its heuristic bootstrap.
+- Hook landings report a read-only recipe's workers as read-only with no write roots, and prompt templates that name extension tools load without a warning.
 
 ### Memory
 
