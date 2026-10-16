@@ -105,7 +105,7 @@ export function mcpCommandOutput(
 			};
 			const lines = result.servers.map(
 				(server) =>
-					`${server.id} scope=${server.scope} command=${JSON.stringify([server.command, ...server.args])} cwd=${JSON.stringify(server.cwd)} trust=${server.trust.status}${"reason" in server.trust ? ` (${server.trust.reason})` : ""} actionClass=${server.trust.actionClass}`,
+					`${server.id} scope=${server.scope}${server.plugin !== undefined ? ` plugin=${server.plugin.id}` : ""} command=${JSON.stringify([server.command, ...server.args])} cwd=${JSON.stringify(server.cwd)} trust=${server.trust.status}${"reason" in server.trust ? ` (${server.trust.reason})` : ""} actionClass=${server.trust.actionClass}`,
 			);
 			for (const server of result.servers) {
 				for (const tool of server.tools) lines.push(`  ${tool.capability} actionClass=${tool.actionClass}`);

@@ -50,6 +50,7 @@ export {
 	mcpConfigPaths,
 	mcpServerDigest,
 	parseMcpConfigText,
+	pluginServerRevocation,
 } from "./config.js";
 export {
 	type McpCachedTool,

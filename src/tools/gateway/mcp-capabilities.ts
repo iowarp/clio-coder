@@ -21,6 +21,7 @@ import {
 	canonicalProjectRoot,
 	createMcpStdioClient,
 	McpError,
+	pluginServerRevocation,
 	readMcpServerCatalog,
 	resolveMcpServers,
 	writeMcpServerCatalog,
@@ -760,7 +761,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		const aborted = () => new McpError("aborted", "MCP discovery aborted");
 		if (signal?.aborted) throw aborted();
 		if (closed || state.declaration.trust.status !== "trusted") return;
-		if (state.failure !== null || state.recovery !== undefined) {
+		// Declarations are a session snapshot, but a plugin's servers serve only
+		// while the plugin still loads the content they were declared from.
+		const plugin = state.declaration.plugin;
+		const revoked = plugin !== undefined ? pluginServerRevocation(plugin, options.cwd) : null;
+		if (revoked !== null || state.failure !== null || state.recovery !== undefined) {
 			// Concurrent callers share recovery; never overlap process groups or
 			// replay the failed call. Discovery revalidates the live tool list.
 			state.recovery ??= (async () => {
@@ -775,6 +780,10 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			})();
 			await state.recovery;
 			delete state.recovery;
+			if (revoked !== null) {
+				state.failure = revoked;
+				return;
+			}
 			if (closed || signal?.aborted) return;
 		}
 		state.connection ??= startConnection(state);

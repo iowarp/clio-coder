@@ -278,7 +278,8 @@ export function readPluginManifest(root: string): PluginCandidate {
 		if (existsSync(path.join(resolved, "mcp.json")))
 			diagnostics.push({
 				type: "warning",
-				message: "MCP declarations are preserved; this Clio version does not execute MCP servers",
+				message:
+					"MCP servers in mcp.json become plugin-scope declarations once the plugin is installed and enabled; none runs until the operator trusts it with clio-coder mcp trust <id>",
 				path: path.join(resolved, "mcp.json"),
 			});
 		return {

@@ -2,17 +2,31 @@
  * Declared local MCP servers. Two optional YAML files name them: the user's
  * `<config>/mcp.yaml`, trusted by authorship, and the project's
  * `.clio-coder/mcp.yaml`, which needs an explicit trust record (see trust.ts)
- * before anything in it is launched. The loader is strict in the same way the
- * verifier catalog is: unknown fields, shell strings, escaping paths, and
- * oversized files are diagnostics that contribute no server, never a guess.
+ * before anything in it is launched. An installed, enabled plugin's root
+ * `mcp.json` adds plugin-scope declarations under that same explicit trust,
+ * bound to the plugin's content digest; installing a plugin launches nothing.
+ * The loader is strict in the same way the verifier catalog is: unknown
+ * fields, shell strings, escaping paths, and oversized files are diagnostics
+ * that contribute no server, never a guess.
  */
 
 import { createHash } from "node:crypto";
-import { closeSync, constants as fsConstants, fstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	constants as fsConstants,
+	fstatSync,
+	openSync,
+	readSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
+import { readSettings } from "../../../core/config.js";
 import { resolveSafeCwd } from "../../../core/safe-exec.js";
 import { clioConfigDir } from "../../../core/xdg.js";
+import { listInstalledPlugins } from "../../plugins/index.js";
 
 export const MCP_CONFIG_VERSION = 1;
 export const MCP_USER_CONFIG_FILENAME = "mcp.yaml";
@@ -37,6 +51,10 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 const ROOT_FIELDS = new Set(["version", "servers"]);
 const SERVER_FIELDS = new Set(["id", "command", "args", "cwd", "env", "timeoutMs", "actionClass", "toolActionClasses"]);
+/** The Agent Plugins `mcp.json` file at a plugin root. */
+export const MCP_PLUGIN_CONFIG_FILENAME = "mcp.json";
+const PLUGIN_ROOT_FIELDS = new Set(["$schema", "mcpServers"]);
+const PLUGIN_SERVER_FIELDS = new Set(["type", "command", "args", "cwd", "env", "timeoutMs"]);
 const SHELL_EXECUTABLES = new Set([
 	"bash",
 	"cmd",
@@ -51,7 +69,16 @@ const SHELL_EXECUTABLES = new Set([
 	"zsh",
 ]);
 
-export type McpServerScope = "user" | "project";
+export type McpServerScope = "user" | "project" | "plugin";
+
+/** The installed plugin that ships a plugin-scope declaration. */
+export interface McpServerPlugin {
+	id: string;
+	/** Where the plugin is installed, which is not the declaration's own scope. */
+	scope: "user" | "project";
+	/** The plugin tree's recorded SHA-256; the declaration digest covers it. */
+	contentDigest: string;
+}
 
 export interface McpServerDeclaration {
 	id: string;
@@ -73,6 +100,8 @@ export interface McpServerDeclaration {
 	actionClassExplicit?: boolean;
 	/** sha256 of the canonical declaration; a trust record binds to it. */
 	digest: string;
+	/** Set for a plugin-scope declaration: the plugin whose `mcp.json` declares it. */
+	plugin?: McpServerPlugin;
 }
 
 export interface McpConfigDiagnostic {
@@ -126,6 +155,8 @@ export function mcpServerDigest(fields: {
 	env: Readonly<Record<string, string>>;
 	timeoutMs: number | null;
 	toolActionClasses?: Readonly<Record<string, "read" | "execute" | "destructive" | "unknown">>;
+	/** A plugin server's plugin tree digest, so any change to the plugin needs a new trust decision. */
+	pluginContentDigest?: string;
 }): string {
 	const canonical = JSON.stringify({
 		id: fields.id,
@@ -147,6 +178,7 @@ export function mcpServerDigest(fields: {
 					),
 				}
 			: {}),
+		...(fields.pluginContentDigest !== undefined ? { pluginContentDigest: fields.pluginContentDigest } : {}),
 	});
 	return createHash("sha256").update(canonical).digest("hex");
 }
@@ -267,8 +299,10 @@ function resolveCwd(raw: string | null, scope: McpServerScope, root: string, loc
 		}
 	}
 	const absolute = raw !== null && (path.isAbsolute(raw) || path.win32.isAbsolute(raw));
-	if (scope === "project" && absolute) {
-		return new Error(`${location} must be repository-relative; absolute cwd '${raw}' is not allowed`);
+	if (scope !== "user" && absolute) {
+		return new Error(
+			`${location} must be ${scope === "plugin" ? "relative to its plugin root" : "repository-relative"}; absolute cwd '${raw}' is not allowed`,
+		);
 	}
 	const realRoot = realDirectory(root, `${location} root`);
 	if (realRoot instanceof Error) return realRoot;
@@ -314,7 +348,7 @@ function validateServer(
 	if (env instanceof Error) return env;
 	const timeoutMs = validateTimeout(value.timeoutMs, `${location}.timeoutMs`);
 	if (timeoutMs instanceof Error) return timeoutMs;
-	if (scope === "project" && value.actionClass !== undefined) {
+	if (scope !== "user" && value.actionClass !== undefined) {
 		return new Error(`${location}.actionClass is only allowed in user config; use the project trust record`);
 	}
 	if (
@@ -484,9 +518,169 @@ function loadFile(filePath: string, scope: McpServerScope, root: string): McpCon
 }
 
 /**
- * Load both scopes. A user declaration wins an id collision; the project
- * declaration is dropped with a diagnostic so nobody wonders why the project's
- * command never runs. A malformed file contributes nothing (fail closed).
+ * One plugin's `mcp.json`, in the Agent Plugins shape
+ * `{"mcpServers": {"<id>": {"type": "stdio", "command", "args", "env"}}}`.
+ * Each server keeps the id it declares and runs in the plugin root. Clio's
+ * client speaks stdio only, so another transport is reported and skipped; a
+ * malformed file contributes nothing (fail closed).
+ */
+function loadPluginFile(plugin: {
+	id: string;
+	scope: "user" | "project";
+	rootPath: string;
+	contentDigest: string;
+}): McpConfigLoadResult {
+	const filePath = path.join(plugin.rootPath, MCP_PLUGIN_CONFIG_FILENAME);
+	const diagnostic = (message: string): McpConfigDiagnostic => ({ scope: "plugin", path: filePath, message });
+	const read = readBoundedFileText(filePath, MCP_CONFIG_CAPS.fileBytes);
+	if (!read.ok) return { servers: [], diagnostics: read.reason === "missing" ? [] : [diagnostic(read.message)] };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(read.text) as unknown;
+	} catch (error) {
+		return {
+			servers: [],
+			diagnostics: [diagnostic(`invalid JSON: ${error instanceof Error ? error.message : String(error)}`)],
+		};
+	}
+	if (!isRecord(parsed) || !isRecord(parsed.mcpServers))
+		return { servers: [], diagnostics: [diagnostic("root must be an object with an mcpServers mapping")] };
+	const rootUnknown = unknownFields(parsed, PLUGIN_ROOT_FIELDS);
+	if (rootUnknown.length > 0)
+		return { servers: [], diagnostics: [diagnostic(`root has unknown field(s): ${rootUnknown.join(", ")}`)] };
+	const entries = Object.entries(parsed.mcpServers);
+	if (entries.length > MCP_CONFIG_CAPS.servers)
+		return { servers: [], diagnostics: [diagnostic(`mcpServers exceeds the ${MCP_CONFIG_CAPS.servers}-server cap`)] };
+	const servers: McpServerDeclaration[] = [];
+	const diagnostics: McpConfigDiagnostic[] = [];
+	for (const [id, value] of entries) {
+		const location = `mcpServers.${id}`;
+		if (!isRecord(value)) return { servers: [], diagnostics: [diagnostic(`${location} must be an object`)] };
+		if (value.type !== undefined && value.type !== "stdio") {
+			diagnostics.push(
+				diagnostic(`${location} uses transport ${JSON.stringify(value.type)}; Clio runs stdio servers only`),
+			);
+			continue;
+		}
+		const unknown = unknownFields(value, PLUGIN_SERVER_FIELDS);
+		if (unknown.length > 0)
+			return { servers: [], diagnostics: [diagnostic(`${location} has unknown field(s): ${unknown.join(", ")}`)] };
+		const { type: _type, ...declared } = value;
+		const validated = validateServer({ id, ...declared }, location, "plugin");
+		if (validated instanceof Error) return { servers: [], diagnostics: [diagnostic(validated.message)] };
+		const { fields, declaredCwd } = validated;
+		const resolved = resolveCwd(declaredCwd, "plugin", plugin.rootPath, `${location}.cwd`);
+		if (resolved instanceof Error) return { servers: [], diagnostics: [diagnostic(resolved.message)] };
+		servers.push({
+			id: fields.id,
+			scope: "plugin",
+			path: filePath,
+			command: fields.command,
+			args: fields.args,
+			cwd: resolved.cwd,
+			cwdRoot: resolved.cwdRoot,
+			env: fields.env,
+			timeoutMs: fields.timeoutMs,
+			actionClass: fields.actionClass,
+			actionClassExplicit: false,
+			toolActionClasses: fields.toolActionClasses,
+			digest: mcpServerDigest({ ...fields, pluginContentDigest: plugin.contentDigest }),
+			plugin: { id: plugin.id, scope: plugin.scope, contentDigest: plugin.contentDigest },
+		});
+	}
+	return { servers, diagnostics };
+}
+
+function trustProjectImports(): boolean {
+	try {
+		return readSettings().integrations.projectResources.trustProjectImports;
+	} catch {
+		// Unreadable settings leave foreign packages untrusted, as every other resource loader does.
+		return false;
+	}
+}
+
+function foreignPluginMessage(id: string): string {
+	return `foreign package ${id} declares no MCP servers until integrations.projectResources.trustProjectImports is on`;
+}
+
+/**
+ * Why a plugin-scope declaration resolved earlier in this session no longer
+ * stands, or null while its plugin still loads the content it was declared
+ * from. A session snapshots its declarations, so the launcher asks this before
+ * every launch and call: a plugin disabled, removed or changed mid-session
+ * must stop serving then, not at the next restart.
+ */
+export function pluginServerRevocation(plugin: McpServerPlugin, cwd: string): string | null {
+	let installed: ReturnType<typeof listInstalledPlugins>;
+	try {
+		// A full listing would hash every installed plugin tree on every call.
+		installed = listInstalledPlugins(cwd, { id: plugin.id });
+	} catch (error) {
+		return `installed plugins cannot be read: ${error instanceof Error ? error.message : String(error)}`;
+	}
+	const item = installed.find((entry) => entry.id === plugin.id && entry.scope === plugin.scope);
+	if (item === undefined) return `plugin ${plugin.id} is no longer installed in ${plugin.scope} scope`;
+	if (!item.enabled) return `plugin ${plugin.id} is disabled`;
+	if (!item.loadable || item.provenance === undefined) return `plugin ${plugin.id} no longer loads`;
+	if (item.provenance.contentDigest !== plugin.contentDigest)
+		return `plugin ${plugin.id} changed since this session declared its servers; restart the session to review it`;
+	if (item.trust === "foreign" && !trustProjectImports()) return foreignPluginMessage(item.id);
+	return null;
+}
+
+/**
+ * Declarations from every installed plugin that would load its content: valid,
+ * unchanged since install, enabled, effective, for a project copy in a
+ * workspace whose plugins the operator trusted, and for a foreign package only
+ * while trustProjectImports is on, as for its other resources.
+ */
+function loadPluginServers(cwd: string): McpConfigLoadResult {
+	const servers: McpServerDeclaration[] = [];
+	const diagnostics: McpConfigDiagnostic[] = [];
+	let installed: ReturnType<typeof listInstalledPlugins>;
+	try {
+		installed = listInstalledPlugins(cwd);
+	} catch (error) {
+		return {
+			servers,
+			diagnostics: [
+				{
+					scope: "plugin",
+					path: cwd,
+					message: `installed plugins cannot be read: ${error instanceof Error ? error.message : String(error)}`,
+				},
+			],
+		};
+	}
+	const trustImports = trustProjectImports();
+	for (const item of installed) {
+		if (!item.loadable || item.provenance === undefined) continue;
+		if (item.trust === "foreign" && !trustImports) {
+			// Only a package that ships an mcp.json has a server to skip; a note for
+			// every other foreign package would fail `mcp list` on nothing.
+			const filePath = path.join(item.provenance.canonicalRoot, MCP_PLUGIN_CONFIG_FILENAME);
+			if (existsSync(filePath))
+				diagnostics.push({ scope: "plugin", path: filePath, message: foreignPluginMessage(item.id) });
+			continue;
+		}
+		const loaded = loadPluginFile({
+			id: item.id,
+			scope: item.scope,
+			rootPath: item.provenance.canonicalRoot,
+			contentDigest: item.provenance.contentDigest,
+		});
+		servers.push(...loaded.servers);
+		diagnostics.push(...loaded.diagnostics);
+	}
+	return { servers, diagnostics };
+}
+
+/**
+ * Load every scope. A user declaration wins an id collision, then a project
+ * declaration, then the first plugin by id; the loser is dropped with a
+ * diagnostic so nobody wonders why its command never runs. A malformed file
+ * contributes nothing (fail closed).
  */
 export function loadMcpServerConfig(options: McpConfigLoadOptions): McpConfigLoadResult {
 	const paths = mcpConfigPaths(options);
@@ -505,6 +699,22 @@ export function loadMcpServerConfig(options: McpConfigLoadOptions): McpConfigLoa
 			});
 			continue;
 		}
+		servers.push(server);
+	}
+	const plugins = loadPluginServers(options.cwd);
+	diagnostics.push(...plugins.diagnostics);
+	const taken = new Map(servers.map((server) => [server.id, server.path]));
+	for (const server of plugins.servers) {
+		const winner = taken.get(server.id);
+		if (winner !== undefined) {
+			diagnostics.push({
+				scope: "plugin",
+				path: server.path,
+				message: `server '${server.id}' from plugin ${server.plugin?.id ?? "?"} is shadowed by the declaration in ${winner}`,
+			});
+			continue;
+		}
+		taken.set(server.id, server.path);
 		servers.push(server);
 	}
 	return { servers, diagnostics };

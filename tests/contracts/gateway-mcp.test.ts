@@ -245,9 +245,12 @@ describe("gateway MCP capabilities", () => {
 		}
 		const trusted = { ...declared, trust: { status: "trusted" as const, actionClass: "unknown" as const } };
 		strictEqual(mcpToolActionClass(trusted, { name: "tail", annotations: null }), "read");
-		strictEqual(mcpToolActionClass(trusted, { name: "get_job_output", annotations: null }), "read");
+		// Only the operator's own declaration earns the Slurm defaults by its id.
+		const operator = { ...trusted, scope: "user" as const };
+		strictEqual(mcpToolActionClass(operator, { name: "get_job_output", annotations: null }), "read");
+		strictEqual(mcpToolActionClass(trusted, { name: "get_job_output", annotations: null }), "unknown");
 		strictEqual(
-			mcpToolActionClass({ ...trusted, toolActionClasses: {} }, { name: "submit_slurm_job", annotations: null }),
+			mcpToolActionClass({ ...operator, toolActionClasses: {} }, { name: "submit_slurm_job", annotations: null }),
 			"execute",
 		);
 		strictEqual(mcpToolConfirmationRule(trusted, "submit_slurm_job"), "slurm-allocation");

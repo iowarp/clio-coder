@@ -395,13 +395,15 @@ function refuseBrokenDependents(
 		);
 }
 
-function scopeEntries(scope: PluginScope, cwd: string): InstalledPlugin[] {
+function scopeEntries(scope: PluginScope, cwd: string, onlyId?: string): InstalledPlugin[] {
 	const base = pluginBaseDir(scope, cwd);
 	if (!existsSync(base)) return [];
 	let names: string[];
 	try {
 		assertManagedBase(scope, cwd);
-		names = readdirSync(base).sort().filter(isPluginId);
+		names = readdirSync(base)
+			.sort()
+			.filter((name) => isPluginId(name) && (onlyId === undefined || name === onlyId));
 	} catch (error) {
 		return [
 			{
@@ -539,9 +541,17 @@ function blockUntrustedProjectPlugins(entries: ReadonlyArray<InstalledPlugin>, c
 	}
 }
 
-export function listInstalledPlugins(cwd = process.cwd(), options: PluginListOptions = {}): InstalledPlugin[] {
+/**
+ * `id` reads only that plugin's copies. Precedence and workspace trust depend
+ * on nothing but same-id peers and the scope, so its entries come out as in a
+ * full listing while no other plugin tree is hashed.
+ */
+export function listInstalledPlugins(
+	cwd = process.cwd(),
+	options: PluginListOptions & { id?: string } = {},
+): InstalledPlugin[] {
 	const scopes: PluginScope[] = options.scope ? [options.scope] : ["user", "project"];
-	const entries = scopes.flatMap((scope) => scopeEntries(scope, cwd));
+	const entries = scopes.flatMap((scope) => scopeEntries(scope, cwd, options.id));
 	blockUntrustedProjectPlugins(entries, cwd);
 	resolvePluginPrecedence(entries);
 	return entries

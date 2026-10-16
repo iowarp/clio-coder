@@ -6,6 +6,8 @@
  * id, and the declaration digest: change the command, arguments, environment,
  * cwd, or timeout and the record is stale until the operator re-trusts it.
  * User-scope declarations are trusted by authorship; they carry no record.
+ * A plugin's declarations need the same explicit record as a project's, and
+ * their digest covers the plugin's content digest.
  */
 
 import { realpathSync } from "node:fs";
@@ -171,18 +173,19 @@ function writeTrustState(records: ReadonlyArray<McpTrustRecord>, configDir?: str
 function trustStatusFor(server: McpServerDeclaration, projectRoot: string, state: McpTrustState): McpTrustStatus {
 	if (server.scope === "user") return { status: "trusted", actionClass: server.actionClass };
 	const record = state.records.find((entry) => entry.projectRoot === projectRoot && entry.id === server.id);
+	const origin = server.plugin !== undefined ? ` from plugin ${server.plugin.id}` : "";
 	if (record === undefined) {
 		return {
 			status: "untrusted",
 			actionClass: "unknown",
-			reason: `project-scope server '${server.id}' requires explicit trust: clio-coder mcp trust ${server.id}`,
+			reason: `${server.scope}-scope server '${server.id}'${origin} requires explicit trust: clio-coder mcp trust ${server.id}`,
 		};
 	}
 	if (record.digest !== server.digest) {
 		return {
 			status: "stale",
 			actionClass: "unknown",
-			reason: `declaration of '${server.id}' changed (command, args, env, cwd, or timeout) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
+			reason: `declaration of '${server.id}'${origin} changed (command, args, env, cwd, ${server.plugin !== undefined ? "timeout, or the plugin's content" : "or timeout"}) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
 		};
 	}
 	return { status: "trusted", actionClass: record.actionClass };
@@ -232,7 +235,7 @@ export function trustMcpServer(options: TrustMcpServerOptions): TrustMcpServerRe
 				(problems.length > 0 ? `; config diagnostics: ${problems.join("; ")}` : ""),
 		};
 	}
-	if (server.scope !== "project") {
+	if (server.scope === "user") {
 		return { ok: false, message: `server '${options.id}' is a user-scope declaration; it is trusted by authorship` };
 	}
 	const trust = readMcpTrustState(options.configDir);

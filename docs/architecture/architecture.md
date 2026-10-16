@@ -48,7 +48,7 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | middleware | `src/domains/middleware/**` | Declarative and programmatic lifecycle hooks and budgets. |
 | mux | `src/domains/mux/**` | Optional interactive pane-host integration: Herdr guest mode, the Yazi file pane, and the cliamp music dock. |
 | observability | `src/domains/observability/**` | Cost tracker, projection snapshot, SQLite trace mirror, evidence index, out-of-turn usage store. See [Observability](observability.md) and [Trace Store](trace-store.md). |
-| plugins | `src/domains/plugins/**` | Plugin packages, which are Agent Plugins carrying content only: discovery, catalog, and lifecycle. Installing one never runs code. |
+| plugins | `src/domains/plugins/**` | Plugin packages, which are Agent Plugins carrying content: discovery, catalog, and lifecycle. Installing one never runs code; the MCP servers its `mcp.json` declares run only after the operator trusts them. |
 | prompts | `src/domains/prompts/**` | Prompt fragments, system prompt compiler, template hashing. |
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials, pricing resolution. |
 | quota | `src/domains/quota/**` | Read-only subscription and credit readings from connected provider accounts, cached and normalized for the usage surfaces. |

@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -11,8 +12,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { mcpToolActionClass } from "../../src/domains/gateway/mcp/action-classes.js";
 import {
 	loadMcpServerConfig,
 	MCP_CONFIG_CAPS,
@@ -26,6 +28,10 @@ import {
 	trustMcpServer,
 	untrustMcpServer,
 } from "../../src/domains/gateway/mcp/index.js";
+import { clearPluginSnapshots, disablePlugin, installPlugin, PLUGIN_SCHEMA } from "../../src/domains/plugins/index.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createMcpCapabilitySource } from "../../src/tools/gateway/index.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
@@ -470,5 +476,146 @@ describe("mcp server trust", () => {
 		} finally {
 			env?.restore();
 		}
+	});
+});
+
+describe("plugin mcp.json declarations", () => {
+	let env: IsolatedClioEnv;
+	afterEach(() => {
+		clearPluginSnapshots();
+		env.restore();
+	});
+
+	it("declares an installed, enabled plugin's servers under explicit trust bound to the plugin's content", async () => {
+		env = await isolateClioEnv("clio-coder-mcp-plugin-");
+		const { project } = scratch();
+		const source = join(env.dir, "source", "zulip-kit");
+		mkdirSync(join(source, "skills", "notes"), { recursive: true });
+		writeFileSync(
+			join(source, "skills", "notes", "SKILL.md"),
+			"---\nname: notes\ndescription: Notes\n---\nTake notes.\n",
+		);
+		writeFileSync(
+			join(source, "plugin.json"),
+			JSON.stringify({ $schema: PLUGIN_SCHEMA, name: "zulip-kit", version: "1.0.0", description: "Fixture" }),
+		);
+		writeFileSync(
+			join(source, "mcp.json"),
+			JSON.stringify({
+				mcpServers: {
+					zulipchat: { type: "stdio", command: "node", args: ["server.mjs"] },
+					remote: { type: "http", url: "https://example.invalid/mcp" },
+				},
+			}),
+		);
+		strictEqual(installPlugin(source, { cwd: project }).plugin?.loadable, true);
+		const declared = resolveMcpServers({ cwd: project });
+		const server = declared.servers.find((entry) => entry.id === "zulipchat");
+		strictEqual(server?.scope, "plugin");
+		strictEqual(server?.plugin?.id, "zulip-kit");
+		deepStrictEqual(server?.trust, {
+			status: "untrusted",
+			actionClass: "unknown",
+			reason:
+				"plugin-scope server 'zulipchat' from plugin zulip-kit requires explicit trust: clio-coder mcp trust zulipchat",
+		});
+		ok(declared.diagnostics.some((entry) => entry.message.includes("Clio runs stdio servers only")));
+		strictEqual(
+			declared.servers.some((entry) => entry.id === "remote"),
+			false,
+		);
+		ok(trustMcpServer({ cwd: project, id: "zulipchat", actionClass: "read" }).ok);
+		strictEqual(resolveMcpServers({ cwd: project }).servers[0]?.trust.status, "trusted");
+
+		writeFileSync(join(source, "skills", "notes", "SKILL.md"), "---\nname: notes\ndescription: Notes\n---\nChanged.\n");
+		ok(installPlugin(source, { cwd: project, force: true }).plugin?.loadable);
+		strictEqual(
+			resolveMcpServers({ cwd: project }).servers[0]?.trust.status,
+			"stale",
+			"a changed plugin tree needs a new trust decision even with an identical mcp.json",
+		);
+		disablePlugin("zulip-kit", { cwd: project });
+		deepStrictEqual(resolveMcpServers({ cwd: project }).servers, []);
+	});
+
+	function pluginWithServer(dir: string, name: string, serverId: string): string {
+		const source = join(dir, "source", name);
+		mkdirSync(source, { recursive: true });
+		writeFileSync(
+			join(source, "plugin.json"),
+			JSON.stringify({ $schema: PLUGIN_SCHEMA, name, version: "1.0.0", description: "Fixture" }),
+		);
+		writeFileSync(
+			join(source, "mcp.json"),
+			JSON.stringify({ mcpServers: { [serverId]: { type: "stdio", command: "node", args: ["server.mjs"] } } }),
+		);
+		return source;
+	}
+
+	it("stops launching a trusted plugin server once its plugin is disabled mid-session", async () => {
+		env = await isolateClioEnv("clio-coder-mcp-plugin-");
+		const { project } = scratch();
+		ok(installPlugin(pluginWithServer(env.dir, "zulip-kit", "zulipchat"), { cwd: project }).plugin?.loadable);
+		ok(trustMcpServer({ cwd: project, id: "zulipchat", actionClass: "read" }).ok);
+		const launches: string[] = [];
+		const source = createMcpCapabilitySource({
+			cwd: project,
+			registry: createRegistry({ safety: createWorkerSafety({ cwd: project }), autonomy: () => "yolo" }),
+			clientFactory: (spec) => {
+				launches.push(spec.id);
+				throw new Error("this test launches no server");
+			},
+		});
+		deepStrictEqual(source.declaredIds(), ["zulipchat"], "the session snapshots the declaration first");
+		disablePlugin("zulip-kit", { cwd: project });
+		const listing = await source.list();
+		deepStrictEqual(launches, [], "a disabled plugin's server must not launch on the session's snapshot");
+		strictEqual(listing.servers[0]?.reason, "plugin zulip-kit is disabled");
+		await source.close();
+	});
+
+	it("notes a skipped foreign package only when it ships an mcp.json", async () => {
+		env = await isolateClioEnv("clio-coder-mcp-plugin-");
+		const { project } = scratch();
+		const foreign = (source: string) =>
+			installPlugin(source, {
+				cwd: project,
+				origin: { kind: "import", source, transport: "local", format: "portable" },
+			}).plugin;
+		const bare = join(env.dir, "source", "notes-kit");
+		mkdirSync(bare, { recursive: true });
+		writeFileSync(
+			join(bare, "plugin.json"),
+			JSON.stringify({ $schema: PLUGIN_SCHEMA, name: "notes-kit", version: "1.0.0", description: "Fixture" }),
+		);
+		strictEqual(foreign(bare)?.trust, "foreign");
+		deepStrictEqual(resolveMcpServers({ cwd: project }).diagnostics, []);
+		const list = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				import.meta.resolve("tsx"),
+				"--input-type=module",
+				"-e",
+				`import { runMcpCommand } from ${JSON.stringify(resolve("src/cli/mcp.ts"))}; process.exitCode = await runMcpCommand(["list"]);`,
+			],
+			{ cwd: project, env: process.env, encoding: "utf8" },
+		);
+		strictEqual(list.status, 0, list.stdout + list.stderr);
+		strictEqual(foreign(pluginWithServer(env.dir, "zulip-kit", "zulipchat"))?.trust, "foreign");
+		deepStrictEqual(
+			resolveMcpServers({ cwd: project }).diagnostics.map((entry) => entry.message),
+			["foreign package zulip-kit declares no MCP servers until integrations.projectResources.trustProjectImports is on"],
+		);
+	});
+
+	it("gives a plugin server named slurm none of the Slurm read defaults", async () => {
+		env = await isolateClioEnv("clio-coder-mcp-plugin-");
+		const { project } = scratch();
+		ok(installPlugin(pluginWithServer(env.dir, "queue-kit", "slurm"), { cwd: project }).plugin?.loadable);
+		ok(trustMcpServer({ cwd: project, id: "slurm" }).ok);
+		const server = resolveMcpServers({ cwd: project }).servers.find((entry) => entry.id === "slurm");
+		strictEqual(server?.trust.status, "trusted");
+		strictEqual(mcpToolActionClass(server, { name: "get_queue_info", annotations: null }), "unknown");
 	});
 });

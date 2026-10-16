@@ -15,7 +15,7 @@ export type McpClassifiedServer = Pick<
 
 /**
  * Tool names of the Slurm MCP servers Clio knows by id. Reads are listed so a
- * trusted declaration without per-tool classes can still query its queue; the
+ * user declaration without per-tool classes can still query its queue; the
  * mutating set asks for confirmation on every surface.
  */
 const SLURM_READ_TOOLS = new Set([
@@ -67,11 +67,18 @@ export function mcpToolActionClass(
 	if (server.scope === "client") return "unknown";
 	const override = Object.hasOwn(server.toolActionClasses, tool.name) ? server.toolActionClasses[tool.name] : undefined;
 	if (override !== undefined) return override;
-	if (server.id === "slurm") {
+	// A project or plugin file can name its server slurm too; only the
+	// operator's own declaration earns the Slurm read defaults.
+	if (server.scope === "user" && server.id === "slurm") {
 		if (SLURM_CONFIRM_TOOLS.has(tool.name)) return "execute";
 		if (SLURM_READ_TOOLS.has(tool.name)) return "read";
 	}
-	if (server.scope === "project" || server.actionClassExplicit || server.trust.actionClass !== "unknown")
+	if (
+		server.scope === "project" ||
+		server.scope === "plugin" ||
+		server.actionClassExplicit ||
+		server.trust.actionClass !== "unknown"
+	)
 		return server.trust.actionClass;
 	if (tool.annotations?.readOnlyHint === true) return options?.readOnly === true ? "unknown" : "read";
 	if (tool.annotations?.destructiveHint === true) return "destructive";

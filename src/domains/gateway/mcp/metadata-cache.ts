@@ -151,7 +151,7 @@ function decodeCatalog(value: unknown): McpServerCatalog | null {
 		const entry = value[field];
 		if (typeof entry !== "string" || entry.length === 0) return null;
 	}
-	if (value.scope !== "user" && value.scope !== "project") return null;
+	if (value.scope !== "user" && value.scope !== "project" && value.scope !== "plugin") return null;
 	if (typeof value.truncated !== "boolean") return null;
 	if (!Number.isFinite(Date.parse(value.observedAt as string))) return null;
 	if (!Array.isArray(value.tools) || value.tools.length > MCP_METADATA_CACHE_CAPS.tools) return null;
