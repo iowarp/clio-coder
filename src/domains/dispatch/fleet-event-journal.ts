@@ -181,6 +181,8 @@ export interface FleetEventJournalRead {
 	offset: number;
 	/** The first line whose sequence or chain does not extend the previous one, if any. */
 	broken: string | null;
+	/** How many of `lines` precede the first break: all of them when `broken` is null. */
+	verified: number;
 	sealed: boolean;
 }
 
@@ -206,6 +208,7 @@ export function readFleetEventJournal(
 	let seq = from.seq;
 	let prev = from.prev;
 	let broken: string | null = null;
+	let verified = 0;
 	let sealed = false;
 	while (offset < text.length) {
 		const end = text.indexOf(0x0a, offset);
@@ -230,10 +233,11 @@ export function readFleetEventJournal(
 		if (line.seq !== seq + 1 || line.prev !== prev || digest !== lineDigest(unsigned)) {
 			broken ??= `line ${seq + 1} does not extend the chain`;
 		}
+		if (broken === null) verified++;
 		seq = line.seq;
 		prev = digest;
 		lines.push(line);
 		if (line.type === "fleet_sealed") sealed = true;
 	}
-	return { lines, offset, broken, sealed };
+	return { lines, offset, broken, verified, sealed };
 }

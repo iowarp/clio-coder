@@ -100,7 +100,20 @@ export async function runFleetEvents(args: ReadonlyArray<string>): Promise<numbe
 			return 1;
 		}
 		if (read !== null) {
-			for (const line of read.lines) process.stdout.write(`${json ? JSON.stringify(line) : summary(line)}\n`);
+			// --json output is imported by other tools, so it never carries a line
+			// past a break; the summary is for a person and shows the rest.
+			if (json && read.broken !== null) {
+				for (const line of read.lines.slice(0, read.verified)) process.stdout.write(`${JSON.stringify(line)}\n`);
+				process.stderr.write(`clio-coder fleet events: journal integrity: ${read.broken}\n`);
+				return 1;
+			}
+			// A line past the break may not have the shape summary() reads, so
+			// the person sees it raw and marked.
+			const verified = read.verified;
+			read.lines.forEach((line, index) => {
+				const text = json ? JSON.stringify(line) : index < verified ? summary(line) : `unverified ${JSON.stringify(line)}`;
+				process.stdout.write(`${text}\n`);
+			});
 			const last = read.lines.at(-1);
 			cursor = { offset: read.offset, seq: last?.seq ?? cursor.seq, prev: last?.digest ?? cursor.prev };
 			if (read.broken !== null && !reported) {
