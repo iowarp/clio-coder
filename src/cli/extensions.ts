@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../core/workspace-trust.js";
+import { approveOperatorProjectInstall, captureProjectInstallBaseline } from "../core/workspace-trust.js";
 import { envelopeReviewLines, reviewExtensionEnvelope } from "../domains/extensions/envelope-review.js";
 import {
 	disableExtension,
@@ -200,7 +200,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 				process.stderr.write("usage: clio-coder extensions install <path> [--user|--project] [--force]\n");
 				return 2;
 			}
-			const firstProjectInstall = parsed.scope === "project" && projectPackagesHaveNoState(process.cwd(), "extensions");
+			const baseline = parsed.scope === "project" ? captureProjectInstallBaseline(process.cwd(), "extensions") : null;
 			// Read from the manifest before the commit, so the operator sees what the package may do
 			// ahead of the write. A package with no api 2 runtime has no envelope to show.
 			const review = (() => {
@@ -222,7 +222,9 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 				expectedEnvelopeDigest: review?.digest ?? null,
 			});
 			const approved =
-				firstProjectInstall && result.extension !== undefined && approveFirstProjectInstall(process.cwd(), "extensions");
+				baseline !== null &&
+				result.extension !== undefined &&
+				approveOperatorProjectInstall(process.cwd(), baseline, [result.extension.id]);
 			if (parsed.json)
 				process.stdout.write(
 					`${JSON.stringify(review ? { ...result, envelope: review.envelope, envelopeDigest: review.digest } : result, null, 2)}\n`,
@@ -233,7 +235,11 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 					printOk(`installed ${result.extension.id} (${result.extension.scope})`);
 					if (approved)
 						process.stdout.write(
-							"This is the workspace's first project extension install, so project extensions are approved for it. Later installs, disables and removes need clio-coder config trust extensions.\n",
+							"Project extensions were new or already approved here, so your install keeps them approved. Changes made outside your installs need clio-coder config trust extensions.\n",
+						);
+					else if (result.extension.scope === "project")
+						process.stdout.write(
+							"Project extensions are not approved for this workspace; review them with clio-coder config trust extensions.\n",
 						);
 					if (result.extension.runtime)
 						process.stderr.write(

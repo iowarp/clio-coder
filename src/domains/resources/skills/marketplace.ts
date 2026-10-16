@@ -2,8 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { resolvePackageRoot } from "../../../core/package-root.js";
 import {
-	approveFirstProjectInstall,
-	projectPackagesHaveNoState,
+	approveOperatorProjectInstall,
+	captureProjectInstallBaseline,
 	projectPackagesTrusted,
 } from "../../../core/workspace-trust.js";
 import { clioConfigDir } from "../../../core/xdg.js";
@@ -363,12 +363,12 @@ export function installSkill(input: InstallSkillInput): InstallSkillResult {
 		scope,
 		force: input.force ?? false,
 	});
-	const firstProjectInstall = scope === "project" && projectPackagesHaveNoState(cwd, "plugins");
+	const baseline = scope === "project" ? captureProjectInstallBaseline(cwd, "plugins") : null;
 	installLibraryPlan(plan);
 	const candidate = readPluginManifest(plan.path);
 	const component = candidate.manifest?.clio.components.find((item) => item.kind === "skill");
 	if (!component) throw new Error("installed skill package has no skill component");
-	if (firstProjectInstall) approveFirstProjectInstall(cwd, "plugins");
+	if (baseline !== null) approveOperatorProjectInstall(cwd, baseline, [entry.name]);
 	return {
 		name: entry.name,
 		scope,

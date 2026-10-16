@@ -1,7 +1,10 @@
 import { realpathSync } from "node:fs";
 import {
 	captureProjectSurface,
+	type ProjectPackageEntry,
 	type ProjectTrustSurface,
+	projectPackageEntries,
+	recordProjectPackageTrust,
 	recordProjectSurfaceTrust,
 	revokeProjectSurfaceTrust,
 } from "../core/workspace-trust.js";
@@ -14,6 +17,27 @@ const PACKAGE_RELOAD: Partial<Record<ProjectTrustSurface, string>> = {
 	extensions: "Reload extensions (/extensions reload) to apply it.",
 	plugins: "Reload the library (/library reload) to apply it.",
 };
+
+/** C1 controls, which JSON escaping leaves raw. */
+function escapeC1(text: string): string {
+	return text.replace(/[\u007f-\u009f]/gu, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+/** JSON string escaping plus C1 controls, since ids and sources are repository-controlled text. */
+function printable(text: string): string {
+	return escapeC1(JSON.stringify(text).slice(1, -1));
+}
+
+function packageLines(surface: ProjectTrustSurface, packages: ReadonlyArray<ProjectPackageEntry>): string {
+	if (packages.length === 0) return `No project ${surface} are installed.\n`;
+	const text = (value: string | null): string => (value === null ? "(none)" : printable(value));
+	const lines = packages.map(
+		(item) =>
+			`  ${item.enabled ? "enabled " : "disabled"}  ${printable(item.id)}  source ${text(item.source)}  origin ${item.origin === null ? "(none)" : escapeC1(item.origin)}  trust ${text(item.trust)}${surface === "plugins" ? `  kind ${text(item.kind)}` : ""}  content ${item.contentDigest?.slice(0, 12) ?? "(unpinned)"}  envelope ${item.envelopeDigest?.slice(0, 12) ?? "(none)"}`,
+	);
+	// A disabled record can still shadow a user copy of its id, so approval covers it too.
+	return `Project ${surface} to approve. Approval covers every package listed, the disabled ones included:\n${lines.join("\n")}\n`;
+}
 
 /** Review is read-only. Approval names the digest the operator reviewed, so edits cannot borrow stale consent. */
 export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process.cwd()): number {
@@ -46,11 +70,19 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 		}
 		const snapshot = captureProjectSurface(cwd, surface);
 		if (preview) {
+			const packages = projectPackageEntries(snapshot);
+			const json = rest[0] === "--json";
 			// JSON escapes terminal control sequences in repository-controlled text.
-			process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
-			if (rest[0] !== "--json" && snapshot.contentHash !== null && snapshot.files.some((file) => file.text !== null)) {
+			if (json || packages === null)
+				process.stdout.write(`${JSON.stringify(packages === null ? snapshot : { ...snapshot, packages }, null, 2)}\n`);
+			else process.stdout.write(packageLines(surface, packages));
+			if (!json && snapshot.contentHash !== null && snapshot.files.some((file) => file.text !== null)) {
 				process.stdout.write(
-					`Review the captured files above. Approve exactly these bytes with:\nclio-coder config trust ${surface} --hash ${snapshot.contentHash}\n`,
+					packages !== null
+						? `Review the packages above. Approve these package identities with:\nclio-coder config trust ${surface} --hash ${snapshot.contentHash}\n`
+						: surface === "extensions" || surface === "plugins"
+							? `Project ${surface} install state cannot be parsed, so it cannot be approved.\n`
+							: `Review the captured files above. Approve exactly these bytes with:\nclio-coder config trust ${surface} --hash ${snapshot.contentHash}\n`,
 				);
 			}
 			return 0;
@@ -63,7 +95,8 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 			printError(`project ${surface} changed since review; inspect it again before approving`);
 			return 1;
 		}
-		recordProjectSurfaceTrust(snapshot.workspaceRoot, surface, snapshot.contentHash);
+		if (surface === "extensions" || surface === "plugins") recordProjectPackageTrust(snapshot);
+		else recordProjectSurfaceTrust(snapshot.workspaceRoot, surface, snapshot.contentHash);
 		process.stdout.write(
 			`Project ${surface} approved for ${snapshot.workspaceRoot} at ${snapshot.contentHash}. ${PACKAGE_RELOAD[surface] ?? "Restart to reload settings and safety; reload extensions to register newly approved hooks."}\n`,
 		);

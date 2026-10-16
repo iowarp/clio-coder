@@ -14,7 +14,7 @@ import path from "node:path";
 import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { projectPackagesTrusted } from "../../core/workspace-trust.js";
+import { projectPackageTrust } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { type InstalledPlugin, listInstalledPlugins, pluginPromptNames } from "../plugins/index.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
@@ -373,20 +373,26 @@ export function listInstalledExtensions(
 
 /**
  * A project copy installs from the repository's own state, so its digest check
- * proves integrity and not consent. Workspace trust supplies the consent: until
- * the operator approves the project's extension state, its copies neither load
- * nor shadow a user copy, and user-scoped extensions are unaffected.
+ * proves integrity and not consent. Workspace trust supplies the consent per
+ * record: a copy the operator has not approved, enabled or disabled, neither
+ * loads nor shadows a user copy, and user-scoped extensions are unaffected.
  */
 function blockUntrustedProjectExtensions(records: ReadonlyArray<InstalledExtensionRecord>, cwd: string): void {
 	const project = records.filter((record) => record.entry.scope === "project");
-	if (project.length === 0 || projectPackagesTrusted(cwd, "extensions")) return;
+	if (project.length === 0) return;
+	const trust = projectPackageTrust(cwd, "extensions");
 	for (const { entry } of project) {
+		if (trust.approvedIds.has(entry.id)) continue;
 		entry.trustBlocked = true;
-		if (entry.valid && entry.compatible && entry.enabled) {
+		// Under a trusted surface only a record nobody approved lands here, and a
+		// disabled one is named too because it would otherwise shadow a user copy.
+		if (entry.valid && entry.compatible && (entry.enabled || trust.verdict === "trusted")) {
 			entry.diagnostics.push({
 				type: "warning",
 				message:
-					"project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions",
+					trust.verdict === "trusted"
+						? `project extension ${entry.id} is not approved for this workspace, so it neither loads nor shadows a user copy; review with clio-coder config trust extensions`
+						: "project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions",
 				path: statePath("project", cwd),
 			});
 		}

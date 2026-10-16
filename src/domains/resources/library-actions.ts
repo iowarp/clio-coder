@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { approveFirstProjectInstall, projectPackagesHaveNoState } from "../../core/workspace-trust.js";
+import { approveOperatorProjectInstall, captureProjectInstallBaseline } from "../../core/workspace-trust.js";
 import {
 	disableExtension,
 	type ExtensionCapabilityEnvelope,
@@ -865,14 +865,18 @@ export function applyLibraryLifecycle(
 				outcomes.push(step.refusal ? failed(step, "refused", step.refusal) : { ...unattempted(step) });
 			return summarize(plan, false, outcomes, { status: "not-applicable", reason: "plan refused; nothing committed" });
 		}
-		const firstExtensionInstall =
-			plan.steps.some(
-				(step) => step.operation === "install" && step.identity.scope === "project" && step.identity.kind === "extension",
-			) && projectPackagesHaveNoState(plan.cwd, "extensions");
-		const firstProjectInstall =
-			plan.steps.some(
-				(step) => step.operation === "install" && step.identity.scope === "project" && step.identity.kind !== "extension",
-			) && projectPackagesHaveNoState(plan.cwd, "plugins");
+		// Captured before any step runs: an operator install may approve only a
+		// surface that had no state or was trusted (workspace trust).
+		const extensionBaseline = plan.steps.some(
+			(step) => step.operation === "install" && step.identity.scope === "project" && step.identity.kind === "extension",
+		)
+			? captureProjectInstallBaseline(plan.cwd, "extensions")
+			: null;
+		const pluginBaseline = plan.steps.some(
+			(step) => step.operation === "install" && step.identity.scope === "project" && step.identity.kind !== "extension",
+		)
+			? captureProjectInstallBaseline(plan.cwd, "plugins")
+			: null;
 		let aborted = false;
 		for (const step of plan.steps) {
 			if (aborted) {
@@ -885,27 +889,15 @@ export function applyLibraryLifecycle(
 			// later steps must not build on a copy whose state cannot be proven.
 			if (outcome.status !== "committed" || outcome.error) aborted = true;
 		}
-		if (
-			firstExtensionInstall &&
-			outcomes.some(
-				(item) =>
-					item.status === "committed" &&
-					item.operation === "install" &&
-					item.identity.scope === "project" &&
-					item.identity.kind === "extension",
-			)
-		)
-			approveFirstProjectInstall(plan.cwd, "extensions");
-		// The operator's own first project install creates the project's plugin
-		// state, which is theirs to approve (workspace trust).
-		if (
-			firstProjectInstall &&
-			outcomes.some(
-				(item) => item.status === "committed" && item.operation === "install" && item.identity.scope === "project",
-			)
-		) {
-			approveFirstProjectInstall(plan.cwd, "plugins");
-		}
+		const installed = outcomes.filter(
+			(item) => item.status === "committed" && item.operation === "install" && item.identity.scope === "project",
+		);
+		const extensionIds = installed.filter((item) => item.identity.kind === "extension").map((item) => item.identity.name);
+		const pluginIds = installed.filter((item) => item.identity.kind !== "extension").map((item) => item.identity.name);
+		if (extensionBaseline !== null && extensionIds.length > 0)
+			approveOperatorProjectInstall(plan.cwd, extensionBaseline, extensionIds);
+		if (pluginBaseline !== null && pluginIds.length > 0)
+			approveOperatorProjectInstall(plan.cwd, pluginBaseline, pluginIds);
 	} finally {
 		releaseLibraryLifecycle(plan);
 	}

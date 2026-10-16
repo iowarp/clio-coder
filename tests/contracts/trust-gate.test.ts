@@ -1,17 +1,22 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import {
+	approveOperatorProjectInstall,
+	captureProjectInstallBaseline,
 	captureProjectSurface,
 	projectSurfaceTrust,
+	recordProjectPackageTrust,
 	recordProjectSurfaceTrust,
 	revokeProjectSurfaceTrust,
 	workspaceTrustDirectory,
 } from "../../src/core/workspace-trust.js";
+import { disableExtension, installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { INTEROP_AGENT_KINDS } from "../../src/domains/interop/registry.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { loadUserHooks, userHookToRegistration } from "../../src/domains/middleware/hooks.js";
@@ -159,6 +164,193 @@ test("S3-01: local-file addition invalidates the entire surface and revocation s
 		rmSync(join(home.dir, "state"), { recursive: true, force: true });
 		throws(() => recordProjectSurfaceTrust(workspace, "hooks", hash), /state was removed/);
 		strictEqual(existsSync(join(home.dir, "state")), false);
+	} finally {
+		home.restore();
+	}
+});
+
+function writePackageState(
+	workspace: string,
+	surface: "extensions" | "plugins",
+	installed: Record<string, Record<string, string>>,
+	disabled: string[] = [],
+): void {
+	const dir = join(workspace, ".clio-coder", surface);
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "state.json"), `${JSON.stringify({ version: 1, disabled, installed }, null, 2)}\n`);
+}
+
+test("project package trust binds package identities, not install-state bytes", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-packages-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		const a = { source: "./a", contentDigest: "a".repeat(64) };
+		writePackageState(workspace, "extensions", { a: { ...a, installedAt: "2026-10-01T00:00:00.000Z" } });
+		recordProjectPackageTrust(captureProjectSurface(workspace, "extensions"));
+		writePackageState(workspace, "extensions", { a: { ...a, installedAt: "2026-10-02T00:00:00.000Z" } });
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "trusted");
+		writePackageState(workspace, "extensions", { a: { ...a, installedAt: "2026-10-02T00:00:00.000Z" } }, ["a"]);
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "trusted");
+		const b = { source: "./b", contentDigest: "b".repeat(64), installedAt: "2026-10-03T00:00:00.000Z" };
+		writePackageState(workspace, "extensions", { a: { ...a, installedAt: "2026-10-02T00:00:00.000Z" }, b });
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "changed");
+		writePackageState(workspace, "extensions", {
+			a: { ...a, envelopeDigest: "e".repeat(64), installedAt: "2026-10-02T00:00:00.000Z" },
+		});
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "changed");
+
+		const plugin = { source: "./p", contentDigest: "c".repeat(64), installedAt: "2026-10-01T00:00:00.000Z" };
+		writePackageState(workspace, "plugins", { p: { ...plugin, trust: "foreign" } });
+		recordProjectPackageTrust(captureProjectSurface(workspace, "plugins"));
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "trusted");
+		writePackageState(workspace, "plugins", { p: { ...plugin, trust: "trusted" } });
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "changed");
+		writePackageState(workspace, "plugins", { p: { ...plugin, trust: "foreign", kind: "extension" } });
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "changed");
+	} finally {
+		home.restore();
+	}
+});
+
+test("an unapproved disabled project extension cannot shadow the user copy under a trusted surface", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-shadow-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(workspace, { recursive: true });
+		const source = (id: string): string => {
+			const root = join(home.dir, "sources", id);
+			mkdirSync(root, { recursive: true });
+			writeFileSync(
+				join(root, "clio-coder-extension.yaml"),
+				`id: ${id}\nname: ${id}\nversion: 1.0.0\ndescription: Shadowing fixture.\n`,
+			);
+			return root;
+		};
+		ok(installExtension(source("shared"), { cwd: workspace, scope: "user" }).extension);
+		ok(installExtension(source("other"), { cwd: workspace, scope: "project" }).extension);
+		recordProjectPackageTrust(captureProjectSurface(workspace, "extensions"));
+		ok(installExtension(source("shared"), { cwd: workspace, scope: "project" }).extension);
+		disableExtension("shared", { cwd: workspace, scope: "project" });
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "trusted");
+		const shared = listInstalledExtensions(workspace, { all: true }).filter((entry) => entry.id === "shared");
+		const user = shared.find((entry) => entry.scope === "user");
+		const project = shared.find((entry) => entry.scope === "project");
+		strictEqual(user?.effective, true);
+		strictEqual(project?.trustBlocked, true);
+		strictEqual(project?.effective, false);
+		ok(
+			project?.diagnostics.some((diagnostic) => diagnostic.message.includes("project extension shared is not approved")),
+		);
+	} finally {
+		home.restore();
+	}
+});
+
+test("an operator install into a trusted package surface stays trusted without approving disabled packages", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-install-trusted-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		const at = { installedAt: "2026-10-01T00:00:00.000Z" };
+		const a = { source: "./a", contentDigest: "a".repeat(64), ...at };
+		const x = { source: "./x", contentDigest: "f".repeat(64), ...at };
+		writePackageState(workspace, "extensions", { a });
+		recordProjectPackageTrust(captureProjectSurface(workspace, "extensions"));
+		writePackageState(workspace, "extensions", { a, x }, ["x"]);
+		const baseline = captureProjectInstallBaseline(workspace, "extensions");
+		ok(baseline);
+		const b = { source: "./b", contentDigest: "b".repeat(64), ...at };
+		writePackageState(workspace, "extensions", { a, b, x }, ["x"]);
+		strictEqual(approveOperatorProjectInstall(workspace, baseline, ["b"]), true);
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "trusted");
+		writePackageState(workspace, "extensions", { a, b, x });
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "changed");
+	} finally {
+		home.restore();
+	}
+});
+
+test("an operator install approves only its own records and never undoes a revoke in its window", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-install-window-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		const at = { installedAt: "2026-10-01T00:00:00.000Z" };
+		const a = { source: "./a", contentDigest: "a".repeat(64), ...at };
+		const b = { source: "./b", contentDigest: "b".repeat(64), ...at };
+		const c = { source: "./c", contentDigest: "c".repeat(64), ...at };
+		writePackageState(workspace, "plugins", { a });
+		recordProjectPackageTrust(captureProjectSurface(workspace, "plugins"));
+		const concurrent = captureProjectInstallBaseline(workspace, "plugins");
+		ok(concurrent);
+		writePackageState(workspace, "plugins", { a, b, c });
+		strictEqual(approveOperatorProjectInstall(workspace, concurrent, ["b"]), false);
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "changed");
+		writePackageState(workspace, "plugins", { a, b });
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "trusted");
+
+		const revoked = captureProjectInstallBaseline(workspace, "plugins");
+		ok(revoked);
+		revokeProjectSurfaceTrust(workspace, "plugins");
+		writePackageState(workspace, "plugins", { a, b, c });
+		strictEqual(approveOperatorProjectInstall(workspace, revoked, ["c"]), false);
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "untrusted");
+	} finally {
+		home.restore();
+	}
+});
+
+test("an operator install into an untrusted package surface stays untrusted", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-install-untrusted-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		const at = { installedAt: "2026-10-01T00:00:00.000Z" };
+		writePackageState(workspace, "plugins", { a: { source: "./a", contentDigest: "a".repeat(64), ...at } });
+		strictEqual(captureProjectInstallBaseline(workspace, "plugins"), null);
+		writePackageState(workspace, "plugins", {
+			a: { source: "./a", contentDigest: "a".repeat(64), ...at },
+			b: { source: "./b", contentDigest: "b".repeat(64), ...at },
+		});
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "untrusted");
+	} finally {
+		home.restore();
+	}
+});
+
+test("a version 1 package digest stays an exact-bytes approval and a digest-only record stays version 1", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-packages-v1-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		writePackageState(workspace, "extensions", {
+			a: { source: "./a", contentDigest: "a".repeat(64), installedAt: "2026-10-01T00:00:00.000Z" },
+		});
+		const snapshot = captureProjectSurface(workspace, "extensions");
+		ok(snapshot.contentHash);
+		const recordFile = join(
+			workspaceTrustDirectory(),
+			`${createHash("sha256").update(snapshot.workspaceRoot).digest("hex")}.json`,
+		);
+		mkdirSync(workspaceTrustDirectory(), { recursive: true });
+		writeFileSync(
+			recordFile,
+			JSON.stringify({
+				version: 1,
+				workspaceRoot: snapshot.workspaceRoot,
+				surfaces: { extensions: snapshot.contentHash },
+			}),
+		);
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "trusted");
+		writeFileSync(join(workspace, ".clio-coder", "hooks.yaml"), "[]\n");
+		approve(workspace, "hooks");
+		const rewritten = JSON.parse(readFileSync(recordFile, "utf8")) as {
+			version: number;
+			surfaces: Record<string, unknown>;
+		};
+		strictEqual(rewritten.version, 1);
+		strictEqual(rewritten.surfaces.extensions, snapshot.contentHash);
+		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "trusted");
+		recordProjectPackageTrust(captureProjectSurface(workspace, "extensions"));
+		strictEqual((JSON.parse(readFileSync(recordFile, "utf8")) as { version: number }).version, 2);
+		revokeProjectSurfaceTrust(workspace, "extensions");
+		strictEqual((JSON.parse(readFileSync(recordFile, "utf8")) as { version: number }).version, 1);
 	} finally {
 		home.restore();
 	}
