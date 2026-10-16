@@ -614,7 +614,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (fleetInFlight !== null) {
 			deps.notify(
 				"warning",
-				`fleet ${fleetInFlight.name} (root=${fleetInFlight.fleetRootId}) is still running; /fleet run is refused until it settles. /fleet shows its progress`,
+				`fleet ${fleetInFlight.name} (root=${fleetInFlight.fleetRootId}) is still running; /fleet run is refused until it settles. clio-coder fleet events ${fleetInFlight.fleetRootId} --follow shows its progress`,
 				"fleet-run:in-flight",
 			);
 			return;
