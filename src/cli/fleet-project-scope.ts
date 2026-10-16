@@ -1,4 +1,5 @@
 import { readSettings } from "../core/config.js";
+import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
 import { readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
 import { dispatchOwnership } from "../domains/dispatch/ownership.js";
 import type { FleetRunRecord } from "../domains/dispatch/state.js";
@@ -24,19 +25,23 @@ export function fleetInspectionScope(all: boolean, cwd = process.cwd()) {
 	};
 	const seesRoot = (record: FleetRunRecord, getRun: (id: string) => RunEnvelope | null): boolean => {
 		if (all) return true;
+		// A root that records where it was launched answers from that alone. The
+		// ledger keeps the newest 1000 runs, so a root whose step runs were
+		// evicted must not vanish from its own project.
+		if (record.cwd !== undefined) return ownership.inProject(record.cwd);
 		// Old root records had no cwd. A complete set of recorded terminal runs
 		// can still establish their project; an unstarted legacy root cannot.
 		const terminalRuns = (record.steps ?? [])
 			.map((step) => step.result.terminalRunId)
 			.filter((id): id is string => typeof id === "string");
-		if (record.cwd !== undefined && !ownership.inProject(record.cwd)) return false;
-		if (terminalRuns.length === 0) return record.cwd !== undefined;
+		if (terminalRuns.length === 0) return false;
 		// Deterministic steps have their own command records, not model-ledger
-		// rows. Verify their recorded cwd instead of hiding mixed playbooks.
-		const codeSteps = new Map(readCodeStepRecords(record.id).map((step) => [step.runId, step]));
+		// rows, and are read only once a run id misses the ledger.
+		let codeSteps: Map<string, CodeStepRecord> | undefined;
 		return terminalRuns.every((id) => {
-			if (seesRunId(id, getRun)) return true;
-			if (getRun(id) !== null) return false;
+			const run = getRun(id);
+			if (run !== null) return seesRun(run);
+			codeSteps ??= new Map(readCodeStepRecords(record.id).map((step) => [step.runId, step]));
 			const code = codeSteps.get(id);
 			return code !== undefined && typeof code.cwd === "string" && ownership.inProject(code.cwd);
 		});
