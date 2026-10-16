@@ -91,8 +91,9 @@ async function capture(model: Model<"openai-completions">, message: AssistantMes
 test("gpt-oss replay never sends content, reasoning and tool_calls in one assistant turn", async () => {
 	const model = fixtureModel("openai/gpt-oss-120b");
 	const assistant = await capture(model, toolTurn(model, narration));
-	strictEqual(assistant.reasoning, undefined);
-	ok(JSON.stringify(assistant.content).includes(narration));
+	// The text joins the reasoning on the analysis channel, after it, and nothing is lost.
+	strictEqual(assistant.reasoning, `${reasoning}\n\n${narration}`);
+	ok(!JSON.stringify(assistant.content ?? null).includes(narration));
 	strictEqual(assistant.tool_calls?.length, 1);
 });
 

@@ -11,7 +11,9 @@ import {
 	type OpenAICompletionsOptions,
 	type SimpleStreamOptions,
 	type StreamOptions,
+	type TextContent,
 	type ThinkingBudgets,
+	type ThinkingContent,
 	type Tool,
 	type Usage,
 } from "@earendil-works/pi-ai";
@@ -447,23 +449,41 @@ function preserveInterruptedReasoning(
  * The gpt-oss chat template raises on an assistant turn that carries text,
  * reasoning and tool calls together ("Cannot pass both content and thinking in
  * an assistant message with tool calls"). Hosted endpoints report it as a bare
- * 400, so one such turn poisons every later request in the session. Harmony
- * renders that text on the analysis channel anyway: drop the reasoning from
- * the request only and never modify the saved transcript.
+ * 400, so one such turn poisons every later request in the session. The
+ * template renders either field of a tool turn on the analysis channel, so the
+ * text joins the reasoning there: the chain of thought a running tool loop
+ * depends on survives, and so do the model's own words. llama.cpp's gpt-oss
+ * handler keeps the reasoning too (it erases `content`), so every server
+ * renders the same analysis. Request only; the saved transcript never changes.
  */
-function harmonyToolTurnsWithoutThinking(context: Context, resolved: ResolvedModelRuntimeCapabilities): Context {
+function harmonyToolTurnsWithOneAnalysis(context: Context, resolved: ResolvedModelRuntimeCapabilities): Context {
 	if (resolved.response.parser !== "harmony") return context;
 	return {
 		...context,
 		messages: context.messages.map((message) => {
-			if (
-				message.role !== "assistant" ||
-				!message.content.some((block) => block.type === "toolCall") ||
-				!message.content.some((block) => block.type === "text" && block.text.trim().length > 0) ||
-				!message.content.some((block) => block.type === "thinking")
-			)
-				return message;
-			return { ...message, content: message.content.filter((block) => block.type !== "thinking") };
+			if (message.role !== "assistant" || !message.content.some((block) => block.type === "toolCall")) return message;
+			const reasoning = message.content.filter(
+				(block): block is ThinkingContent => block.type === "thinking" && !block.redacted,
+			);
+			const text = message.content
+				.filter((block): block is TextContent => block.type === "text")
+				.map((block) => block.text.trim())
+				.filter((part) => part.length > 0);
+			const first = reasoning[0];
+			if (first === undefined || text.length === 0) return message;
+			const analysis: ThinkingContent = {
+				...first,
+				thinking: [...reasoning.map((block) => block.thinking.trim()).filter((part) => part.length > 0), ...text].join(
+					"\n\n",
+				),
+			};
+			return {
+				...message,
+				content: [
+					analysis,
+					...message.content.filter((block) => block.type !== "text" && !(block.type === "thinking" && !block.redacted)),
+				],
+			};
 		}),
 	};
 }
@@ -1094,7 +1114,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 	const resolved = resolvedCapabilitiesForModel(model, level);
 	const effectiveContext = stripsThinking(resolved)
 		? stripThinkingFromContext(context)
-		: harmonyToolTurnsWithoutThinking(context, resolved);
+		: harmonyToolTurnsWithOneAnalysis(context, resolved);
 	// Pi's credential check reads request headers, while its HTTP client also
 	// reads model headers. Forward both so header-authenticated targets pass both.
 	const transportOptions = model.headers
