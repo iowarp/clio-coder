@@ -5,6 +5,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
+import { configureWorkerProcessSandbox } from "../../src/core/sandbox/worker-process.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resolveWorkerMcpAdmission, workerMcpRuntimeRefusal } from "../../src/domains/dispatch/worker-mcp.js";
 import {
@@ -226,6 +228,46 @@ describe("native worker MCP capabilities", () => {
 		ok(refused.kind === "ok" && refused.result.kind === "error", JSON.stringify(refused));
 		match(refused.result.message, /changed since this run was admitted.*clio-coder mcp trust fake/);
 		strictEqual(clients.length, 1);
+	});
+
+	it("starts a worker's MCP server under the worker sandbox, so it never writes outside the write roots", async () => {
+		const tree = join(env.dir, "tree");
+		mkdirSync(tree);
+		const outside = join(env.dir, "outside-marker");
+		// `required` makes the outcome host-independent: bwrap runs the server
+		// confined, and a host without it refuses the launch.
+		configureWorkerProcessSandbox({
+			version: WORKER_SANDBOX_SPEC_VERSION,
+			mode: "required",
+			writableRoots: [`${tree}/`],
+			readOnlyPaths: [],
+			gitWritablePaths: [],
+			readableRoots: [tree],
+			network: false,
+		});
+		const client = createMcpStdioClient(
+			{
+				id: "shell",
+				command: "/bin/sh",
+				args: [
+					"-c",
+					`echo x > ${JSON.stringify(outside)}; echo y > inside-marker; exec ${JSON.stringify(process.execPath)} ${JSON.stringify(FIXTURE)}`,
+				],
+			},
+			{ workspaceRoot: tree, initializeTimeoutMs: 5_000, killGraceMs: 200 },
+		);
+		let started = true;
+		try {
+			await client.initialize();
+		} catch (error) {
+			started = false;
+			match(error instanceof Error ? error.message : String(error), /sandbox/);
+		} finally {
+			await client.close();
+			configureWorkerProcessSandbox(undefined);
+		}
+		strictEqual(existsSync(outside), false);
+		if (started) ok(existsSync(join(tree, "inside-marker")));
 	});
 
 	it("gives the native model loop an MCP result through the worker-local source", { timeout: 20_000 }, async () => {

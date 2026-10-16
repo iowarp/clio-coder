@@ -4,8 +4,10 @@
  * server that dies stays dead until the gateway decides to create a new
  * client. Every request carries its own timeout, every failure is a typed
  * McpError, and nothing the server prints reaches this process's stdout or
- * stderr. Launching a server here is not sandboxing it: the child gets the
- * allowlisted tool environment and a workspace-contained cwd, nothing more.
+ * stderr. The child gets the allowlisted tool environment and a
+ * workspace-contained cwd. Inside a dispatched worker it also runs under the
+ * worker's OS sandbox, like every other child the worker starts; in the
+ * orchestrator no sandbox policy is configured and it runs directly.
  *
  * Both directions are bounded. The framer caps inbound lines; an outbound
  * cap bounds the bytes waiting on a server that stopped reading its stdin,
@@ -22,6 +24,7 @@ import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../../core/safe-exec.js";
+import { planSandboxedSpawn } from "../../../core/sandbox/worker-process.js";
 import { clampTimerDelayMs, sleep } from "../../../core/timers.js";
 import type { JsonRpcId, JsonRpcMessage } from "./protocol.js";
 import {
@@ -671,9 +674,19 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 			fail(new McpError("spawn", `mcp server ${spec.id} failed to start: ${cwd.message}`));
 			return false;
 		}
+		// A worker's policy engine admits execute-class calls under write roots on
+		// the promise that bwrap binds every child it starts to those roots, so a
+		// server must not be the one child that escapes them or the network policy.
+		const sandbox = planSandboxedSpawn({ argv: [spec.command, ...(spec.args ?? [])] }, cwd);
+		if (sandbox.kind === "refused") {
+			fail(new McpError("spawn", `mcp server ${spec.id} failed to start: ${sandbox.message}`));
+			return false;
+		}
 		let proc: ChildProcess;
 		try {
-			proc = spawn(spec.command, [...(spec.args ?? [])], {
+			const [file, args] =
+				sandbox.kind === "sandboxed" ? [sandbox.file, sandbox.args] : [spec.command, [...(spec.args ?? [])]];
+			proc = spawn(file, args, {
 				cwd,
 				env: buildSafeToolEnv({ ...(spec.env ?? {}) }),
 				detached: process.platform !== "win32",

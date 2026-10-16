@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { TSchema } from "typebox";
 import type { DynamicToolName } from "../../core/tool-names.js";
 import { mcpToolName } from "../../core/tool-names.js";
@@ -160,6 +161,13 @@ export interface McpCapabilitySourceOptions {
 	 * under the class admission sealed into the permit.
 	 */
 	admitted?: WorkerMcpAttestation;
+	/**
+	 * The worker's own tree, where its project servers start. A project
+	 * declaration's cwd keeps its place relative to the repository but lands
+	 * here, inside the sandbox's write roots, instead of in the checkout that
+	 * admission read the declaration from.
+	 */
+	launchRoot?: string;
 }
 
 export interface McpCapabilitySource {
@@ -319,6 +327,14 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	};
 
 	const closeClient = (state: ServerState): Promise<McpTeardownOutcome> | undefined => state.connection?.close();
+
+	const launchPlacement = (declaration: GatewayMcpServer): { cwd: string; workspaceRoot: string } => {
+		if (options.launchRoot === undefined || declaration.scope !== "project") {
+			return { cwd: declaration.cwd, workspaceRoot: declaration.cwdRoot };
+		}
+		const relative = path.relative(declaration.cwdRoot, declaration.cwd);
+		return { cwd: path.join(options.launchRoot, relative), workspaceRoot: options.launchRoot };
+	};
 
 	/**
 	 * A worker keeps every declaration so the owner rule routes exactly as
@@ -515,6 +531,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	const startConnection = (state: ServerState): OwnedConnection => {
 		const controller = new AbortController();
 		const { declaration } = state;
+		const placement = launchPlacement(declaration);
 		// PERF W3: reserve ownership before the lazy import, so close can fence acquisition.
 		const loaded = (async () => {
 			const { createMcpConnection } = await import("../../domains/gateway/mcp/connection-lifecycle.js");
@@ -526,11 +543,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 							id: declaration.id,
 							command: declaration.command,
 							args: declaration.args,
-							cwd: declaration.cwd,
+							cwd: placement.cwd,
 							env: declaration.env,
 						},
 						{
-							workspaceRoot: declaration.cwdRoot,
+							workspaceRoot: placement.workspaceRoot,
 							onFailure: (error) => {
 								state.failure ??= errorMessage(error);
 								void closeClient(state);

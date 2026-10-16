@@ -775,8 +775,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					const admitted = input.mcp as WorkerMcpAttestation;
 					// Declarations and trust are read from the project root admission
 					// used, never from a task worktree that holds neither, and nothing
-					// this run observes is written back to the operator's catalog.
-					workerMcp = createMcpCapabilitySource({ cwd: admitted.projectRoot, registry, persistCatalog: false, admitted });
+					// this run observes is written back to the operator's catalog. The
+					// servers themselves start in this run's tree, under its sandbox.
+					workerMcp = createMcpCapabilitySource({
+						cwd: admitted.projectRoot,
+						launchRoot: input.cwd ?? process.cwd(),
+						registry,
+						persistCatalog: false,
+						admitted,
+					});
 					return workerMcp;
 				}
 			: undefined,
