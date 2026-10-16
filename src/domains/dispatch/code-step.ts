@@ -49,6 +49,8 @@ export const CODE_STEP_EMPTY_DIFF_MESSAGE = "nothing to commit: the workspace ha
 export const CODE_STEP_TRUNCATION_MARKER = "\n[... output truncated, see artifact ...]\n";
 
 export interface CodeStepRunInput {
+	/** A run id the caller announced before the command started; minted here when absent. */
+	runId?: string;
 	/** Run-local mutation paths supplied only for a fleet loop's code check. */
 	mutatedPaths?: ReadonlyArray<string>;
 	/** Already resolved literal arguments; never interpolated a second time. */
@@ -212,7 +214,7 @@ export function workspaceHasChanges(root: string): boolean {
 	return status.trim().length > 0;
 }
 
-function newCodeRunId(): string {
+export function newCodeRunId(): string {
 	return `code-${createHash("sha256")
 		.update(`${process.pid}:${Date.now()}:${Math.random()}`)
 		.digest("hex")
@@ -326,7 +328,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		throw new Error("code step: artifactDir must be absolute");
 	}
 	const cwd = resolveCwd(command, input.workspaceRoot);
-	const runId = newCodeRunId();
+	const runId = input.runId ?? newCodeRunId();
 	const extraArgs = input.args ?? [];
 	if (
 		extraArgs.length > 64 ||

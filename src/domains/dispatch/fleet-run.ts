@@ -26,7 +26,7 @@ import type { CostProvenance } from "../providers/index.js";
 import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
 import { claimAssignmentVerdict, recordAssignmentAttempt, settleStoredAssignment } from "./assignment-store.js";
-import { runCodeStep } from "./code-step.js";
+import { newCodeRunId, runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
 import type { DispatchContract, DispatchPlanTaskResolution, DispatchRequest } from "./contract.js";
 import { buildDelegationProposalBriefing, validateDelegationPlan } from "./delegation-plan.js";
@@ -832,7 +832,20 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 						}
 					}
 				}
+				// Announced before the command runs, as an agent step is at launch, so
+				// a code-only fleet reads as running while it runs and an ACP client
+				// learns it started without waiting for the first command to finish.
+				const codeRunId = newCodeRunId();
+				const event = {
+					stepId: step.id,
+					kind: "code" as const,
+					waveIndex: fleetPlanWaveIndex(livePlan, step.id),
+					assignmentId: codeRunId,
+					commandId: command.id,
+				};
+				input.onStepDispatched?.(event);
 				const outcome = await runCodeStep({
+					runId: codeRunId,
 					...(mutatedPaths.size > 0 ? { mutatedPaths: [...mutatedPaths] } : {}),
 					...(step.args ? { args: step.args } : {}),
 					stepId: step.id,
@@ -853,15 +866,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				});
 				if (step.verification === true) validationFresh = outcome.report.passed;
 				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
-				const waveIndex = fleetPlanWaveIndex(livePlan, step.id);
-				const event = {
-					stepId: step.id,
-					kind: "code" as const,
-					waveIndex,
-					assignmentId: outcome.record.runId,
-					commandId: command.id,
-				};
-				input.onStepDispatched?.(event);
 				input.onStepSettled?.({
 					...event,
 					succeeded: outcome.report.passed,

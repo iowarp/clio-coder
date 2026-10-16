@@ -600,12 +600,25 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	 * contract that fails preflight opens the same overlay with its diagnostics
 	 * and no accept action, so the only exit from a broken plan is to leave it.
 	 */
+	// The fleet this session started and has not seen settle. Launch returns at
+	// once so the session stays usable, which made a running fleet easy to read
+	// as finished; a second start is refused while one runs (Portus v3).
+	let fleetInFlight: { name: string; fleetRootId: string } | null = null;
+
 	const startFleetRun = (
 		name: string,
 		vars: Readonly<Record<string, string>>,
 		options: FleetRunStartOptions = {},
 	): void => {
 		if (deps.transitions.state !== "closed") return;
+		if (fleetInFlight !== null) {
+			deps.notify(
+				"warning",
+				`fleet ${fleetInFlight.name} (root=${fleetInFlight.fleetRootId}) is still running; /fleet run is refused until it settles. /fleet shows its progress`,
+				"fleet-run:in-flight",
+			);
+			return;
+		}
 		// Refused, never queued: an approved plan describes the workspace as it
 		// stands, and a turn still in flight is about to change it.
 		if (deps.isTurnInFlight?.() === true) {
@@ -651,9 +664,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const dispatchFleetRun = (preview: FleetRunPreview, agents: AgentsContract): void => {
 		const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
 		const run = deps.runFleet ?? executeFleetRun;
+		fleetInFlight = { name: preview.name, fleetRootId };
 		deps.notify(
 			"info",
-			`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}`,
+			`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
 			"fleet-run:started",
 		);
 		void run({
@@ -676,6 +690,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onNotice: (text) => deps.stderr(`[fleet ${preview.name}] ${text}\n`),
 		})
 			.then((outcome) => {
+				fleetInFlight = null;
 				deps.notify(
 					outcome.cleanRun ? "success" : "warning",
 					// `totalCost` rather than the bare `totalCostUsd` sum: a run whose
@@ -686,6 +701,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				);
 			})
 			.catch((error: unknown) => {
+				fleetInFlight = null;
 				deps.notify(
 					"error",
 					`fleet ${preview.name}: ${error instanceof Error ? error.message : String(error)}`,
