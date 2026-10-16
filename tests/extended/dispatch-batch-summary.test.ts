@@ -69,11 +69,12 @@ test("dispatch batch shows sealed tool calls and provenance-aware cost without i
 		observedToolCalls: 7,
 		unobservableToolRuns: 1,
 		excludedUntrustedRuns: 1,
-		cost: "$0.30 +?",
+		// run-b is estimated, so the partly unknown total is approximate too (5996f82c6).
+		cost: "~$0.30 +?",
 	});
 	match(
 		formatDispatchOutput("parallel", runs, 16_384),
-		/batch observed_tool_calls=7 cost=\$0\.30 \+\? unobservable_tool_runs=1 excluded_untrusted_runs=1/u,
+		/batch observed_tool_calls=7 cost=~\$0\.30 \+\? unobservable_tool_runs=1 excluded_untrusted_runs=1/u,
 	);
 });
 

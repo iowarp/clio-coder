@@ -79,11 +79,14 @@ test("trusted user hooks protect paths before mutations and after observations i
 			},
 		);
 		match(result.stdout, /PROTECTION_CHECK_COMPLETE/u);
-		strictEqual(fixture.requests.filter((request) => request.stream !== false).length, 5);
+		// A successful headless run then retains lessons through a tool-less request
+		// (b1385e91a), so the agent loop's turns are the requests that carry tools.
+		const turns = fixture.requests.filter((request) => request.stream !== false && Array.isArray(request.tools));
+		strictEqual(turns.length, 5);
 		strictEqual(readFileSync("before.txt", "utf8"), "original before");
 		strictEqual(readFileSync("after.txt", "utf8"), "original after");
 		strictEqual(readFileSync("ordinary.txt", "utf8"), "allowed write");
-		match(JSON.stringify(fixture.requests.at(-1)?.messages), /protected artifact blocked/u);
+		match(JSON.stringify(turns.at(-1)?.messages), /protected artifact blocked/u);
 	} finally {
 		await closeServer(fixture.server);
 		process.chdir(originalCwd);

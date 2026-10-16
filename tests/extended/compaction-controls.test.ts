@@ -1084,7 +1084,9 @@ describe("production compaction controls", () => {
 		await rejects(f.run(), /fixture stream error/);
 		const rows = readOutOfTurnUsageRows(clioStateDir()).rows;
 		strictEqual(rows.length, 1);
+		// Rows carry pricing provenance again (5996f82c6); a null cost reads as unknown.
 		deepStrictEqual(rows[0]?.usage, {
+			costProvenance: "unknown",
 			input: null,
 			output: null,
 			cacheRead: null,
@@ -1093,7 +1095,9 @@ describe("production compaction controls", () => {
 			totalTokens: null,
 			costUsd: null,
 		});
-		strictEqual(f.liveUsage.length, 0);
+		// The live sink gets an unmetered record rather than nothing (5996f82c6).
+		strictEqual(f.liveUsage.length, 1);
+		strictEqual((f.liveUsage[0]?.[4] as { missingTokenCalls?: number }).missingTokenCalls, 1);
 		const result = spawnSync(
 			process.execPath,
 			[new URL("../../dist/cli/index.js", import.meta.url).pathname, "usage", "report", "--json", "--repo", scratch.dir],
@@ -1275,11 +1279,9 @@ describe("production compaction controls", () => {
 		f.response.fail = true;
 		await rejects(f.run(), /fixture stream error/);
 		ok(readFileSync(outOfTurnUsagePath(clioStateDir()), "utf8").startsWith(before));
-		// The file keeps the historical line byte for byte; the reader drops the
-		// retired `sessionId` and `usage.costProvenance` it carries.
-		const { sessionId: _sessionId, usage: historicalUsage, ...kept } = historical;
-		const { costProvenance: _costProvenance, ...usage } = historicalUsage;
-		deepStrictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0], { ...kept, usage });
+		// The file keeps the historical line byte for byte, and the reader keeps its
+		// `sessionId` and `usage.costProvenance` for resumed totals (5996f82c6).
+		deepStrictEqual(readOutOfTurnUsageRows(clioStateDir()).rows[0], historical);
 	});
 	it("preserves spending when checkpoint append provably wrote nothing", async () => {
 		const f = fixture(true);
@@ -1332,9 +1334,12 @@ describe("production compaction controls", () => {
 				readSessionEntries: f.entries,
 				autoCompact: async (...args) => {
 					const result = await f.run(...args);
+					// A legacy result predates route attribution, including the summarizer's
+					// own cost provenance (5996f82c6), so it falls back to the chat runtime.
 					if (legacy && result?.usage) {
 						delete result.usage.targetId;
 						delete result.usage.modelId;
+						delete result.usage.costProvenance;
 					}
 					return result;
 				},

@@ -105,6 +105,20 @@ function assertCharged(charge: Charge | undefined): void {
 	strictEqual(charge.label, "system-one");
 }
 
+/**
+ * A request that reported no usage is still recorded as one call with unknown
+ * cost, so the session's spend shows it as missing instead of free (5996f82c6).
+ */
+function assertUnmetered(charge: Charge | undefined): void {
+	ok(charge);
+	strictEqual(charge.tokens, 0);
+	strictEqual(charge.costUsd, 0);
+	strictEqual(charge.breakdown?.apiCalls, 1);
+	strictEqual(charge.breakdown?.missingTokenCalls, 1);
+	strictEqual(charge.provenance, "unknown");
+	strictEqual(charge.label, "system-one");
+}
+
 function json(status: number, body: unknown): Response {
 	return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -152,9 +166,12 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(bodies.length, 6);
 		ok(bodies[0]?.response_format !== undefined);
 		strictEqual(admitted(), bodies.length, "every request was admitted, the retry included");
-		// The rejected request reported no usage; every answered one is charged.
-		strictEqual(charges.length, 5);
-		for (const charge of charges) assertCharged(charge);
+		// The rejected request reported no usage and is recorded as unmetered; every answered one is charged.
+		strictEqual(charges.length, 6);
+		const unmetered = charges.filter((charge) => charge.provenance === "unknown");
+		strictEqual(unmetered.length, 1);
+		assertUnmetered(unmetered[0]);
+		for (const charge of charges.filter((charge) => charge.provenance !== "unknown")) assertCharged(charge);
 		strictEqual(rows().length, 6, "the rejected request remains visible with unknown usage");
 		const missing = (rows() as string[])
 			.map((row) => JSON.parse(row) as { usage: { totalTokens: number | null; costUsd: number | null } })
@@ -196,8 +213,9 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(bodies.length, 2);
 		ok(bodies[0]?.response_format !== undefined && bodies[1]?.response_format === undefined);
 		strictEqual(admitted(), 2, "both attempts were admitted");
-		strictEqual(charges.length, 1);
-		assertCharged(charges[0]);
+		strictEqual(charges.length, 2);
+		assertUnmetered(charges[0]);
+		assertCharged(charges[1]);
 		strictEqual(rows().length, 2, "the schema-free retry keeps the first attempt's missing usage visible");
 	});
 });
