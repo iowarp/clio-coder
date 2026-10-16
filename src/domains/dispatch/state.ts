@@ -114,8 +114,15 @@ export function readFleetRun(runId: string): FleetRunRecord | null {
 	}
 }
 
-export async function writeFleetRun(record: FleetRunRecord): Promise<void> {
-	await atomicWrite(fleetRunPath(record.id), `${JSON.stringify(record, null, 2)}\n`);
+/**
+ * Write the root record and return the exact text written, so a digest of it
+ * names the bytes a reader of the file sees. The text is fixed before the first
+ * await, so a caller that mutates the record afterwards does not change it.
+ */
+export async function writeFleetRun(record: FleetRunRecord): Promise<string> {
+	const text = `${JSON.stringify(record, null, 2)}\n`;
+	await atomicWrite(fleetRunPath(record.id), text);
+	return text;
 }
 
 /**

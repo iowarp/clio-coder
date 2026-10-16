@@ -6,7 +6,9 @@
  * lines verbatim, one per line, so another process can import them; without
  * it each line is summarized. `--follow` keeps reading as the fleet appends
  * and exits once the `fleet_sealed` line arrives, so a follower such as an
- * external sealer ends exactly when the fleet's manifest is final. The
+ * external sealer ends exactly when the fleet's manifest is final. Lines are
+ * hash-chained, not signed: the chain shows a reader that each line extends
+ * the ones before it, and does not stop someone who can write the file. The
  * command is read-only and shares no memory with the process running the
  * fleet, so it works from another terminal or over SSH.
  */
@@ -23,8 +25,11 @@ import { fleetInspectionScope } from "./fleet-project-scope.js";
 const HELP = `clio-coder fleet events <fleetRootId> [--follow] [--json] [--all]
 
 Print a fleet run's live event journal: fleet_started, step_dispatched,
-step_settled (each a sealed checkpoint of the fleet manifest, with the step's
-receipt or command record path) and fleet_sealed, the final seal.
+step_settled (the step's receipt or command record path, the digest of its
+entry in the fleet manifest, and the digest of the manifest bytes written at
+that moment) and fleet_sealed, the last line. Lines are hash-chained, not
+signed: the chain detects a line that does not extend the ones before it, not
+a rewrite by someone who can write the file.
 
   --follow  keep reading as the fleet appends; exit after fleet_sealed
   --json    write the stored NDJSON lines verbatim

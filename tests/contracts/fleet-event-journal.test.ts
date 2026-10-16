@@ -1,8 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { runFleetEvents } from "../../src/cli/fleet-events.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
@@ -10,6 +11,7 @@ import {
 	createFleetEventJournal,
 	fleetEventJournalPath,
 	fleetManifestDigest,
+	fleetStepEntryDigest,
 	readFleetEventJournal,
 } from "../../src/domains/dispatch/fleet-event-journal.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
@@ -20,7 +22,7 @@ function git(root: string, ...args: string[]) {
 	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-test("a fleet appends a hash-chained journal whose settled steps are sealed manifest checkpoints", async () => {
+test("a fleet appends a hash-chained journal whose settled steps name the manifest bytes on disk", async () => {
 	const env = await isolateClioEnv("clio-coder-fleet-events-");
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-fleet-events-repo-"));
 	try {
@@ -49,6 +51,10 @@ test("a fleet appends a hash-chained journal whose settled steps are sealed mani
 			description: id,
 		});
 		const rootId = "fleet-0123456789ab";
+		const recordPath = join(dirname(fleetEventJournalPath(rootId)), `${rootId}.json`);
+		// The record is rewritten as the fleet goes on; the bytes stage's settle
+		// wrote are on disk only until the next write, which follows check's dispatch.
+		let afterStage: string | null = null;
 		const outcome = await executeFleetRun({
 			plan,
 			playbookName: "stage-check",
@@ -65,6 +71,9 @@ test("a fleet appends a hash-chained journal whose settled steps are sealed mani
 			dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
 			agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
 			attributionEnabled: false,
+			onStepDispatched: (event) => {
+				if (event.stepId === "check") afterStage = readFileSync(recordPath, "utf8");
+			},
 		});
 		strictEqual(outcome.cleanRun, true);
 		const read = readFleetEventJournal(rootId);
@@ -85,10 +94,18 @@ test("a fleet appends a hash-chained journal whose settled steps are sealed mani
 		for (const line of read.lines) {
 			if (line.type === "step_settled") ok(existsSync(line.recordPath), line.recordPath);
 		}
+		const stageSettled = read.lines[2];
+		ok(stageSettled?.type === "step_settled");
+		ok(afterStage !== null);
+		strictEqual(stageSettled.manifestDigest, createHash("sha256").update(afterStage).digest("hex"));
+		const final = readFleetRun(rootId);
+		ok(final);
+		strictEqual(stageSettled.manifestStepCount, 1);
+		strictEqual(stageSettled.stepEntryDigest, fleetStepEntryDigest(final.steps[0] ?? { stepId: "", result: null }));
 		const sealed = read.lines.at(-1);
 		ok(sealed?.type === "fleet_sealed");
 		strictEqual(sealed.outcome, "completed");
-		strictEqual(sealed.manifestDigest, fleetManifestDigest(readFleetRun(rootId)));
+		strictEqual(sealed.manifestDigest, fleetManifestDigest(readFileSync(recordPath, "utf8")));
 		// A follower resumes from its cursor, and a forged line is caught.
 		const text = readFileSync(fleetEventJournalPath(rootId), "utf8");
 		appendFileSync(fleetEventJournalPath(rootId), `${JSON.stringify({ ...sealed, seq: 7 })}\n`);

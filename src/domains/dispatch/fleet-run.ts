@@ -49,7 +49,7 @@ import { gateRouteCorrelation, requestExecutionRole } from "./execution-role.js"
 import type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
 import { deriveFleetCommitAttribution } from "./fleet-commit-attribution.js";
-import { createFleetEventJournal, fleetManifestDigest } from "./fleet-event-journal.js";
+import { createFleetEventJournal, fleetManifestDigest, fleetStepEntryDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
 import {
 	decideReviewGate,
@@ -340,7 +340,14 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		resumedFrom: input.resume?.record.id ?? null,
 		steps: [...replayed].map(([stepId, result]) => ({ stepId, result })),
 	};
-	await writeFleetRun(fleetRunRecord);
+	// The digest of the last root record bytes this run wrote, which the final
+	// journal line names.
+	let manifestDigest = fleetManifestDigest(await writeFleetRun(fleetRunRecord));
+	const writeManifest = async (): Promise<string> => {
+		const digest = fleetManifestDigest(await writeFleetRun(fleetRunRecord));
+		manifestDigest = digest;
+		return digest;
+	};
 	const events = createFleetEventJournal(fleetRootId);
 	events.append({
 		type: "fleet_started",
@@ -372,7 +379,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			outcome,
 			endedAt: fleetRunRecord.endedAt ?? new Date().toISOString(),
 			stepCount: fleetRunRecord.steps.length,
-			manifestDigest: fleetManifestDigest(fleetRunRecord),
+			manifestDigest,
 		});
 	// Every step of this run dispatches under `fleetRootId` as its lineage root,
 	// so every agent step also settles the assignment row of that id. One step is
@@ -1039,9 +1046,13 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					stepResult.workspaceCheckpoint = ref;
 					notice(`loop ${step.loop.loopId} cycle ${step.loop.attempt} checkpoint=${ref}`, "gate");
 				}
-				fleetRunRecord.steps.push({ stepId: step.id, result: stepResult });
-				await writeFleetRun(fleetRunRecord);
-				// Each settled step is a sealed checkpoint of the manifest just written.
+				const entry = { stepId: step.id, result: stepResult };
+				fleetRunRecord.steps.push(entry);
+				const manifestStepCount = fleetRunRecord.steps.length;
+				const writtenDigest = await writeManifest();
+				// Each settled step checkpoints the manifest just written. Later settles
+				// rewrite the file, so the entry digest and its position are what a
+				// reader can still check against any later version of the record.
 				events.append({
 					type: "step_settled",
 					stepId: step.id,
@@ -1055,7 +1066,9 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 							? join(codeStepDir(fleetRootId), `${stepResult.terminalRunId}.json`)
 							: join(clioStateDir(), "receipts", `${stepResult.terminalRunId}.json`),
 					...(stepResult.failureReason !== undefined ? { failureReason: stepResult.failureReason } : {}),
-					manifestDigest: fleetManifestDigest(fleetRunRecord),
+					stepEntryDigest: fleetStepEntryDigest(entry),
+					manifestStepCount,
+					manifestDigest: writtenDigest,
 				});
 				// The scheduler settles both kinds of step here, so this is where a
 				// deterministic step enters the assignment: a code step's `code-*` run
@@ -1103,7 +1116,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		result = await executePlan(livePlan, adapter, input.signal);
 	} catch (error) {
 		fleetRunRecord.endedAt = new Date().toISOString();
-		await writeFleetRun(fleetRunRecord);
+		await writeManifest();
 		sealEvents("failed");
 		// A run the scheduler could not carry to the end never reached a verdict,
 		// and a fleet that threw is not a fleet that worked.
@@ -1111,7 +1124,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		throw error;
 	}
 	fleetRunRecord.endedAt = new Date().toISOString();
-	await writeFleetRun(fleetRunRecord);
+	await writeManifest();
 	sealEvents("completed");
 
 	// A loop is judged by whether it converged, not attempt by attempt: a red

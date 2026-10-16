@@ -20,7 +20,8 @@ function sha256(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
 }
 
-function canonicalJson(value: unknown): string {
+/** Sorted-key JSON, the one serialization every Clio digest over a JSON value uses. */
+export function canonicalJson(value: unknown): string {
 	return serializeCanonical(value);
 }
 

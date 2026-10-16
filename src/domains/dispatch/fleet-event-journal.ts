@@ -9,22 +9,30 @@
  *
  * Every line carries `v` (1), `seq` (from 1), `at` (ISO), `rootId`, `type`,
  * `prev` (the previous line's digest, null on the first) and `digest`
- * (sha256 over the line's canonical JSON without `digest`). The chain lets a
- * reader that imported lines 1..n prove line n+1 extends exactly those.
+ * (sha256 over the line's sorted-key JSON without `digest`, the serializer
+ * receipts use). The chain lets a reader that imported lines 1..n detect a
+ * line n+1 that does not extend exactly those. Lines are hash-chained, not
+ * signed: anyone who can write the file can rewrite it and recompute every
+ * digest, so the chain catches corruption and accidental edits, not a forger.
  *
  *   fleet_started    fleet, planHash, vars, resumedFrom, replayedStepIds,
  *                    workspaceRoot, stepIds
  *   step_dispatched  stepId, kind, waveIndex, assignmentId, agentId | commandId
  *   step_settled     stepId, kind, succeeded, integrityValid, terminalRunId,
- *                    receiptDigest, recordPath, failureReason?, manifestDigest
+ *                    receiptDigest, recordPath, failureReason?, stepEntryDigest,
+ *                    manifestStepCount, manifestDigest
  *   fleet_sealed     outcome ("completed" | "failed"), endedAt, stepCount,
  *                    manifestDigest
  *
- * `manifestDigest` is the sha256 of the root record as it was written right
- * after that fact, so every settled step is a sealed checkpoint of the fleet
- * manifest, and `fleet_sealed` is the final seal: nothing is appended after
- * it. An external sealer no longer has to run after the fleet; it follows the
- * journal and seals incrementally (`clio-coder fleet events --follow --json`).
+ * `manifestDigest` is the sha256 of the exact bytes of the root record
+ * written right after that fact. The record is rewritten in place as the
+ * fleet goes on, so those bytes are gone by the next settle; what stays
+ * checkable is `stepEntryDigest`, the sorted-key sha256 of the step's entry in
+ * the record's `steps`, and `manifestStepCount`, that entry's 1-based position,
+ * which every later version of the record still carries. `fleet_sealed` is the
+ * last line: nothing is appended after it, and its `manifestDigest` names the
+ * final record's bytes. An external sealer follows the journal instead of
+ * waiting for the fleet (`clio-coder fleet events --follow --json`).
  *
  * A write failure turns the journal off for the rest of the run after one
  * notice. It never fails the fleet it describes.
@@ -34,6 +42,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
+import { canonicalJson } from "./receipt-integrity.js";
 
 export const FLEET_EVENT_JOURNAL_VERSION = 1;
 
@@ -69,6 +78,10 @@ export type FleetEventBody =
 			/** The sealed receipt, or the code step's command record, as an absolute path. */
 			recordPath: string;
 			failureReason?: string;
+			/** Sorted-key sha256 of `{ stepId, result }` as the record stores it. */
+			stepEntryDigest: string;
+			/** The record's step count when this entry was written; the entry sits at that 1-based position. */
+			manifestStepCount: number;
 			manifestDigest: string;
 	  }
 	| {
@@ -92,9 +105,20 @@ export function fleetEventJournalPath(rootId: string): string {
 	return join(clioStateDir(), "fleet-runs", `${rootId}.events.ndjson`);
 }
 
-/** The digest a manifest checkpoint names: the root record's canonical bytes. */
-export function fleetManifestDigest(record: unknown): string {
-	return sha256(JSON.stringify(record));
+/** The digest a manifest checkpoint names: sha256 of the exact text `writeFleetRun` wrote. */
+export function fleetManifestDigest(writtenText: string): string {
+	return sha256(writtenText);
+}
+
+/**
+ * Digest of one `steps` entry as a reader of the record file parses it. The
+ * JSON round trip applies what the file write applied (dropped undefined
+ * fields, non-finite numbers as null), so a verifier digesting the parsed
+ * entry gets the same value and the canonical serializer never sees a value
+ * it refuses.
+ */
+export function fleetStepEntryDigest(entry: { stepId: string; result: unknown }): string {
+	return sha256(canonicalJson(JSON.parse(JSON.stringify(entry))));
 }
 
 function sha256(text: string): string {
@@ -102,7 +126,7 @@ function sha256(text: string): string {
 }
 
 function lineDigest(line: Omit<FleetEventLine, "digest">): string {
-	return sha256(JSON.stringify(line));
+	return sha256(canonicalJson(line));
 }
 
 export interface FleetEventJournal {
