@@ -723,6 +723,7 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 		const plugin = listInstalledPlugins(cwd, { scope, all: true }).find((entry) => entry.id === manifest.name);
 		return {
 			...(plugin ? { plugin } : {}),
+			contentDigest: digest,
 			...(moved && preserveBackup ? { recovery: { packageBackup: backup } } : {}),
 			diagnostics: plugin?.diagnostics ?? [],
 		};

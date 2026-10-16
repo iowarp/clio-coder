@@ -49,6 +49,8 @@ interface PackageIdentities {
 	enabled: string[];
 	/** Each install-state id's identity, or null when its record pins no content. */
 	byId: Map<string, string | null>;
+	/** Each install-state id's recorded content digest, absent when its record has none. */
+	digestById: Map<string, string>;
 	/** False when a record carries no content digest, so its identity pins no content. */
 	pinned: boolean;
 }
@@ -87,7 +89,7 @@ function canonicalJson(value: unknown): string {
  * Returns null for install state that cannot be parsed.
  */
 function packageIdentities(surface: PackageTrustSurface, text: string | null): PackageIdentities | null {
-	if (text === null) return { all: [], enabled: [], byId: new Map(), pinned: true };
+	if (text === null) return { all: [], enabled: [], byId: new Map(), digestById: new Map(), pinned: true };
 	let raw: unknown;
 	try {
 		raw = JSON.parse(text);
@@ -100,6 +102,7 @@ function packageIdentities(surface: PackageTrustSurface, text: string | null): P
 	const all = new Set<string>();
 	const enabled: string[] = [];
 	const byId = new Map<string, string | null>();
+	const digestById = new Map<string, string>();
 	let pinned = true;
 	for (const [id, entry] of Object.entries(raw.installed)) {
 		if (!isObject(entry)) return null;
@@ -124,9 +127,10 @@ function packageIdentities(surface: PackageTrustSurface, text: string | null): P
 		);
 		all.add(identity);
 		byId.set(id, entry.contentDigest === undefined ? null : identity);
+		if (typeof entry.contentDigest === "string") digestById.set(id, entry.contentDigest);
 		if (!disabled.has(id)) enabled.push(identity);
 	}
-	return { all: [...all].sort(), enabled, byId, pinned };
+	return { all: [...all].sort(), enabled, byId, digestById, pinned };
 }
 
 function identitiesApproved(packages: PackageIdentities, approval: SurfaceApproval | undefined): boolean {
@@ -484,8 +488,9 @@ function approvedAtCommit(current: SurfaceApproval | undefined, baseline: Projec
 /**
  * Approves the operator's own install into a project: the identities of the
  * records this install wrote, added to the surface's approved set as it stands
- * under the lock. A record another writer added or changed in the install
- * window stays unapproved. It records identities, never a byte digest. Archive
+ * under the lock. A record is approved only while it still carries the content
+ * digest the install wrote, so a record another writer added or replaced in the
+ * install window (an interop import with --force) stays unapproved. It records identities, never a byte digest. Archive
  * imports and imports from other tools never call it, and enable or later
  * changes by anyone else need `config trust`. Returns whether the new state
  * was approved.
@@ -493,7 +498,7 @@ function approvedAtCommit(current: SurfaceApproval | undefined, baseline: Projec
 export function approveOperatorProjectInstall(
 	workspaceRoot: string,
 	baseline: ProjectInstallBaseline,
-	writtenIds: ReadonlyArray<string>,
+	written: ReadonlyArray<{ id: string; contentDigest: string }>,
 ): boolean {
 	try {
 		const root = realpathSync(resolve(workspaceRoot));
@@ -508,11 +513,11 @@ export function approveOperatorProjectInstall(
 			const before = approvedAtCommit(record.surfaces[baseline.surface], baseline);
 			if (before === null) return false;
 			// Records without a content digest pin no content, so only a review approves them.
-			const written = writtenIds.flatMap((id) => {
+			const ours = written.flatMap(({ id, contentDigest }) => {
 				const identity = packages.byId.get(id);
-				return typeof identity === "string" ? [identity] : [];
+				return typeof identity === "string" && packages.digestById.get(id) === contentDigest ? [identity] : [];
 			});
-			const approval = { identities: [...new Set([...before, ...written])].sort() };
+			const approval = { identities: [...new Set([...before, ...ours])].sort() };
 			record.surfaces[baseline.surface] = approval;
 			writeRecord(record);
 			return identitiesApproved(packages, approval);

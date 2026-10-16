@@ -260,7 +260,7 @@ test("an operator install into a trusted package surface stays trusted without a
 		ok(baseline);
 		const b = { source: "./b", contentDigest: "b".repeat(64), ...at };
 		writePackageState(workspace, "extensions", { a, b, x }, ["x"]);
-		strictEqual(approveOperatorProjectInstall(workspace, baseline, ["b"]), true);
+		strictEqual(approveOperatorProjectInstall(workspace, baseline, [{ id: "b", contentDigest: b.contentDigest }]), true);
 		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "trusted");
 		writePackageState(workspace, "extensions", { a, b, x });
 		strictEqual(captureProjectSurface(workspace, "extensions").verdict, "changed");
@@ -282,7 +282,10 @@ test("an operator install approves only its own records and never undoes a revok
 		const concurrent = captureProjectInstallBaseline(workspace, "plugins");
 		ok(concurrent);
 		writePackageState(workspace, "plugins", { a, b, c });
-		strictEqual(approveOperatorProjectInstall(workspace, concurrent, ["b"]), false);
+		strictEqual(
+			approveOperatorProjectInstall(workspace, concurrent, [{ id: "b", contentDigest: b.contentDigest }]),
+			false,
+		);
 		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "changed");
 		writePackageState(workspace, "plugins", { a, b });
 		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "trusted");
@@ -291,8 +294,17 @@ test("an operator install approves only its own records and never undoes a revok
 		ok(revoked);
 		revokeProjectSurfaceTrust(workspace, "plugins");
 		writePackageState(workspace, "plugins", { a, b, c });
-		strictEqual(approveOperatorProjectInstall(workspace, revoked, ["c"]), false);
+		strictEqual(approveOperatorProjectInstall(workspace, revoked, [{ id: "c", contentDigest: c.contentDigest }]), false);
 		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "untrusted");
+
+		// Another writer replaced the installed id before the approval committed.
+		recordProjectPackageTrust(captureProjectSurface(workspace, "plugins"));
+		const replaced = captureProjectInstallBaseline(workspace, "plugins");
+		ok(replaced);
+		const d = { source: "./d", contentDigest: "d".repeat(64), ...at };
+		writePackageState(workspace, "plugins", { a, b, c, d: { ...d, contentDigest: "e".repeat(64) } });
+		strictEqual(approveOperatorProjectInstall(workspace, replaced, [{ id: "d", contentDigest: d.contentDigest }]), false);
+		strictEqual(captureProjectSurface(workspace, "plugins").verdict, "changed");
 	} finally {
 		home.restore();
 	}

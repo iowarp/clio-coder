@@ -247,6 +247,8 @@ export interface ExtensionInstallOptions extends ExtensionListOptions {
 
 export interface ExtensionInstallResult {
 	extension?: InstalledExtension;
+	/** The content digest this install wrote into its record, for approving exactly that record. */
+	contentDigest?: string;
 	recovery?: { stateBackup?: string; packageBackup?: string };
 	diagnostics: ExtensionDiagnostic[];
 }

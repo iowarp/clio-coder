@@ -407,6 +407,8 @@ export function releaseLibraryPlan(plan: LibraryInstallPlan): void {
 /** All surfaces commit the reviewed digest, including every bundle asset. */
 export interface LibraryInstallResult {
 	recovery?: { stateBackup?: string; packageBackup?: string };
+	/** The content digest the install wrote into its record. */
+	contentDigest?: string;
 }
 
 /**
@@ -489,7 +491,10 @@ export function installLibraryPlan(plan: LibraryInstallPlan): LibraryInstallResu
 				`${result.diagnostics.map((item) => item.message).join("; ") || "plugin install failed"}${result.recovery ? `; recovery: ${JSON.stringify(result.recovery)}` : ""}`,
 			);
 		recovery = result.recovery;
-		return recovery ? { recovery } : {};
+		return {
+			...(recovery ? { recovery } : {}),
+			...(result.contentDigest !== undefined ? { contentDigest: result.contentDigest } : {}),
+		};
 	} finally {
 		releaseLibraryPlan(plan);
 	}

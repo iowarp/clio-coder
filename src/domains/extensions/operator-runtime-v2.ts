@@ -130,7 +130,9 @@ function inactiveReason(entry: InstalledExtension): string | undefined {
 	if (entry.muted) return `muted for this session; /extensions unmute ${entry.id} restores it`;
 	if (entry.consentPending) return "waiting for your approval of its capability envelope; /extensions dev asks again";
 	if (entry.overriddenBy) return `shadowed by the ${entry.overriddenBy} copy`;
-	if (entry.trustBlocked) return "project extensions in this workspace are not trusted";
+	// A trusted surface can still block one record, so name the record rather than the surface.
+	if (entry.trustBlocked)
+		return `project extension ${entry.id} is not approved for this workspace; clio-coder config trust extensions reviews it`;
 	if (!entry.valid)
 		return entry.diagnostics.find((diagnostic) => diagnostic.type === "error")?.message ?? "invalid package";
 	if (!entry.compatible) return "not compatible with this Clio version";

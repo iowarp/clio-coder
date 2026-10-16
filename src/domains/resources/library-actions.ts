@@ -775,7 +775,11 @@ function runWriter(plan: LibraryLifecyclePlan, step: LibraryPlanStep): PluginMut
 	return removePlugin(identity.name, scoped);
 }
 
-function applyStep(plan: LibraryLifecyclePlan, step: LibraryPlanStep): LibraryStepOutcome {
+function applyStep(
+	plan: LibraryLifecyclePlan,
+	step: LibraryPlanStep,
+	writtenDigests: Map<LibraryPackageIdentity, string>,
+): LibraryStepOutcome {
 	const peer = peerOf(step.identity.scope);
 	const holdPeer =
 		step.expected.some((fact) => fact.scope === peer) &&
@@ -803,6 +807,7 @@ function applyStep(plan: LibraryLifecyclePlan, step: LibraryPlanStep): LibrarySt
 		if (problem.changed && outcome.error) outcome.error.changed = problem.changed;
 		return outcome;
 	}
+	if (result.contentDigest !== undefined) writtenDigests.set(step.identity, result.contentDigest);
 	// The writer committed durably. Verification can only annotate that fact;
 	// a read-back failure never turns the commit into a failed step.
 	const outcome: LibraryStepOutcome = {
@@ -877,13 +882,14 @@ export function applyLibraryLifecycle(
 		)
 			? captureProjectInstallBaseline(plan.cwd, "plugins")
 			: null;
+		const writtenDigests = new Map<LibraryPackageIdentity, string>();
 		let aborted = false;
 		for (const step of plan.steps) {
 			if (aborted) {
 				outcomes.push(unattempted(step));
 				continue;
 			}
-			const outcome = applyStep(plan, step);
+			const outcome = applyStep(plan, step, writtenDigests);
 			outcomes.push(outcome);
 			// A durable commit with a verification problem still stops the batch;
 			// later steps must not build on a copy whose state cannot be proven.
@@ -892,12 +898,18 @@ export function applyLibraryLifecycle(
 		const installed = outcomes.filter(
 			(item) => item.status === "committed" && item.operation === "install" && item.identity.scope === "project",
 		);
-		const extensionIds = installed.filter((item) => item.identity.kind === "extension").map((item) => item.identity.name);
-		const pluginIds = installed.filter((item) => item.identity.kind !== "extension").map((item) => item.identity.name);
-		if (extensionBaseline !== null && extensionIds.length > 0)
-			approveOperatorProjectInstall(plan.cwd, extensionBaseline, extensionIds);
-		if (pluginBaseline !== null && pluginIds.length > 0)
-			approveOperatorProjectInstall(plan.cwd, pluginBaseline, pluginIds);
+		const written = installed.flatMap((item) => {
+			const contentDigest = writtenDigests.get(item.identity);
+			return contentDigest === undefined
+				? []
+				: [{ id: item.identity.name, contentDigest, extension: item.identity.kind === "extension" }];
+		});
+		const extensionWrites = written.filter((item) => item.extension);
+		const pluginWrites = written.filter((item) => !item.extension);
+		if (extensionBaseline !== null && extensionWrites.length > 0)
+			approveOperatorProjectInstall(plan.cwd, extensionBaseline, extensionWrites);
+		if (pluginBaseline !== null && pluginWrites.length > 0)
+			approveOperatorProjectInstall(plan.cwd, pluginBaseline, pluginWrites);
 	} finally {
 		releaseLibraryLifecycle(plan);
 	}

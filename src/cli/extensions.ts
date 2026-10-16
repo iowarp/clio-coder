@@ -224,7 +224,10 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Prom
 			const approved =
 				baseline !== null &&
 				result.extension !== undefined &&
-				approveOperatorProjectInstall(process.cwd(), baseline, [result.extension.id]);
+				result.contentDigest !== undefined &&
+				approveOperatorProjectInstall(process.cwd(), baseline, [
+					{ id: result.extension.id, contentDigest: result.contentDigest },
+				]);
 			if (parsed.json)
 				process.stdout.write(
 					`${JSON.stringify(review ? { ...result, envelope: review.envelope, envelopeDigest: review.digest } : result, null, 2)}\n`,

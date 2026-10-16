@@ -364,11 +364,12 @@ export function installSkill(input: InstallSkillInput): InstallSkillResult {
 		force: input.force ?? false,
 	});
 	const baseline = scope === "project" ? captureProjectInstallBaseline(cwd, "plugins") : null;
-	installLibraryPlan(plan);
+	const installed = installLibraryPlan(plan);
 	const candidate = readPluginManifest(plan.path);
 	const component = candidate.manifest?.clio.components.find((item) => item.kind === "skill");
 	if (!component) throw new Error("installed skill package has no skill component");
-	if (baseline !== null) approveOperatorProjectInstall(cwd, baseline, [entry.name]);
+	if (baseline !== null && installed.contentDigest !== undefined)
+		approveOperatorProjectInstall(cwd, baseline, [{ id: entry.name, contentDigest: installed.contentDigest }]);
 	return {
 		name: entry.name,
 		scope,

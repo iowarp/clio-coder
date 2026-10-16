@@ -188,6 +188,8 @@ export interface LibraryPackageInstallInput extends Omit<PluginInstallOptions, "
 
 export interface PluginMutationResult {
 	plugin?: InstalledPlugin;
+	/** The content digest an install wrote into its record, for approving exactly that record. */
+	contentDigest?: string;
 	removed?: { id: string; scope: PluginScope; path: string };
 	recovery?: { stateBackup?: string; packageBackup?: string };
 	diagnostics: PluginDiagnostic[];

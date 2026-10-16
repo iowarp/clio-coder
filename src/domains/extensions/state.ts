@@ -688,6 +688,7 @@ export function installExtension(sourcePath: string, options: ExtensionInstallOp
 	);
 	return {
 		...(installed ? { extension: installed } : {}),
+		contentDigest: sourceDigest,
 		...(stateBackup || packageBackup
 			? { recovery: { ...(stateBackup ? { stateBackup } : {}), ...(packageBackup ? { packageBackup } : {}) } }
 			: {}),
