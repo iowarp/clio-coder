@@ -328,7 +328,7 @@ describe("fleet lifecycle boundary", () => {
 		writeFileSync(
 			ssh,
 			`#!/bin/sh
-printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok'
+printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok'
 `,
 		);
 		chmodSync(ssh, 0o755);
@@ -352,7 +352,7 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}
 		writeFileSync(
 			ssh,
 			`#!/bin/sh
-printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok'
+printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok'
 `,
 		);
 		chmodSync(ssh, 0o755);
@@ -407,7 +407,7 @@ case "$*" in
   *clio-coder-preflight/1*clioCoder=*) ;;
   *) exit 9 ;;
 esac
-printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok' 'cpu=1' 'memkb=1' 'gpu=unknown' 'vrammb=unknown'
+printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok' 'cpu=1' 'memkb=1' 'gpu=unknown' 'vrammb=unknown'
 `,
 			"utf8",
 		);

@@ -1,6 +1,10 @@
 import { isResponseSchemaRejection } from "../../core/response-schema.js";
 import { isEngineContextOverflow, isProviderContentFilter } from "../../engine/ai.js";
-import { WORKER_EXIT_PERMISSION_REQUIRED, WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../worker/spec-contract.js";
+import {
+	WORKER_EXIT_PERMISSION_REQUIRED,
+	WORKER_PROVIDER_HTTP_STATUS_MARKER,
+	WORKER_SPEC_VERSION_SKEW,
+} from "../../worker/spec-contract.js";
 import { isDeterministicOutcomeCode } from "./backoff.js";
 import type { RunTerminationEvidence } from "./outcome.js";
 import type { RunOutcome, RunOutcomeCode } from "./types.js";
@@ -18,6 +22,7 @@ export type FailureClass =
 	| "target-transient"
 	| "capacity"
 	| "node-channel"
+	| "node-version"
 	| "node-resource"
 	| "worker-runtime"
 	| "internal";
@@ -61,6 +66,24 @@ function resultText(result: SpawnedWorkerResult | null, providerError?: string |
 		.toLowerCase();
 }
 
+// A released 0.6.2 worker refuses a spec version it does not read with advice
+// to re-dispatch, which earns the same refusal from the same node.
+const RELEASED_SPEC_VERSION_REFUSAL =
+	/WorkerSpec version (\S+) is unsupported \(expected version (\S+)\)\. Re-dispatch the request[^\n]*/g;
+
+/**
+ * A worker's version-skew refusal as the operator should read it. The wording
+ * of a released 0.6.2 node is replaced by the build skew it actually reports;
+ * any other text is returned unchanged.
+ */
+export function honestWorkerSpecSkewText(text: string): string {
+	return text.replace(
+		RELEASED_SPEC_VERSION_REFUSAL,
+		(_match, sent: string, reads: string) =>
+			`WorkerSpec version ${sent} is not one this worker reads (it reads ${reads}). The dispatching session and this node run different Clio Coder builds; upgrade the older one, or dispatch to another node.`,
+	);
+}
+
 /**
  * Whether a deterministic-task class came from the provider's context-overflow
  * verdict rather than an outcome code, a rejected schema, or a rejected worker
@@ -98,10 +121,16 @@ export function classifyFailure(
 	if (evidence.permissionFailure || evidence.exitCode === WORKER_EXIT_PERMISSION_REQUIRED) return "permission";
 	if (isDeterministicOutcomeCode(code)) return "deterministic-task";
 	if (evidence.qualityGateFailure === true) return "model-quality";
+	// A node whose worker does not read this spec's version runs another
+	// build. The spec is sound and another node may read it, so the attempt
+	// moves off this node; the node itself stays usable for specs it reads.
+	if (WORKER_SPEC_VERSION_SKEW.test(resultText(result, providerError))) return "node-version";
 	// A typed control-channel failure is node evidence on its own. It is checked
 	// before the diagnostic text so a stderr tail that happens to mention a
 	// target error cannot reclassify a channel that demonstrably failed.
-	if (result?.channelFailure !== undefined) return "node-channel";
+	// A lost hook answer is not one: the worker decides the call by the hook's
+	// own policy and the run goes on, so the run's end classifies by its own evidence.
+	if (result?.channelFailure !== undefined && result.channelFailure !== "hook_result") return "node-channel";
 	if (evidence.stallKilled || outcome === "stalled" || outcome === "spawn_failed" || result?.exitCode === 255) {
 		return "node-channel";
 	}
@@ -195,6 +224,8 @@ export function decideRetry(failureClass: FailureClass, attempt: number, maxRetr
 			});
 		case "node-channel":
 			return base(["node"], "retry-node-channel");
+		case "node-version":
+			return base(["node"], "retry-node-version");
 		case "node-resource":
 			return base(["node"], "retry-node-resource");
 		case "target-auth":
@@ -228,5 +259,10 @@ export function affectsNodeBreaker(failureClass: FailureClass): boolean {
 }
 
 export function isInfrastructureFailure(failureClass: FailureClass): boolean {
-	return affectsTargetBreaker(failureClass) || affectsNodeBreaker(failureClass) || failureClass === "internal";
+	return (
+		affectsTargetBreaker(failureClass) ||
+		affectsNodeBreaker(failureClass) ||
+		failureClass === "node-version" ||
+		failureClass === "internal"
+	);
 }

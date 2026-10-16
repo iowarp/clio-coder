@@ -73,7 +73,7 @@ async function hookedRegistry(t: TestContext, tools: string[], onHook?: () => vo
 	const gateway = createMcpCapabilitySource({ cwd: workspace, registry });
 	mcp = gateway;
 	t.after(() => gateway.close());
-	return { registry, events, mcp: gateway, workspace: realpathSync(workspace) };
+	return { registry, middleware, events, mcp: gateway, workspace: realpathSync(workspace) };
 }
 
 test("a tool hook is told where the tool lands its path, a `..` after a link included", async (t) => {
@@ -97,6 +97,21 @@ test("a tool hook is told where the tool lands its path, a `..` after a link inc
 		resolved: true,
 		workspacePath: "real/landed.txt",
 	});
+});
+
+test("a landing the walk could not resolve has no workspace path, however its text reads", async (t) => {
+	const { middleware, events, workspace } = await hookedRegistry(t, ["read"]);
+	// The walk stops at a link loop, so the landing stays the text `loop/../x.txt`, which is not `x.txt`.
+	const unresolved = [workspace, "loop", "..", "x.txt"].join(path.sep);
+	await middleware.runAwaitedHook?.({
+		hook: "before_tool",
+		toolName: ToolNames.Read,
+		toolArgs: { path: "loop/../x.txt" },
+		toolLanding: { path: { arg: "path", path: unresolved, resolved: false } },
+	});
+	const [event] = events;
+	ok(event?.point === "before_tool");
+	deepStrictEqual(event.target, { arg: "path", path: unresolved, resolved: false, workspacePath: null });
 });
 
 test("a link swapped while the hook ran makes the tool refuse instead of opening another file", async (t) => {

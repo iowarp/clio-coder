@@ -399,6 +399,8 @@ export interface HookReceiptExtension {
 export interface HookReceipt {
 	extensionVersion?: string;
 	sessionId?: string;
+	/** The dispatched run whose call the hook ran for; absent for the session's own calls. */
+	runId?: string;
 	turnId?: string;
 	at: number;
 	hookId: string;

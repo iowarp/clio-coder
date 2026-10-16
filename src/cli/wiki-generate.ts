@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
-import { type LoadResult, loadDomains } from "../core/domain-loader.js";
+import { loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
@@ -35,6 +35,7 @@ import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import { runEventJournalPath } from "../domains/dispatch/run-event-journal.js";
 import { callLevelUpstreamResponses, type RunReceipt } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
+import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { renderCostAmount } from "../domains/observability/cost.js";
 import { createObservabilityDomainModule } from "../domains/observability/index.js";
@@ -46,6 +47,7 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
+import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 /**
  * Model id recorded on wiki metadata when the documenter target cannot be
@@ -1032,9 +1034,15 @@ async function generateWikiWithDocumenter(
 	}
 }
 
-async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded: LoadResult; workerProfile?: string }> {
+async function loadWikiDispatch(): Promise<{
+	dispatch: DispatchContract;
+	stop(): Promise<void>;
+	workerProfile?: string;
+}> {
+	const workerHooks = createCliWorkerHooks("context wiki");
 	const loaded = await loadDomains([
 		ConfigDomainModule,
+		ExtensionsDomainModule,
 		ResourcesDomainModule,
 		ContextDomainModule,
 		ProvidersDomainModule,
@@ -1045,15 +1053,36 @@ async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded:
 		SessionDomainModule,
 		createObservabilityDomainModule({ dispatchTrace: false }),
 		SchedulingDomainModule,
-		createDispatchDomainModule({ journalRunEvents: true }),
+		createDispatchDomainModule({ journalRunEvents: true, workerHooks: workerHooks.workerHooks }),
 	]);
+	// The command's own extension host runs the writer's tool hooks, as in
+	// fleet run; every exit from here disposes it.
+	const stop = async (): Promise<void> => {
+		try {
+			await workerHooks.drain();
+			await workerHooks.dispose();
+		} finally {
+			await loaded.stop();
+		}
+	};
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
-		await loaded.stop();
+		await stop();
 		throw new Error("wiki writer dispatch unavailable");
 	}
+	let refusal: string | null;
+	try {
+		refusal = await workerHooks.start(loaded);
+	} catch (err) {
+		await stop();
+		throw err;
+	}
+	if (refusal !== null) {
+		await stop();
+		throw new Error(`clio-coder context wiki: ${refusal}`);
+	}
 	const workerProfile = loaded.getContract<ConfigContract>("config")?.get().fleet?.agentProfiles?.[WIKI_AGENT_ID];
-	return { dispatch, loaded, ...(workerProfile ? { workerProfile } : {}) };
+	return { dispatch, stop, ...(workerProfile ? { workerProfile } : {}) };
 }
 
 /**
@@ -1166,9 +1195,9 @@ export function modelWikiGenerate(options: ModelWikiGenerateOptions = {}): WikiG
 				await generateWikiWithDocumenter(options.dispatch, input, receipts, options.route, deadline);
 				return;
 			}
-			const { dispatch, loaded, workerProfile } = await loadWikiDispatch();
+			const { dispatch, stop, workerProfile } = await loadWikiDispatch();
 			const route = { ...(workerProfile ? { workerProfile } : {}), ...options.route };
-			await withWikiDispatchLifecycle({ dispatch, stop: () => loaded.stop() }, (signal) =>
+			await withWikiDispatchLifecycle({ dispatch, stop }, (signal) =>
 				generateWikiWithDocumenter(dispatch, input, receipts, route, deadline, signal),
 			);
 		} finally {

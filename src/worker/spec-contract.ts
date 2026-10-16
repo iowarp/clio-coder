@@ -24,7 +24,12 @@ import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js
 import type { WorkerPermit } from "../domains/safety/worker-permit.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { parseWorkerContextSeed } from "./context-seed.js";
-import { INTERNAL_HELPER_RESULT_KINDS, workerPermitDigest } from "./protocol.js";
+import {
+	INTERNAL_HELPER_RESULT_KINDS,
+	WORKER_EXTENSION_HOOKS_MAX,
+	type WorkerExtensionHook,
+	workerPermitDigest,
+} from "./protocol.js";
 
 /**
  * Current attested, budget-bearing dispatch document emitted by this release.
@@ -33,8 +38,30 @@ import { INTERNAL_HELPER_RESULT_KINDS, workerPermitDigest } from "./protocol.js"
  * Version 7 parks main-authority asks for a live main-agent grant bound to
  * the attempt (`escalation.grant`); a version 6 worker would deny them.
  * Version 8 carries parent-approved source rules so worker reads add flow labels.
+ * Version 9 carries the session's extension tool hooks (`extensionHooks`); a
+ * version 8 worker would run every call unhooked. Only a spec that carries
+ * them is version 9, so a node one release behind still serves hook-free
+ * dispatch; a worker reads both.
  */
-export const WORKER_SPEC_VERSION = 8;
+export const WORKER_SPEC_VERSION = 9;
+/** The version of a spec without extension hooks, which a version 8 worker serves exactly. */
+export const WORKER_SPEC_HOOKLESS_VERSION = 8;
+/** Every spec version this worker reads, lowest first. */
+export const WORKER_SPEC_VERSIONS: ReadonlyArray<number> = [WORKER_SPEC_HOOKLESS_VERSION, WORKER_SPEC_VERSION];
+export type WorkerSpecVersion = typeof WORKER_SPEC_HOOKLESS_VERSION | typeof WORKER_SPEC_VERSION;
+
+/** The lowest version that carries everything the spec holds. */
+export function workerSpecVersionFor(spec: { extensionHooks?: ReadonlyArray<unknown> }): WorkerSpecVersion {
+	return spec.extensionHooks !== undefined ? WORKER_SPEC_VERSION : WORKER_SPEC_HOOKLESS_VERSION;
+}
+
+/**
+ * A worker's refusal of a spec version it does not read, in this release's
+ * wording and in the wording of releases before it ("is unsupported"),
+ * matched on the lowercased diagnostic. The dispatching session and the node
+ * run different builds, so another node may serve the same spec.
+ */
+export const WORKER_SPEC_VERSION_SKEW = /workerspec version \S+ is (?:unsupported|not one this worker reads)\b/;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -156,6 +183,8 @@ interface WorkerSpecFields {
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
 	middlewareSnapshot?: MiddlewareSnapshot;
+	/** The dispatching session's extension tool hooks; each matching call waits for the orchestrator to run it. */
+	extensionHooks?: ReadonlyArray<WorkerExtensionHook>;
 	/** Parent-session protections frozen before placement and worker launch. */
 	protectedArtifactState?: WorkerProtectedArtifactState;
 	/** Information-flow restrictions the inherited context carries; judged on every worker model request. */
@@ -247,7 +276,7 @@ export interface WorkerTaskWorktree {
 
 /** Current wire shape. Every document carries its concrete admitted budget. */
 export type CurrentWorkerSpec = WorkerSpecFields & {
-	specVersion: typeof WORKER_SPEC_VERSION;
+	specVersion: WorkerSpecVersion;
 	budget: WorkerBudget;
 };
 
@@ -732,6 +761,23 @@ function validateMiddlewareSnapshot(value: unknown): void {
 	}
 }
 
+function validateExtensionHooks(value: unknown): void {
+	if (!Array.isArray(value) || value.length > WORKER_EXTENSION_HOOKS_MAX)
+		throw new Error(`WorkerSpec.extensionHooks must be an array of at most ${WORKER_EXTENSION_HOOKS_MAX} hooks`);
+	for (const [index, entry] of value.entries()) {
+		const source = `WorkerSpec.extensionHooks[${index}]`;
+		const hook = readRecord(entry, source);
+		exactKeys(hook, ["id", "point", "tools", "timeoutMs", "onTimeout", "onError"], source);
+		readString(hook.id, `${source}.id`);
+		readEnum(hook.point, `${source}.point`, ["before_tool", "after_tool"] as const);
+		if (hook.tools !== undefined) readStringArray(hook.tools, `${source}.tools`);
+		if (typeof hook.timeoutMs !== "number" || !Number.isFinite(hook.timeoutMs) || hook.timeoutMs <= 0)
+			throw new Error(`${source}.timeoutMs must be a positive finite number`);
+		readEnum(hook.onTimeout, `${source}.onTimeout`, ["pass", "block"] as const);
+		readEnum(hook.onError, `${source}.onError`, ["pass", "block"] as const);
+	}
+}
+
 function validateProtectedArtifactState(value: unknown): void {
 	const state = readRecord(value, "WorkerSpec.protectedArtifactState");
 	if (state.version !== WORKER_PROTECTED_ARTIFACT_STATE_VERSION) {
@@ -969,16 +1015,22 @@ function validateWorkerFlowPolicy(value: unknown): void {
 
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
-	if (spec.specVersion !== WORKER_SPEC_VERSION) {
+	const version = spec.specVersion;
+	if (typeof version !== "number" || !WORKER_SPEC_VERSIONS.includes(version)) {
 		throw new Error(
-			`WorkerSpec version ${String(spec.specVersion)} is unsupported (expected version ${WORKER_SPEC_VERSION}). Re-dispatch the request to generate a valid attested, budget-bearing worker specification.`,
+			`WorkerSpec version ${String(version)} is not one this worker reads (it reads ${WORKER_SPEC_VERSIONS.join(" and ")}). The dispatching session and this node run different Clio Coder builds; upgrade the older one, or dispatch to another node.`,
+		);
+	}
+	if (version === WORKER_SPEC_HOOKLESS_VERSION && spec.extensionHooks !== undefined) {
+		throw new Error(
+			`WorkerSpec version ${version} cannot carry extensionHooks; they need version ${WORKER_SPEC_VERSION}`,
 		);
 	}
 	if (spec.budget === undefined) {
-		throw new Error(`WorkerSpec version ${WORKER_SPEC_VERSION} requires budget`);
+		throw new Error(`WorkerSpec version ${version} requires budget`);
 	}
 	if (typeof spec.settingsFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(spec.settingsFingerprint)) {
-		throw new Error(`WorkerSpec version ${WORKER_SPEC_VERSION} requires settingsFingerprint as a sha256 hex digest`);
+		throw new Error(`WorkerSpec version ${version} requires settingsFingerprint as a sha256 hex digest`);
 	}
 	const runtime = readRecord(spec.runtime, "WorkerSpec.runtime");
 	if (runtime.version !== WORKER_RUNTIME_DESCRIPTOR_VERSION) {
@@ -1044,6 +1096,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	validateProtectedModels(spec.protectedModels);
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);
+	if (spec.extensionHooks !== undefined) validateExtensionHooks(spec.extensionHooks);
 	if (spec.flowPolicy !== undefined) validateWorkerFlowPolicy(spec.flowPolicy);
 	if (spec.protectedArtifactState !== undefined) validateProtectedArtifactState(spec.protectedArtifactState);
 	if (spec.flowRestrictions !== undefined) validateFlowRestrictions(spec.flowRestrictions);

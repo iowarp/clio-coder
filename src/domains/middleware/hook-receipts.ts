@@ -25,6 +25,8 @@ export interface HookReceiptLogOptions {
 	capacity?: number;
 	/** Absolute path for the durable JSON snapshot. Omit for in-memory only. */
 	persistPath?: string;
+	/** Receipts the ring starts with, oldest first, such as the persisted snapshot. */
+	initial?: ReadonlyArray<HookReceipt>;
 	now?: () => number;
 	throttleMs?: number;
 }
@@ -38,7 +40,7 @@ export function createHookReceiptLog(options: HookReceiptLogOptions = {}): HookR
 	const capacity = options.capacity ?? HOOK_RECEIPT_LOG_CAPACITY;
 	const now = options.now ?? Date.now;
 	const throttleMs = options.throttleMs ?? PERSIST_THROTTLE_MS;
-	const ring: HookReceipt[] = [];
+	const ring: HookReceipt[] = capacity > 0 ? [...(options.initial ?? [])].slice(-capacity) : [];
 	let lastPersistAt = 0;
 	let dirty = false;
 

@@ -191,6 +191,7 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 						`  project=${record.project.kind}${record.project.head ? ` commit=${record.project.head}` : ""}\n`,
 					);
 				if (record.detail) process.stdout.write(`  ${record.detail}\n`);
+				if (record.note) process.stdout.write(`  note: ${record.note}\n`);
 				for (const fact of record.targets)
 					process.stdout.write(
 						`  ${fact.targetId}: network=${fact.reachable} listingAccess=${fact.authentication ?? "unknown"} model=${fact.modelAvailable} runtime=${fact.runtimeCompatible}\n`,

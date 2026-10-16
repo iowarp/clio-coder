@@ -1,7 +1,9 @@
 import {
 	type AgentLedgerEntry,
 	parseAgentLedgerEntry,
+	parseWorkerHookResult,
 	WORKER_STDIN_FRAME_MAX_BYTES,
+	type WorkerHookResultFrame,
 	withinFrameBudget,
 } from "./protocol.js";
 import { parseWorkerSpec, type WorkerSpec } from "./spec-contract.js";
@@ -35,6 +37,13 @@ export interface WorkerStdinDemux {
 	 * Single handler; a second registration replaces the first.
 	 */
 	onLedgerDelta(handler: (entries: ReadonlyArray<AgentLedgerEntry>) => void): void;
+	/**
+	 * Register the handler for extension hook answers
+	 * (`{"type":"hook_result","requestId":"...","effects":[...]}`). An answer
+	 * only follows a request the run sent after this was registered, so an
+	 * answer with no handler is dropped and counted.
+	 */
+	onHookResult(handler: (result: WorkerHookResultFrame) => void): void;
 	/**
 	 * Resolve once the orchestrator's `admit` frame (`{"type":"admit","specDigest":"..."}`)
 	 * names `expectedDigest`. Rejects on a different or missing digest, on the
@@ -147,6 +156,7 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let permissionHandler: ((decision: WorkerPermissionDecision) => void) | null = null;
 	const pendingPermissionDecisions: WorkerPermissionDecision[] = [];
 	let ledgerDeltaHandler: ((entries: ReadonlyArray<AgentLedgerEntry>) => void) | null = null;
+	let hookResultHandler: ((result: WorkerHookResultFrame) => void) | null = null;
 	const pendingLedgerDeltas: Array<ReadonlyArray<AgentLedgerEntry>> = [];
 	let droppedLines = 0;
 	let channelCloseHandler: (() => void) | null = null;
@@ -281,6 +291,15 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			deliverLedgerDelta(entries);
 			return;
 		}
+		if (typeof value === "object" && value !== null && (value as { type?: unknown }).type === "hook_result") {
+			const result = parseWorkerHookResult(value);
+			if (result === null || hookResultHandler === null) {
+				droppedLines += 1;
+				return;
+			}
+			hookResultHandler(result);
+			return;
+		}
 		if (typeof value === "object" && value !== null && (value as { type?: unknown }).type === "admit") {
 			// Only the first verdict counts; a repeat cannot revoke or re-grant it.
 			if (admittedDigest !== undefined) {
@@ -390,6 +409,9 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				const entry = pendingPermissionDecisions.shift();
 				if (entry !== undefined) handler(entry);
 			}
+		},
+		onHookResult(handler: (result: WorkerHookResultFrame) => void): void {
+			hookResultHandler = handler;
 		},
 		onLedgerDelta(handler: (entries: ReadonlyArray<AgentLedgerEntry>) => void): void {
 			ledgerDeltaHandler = handler;

@@ -33,7 +33,12 @@ export type {
 	WorkerAdmitFrame,
 	WorkerAttestation,
 	WorkerControlFrame,
+	WorkerExtensionHook,
 	WorkerGrantRequestFrame,
+	WorkerHookEffect,
+	WorkerHookRequest,
+	WorkerHookResultFrame,
+	WorkerHookRun,
 	WorkerModelLoad,
 	WorkerResourceFacts,
 	WorkerResourceValue,
@@ -54,11 +59,13 @@ export {
 	parseAgentLedgerBody,
 	parseBulkFrame,
 	parseControlFrame,
+	parseWorkerHookRequest,
 	toolSignatureOf,
 	WORKER_ANNOUNCE_DEADLINE_MS,
 	WORKER_BULK_FRAME_MAX_BYTES,
 	WORKER_CONTROL_FRAME_MAX_BYTES,
 	WORKER_EVENT_QUEUE_MAX_FRAMES,
+	WORKER_HOOK_REQUEST_EVENT,
 	WORKER_PROTOCOL_VERSION,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	WORKER_STDIN_QUEUE_MAX_BYTES,
@@ -182,10 +189,19 @@ function workerSpecDigestOf(spec: unknown): string {
  * failure so failure classification routes it to the node dimension instead of
  * blaming the target or the model.
  */
+/** The stdin write that failed. A lost `hook_result` is answered by the worker's own hook policy, not by the node. */
+export type WorkerChannelOperation =
+	| "steer"
+	| "permission_decision"
+	| "spec"
+	| "ledger_delta"
+	| "admit"
+	| "hook_result";
+
 export class WorkerChannelFailure extends Error {
 	readonly failureClass = "node-channel" as const;
-	readonly operation: "steer" | "permission_decision" | "spec" | "ledger_delta" | "admit";
-	constructor(operation: "steer" | "permission_decision" | "spec" | "ledger_delta" | "admit", detail: string) {
+	readonly operation: WorkerChannelOperation;
+	constructor(operation: WorkerChannelOperation, detail: string) {
 		super(`worker control channel failure during ${operation}: ${detail}`);
 		this.name = "WorkerChannelFailure";
 		this.operation = operation;

@@ -9,12 +9,12 @@ import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { workerPermitDigest } from "../../src/worker/protocol.js";
-import { parseWorkerSpec, WORKER_SPEC_VERSION, type WorkerSpec } from "../../src/worker/spec-contract.js";
+import { parseWorkerSpec, WORKER_SPEC_HOOKLESS_VERSION, type WorkerSpec } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-test("a yolo session dispatches a default worker and rejects the previous worker wire version", async () => {
+test("a yolo session dispatches a default worker as version 8 and rejects a wire version it does not read", async () => {
 	const env = await isolateClioEnv("clio-default-worker-");
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.safety.autonomy = "yolo";
@@ -25,7 +25,12 @@ test("a yolo session dispatches a default worker and rejects the previous worker
 			strictEqual("autonomy" in spec, false);
 			strictEqual(spec.readOnly, undefined);
 			strictEqual(parseWorkerSpec(spec).readOnly, undefined);
-			throws(() => parseWorkerSpec({ ...spec, specVersion: WORKER_SPEC_VERSION - 1 }), /unsupported.*expected version/u);
+			// A spec without extension hooks stays version 8, so a node one release behind still serves it.
+			strictEqual(spec.specVersion, WORKER_SPEC_HOOKLESS_VERSION);
+			throws(
+				() => parseWorkerSpec({ ...spec, specVersion: WORKER_SPEC_HOOKLESS_VERSION - 1 }),
+				/is not one this worker reads .*different Clio Coder builds/u,
+			);
 			throw new Error("worker spec observed");
 		},
 	});

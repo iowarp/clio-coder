@@ -1,6 +1,5 @@
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
-import type { LoadResult } from "../core/domain-loader.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { isResponseSchemaRejection, UnsupportedResponseSchemaError } from "../core/response-schema.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
@@ -23,10 +22,11 @@ import type {
 } from "../domains/context/index.js";
 import { fallbackBootstrapOutput } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import { newRunId } from "../domains/dispatch/state.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
+import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
@@ -37,6 +37,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
+import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 export const BOOTSTRAP_MAX_OUTPUT_BYTES = 256 * 1024;
 
@@ -538,10 +539,12 @@ async function generateBootstrapWithModel(
 async function loadBootstrapDispatch(): Promise<{
 	dispatch: DispatchContract;
 	config: ConfigContract;
-	loaded: LoadResult;
+	stop(): Promise<void>;
 }> {
+	const workerHooks = createCliWorkerHooks("context init");
 	const loaded = await loadDomains([
 		ConfigDomainModule,
+		ExtensionsDomainModule,
 		ResourcesDomainModule,
 		ProvidersDomainModule,
 		SafetyDomainModule,
@@ -556,15 +559,38 @@ async function loadBootstrapDispatch(): Promise<{
 		// output. Receipts and the ledger still record the run.
 		createObservabilityDomainModule({ dispatchTrace: false }),
 		SchedulingDomainModule,
-		DispatchDomainModule,
+		createDispatchDomainModule({ workerHooks: workerHooks.workerHooks }),
 	]);
+	// The command's own extension host runs the bootstrap worker's tool hooks,
+	// as in fleet run; every exit from here disposes it.
+	const stop = async (): Promise<void> => {
+		try {
+			await workerHooks.drain();
+			await workerHooks.dispose();
+		} finally {
+			await loaded.stop();
+		}
+	};
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	const config = loaded.getContract<ConfigContract>("config");
 	if (!dispatch || !config) {
-		await loaded.stop();
+		await stop();
 		throw new Error("bootstrap dispatch or configuration unavailable");
 	}
-	return { dispatch, config, loaded };
+	// A host that failed under a blocking hook refuses the worker, and init
+	// falls back as for any unavailable agent.
+	let refusal: string | null;
+	try {
+		refusal = await workerHooks.start(loaded);
+	} catch (err) {
+		await stop();
+		throw err;
+	}
+	if (refusal !== null) {
+		await stop();
+		throw new Error(`clio-coder context init: ${refusal}`);
+	}
+	return { dispatch, config, stop };
 }
 
 /**
@@ -574,7 +600,7 @@ async function loadBootstrapDispatch(): Promise<{
  */
 export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = {}): BootstrapGenerate {
 	return async (input) => {
-		let loaded: LoadResult | null = null;
+		let stop: (() => Promise<void>) | null = null;
 		try {
 			if (options.dispatch) {
 				const route = options.route ?? options.resolveRoute?.();
@@ -582,7 +608,7 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 			}
 			{
 				const lazy = await loadBootstrapDispatch();
-				loaded = lazy.loaded;
+				stop = lazy.stop;
 				const route = options.route ?? resolveBootstrapRoute(lazy.config.get());
 				return await generateBootstrapWithModel(lazy.dispatch, input, route);
 			}
@@ -608,7 +634,7 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 			options.onFallback?.(error, fallback.mode);
 			return fallback.output;
 		} finally {
-			if (loaded) await loaded.stop();
+			if (stop) await stop();
 		}
 	};
 }

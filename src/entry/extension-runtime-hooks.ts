@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { isAbsolute, relative as relativePath, sep } from "node:path";
+import { isAbsolute, join, relative as relativePath, resolve, sep } from "node:path";
 import {
 	capabilityEnvelope,
 	type ExtensionContentAccess,
@@ -14,6 +14,7 @@ import {
 	isLoadableExtension,
 	type LoadableExtension,
 	type McpToolOwnerLookup,
+	RUNTIME_V2_LIMITS,
 } from "../domains/extensions/index.js";
 import type {
 	HookReceipt,
@@ -21,10 +22,67 @@ import type {
 	MiddlewareEffect,
 	MiddlewareHookInput,
 	MiddlewareHookRegistration,
+	ToolCallLanding,
 } from "../domains/middleware/index.js";
+import {
+	WORKER_EXTENSION_HOOKS_MAX,
+	type WorkerExtensionHook,
+	type WorkerHookEffect,
+	type WorkerHookRequest,
+	type WorkerHookRun,
+} from "../worker/protocol.js";
 
 /** A hook that misses this many deadlines in a row is disabled for the generation. */
 const TIMEOUT_STREAK_LIMIT = 3;
+
+/**
+ * Dispatched workers' hook calls one extension runtime holds at once. The
+ * runtime refuses a request past its cap as busy, which a gate reads as its
+ * own failure, so worker calls queue for half the cap and leave the rest to
+ * the session's own hooks, observations and tools.
+ */
+const WORKER_HOOK_CONCURRENCY = Math.max(1, Math.floor(RUNTIME_V2_LIMITS.concurrentRequests / 2));
+
+/** Whose call a hook runs for: the session's own, or a dispatched worker's. */
+type HookCallOrigin = "session" | "worker";
+
+/** Runs `work` when a permit frees within `waitMs`; null when the wait ran out first. */
+type WorkerPermits = <T>(work: () => Promise<T>, waitMs: number) => Promise<T | null>;
+
+/**
+ * One extension's worker hook calls, run at most `size` at a time in arrival
+ * order. A call still queued at its deadline leaves the queue, so the wait
+ * never outlasts the hook's timeout.
+ */
+function createPermits(size: number): WorkerPermits {
+	let free = size;
+	const waiting: Array<() => void> = [];
+	return async (work, waitMs) => {
+		if (free > 0) free -= 1;
+		else {
+			const admitted = await new Promise<boolean>((resolve) => {
+				const timer = setTimeout(() => {
+					const at = waiting.indexOf(admit);
+					if (at >= 0) waiting.splice(at, 1);
+					resolve(false);
+				}, waitMs);
+				const admit = (): void => {
+					clearTimeout(timer);
+					resolve(true);
+				};
+				waiting.push(admit);
+			});
+			if (!admitted) return null;
+		}
+		try {
+			return await work();
+		} finally {
+			const next = waiting.shift();
+			if (next !== undefined) next();
+			else free += 1;
+		}
+	};
+}
 
 type ToolOrTurnPoint = "before_tool" | "after_tool" | "turn_start" | "turn_end";
 
@@ -84,13 +142,14 @@ function hookEvent(
 	point: ToolOrTurnPoint,
 	input: MiddlewareHookInput,
 	access: ReadonlyArray<ExtensionContentAccess>,
+	workspace?: WorkerLandingWorkspace,
 ): ExtensionHookEvent {
 	const turnId = input.turnId ?? null;
 	const tool = input.toolName ?? "";
 	// The landing is derived from the arguments, so it crosses under the same class.
 	const args =
 		access.includes("tool-args") && input.toolArgs !== undefined
-			? { args: { ...input.toolArgs }, ...landingFields(input.toolLanding) }
+			? { args: { ...input.toolArgs }, ...landingFields(input.toolLanding, workspace) }
 			: {};
 	switch (point) {
 		case "before_tool":
@@ -130,26 +189,79 @@ function hookEvent(
 	}
 }
 
-/** The landing as api 2 hook events carry it; `workspacePath` is relative to the session's workspace. */
+/**
+ * Where a dispatched worker's tree sits in the session's: the worker's own
+ * root (its task worktree, or its cwd) in the worker's filesystem, and the
+ * directory of the session's checkout it stands for.
+ */
+export interface WorkerLandingWorkspace {
+	workerRoot: string;
+	sourceRoot: string;
+}
+
+function physicalPath(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		// A root that cannot be resolved here is compared as given; a landing under it still maps.
+		return path;
+	}
+}
+
+function relativeInside(from: string, to: string): string | null {
+	const relative = relativePath(from, to);
+	return relative !== ".." && !relative.startsWith(`..${sep}`) && !isAbsolute(relative) ? relative : null;
+}
+
+/** `path` relative to `root`, comparing both the physical and the given root, or null outside it. */
+function insideRoot(root: string, path: string): string | null {
+	return relativeInside(physicalPath(root), path) ?? relativeInside(root, path);
+}
+
+/**
+ * A protected path a hook named for a worker's call, in the worker's
+ * coordinates. The hook saw the call's landing as `landingFields` shows it:
+ * `target.path` is the worker's own path and `workspacePath` is relative to
+ * the session's workspace. A path already inside the worker's root names the
+ * worker's file and stays, even when the worktree sits under the checkout
+ * (`<checkout>/.clio-coder/worktrees/<run>`); a path under the checkout and
+ * outside the worker's root lands at the same place under the worker's root.
+ * A relative path means the session's workspace, so the worker gets it
+ * absolute and its guard never resolves it against the worker's own cwd.
+ */
+function workerProtectedPath(path: string, worker: WorkerLandingWorkspace): string {
+	const named = isAbsolute(path) ? path : resolve(physicalPath(process.cwd()), path);
+	if (insideRoot(worker.workerRoot, named) !== null) return named;
+	const fromSource = insideRoot(worker.sourceRoot, named);
+	return fromSource === null ? named : join(worker.workerRoot, fromSource);
+}
+
+/**
+ * The landing as api 2 hook events carry it; `workspacePath` is relative to
+ * the session's workspace. A worker's landing under its own root counts as
+ * the same place in the session's checkout, so a task worktree's write reads
+ * as the checkout path it will merge into, wherever the worktree lives.
+ */
 function landingFields(
 	landing: MiddlewareHookInput["toolLanding"],
+	worker?: WorkerLandingWorkspace,
 ): Pick<ExtensionToolHookLanding, "target" | "dispatch"> {
 	if (landing === undefined) return {};
 	const fields: Pick<ExtensionToolHookLanding, "target" | "dispatch"> = {};
 	if (landing.path !== undefined) {
-		let workspace = process.cwd();
-		try {
-			workspace = realpathSync(workspace);
-		} catch {
-			// The process cwd is already physical on every platform Clio runs on; keep it.
+		const workspace = physicalPath(process.cwd());
+		let landed = landing.path.path;
+		if (worker !== undefined) {
+			const fromWorkerRoot = relativeInside(worker.workerRoot, landed);
+			if (fromWorkerRoot !== null) landed = join(physicalPath(worker.sourceRoot), fromWorkerRoot);
 		}
-		const relative = relativePath(workspace, landing.path.path);
-		const inside = relative !== ".." && !relative.startsWith(`..${sep}`) && !isAbsolute(relative);
+		// An unresolved landing is only text: `loop/../x` past a link loop is not `x`, so it has no workspace path.
+		const relative = landing.path.resolved ? relativeInside(workspace, landed) : null;
 		fields.target = {
 			arg: landing.path.arg,
 			path: landing.path.path,
 			resolved: landing.path.resolved,
-			workspacePath: inside ? (relative === "" ? "." : relative.split(sep).join("/")) : null,
+			workspacePath: relative === null ? null : relative === "" ? "." : relative.split(sep).join("/"),
 		};
 	}
 	if (landing.dispatch !== undefined) {
@@ -190,12 +302,15 @@ function closedGate(point: ToolOrTurnPoint, extensionId: string, reason: string)
 
 type RuntimeHookPoint = ToolOrTurnPoint | "prompt_submit";
 
-type RunnerVerdict =
+type RunnerOutcome =
 	| { kind: "ok"; effects: ExtensionEffect[] }
 	| { kind: "failed"; reason: string; policy: "pass" | "block"; outcome: HookReceipt["outcome"] };
+/** A runner's answer for one call, carrying that call's own turn for its receipt. */
+type RunnerVerdict = RunnerOutcome & { turnId: string | null };
 
 interface RuntimeHookRunner {
-	run(event: ExtensionHookEvent, toolName?: string): Promise<RunnerVerdict>;
+	/** A worker's missed deadline is the worker's round trip, so it never counts toward disabling the session's hook. */
+	run(event: ExtensionHookEvent, origin?: HookCallOrigin, budgetMs?: number): Promise<RunnerVerdict>;
 	/** Receipt for a finished run, with the effects the host will apply. */
 	settle(
 		verdict: RunnerVerdict,
@@ -203,6 +318,7 @@ interface RuntimeHookRunner {
 		effectKinds: ReadonlyArray<string>,
 		toolName?: string,
 		sessionId?: string,
+		runId?: string,
 	): void;
 }
 
@@ -224,7 +340,6 @@ function createRuntimeHookRunner(
 	const provenance = entry.provenance;
 	let streak = 0;
 	let disabled = false;
-	let turnId: string | null = null;
 	const reported = new Set<string>();
 	const notify = (reason: string): void => {
 		if (reported.has(reason)) return;
@@ -235,28 +350,41 @@ function createRuntimeHookRunner(
 			// A notice sink has no authority over the call.
 		}
 	};
-	const failed = (reason: string, policy: "pass" | "block", outcome: HookReceipt["outcome"]): RunnerVerdict => {
+	const failed = (reason: string, policy: "pass" | "block", outcome: HookReceipt["outcome"]): RunnerOutcome => {
 		notify(policy === "block" ? `${reason}; it fails closed` : `${reason}; skipped`);
 		return { kind: "failed", reason, policy, outcome };
 	};
-	return {
-		async run(event) {
-			turnId = "turnId" in event ? event.turnId : null;
-			if (disabled) return failed("is disabled after repeated missed deadlines", hook.onTimeout, "runtime-timeout");
-			const executor = bridge.current();
-			if (executor === null) return failed("has no running runtime", hook.onError, "runtime-failed");
-			const outcome = await executor.hook(entry.id, event, hook.timeoutMs);
-			if (outcome.kind === "timeout") {
+	const evaluate = async (
+		event: ExtensionHookEvent,
+		origin: HookCallOrigin,
+		budgetMs: number,
+	): Promise<RunnerOutcome> => {
+		if (disabled) return failed("is disabled after repeated missed deadlines", hook.onTimeout, "runtime-timeout");
+		const executor = bridge.current();
+		if (executor === null) return failed("has no running runtime", hook.onError, "runtime-failed");
+		if (budgetMs <= 0)
+			return failed(`missed its ${hook.timeoutMs} ms deadline queued for the runtime`, hook.onTimeout, "runtime-timeout");
+		const outcome = await executor.hook(entry.id, event, budgetMs);
+		if (outcome.kind === "timeout") {
+			if (origin === "session") {
 				streak += 1;
 				if (streak >= TIMEOUT_STREAK_LIMIT) disabled = true;
-				return failed(`missed its ${hook.timeoutMs} ms deadline`, hook.onTimeout, "runtime-timeout");
 			}
-			streak = 0;
-			if (outcome.kind === "error") return failed(`failed: ${outcome.message}`, hook.onError, "runtime-failed");
-			reported.clear();
-			return { kind: "ok", effects: outcome.effects };
+			return failed(`missed its ${hook.timeoutMs} ms deadline`, hook.onTimeout, "runtime-timeout");
+		}
+		if (origin === "session") streak = 0;
+		if (outcome.kind === "error") return failed(`failed: ${outcome.message}`, hook.onError, "runtime-failed");
+		reported.clear();
+		return { kind: "ok", effects: outcome.effects };
+	};
+	return {
+		async run(event, origin = "session", budgetMs = hook.timeoutMs) {
+			// Session and worker calls overlap, so the turn rides each call's verdict, not the runner.
+			const turnId = "turnId" in event ? event.turnId : null;
+			return { ...(await evaluate(event, origin, budgetMs)), turnId };
 		},
-		settle(verdict, startedAt, effectKinds, toolName, sessionId) {
+		settle(verdict, startedAt, effectKinds, toolName, sessionId, runId) {
+			const turnId = verdict.turnId;
 			try {
 				options.recordReceipt({
 					at: now(),
@@ -269,6 +397,7 @@ function createRuntimeHookRunner(
 					kind: "runtime",
 					extensionVersion: entry.version,
 					...(sessionId ? { sessionId } : {}),
+					...(runId ? { runId } : {}),
 					outcome: verdict.kind === "ok" ? "runtime-ok" : verdict.outcome,
 					durationMs: Math.round(performance.now() - startedAt),
 					...(effectKinds.length > 0 ? { effectKinds: [...effectKinds] } : {}),
@@ -303,6 +432,18 @@ function eachRuntimeHook(
 	}
 }
 
+/** One hook run for a dispatched worker's call, with the session's deadline, policy and receipt. */
+export type WorkerHookEvaluator = (
+	input: MiddlewareHookInput,
+	workspace?: WorkerLandingWorkspace,
+) => Promise<MiddlewareEffect[]>;
+
+export interface ExtensionRuntimeHooks {
+	registrations: MiddlewareHookRegistration[];
+	/** The tool hooks again by registration id, as dispatched workers' calls run them. */
+	workerEvaluators: Map<string, WorkerHookEvaluator>;
+}
+
 /**
  * One owned middleware registration per declared api 2 tool or turn hook,
  * published with the extension generation through the reload coordinator.
@@ -316,13 +457,56 @@ export function buildExtensionRuntimeHookRegistrations(
 	bridge: ExtensionRuntimeHookBridge,
 	options: ExtensionRuntimeHookOptions,
 ): MiddlewareHookRegistration[] {
+	return buildExtensionRuntimeHooks(packages, bridge, options).registrations;
+}
+
+/**
+ * The registrations, and for each tool hook the evaluator a dispatched
+ * worker's call runs through. Both share one runner, so a worker call meets
+ * the same deadline, failure policy and disabled state; worker calls queue
+ * per extension runtime behind `WORKER_HOOK_CONCURRENCY`.
+ */
+export function buildExtensionRuntimeHooks(
+	packages: ReadonlyArray<InstalledExtension>,
+	bridge: ExtensionRuntimeHookBridge,
+	options: ExtensionRuntimeHookOptions,
+): ExtensionRuntimeHooks {
 	const registrations: MiddlewareHookRegistration[] = [];
+	const workerEvaluators = new Map<string, WorkerHookEvaluator>();
+	const workerPermits = new Map<string, WorkerPermits>();
 	eachRuntimeHook(packages, (entry, hook, index, digest) => {
 		if (hook.on === "prompt_submit") return;
 		const point: ToolOrTurnPoint = hook.on;
 		const access = entry.runtimeV2?.access ?? [];
 		const id = `extension:${entry.id}:${point}:${index}`;
 		const runner = createRuntimeHookRunner(entry, hook, point, id, digest, bridge, options);
+		const evaluate = async (
+			input: MiddlewareHookInput,
+			origin: HookCallOrigin,
+			workspace?: WorkerLandingWorkspace,
+			budgetMs?: number,
+		): Promise<MiddlewareEffect[]> => {
+			const startedAt = performance.now();
+			const verdict = await runner.run(hookEvent(point, input, access, workspace), origin, budgetMs);
+			const effects =
+				verdict.kind === "ok"
+					? verdict.effects.flatMap((effect) => {
+							const mapped = middlewareEffect(effect, entry.id);
+							return mapped === null ? [] : [mapped];
+						})
+					: verdict.policy === "block"
+						? closedGate(point, entry.id, verdict.reason)
+						: [];
+			runner.settle(
+				verdict,
+				startedAt,
+				effects.map((effect) => effect.kind),
+				input.toolName,
+				input.sessionId,
+				input.runId,
+			);
+			return effects;
+		};
 		registrations.push({
 			id,
 			description: `${entry.id} runtime ${point} hook`,
@@ -332,30 +516,25 @@ export function buildExtensionRuntimeHookRegistrations(
 				: {}),
 			awaited: true,
 			evaluate: () => [],
-			async evaluateAsync(input) {
-				const startedAt = performance.now();
-				const verdict = await runner.run(hookEvent(point, input, access), input.toolName);
-				const effects =
-					verdict.kind === "ok"
-						? verdict.effects.flatMap((effect) => {
-								const mapped = middlewareEffect(effect, entry.id);
-								return mapped === null ? [] : [mapped];
-							})
-						: verdict.policy === "block"
-							? closedGate(point, entry.id, verdict.reason)
-							: [];
-				runner.settle(
-					verdict,
-					startedAt,
-					effects.map((effect) => effect.kind),
-					input.toolName,
-					input.sessionId,
-				);
-				return effects;
-			},
+			evaluateAsync: (input) => evaluate(input, "session"),
+		});
+		if (point !== "before_tool" && point !== "after_tool") return;
+		let permits = workerPermits.get(entry.id);
+		if (permits === undefined) {
+			permits = createPermits(WORKER_HOOK_CONCURRENCY);
+			workerPermits.set(entry.id, permits);
+		}
+		const queue = permits;
+		// The queue wait spends the call's deadline, so a call answers within its timeout and
+		// the runtime gets only what the wait left; one that never reached it is scored a timeout.
+		workerEvaluators.set(id, async (input, workspace) => {
+			const arrived = performance.now();
+			const left = (): number => Math.floor(hook.timeoutMs - (performance.now() - arrived));
+			const ran = await queue(() => evaluate(input, "worker", workspace, left()), hook.timeoutMs);
+			return ran ?? evaluate(input, "worker", workspace, 0);
 		});
 	});
-	return registrations;
+	return { registrations, workerEvaluators };
 }
 
 export type ExtensionPromptGateVerdict =
@@ -440,4 +619,133 @@ export function buildExtensionPromptGate(
 			return { kind: "pass", text, notices };
 		},
 	};
+}
+
+/**
+ * The tool hooks of one generation as a native worker's spec carries them,
+ * under the ids of their middleware registrations. Turn and prompt hooks are
+ * the session's own; a worker has no turn of the session's to gate. A worker
+ * refuses a spec past `WORKER_EXTENSION_HOOKS_MAX` hooks, so the spec keeps
+ * that many, gates that fail closed first, in declaration order, and
+ * `onDropped` hears the hooks left out.
+ */
+export function buildWorkerExtensionHooks(
+	packages: ReadonlyArray<InstalledExtension>,
+	onDropped?: (hooks: ReadonlyArray<WorkerExtensionHook>) => void,
+): WorkerExtensionHook[] {
+	const hooks: WorkerExtensionHook[] = [];
+	eachRuntimeHook(packages, (entry, hook, index) => {
+		if (hook.on !== "before_tool" && hook.on !== "after_tool") return;
+		hooks.push({
+			id: `extension:${entry.id}:${hook.on}:${index}`,
+			point: hook.on,
+			...(hook.tools !== undefined ? { tools: [...hook.tools] } : {}),
+			timeoutMs: hook.timeoutMs,
+			onTimeout: hook.onTimeout,
+			onError: hook.onError,
+		});
+	});
+	if (hooks.length <= WORKER_EXTENSION_HOOKS_MAX) return hooks;
+	const gate = (hook: WorkerExtensionHook): boolean => hook.onError === "block" || hook.onTimeout === "block";
+	const kept = new Set(
+		[...hooks.filter(gate), ...hooks.filter((hook) => !gate(hook))].slice(0, WORKER_EXTENSION_HOOKS_MAX),
+	);
+	onDropped?.(hooks.filter((hook) => !kept.has(hook)));
+	return hooks.filter((hook) => kept.has(hook));
+}
+
+function workerEffect(effect: MiddlewareEffect): WorkerHookEffect | null {
+	if (effect.kind === "block_tool") return { kind: "block_tool", reason: effect.reason };
+	if (effect.kind === "rewrite_tool_input")
+		return { kind: "rewrite_tool_input", args: effect.args, reason: effect.reason, source: effect.source };
+	if (effect.kind === "annotate_tool_result")
+		return {
+			kind: "annotate_tool_result",
+			message: effect.message,
+			...(effect.severity === "info" || effect.severity === "warn" ? { severity: effect.severity } : {}),
+		};
+	if (effect.kind === "protect_path") return { kind: "protect_path", path: effect.path, reason: effect.reason };
+	if (effect.kind === "require_tool") return { kind: "require_tool", toolName: effect.toolName };
+	if (effect.kind === "lock_tools") return { kind: "lock_tools" };
+	return null;
+}
+
+/**
+ * Run one hook for a worker's call through the session's own registration,
+ * so its deadline, failure policy, content access and receipt are the ones a
+ * main-session call gets. A hook the current generation no longer holds
+ * answers by the policy the worker was dispatched with; one never declared
+ * fails closed. Operator notices go to the session; the worker applies every
+ * other tool-point effect, and anything else is reported, not dropped.
+ */
+export async function evaluateWorkerHookRequest(
+	request: WorkerHookRequest,
+	evaluator: WorkerHookEvaluator | undefined,
+	declared: WorkerExtensionHook | undefined,
+	run: WorkerHookRun,
+	notify: (message: string) => void,
+): Promise<WorkerHookEffect[]> {
+	const closed = (reason: string): WorkerHookEffect[] => {
+		const message = `${request.hookId} ${reason}; the gate fails closed`;
+		// The stricter of the two policies, as the worker decides a lost answer.
+		if (declared !== undefined && declared.onError !== "block" && declared.onTimeout !== "block") return [];
+		return request.point === "before_tool"
+			? [{ kind: "block_tool", reason: message }]
+			: [{ kind: "annotate_tool_result", message, severity: "warn" }];
+	};
+	if (evaluator === undefined) return closed("is not installed in this session's current generation");
+	const input: MiddlewareHookInput = {
+		hook: request.point,
+		toolName: request.tool,
+		metadata:
+			request.point === "after_tool"
+				? { resultKind: request.outcome === "error" ? "error" : "ok", durationMs: request.durationMs ?? 0 }
+				: {},
+		...(request.args !== undefined ? { toolArgs: request.args } : {}),
+		...(request.landing !== undefined ? { toolLanding: request.landing as ToolCallLanding } : {}),
+		...(request.result !== undefined
+			? {
+					toolResultDigest: {
+						text: request.result,
+						provenance: { producer: "code", source: "legacy-fallback", algorithm: "redacted-legacy-digest-v1" },
+					},
+				}
+			: {}),
+		...(run.sessionId !== null ? { sessionId: run.sessionId } : {}),
+		...(run.runId !== null ? { runId: run.runId } : {}),
+	};
+	const workspace: WorkerLandingWorkspace | undefined =
+		request.workspaceRoot !== undefined && run.sourceRoot !== undefined
+			? { workerRoot: request.workspaceRoot, sourceRoot: run.sourceRoot }
+			: undefined;
+	let effects: ReadonlyArray<MiddlewareEffect>;
+	try {
+		effects = await evaluator(input, workspace);
+	} catch (error) {
+		return closed(`failed: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	const say = (message: string): void => {
+		try {
+			notify(message);
+		} catch {
+			// A notice sink has no authority over the call; a throw here must not lose the hook's verdict.
+		}
+	};
+	const answer: WorkerHookEffect[] = [];
+	for (const effect of effects) {
+		if (effect.kind === "notify_operator") {
+			say(effect.message);
+			continue;
+		}
+		const mapped = workerEffect(effect);
+		if (mapped !== null)
+			answer.push(
+				mapped.kind === "protect_path" && workspace !== undefined
+					? { ...mapped, path: workerProtectedPath(mapped.path, workspace) }
+					: mapped,
+			);
+		else
+			say(`${request.hookId} returned ${effect.kind}, which a dispatched worker's call cannot apply; it was not applied`);
+	}
+	return answer;
 }

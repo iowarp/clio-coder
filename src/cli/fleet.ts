@@ -62,6 +62,7 @@ import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
+import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import {
@@ -86,6 +87,7 @@ import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { parsePlaybookVars } from "./playbook-vars.js";
+import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 import { convertWorkspaceForCommand } from "./workspace-conversion.js";
 
 const HELP = `clio-coder fleet <subcommand>
@@ -275,8 +277,10 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	ensureClioState();
+	const workerHooks = createCliWorkerHooks("fleet");
 	const loaded = await loadDomains([
 		ConfigDomainModule,
+		ExtensionsDomainModule,
 		ResourcesDomainModule,
 		ContextDomainModule,
 		ProvidersDomainModule,
@@ -289,7 +293,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		// A fleet step is dispatched by executeFleetRun, which drains the handle
 		// itself and never builds a dispatch event registry, so the domain is the
 		// only thing that can write each step's durable transcript.
-		createDispatchDomainModule({ journalRunEvents: true, workerSteering: false }),
+		createDispatchDomainModule({ journalRunEvents: true, workerSteering: false, workerHooks: workerHooks.workerHooks }),
 		SessionDomainModule,
 	]);
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
@@ -355,6 +359,24 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		await loaded.stop();
 		return fail(err instanceof Error ? err.message : String(err));
 	}
+	// Started before route preflight, so preview sees the tool hooks dispatch
+	// will and refuses a step whose route cannot carry a blocking one before any
+	// step runs and writes. Every exit from here disposes the host.
+	const stopRun = async (): Promise<void> => {
+		await workerHooks.dispose();
+		await loaded.stop();
+	};
+	let hookRefusal: string | null;
+	try {
+		hookRefusal = await workerHooks.start(loaded);
+	} catch (err) {
+		await stopRun();
+		return fail(err instanceof Error ? err.message : String(err));
+	}
+	if (hookRefusal !== null) {
+		await stopRun();
+		return refuse(hookRefusal);
+	}
 	if (dispatch.preview !== undefined) {
 		try {
 			const foreground = foregroundStreamUsage();
@@ -380,14 +402,14 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			}
 			plan = bindExecutionPlanEndpoints(plan, bindings);
 		} catch (err) {
-			await loaded.stop();
+			await stopRun();
 			return fail(`route preflight failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 	try {
 		preflightWriteBoundaries(plan, process.cwd());
 	} catch (err) {
-		await loaded.stop();
+		await stopRun();
 		return fail(`preflight failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
@@ -395,13 +417,13 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	if (resumeId !== undefined) {
 		const record = readFleetRun(resumeId);
 		if (record === null) {
-			await loaded.stop();
+			await stopRun();
 			return refuse(`resume run '${resumeId}' was not found in the durable fleet ledger`);
 		}
 		const planned = planFleetResume(record, plan, playbook, vars, process.cwd());
 		if (!planned.ok) {
 			if (planned.reason === "fleet-name") {
-				await loaded.stop();
+				await stopRun();
 				return refuse(`resume run '${resumeId}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`);
 			}
 			if (planned.reason === "workspace") {
@@ -419,7 +441,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				);
 			}
 			if (planned.reason === "vars") {
-				await loaded.stop();
+				await stopRun();
 				return refuse(`resume run '${resumeId}' used different --var values`);
 			}
 			process.stderr.write(
@@ -430,7 +452,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 				process.stderr.write(`    prior: ${JSON.stringify(entry.prior)}\n`);
 				process.stderr.write(`    current: ${JSON.stringify(entry.current)}\n`);
 			}
-			await loaded.stop();
+			await stopRun();
 			return 1;
 		}
 		resume = { record, replayed: planned.replayed };
@@ -504,6 +526,8 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		});
 	} catch (err) {
 		await dispatch.drain();
+		await workerHooks.drain();
+		await workerHooks.dispose();
 		await loaded.stop();
 		// A busy or unjudgeable workspace lock refuses this run; it is not a usage error, so it exits 1 like the other refusals.
 		if (err instanceof FleetWorkspaceBusyError || err instanceof FleetWorkspaceLockUnavailableError) {
@@ -512,6 +536,8 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		return fail(err instanceof Error ? err.message : String(err));
 	}
 	await dispatch.drain();
+	await workerHooks.drain();
+	await workerHooks.dispose();
 	await loaded.stop();
 
 	if (json) {

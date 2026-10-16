@@ -106,7 +106,12 @@ import {
 	gatewayChainReceipts,
 } from "../tools/surface.js";
 import type { TaskWorktree } from "../tools/task-worktree.js";
-import { type AgentLedgerPort, canonicalJson, type WorkerGrantRequestFrame } from "../worker/protocol.js";
+import {
+	type AgentLedgerPort,
+	canonicalJson,
+	type WorkerExtensionHook,
+	type WorkerGrantRequestFrame,
+} from "../worker/protocol.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -138,6 +143,7 @@ import { registerClioOAuthProviders } from "./oauth.js";
 import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
+import { createWorkerExtensionHookRegistrations, type WorkerHookTransport } from "./worker-extension-hooks.js";
 import type { WorkerRefusal } from "./worker-refusals.js";
 import {
 	describeWorkerRefusal,
@@ -221,6 +227,8 @@ export interface WorkerRunInput {
 	middlewareSnapshot?: MiddlewareSnapshot;
 	/** Frozen parent-session protection state, enforced before every mediated call. */
 	protectedArtifactState?: WorkerProtectedArtifactState;
+	/** The dispatching session's extension tool hooks and the round trip that runs them there. */
+	extensionHookHost?: { hooks: ReadonlyArray<WorkerExtensionHook>; request: WorkerHookTransport };
 	signal?: AbortSignal;
 	noSkills?: boolean;
 	turnConstraints?: import("../core/turn-constraints.js").TurnConstraints;
@@ -726,6 +734,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 		},
 	};
+	// The protected-artifacts guard starts from the parent-session snapshot
+	// and has no persistence sink. It can still absorb worker-local
+	// protect_path effects from snapshot rules and the dispatching session's
+	// extension hooks for the rest of this run.
+	const protectedArtifacts = createProtectedArtifactsRegistration({
+		...(input.protectedArtifactState !== undefined
+			? { initialState: { artifacts: [...input.protectedArtifactState.artifacts] } }
+			: {}),
+	});
 	const registry = createWorkerToolRegistry(
 		input.middlewareSnapshot,
 		safety,
@@ -740,16 +757,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// gathered instead of burning the lifetime cap on a retry spiral, and
 		// the bounded backstop reason is watched in telemetry.onFinish below to
 		// abort a worker that keeps calling tools anyway.
-		// The protected-artifacts guard starts from the parent-session snapshot
-		// and has no persistence sink. It can still absorb worker-local
-		// protect_path effects from snapshot rules for the rest of this run.
 		[
 			loopGuardRegistration,
-			createProtectedArtifactsRegistration({
-				...(input.protectedArtifactState !== undefined
-					? { initialState: { artifacts: [...input.protectedArtifactState.artifacts] } }
-					: {}),
-			}),
+			protectedArtifacts,
+			// The dispatching session's extension gates, run there for each call they match.
+			...(input.extensionHookHost !== undefined
+				? createWorkerExtensionHookRegistrations(input.extensionHookHost.hooks, input.extensionHookHost.request)
+				: []),
 		],
 		input.readOnly,
 		(effects) => middlewareToolChoice.apply(effects),
@@ -791,6 +805,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					return workerMcp;
 				}
 			: undefined,
+		(effects, hookInput) => protectedArtifacts.absorbAwaited(hookInput, effects),
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;

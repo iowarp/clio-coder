@@ -54,15 +54,18 @@ import {
 	isControlLine,
 	parseBulkFrame,
 	parseControlFrame,
+	parseWorkerHookRequest,
 	verifyWorkerAttestation,
 	WORKER_ANNOUNCE_DEADLINE_MS,
 	WORKER_BULK_FRAME_MAX_BYTES,
+	WORKER_HOOK_REQUEST_EVENT,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	WORKER_STDIN_QUEUE_MAX_BYTES,
 	type WorkerAdmitFrame,
 	type WorkerAttestation,
 	WorkerChannelFailure,
 	type WorkerGrantRequestFrame,
+	type WorkerHookRequest,
 	type WorkerModelLoad,
 } from "./worker-protocol.js";
 
@@ -164,6 +167,13 @@ export interface WorkerProcessOptions {
 	 * belongs to an admitted identity.
 	 */
 	onGrantRequest?: (request: WorkerGrantRequestFrame) => void;
+	/**
+	 * One extension hook request from the worker's tool loop. It is taken off
+	 * the event stream here, so its arguments reach only the session's hook
+	 * runner, never a display or a journal. Delivered only after the announce
+	 * is accepted, so a request always belongs to an admitted identity.
+	 */
+	onHookRequest?: (request: WorkerHookRequest) => void;
 	/**
 	 * Identity the plan approved. Defaults to the identity of the spec actually
 	 * written to stdin, which is what every production caller wants; a caller
@@ -475,6 +485,13 @@ function attachWorkerChannel(
 			return;
 		}
 		if (announceFailed) return;
+		const bulk = frame.value as { type?: unknown; payload?: unknown } | null;
+		if (typeof bulk === "object" && bulk !== null && bulk.type === WORKER_HOOK_REQUEST_EVENT) {
+			const request = announceAccepted ? parseWorkerHookRequest(bulk.payload) : null;
+			if (request === null) appendStderr("[worker] dropped a hook request from an unadmitted or malformed frame\n");
+			else opts?.onHookRequest?.(request);
+			return;
+		}
 		if (!announceAccepted) {
 			preAnnounce.push(frame.value);
 			startAttestationGrace();
@@ -726,9 +743,11 @@ function attachWorkerChannel(
 	 */
 	let queuedStdinBytes = 0;
 
-	function failChannel(operation: "steer" | "permission_decision" | "ledger_delta" | "admit", detail: string): false {
-		channelFailure = new WorkerChannelFailure(operation, detail);
-		appendStderr(`[worker] ${channelFailure.message}\n`);
+	function failChannel(operation: Exclude<WorkerChannelFailure["operation"], "spec">, detail: string): false {
+		const failure = new WorkerChannelFailure(operation, detail);
+		// A lost hook answer never hides the failure of a frame the run depends on.
+		if (operation !== "hook_result" || channelFailure === null) channelFailure = failure;
+		appendStderr(`[worker] ${failure.message}\n`);
 		return false;
 	}
 
@@ -741,7 +760,9 @@ function attachWorkerChannel(
 					? "ledger_delta"
 					: frameType === "admit"
 						? "admit"
-						: "steer";
+						: frameType === "hook_result"
+							? "hook_result"
+							: "steer";
 		if (!isAlive()) return failChannel(operation, "worker has exited");
 		const stdin = child.stdin;
 		if (!stdin || stdin.destroyed || !stdin.writable) return failChannel(operation, "worker stdin is not writable");

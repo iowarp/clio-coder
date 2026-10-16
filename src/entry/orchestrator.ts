@@ -146,7 +146,6 @@ import {
 } from "../domains/middleware/dispatch-nudge.js";
 import { createGuidanceRegistration } from "../domains/middleware/guidance.js";
 import {
-	createHookReceiptLog,
 	createMarketplaceOfferRegistration,
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
@@ -336,7 +335,7 @@ import { resizeImage } from "../utils/image-resize.js";
 import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
-import { createExtensionReloadCoordinator } from "./extension-reload.js";
+import { createExtensionReloadCoordinator, extensionHookReceiptSink, hookReceiptLog } from "./extension-reload.js";
 import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
 import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
@@ -1861,6 +1860,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const muxEnablement = resolvePanesEnablement(options.panes, options.startupSettings?.interface.panes.enabled);
 	const withPanes = muxInteractive && muxEnablement !== "off" ? await import("./with-panes.js") : null;
 
+	// Assigned once the extension reload coordinator exists, after the domains
+	// load; a worker dispatched before that carries no extension hooks.
+	let workerHookSource: import("./extension-reload.js").ExtensionReloadCoordinator["workerHooks"] | null = null;
 	const memoryOwner = new MemoryRuntime();
 	let getMemoryLessonJudge: (() => ReturnType<typeof createMemoryLessonJudge> | null) | null = null;
 	const result = await loadDomains(
@@ -1934,6 +1936,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					? { operatorAsk: { available: () => askUserHandler !== null, ask: (q, o) => askUserBridge(q, o) } }
 					: {}),
 				getSettings: () => effectiveSettingsForDispatch?.(),
+				// A native worker's tool calls reach this session's extension hooks.
+				workerHooks: {
+					declarations: () => workerHookSource?.declarations() ?? [],
+					dropped: () => workerHookSource?.dropped() ?? [],
+					evaluate: async (request, run) => (await workerHookSource?.evaluate(request, run)) ?? [],
+					notify: (message) => workerHookSource?.notify(message),
+				},
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
 				getFlowRestrictions: () => flowRestrictionsForDispatch?.() ?? null,
 				getFlowPolicy: () => workerFlowPolicyInput(safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY),
@@ -2815,7 +2824,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// so no consumer ever sees extension resources paired with hooks from a
 	// different generation. The owner slot is anchored here, so user hooks
 	// keep evaluating before the protection consumer and assessors below.
-	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
+	const hookReceipts = hookReceiptLog();
 	let bootHookNotices = true;
 	const reloadPlugins = () =>
 		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit(BusChannels.PluginsReloaded, event));
@@ -2837,31 +2846,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// The gateway is registered after this coordinator; the lookup runs at call time.
 		mcpOwner: (tool) => toolBootstrap.mcpCapabilities?.ownerIdOf(tool) ?? null,
 		cwd: () => process.cwd(),
-		recordReceipt: (receipt) => {
-			const sessionId = receipt.sessionId ?? session?.current()?.id;
-			const attributed = { ...receipt, ...(sessionId ? { sessionId } : {}) };
-			hookReceiptLog.record(attributed);
-			if (receipt.extension)
-				recordPackageActivity({
-					kind: `hook:${receipt.hook}`,
-					at: new Date(receipt.at).toISOString(),
-					owner: {
-						kind: "extension",
-						id: receipt.extension.id,
-						version: receipt.extensionVersion ?? "",
-						digest: receipt.extension.contentDigest,
-						scope: receipt.extension.scope,
-					},
-					outcome: receipt.outcome,
-					...(sessionId ? { sessionId } : {}),
-					...(receipt.turnId ? { turnId: receipt.turnId } : {}),
-					details: {
-						effectKinds: receipt.effectKinds ?? [],
-						generation: receipt.extension.generation,
-						durationMs: receipt.durationMs ?? null,
-					},
-				});
-		},
+		recordReceipt: extensionHookReceiptSink(hookReceipts, () => session?.current()?.id),
 		report: (line) => {
 			if (reloadClasses.captureIssue(line)) return;
 			if (!interactive) process.stderr.write(`${line}\n`);
@@ -2872,12 +2857,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (!reloadClasses.active) reloadPlugins();
 		},
 	});
+	workerHookSource = extensionReload.workerHooks;
 	await bootPhaseBoundary?.();
 	extensionReload.applyBoot();
 	middleware.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
 	await bootPhaseBoundary?.();
-	termination.onDrain(() => hookReceiptLog.flush());
+	termination.onDrain(() => hookReceipts.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
 	let activeAcpSessionAutonomy: AutonomyLevel | null = null;

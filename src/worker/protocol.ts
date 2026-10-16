@@ -371,6 +371,148 @@ export interface AgentLedgerPort {
 }
 
 /**
+ * An api 2 extension tool hook of the dispatching session. The worker runs no
+ * extension runtime: for each call a hook matches it sends a hook request on
+ * the bulk lane and holds the call until the orchestrator, which ran the hook
+ * on the session's own runtime, answers on stdin. The ids are the
+ * orchestrator's registration ids for the generation that dispatched the run.
+ */
+export interface WorkerExtensionHook {
+	id: string;
+	point: "before_tool" | "after_tool";
+	/** Exact names, or a prefix ending in `*`; absent matches every tool. */
+	tools?: ReadonlyArray<string>;
+	timeoutMs: number;
+	onTimeout: "pass" | "block";
+	onError: "pass" | "block";
+}
+
+/** Most extension tool hooks one worker spec carries. */
+export const WORKER_EXTENSION_HOOKS_MAX = 64;
+
+/** Bulk event that carries one hook request; dispatch takes it off the event stream before anything displays it. */
+export const WORKER_HOOK_REQUEST_EVENT = "clio_coder_hook_request";
+
+/**
+ * How long past a hook's own deadline the worker waits for the answer: the
+ * orchestrator enforces the deadline itself, so this bounds only the round
+ * trip and a host that never answers.
+ */
+export const WORKER_HOOK_ROUND_TRIP_MS = 10_000;
+
+export interface WorkerHookRequest {
+	requestId: string;
+	hookId: string;
+	point: "before_tool" | "after_tool";
+	tool: string;
+	args?: Record<string, unknown>;
+	/** Where the call lands, resolved in the worker's own filesystem and cwd. */
+	landing?: Record<string, unknown>;
+	/** The worker's own root, physical in its filesystem: its task worktree, else its cwd. */
+	workspaceRoot?: string;
+	outcome?: "ok" | "error";
+	durationMs?: number;
+	/** The bounded result digest, at after_tool. */
+	result?: string;
+}
+
+/** The dispatched run a hook request belongs to, as the orchestrator knows it. */
+export interface WorkerHookRun {
+	runId: string | null;
+	sessionId: string | null;
+	/** The session's directory the worker's root stands for, so its landings map back to the checkout. */
+	sourceRoot?: string;
+}
+
+/** The effects a worker applies from a hook: every tool-point effect but the operator notice, which is the session's. */
+export type WorkerHookEffect =
+	| { kind: "block_tool"; reason: string }
+	| { kind: "rewrite_tool_input"; args: Record<string, unknown>; reason: string; source: string }
+	| { kind: "annotate_tool_result"; message: string; severity?: "info" | "warn" }
+	| { kind: "protect_path"; path: string; reason: string }
+	| { kind: "require_tool"; toolName: string }
+	| { kind: "lock_tools" };
+
+/** Stdin frame answering one hook request. */
+export interface WorkerHookResultFrame {
+	type: "hook_result";
+	requestId: string;
+	effects: ReadonlyArray<WorkerHookEffect>;
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function parseWorkerHookRequest(value: unknown): WorkerHookRequest | null {
+	if (!plainRecord(value)) return null;
+	const { requestId, hookId, point, tool, args, landing, workspaceRoot, outcome, durationMs, result } = value;
+	if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return null;
+	if (typeof hookId !== "string" || hookId.length === 0 || hookId.length > 512) return null;
+	if (point !== "before_tool" && point !== "after_tool") return null;
+	if (typeof tool !== "string" || tool.length === 0 || tool.length > 256) return null;
+	if (args !== undefined && !plainRecord(args)) return null;
+	if (landing !== undefined && !plainRecord(landing)) return null;
+	if (
+		workspaceRoot !== undefined &&
+		(typeof workspaceRoot !== "string" || workspaceRoot.length === 0 || workspaceRoot.length > 4096)
+	)
+		return null;
+	if (outcome !== undefined && outcome !== "ok" && outcome !== "error") return null;
+	if (durationMs !== undefined && (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0))
+		return null;
+	if (result !== undefined && typeof result !== "string") return null;
+	return {
+		requestId,
+		hookId,
+		point,
+		tool,
+		...(args === undefined ? {} : { args }),
+		...(landing === undefined ? {} : { landing }),
+		...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+		...(outcome === undefined ? {} : { outcome }),
+		...(durationMs === undefined ? {} : { durationMs }),
+		...(result === undefined ? {} : { result }),
+	};
+}
+
+function parseWorkerHookEffect(value: unknown): WorkerHookEffect | null {
+	if (!plainRecord(value)) return null;
+	if (value.kind === "block_tool" && typeof value.reason === "string")
+		return { kind: "block_tool", reason: value.reason };
+	if (
+		value.kind === "rewrite_tool_input" &&
+		plainRecord(value.args) &&
+		typeof value.reason === "string" &&
+		typeof value.source === "string"
+	)
+		return { kind: "rewrite_tool_input", args: value.args, reason: value.reason, source: value.source };
+	if (value.kind === "protect_path" && typeof value.path === "string" && typeof value.reason === "string")
+		return { kind: "protect_path", path: value.path, reason: value.reason };
+	if (value.kind === "require_tool" && typeof value.toolName === "string")
+		return { kind: "require_tool", toolName: value.toolName };
+	if (value.kind === "lock_tools") return { kind: "lock_tools" };
+	if (value.kind === "annotate_tool_result" && typeof value.message === "string") {
+		const severity = value.severity === "info" || value.severity === "warn" ? value.severity : undefined;
+		return { kind: "annotate_tool_result", message: value.message, ...(severity === undefined ? {} : { severity }) };
+	}
+	return null;
+}
+
+/** Null for anything but a well-formed answer; an unreadable effect fails the whole answer, so the worker's policy decides. */
+export function parseWorkerHookResult(value: unknown): WorkerHookResultFrame | null {
+	if (!plainRecord(value) || value.type !== "hook_result") return null;
+	if (typeof value.requestId !== "string" || !Array.isArray(value.effects)) return null;
+	const effects: WorkerHookEffect[] = [];
+	for (const raw of value.effects) {
+		const effect = parseWorkerHookEffect(raw);
+		if (effect === null) return null;
+		effects.push(effect);
+	}
+	return { type: "hook_result", requestId: value.requestId, effects };
+}
+
+/**
  * A model the worker's own request loaded and pinned. The orchestrator owns the
  * release of worker loads (#379), so the worker reports each one and the
  * orchestrator releases it when it exits. Only ids cross the wire: the

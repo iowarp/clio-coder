@@ -20,6 +20,7 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { resolveClioDirs } from "../../core/xdg.js";
+import { WORKER_SPEC_HOOKLESS_VERSION, WORKER_SPEC_VERSION, WORKER_SPEC_VERSIONS } from "../../worker/spec-contract.js";
 import type { FleetProjectVerification } from "./fleet-project-verification.js";
 import {
 	evaluateRouteFacts,
@@ -63,7 +64,16 @@ export interface FleetPreflightRecord {
 	/** Local clio-coder version at check time; a different local version invalidates the record. */
 	localVersion: string;
 	remoteVersion: string | null;
+	/** Worker spec versions this install wrote at check time; a different set invalidates the record. */
+	localWorkerSpecs?: number[];
+	/**
+	 * Spec versions the node's worker reported reading; null when it did not
+	 * report them, which counts as reading the hook-free version only.
+	 */
+	remoteWorkerSpecs?: number[] | null;
 	detail: string | null;
+	/** What a passing node cannot run, such as hooked dispatches on a build that predates the spec report. */
+	note?: string;
 	checks: FleetPreflightChecks;
 	/**
 	 * Per-target facts observed from this node. A `localhost` endpoint means a
@@ -162,6 +172,12 @@ export function fleetPreflightVerdict(
 			reason: `node '${node.id}' preflight was recorded for host '${record.host}' but the node now points at '${node.host}'; run 'clio-coder doctor --fix'`,
 		};
 	}
+	if (record.localWorkerSpecs?.join(" ") !== WORKER_SPEC_VERSIONS.join(" ")) {
+		return {
+			ok: false,
+			reason: `node '${node.id}' preflight predates this build's worker spec versions (${WORKER_SPEC_VERSIONS.join(", ")}); run 'clio-coder doctor --fix'`,
+		};
+	}
 	if (record.localVersion !== readClioVersion()) {
 		return {
 			ok: false,
@@ -227,6 +243,12 @@ function buildPreflightScript(node: SshNodeEndpoint, projectRoot: string): strin
 	// trailing `worker` subcommand to get the base CLI invocation.
 	const cliBase = entry.endsWith(" worker") ? entry.slice(0, -" worker".length) : null;
 	const versionCommand = node.clioCoderVersionCommand ?? (cliBase !== null ? `${cliBase} --version` : null);
+	// The spec versions the node's worker reads. A build older than the report
+	// ignores the flag and prints its version line, which reads as unreported.
+	const specProbe =
+		cliBase !== null
+			? `w=$(${cliBase} version --worker-specs 2>/dev/null | head -n 1); echo "workerSpecs=$w"`
+			: "echo workerSpecs=unverified-entry";
 	const versionProbe =
 		versionCommand !== null
 			? `v=$(${versionCommand} 2>/dev/null | head -n 1); if [ -n "$v" ]; then echo "clioCoder=$v"; else echo clioCoder=missing; fi`
@@ -235,6 +257,7 @@ function buildPreflightScript(node: SshNodeEndpoint, projectRoot: string): strin
 		`echo ${shellQuote(PREFLIGHT_MARKER)}`,
 		`if cd ${shellQuote(projectRoot)} 2>/dev/null; then echo cwd=ok; else echo cwd=missing; fi`,
 		versionProbe,
+		specProbe,
 		`d="\${XDG_STATE_HOME:-$HOME/.local/state}/clio-coder"; if [ -d "$d" ]; then if [ -w "$d" ]; then echo state=ok; else echo state=fail; fi; else p="$d"; while [ ! -e "$p" ] && [ "$p" != / ]; do p=$(dirname "$p"); done; if [ -d "$p" ] && [ -w "$p" ] && [ -x "$p" ]; then echo state=creatable; else echo state=fail; fi; fi`,
 		// Resource observation runs on the node. A node without nvidia-smi reports
 		// unknown; it never reports zero GPUs, which a fit requirement would read
@@ -244,6 +267,22 @@ function buildPreflightScript(node: SshNodeEndpoint, projectRoot: string): strin
 		`g=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null); if [ -n "$g" ]; then echo "gpu=$(echo "$g" | wc -l)"; echo "vrammb=$(echo "$g" | paste -sd+ - | bc 2>/dev/null || echo unknown)"; else echo gpu=unknown; echo vrammb=unknown; fi`,
 	];
 	return lines.join("; ");
+}
+
+/** The spec versions a node's `version --worker-specs` printed; null for anything else. */
+function parseWorkerSpecs(reported: string): number[] | null {
+	const text = reported.trim();
+	return /^\d+(?: \d+)*$/.test(text) ? text.split(" ").map(Number) : null;
+}
+
+/**
+ * Why a node's worker cannot serve every spec this build writes, or null when
+ * it can. An unreported node is handled by the caller as hook-free only.
+ */
+function workerSpecMismatch(specs: ReadonlyArray<number>): string | null {
+	const local = WORKER_SPEC_VERSIONS.join(" and ");
+	if (WORKER_SPEC_VERSIONS.every((version) => specs.includes(version))) return null;
+	return `worker spec mismatch (this build writes versions ${local}, the node's worker reads ${specs.join(" and ")})`;
 }
 
 function parseSemver(text: string): string | null {
@@ -380,6 +419,8 @@ export async function runFleetNodePreflight(
 		checkedAt,
 		localVersion,
 		remoteVersion: null,
+		localWorkerSpecs: [...WORKER_SPEC_VERSIONS],
+		remoteWorkerSpecs: null,
 		detail: null,
 		checks,
 		targets: [],
@@ -414,6 +455,23 @@ export async function runFleetNodePreflight(
 		record.remoteVersion = parseSemver(clioValue);
 		checks.versionMatch = record.remoteVersion !== null && record.remoteVersion === parseSemver(localVersion);
 	}
+	// The package version alone misses two builds of one version that write
+	// different specs, so a node that reports its spec versions must read every
+	// one this build writes. A build older than the report (released 0.6.2)
+	// still reads the hook-free version this build sends for a dispatch without
+	// extension hooks, so it passes as hook-free only, and a hooked dispatch
+	// fails over to another node at dispatch time. A custom entry has no CLI to
+	// ask; its version command stands.
+	const specValue = lines.find((line) => line.startsWith("workerSpecs="))?.slice("workerSpecs=".length) ?? "";
+	let specMismatch: string | null = null;
+	if (specValue !== "unverified-entry") {
+		record.remoteWorkerSpecs = parseWorkerSpecs(specValue);
+		if (record.remoteWorkerSpecs !== null) specMismatch = workerSpecMismatch(record.remoteWorkerSpecs);
+		else
+			record.note = `the node's worker does not report the spec versions it reads (a build older than this one), so it counts as reading version ${WORKER_SPEC_HOOKLESS_VERSION} only; dispatches carrying extension hooks (version ${WORKER_SPEC_VERSION}) will not run on this node and go to another node`;
+	}
+	const packageMatch = checks.versionMatch;
+	if (specMismatch !== null) checks.versionMatch = false;
 	const failures: string[] = [];
 	if (!checks.pathParity)
 		failures.push(
@@ -423,11 +481,11 @@ export async function runFleetNodePreflight(
 		failures.push("custom worker entry needs clioCoderVersionCommand printing its exact Clio version");
 	else if (!checks.clioPresent)
 		failures.push("clio-coder not found on remote PATH (set fleet.nodes[].clioCoderEntry or install clio-coder)");
-	else if (!checks.versionMatch) {
+	else if (!packageMatch) {
 		failures.push(
 			`clio-coder version mismatch (local ${parseSemver(localVersion) ?? localVersion}, remote ${record.remoteVersion ?? "unknown"})`,
 		);
-	}
+	} else if (specMismatch !== null) failures.push(specMismatch);
 	if (!checks.stateDirWritable) failures.push("remote clio-coder state dir is not writable");
 	record.ok = failures.length === 0;
 	record.detail = failures.length > 0 ? failures.join("; ") : null;

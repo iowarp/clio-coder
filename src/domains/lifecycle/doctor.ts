@@ -737,7 +737,7 @@ export async function runDoctorFleetChecks(
 			level: record.ok ? ("ok" as const) : ("warn" as const),
 			name: `fleet node ${record.nodeId}`,
 			detail: record.ok
-				? `checks passed; ${eligible ? "eligible from recorded preflight" : `not admitted, run fleet nodes test ${record.nodeId} --record`}${recorded ? " (recorded)" : ""}: ${record.host}, clio ${record.remoteVersion}, project=${record.project?.kind ?? "not verified"}; ${targets}`
+				? `checks passed; ${eligible ? "eligible from recorded preflight" : `not admitted, run fleet nodes test ${record.nodeId} --record`}${recorded ? " (recorded)" : ""}: ${record.host}, clio ${record.remoteVersion}, project=${record.project?.kind ?? "not verified"}; ${targets}${record.note ? `; note: ${record.note}` : ""}`
 				: `needs attention: ${record.detail ?? "preflight failed"}`,
 		};
 	});

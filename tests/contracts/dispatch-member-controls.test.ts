@@ -917,4 +917,35 @@ describe("dispatch member controls", () => {
 			}
 		});
 	}
+
+	it("fails a pinned dispatch at once when its node does not read the spec version", async (context) => {
+		const timers = holdRetries(context);
+		const f = await fixture(2);
+		const scheduled = deferred<"retry">();
+		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+			if (isProgressEvent(event.event) && event.event.type === "retry_scheduled") scheduled.resolve("retry");
+		});
+		try {
+			const handle = await f.contract.dispatch({ ...f.request, failover: "none" });
+			// The refusal a released 0.6.2 worker writes for a version 9 spec.
+			f.workers[0]?.finish({
+				exitCode: 1,
+				signal: null,
+				stderrTail:
+					"[worker] fatal: WorkerSpec version 9 is unsupported (expected version 8). Re-dispatch the request to generate a valid attested, budget-bearing worker specification.",
+			});
+			const settled = await Promise.race([handle.finalPromise, scheduled.promise]);
+			ok(settled !== "retry", "a pinned node that cannot read the spec must not be retried");
+			strictEqual(settled.outcome, "failed");
+			strictEqual(timers.callbacks.size, 0);
+			strictEqual(f.workers.length, 1);
+			match(
+				settled.outcomeDetail ?? "",
+				/WorkerSpec version 9 is not one this worker reads .*different Clio Coder builds/u,
+			);
+			ok(!(settled.outcomeDetail ?? "").includes("Re-dispatch"));
+		} finally {
+			await f.stop();
+		}
+	});
 });

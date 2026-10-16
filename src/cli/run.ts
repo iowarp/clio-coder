@@ -23,6 +23,7 @@ import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatc
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
+import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
@@ -50,6 +51,7 @@ import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { formatDispatchHumanOutput } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
+import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 const USAGE =
 	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--agent <recipe-id>] "<task>"\n';
@@ -529,8 +531,10 @@ async function runDispatch(
 
 	ensureClioState();
 	let effectiveSettings: Readonly<ClioSettings> | undefined;
+	const workerHooks = createCliWorkerHooks("run");
 	const loaded = await loadDomains([
 		ConfigDomainModule,
+		ExtensionsDomainModule,
 		ResourcesDomainModule,
 		createContextDomainModule({
 			noContextFiles: options.noContextFiles === true,
@@ -555,6 +559,7 @@ async function runDispatch(
 			// run's durable transcript.
 			journalRunEvents: true,
 			workerSteering: parsed.steerChannel !== undefined,
+			workerHooks: workerHooks.workerHooks,
 		}),
 	]);
 	const config = loaded.getContract<ConfigContract>("config");
@@ -691,6 +696,16 @@ async function runDispatch(
 		} else process.stderr.write(`clio-coder run: ${notice.message}\n`);
 	});
 	try {
+		// Started after every early exit, so a refused run never starts a runtime it
+		// would have to stop, and refused like fleet run when a blocking hook cannot run.
+		const hookRefusal = await workerHooks.start(loaded);
+		if (hookRefusal !== null) {
+			unsubscribeScopeNotices();
+			await workerHooks.dispose();
+			await loaded.stop();
+			process.stderr.write(`clio-coder run: ${hookRefusal}\n`);
+			return 1;
+		}
 		const handle = await dispatch.dispatch(dispatchReq);
 		writeJsonHeader(handle.runId);
 		if (parsed.steerChannel) {
@@ -752,6 +767,8 @@ async function runDispatch(
 		process.off("SIGTERM", onSignal);
 
 		await dispatch.drain();
+		await workerHooks.drain();
+		await workerHooks.dispose();
 		await loaded.stop();
 		return mapExitCode(receipt);
 	} catch (err) {
@@ -759,6 +776,10 @@ async function runDispatch(
 		if (cleanupSteer) {
 			cleanupSteer();
 		}
+		// A disposed host declares no hooks, so a retry admitted after dispose would run unhooked; drain first.
+		await dispatch.drain();
+		await workerHooks.drain();
+		await workerHooks.dispose();
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio-coder run failed: ${msg}\n`);
 		const failedSpec = runAgents?.getSpec(parsed.agentId);

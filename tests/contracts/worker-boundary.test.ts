@@ -1,11 +1,14 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { createCliWorkerHooks, workerHookStartupFailure } from "../../src/cli/worker-extension-hooks.js";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
@@ -20,6 +23,7 @@ import {
 	parseControlFrame,
 	verifyWorkerAttestation,
 	type WorkerAttestation,
+	type WorkerHookRequest,
 } from "../../src/domains/dispatch/worker-protocol.js";
 import {
 	type SpawnedWorker,
@@ -513,5 +517,357 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 		);
 		strictEqual(silent.exitCode, 1, silent.stderrTail);
 		match(silent.stderrTail ?? "", /did not announce its route identity within 300 ms/u);
+	});
+});
+
+describe("worker extension hooks", () => {
+	it("counts a startup reload committed with errors as a failed host", () => {
+		// operator-runtime-v2 answers this after retiring every process; it carries no degraded count.
+		const withErrors = { status: "committed", generation: 1, message: "Extensions reloaded with errors: boom" } as const;
+		strictEqual(workerHookStartupFailure(withErrors), withErrors.message);
+		strictEqual(workerHookStartupFailure({ status: "committed", generation: 1, message: "ok", degraded: 0 }), null);
+	});
+	it("refuses a worker's hook query once the CLI hook host is disposed", async () => {
+		const hooks = createCliWorkerHooks("fleet");
+		await hooks.dispose();
+		const effects = await hooks.workerHooks.evaluate(
+			{ requestId: "r1", hookId: "extension:desk_guard:before_tool:0", point: "before_tool", tool: "bash" },
+			{ runId: null, sessionId: null },
+		);
+		deepStrictEqual(effects, [
+			{
+				kind: "block_tool",
+				reason: "the fleet extension host stopped; extension:desk_guard:before_tool:0 cannot run, so the call fails closed",
+			},
+		]);
+	});
+	it("holds a worker's matching call for the dispatching session's hook and applies its verdict", {
+		timeout: 120_000,
+	}, async () => {
+		const env = await isolateClioEnv("clio-worker-extension-hook-");
+		const bodies: string[] = [];
+		const server = createServer(async (req, res) => {
+			bodies.push(await readRequestBody(req));
+			res.setHeader("content-type", "text/event-stream");
+			const chunks =
+				bodies.length === 1
+					? [
+							{
+								model: "fixture",
+								choices: [
+									{
+										index: 0,
+										delta: {
+											role: "assistant",
+											tool_calls: [
+												{
+													index: 0,
+													id: "call_1",
+													type: "function",
+													function: { name: "read", arguments: JSON.stringify({ path: "input.txt" }) },
+												},
+											],
+										},
+										finish_reason: null,
+									},
+								],
+							},
+							{ model: "fixture", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+						]
+					: [
+							{
+								model: "fixture",
+								choices: [
+									{
+										index: 0,
+										delta: {
+											role: "assistant",
+											content: JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] }),
+										},
+										finish_reason: "stop",
+									},
+								],
+							},
+						];
+			res.end(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`);
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
+		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		settings.targets = [{ id: "fixture", runtime: "litellm", url, defaultModel: "fixture" }];
+		settings.fleet.default.target = "fixture";
+		settings.fleet.default.model = "fixture";
+		const requests: WorkerHookRequest[] = [];
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
+			spawnWorker: (spec, opts) =>
+				spawnWorkerProcess(process.execPath, ["--import", import.meta.resolve("tsx"), WORKER_ENTRY], spec, {
+					...opts,
+					cwd: env.dir,
+				}),
+			workerHooks: {
+				declarations: () => [
+					{
+						id: "extension:gate:before_tool:0",
+						point: "before_tool",
+						tools: ["read"],
+						timeoutMs: 1000,
+						onTimeout: "block",
+						onError: "block",
+					},
+				],
+				evaluate: async (request) => {
+					requests.push(request);
+					return [{ kind: "block_tool", reason: "gate closed by the dispatching session" }];
+				},
+			},
+		});
+		try {
+			await bundle.extension.start();
+			writeFileSync(join(env.dir, "input.txt"), "fixture\n");
+			const run = await bundle.contract.dispatch({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: "Inspect the fixture.",
+				cwd: env.dir,
+				requestOrigin: "internal",
+				resultContractOverride: { kind: "provenance-report" },
+			});
+			await run.finalPromise;
+			strictEqual(requests.length, 1, bodies.join("\n"));
+			const [request] = requests;
+			deepStrictEqual(
+				{ hookId: request?.hookId, tool: request?.tool, args: request?.args, landing: request?.landing },
+				{
+					hookId: "extension:gate:before_tool:0",
+					tool: "read",
+					args: { path: "input.txt" },
+					landing: { path: { arg: "path", path: join(realpathSync(env.dir), "input.txt"), resolved: true } },
+				},
+			);
+			// The model saw the session's verdict, not the file.
+			match(bodies[1] ?? "", /gate closed by the dispatching session/u);
+			ok(!(bodies[1] ?? "").includes("fixture\\n"));
+		} finally {
+			await bundle.extension.stop?.();
+			await closeServer(server);
+			env.restore();
+		}
+	});
+	it("refuses a claude-sdk dispatch that a matching blocking hook could not reach", async () => {
+		const env = await isolateClioEnv("clio-worker-unhooked-runtime-");
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
+		settings.targets = [{ id: "sdk", runtime: "claude-sdk", defaultModel: "claude-fixture" }];
+		settings.fleet.default.target = "sdk";
+		settings.fleet.default.model = "claude-fixture";
+		const spawned: string[] = [];
+		const bundle = makeDispatchBundle(
+			dispatchStubContext({
+				settings,
+				runtime: {
+					id: "claude-sdk",
+					displayName: "Claude SDK",
+					kind: "sdk",
+					apiFamily: "anthropic-messages",
+					auth: "api-key",
+					defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					synthesizeModel: () => ({ id: "claude-fixture", provider: "claude-sdk" }) as never,
+				},
+			}),
+			{
+				spawnWorker: (spec) => {
+					spawned.push(spec.agentId);
+					throw new Error("an unhooked worker must not start");
+				},
+				workerHooks: {
+					declarations: () => [
+						{
+							id: "extension:desk_guard:before_tool:0",
+							point: "before_tool",
+							tools: ["read"],
+							timeoutMs: 1000,
+							onTimeout: "pass",
+							onError: "block",
+						},
+					],
+					evaluate: async () => [],
+				},
+			},
+		);
+		try {
+			await bundle.extension.start();
+			await rejects(async () => {
+				const run = await bundle.contract.dispatch({
+					agentId: "scout",
+					executionRole: "researcher",
+					task: "Inspect the fixture.",
+					cwd: env.dir,
+					requestOrigin: "internal",
+				});
+				await run.finalPromise;
+			}, /claude-sdk runtime cannot carry extension tool hooks.*desk_guard/u);
+			// Preview and failover candidates refuse the route dispatch refuses.
+			throws(
+				() =>
+					bundle.contract.preview?.({
+						agentId: "scout",
+						executionRole: "researcher",
+						task: "Inspect the fixture.",
+						cwd: env.dir,
+						requestOrigin: "internal",
+					}),
+				/claude-sdk runtime cannot carry extension tool hooks.*desk_guard/u,
+			);
+			deepStrictEqual(spawned, []);
+		} finally {
+			await bundle.extension.stop?.();
+			env.restore();
+		}
+	});
+	it("refuses a CLI or ACP dispatch under a blocking hook that names none of its tools", async () => {
+		const env = await isolateClioEnv("clio-worker-unhooked-cli-");
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
+		settings.targets = [{ id: "codex", runtime: "codex-cli", defaultModel: "codex-fixture" }];
+		settings.fleet.default.target = "codex";
+		settings.fleet.default.model = "codex-fixture";
+		settings.integrations.externalAgents.entries = [{ id: "acp-fixture", command: "acp-fixture", args: [] }];
+		const spawned: string[] = [];
+		const bundle = makeDispatchBundle(
+			dispatchStubContext({
+				settings,
+				runtime: {
+					id: "codex-cli",
+					displayName: "Codex CLI",
+					kind: "subprocess",
+					apiFamily: "openai-responses",
+					auth: "none",
+					defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					synthesizeModel: () => ({ id: "codex-fixture", provider: "codex-cli" }) as never,
+				},
+			}),
+			{
+				spawnWorker: (spec) => {
+					spawned.push(spec.agentId);
+					throw new Error("an unhooked worker must not start");
+				},
+				workerHooks: {
+					declarations: () => [
+						{
+							id: "extension:desk_guard:before_tool:0",
+							point: "before_tool",
+							tools: ["music"],
+							timeoutMs: 1000,
+							onTimeout: "pass",
+							onError: "block",
+						},
+					],
+					evaluate: async () => [],
+				},
+			},
+		);
+		try {
+			await bundle.extension.start();
+			for (const [agentId, refusal] of [
+				["scout", /codex-cli runtime runs its own tools.*desk_guard/u],
+				["acp-fixture", /ACP agent acp-fixture runs its own tools.*desk_guard/u],
+			] as const) {
+				await rejects(async () => {
+					const run = await bundle.contract.dispatch({
+						agentId,
+						executionRole: "researcher",
+						task: "Inspect the fixture.",
+						cwd: env.dir,
+						requestOrigin: "internal",
+					});
+					await run.finalPromise;
+				}, refusal);
+			}
+			// A plan must not preview the CLI route or the delegation dispatch refuses.
+			throws(
+				() =>
+					bundle.contract.preview?.({
+						agentId: "scout",
+						executionRole: "researcher",
+						task: "Inspect the fixture.",
+						cwd: env.dir,
+						requestOrigin: "internal",
+					}),
+				/codex-cli runtime runs its own tools.*desk_guard/u,
+			);
+			throws(
+				() =>
+					bundle.contract.preview?.({
+						agentId: "acp-fixture",
+						executionRole: "researcher",
+						task: "Inspect the fixture.",
+						cwd: env.dir,
+						requestOrigin: "internal",
+					}),
+				/ACP agent acp-fixture runs its own tools.*desk_guard/u,
+			);
+			deepStrictEqual(spawned, []);
+		} finally {
+			await bundle.extension.stop?.();
+			env.restore();
+		}
+	});
+	it("refuses a dispatch whose tools match a blocking hook past the worker hook cap", async () => {
+		const env = await isolateClioEnv("clio-worker-dropped-gate-");
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
+		settings.targets = [{ id: "fixture", runtime: "litellm", url: "http://127.0.0.1:9", defaultModel: "fixture" }];
+		settings.fleet.default.target = "fixture";
+		settings.fleet.default.model = "fixture";
+		const spawned: string[] = [];
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
+			spawnWorker: (spec) => {
+				spawned.push(spec.agentId);
+				throw new Error("a worker past its gate must not start");
+			},
+			workerHooks: {
+				declarations: () => [],
+				dropped: () => [
+					{
+						id: "extension:desk_guard:before_tool:64",
+						point: "before_tool",
+						tools: ["read"],
+						timeoutMs: 1000,
+						onTimeout: "pass",
+						onError: "block",
+					},
+				],
+				evaluate: async () => [],
+			},
+		});
+		try {
+			await bundle.extension.start();
+			await rejects(async () => {
+				const run = await bundle.contract.dispatch({
+					agentId: "scout",
+					executionRole: "researcher",
+					task: "Inspect the fixture.",
+					cwd: env.dir,
+					requestOrigin: "internal",
+				});
+				await run.finalPromise;
+			}, /blocking tool hooks of desk_guard fall past the 64 hooks a worker carries/u);
+			throws(
+				() =>
+					bundle.contract.preview?.({
+						agentId: "scout",
+						executionRole: "researcher",
+						task: "Inspect the fixture.",
+						cwd: env.dir,
+						requestOrigin: "internal",
+					}),
+				/blocking tool hooks of desk_guard fall past the 64 hooks a worker carries/u,
+			);
+			deepStrictEqual(spawned, []);
+		} finally {
+			await bundle.extension.stop?.();
+			env.restore();
+		}
 	});
 });

@@ -7,6 +7,8 @@ import {
 	type MiddlewareDiagnosticSink,
 	type MiddlewareRuleDefinition,
 	registrationFromRuleDefinition,
+	registrationMatchesTool,
+	runMiddlewareAsyncRegistrations,
 	runMiddlewareRegistrations,
 	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
@@ -62,6 +64,24 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 			const registrations = table.list();
 			return runMiddlewareRegistrations(input, registrations, {
 				budgetTracker,
+				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+			});
+		},
+		// A worker's awaited registrations are its proxies for the dispatching
+		// session's extension hooks (src/engine/worker-extension-hooks.ts).
+		hasAwaitedHook(hook, toolName) {
+			return table
+				.list()
+				.some(
+					(registration) =>
+						registration.awaited === true &&
+						registration.hooks.includes(hook) &&
+						registrationMatchesTool(registration, toolName),
+				);
+		},
+		runAwaitedHook(input, priorEffects = []) {
+			return runMiddlewareAsyncRegistrations(input, table.list(), priorEffects, {
+				include: (registration) => registration.awaited === true,
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
 		},

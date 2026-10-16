@@ -1,4 +1,4 @@
-import { strictEqual, throws } from "node:assert/strict";
+import { match, strictEqual, throws } from "node:assert/strict";
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -45,7 +45,7 @@ describe("fleet node management", () => {
 		const ssh = join(scratch, "ssh");
 		writeFileSync(
 			ssh,
-			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'state=ok'\n`,
+			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok'\n`,
 		);
 		chmodSync(ssh, 0o755);
 		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false });
@@ -55,5 +55,26 @@ describe("fleet node management", () => {
 		writeFileSync(ssh, "#!/bin/sh\nexit 255\n");
 		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false, record: true });
 		strictEqual(inspectFleetNodes()[0]?.readiness, "needs attention");
+	});
+
+	it("passes a node too old to report its worker spec versions as hook-free only", async () => {
+		addFleetNode({ id: "builder", host: "builder.invalid", maxWorkers: 1 });
+		const ssh = join(scratch, "ssh");
+		// A build older than the spec report prints its version line for the probe.
+		writeFileSync(
+			ssh,
+			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=Clio Coder 0.6.2' 'state=ok'\n`,
+		);
+		chmodSync(ssh, 0o755);
+		const record = await testFleetNode("builder", process.cwd(), {
+			sshBinary: ssh,
+			targets: [],
+			verifyProject: false,
+			record: true,
+		});
+		strictEqual(record.ok, true, record.detail ?? "");
+		strictEqual(record.remoteWorkerSpecs, null);
+		match(record.note ?? "", /version 8 only.*extension hooks \(version 9\) will not run on this node/);
+		strictEqual(inspectFleetNodes()[0]?.readiness, "ready for this project");
 	});
 });

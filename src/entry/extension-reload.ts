@@ -28,7 +28,9 @@
 
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import { recordPackageActivity } from "../core/package-activity.js";
 import type { ToolName } from "../core/tool-names.js";
+import { clioStateDir } from "../core/xdg.js";
 import type {
 	ExtensionReloadCommitted,
 	ExtensionReloadRejection,
@@ -43,18 +45,31 @@ import {
 	type BuildUserHookRegistrationsResult,
 	buildUserHookRegistrations,
 	type CapturedHookSourceSet,
+	createHookReceiptLog,
+	type HookReceiptLog,
 	type HookReceiptSink,
 	type MiddlewareContract,
 	type MiddlewareRegistrationConflict,
+	readPersistedHookReceipts,
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
 import { buildExtensionRuntimeToolSpecs } from "../tools/extension-runtime-tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import {
+	WORKER_EXTENSION_HOOKS_MAX,
+	type WorkerExtensionHook,
+	type WorkerHookEffect,
+	type WorkerHookRequest,
+	type WorkerHookRun,
+} from "../worker/protocol.js";
 import { capturedHookSourcesFor } from "./extension-hook-sources.js";
 import {
 	buildExtensionPromptGate,
-	buildExtensionRuntimeHookRegistrations,
+	buildExtensionRuntimeHooks,
+	buildWorkerExtensionHooks,
 	type ExtensionPromptGate,
+	evaluateWorkerHookRequest,
+	type WorkerHookEvaluator,
 } from "./extension-runtime-hooks.js";
 
 export interface ExtensionReloadHookSummary {
@@ -119,6 +134,75 @@ export interface ExtensionReloadCoordinator {
 	 * exist, since only there is a runtime to answer a call.
 	 */
 	attachRuntimeTools(registry: Pick<ToolRegistry, "register" | "unregister" | "get">): void;
+	/**
+	 * The published generation's tool hooks for dispatched native workers, and
+	 * the evaluation of one worker call through the session's own registration.
+	 * Empty without runtime hooks.
+	 */
+	workerHooks: {
+		declarations(): ReadonlyArray<WorkerExtensionHook>;
+		/** Tool hooks past the cap a worker spec carries, which no worker runs. */
+		dropped(): ReadonlyArray<WorkerExtensionHook>;
+		evaluate(request: WorkerHookRequest, run: WorkerHookRun): Promise<ReadonlyArray<WorkerHookEffect>>;
+		/** One line through the runtime host's notice channel. */
+		notify(message: string): void;
+	};
+}
+
+const hookReceiptLogs = new Map<string, HookReceiptLog>();
+
+/**
+ * The one writer of `<stateDir>/hook-receipts.json` in this process. It starts
+ * from the persisted snapshot, so a command that only answers worker hooks
+ * (`fleet run`, `run --agent`) appends to the receipts a session left instead
+ * of replacing them with its own.
+ */
+export function hookReceiptLog(): HookReceiptLog {
+	const persistPath = path.join(clioStateDir(), "hook-receipts.json");
+	let log = hookReceiptLogs.get(persistPath);
+	if (log === undefined) {
+		let initial: ReturnType<typeof readPersistedHookReceipts> = [];
+		try {
+			initial = readPersistedHookReceipts(persistPath);
+		} catch {
+			// An unreadable snapshot is observability only; the log starts empty and rewrites it.
+		}
+		log = createHookReceiptLog({ persistPath, initial });
+		hookReceiptLogs.set(persistPath, log);
+	}
+	return log;
+}
+
+/**
+ * Where a session's hook receipts go: the persisted receipt log, attributed to
+ * the session when the receipt names none, and an extension's package
+ * activity.
+ */
+export function extensionHookReceiptSink(log: HookReceiptLog, sessionId: () => string | undefined): HookReceiptSink {
+	return (receipt) => {
+		const session = receipt.sessionId ?? sessionId();
+		log.record({ ...receipt, ...(session ? { sessionId: session } : {}) });
+		if (receipt.extension)
+			recordPackageActivity({
+				kind: `hook:${receipt.hook}`,
+				at: new Date(receipt.at).toISOString(),
+				owner: {
+					kind: "extension",
+					id: receipt.extension.id,
+					version: receipt.extensionVersion ?? "",
+					digest: receipt.extension.contentDigest,
+					scope: receipt.extension.scope,
+				},
+				outcome: receipt.outcome,
+				...(session ? { sessionId: session } : {}),
+				...(receipt.turnId ? { turnId: receipt.turnId } : {}),
+				details: {
+					effectKinds: receipt.effectKinds ?? [],
+					generation: receipt.extension.generation,
+					durationMs: receipt.durationMs ?? null,
+				},
+			});
+	};
 }
 
 /** Cap on issue lines carried in one outcome so an operator surface stays bounded. */
@@ -157,6 +241,12 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 	let publishedPackages: ReadonlyArray<InstalledExtension> = [];
 	let toolRegistry: Pick<ToolRegistry, "register" | "unregister" | "get"> | null = null;
 	let registeredTools: ToolName[] = [];
+	let workerDeclarations: ReadonlyArray<WorkerExtensionHook> = [];
+	let workerDropped: ReadonlyArray<WorkerExtensionHook> = [];
+	let workerEvaluators = new Map<string, WorkerHookEvaluator>();
+	// Every declaration a worker may still be holding, so a hook a reload
+	// removed answers by the policy that worker was dispatched under.
+	const dispatchedDeclarations = new Map<string, WorkerExtensionHook>();
 
 	/** Swap the gateway's runtime tools for the published generation's; a taken name is reported, never replaced. */
 	const publishRuntimeTools = (): string[] => {
@@ -291,10 +381,11 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 				...(deps.now !== undefined ? { now: deps.now } : {}),
 				...(deps.mcpOwner !== undefined ? { mcpOwner: deps.mcpOwner } : {}),
 			};
-			const runtimeRegistrations =
+			const runtimeHooks =
 				deps.runtimeHooks === undefined
-					? []
-					: buildExtensionRuntimeHookRegistrations(candidate.snapshot.packages, deps.runtimeHooks, runtimeHookOptions);
+					? { registrations: [], workerEvaluators: new Map<string, WorkerHookEvaluator>() }
+					: buildExtensionRuntimeHooks(candidate.snapshot.packages, deps.runtimeHooks, runtimeHookOptions);
+			const runtimeRegistrations = runtimeHooks.registrations;
 			const nextPromptGate =
 				deps.runtimeHooks === undefined
 					? null
@@ -331,9 +422,23 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			replacement.publish();
 			promptGate = nextPromptGate;
 			publishedPackages = candidate.snapshot.packages;
+			const workerHookLines: string[] = [];
+			let dropped: ReadonlyArray<WorkerExtensionHook> = [];
+			workerDeclarations =
+				deps.runtimeHooks === undefined
+					? []
+					: buildWorkerExtensionHooks(candidate.snapshot.packages, (hooks) => {
+							dropped = hooks;
+							const ids = hooks.map((hook) => hook.id);
+							workerHookLines.push(
+								`[clio-coder:extensions] ${ids.length} tool hooks past the ${WORKER_EXTENSION_HOOKS_MAX} a dispatched worker carries do not run for worker calls: ${ids.slice(0, 8).join(", ")}${ids.length > 8 ? ", ..." : ""}`,
+							);
+						});
+			workerDropped = dropped;
+			workerEvaluators = runtimeHooks.workerEvaluators;
 			// Both references are live. Observers may run from here on.
 			replacement.emitConflicts();
-			const lines = [...issueLines(built, replacement.dropped), ...publishRuntimeTools()];
+			const lines = [...issueLines(built, replacement.dropped), ...publishRuntimeTools(), ...workerHookLines];
 			try {
 				deps.onCommitted?.({
 					generation: candidate.generation,
@@ -381,6 +486,22 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 		attachRuntimeTools(registry) {
 			toolRegistry = registry;
 			emitLines(publishRuntimeTools());
+		},
+		workerHooks: {
+			declarations() {
+				for (const hook of workerDeclarations) dispatchedDeclarations.set(hook.id, hook);
+				return workerDeclarations;
+			},
+			dropped: () => workerDropped,
+			evaluate: (request, run) =>
+				evaluateWorkerHookRequest(
+					request,
+					workerEvaluators.get(request.hookId),
+					dispatchedDeclarations.get(request.hookId),
+					run,
+					(message) => deps.runtimeHooks?.current()?.notify(message),
+				),
+			notify: (message) => deps.runtimeHooks?.current()?.notify(message),
 		},
 	};
 }

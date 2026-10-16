@@ -4,7 +4,7 @@ import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { normalizeCallUsage, normalizeTokenUsage } from "../../core/token-split.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
-import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
+import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
@@ -113,10 +113,11 @@ import {
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
-	WORKER_SPEC_VERSION,
+	WORKER_SPEC_HOOKLESS_VERSION,
 	type WorkerBudget,
 	type WorkerGrantBinding,
 	type WorkerPromptMessage,
+	workerSpecVersionFor,
 } from "../../worker/spec-contract.js";
 import type { WorkerDecisionBinding } from "../../worker/stdin-demux.js";
 import type { AgentsContract } from "../agents/contract.js";
@@ -281,6 +282,7 @@ import {
 	classifyFailure,
 	decideRetry,
 	type FailureClass,
+	honestWorkerSpecSkewText,
 	isContextOverflowFailure,
 	isInfrastructureFailure,
 	type RetryDecision,
@@ -442,7 +444,12 @@ import {
 	type AgentLedgerBody,
 	computeSettingsFingerprint,
 	endpointIdentityHash,
+	type WorkerExtensionHook,
 	type WorkerGrantRequestFrame,
+	type WorkerHookEffect,
+	type WorkerHookRequest,
+	type WorkerHookResultFrame,
+	type WorkerHookRun,
 	type WorkerModelLoad,
 } from "./worker-protocol.js";
 import {
@@ -598,6 +605,22 @@ export interface DispatchBundleOptions {
 	getSessionId?: () => string | null;
 	/** Interactive sessions park paid routes until their session ceiling is raised. */
 	budgetWaitForRaise?: boolean;
+	/**
+	 * The session's api 2 extension tool hooks, which a native worker cannot
+	 * run itself. Each dispatched spec carries the declarations; each call
+	 * they match comes back here and is answered with the hook's effects.
+	 * Absent (the fleet CLI, a session with no extension host) means workers
+	 * run unhooked, as before.
+	 */
+	workerHooks?: {
+		declarations(): ReadonlyArray<WorkerExtensionHook>;
+		/** Tool hooks past `WORKER_EXTENSION_HOOKS_MAX` that no worker spec carries. */
+		dropped?(): ReadonlyArray<WorkerExtensionHook>;
+		/** Never rejects: a hook that cannot run answers with its own failure policy. */
+		evaluate(request: WorkerHookRequest, run: WorkerHookRun): Promise<ReadonlyArray<WorkerHookEffect>>;
+		/** One operator line, where the session reports its extensions' issues. */
+		notify?(message: string): void;
+	};
 	/**
 	 * True only when this process shows worker permission escalations to an
 	 * operator and answers them through resolveWorkerPermission (the interactive
@@ -1915,6 +1938,8 @@ interface DispatchWorkerSpecInput {
 	grantAttempt?: WorkerGrantBinding;
 	/** The main agent's effective autonomy when the attempt spawns. */
 	mainAutonomy?: AutonomyLevel;
+	/** The session's extension tool hooks at spawn; only a native worker's own tool loop can hold a call for them. */
+	extensionHooks?: ReadonlyArray<WorkerExtensionHook>;
 }
 
 interface DispatchLifecycleStage {
@@ -2827,6 +2852,44 @@ function workerSandboxPromptLine(input: Parameters<typeof workerSandboxFor>[0]):
 	return sandbox.applies ? { sandboxLine: workerSandboxLine(sandbox.spec, sandboxAvailability()) } : {};
 }
 
+/**
+ * The session's tool hooks a worker on `runtime` would run without. Only a
+ * native worker's own tool loop can hold a call for them; a claude-sdk or
+ * other non-http worker runs its tools where no hook reaches. A CLI runtime
+ * runs its own tools under its own names, so its allowedTools say nothing
+ * about what it will run and every hook applies to it.
+ */
+function unhookedWorkerHooks(
+	runtime: RuntimeDescriptor,
+	hooks: ReadonlyArray<WorkerExtensionHook>,
+	allowedTools: ReadonlyArray<ToolName>,
+): WorkerExtensionHook[] {
+	if (runtime.kind === "http") return [];
+	if (runtime.kind === "subprocess") return [...hooks];
+	return hooksMatchingTools(hooks, allowedTools);
+}
+
+function hooksMatchingTools(
+	hooks: ReadonlyArray<WorkerExtensionHook>,
+	allowedTools: ReadonlyArray<ToolName>,
+): WorkerExtensionHook[] {
+	const matches = (pattern: string, tool: string): boolean =>
+		pattern.endsWith("*") ? tool.startsWith(pattern.slice(0, -1)) : pattern === tool;
+	return hooks.filter(
+		(hook) =>
+			hook.tools === undefined || allowedTools.some((tool) => hook.tools?.some((pattern) => matches(pattern, tool))),
+	);
+}
+
+function isBlockingHook(hook: WorkerExtensionHook): boolean {
+	return hook.onError === "block" || hook.onTimeout === "block";
+}
+
+/** Worker hook ids read `extension:<id>:<point>:<index>` (buildWorkerExtensionHooks). */
+function hookExtensionIds(hooks: ReadonlyArray<WorkerExtensionHook>): string {
+	return [...new Set(hooks.map((hook) => hook.id.split(":")[1] ?? hook.id))].join(", ");
+}
+
 function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
 	assertResponseSchemaEnforceable(
 		input.target.runtime,
@@ -2836,7 +2899,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	);
 	const settings = input.settings ?? config?.get();
 	const spec: WorkerSpec = {
-		specVersion: WORKER_SPEC_VERSION,
+		specVersion: WORKER_SPEC_HOOKLESS_VERSION,
 		settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 		systemPrompt: input.systemPrompt,
 		dynamicPromptMessages: input.dynamicPromptMessages,
@@ -2943,6 +3006,13 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (input.credentialExpiresAt !== undefined) spec.credentialExpiresAt = input.credentialExpiresAt;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
 	if (input.req.turnConstraints !== undefined) spec.turnConstraints = workerTurnConstraints(input.req.turnConstraints);
+	if (input.extensionHooks !== undefined && input.extensionHooks.length > 0 && input.target.runtime.kind === "http")
+		spec.extensionHooks = input.extensionHooks.map((hook) => ({
+			...hook,
+			...(hook.tools ? { tools: [...hook.tools] } : {}),
+		}));
+	// Only a hooked spec needs version 9, so a node one release behind still serves the rest.
+	spec.specVersion = workerSpecVersionFor(spec);
 	const skillPaths = [...(input.req.skillPaths ?? []), ...(input.recipe?.boundSkillPaths ?? [])];
 	if (skillPaths.length > 0) spec.skillPaths = [...new Set(skillPaths)];
 	const recipeSkills = (input.recipe?.skills ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
@@ -3411,6 +3481,8 @@ export function createDispatchBundle(
 	// message when the context domain is not loaded.
 	const projectContext = context.getContract<ContextContract>("context");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
+	// Each unhooked-runtime notice once per process, however many workers it covers.
+	const unhookedNotices = new Set<string>();
 	const fleetRegistry = scheduling.fleet;
 	const resolveNode =
 		options?.resolveNode ??
@@ -6499,6 +6571,7 @@ export function createDispatchBundle(
 				if (refusal !== null) throw new Error(refusal);
 			}
 			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
+			assertAcpDelegationUnhooked(req.delegationAgentId);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
 					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
@@ -6676,6 +6749,14 @@ export function createDispatchBundle(
 					"dispatch: fleet.permissions.mode=main routes worker asks to the main agent, but this placement launches through a remote transport, which cannot carry a bound grant yet; use fleet.permissions.mode escalate or deny for this work",
 				);
 			}
+			const unhooked = assertWorkerHooksCarried(lifecycle.target.runtime, lifecycle.admission.allowedTools);
+			if (unhooked.length > 0) {
+				const notice = `extension tool hooks of ${hookExtensionIds(unhooked)} do not run for ${lifecycle.target.runtime.id} workers; their tool calls are unhooked`;
+				if (!unhookedNotices.has(notice)) {
+					unhookedNotices.add(notice);
+					options?.workerHooks?.notify?.(notice);
+				}
+			}
 			// Capacity admission may have waited. Resolve the subscription again at
 			// launch so a CLI peer never starts with the queued snapshot's old token.
 			const claudeLaunch = lifecycle.target.runtime.auth === "claude-cli";
@@ -6724,6 +6805,7 @@ export function createDispatchBundle(
 					permit: lifecycle.permit,
 					...(grantAttempt !== undefined ? { grantAttempt } : {}),
 					mainAutonomy: lifecycle.settings?.safety.autonomy ?? "default",
+					...(options?.workerHooks ? { extensionHooks: options.workerHooks.declarations() } : {}),
 				},
 				config ?? undefined,
 			);
@@ -6836,6 +6918,35 @@ export function createDispatchBundle(
 			});
 			if (!opened.ok) denyAtOnce(opened.reason);
 		};
+		// A worker's call waits on its answer, so every request is answered, with
+		// the hook's own failure policy when it cannot run.
+		let answerHook: ((frame: WorkerHookResultFrame) => boolean) | undefined;
+		const workerHooks = options?.workerHooks;
+		const onHookRequest = (request: WorkerHookRequest): void => {
+			if (workerHooks === undefined) return;
+			void workerHooks
+				.evaluate(request, {
+					runId: runIdForPermissionAudit,
+					sessionId: req.ownerSessionId ?? null,
+					// A task worktree stands for the checkout it was cut from; any other worker for its dispatch cwd.
+					sourceRoot: req.taskWorktree?.root ?? lifecycle.cwd,
+				})
+				// evaluate never rejects by contract; if it does, the call still gets an
+				// answer by the stricter of the dispatched hook's policies, as the
+				// worker would decide a lost one, only without waiting out its deadline.
+				.catch((error: unknown): ReadonlyArray<WorkerHookEffect> => {
+					const hook = spec.extensionHooks?.find((entry) => entry.id === request.hookId);
+					if (hook !== undefined && hook.onError !== "block" && hook.onTimeout !== "block") return [];
+					const message = `${request.hookId} could not be evaluated (${error instanceof Error ? error.message : String(error)}); the gate fails closed`;
+					return request.point === "before_tool"
+						? [{ kind: "block_tool", reason: message }]
+						: [{ kind: "annotate_tool_result", message, severity: "warn" }];
+				})
+				.then((effects) => answerHook?.({ type: "hook_result", requestId: request.requestId, effects }))
+				.catch(() => {
+					// send reports its own failures as a channel failure; the worker then decides the call by its policy.
+				});
+		};
 		const checkoutBefore =
 			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
 		let worker: SpawnedWorker;
@@ -6849,6 +6960,7 @@ export function createDispatchBundle(
 				onModelLoaded,
 				...(agentLedgerId !== null ? { onLedgerPost } : {}),
 				...(grantAttempt !== undefined ? { onGrantRequest } : {}),
+				...(spec.extensionHooks !== undefined ? { onHookRequest } : {}),
 			};
 			// Speculative dispatch: a process started on this turn's forecast is used
 			// only for exactly the recipe, target, model, runtime and directory it
@@ -6880,6 +6992,7 @@ export function createDispatchBundle(
 		const pid = worker.pid;
 		const abort = () => worker.abort();
 		const sendToWorker = worker.send?.bind(worker);
+		answerHook = sendToWorker;
 		const steeringProvenance: RunSteeringProvenance[] = [];
 		let steeringProvenanceClosed = false;
 		const steer =
@@ -8381,8 +8494,14 @@ export function createDispatchBundle(
 				const status = runStatusForOutcome(finalOutcome);
 				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode, providerErrorMessage);
 				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode, providerErrorMessage);
+				// A released node's skew refusal asks for a re-dispatch that earns the
+				// same refusal; the receipt reports the build skew instead.
+				const receiptResult =
+					failureClass === "node-version" && typeof result.stderrTail === "string"
+						? { ...result, stderrTail: honestWorkerSpecSkewText(result.stderrTail) }
+						: result;
 				const receiptDraft = buildReceiptDraft(
-					result,
+					receiptResult,
 					endedAt,
 					status,
 					finalOutcome,
@@ -8825,6 +8944,51 @@ export function createDispatchBundle(
 		return { runId: handle.runId, events: assignment.events, finalPromise: terminal };
 	}
 
+	// An external ACP agent runs its own tools where no extension tool hook
+	// reaches, so any blocking hook refuses it whatever tools the hook names.
+	// Preview shares it so a plan never shows a delegation dispatch refuses.
+	function assertAcpDelegationUnhooked(agentId: string): void {
+		const gates = [...(options?.workerHooks?.declarations() ?? []), ...(options?.workerHooks?.dropped?.() ?? [])].filter(
+			isBlockingHook,
+		);
+		if (gates.length > 0)
+			throw new Error(
+				`dispatch: the ACP agent ${agentId} runs its own tools where no extension tool hook reaches, and the blocking hooks of ${hookExtensionIds(gates)} apply to every worker; dispatch to an http target`,
+			);
+	}
+
+	/**
+	 * Refuses a worker route whose tools a blocking hook gates but the worker
+	 * would run past: a gate beyond the spec's hook cap that never reaches the
+	 * worker, or one the route's runtime cannot carry. Dispatch, preview and
+	 * failover candidates share it, so a refused route is never offered. Answers
+	 * the passing hooks the runtime runs without, which dispatch names once.
+	 */
+	function assertWorkerHooksCarried(
+		runtime: RuntimeDescriptor,
+		allowedTools: ReadonlyArray<ToolName>,
+	): WorkerExtensionHook[] {
+		const dropped = options?.workerHooks?.dropped?.() ?? [];
+		const droppedGates = hooksMatchingTools(dropped, allowedTools).filter(isBlockingHook);
+		if (droppedGates.length > 0)
+			throw new Error(
+				`dispatch: the blocking tool hooks of ${hookExtensionIds(droppedGates)} fall past the ${WORKER_EXTENSION_HOOKS_MAX} hooks a worker carries and match this worker's tools; reduce the installed tool hooks`,
+			);
+		const unhooked = unhookedWorkerHooks(
+			runtime,
+			[...(options?.workerHooks?.declarations() ?? []), ...dropped],
+			allowedTools,
+		);
+		const gates = unhooked.filter(isBlockingHook);
+		if (gates.length > 0)
+			throw new Error(
+				runtime.kind === "subprocess"
+					? `dispatch: the ${runtime.id} runtime runs its own tools where no extension tool hook reaches, and the blocking hooks of ${hookExtensionIds(gates)} apply to every worker; route it to an http target`
+					: `dispatch: the ${runtime.id} runtime cannot carry extension tool hooks, and the blocking hooks of ${hookExtensionIds(gates)} match this worker's tools; route it to an http target`,
+			);
+		return unhooked;
+	}
+
 	function previewFixed(
 		req: DispatchRequest,
 		settings: EffectiveSettings = getEffectiveSettings(),
@@ -8846,6 +9010,7 @@ export function createDispatchBundle(
 				if (refusal !== null) throw new Error(refusal);
 			}
 			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
+			assertAcpDelegationUnhooked(req.delegationAgentId);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
 					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
@@ -8948,6 +9113,7 @@ export function createDispatchBundle(
 			target.runtime.kind !== "subprocess",
 			getProtectedArtifactState(),
 		);
+		assertWorkerHooksCarried(target.runtime, effectiveTools);
 		resolveEffectiveWorkerBudget({
 			req,
 			recipeId: recipe.id,

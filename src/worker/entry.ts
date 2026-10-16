@@ -14,6 +14,8 @@
 // id is appended once the spec is parsed.
 process.title = "clio-coder-worker";
 
+import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { AI_AGENT_NAME } from "../core/agent-environment.js";
 import { deleteInjectedCompileCacheFrom } from "../core/compile-cache.js";
 import { adoptDevRootOwner } from "../core/dev-roots.js";
@@ -48,6 +50,7 @@ import {
 	setProtectedModelsProvider,
 	setResidencyNoticeSink,
 } from "../engine/apis/residency.js";
+import type { WorkerHookTransport } from "../engine/worker-extension-hooks.js";
 import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";
 import { attestedToolSignature } from "../engine/worker-tools.js";
 import { emitControlFrame } from "./control-lane.js";
@@ -58,7 +61,9 @@ import { drainStdout, emitEvent } from "./ndjson.js";
 import {
 	endpointIdentityHash,
 	WORKER_ADMISSION_WAIT_MS,
+	WORKER_HOOK_REQUEST_EVENT,
 	WORKER_PROTOCOL_VERSION,
+	type WorkerHookEffect,
 	workerSpecDigest,
 } from "./protocol.js";
 import { observeHostIdentity, observeWorkerResourceFacts } from "./resource-facts.js";
@@ -209,6 +214,49 @@ async function main(): Promise<number> {
 	});
 	demux.onLedgerDelta((entries) => ledgerPort.acceptDelta(entries));
 
+	// Each extension hook call waits for the orchestrator's answer on stdin.
+	// The channel closing answers none of them, so each fails by its own policy.
+	const pendingHooks = new Map<
+		string,
+		{ resolve: (effects: ReadonlyArray<WorkerHookEffect>) => void; reject: (error: Error) => void }
+	>();
+	demux.onHookResult((result) => {
+		const pending = pendingHooks.get(result.requestId);
+		if (pending === undefined) return;
+		pendingHooks.delete(result.requestId);
+		pending.resolve(result.effects);
+	});
+	// Landings are physical paths, so the root the orchestrator maps them from is too.
+	let hookWorkspaceRoot = spec.taskWorktree?.path ?? process.cwd();
+	try {
+		hookWorkspaceRoot = realpathSync(hookWorkspaceRoot);
+	} catch {
+		// An unresolvable root is sent as given; only the mapping of a landing under it is lost.
+	}
+	const requestHook: WorkerHookTransport = (request, timeoutMs) =>
+		new Promise((resolve, reject) => {
+			const requestId = randomUUID();
+			const timer = setTimeout(() => {
+				pendingHooks.delete(requestId);
+				reject(new Error(`no answer within ${timeoutMs} ms`));
+			}, timeoutMs);
+			timer.unref?.();
+			pendingHooks.set(requestId, {
+				resolve: (effects) => {
+					clearTimeout(timer);
+					resolve(effects);
+				},
+				reject: (error) => {
+					clearTimeout(timer);
+					reject(error);
+				},
+			});
+			emitEvent({
+				type: WORKER_HOOK_REQUEST_EVENT,
+				payload: { ...request, workspaceRoot: hookWorkspaceRoot, requestId },
+			});
+		});
+
 	const input: WorkerRunInput = {
 		systemPrompt: spec.systemPrompt,
 		...(spec.contextSeed ? { contextSeed: spec.contextSeed } : {}),
@@ -261,6 +309,9 @@ async function main(): Promise<number> {
 		...(spec.helperResult === true ? { helperResult: true } : {}),
 		...(spec.product !== undefined ? { product: spec.product } : {}),
 		agentLedger: ledgerPort,
+		...(spec.extensionHooks !== undefined && spec.extensionHooks.length > 0
+			? { extensionHookHost: { hooks: spec.extensionHooks, request: requestHook } }
+			: {}),
 		cwd: process.cwd(),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
@@ -327,6 +378,8 @@ async function main(): Promise<number> {
 		handle.abort();
 	};
 	demux.onChannelClose(() => {
+		for (const pending of pendingHooks.values()) pending.reject(new Error("the control channel closed"));
+		pendingHooks.clear();
 		if (runSettled) return;
 		process.stderr.write("[worker] control channel closed; aborting run\n");
 		abortOnce();

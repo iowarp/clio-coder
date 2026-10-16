@@ -19,7 +19,13 @@ export function sameFailoverCandidate(left: DispatchFailoverCandidate, right: Di
 }
 
 export function retryDecisionWithinFailover(decision: RetryDecision, failover: DispatchFailoverMode): RetryDecision {
-	return failover === "none" ? { ...decision, excludedRouteParts: [], qualityEscalation: null } : decision;
+	if (failover !== "none") return decision;
+	// A pinned route keeps its node, and a node that does not read the spec's
+	// version refuses every retry the same way, so the first refusal is final.
+	if (decision.retry && decision.excludedRouteParts.includes("node") && decision.reasonCode === "retry-node-version") {
+		return { retry: false, excludedRouteParts: [], qualityEscalation: null, reasonCode: "non-retryable-node-version" };
+	}
+	return { ...decision, excludedRouteParts: [], qualityEscalation: null };
 }
 
 /**

@@ -361,7 +361,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["reset", async (subArgs) => (await import("./reset.js")).runResetCommand(subArgs)],
 	["uninstall", async (subArgs) => (await import("./uninstall.js")).runUninstallCommand(subArgs)],
 	["upgrade", async (subArgs) => (await import("./upgrade.js")).runUpgradeCommand(subArgs)],
-	["version", async () => (await import("./version.js")).runVersionCommand()],
+	["version", async (subArgs) => (await import("./version.js")).runVersionCommand(subArgs)],
 	[
 		"worker",
 		async () => {
