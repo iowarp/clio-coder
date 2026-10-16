@@ -3889,6 +3889,36 @@ export function createDispatchBundle(
 		throw new Error(`dispatch: admission denied: ${reason}`);
 	}
 
+	/**
+	 * Priced spend metered by workers still running. A worker's spend reaches
+	 * the session ledger only when its run ends (observability records it on
+	 * the terminal event, after `active` drops the run), so without this a
+	 * fan-out admitted every member against settled spend alone.
+	 */
+	function inFlightSpendUsd(): number {
+		let usd = 0;
+		for (const run of active.values()) usd += run.meter.costUsd ?? 0;
+		return usd;
+	}
+
+	/**
+	 * Under a `clio-coder run --max-cost-usd` cap, admission alone let running
+	 * workers spend past it. Every metered worker call re-checks settled plus
+	 * in-flight spend and stops each running worker once the cap is reached, so
+	 * spend passes it only by the calls workers already had in flight.
+	 */
+	function stopRunsAtRunCostCap(): void {
+		const cap = scheduling.runCostCap?.() ?? null;
+		if (cap === null) return;
+		const ceilingUsd = getEffectiveSettings()?.safety.limits.sessionCostUsd ?? scheduling.ceilingUsd();
+		const currentUsd = scheduling.preflight().currentUsd + inFlightSpendUsd();
+		if (!sessionCeilingReached(currentUsd, ceilingUsd)) return;
+		const detail = new SessionCostCeilingError(currentUsd, ceilingUsd, cap).message;
+		for (const run of active.values()) {
+			if (!run.aborted) contract.abort(run.runId, { cause: "budget", detail });
+		}
+	}
+
 	async function assertBudgetAdmitsRoute(
 		req: DispatchRequest,
 		pricing: EffectivePricing,
@@ -3905,12 +3935,15 @@ export function createDispatchBundle(
 			if (scheduling.admitPaidRequest) {
 				await scheduling.admitPaidRequest({
 					waitForRaise: options?.budgetWaitForRaise === true,
+					additionalUsd: inFlightSpendUsd(),
 					getCeilingUsd: () => getEffectiveSettings()?.safety.limits.sessionCostUsd ?? scheduling.ceilingUsd(),
 					...(signal ? { signal } : {}),
 				});
 			} else {
-				const { currentUsd, ceilingUsd } = scheduling.preflight();
-				if (sessionCeilingReached(currentUsd, ceilingUsd)) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
+				const preflight = scheduling.preflight();
+				const currentUsd = preflight.currentUsd + inFlightSpendUsd();
+				if (sessionCeilingReached(currentUsd, preflight.ceilingUsd))
+					throw new SessionCostCeilingError(currentUsd, preflight.ceilingUsd);
 			}
 		} catch (error) {
 			if (error instanceof SessionCostCeilingError) {
@@ -5773,6 +5806,7 @@ export function createDispatchBundle(
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
 					accumulateNativeUsage(tokenMeter, u, null);
+					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
 							event.message,
@@ -7351,6 +7385,7 @@ export function createDispatchBundle(
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
 					accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
+					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
 							event.message,

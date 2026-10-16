@@ -28,13 +28,14 @@ import { newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
 	RunKind,
 	RunOutcome,
+	RunReceiptCostCap,
 	RunReceiptDraft,
 	RunReceiptSafetySummary,
 	RunStatus,
 	SafetyBlockedAttempt,
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
-import type { CostAmount } from "../../domains/observability/cost.js";
+import type { CostAmount, CostEntry } from "../../domains/observability/cost.js";
 import { aggregateCostAmounts } from "../../domains/observability/cost.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
@@ -115,6 +116,89 @@ export interface HeadlessMainAgentOptions {
 	 * run with no operator still says what a dispatch's scope entry did.
 	 */
 	scopeNotices?: (listener: (payload: unknown) => void) => () => void;
+	/**
+	 * This process's priced-call ledger. Compaction runs its own model calls
+	 * outside the turn's event stream, so the ones recorded during the run are
+	 * folded into its receipt from here.
+	 */
+	costEntries?: () => ReadonlyArray<CostEntry>;
+	/** `clio-coder run --max-cost-usd`: the cap the receipt records. */
+	costCap?: RunReceiptCostCap;
+}
+
+/** Ledger labels of the model calls a run makes outside its own turn events that the run still owes. */
+const RUN_OWNED_COST_LABELS: ReadonlySet<string> = new Set(["compaction", "failed-compaction"]);
+
+/**
+ * A run-owned row's identity by content. A continued session's ledger already
+ * holds its earlier compaction rows when the run starts, and a session reset
+ * replays them as new objects in a different order, so neither the ledger's
+ * length nor object identity tells this run's rows from them.
+ */
+function runOwnedCostKey(entry: CostEntry): string {
+	return JSON.stringify([
+		entry.label,
+		entry.providerId,
+		entry.attributedModelId,
+		entry.tokens,
+		entry.usd,
+		entry.input,
+		entry.output,
+	]);
+}
+
+/** Counts of the run-owned rows a ledger holds, keyed by content. */
+function runOwnedCostCounts(entries: ReadonlyArray<CostEntry>): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const entry of entries) {
+		if (entry.label === undefined || !RUN_OWNED_COST_LABELS.has(entry.label)) continue;
+		const key = runOwnedCostKey(entry);
+		counts.set(key, (counts.get(key) ?? 0) + 1);
+	}
+	return counts;
+}
+
+/** Folds the run-owned rows the ledger holds beyond those it held at the start. */
+function foldRunOwnedCosts(
+	stats: HeadlessMainAgentReceiptStats,
+	entries: ReadonlyArray<CostEntry>,
+	atStart: ReadonlyMap<string, number>,
+): void {
+	const earlier = new Map(atStart);
+	for (const entry of entries) {
+		if (entry.label === undefined || !RUN_OWNED_COST_LABELS.has(entry.label)) continue;
+		const key = runOwnedCostKey(entry);
+		const remaining = earlier.get(key) ?? 0;
+		if (remaining > 0) {
+			earlier.set(key, remaining - 1);
+			continue;
+		}
+		const apiCalls = entry.apiCalls ?? 1;
+		stats.costAmounts.push({
+			usd: entry.usd,
+			provenance: entry.provenance,
+			apiCalls,
+			missingTokenCalls: entry.missingTokenCalls ?? 0,
+		});
+		const usage: RunUsageSummary = {
+			tokens: entry.tokens,
+			costUsd: entry.usd,
+			input: entry.input,
+			output: entry.output,
+			cacheRead: entry.cacheRead,
+			cacheWrite: entry.cacheWrite,
+			reasoning: entry.reasoningTokens,
+			apiCalls,
+			missingTokenCalls: entry.missingTokenCalls ?? 0,
+			hadReasoning: entry.reasoningTokens > 0,
+			hadUsage: true,
+			responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
+			// The response-model facts stay the turn's own; a compaction call reports none here.
+			lastResponseModelIdObservation: stats.usage?.lastResponseModelIdObservation ?? { state: "not-observed" },
+			lastDifferingResponseModelId: stats.usage?.lastDifferingResponseModelId ?? null,
+		};
+		stats.usage = stats.usage === null ? usage : addRunUsage(stats.usage, usage);
+	}
 }
 
 interface HeadlessMainAgentResult {
@@ -600,6 +684,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	endedAt: string;
 	terminal: HeadlessTerminalOutcome;
 	stats: HeadlessMainAgentReceiptStats;
+	costCap?: RunReceiptCostCap;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
@@ -733,6 +818,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 				: {}),
 		},
 		noop: headlessNoop(input.stats),
+		...(input.costCap !== undefined ? { costCap: input.costCap } : {}),
 		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
 		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
 	};
@@ -789,9 +875,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// phase instead of losing the whole run's usage. Whichever caller arrives
 	// first seals; the other awaits that same seal.
 	let sealed: Promise<void> | null = null;
+	const costAtStart = runOwnedCostCounts(options.costEntries?.() ?? []);
 	const sealReceipt = (terminal: HeadlessTerminalOutcome): Promise<void> => {
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
+		const ledger = options.costEntries?.() ?? [];
+		foldRunOwnedCosts(receiptStats, ledger, costAtStart);
 		sealed = recordHeadlessMainAgentReceipt({
 			runId,
 			chat,
@@ -800,6 +889,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			endedAt,
 			terminal,
 			stats: receiptStats,
+			...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
 		}).catch((error: unknown) => {
 			process.stderr.write(
 				`clio-coder run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`,

@@ -75,6 +75,8 @@ export interface BootOptions {
 		resumeSession?: { kind: "id"; id: string } | { kind: "latest" };
 		/** `clio-coder run --fail-on-noop`: a no-op run exits 1 with outcome failed. */
 		failOnNoop?: boolean;
+		/** `clio-coder run --max-cost-usd`: priced spend the run may add on top of what its session already spent. */
+		maxCostUsd?: number;
 		/** `clio-coder run --timeout`: the armed wall-clock limit for the whole run. */
 		deadline?: HeadlessRunDeadline;
 	};

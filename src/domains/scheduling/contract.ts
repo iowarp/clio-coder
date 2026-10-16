@@ -1,4 +1,4 @@
-import type { BudgetVerdict } from "./budget.js";
+import type { BudgetVerdict, RunCostCap } from "./budget.js";
 import type { FleetRegistry } from "./cluster.js";
 import type { LocalCapacity } from "./local-capacity.js";
 
@@ -9,7 +9,7 @@ export interface BudgetPreflight {
 }
 
 export interface SchedulingContract {
-	/** The configured session ceiling in USD; 0 means no ceiling. */
+	/** The session ceiling in USD from the session's effective settings; 0 means no ceiling. */
 	ceilingUsd(): number;
 	/**
 	 * Evaluate the running session cost against the ceiling. Scheduling owns the
@@ -26,6 +26,10 @@ export interface SchedulingContract {
 		getCeilingUsd?: () => number;
 		signal?: AbortSignal;
 	}): Promise<void>;
+	/** Arm a `clio-coder run --max-cost-usd` cap, so a stop at it names the flag. */
+	setRunCostCap?(cap: RunCostCap): void;
+	/** The armed run cap, or null outside a capped run. */
+	runCostCap?(): RunCostCap | null;
 	/** Configured global worker capacity; durable leases own active usage. */
 	maxWorkers(): number;
 	/**

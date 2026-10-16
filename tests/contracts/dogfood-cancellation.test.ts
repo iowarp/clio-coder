@@ -7,6 +7,8 @@ import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { CostEntry } from "../../src/domains/observability/cost.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -859,4 +861,53 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 	} finally {
 		await f.close();
 	}
+});
+
+it("a headless receipt counts the compaction calls its run made, once", { timeout: 15_000 }, async () => {
+	const compaction: CostEntry = {
+		providerId: "fixture",
+		attributedModelId: "summarizer",
+		requestedModelIds: [],
+		responseModelIdObservationCounts: {
+			reportedCalls: 0,
+			notReportedCalls: 0,
+			notObservedCalls: 1,
+			legacyDifferenceOnlyCalls: 0,
+		},
+		tokens: 7000,
+		usd: 0.25,
+		provenance: "known",
+		input: 6000,
+		output: 1000,
+		cacheRead: 0,
+		cacheWrite: 0,
+		reasoningTokens: 0,
+		apiCalls: 1,
+		label: "compaction",
+	};
+	// One run without a compaction is the baseline the same turn with one is measured against.
+	const sealedRun = async (row: CostEntry | null): Promise<RunReceipt> => {
+		const before = new Set(readRunJournal(join(env.dir, "state"))?.receipts.map((receipt) => receipt.runId) ?? []);
+		const f = fixture("success");
+		const ledger: CostEntry[] = [];
+		f.loop.onEvent((event) => {
+			// Compaction records its own call in the session's priced-call ledger, outside the turn's events.
+			if (row !== null && event.type === "agent_end" && ledger.length === 0) ledger.push(row);
+		});
+		try {
+			strictEqual(await runHeadlessMainAgent(f.loop, { prompt: "Hello", mode: "json", costEntries: () => ledger }), 0);
+		} finally {
+			await f.close();
+		}
+		const receipt = readRunJournal(join(env.dir, "state"))?.receipts.find((entry) => !before.has(entry.runId));
+		ok(receipt);
+		return receipt;
+	};
+	const baseline = await sealedRun(null);
+	const compacted = await sealedRun(compaction);
+	strictEqual((compacted.inputTokenCount ?? 0) - (baseline.inputTokenCount ?? 0), 6000);
+	strictEqual((compacted.outputTokenCount ?? 0) - (baseline.outputTokenCount ?? 0), 1000);
+	strictEqual((compacted.apiCalls ?? 0) - (baseline.apiCalls ?? 0), 1);
+	// Absolute tolerance 1e-9 USD for the float sum.
+	ok(Math.abs(compacted.costUsd - baseline.costUsd - 0.25) <= 1e-9, `cost ${baseline.costUsd} -> ${compacted.costUsd}`);
 });

@@ -327,7 +327,7 @@ export interface DispatchSnapshot {
  * the operator cause so the receipt names where the cancel came from.
  */
 export interface AbortReason {
-	cause: "timeout" | "operator";
+	cause: "timeout" | "operator" | "budget";
 	detail: string;
 }
 

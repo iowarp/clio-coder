@@ -1,5 +1,5 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import { createSchedulingBundle } from "./extension.js";
+import { createSchedulingBundle, type SchedulingBundleOptions } from "./extension.js";
 import { SchedulingManifest } from "./manifest.js";
 
 export const SchedulingDomainModule: DomainModule = {
@@ -7,8 +7,21 @@ export const SchedulingDomainModule: DomainModule = {
 	createExtension: createSchedulingBundle,
 };
 
-export type { BudgetVerdict } from "./budget.js";
-export { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON, SessionCostCeilingError } from "./budget.js";
+export function createSchedulingDomainModule(options: SchedulingBundleOptions): DomainModule {
+	return {
+		manifest: SchedulingManifest,
+		createExtension: (context) => createSchedulingBundle(context, options),
+	};
+}
+
+export type { BudgetVerdict, RunCostCap } from "./budget.js";
+export {
+	createRunCostCap,
+	runCostCeilingUsd,
+	SESSION_COST_CEILING_EXIT_CODE,
+	SESSION_COST_CEILING_REASON,
+	SessionCostCeilingError,
+} from "./budget.js";
 export type { SchedulingContract } from "./contract.js";
 export { createJobController } from "./job-controller.js";
 export { jobHasUnresolvedCleanup, jobIsComplete, matchesJobPredicate, normalizeJobSpec } from "./job-model.js";

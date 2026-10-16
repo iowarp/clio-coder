@@ -5,10 +5,11 @@
  */
 
 import { type BudgetAlertPayload, BusChannels } from "../../core/bus-events.js";
+import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
-import { createBudgetState, SessionCostCeilingError, sessionCeilingReached } from "./budget.js";
+import { createBudgetState, type RunCostCap, SessionCostCeilingError, sessionCeilingReached } from "./budget.js";
 import { createFleetRegistry, LOCAL_NODE_ID } from "./cluster.js";
 import type { SchedulingContract } from "./contract.js";
 import {
@@ -20,6 +21,12 @@ import {
 export interface SchedulingBundleOptions {
 	/** Host sampling seams for `fleet.concurrency: auto`; tests inject facts and a clock. */
 	localCapacity?: Omit<LocalCapacitySamplerOptions, "activeLocalWorkers">;
+	/**
+	 * The session's effective settings view. Session overrides such as the
+	 * ceiling `clio-coder run --max-cost-usd` sets live there, not in the
+	 * config snapshot, so the plan baseline and budget alerts read it.
+	 */
+	getSettings?: () => Readonly<ClioSettings> | undefined;
 }
 
 export function createSchedulingBundle(
@@ -42,8 +49,10 @@ export function createSchedulingBundle(
 	});
 	const unsubscribes: Array<() => void> = [];
 
+	let runCap: RunCostCap | null = null;
+
 	function syncBudget(): void {
-		const nextCeiling = config.get().safety.limits.sessionCostUsd;
+		const nextCeiling = (options.getSettings?.() ?? config.get()).safety.limits.sessionCostUsd;
 		if (nextCeiling === budget.ceilingUsd) return;
 		budget = createBudgetState(nextCeiling);
 	}
@@ -91,7 +100,7 @@ export function createSchedulingBundle(
 				const spend = currentUsd + additionalUsd;
 				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
 				if (!sessionCeilingReached(spend, ceilingUsd)) return;
-				if (!waitForRaise) throw new SessionCostCeilingError(spend, ceilingUsd);
+				if (!waitForRaise) throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined);
 				if (signal?.aborted) throw signal.reason ?? new Error("budget wait aborted");
 				if (!alerted) {
 					alerted = true;
@@ -114,6 +123,10 @@ export function createSchedulingBundle(
 				});
 			}
 		},
+		setRunCostCap: (cap) => {
+			runCap = cap;
+		},
+		runCostCap: () => runCap,
 		maxWorkers: () => resolveGlobalConcurrency(config.get().fleet.concurrency),
 		localCapacity: () => localCapacity.resolve(config.get().fleet.concurrency),
 		fleet,

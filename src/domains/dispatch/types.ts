@@ -977,6 +977,13 @@ export interface RunHostVerification {
 	attribution?: RunHostVerificationAttribution[];
 }
 
+export interface RunReceiptCostCap {
+	/** Priced spend the run could add, in US dollars. */
+	maxUsd: number;
+	/** Routes in use at the start whose cost is unknown, as `target/model`; the cap does not bound them. */
+	unpricedRoutes: string[];
+}
+
 export interface RunReceipt {
 	cwd?: string;
 	runId: string;
@@ -1154,6 +1161,11 @@ export interface RunReceipt {
 	 * the field existed.
 	 */
 	noop?: boolean;
+	/**
+	 * The `clio-coder run --max-cost-usd` cap a headless main-agent run ran
+	 * under. Absent on runs without the flag and on worker receipts.
+	 */
+	costCap?: RunReceiptCostCap;
 	reproducibility?: RunReceiptReproducibility;
 	/** Effective target/runtime/model/thinking/capability decision for this run. */
 	runtimeResolution?: RuntimeTargetSnapshot;

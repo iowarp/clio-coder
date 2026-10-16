@@ -174,6 +174,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	outcomeCode: true,
 	steering: true,
 	routeDecision: true,
+	// Absent unless `clio-coder run --max-cost-usd` capped the run, so every
+	// other receipt digests exactly as it did before the field existed.
+	costCap: true,
 } as const satisfies Record<ReceiptIntegrityField, true> & { autonomyEnforcement: true };
 
 const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];

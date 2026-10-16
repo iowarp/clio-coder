@@ -54,7 +54,7 @@ import { setupSteerChannel } from "./steer-channel.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--max-cost-usd <N>] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio-coder run [flags] "<task>"
 
@@ -90,6 +90,13 @@ Flags:
   --continue                append this turn to the most recent session for this cwd
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer is not a no-op (see below)
   --timeout <seconds>       wall-clock limit for the whole main-agent run; exit 124 on expiry
+  --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
+                           admitted only while under it, and running workers are stopped when it is reached; exit 4
+                           when it stops the run. Spend can pass it by the model calls already in flight then: one per
+                           running worker plus the main agent's. Unpriced routes are not bounded; stderr names each
+                           configured one: chat, compaction, fleet default, fleet profiles (which recipe pins name),
+                           roster members and every target at its default model. A model the main agent names for one
+                           dispatch is not checked
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
@@ -385,6 +392,11 @@ export async function runClioRun(
 			// A worker's receipt is sealed inside the dispatch domain, where a
 			// failed outcome also feeds retry policy, so the no-op verdict stays a
 			// main-agent contract rather than a flag --agent would silently ignore.
+			if (parsed.maxCostUsd !== undefined && parsed.agentId !== undefined) {
+				process.stderr.write("clio-coder run: --max-cost-usd applies to the main agent, not --agent dispatch\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
 			if (parsed.failOnNoop && parsed.agentId !== undefined) {
 				process.stderr.write("clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
@@ -474,6 +486,7 @@ export async function runClioRun(
 								...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 								...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 								...(parsed.failOnNoop ? { failOnNoop: true } : {}),
+								...(parsed.maxCostUsd !== undefined ? { maxCostUsd: parsed.maxCostUsd } : {}),
 								...(deadline !== undefined ? { deadline } : {}),
 								...(parsed.sessionId !== undefined
 									? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }

@@ -240,8 +240,9 @@ import {
 } from "../domains/safety/protected-artifacts-registration.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
+import { createRunCostCap, runCostCeilingUsd } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
-import { SchedulingDomainModule } from "../domains/scheduling/index.js";
+import { createSchedulingDomainModule } from "../domains/scheduling/index.js";
 import { serializeConversation } from "../domains/session/compaction/branch-summary.js";
 import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
 import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
@@ -465,6 +466,45 @@ interface CompactionResolution {
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;
 	return providers.getTarget(targetId);
+}
+
+/**
+ * The routes a `clio-coder run --max-cost-usd` run can reach whose cost is
+ * unknown: the chat route, the compaction route, the default worker route,
+ * every fleet profile (recipe pins in `fleet.agentProfiles` and coordinator
+ * profile picks resolve to one), every roster member, and each configured
+ * target at its default model, which a coordinator pin naming only a target
+ * takes. Paid-request admission checks only known or estimated pricing, so
+ * the cap cannot bound these; LiteLLM stays unknown until its target declares
+ * `pricing`. A model a coordinator names one-off is not known at boot.
+ */
+function unpricedRunRoutes(settings: Readonly<ClioSettings>, providers: ProvidersContract | undefined): string[] {
+	if (!providers) return [];
+	const routes: Array<{ target: string | null | undefined; model?: string | null | undefined }> = [
+		settings.chat,
+		settings.fleet.default,
+		...Object.values(settings.fleet.profiles),
+		...Object.values(settings.fleet.rosters).flatMap((roster) => roster.members),
+		...settings.targets.map((target) => ({ target: target.id })),
+	];
+	const compaction = settings.context.compaction.model;
+	if (compaction) {
+		try {
+			const selected = resolveModelReference(compaction, providers);
+			if (selected.ref && !selected.warning) routes.push(selected.ref);
+		} catch {
+			// An invalid compaction pattern fails compaction itself with its own message.
+		}
+	}
+	const unpriced = new Set<string>();
+	for (const route of routes) {
+		const target = resolveTarget(providers, route.target);
+		const runtime = target ? providers.getRuntime(target.runtime) : null;
+		const model = route.model ?? target?.defaultModel;
+		if (!target || !runtime || !model) continue;
+		if (resolveEffectivePricing(target, runtime, model).provenance === "unknown") unpriced.add(`${target.id}/${model}`);
+	}
+	return [...unpriced];
 }
 
 /**
@@ -1908,7 +1948,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			},
 			SessionDomainModule,
 			ObservabilityDomainModule,
-			SchedulingDomainModule,
+			// Budget alerts and the plan baseline read the ceiling through the
+			// session's effective view, where `--max-cost-usd` sets it.
+			createSchedulingDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
 			...(withPanes
 				? [
 						withPanes.createMuxDomainModule({
@@ -5253,6 +5295,33 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const unsubscribeLoopGuardStop = subscribeLoopGuardStop(bus, chat);
 		const headlessPermissionReason = HEADLESS_PERMISSION_DENIED_REASON;
 		let headlessExtensionHost: import("./extension-host.js").ExtensionHost | null = null;
+		// `--max-cost-usd` bounds what this run adds, so a continued session's
+		// earlier spend does not count against it. It becomes the session
+		// ceiling every paid request already passes: the main agent's, each
+		// compaction's and each dispatch's admission. A lower configured
+		// ceiling still holds.
+		const runCostCap =
+			options.headless.maxCostUsd === undefined
+				? null
+				: createRunCostCap(observability?.sessionCost() ?? 0, options.headless.maxCostUsd);
+		if (runCostCap !== null) {
+			sessionOverrides.set(
+				"safety.limits.sessionCostUsd",
+				runCostCeilingUsd({
+					spentUsd: runCostCap.startUsd,
+					runMaxUsd: runCostCap.maxUsd,
+					configuredUsd: getCurrentSettings().safety.limits.sessionCostUsd,
+				}),
+			);
+			bumpSessionState();
+			result.getContract<SchedulingContract>("scheduling")?.setRunCostCap?.(runCostCap);
+		}
+		const unpricedRoutes = runCostCap === null ? [] : unpricedRunRoutes(getCurrentSettings(), providers);
+		if (unpricedRoutes.length > 0) {
+			process.stderr.write(
+				`clio-coder run: --max-cost-usd does not bound unpriced routes: ${unpricedRoutes.join(", ")}; declare targets[].pricing to bound them\n`,
+			);
+		}
 		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision, meta) => {
 			resolvePermission(
 				{ bus, registry: toolRegistry },
@@ -5335,6 +5404,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(dispatch ? { dispatch } : {}),
 				scopeNotices: (listener) => bus.on(BusChannels.DispatchScopeNotice, listener),
+				...(observability ? { costEntries: () => observability.costEntries() } : {}),
+				...(runCostCap !== null ? { costCap: { maxUsd: runCostCap.maxUsd, unpricedRoutes } } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
 			if (code === 0) {

@@ -53,6 +53,8 @@ export interface RunCliArgs {
 	cwd?: string;
 	/** Fail a main-agent run whose receipt records a no-op. */
 	failOnNoop: boolean;
+	/** Priced spend this run may add, in US dollars. */
+	maxCostUsd?: number;
 	/** Wall-clock limit for the whole run, in seconds. */
 	timeoutSeconds?: number;
 	fileArgs: string[];
@@ -292,6 +294,15 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--fail-on-noop") {
 			parsed.failOnNoop = true;
+			continue;
+		}
+		if (arg === "--max-cost-usd") {
+			const value = need(arg);
+			if (value !== null) {
+				const usd = Number(value);
+				if (Number.isFinite(usd) && usd > 0) parsed.maxCostUsd = usd;
+				else parsed.diagnostics.push({ type: "error", message: "--max-cost-usd must be a positive number of US dollars" });
+			}
 			continue;
 		}
 		if (arg === "--cwd") {
