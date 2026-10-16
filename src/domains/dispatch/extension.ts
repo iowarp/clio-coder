@@ -2156,6 +2156,14 @@ function receiptPermitSummary(
 			readOnly: permit.ceiling.readOnly,
 			writeRoots: [...permit.ceiling.writeRoots],
 			enforcement: { ...permit.ceiling.enforcement },
+			...(permit.ceiling.mcp !== undefined
+				? {
+						mcp: {
+							projectRoot: permit.ceiling.mcp.projectRoot,
+							tools: permit.ceiling.mcp.tools.map((entry) => ({ ...entry })),
+						},
+					}
+				: {}),
 		},
 		...("recordOnly" in permit ? { recordOnly: { ...permit.recordOnly } } : {}),
 	};

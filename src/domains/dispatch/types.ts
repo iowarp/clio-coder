@@ -766,6 +766,11 @@ export interface RunReceiptSafetySummary {
 			readOnly: boolean;
 			writeRoots: ReadonlyArray<string>;
 			enforcement: RuntimeEnforcement;
+			/** The MCP tools admission attested into the permit, each with the class it runs under. */
+			mcp?: {
+				projectRoot: string;
+				tools: ReadonlyArray<{ serverId: string; digest: string; tool: string; actionClass: string }>;
+			};
 		};
 		/**
 		 * Present only on ACP delegation receipts. The peer runs its own tools and
