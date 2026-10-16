@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { Playbook } from "../agents/playbook.js";
 import type { PlaybookCommandRegistry } from "../agents/playbook-commands.js";
@@ -248,6 +249,12 @@ export interface ExecuteFleetRunInput {
 	vars?: Readonly<Record<string, string>>;
 	/** A validated prior run and the successful prefix retained from it. */
 	resume?: { record: FleetRunRecord; replayed: ReadonlyMap<string, ExecutionStepResult> };
+	/**
+	 * The starting session's standing tool limits. Every worker the run starts
+	 * carries them, so a session started with `--delegate-tools read` never
+	 * hands a playbook step write or bash (Z1).
+	 */
+	turnConstraints?: TurnConstraints;
 	onStepDispatched?: (event: FleetRunStepEvent) => void;
 	onStepSettled?: (outcome: FleetRunStepOutcome) => void;
 	/** Operator-facing lines the caller renders wherever it shows the run. */
@@ -616,6 +623,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 								readOnly: true,
 								lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
 								resultContractOverride: { kind: "artifact-report" },
+								...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
 								...(step.target !== undefined ? { target: step.target } : {}),
 								...(step.profile !== undefined ? { workerProfile: step.profile } : {}),
 							};
@@ -690,6 +698,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 					task: step.task,
 					cwd: workspaceRoot,
 					...(stepIntent === null ? {} : { intent: stepIntent }),
+					...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
 					predecessorHandoffs: handoffs,
 					requestOrigin: "user",
 					...(decisionRefs.length > 0 ? { decisionRefs } : {}),

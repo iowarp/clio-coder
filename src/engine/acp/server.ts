@@ -69,6 +69,12 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
+import {
+	narrowTurnConstraints,
+	snapshotTurnConstraints,
+	type TurnConstraints,
+	turnAllowsTool,
+} from "../../core/turn-constraints.js";
 import type { RunReceiptFacts } from "../../domains/dispatch/receipt-facts.js";
 import {
 	readRunReceiptFacts,
@@ -177,6 +183,7 @@ import {
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
 import { ACP_TRUST_CAPABILITY, ACP_TRUST_META_KEY, trustResultMeta } from "./trust-notice.js";
 import type {
+	AcpCeiling,
 	AcpCommandsCapability,
 	AcpContentBlock,
 	AcpDecisionSupersedeResult,
@@ -213,6 +220,8 @@ import type {
 import {
 	ACP_AGENT_META_KEY,
 	ACP_BRANCHES_META_KEY,
+	ACP_CEILING_FIELDS,
+	ACP_CEILING_META_KEY,
 	ACP_COMMANDS_INVOKE_METHOD,
 	ACP_COMMANDS_LIST_METHOD,
 	ACP_COMMANDS_META_KEY,
@@ -347,6 +356,12 @@ export interface AcpServerChat {
 	onEvent(handler: (event: AcpServerEvent) => void): () => void;
 	isStreaming(): boolean;
 	getSessionId(): string | null;
+	/**
+	 * Narrow the chat's standing tool limits below the operator's by each
+	 * ceiling in order and return the effective limits. Absent means the chat
+	 * cannot enforce a client ceiling, so one is refused.
+	 */
+	setToolCeiling?(ceilings: ReadonlyArray<TurnConstraints | undefined>): TurnConstraints | undefined;
 	/** Replace provider context and the next persisted parent for a new or loaded session. */
 	resetForSession?(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
 	/**
@@ -594,6 +609,8 @@ interface AcpServerSession {
 	thinkingLevel: AcpThinkingLevel;
 	createdAt: string;
 	activePrompt: ActivePrompt | null;
+	/** The client's own session ceiling from `session/new`; the operator's limits sit under it. */
+	ceiling?: TurnConstraints;
 }
 
 interface ActivePrompt {
@@ -802,6 +819,58 @@ function contentText(value: unknown): string {
 	if (Array.isArray(value.content)) return contentText(value.content);
 	if (typeof value.content === "string") return value.content;
 	return "";
+}
+
+const ACP_CEILING_FIELD_SET: ReadonlySet<string> = new Set(ACP_CEILING_FIELDS);
+
+/**
+ * The client ceiling in `params._meta["clio-coder/ceiling"]`, or undefined when
+ * the request carries none. Anything malformed refuses the request: an ignored
+ * ceiling would let work run wider than the client asked for (Z1).
+ */
+function requestCeiling(params: unknown): TurnConstraints | undefined {
+	const meta = isRecord(params) ? params._meta : undefined;
+	// A _meta that is not an object cannot carry a ceiling; whatever else it
+	// means is another extension's to judge, so it fails nothing here.
+	if (!isRecord(meta) || !Object.hasOwn(meta, ACP_CEILING_META_KEY)) return undefined;
+	const raw = meta[ACP_CEILING_META_KEY];
+	if (!isRecord(raw)) throw invalidCeiling("the ceiling must be an object");
+	const unknown = Object.keys(raw).find((key) => !ACP_CEILING_FIELD_SET.has(key));
+	if (unknown !== undefined) throw invalidCeiling(`unknown ceiling field ${JSON.stringify(unknown.slice(0, 64))}`);
+	try {
+		return snapshotTurnConstraints(raw as TurnConstraints);
+	} catch {
+		throw invalidCeiling(
+			"allowedTools and delegatedTools take capability names, delegation takes allowed or forbidden, readOnly takes true",
+		);
+	}
+}
+
+/** Whether any limit narrows what a turn may do; such limits bound commands too. */
+function ceilingBinds(limits: TurnConstraints | undefined): limits is TurnConstraints {
+	return (
+		limits !== undefined &&
+		(limits.readOnly === true ||
+			limits.delegation === "forbidden" ||
+			limits.allowedTools !== undefined ||
+			limits.delegatedTools !== undefined)
+	);
+}
+
+function invalidCeiling(detail: string): AcpRequestError {
+	return new AcpRequestError(-32602, `invalid ${ACP_CEILING_META_KEY}: ${detail}`, { code: "invalid_ceiling" });
+}
+
+/** The applied ceiling as echoed on the wire; `{}` means no limit applies. */
+function ceilingMeta(effective: TurnConstraints | undefined): { [ACP_CEILING_META_KEY]: AcpCeiling } {
+	return {
+		[ACP_CEILING_META_KEY]: {
+			...(effective?.allowedTools !== undefined ? { allowedTools: [...effective.allowedTools] } : {}),
+			...(effective?.delegatedTools !== undefined ? { delegatedTools: [...effective.delegatedTools] } : {}),
+			...(effective?.delegation !== undefined ? { delegation: effective.delegation } : {}),
+			...(effective?.readOnly === true ? { readOnly: true } : {}),
+		},
+	};
 }
 
 /**
@@ -3112,6 +3181,8 @@ export interface AcpHandshakeFeatures {
 	settings: boolean;
 	providers: boolean;
 	commandsCapability?: AcpCommandsCapability & { count?: number; promptTurns?: boolean };
+	/** The chat enforces a client ceiling; absent reads as false. */
+	ceiling?: boolean;
 	steer: boolean;
 	dispatch: boolean;
 	toolRegistry: boolean;
@@ -3356,6 +3427,15 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							probe: features.providers,
 						},
 						[ACP_TRUST_META_KEY]: ACP_TRUST_CAPABILITY,
+						...(features.ceiling === true
+							? {
+									[ACP_CEILING_META_KEY]: {
+										version: 1 as const,
+										meta: ACP_CEILING_META_KEY,
+										fields: ACP_CEILING_FIELDS,
+									},
+								}
+							: {}),
 						...(features.commandsCapability !== undefined
 							? {
 									[ACP_COMMANDS_META_KEY]: {
@@ -3603,6 +3683,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 							...(options.chat.whenSettled ? { promptTurns: true } : {}),
 						},
 					}),
+			ceiling: options.chat.setToolCeiling !== undefined,
 			steer: options.chat.steer !== undefined,
 			dispatch: options.dispatch !== undefined,
 			toolRegistry: options.toolRegistry !== undefined,
@@ -4281,6 +4362,45 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 	};
 
+	// The limits last applied to the chat. A slash command acts outside the tool
+	// calls these bound, so it is screened against them before it runs (Z1).
+	let standingLimits: TurnConstraints | undefined;
+	const applyCeilings = (ceilings: ReadonlyArray<TurnConstraints | undefined>): TurnConstraints | undefined => {
+		standingLimits = options.chat.setToolCeiling?.(ceilings);
+		return standingLimits;
+	};
+	const assertCommandWithinCeiling = (control: AcpCommandControl, command: unknown, argv: unknown): void => {
+		if (!ceilingBinds(standingLimits)) return;
+		const refusal =
+			control.ceilingRefusal === undefined
+				? "this agent cannot screen commands against a ceiling"
+				: control.ceilingRefusal(command, argv, standingLimits);
+		if (refusal !== null) throw new AcpRequestError(-32602, refusal, { code: "ceiling_refused" });
+	};
+	const assertCeilingEnforceable = (ceiling: TurnConstraints | undefined): void => {
+		if (ceiling !== undefined && options.chat.setToolCeiling === undefined) {
+			throw new AcpRequestError(-32602, `this agent cannot enforce ${ACP_CEILING_META_KEY}`, {
+				code: "ceiling_unsupported",
+			});
+		}
+	};
+	/**
+	 * Apply the bound session's ceiling as the chat's standing limits and return
+	 * the echo for its response. Every way a session becomes bound goes through
+	 * here, so a fork, a handoff or a load never runs under limits it did not echo.
+	 */
+	const applySessionCeiling = (session: AcpServerSession): Record<string, unknown> =>
+		options.chat.setToolCeiling !== undefined ? ceilingMeta(applyCeilings([session.ceiling])) : {};
+	/**
+	 * A successor's ceiling: the source session's narrowed by the one sent with
+	 * the request, so a fork or handoff can tighten what it inherits and never
+	 * loosen it (Z1).
+	 */
+	const successorCeiling = (source: AcpServerSession, params: unknown): TurnConstraints | undefined => {
+		const requested = requestCeiling(params);
+		assertCeilingEnforceable(requested);
+		return snapshotTurnConstraints(narrowTurnConstraints(source.ceiling, requested));
+	};
 	const getSession = (params: unknown): AcpServerSession => {
 		const id = sessionIdOf(params);
 		const session = sessions.get(id);
@@ -4442,6 +4562,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
 		}
 		const request = assertParamKeys(params, new Set(["cwd", "mcpServers", "additionalDirectories"]));
+		const ceiling = requestCeiling(request);
+		assertCeilingEnforceable(ceiling);
 		assertNoAdditionalDirectories(request.additionalDirectories);
 		const sessionCwd = canonicalSessionCwd(request.cwd);
 		const clientMcpServers = parseClientMcpServers(request.mcpServers, false);
@@ -4477,16 +4599,19 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			thinkingLevel: options.settings?.read().thinkingLevel ?? "off",
 			createdAt: meta?.createdAt ?? new Date().toISOString(),
 			activePrompt: null,
+			...(ceiling !== undefined ? { ceiling } : {}),
 		};
 		sessionCreated = true;
 		sessions.set(id, session);
 		boundSessionId = id;
+		const ceilingEcho = applySessionCeiling(session);
 		announceCommands(id);
 		telemetry.bind(false);
 		return {
 			sessionId: id,
 			...sessionConfig(session),
 			_meta: {
+				...ceilingEcho,
 				[ACP_SESSION_META_KEY]: sessionResultMeta(session, false),
 				...(await workspaceResultMeta()),
 				...trustResultMeta(session.cwd),
@@ -4572,6 +4697,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
 		}
 		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
+		// Composed exactly like session/new; without one the operator's limits apply.
+		const ceiling = requestCeiling(request);
+		assertCeilingEnforceable(ceiling);
 		assertNoAdditionalDirectories(request.additionalDirectories);
 		const id = sessionIdOf(request);
 		canonicalSessionCwd(request.cwd);
@@ -4636,12 +4764,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			thinkingLevel: options.settings?.read().thinkingLevel ?? "off",
 			createdAt: stored.createdAt,
 			activePrompt: null,
+			...(ceiling !== undefined ? { ceiling } : {}),
 		};
 		sessionCreated = true;
+		const ceilingEcho = applySessionCeiling(session);
 		bindRestored(session, replay);
 		return {
 			...sessionConfig(session),
 			_meta: {
+				...ceilingEcho,
 				[ACP_SESSION_META_KEY]: sessionResultMeta(
 					session,
 					true,
@@ -4877,6 +5008,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const { session, resetForSession, readEntries, buildMessages } = requireBranches();
 		const bound = getSession(request);
 		requireIdle(bound, "fork");
+		const ceiling = successorCeiling(bound, request);
 		const turnId = selectableTurn(session, bound.id, request.turnId);
 		let meta: SessionMeta;
 		try {
@@ -4900,6 +5032,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			id: meta.id,
 			createdAt: meta.createdAt,
 			activePrompt: null,
+			...(ceiling !== undefined ? { ceiling } : {}),
 		};
 		sessions.delete(bound.id);
 		let replay: PreparedAcpReplay | undefined;
@@ -4925,6 +5058,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			resetForSession(forkLeaf, []);
 			replayFailed = true;
 		}
+		const ceilingEcho = applySessionCeiling(forked);
 		bindRestored(forked, replay);
 		return {
 			sessionId: forked.id,
@@ -4932,6 +5066,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			parentTurnId: turnId,
 			...sessionConfig(forked),
 			_meta: {
+				...ceilingEcho,
 				[ACP_SESSION_META_KEY]: {
 					...sessionResultMeta(
 						forked,
@@ -5028,6 +5163,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const { control, session, resetForSession } = requireHandoff();
 		const bound = getSession(request);
 		requireIdle(bound, "hand off");
+		const ceiling = successorCeiling(bound, request);
 		const handoffId = requireBoundedClientString(request.handoffId, "handoffId", ACP_MAX_SESSION_ID_BYTES);
 		const document = handoffDocument(request.document);
 		const pending = pendingHandoff;
@@ -5050,7 +5186,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (current?.id !== toSessionId || safeStoredIdentifier(toSessionId, ACP_MAX_SESSION_ID_BYTES) === null) {
 			throw new AcpRequestError(-32603, "handoff failed", { code: "internal_error" });
 		}
-		const successor: AcpServerSession = { ...bound, id: toSessionId, createdAt: current.createdAt, activePrompt: null };
+		const successor: AcpServerSession = {
+			...bound,
+			id: toSessionId,
+			createdAt: current.createdAt,
+			activePrompt: null,
+			...(ceiling !== undefined ? { ceiling } : {}),
+		};
 		sessions.delete(bound.id);
 		let replay: PreparedAcpReplay | undefined;
 		try {
@@ -5062,6 +5204,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			resetForSession(null);
 		}
 		for (const warning of outcome.warnings) options.diagnostics?.(`handoff: ${warning}`);
+		const ceilingEcho = applySessionCeiling(successor);
 		bindRestored(successor, replay);
 		return {
 			status: "committed" as const,
@@ -5069,7 +5212,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			fromSessionId: bound.id,
 			warnings: outcome.warnings.slice(0, 8).map((warning) => boundString(warning, ACP_MAX_HANDOFF_REASON_BYTES)),
 			...sessionConfig(successor),
-			_meta: { [ACP_SESSION_META_KEY]: sessionResultMeta(successor, false) },
+			_meta: { ...ceilingEcho, [ACP_SESSION_META_KEY]: sessionResultMeta(successor, false) },
 		};
 	});
 
@@ -5361,6 +5504,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (typeof request.planHash !== "string" || !/^[0-9a-f]{64}$/u.test(request.planHash)) {
 			throw new AcpRequestError(-32602, "planHash is invalid", { code: "invalid_params" });
 		}
+		// A playbook starts workers outside any tool call, so the session's limits
+		// screen it as they screen /run, and every worker it starts carries them (Z1).
+		const limits = standingLimits;
+		if (limits?.readOnly === true || !turnAllowsTool(limits, ToolNames.Dispatch)) {
+			throw new AcpRequestError(
+				-32602,
+				limits?.readOnly === true
+					? "a fleet run starts workers that write and the ceiling is read-only. Nothing was dispatched"
+					: "a fleet run starts workers and the ceiling withholds dispatch. Nothing was dispatched",
+				{ code: "ceiling_refused" },
+			);
+		}
 		const result = compileFleet(control, name, vars, fleetResume(request.resume));
 		if (!result.ok) return projectFleetPreview(result);
 		if (result.preview.planHash !== request.planHash) {
@@ -5373,7 +5528,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		let started: Awaited<ReturnType<AcpFleetControl["run"]>>;
 		try {
-			started = await control.run(result.preview);
+			started = await control.run(result.preview, limits);
 		} catch (error) {
 			options.diagnostics?.(`fleet run failed to start: ${acpErrorMessage(error)}`);
 			throw new AcpRequestError(-32603, "fleet run failed to start", { code: "internal_error" });
@@ -5430,6 +5585,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (correction !== undefined && correction.length === 0) {
 			throw new AcpRequestError(-32602, "a correction needs the new direction", { code: "invalid_params" });
 		}
+		// Superseding writes the board's decision record, which a read-only ceiling denies.
+		if (standingLimits?.readOnly === true) {
+			throw new AcpRequestError(-32602, "superseding a decision writes the board and the ceiling is read-only", {
+				code: "ceiling_refused",
+			});
+		}
 		try {
 			const outcome = actions.supersedeDecision(interviewId, key, correction);
 			return {
@@ -5453,6 +5614,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const entryId = requireBoundedClientString(request.entryId, "entryId", 256);
 		if (request.scope !== "repo" && request.scope !== "global") {
 			throw new AcpRequestError(-32602, "scope must be repo or global", { code: "invalid_params" });
+		}
+		// A proposal writes a memory record, which a read-only ceiling denies.
+		if (standingLimits?.readOnly === true) {
+			throw new AcpRequestError(-32602, "a memory proposal writes a record and the ceiling is read-only", {
+				code: "ceiling_refused",
+			});
 		}
 		if (request.scope === "global" && request.acknowledgeGlobal !== true) {
 			return {
@@ -5746,6 +5913,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				code: "prompt_turn_required",
 			});
 		}
+		assertCommandWithinCeiling(options.commands, request.command, request.argv);
 		if (request.command !== "context" && request.command !== "compact")
 			return options.commands.invoke({ command: request.command, argv: request.argv });
 		if (session.id !== boundSessionId)
@@ -6121,6 +6289,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "excludeFromContext must be a boolean", { code: "invalid_params" });
 		}
 		const excludeFromContext = request.excludeFromContext === true;
+		// The line runs outside any tool call, so the session's limits screen it
+		// as they screen the model's own bash.
+		if (standingLimits?.readOnly === true || !turnAllowsTool(standingLimits, ToolNames.Bash)) {
+			throw new AcpRequestError(
+				-32602,
+				standingLimits?.readOnly === true
+					? "a shell line can write and the ceiling is read-only. Nothing ran"
+					: "a shell line runs bash and the ceiling withholds it. Nothing ran",
+				{ code: "ceiling_refused" },
+			);
+		}
 		if (closingSessions.has(session.id)) {
 			throw new AcpRequestError(-32002, "unknown ACP session", { code: "session_unknown" });
 		}
@@ -6469,6 +6648,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireInitialized();
 		requireAuthenticated();
 		const session = getSession(params);
+		const promptCeiling = requestCeiling(params);
+		assertCeilingEnforceable(promptCeiling);
 		if (contextCommandInFlight !== null || session.activePrompt || options.chat.isStreaming()) {
 			throw new AcpRequestError(-32602, "this session already has an active prompt", { code: "prompt_active" });
 		}
@@ -6525,6 +6706,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			settle = resolveSettled;
 		});
 		options.onActiveSessionAutonomyChange?.(session.autonomy);
+		// The standing limits, not one submit's constraints, carry the prompt
+		// ceiling, so a command's injected turn and a send-now resubmit hold it too.
+		const ceilingEcho =
+			options.chat.setToolCeiling !== undefined ? ceilingMeta(applyCeilings([session.ceiling, promptCeiling])) : undefined;
+		const respond = (stopReason: string): AcpPromptResponse =>
+			promptResponse(stopReason, active, options.usage?.session(), ceilingEcho);
 		telemetry.turnStarted(active.usage);
 		const unsubscribe = attachTurnObserver(session.id, active);
 		try {
@@ -6547,6 +6734,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					if ("error" in words) throw new AcpRequestError(-32602, words.error, { code: "invalid_params" });
 					argv = words.tokens;
 				}
+				if (options.commands !== undefined) assertCommandWithinCeiling(options.commands, command, argv);
 				const result = await options.commands?.invoke({ command, argv });
 				if (options.commands?.injectsUserTurn(command, argv)) await options.chat.whenSettled?.();
 				if (result !== undefined)
@@ -6607,6 +6795,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			active.errored = true;
 			active.errorMessage = err instanceof Error ? err.message : String(err);
 		} finally {
+			if (promptCeiling !== undefined) applyCeilings([session.ceiling]);
 			active.acceptsContinuation = false;
 			unsubscribe();
 			// The last meter and plan frames precede the response they total.
@@ -6631,12 +6820,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// provider failure or an operator cancellation.
 		if (active.toolCallLimitReached) {
 			settleOpenToolCalls(options.transport, session.id, active, "tool call limit exceeded");
-			return promptResponse("max_turn_requests", active, options.usage?.session());
+			return respond("max_turn_requests");
 		}
 		// Operator cancellation takes precedence over ordinary turn outcomes.
 		if (active.cancelled) {
 			settleOpenToolCalls(options.transport, session.id, active, "cancelled");
-			return promptResponse("cancelled", active, options.usage?.session());
+			return respond("cancelled");
 		}
 		// The empty-success defect: Clio refused to start the turn, the notice
 		// carrying the reason has no ACP equivalent, and nothing else in the turn
@@ -6667,7 +6856,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}
 			throw new AcpRequestError(-32603, ACP_TURN_FAILED_MESSAGE, { code: "turn_failed" });
 		}
-		return promptResponse(active.stopReason, active, options.usage?.session());
+		return respond(active.stopReason);
 	});
 
 	const detachInterviews = options.interviews?.attach({
@@ -6716,10 +6905,12 @@ function promptResponse(
 	stopReason: string,
 	active: ActivePrompt,
 	session?: ReturnType<AcpUsageSource["session"]>,
+	ceiling?: Record<string, unknown>,
 ): AcpPromptResponse {
 	return {
 		stopReason,
 		_meta: {
+			...ceiling,
 			[ACP_USAGE_META_KEY]: {
 				...turnUsageMeta(active.usage),
 				...(session ? { session: sessionUsageTotals(session) } : {}),

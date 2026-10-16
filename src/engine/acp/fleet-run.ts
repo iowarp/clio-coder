@@ -18,6 +18,7 @@ export { ACP_FLEET_META_KEY, ACP_FLEET_PREVIEW_METHOD, ACP_FLEET_RUN_METHOD } fr
  * compiled plan itself and the rendered task stay host-side.
  */
 
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { FleetRunPreview, FleetRunPreviewResult } from "../../domains/dispatch/index.js";
 
 export const ACP_FLEET_MAX_STEPS = 64;
@@ -38,9 +39,12 @@ export interface AcpFleetControl {
 	 * dispatch admission can refuse a step the compiler accepted, and a client
 	 * told "started" would otherwise wait on a run that never began. A run
 	 * refused while another is in flight never got a root of its own.
+	 * `turnConstraints` are the session's standing limits; every worker the
+	 * run starts carries them.
 	 */
 	run(
 		preview: FleetRunPreview,
+		turnConstraints?: TurnConstraints,
 	): Promise<
 		| { status: "started"; fleetRootId: string }
 		| { status: "failed"; fleetRootId: string; reason: string }

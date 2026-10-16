@@ -314,6 +314,8 @@ export interface RegistryDeps {
 	mutationEpoch?: (turnId: string) => number;
 	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
 	readOnly?: boolean;
+	/** Who can make a turn's host scope read-only here, named by its denial; absent means `clio-coder run --read-only`. */
+	hostReadOnlySource?: HostReadOnlySource;
 	/**
 	 * The worker's standing Git allowance and attested task worktree (Phase C).
 	 * Read only when `principal` is worker; the git tool body receives it too,
@@ -1322,16 +1324,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (admission.code === "read_only") {
 			// A read-only dispatch and a host's read-only task scope deny alike;
 			// the reason code names which one the operator set.
-			const hostScoped = deps.readOnly !== true;
-			const reasonCode = hostScoped ? "task:read_only" : "dispatch:read_only";
-			const verdict = readOnlyDeniedVerdict(decision, call.tool, hostScoped, reasonCode);
+			const hostSource = deps.readOnly === true ? null : HOST_READ_ONLY_SOURCES[deps.hostReadOnlySource ?? "run"];
+			const reasonCode = hostSource !== null ? "task:read_only" : "dispatch:read_only";
+			const verdict = readOnlyDeniedVerdict(decision, call.tool, hostSource, reasonCode);
 			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode });
 			return withDenial(
 				verdict,
 				"clio_policy",
-				hostScoped
-					? "the host must start the task without its read-only ceiling (clio-coder run --read-only)."
-					: "the dispatching agent must dispatch this work without read-only.",
+				hostSource?.remedy ?? "the dispatching agent must dispatch this work without read-only.",
 				reasonCode,
 			);
 		}
@@ -2303,31 +2303,45 @@ function skillSurfaceBlockedVerdict(
 	return { kind: "blocked", reason, decision: blocked };
 }
 
+export type HostReadOnlySource = "run" | "acp-ceiling";
+
+/** What a host read-only denial says set the scope and who can lift it. */
+const HOST_READ_ONLY_SOURCES: Readonly<Record<HostReadOnlySource, { detail: string; remedy: string }>> = {
+	run: {
+		detail: "The host started this task read-only (clio-coder run --read-only)",
+		remedy: "the host must start the task without its read-only ceiling (clio-coder run --read-only).",
+	},
+	"acp-ceiling": {
+		detail: "The ACP client set readOnly in its clio-coder/ceiling for this session or prompt",
+		remedy: "the ACP client must send this work without readOnly in its clio-coder/ceiling.",
+	},
+};
+
 /** A read-only dispatch or task scope resolves every forbidden call as a terminal denial. */
 function readOnlyDeniedVerdict(
 	decision: SafetyDecision,
 	tool: string,
-	hostScoped: boolean,
+	hostSource: { detail: string } | null,
 	reasonCode: string,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const rejection = hostScoped
-		? {
-				short: `${tool} denied: this task is read-only`,
-				detail:
-					"The host started this task read-only (clio-coder run --read-only), so this call cannot execute and no approval clears it.",
-				hints: [
-					"Describe the proposed change as text in the answer.",
-					"Inspection tools remain available for paths inside the workspace.",
-				],
-			}
-		: {
-				short: `${tool} denied: this run is read-only`,
-				detail: `The dispatch that started this run is read-only, so this call cannot execute.`,
-				hints: [
-					"Describe the proposed change as text for the dispatching agent.",
-					"Inspection tools remain available for paths inside the workspace.",
-				],
-			};
+	const rejection =
+		hostSource !== null
+			? {
+					short: `${tool} denied: this task is read-only`,
+					detail: `${hostSource.detail}, so this call cannot execute and no approval clears it.`,
+					hints: [
+						"Describe the proposed change as text in the answer.",
+						"Inspection tools remain available for paths inside the workspace.",
+					],
+				}
+			: {
+					short: `${tool} denied: this run is read-only`,
+					detail: `The dispatch that started this run is read-only, so this call cannot execute.`,
+					hints: [
+						"Describe the proposed change as text for the dispatching agent.",
+						"Inspection tools remain available for paths inside the workspace.",
+					],
+				};
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,

@@ -1159,7 +1159,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		startHandoff: (goal) => startHandoffState(goal),
 		startFleetRun: (name, vars, options) => startFleetRunState(name, vars, options),
 		openFleetRuns: () => toggleDispatchBoardOverlay(),
-		...(toolRegistry ? { runCouncilDispatch: (args) => dispatchCouncilThroughRegistry(toolRegistry, args) } : {}),
+		...(toolRegistry
+			? {
+					runCouncilDispatch: (args, turnConstraints) => dispatchCouncilThroughRegistry(toolRegistry, args, turnConstraints),
+				}
+			: {}),
 		openContextView: () => openContextViewOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openDecisions: () => openDecisionsOverlayState(),

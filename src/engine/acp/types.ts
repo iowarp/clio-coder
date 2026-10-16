@@ -87,6 +87,14 @@ export const ACP_DISPATCH_PLAN_META_KEY = "clio-coder/dispatchPlan";
 export const ACP_WORKSPACE_META_KEY = "clio-coder/workspace";
 export const ACP_PLAN_META_KEY = "clio-coder/plan";
 export const ACP_TRUST_META_KEY = "clio-coder/trust";
+/**
+ * A client's enforced capability ceiling: `params._meta` on `session/new` (the
+ * whole session) and `session/prompt` (that prompt), echoed as applied on both
+ * responses. It only narrows the limits the operator started `acp` with.
+ */
+export const ACP_CEILING_META_KEY = "clio-coder/ceiling";
+/** Every field a client ceiling may carry; any other key refuses the request. */
+export const ACP_CEILING_FIELDS = ["allowedTools", "delegatedTools", "delegation", "readOnly"] as const;
 export const ACP_SESSION_TRUST_METHOD = "_clio-coder/session/trust";
 export const ACP_SESSION_LABEL_METHOD = "_clio-coder/session/label";
 export const ACP_SESSION_LIST_METHOD = "session/list";
@@ -685,6 +693,30 @@ export interface AcpTrustCapability {
 }
 
 /**
+ * A client ceiling as `session/new`, `session/load`, `session/resume`,
+ * `session/prompt`, fork and handoff commit take it under
+ * {@link ACP_CEILING_META_KEY}, and as each of their responses echoes the
+ * applied one. An echoed `{}` means no limit applies.
+ */
+export interface AcpCeiling {
+	allowedTools?: ReadonlyArray<string>;
+	delegatedTools?: ReadonlyArray<string>;
+	delegation?: "allowed" | "forbidden";
+	readOnly?: true;
+}
+
+/**
+ * Announced only by a server that enforces a ceiling; any other server refuses
+ * one with `ceiling_unsupported`. Enforcement covers tool calls, the dispatches
+ * they start, and slash commands, which run only as reads or bounded turns.
+ */
+export interface AcpCeilingCapability {
+	version: 1;
+	meta: typeof ACP_CEILING_META_KEY;
+	fields: ReadonlyArray<(typeof ACP_CEILING_FIELDS)[number]>;
+}
+
+/**
  * `agentCapabilities._meta` as `initialize` answers it. The server's literal
  * `satisfies` this, so an extension it announces under a key or in a shape this
  * interface does not name fails the build instead of reaching a client.
@@ -694,6 +726,7 @@ export interface AcpAgentCapabilitiesMeta {
 	[ACP_SETTINGS_META_KEY]: AcpSettingsCapability;
 	[ACP_TARGETS_META_KEY]: AcpTargetsCapability;
 	[ACP_TRUST_META_KEY]: AcpTrustCapability;
+	[ACP_CEILING_META_KEY]?: AcpCeilingCapability;
 	[ACP_COMMANDS_META_KEY]?: AcpCommandsCapability;
 	[ACP_STEERING_META_KEY]: AcpWire<AcpSteeringCapability>;
 	[ACP_AGENT_META_KEY]: { version: 1; meta: typeof ACP_AGENT_META_KEY };

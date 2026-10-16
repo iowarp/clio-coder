@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import type { DispatchContract, FleetRunPreview, FleetRunPreviewInput } from "../domains/dispatch/index.js";
@@ -132,6 +133,11 @@ export interface OverlayGeneralOpenersDeps {
 	 * still in flight is about to change it.
 	 */
 	isTurnInFlight?: () => boolean;
+	/**
+	 * The session's `--allow-tools`/`--delegate-tools` limits. Every worker a
+	 * fleet run starts carries them, as a `/run` worker does.
+	 */
+	standingTurnConstraints?: () => TurnConstraints | undefined;
 	/** Record which wave and step a dispatched run belongs to, for the board's phase column. */
 	setFleetRunPhase?: (runId: string, phase: { wave: number; stepId: string }) => void;
 	/** The shared fleet-run path; overridable so a test can observe one call. */
@@ -667,6 +673,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		// The arguments are built before the single-run guard is taken: a throw
 		// from a settings or session read would otherwise leave it set and refuse
 		// every later fleet run in this session.
+		const turnConstraints = deps.standingTurnConstraints?.();
 		const args: Parameters<typeof executeFleetRun>[0] = {
 			plan: preview.plan,
 			playbookName: preview.name,
@@ -681,6 +688,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			...(preview.resume !== undefined
 				? { resume: { record: preview.resume.record, replayed: preview.resume.replayed } }
 				: {}),
+			...(turnConstraints !== undefined ? { turnConstraints } : {}),
 			onStepDispatched: (event) => {
 				deps.setFleetRunPhase?.(event.assignmentId, { wave: event.waveIndex, stepId: event.stepId });
 			},

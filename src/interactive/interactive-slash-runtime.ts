@@ -32,7 +32,6 @@ import { withContinuityReplay } from "../session-control/model-session-replay.js
 import { type OracleDigestSources, oracleBriefingFromEntries } from "../session-control/oracle.js";
 import {
 	type ContextClearCommandOptions,
-	type CouncilDispatchOutcome,
 	dispatchSlashCommand,
 	type FleetRunStartOptions,
 	type InitCommandOptions,
@@ -83,7 +82,7 @@ export interface InteractiveSlashSubmitExpansion {
 
 type SlashChat = Pick<
 	ChatLoop,
-	"discoverOperatorEgg" | "eggsCommand" | "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit"
+	"discoverOperatorEgg" | "eggsCommand" | "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit" | "toolLimits"
 >;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
 type UserTurnStatus = import("./chat-panel.js").UserTurnStatus;
@@ -180,7 +179,7 @@ export interface InteractiveSlashRuntimeDeps {
 	 * the approval overlay opens before any member runs. Absent on a host with no
 	 * tool registry, in which case `/council` says so.
 	 */
-	runCouncilDispatch?: (args: Readonly<Record<string, unknown>>) => Promise<CouncilDispatchOutcome>;
+	runCouncilDispatch?: SlashCommandContext["runCouncilDispatch"];
 	openContextView: () => void;
 	openTasks: () => void;
 	openDecisions: () => void;
@@ -525,6 +524,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		// `/oracle` is refused, never queued, while a turn streams: the digest it
 		// packs describes the record as it stands.
 		isTurnInFlight: () => deps.chat.isStreaming(),
+		// `--allow-tools`/`--delegate-tools` bound every dispatch a command starts, as they bound turns.
+		standingTurnConstraints: () => deps.chat.toolLimits?.(),
 		oracleBriefing: oracleBriefingSources,
 		startHandoff: deps.startHandoff,
 		...(deps.startFleetRun ? { startFleetRun: deps.startFleetRun } : {}),

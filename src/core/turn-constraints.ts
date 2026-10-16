@@ -83,10 +83,13 @@ export function narrowTurnConstraints(
 			: intersectLists(session.delegatedTools ?? session.allowedTools, turn.delegatedTools ?? turn.allowedTools);
 	const delegation = session.delegation === "forbidden" ? "forbidden" : turn.delegation;
 	const skills = session.skills === "disabled" ? "disabled" : turn.skills;
+	// Once any layer is read-only every narrower one is too (Z1).
+	const readOnly = session.readOnly === true || turn.readOnly === true;
 	return {
 		...(turn.mode === undefined ? {} : { mode: turn.mode }),
 		...(delegation === undefined ? {} : { delegation }),
 		...(skills === undefined ? {} : { skills }),
+		...(readOnly ? { readOnly: true as const } : {}),
 		...(allowedTools === undefined ? {} : { allowedTools }),
 		...(delegatedTools === undefined ? {} : { delegatedTools }),
 	};

@@ -32,6 +32,8 @@ export type {
  */
 import type { JobRecord } from "../../core/job-types.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
+import { ToolNames } from "../../core/tool-names.js";
+import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import { parseLoopArgv } from "../../session-control/loop-command.js";
 import type { NoticeLevel } from "../../session-control/notice-source.js";
 import type { SlashCommand, SlashCommandContext, SlashCommandKind } from "../../session-control/slash-commands.js";
@@ -121,6 +123,12 @@ export interface AcpCommandRule {
 	promptTurn?: true;
 	/** Subcommands whose work runs as a conversation turn, as {@link promptTurn} does for a whole command. */
 	promptTurnSubcommands?: ReadonlyArray<string>;
+	/** First arguments that only read, with `""` for the bare form; the rest are refused under a ceiling. */
+	reads?: ReadonlyArray<string>;
+	/** First arguments that only stop, pause or reshape the session's own context; a ceiling admits them as reads. */
+	sessionOnly?: ReadonlyArray<string>;
+	/** The whole command, or these first arguments, write or delegate, so a read-only ceiling refuses them even as turns. */
+	readOnlyRefuses?: true | ReadonlyArray<string>;
 }
 
 /**
@@ -328,6 +336,7 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "getDecisionBoard"
 			| "importShareArchive"
 			| "isTurnInFlight"
+			| "standingTurnConstraints"
 			| "jobs"
 			| "listWorkerRuns"
 			| "oracleBriefing"
@@ -631,6 +640,7 @@ function sessionCommandContext(
 		...(host.runDoctor ? { runDoctor: host.runDoctor } : {}),
 		...(host.oracleBriefing ? { oracleBriefing: host.oracleBriefing } : {}),
 		...(host.isTurnInFlight ? { isTurnInFlight: host.isTurnInFlight } : {}),
+		...(host.standingTurnConstraints ? { standingTurnConstraints: host.standingTurnConstraints } : {}),
 		...(host.jobs ? { jobs: host.jobs } : {}),
 		...(host.getWorkerRosters ? { getWorkerRosters: host.getWorkerRosters } : {}),
 		...(host.runCouncilDispatch ? { runCouncilDispatch: host.runCouncilDispatch } : {}),
@@ -745,6 +755,14 @@ export interface AcpCommandControl {
 	injectsUserTurn(command: unknown, argv?: unknown): boolean;
 	/** True when this command, or its subcommand in `argv[0]`, must run inside a `session/prompt` turn; absent reads as false. */
 	promptTurn?(command: unknown, argv?: unknown): boolean;
+	/**
+	 * Why `limits`, a binding client or operator ceiling, refuses this command,
+	 * or null when it admits it. The ceiling bounds tool calls, so only a
+	 * command whose effect is a turn under those limits, or a pure read, runs
+	 * (Z1). A command that starts a worker is refused when the limits withhold
+	 * dispatch. Absent refuses every command under a binding ceiling.
+	 */
+	ceilingRefusal?(command: unknown, argv: unknown, limits: TurnConstraints): string | null;
 	/** Announced verbatim under `clio-coder/commands`. */
 	capability: Partial<AcpCommandsCapability> & { count?: number };
 	/** Screen a prompt line that did not name an admitted command. */
@@ -801,6 +819,12 @@ function screenAcpPromptLine(text: string, host: AcpCommandHost): AcpPromptLineV
 	};
 }
 
+function ruleInjectsUserTurn(rule: AcpCommandRule, argv: unknown): boolean {
+	if (rule.injectsUserTurn !== true) return false;
+	const first = Array.isArray(argv) ? argv[0] : undefined;
+	return !(typeof first === "string" && rule.injectsUserTurnExcept?.includes(first) === true);
+}
+
 /** Binds one host to the control the ACP server takes. */
 export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 	return {
@@ -815,9 +839,25 @@ export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 		injectsUserTurn: (command, argv) => {
 			if (typeof command !== "string") return false;
 			const rule = RULE_BY_NAME.get(command);
-			if (rule?.injectsUserTurn !== true) return false;
-			const first = Array.isArray(argv) ? argv[0] : undefined;
-			return !(typeof first === "string" && rule.injectsUserTurnExcept?.includes(first) === true);
+			return rule !== undefined && ruleInjectsUserTurn(rule, argv);
+		},
+		ceilingRefusal: (command, argv, limits) => {
+			// An unknown command is refused by invoke with its own reason.
+			const rule = typeof command === "string" ? RULE_BY_NAME.get(command) : undefined;
+			if (rule === undefined) return null;
+			const first = Array.isArray(argv) && typeof argv[0] === "string" ? argv[0] : "";
+			const label = `/${rule.name}${first ? ` ${first}` : ""}`;
+			if (rule.streams === "dispatch" && !turnAllowsTool(limits, ToolNames.Dispatch))
+				return `${label} starts a worker and the ceiling withholds dispatch`;
+			if (limits.readOnly === true && (rule.readOnlyRefuses === true || rule.readOnlyRefuses?.includes(first) === true))
+				return `${label} writes or delegates and the ceiling is read-only`;
+			if (
+				ruleInjectsUserTurn(rule, argv) ||
+				rule.reads?.includes(first) === true ||
+				rule.sessionOnly?.includes(first) === true
+			)
+				return null;
+			return `${label} acts outside the ceiling's tool limits; under a ceiling only reads, session controls and commands that submit a turn run`;
 		},
 		promptTurn: (command, argv) => {
 			if (typeof command !== "string") return false;

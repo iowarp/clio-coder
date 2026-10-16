@@ -23,6 +23,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains/memory/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
@@ -60,10 +61,14 @@ export async function runHostDispatch(
 	registry: Pick<ToolRegistry, "invoke">,
 	events: HostToolEvents,
 	args: Readonly<Record<string, unknown>>,
+	turnConstraints?: TurnConstraints,
 ): Promise<CouncilDispatchOutcome> {
 	const toolCallId = `host-${randomUUID()}`;
 	events.emit({ type: "tool_execution_start", toolCallId, toolName: ToolNames.Dispatch, args: { ...args } });
-	const verdict = await registry.invoke({ tool: ToolNames.Dispatch, args: { ...args } }, { toolCallId });
+	const verdict = await registry.invoke(
+		{ tool: ToolNames.Dispatch, args: { ...args } },
+		{ toolCallId, ...(turnConstraints !== undefined ? { turnConstraints } : {}) },
+	);
 	const outcome: CouncilDispatchOutcome =
 		verdict.kind === "blocked"
 			? { status: "blocked", reason: verdict.reason }

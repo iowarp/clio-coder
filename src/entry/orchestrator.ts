@@ -3025,6 +3025,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
 		// Headless runs deny every ask, so they keep #377's test-runner allow.
 		...(options.headless === undefined ? { sessionCodeConsent } : {}),
+		// `acp` takes no read-only flag; only a client ceiling makes its turns read-only.
+		...(acpMode ? { hostReadOnlySource: "acp-ceiling" as const } : {}),
 	});
 	// Reloaded settings can change what refused a call, so the memory of it goes.
 	bus.on(BusChannels.ConfigHotReload, () => toolRegistry.forgetRefusals());
@@ -4655,7 +4657,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										resolveRoute: fleetRouteResolver(dispatch.preview, roleFacts),
 									});
 								},
-								run: (preview) =>
+								run: (preview, turnConstraints) =>
 									new Promise((resolve) => {
 										if (acpFleetInFlight !== null) {
 											// No root is minted for a run that never starts; the running
@@ -4705,6 +4707,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											...(preview.resume !== undefined
 												? { resume: { record: preview.resume.record, replayed: preview.resume.replayed } }
 												: {}),
+											...(turnConstraints !== undefined ? { turnConstraints } : {}),
 											onStepDispatched: admit,
 											onNotice: (text) => process.stderr.write(`[clio-coder:acp] fleet ${preview.name}: ${text}\n`),
 										})
@@ -4843,6 +4846,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								},
 								getDecisionBoard: () => decisionBoard.snapshot(),
 								isTurnInFlight: () => chat.isStreaming(),
+								standingTurnConstraints: () => chat.toolLimits?.(),
 								seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
 								// Recovery continues the engine without new input. It runs inside the
 								// prompt turn that asked for it, so its output streams there, and the
@@ -4858,7 +4862,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								},
 								// `/council` enters the registry as the dispatch call a model makes, under
 								// a call id the turn announces, so its plan approval binds to that call.
-								runCouncilDispatch: (args) => runHostDispatch(toolRegistry, acpHostToolEvents, args),
+								runCouncilDispatch: (args, turnConstraints) =>
+									runHostDispatch(toolRegistry, acpHostToolEvents, args, turnConstraints),
 								// `/share` picks from the runs this process watched, folded from the
 								// dispatch lifecycle exactly as the terminal's worker blocks are.
 								listWorkerRuns: () => acpWorkerRuns.list(),

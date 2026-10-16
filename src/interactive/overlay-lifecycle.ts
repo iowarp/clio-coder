@@ -559,6 +559,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.agents ? { agents: deps.app.agents } : {}),
 		...(scheduling ? { getBudgetPreflight: () => scheduling.preflight() } : {}),
 		isTurnInFlight: () => deps.app.chat.isStreaming(),
+		standingTurnConstraints: () => deps.app.chat.toolLimits?.(),
 		...(deps.setFleetRunPhase ? { setFleetRunPhase: deps.setFleetRunPhase } : {}),
 	});
 

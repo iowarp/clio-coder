@@ -2,16 +2,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type { SessionToolLimits } from "../../src/core/tool-limit-flags.js";
+import { turnDelegatesTool } from "../../src/core/turn-constraints.js";
+import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
+import {
+	createInteractiveSlashRuntime,
+	type InteractiveSlashRuntimeDeps,
+} from "../../src/interactive/interactive-slash-runtime.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
-test("an interactive or ACP session's tool limits bound every turn, before and after a scoped one", async () => {
-	assert.deepEqual(extractGlobalFlags(["--allow-tools", "read,write", "--delegate-tools", "none"]).toolLimits, {
-		allowedTools: ["read", "write"],
-		delegatedTools: [],
-	});
+function limitedChatLoop(sessionToolLimits: SessionToolLimits) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	const context = dispatchStubContext({ settings });
@@ -42,16 +46,24 @@ test("an interactive or ACP session's tool limits bound every turn, before and a
 		replaceEntries: () => {},
 		tree: () => ({ leafId: null, nodes: [] }),
 	} as unknown as SessionContract;
-	const loop = createChatLoop({
+	return createChatLoop({
 		getSettings: () => settings,
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
-		sessionToolLimits: { allowedTools: ["read", "write"], delegatedTools: [] },
+		sessionToolLimits,
 		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
 			agent: { state: options?.initialState, subscribe: () => () => {}, abort() {}, async prompt() {} },
 		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
 	});
+}
+
+test("an interactive or ACP session's tool limits bound every turn, before and after a scoped one", async () => {
+	assert.deepEqual(extractGlobalFlags(["--allow-tools", "read,write", "--delegate-tools", "none"]).toolLimits, {
+		allowedTools: ["read", "write"],
+		delegatedTools: [],
+	});
+	const loop = limitedChatLoop({ allowedTools: ["read", "write"], delegatedTools: [] });
 	try {
 		// A prewarmed runtime builds its tool surface from these before any turn.
 		assert.deepEqual(loop.currentTurnConstraints?.(), { allowedTools: ["read", "write"], delegatedTools: [] });
@@ -60,6 +72,44 @@ test("an interactive or ACP session's tool limits bound every turn, before and a
 		// A host-scoped turn narrows further and never widens past the session limit.
 		await loop.submit("scoped", { constraints: { allowedTools: ["read", "bash"], delegatedTools: ["bash"] } });
 		assert.deepEqual(loop.currentTurnConstraints?.(), { allowedTools: ["read"], delegatedTools: [] });
+	} finally {
+		loop.dispose();
+		await loop.whenSettled();
+	}
+});
+
+test("a TUI /delegate under --delegate-tools read dispatches a worker limited to read", async () => {
+	const toolLimits = extractGlobalFlags(["--delegate-tools", "read"]).toolLimits;
+	assert.ok(toolLimits);
+	const loop = limitedChatLoop(toolLimits);
+	const dispatched: DispatchRequest[] = [];
+	const runtime = createInteractiveSlashRuntime({
+		io: { stdout() {}, stderr() {} },
+		bus: createSafeEventBus(),
+		chat: loop,
+		chatPanel: { appendReplayBlock() {}, appendUser() {} },
+		requestRender() {},
+		refreshFooter() {},
+		dispatch: {
+			dispatch: async (request: DispatchRequest) => {
+				dispatched.push(request);
+				return {
+					runId: "delegate-run",
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve({ runId: "delegate-run", outcome: "completed", exitCode: 0 }),
+				};
+			},
+		},
+	} as unknown as InteractiveSlashRuntimeDeps);
+	try {
+		runtime.dispatchCommand("/delegate codex rewrite the build script");
+		await new Promise((resolve) => setImmediate(resolve));
+		const request = dispatched.at(0);
+		assert.ok(request, "/delegate dispatched nothing");
+		assert.deepEqual(request.turnConstraints, { delegatedTools: ["read"] });
+		assert.equal(turnDelegatesTool(request.turnConstraints, "read"), true);
+		assert.equal(turnDelegatesTool(request.turnConstraints, "write"), false);
+		assert.equal(turnDelegatesTool(request.turnConstraints, "bash"), false);
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();

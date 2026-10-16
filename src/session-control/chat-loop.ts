@@ -635,6 +635,16 @@ export interface ChatLoop {
 	bindMachineTurnProjection?(host: MachineTurnProjectionHost): () => void;
 	machineTurnAvailable?(): boolean;
 	currentTurnConstraints?(): TurnConstraints | undefined;
+	/**
+	 * Narrow the standing limits below the operator's `sessionToolLimits` by
+	 * each ceiling in order (an ACP client's session, then prompt ceiling).
+	 * Every later turn, continuation and job holds the result until the next
+	 * call; nothing passed here can widen the operator's limits. Returns the
+	 * effective standing limits.
+	 */
+	setToolCeiling?(ceilings: ReadonlyArray<TurnConstraints | undefined>): TurnConstraints | undefined;
+	/** The standing limits {@link setToolCeiling} last set, for work a command starts outside a turn. */
+	toolLimits?(): TurnConstraints | undefined;
 	/** Effective creating/current task and skill ceiling for session-owned jobs (#411). */
 	jobConstraints?(): TurnConstraints | undefined;
 	steer(text: string): boolean;
@@ -1118,7 +1128,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const draftRound = deps.runDraftRound ?? runOutOfTurnRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState();
-	const sessionToolLimits = snapshotTurnConstraints(deps.sessionToolLimits);
+	const operatorToolLimits = snapshotTurnConstraints(deps.sessionToolLimits);
+	let sessionToolLimits = operatorToolLimits;
 	state.currentTurnConstraints = sessionToolLimits;
 	const eggs = createConversationEggs({
 		identity: () => deps.session?.current()?.id ?? null,
@@ -3347,6 +3358,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		contextUsage: () => context.contextUsage(),
 		currentTurnConstraints: () => state.currentTurnConstraints,
+		setToolCeiling(ceilings) {
+			sessionToolLimits = snapshotTurnConstraints(ceilings.reduce(narrowTurnConstraints, operatorToolLimits));
+			// A run in flight keeps the scope it was admitted under.
+			if (!state.streaming) state.currentTurnConstraints = sessionToolLimits;
+			return sessionToolLimits;
+		},
+		toolLimits: () => sessionToolLimits,
 		jobConstraints: () => {
 			const constraints = state.currentTurnConstraints;
 			const policy = state.currentPendingSkillPolicy ?? state.activeSkillSurface;

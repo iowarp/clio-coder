@@ -5,6 +5,7 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { SettingsAreaId } from "../core/settings-areas.js";
 import { resolveSettingsArea, SETTINGS_AREAS } from "../core/settings-areas.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
@@ -330,6 +331,11 @@ export interface HandleRunDeps {
 	 * asked for the model to see a result must not be told it did.
 	 */
 	submitOperatorNote?: (text: string) => void;
+	/**
+	 * The session's standing tool limits. The run carries them, so a session
+	 * started with `--delegate-tools read` never hands a worker write or bash.
+	 */
+	turnConstraints?: TurnConstraints;
 }
 
 /**
@@ -375,6 +381,11 @@ function shareReceipt(agentId: string, receipt: RunReceipt, deps: HandleRunDeps)
 	deps.submitOperatorNote(note);
 }
 
+function standingLimits(ctx: SlashCommandContext): { turnConstraints?: TurnConstraints } {
+	const turnConstraints = ctx.standingTurnConstraints?.();
+	return turnConstraints !== undefined ? { turnConstraints } : {};
+}
+
 /**
  * The attributed half every operator-started run shares, whether `/run` or
  * `/delegate` built the request. Dispatch it, forward its events for surfaces
@@ -392,6 +403,7 @@ async function runAttributed(
 ): Promise<void> {
 	const { dispatch, notice, bus } = deps;
 	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
+	if (deps.turnConstraints !== undefined) request = { ...request, turnConstraints: deps.turnConstraints };
 	try {
 		const handle = await dispatch.dispatch(request);
 		for await (const event of handle.events) {
@@ -528,6 +540,7 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 		return;
 	}
 	const digest = packOracleDigest({ ...sources, question });
+	const turnConstraints = ctx.standingTurnConstraints?.();
 	const request: DispatchRequest = {
 		agentId: ORACLE_AGENT_ID,
 		task: ORACLE_TASK,
@@ -538,6 +551,7 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 		}),
 		requestOrigin: "internal",
 		readOnly: true,
+		...(turnConstraints !== undefined ? { turnConstraints } : {}),
 	};
 	const progressBus = ctx.dispatch.ownsProgressBus?.(ctx.bus) === true ? undefined : ctx.bus;
 	try {
@@ -603,7 +617,10 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 		return;
 	}
 	try {
-		const outcome = await ctx.runCouncilDispatch(buildCouncilDispatchArgs(task, resolved.roster, options));
+		const outcome = await ctx.runCouncilDispatch(
+			buildCouncilDispatchArgs(task, resolved.roster, options),
+			ctx.standingTurnConstraints?.(),
+		);
 		if (outcome.status === "blocked") ctx.notice("warn", `/council was not admitted: ${outcome.reason}`);
 		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${outcome.message}`);
 	} catch (err) {
@@ -832,13 +849,22 @@ export interface SessionCommandContext {
 	 * its own, so admission, the approval overlay, receipts, and the board treat
 	 * an operator council exactly as they treat a model-asked one.
 	 */
-	runCouncilDispatch?: (args: Readonly<Record<string, unknown>>) => Promise<CouncilDispatchOutcome>;
+	runCouncilDispatch?: (
+		args: Readonly<Record<string, unknown>>,
+		turnConstraints?: TurnConstraints,
+	) => Promise<CouncilDispatchOutcome>;
 	/**
 	 * True while a turn is streaming. `/oracle` is refused then, never queued:
 	 * the digest describes the record as it stands and an in-flight turn is
 	 * about to change it.
 	 */
 	isTurnInFlight?: () => boolean;
+	/**
+	 * The session's standing tool limits, which an ACP client ceiling narrows.
+	 * A dispatch /run, /delegate, /oracle or /council starts outside a turn
+	 * carries them, or it would run wider than the session it was started from (Z1).
+	 */
+	standingTurnConstraints?: () => TurnConstraints | undefined;
 	/**
 	 * `/handoff <goal>`: extract this session's working state for a stated goal,
 	 * review the document, and seed a successor session with it. A session
@@ -976,6 +1002,23 @@ export interface CommandAcpAdmission {
 	injectsUserTurnExcept?: ReadonlyArray<string>;
 	promptTurn?: true;
 	promptTurnSubcommands?: ReadonlyArray<string>;
+	/**
+	 * First arguments that only read, with `""` for the bare form. Under an ACP
+	 * client or operator ceiling only these and turn-injecting commands run (Z1).
+	 */
+	reads?: ReadonlyArray<string>;
+	/**
+	 * First arguments that only stop, pause or reshape the session's own context
+	 * and write no project or operator file. A ceiling admits them as it admits
+	 * {@link reads}: a client held to read-only must still be able to stop a loop.
+	 */
+	sessionOnly?: ReadonlyArray<string>;
+	/**
+	 * The whole command, or these first arguments, write project or session
+	 * state or start a worker outside any tool call. A read-only ceiling denies
+	 * every write and delegation, so it refuses them even when they submit a turn.
+	 */
+	readOnlyRefuses?: true | ReadonlyArray<string>;
 }
 
 export interface BuiltinSlashCommand {
@@ -1132,7 +1175,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "eggs",
-		acp: {},
+		acp: { reads: ["", "status"], sessionOnly: ["off"] },
 		description: "Show active conversation eggs or turn them off",
 		group: "Inspect",
 		kinds: ["eggs"],
@@ -1439,7 +1482,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "mcp",
-		acp: {},
+		acp: { reads: ["", "list"] },
 		description: "List MCP servers, or trust or untrust one by id",
 		group: "Inspect",
 		kinds: ["mcp"],
@@ -1463,7 +1506,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "doctor",
-		acp: {},
+		acp: { reads: [""] },
 		description: "Check this install; `deep` adds live tool probes and a contract dry run",
 		group: "Inspect",
 		kinds: ["doctor"],
@@ -1768,6 +1811,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						runtimeForTarget: (id) => ctx.providers.getTarget(id)?.runtime ?? null,
 						bus: ctx.bus,
 						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
+						...standingLimits(ctx),
 					},
 					options,
 				);
@@ -1823,6 +1867,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						notice: ctx.notice,
 						bus: ctx.bus,
 						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
+						...standingLimits(ctx),
 					},
 					{ share, readOnly: command.readOnly === true },
 				);
@@ -1882,7 +1927,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "oracle",
-		acp: { streams: "dispatch", injectsUserTurn: true },
+		acp: { streams: "dispatch", injectsUserTurn: true, readOnlyRefuses: true },
 		description: "Have a read-only advisor challenge a question against settled decisions",
 		group: "Work",
 		kinds: ["oracle", "oracle-usage"],
@@ -1969,7 +2014,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "loop",
 		// Its jobs fire user turns later, outside any prompt, which is what this marker tells a client.
 		// Listing and controlling jobs submits nothing, so those verbs stay available while a prompt runs.
-		acp: { injectsUserTurn: true, injectsUserTurnExcept: LOOP_OBSERVE_VERBS },
+		acp: {
+			injectsUserTurn: true,
+			injectsUserTurnExcept: LOOP_OBSERVE_VERBS,
+			reads: ["list", "status"],
+			// Resume restarts jobs that fire turns, so a ceiling does not admit it.
+			sessionOnly: ["stop", "cancel", "pause"],
+		},
 		description: "Run a bounded recurring job: a main-context task or a typed command",
 		group: "Work",
 		kinds: ["loop"],
@@ -2073,6 +2124,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: {
 			subcommands: ["compact", "recall", "init", "refresh", "reset", "recover"],
 			promptTurnSubcommands: ["recover"],
+			// Reset deletes project context files, so a ceiling refuses it.
+			sessionOnly: ["compact", "recall"],
 		},
 		description: "Show the context window, or manage session and project context",
 		group: "Inspect",
@@ -2263,7 +2316,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "tasks",
-		acp: { subcommands: ["add", "hand", "done", "drop"], injectsUserTurn: true },
+		acp: {
+			subcommands: ["add", "hand", "done", "drop"],
+			injectsUserTurn: true,
+			readOnlyRefuses: ["add", "hand", "done", "drop"],
+		},
 		description: "Show the session task board, or manage project tasks",
 		group: "Inspect",
 		kinds: ["tasks", "tasks-add", "tasks-hand", "tasks-done", "tasks-drop"],

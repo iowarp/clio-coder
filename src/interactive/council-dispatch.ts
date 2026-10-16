@@ -10,6 +10,7 @@
  */
 
 import { ToolNames } from "../core/tool-names.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { CouncilDispatchOutcome } from "../session-control/slash-commands.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
@@ -22,8 +23,12 @@ import type { ToolRegistry } from "../tools/registry.js";
 export async function dispatchCouncilThroughRegistry(
 	registry: Pick<ToolRegistry, "invoke">,
 	args: Readonly<Record<string, unknown>>,
+	turnConstraints?: TurnConstraints,
 ): Promise<CouncilDispatchOutcome> {
-	const verdict = await registry.invoke({ tool: ToolNames.Dispatch, args: { ...args } });
+	const verdict = await registry.invoke(
+		{ tool: ToolNames.Dispatch, args: { ...args } },
+		turnConstraints !== undefined ? { turnConstraints } : undefined,
+	);
 	if (verdict.kind === "blocked") return { status: "blocked", reason: verdict.reason };
 	if (verdict.kind === "not_visible") return { status: "error", message: verdict.reason };
 	return verdict.result.kind === "error" ? { status: "error", message: verdict.result.message } : { status: "ok" };

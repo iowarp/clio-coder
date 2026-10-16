@@ -26,6 +26,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		let accept: (() => void) | undefined;
 		let finish: (() => void) | undefined;
 		let settingsReadable = false;
+		const runLimits: unknown[] = [];
 		const transitions = { state: "closed", handle: null, showPermission: () => false, close: noop };
 		const deps: Partial<OverlayGeneralOpenersDeps> = {
 			dispatch: {} as DispatchContract,
@@ -63,8 +64,11 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 				accept = options.onAccept;
 				return {} as ReturnType<NonNullable<OverlayGeneralOpenersDeps["openFleetRunApprovalOverlay"]>>;
 			},
-			runFleet: () =>
+			// The session's --delegate-tools limit reaches every worker the run starts.
+			standingTurnConstraints: () => ({ delegatedTools: ["read"] }),
+			runFleet: (input) =>
 				new Promise<FleetRunOutcome>((resolve) => {
+					runLimits.push(input.turnConstraints);
 					finish = () =>
 						resolve({
 							cleanRun: true,
@@ -85,6 +89,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		strictEqual(opened, 2, "the failed start left no run in flight");
 		accept();
 		strictEqual(notices.at(-1)?.[0], "fleet-run:started");
+		deepStrictEqual(runLimits, [{ delegatedTools: ["read"] }]);
 		openers.startFleetRun("survey", {});
 		strictEqual(opened, 2, "no second approval while the first fleet runs");
 		strictEqual(notices.at(-1)?.[0], "fleet-run:in-flight");
