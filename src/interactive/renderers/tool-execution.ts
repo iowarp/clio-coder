@@ -1147,6 +1147,9 @@ function sublineParts(
 	}
 	const settled = status === "ok" || status === "error";
 	const notRun = didNotRun(finished);
+	// A change the tool refused or failed to apply never landed, so the row
+	// must not read "edited" beside its error glyph.
+	const failedChange = !notRun && status === "error" && row.spec.class === "mutate";
 	const verb =
 		status === "forming" || status === "ready"
 			? sanitizeCallTargetText(row.toolName)
@@ -1154,9 +1157,11 @@ function sublineParts(
 				? finished?.outcome === "blocked"
 					? "blocked"
 					: "not run"
-				: settled
-					? row.spec.verbs[1]
-					: row.spec.verbs[0];
+				: failedChange
+					? "edit failed"
+					: settled
+						? row.spec.verbs[1]
+						: row.spec.verbs[0];
 	const target = rowObject(row, finished, width, objectBudget);
 	// A call cut off before its arguments named a target still says which tool it was.
 	const object =
@@ -1182,7 +1187,7 @@ function sublineParts(
 			: "";
 	const inlineText = scalars.length > 0 ? theme.fg("toolArgument", ` · ${scalars.join(" · ")}`) : "";
 	const head = (inline: string): string =>
-		`${classMark(row.spec.class)}${notRun ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inline}`;
+		`${classMark(row.spec.class)}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inline}`;
 	const ledger = finished === null ? null : ledgerTail(finished, row);
 	const via = row.viaGateway ? toolMeta(" · via gateway") : "";
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";

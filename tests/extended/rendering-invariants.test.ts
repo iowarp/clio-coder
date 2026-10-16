@@ -2227,7 +2227,7 @@ describe("tool classes", () => {
 			),
 		);
 		deepStrictEqual(failed, [
-			`${GLYPH.classMutate} edited src/a.ts ✗ · 42ms`,
+			`${GLYPH.classMutate} edit failed src/a.ts ✗ · 42ms`,
 			"  │ oldText › OLD",
 			"  │ newText › NEW",
 			"  │ edit: oldText not found in src/a.ts.",
