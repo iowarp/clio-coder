@@ -41,6 +41,7 @@ import {
 	type ExecutionPlanCodeStep,
 	type ExecutionPlanStep,
 	executionPlanAncestors,
+	executionPlanIdentityHash,
 	executionPlanWaves,
 	spliceExecutionPlan,
 } from "./execution-plan.js";
@@ -146,6 +147,12 @@ function sortedVars(vars: Readonly<Record<string, string>>): string {
 	return JSON.stringify(Object.entries(vars).sort());
 }
 
+function withoutEndpoint(step: unknown): unknown {
+	if (typeof step !== "object" || step === null || !("endpoint" in step)) return step;
+	const { endpoint: _endpoint, ...rest } = step;
+	return rest;
+}
+
 function stepIdentity(step: unknown): string {
 	if (typeof step === "string") return step;
 	if (typeof step === "object" && step !== null && "id" in step && typeof step.id === "string") return step.id;
@@ -192,23 +199,22 @@ export function planFleetResume(
 		return { ok: false, reason: "running", pid: assignment.processOwner.pid };
 	}
 	if (sortedVars(record.vars) !== sortedVars(vars)) return { ok: false, reason: "vars" };
-	if (record.planHash !== plan.hash) {
+	// Endpoint limits and the foreground count are bound into `hash` at route
+	// preflight, so a busier endpoint must not read as a changed plan. A record
+	// written before the identity hash existed still compares the bound hash.
+	const priorHash = record.planIdentityHash ?? record.planHash;
+	const currentHash = record.planIdentityHash !== undefined ? executionPlanIdentityHash(plan) : plan.hash;
+	if (priorHash !== currentHash) {
 		const priorSteps = record.planSteps ?? record.stepIds;
 		const width = Math.max(priorSteps.length, plan.steps.length);
 		const diff: FleetResumeStepDiff[] = [];
 		for (let index = 0; index < width; index += 1) {
 			const prior = priorSteps[index] ?? "(missing)";
 			const current = plan.steps[index] ?? "(missing)";
-			if (JSON.stringify(prior) === JSON.stringify(current)) continue;
+			if (JSON.stringify(withoutEndpoint(prior)) === JSON.stringify(withoutEndpoint(current))) continue;
 			diff.push({ index, prior, current, priorId: stepIdentity(prior), currentId: stepIdentity(current) });
 		}
-		return {
-			ok: false,
-			reason: "plan-hash",
-			priorHash: record.planHash,
-			currentHash: plan.hash,
-			diff,
-		};
+		return { ok: false, reason: "plan-hash", priorHash, currentHash, diff };
 	}
 	const priorByStep = new Map(record.steps.map((entry) => [entry.stepId, entry.result]));
 	const replayed = new Map<string, ExecutionStepResult>();
@@ -325,6 +331,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		cwd: workspaceRoot,
 		fleet: input.playbookName,
 		planHash: livePlan.hash,
+		planIdentityHash: executionPlanIdentityHash(livePlan),
 		stepIds: livePlan.steps.map((step) => step.id),
 		planSteps: livePlan.steps.map((step) => structuredClone(step)),
 		vars: { ...(input.vars ?? {}) },

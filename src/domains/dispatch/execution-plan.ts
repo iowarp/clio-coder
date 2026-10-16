@@ -376,6 +376,29 @@ export function bindExecutionPlanEndpoints(
 	});
 }
 
+/**
+ * The plan's hash with route-preflight endpoint bounds removed. Endpoint limits
+ * and the foreground count describe the routes at the moment of compile, not
+ * the plan, so a resume compares this rather than `hash`.
+ */
+export function executionPlanIdentityHash(plan: ExecutionPlan): string {
+	return compileExecutionPlan({
+		topology: plan.topology,
+		rootTask: plan.rootTask,
+		maxWorkers: plan.maxWorkers,
+		...(plan.writers === 1 ? { writers: 1 as const } : {}),
+		onFailure: plan.onFailure,
+		steps: plan.steps.map((step) => withoutEndpoint(step)),
+		loops: plan.loops,
+	}).hash;
+}
+
+function withoutEndpoint<T extends ExecutionPlanStep>(step: T): T {
+	if (step.kind === "code" || step.endpoint === undefined) return step;
+	const { endpoint: _endpoint, ...rest } = step;
+	return rest as T;
+}
+
 /** Transitive dependency closure of one plan step. */
 export function executionPlanAncestors(plan: ExecutionPlan, stepId: string): ReadonlySet<string> {
 	const byId = new Map(plan.steps.map((step) => [step.id, step]));

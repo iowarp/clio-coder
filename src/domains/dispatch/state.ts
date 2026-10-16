@@ -44,6 +44,8 @@ export interface FleetRunRecord {
 	cwd?: string;
 	fleet: string;
 	planHash: string;
+	/** The plan hash before endpoint binding; absent on records older than resume across endpoint load. */
+	planIdentityHash?: string;
 	stepIds: string[];
 	planSteps: unknown[];
 	vars: Record<string, string>;
