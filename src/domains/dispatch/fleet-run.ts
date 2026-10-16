@@ -373,7 +373,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 		}
 		input.onStepDispatched?.(event);
 	};
-	const sealEvents = (outcome: "completed" | "failed"): void =>
+	const sealEvents = (outcome: "succeeded" | "failed" | "aborted"): void =>
 		events.append({
 			type: "fleet_sealed",
 			outcome,
@@ -1117,7 +1117,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	} catch (error) {
 		fleetRunRecord.endedAt = new Date().toISOString();
 		await writeManifest();
-		sealEvents("failed");
+		sealEvents(input.signal?.aborted === true ? "aborted" : "failed");
 		// A run the scheduler could not carry to the end never reached a verdict,
 		// and a fleet that threw is not a fleet that worked.
 		await settleFleetAssignment(false);
@@ -1125,7 +1125,6 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	}
 	fleetRunRecord.endedAt = new Date().toISOString();
 	await writeManifest();
-	sealEvents("completed");
 
 	// A loop is judged by whether it converged, not attempt by attempt: a red
 	// verification that a later attempt fixed is the loop working as declared,
@@ -1136,6 +1135,9 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	// A step a stop policy left unrun is counted but never succeeded, so a run
 	// that halted early can never reach the required count.
 	const cleanRun = failedLoops.length === 0 && result.skipped.length === 0 && succeededStepCount === required.length;
+	// The seal carries the same verdict the assignment row gets, so a fleet
+	// with a red or skipped step never seals as a success.
+	sealEvents(cleanRun ? "succeeded" : input.signal?.aborted === true ? "aborted" : "failed");
 	await settleFleetAssignment(cleanRun);
 	return {
 		rootId: fleetRootId,

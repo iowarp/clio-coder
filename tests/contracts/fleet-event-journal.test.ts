@@ -104,7 +104,7 @@ test("a fleet appends a hash-chained journal whose settled steps name the manife
 		strictEqual(stageSettled.stepEntryDigest, fleetStepEntryDigest(final.steps[0] ?? { stepId: "", result: null }));
 		const sealed = read.lines.at(-1);
 		ok(sealed?.type === "fleet_sealed");
-		strictEqual(sealed.outcome, "completed");
+		strictEqual(sealed.outcome, "succeeded");
 		strictEqual(sealed.manifestDigest, fleetManifestDigest(readFileSync(recordPath, "utf8")));
 		// A follower resumes from its cursor, and a forged line is caught.
 		const text = readFileSync(fleetEventJournalPath(rootId), "utf8");
@@ -116,6 +116,55 @@ test("a fleet appends a hash-chained journal whose settled steps name the manife
 		});
 		ok(tampered);
 		strictEqual(tampered.broken, "line 7 does not extend the chain");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		env.restore();
+	}
+});
+
+test("a fleet with a failed step seals failed", async () => {
+	const env = await isolateClioEnv("clio-coder-fleet-events-red-");
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-fleet-events-red-repo-"));
+	try {
+		git(root, "init", "-q");
+		const plan = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "check",
+			maxWorkers: 1,
+			onFailure: "stop",
+			steps: [{ kind: "code", id: "check", commandId: "check", scope: "readonly", dependencies: [] }],
+		});
+		const rootId = "fleet-0123456789ac";
+		const outcome = await executeFleetRun({
+			plan,
+			playbookName: "red",
+			commands: {
+				version: 1,
+				path: join(root, "commands.yaml"),
+				commands: new Map([
+					[
+						"check",
+						{
+							id: "check",
+							argv: [process.execPath, "-e", "process.exit(1)"],
+							cwd: "",
+							timeoutMs: 10000,
+							env: [],
+							description: "check",
+						},
+					],
+				]),
+			},
+			workspaceRoot: root,
+			fleetRootId: rootId,
+			dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
+			agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
+			attributionEnabled: false,
+		});
+		strictEqual(outcome.cleanRun, false);
+		const sealed = readFleetEventJournal(rootId)?.lines.at(-1);
+		ok(sealed?.type === "fleet_sealed");
+		strictEqual(sealed.outcome, "failed");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 		env.restore();
@@ -139,7 +188,7 @@ test("fleet events prints the stored lines verbatim and ends at the seal", async
 		});
 		journal.append({
 			type: "fleet_sealed",
-			outcome: "completed",
+			outcome: "succeeded",
 			endedAt: "2026-10-01T00:00:00.000Z",
 			stepCount: 0,
 			manifestDigest: "c".repeat(64),

@@ -21,7 +21,7 @@
  *   step_settled     stepId, kind, succeeded, integrityValid, terminalRunId,
  *                    receiptDigest, recordPath, failureReason?, stepEntryDigest,
  *                    manifestStepCount, manifestDigest
- *   fleet_sealed     outcome ("completed" | "failed"), endedAt, stepCount,
+ *   fleet_sealed     outcome ("succeeded" | "failed" | "aborted"), endedAt, stepCount,
  *                    manifestDigest
  *
  * `manifestDigest` is the sha256 of the exact bytes of the root record
@@ -86,7 +86,8 @@ export type FleetEventBody =
 	  }
 	| {
 			type: "fleet_sealed";
-			outcome: "completed" | "failed";
+			/** The run's own verdict: succeeded only when every required step succeeded and every loop converged. */
+			outcome: "succeeded" | "failed" | "aborted";
 			endedAt: string;
 			stepCount: number;
 			manifestDigest: string;
