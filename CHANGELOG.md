@@ -4,12 +4,65 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-### Fixes
+Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trust, lets an outside driver follow, resume and bound a fleet or headless run, and enforces tool ceilings that a headless run, an ACP client or a prompt template sets. Memory now keeps commands a task proved to work and offers them when a later session touches the same files. Extension api 2 runtimes run in every host and in dispatched workers, and gpt-oss models keep their tool turns intact.
 
-- Interrupt in-flight MCP calls with `notifications/cancelled` and a bounded responsiveness check, keeping responsive servers available. Trusted servers that fail reconnect lazily after cleanup on the next gateway call; cancelled calls are never automatically replayed.
-- Use MCP annotations as advisory action-class defaults for untouched user declarations, preserving operator overrides. Keep boolean hints in tool catalogs, show per-tool classes in `mcp list`, and support `mcp list --refresh` to refresh them. Repeated read-only idempotent polls spend the normal call budget instead of triggering the identical-argument loop guard.
-- Attribute assistant turns to their recorded provider and model in live and resumed terminal transcripts, copied views, Markdown exports and HTML exports. Export model changes at their recorded positions.
-- Accept an explicit `allow` capability list on main-runner jobs, intersect it with inherited task constraints, enforce it on every occurrence regardless of autonomy, and show it in job creation and monitor output. Rejected tools use the existing turn-constraint audit trail.
+### Upgrade notes
+
+- A project MCP server now binds the SHA-256 of every in-project file its launch names into its trust digest: an absolute command, each argument not shaped like a flag and each value a flag carries after `=` (such as `--require=./a.cjs`) that resolves to an existing file in the project. An imported module, a `python -m` module and a file reached through the environment are not bound. An existing trust for a server that names such a file reads as stale once after the upgrade, and the stale notice names the entry-script binding; run `clio-coder mcp trust <id>` again. Editing a bound file later makes the trust stale again. `mcp list` and `mcp trust` print `entry=<paths>`, or `entry=none` when the trust pins no file. An older build sharing the config directory drops the new `network` and `entryScriptHashes` trust fields when it rewrites the trust file and reads entry-bound digests as stale.
+- With `CLIO_CODER_INTEROP_HOME` unset, Clio reads the operator's home for other agents' skills, prompts and inventory even when `CLIO_CODER_HOME` relocates Clio's own directories. A path names another home, and `CLIO_CODER_INTEROP_HOME=none` reads no foreign user roots, overrides an explicit agent home variable such as `CLAUDE_CONFIG_DIR` and turns off sibling quota credentials.
+- A fleet node that runs workers carrying tool hooks needs a build that reads worker spec version 9. Specs without hooks still go out as version 8, so a node one release behind keeps working for them. A node that cannot read the version is reported as build skew, and the dispatch fails over to another node.
+- Under any blocking tool hook, Clio refuses to dispatch to CLI runtimes and refuses ACP delegation, because neither can carry the hook.
+
+### MCP
+
+- Native workers can use MCP. A recipe names exact `mcp_<id>__<tool>` capabilities, admission refuses an untrusted or stale server by name, and the worker starts only the declaration its permit sealed, under the worker sandbox and at the task worktree root.
+- `clio-coder mcp trust <id> --network` grants one project or plugin server network inside a worker sandbox, and a user declaration grants it with `network: true`. On Linux the granted server runs in the host network namespace, so it reaches the internet, services listening on localhost and abstract Unix sockets. Credential masking in the sandbox is a denylist of known paths, so any other secret readable in the home can leave through a granted server. A worker keeps the grant only when none of its write roots contains or lies inside the server's launch cwd, the directory of a bound entry file, or for a project server the project root, so in practice only read-only workers keep it. Admission and the dispatch result name each withheld grant with its reason. Worker shells and other servers keep the run's network policy. `mcp list` and `mcp test` show each server's grant and where it came from.
+- `clio-coder mcp test <id> [--call <tool> [--args <json>]]` starts one declared server through the gateway's own client and records each call's result or error.
+- An installed plugin's `mcp.json` servers are declared under explicit trust and stop when the plugin is disabled, removed or changed. A foreign package's `mcp.json` is skipped unless project imports are trusted.
+- MCP tools are classified through one trust-first classifier. Annotations serve as advisory action-class defaults for untouched user declarations, operator overrides win, `mcp list` shows per-tool classes and `mcp list --refresh` refreshes them.
+- Interrupting an in-flight MCP call sends `notifications/cancelled` and keeps a responsive server available. A trusted server that fails reconnects on the next gateway call, and a cancelled call is never replayed.
+- Repeated read-only idempotent polls spend the normal call budget instead of tripping the identical-argument loop guard.
+
+### Safety and limits
+
+- `clio-coder run --read-only` without `--agent` is an enforced ceiling on the main agent, and only MCP servers the operator classes as read start under it. A call the ceiling refuses does not fail the run.
+- Every refusal says what refused it and puts its remedy on its own line, and an identical repeat in the same turn is refused without running.
+- `--allow-tools` and `--delegate-tools` limit an interactive or ACP session's tools. Every turn runs under them, and `/run`, `/delegate`, `/council` and `/fleet` carry them to every worker.
+- An ACP client can set a capability ceiling per session and per prompt. Clio advertises it, screens slash commands, shell lines and fleet runs against it, and carries it through fork, handoff and `session/load`.
+- Prompt template `allowed-tools` now narrows the template's turn, and `delegated-tools` sets the ceiling its dispatched workers get. Neither widens the session's limits, and imported skills and commands keep their own narrower tool lists.
+- Attended sessions ask once before the first test runner of each session, whoever wrote the code, including a dispatch or job host check. Headless runs keep their existing allow.
+- `clio-coder run --max-cost-usd <n>` bounds the run's priced spend. The run stops with exit 4 and `budget_ceiling` when it reaches the cap, and warns about any unpriced route it cannot bound.
+- Main-runner jobs accept an explicit `allow` capability list. It intersects inherited task constraints, holds on every occurrence regardless of autonomy, and shows in job creation and monitor output.
+- Project extension and plugin trust pins package identities, so reinstalling identical content or disabling a package keeps consent, while a changed trust flag, capability envelope or plugin kind asks again. `config trust extensions` and `config trust plugins` list each package with its origin and trust, disabled ones included. An operator install approves only the records still carrying the content digest it wrote, so a record another writer replaced during the install stays unapproved.
+- A per-target `--api-key` override satisfies an OAuth target again.
+
+### Fleet
+
+- `clio-coder fleet events <root>` prints a fleet's hash-chained event journal, `--json` writes the stored NDJSON lines verbatim and `--follow` keeps reading until the fleet seals. Each settled step writes a verifiable manifest checkpoint.
+- Fleets resume from the TUI, ACP and the desktop app as well as `fleet run --resume`. Every surface validates the prior root against the plan and shows the replayed steps in the preview.
+- One cross-process lock per git checkout keeps two fleets from running in the same workspace. A refused CLI run exits 1, and a stale lock from another host is reclaimed once its holder stops refreshing it.
+- Receipts count only provider calls and record how each ended, and a worker's receipt records the MCP tools its permit attested.
+
+### Extensions
+
+- Extension api 2 hooks, runtime tools, observations and maintenance ticks run in `clio-coder run` and ACP sessions as well as the terminal. With no interview channel, an interview step is cancelled with reason `headless` at once instead of waiting.
+- The session's tool hooks apply to dispatched workers' calls under `fleet run`, `run --agent` and in-session dispatch. A lost hook answer fails closed by the hook's stricter policy.
+- A hook can name MCP tools by family with a trailing `*`, and hooks with tool-args access receive the link-resolved path each file tool lands on and the workers a dispatch will start.
+- `clio-coder fleet run` checks every step's route in preflight and refuses a playbook before any step runs when one hooked step's runtime cannot carry a blocking hook.
+- `clio-coder context wiki` and `clio-coder context init` run their workers under the command's own extension host. When that host fails to start and a blocking hook applies, they refuse before dispatching, and `context init` falls back to its heuristic bootstrap.
+
+### Memory
+
+- Memory keeps commands a completed task proved to work from its own receipts, whatever the lesson model answers, and offers them on the session's own actions: its first code change, a read, edit or run of a file the lesson names, and a failed run of the same program on the same file.
+- A retention a process left unsettled is finished by the next process from that session's ledger.
+- `/memory` opens on the lessons the session can reach and shows what each concerns, whether the main prompt carries it, its evidence and its track record.
+- Opt-in `context.memory.observations.enabled` prepares source-linked notes that compaction can use in place of the history they cover.
+
+### Providers and sessions
+
+- gpt-oss models keep their reasoning on replayed tool turns and no longer send text, reasoning and tool calls in one turn.
+- Out-of-turn rounds ask for an explicit thinking level.
+- Live and resumed transcripts, copied views and Markdown and HTML exports attribute each assistant turn to its recorded provider and model, and exports show model changes where they happened.
 
 ## 0.6.2 - 2026-10-09
 
