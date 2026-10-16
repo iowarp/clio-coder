@@ -235,7 +235,7 @@ it("refreshes trusted MCP catalogs and lists annotation-derived tool classes", (
 		const marker = join(scratch.dir, "untrusted-launched");
 		writeFileSync(
 			join(scratch.dir, "config", "mcp.yaml"),
-			`version: 1\nservers:\n  - id: fake\n    command: ${JSON.stringify(process.execPath)}\n    args: [${JSON.stringify(resolve("tests/fixtures/mcp-fake-server.mjs"))}]\n`,
+			`version: 1\nservers:\n  - id: fake\n    command: ${JSON.stringify(process.execPath)}\n    args: [${JSON.stringify(resolve("tests/fixtures/mcp-fake-server.mjs"))}]\n    toolActionClasses: {echo: read}\n`,
 		);
 		writeFileSync(
 			join(project, ".clio-coder", "mcp.yaml"),
@@ -265,6 +265,169 @@ it("refreshes trusted MCP catalogs and lists annotation-derived tool classes", (
 		strictEqual(cached.status, 0);
 		match(cached.stdout, /mcp_fake__sleep actionClass=read/u);
 		match(cached.stdout, /mcp_fake__fail actionClass=destructive/u);
+	} finally {
+		scratch.cleanup();
+	}
+});
+
+it("tests one trusted server through the gateway's client and never launches an untrusted one", () => {
+	const scratch = makeScratchHome("clio-mcp-cli-test-");
+	try {
+		const project = join(scratch.dir, "project");
+		mkdirSync(join(project, ".clio-coder"), { recursive: true });
+		mkdirSync(join(scratch.dir, "config"), { recursive: true });
+		const marker = join(scratch.dir, "untrusted-launched");
+		writeFileSync(
+			join(scratch.dir, "config", "mcp.yaml"),
+			`version: 1\nservers:\n  - id: fake\n    command: ${JSON.stringify(process.execPath)}\n    args: [${JSON.stringify(resolve("tests/fixtures/mcp-fake-server.mjs"))}]\n    toolActionClasses: {echo: read}\n`,
+		);
+		writeFileSync(
+			join(project, ".clio-coder", "mcp.yaml"),
+			`version: 1\nservers:\n  - id: untrusted\n    command: ${JSON.stringify(process.execPath)}\n    args: ["-e", ${JSON.stringify(`require('fs').writeFileSync(${JSON.stringify(marker)}, 'launched')`)}]\n`,
+		);
+		const module = resolve("src/cli/mcp.ts");
+		const run = (args: string[]) =>
+			spawnSync(
+				process.execPath,
+				[
+					"--import",
+					import.meta.resolve("tsx"),
+					"--input-type=module",
+					"-e",
+					`import { runMcpCommand } from ${JSON.stringify(module)}; process.exitCode = await runMcpCommand(${JSON.stringify(args)});`,
+				],
+				{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
+			);
+		const refused = run(["test", "untrusted", "--json"]);
+		strictEqual(refused.status, 1);
+		match(JSON.parse(refused.stdout).message, /never launched until trusted: clio-coder mcp trust untrusted/u);
+		strictEqual(existsSync(marker), false);
+		const tested = run(["test", "fake", "--call", "echo", "--args", '{"text":"hi"}', "--json"]);
+		strictEqual(tested.status, 0, tested.stderr);
+		const data = JSON.parse(tested.stdout);
+		strictEqual(data.ok, true);
+		strictEqual(data.protocolVersion, "2025-06-18");
+		deepStrictEqual(data.serverInfo, { name: "fake", version: "1.0" });
+		deepStrictEqual(
+			data.tools.find((tool: { name: string }) => tool.name === "sleep"),
+			{ name: "sleep", capability: "mcp_fake__sleep", actionClass: "read", serverHint: "read-only" },
+		);
+		deepStrictEqual(
+			data.calls.map(({ tool, isError, text }: { tool: string; isError: boolean; text: string }) => ({
+				tool,
+				isError,
+				text,
+			})),
+			[{ tool: "echo", isError: false, text: '{"text":"hi"}' }],
+		);
+	} finally {
+		scratch.cleanup();
+	}
+});
+
+it("admits each mcp test call as a session does and never sends a confirm-gated one", () => {
+	const scratch = makeScratchHome("clio-mcp-cli-test-admission-");
+	try {
+		const project = join(scratch.dir, "project");
+		mkdirSync(project, { recursive: true });
+		mkdirSync(join(scratch.dir, "config"), { recursive: true });
+		const marker = join(scratch.dir, "tools-call-received");
+		// A minimal Slurm server that records any tools/call it receives.
+		const server = [
+			"const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');",
+			"require('readline').createInterface({ input: process.stdin }).on('line', (line) => {",
+			"  const m = JSON.parse(line);",
+			"  if (m.method === 'initialize') send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'slurm', version: '1' } } });",
+			"  else if (m.method === 'tools/list') send({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'slurm_submit', inputSchema: { type: 'object' } }] } });",
+			`  else if (m.method === 'tools/call') { require('fs').writeFileSync(${JSON.stringify(marker)}, 'called'); send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: 'submitted' }] } }); }`,
+			"});",
+		].join("\n");
+		// Classed read, slurm_submit runs on no class rule; only the Slurm
+		// confirmation rule, which binds on every surface, can refuse it.
+		writeFileSync(
+			join(scratch.dir, "config", "mcp.yaml"),
+			`version: 1\nservers:\n  - id: slurm\n    command: ${JSON.stringify(process.execPath)}\n    args: ["-e", ${JSON.stringify(server)}]\n    toolActionClasses: {slurm_submit: read}\n`,
+		);
+		const result = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				import.meta.resolve("tsx"),
+				"--input-type=module",
+				"-e",
+				`import { runMcpCommand } from ${JSON.stringify(resolve("src/cli/mcp.ts"))}; process.exitCode = await runMcpCommand(${JSON.stringify(["test", "slurm", "--call", "slurm_submit", "--call", "unlisted", "--json"])});`,
+			],
+			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
+		);
+		strictEqual(result.status, 1, result.stderr);
+		const data = JSON.parse(result.stdout);
+		strictEqual(data.protocolVersion, "2025-06-18");
+		deepStrictEqual(
+			data.calls.map(({ tool, isError, refused }: { tool: string; isError: boolean; refused?: boolean }) => ({
+				tool,
+				isError,
+				refused,
+			})),
+			[
+				{ tool: "slurm_submit", isError: true, refused: true },
+				{ tool: "unlisted", isError: true, refused: true },
+			],
+		);
+		deepStrictEqual(
+			{ layer: data.calls[0].denial.layer, actionClass: data.calls[0].denial.actionClass },
+			{ layer: "operator_approval", actionClass: "read" },
+		);
+		strictEqual(existsSync(marker), false, "the server never received a tools/call");
+	} finally {
+		scratch.cleanup();
+	}
+});
+
+it("records a JSON-RPC error answer as that call's error and runs the later calls", () => {
+	const scratch = makeScratchHome("clio-mcp-cli-test-rpc-error-");
+	try {
+		const project = join(scratch.dir, "project");
+		mkdirSync(project, { recursive: true });
+		mkdirSync(join(scratch.dir, "config"), { recursive: true });
+		const server = [
+			"const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');",
+			"require('readline').createInterface({ input: process.stdin }).on('line', (line) => {",
+			"  const m = JSON.parse(line);",
+			"  if (m.method === 'initialize') send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'rpc', version: '1' } } });",
+			"  else if (m.method === 'tools/list') send({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'strict', inputSchema: { type: 'object' } }, { name: 'echo', inputSchema: { type: 'object' } }] } });",
+			"  else if (m.method === 'tools/call' && m.params.name === 'strict') send({ jsonrpc: '2.0', id: m.id, error: { code: -32602, message: 'invalid params' } });",
+			"  else if (m.method === 'tools/call') send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: 'echoed' }] } });",
+			"});",
+		].join("\n");
+		writeFileSync(
+			join(scratch.dir, "config", "mcp.yaml"),
+			`version: 1\nservers:\n  - id: rpc\n    command: ${JSON.stringify(process.execPath)}\n    args: ["-e", ${JSON.stringify(server)}]\n    toolActionClasses: {strict: read, echo: read}\n`,
+		);
+		const result = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				import.meta.resolve("tsx"),
+				"--input-type=module",
+				"-e",
+				`import { runMcpCommand } from ${JSON.stringify(resolve("src/cli/mcp.ts"))}; process.exitCode = await runMcpCommand(${JSON.stringify(["test", "rpc", "--call", "strict", "--call", "echo", "--json"])});`,
+			],
+			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
+		);
+		strictEqual(result.status, 1, result.stderr);
+		const calls = JSON.parse(result.stdout).calls;
+		deepStrictEqual(
+			calls.map(({ tool, isError, error }: { tool: string; isError?: boolean; error?: string }) => ({
+				tool,
+				isError,
+				error,
+			})),
+			[
+				{ tool: "strict", isError: true, error: undefined },
+				{ tool: "echo", isError: false, error: undefined },
+			],
+		);
+		match(calls[0].text, /invalid params/u);
 	} finally {
 		scratch.cleanup();
 	}

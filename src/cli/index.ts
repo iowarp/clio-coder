@@ -76,7 +76,7 @@ Usage:
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder library              register, install, update, import, inspect, and manage packages of every kind
-  clio-coder mcp list|trust|untrust  list MCP servers and manage trust for project-declared servers
+  clio-coder mcp list|test|trust|untrust  list, test and trust declared MCP servers
   clio-coder tasks                list, add, hand, finish, or drop project operator tasks
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive

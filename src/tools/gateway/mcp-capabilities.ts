@@ -651,6 +651,15 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						state.failure = errorMessage(error);
 						await closeClient(state);
 					}
+					// A JSON-RPC error answer (invalid params, unknown tool) came from the
+					// server, so it carries the server id like any other answer; only a
+					// request that got no answer goes without it.
+					if (error instanceof McpError && error.code === "server")
+						return {
+							kind: "error",
+							message: `${name}: ${errorMessage(error)}`,
+							details: { server: declaration.id, tool: tool.name },
+						};
 					return { kind: "error", message: `${name}: ${errorMessage(error)}` };
 				}
 			},
