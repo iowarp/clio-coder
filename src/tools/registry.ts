@@ -2427,11 +2427,15 @@ function skillSurfaceBlockedVerdict(
 
 export type HostReadOnlySource = "run" | "acp-ceiling";
 
-/** What a host read-only denial says set the scope and who can lift it. */
-const HOST_READ_ONLY_SOURCES: Readonly<Record<HostReadOnlySource, { detail: string; remedy: string }>> = {
+/**
+ * What a host read-only denial says set the scope and who can lift it. The
+ * run remedy says to drop the flag in plain words: a remedy that ended on the
+ * flag itself was relayed to the user as the fix.
+ */
+export const HOST_READ_ONLY_SOURCES: Readonly<Record<HostReadOnlySource, { detail: string; remedy: string }>> = {
 	run: {
 		detail: "The host started this task read-only (clio-coder run --read-only)",
-		remedy: "the host must start the task without its read-only ceiling (clio-coder run --read-only).",
+		remedy: "the operator must rerun this task without the --read-only flag.",
 	},
 	"acp-ceiling": {
 		detail: "The ACP client set readOnly in its clio-coder/ceiling for this session or prompt",
