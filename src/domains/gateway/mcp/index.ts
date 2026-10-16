@@ -4,6 +4,12 @@
  */
 
 export {
+	type McpClassifiedServer,
+	mcpToolActionClass,
+	mcpToolConfirmationRule,
+	mcpToolOwner,
+} from "./action-classes.js";
+export {
 	createMcpStdioClient,
 	DEFAULT_INITIALIZE_TIMEOUT_MS,
 	DEFAULT_KILL_GRACE_MS,

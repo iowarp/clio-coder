@@ -11,6 +11,9 @@ import {
 	canonicalProjectRoot,
 	createMcpStdioClient,
 	type McpClient,
+	mcpToolActionClass,
+	mcpToolConfirmationRule,
+	mcpToolOwner,
 	resolveMcpServers,
 	trustMcpServer,
 	untrustMcpServer,
@@ -218,6 +221,36 @@ describe("gateway MCP capabilities", () => {
 		await overridden.source.refresh("fake");
 		strictEqual(overridden.registry.get("mcp_fake__sleep" as ToolName)?.baseActionClass, "unknown");
 		strictEqual(overridden.registry.get("mcp_fake__fail" as ToolName)?.baseActionClass, "execute");
+	});
+
+	it("classifies an MCP tool trust first, for every caller, through one function", () => {
+		const declared = {
+			id: "slurm",
+			scope: "project" as const,
+			actionClassExplicit: false,
+			toolActionClasses: { submit_slurm_job: "read" as const, tail: "read" as const },
+		};
+		const hinted = { annotations: { readOnlyHint: true } };
+		// An unreviewed declaration controls none of its own classes.
+		for (const trust of [
+			{ status: "untrusted" as const, actionClass: "unknown" as const, reason: "r" },
+			{ status: "stale" as const, actionClass: "unknown" as const, reason: "r" },
+		]) {
+			strictEqual(mcpToolActionClass({ ...declared, trust }, { name: "tail", ...hinted }), "unknown");
+			strictEqual(mcpToolActionClass({ ...declared, trust }, { name: "get_job_output", ...hinted }), "unknown");
+		}
+		const trusted = { ...declared, trust: { status: "trusted" as const, actionClass: "unknown" as const } };
+		strictEqual(mcpToolActionClass(trusted, { name: "tail", annotations: null }), "read");
+		strictEqual(mcpToolActionClass(trusted, { name: "get_job_output", annotations: null }), "read");
+		strictEqual(
+			mcpToolActionClass({ ...trusted, toolActionClasses: {} }, { name: "submit_slurm_job", annotations: null }),
+			"execute",
+		);
+		strictEqual(mcpToolConfirmationRule(trusted, "submit_slurm_job"), "slurm-allocation");
+		strictEqual(mcpToolActionClass({ ...trusted, scope: "client" }, { name: "tail", annotations: null }), "unknown");
+		const owner = mcpToolOwner([{ id: "a" }, { id: "a__b" }], "mcp_a__b__tool");
+		deepStrictEqual(owner, { declaration: { id: "a__b" }, tool: "tool" });
+		strictEqual(mcpToolOwner([{ id: "a" }], "mcp_b__tool"), null);
 	});
 
 	it("bounds identical read-only idempotent polls by a turn budget and resets between occurrences", async () => {

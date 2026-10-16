@@ -1,7 +1,7 @@
 import type { TSchema } from "typebox";
 import type { DynamicToolName } from "../../core/tool-names.js";
 import { mcpToolName } from "../../core/tool-names.js";
-import { mcpToolActionClass } from "../../domains/gateway/mcp/action-classes.js";
+import { mcpToolActionClass, mcpToolConfirmationRule, mcpToolOwner } from "../../domains/gateway/mcp/action-classes.js";
 import type {
 	McpCatalogIdentity,
 	McpClient,
@@ -41,45 +41,8 @@ type GatewayMcpServer = ResolvedMcpServer | (Omit<ResolvedMcpServer, "scope"> & 
 /** Model-visible bytes of one MCP result before the rest is offloaded. */
 const MCP_RESULT_CONTEXT_BYTES = 16 * 1024;
 
-const SLURM_READ_TOOLS = new Set([
-	"slurm_list",
-	"slurm_describe",
-	"slurm_cluster",
-	"check_job_status",
-	"list_slurm_jobs",
-	"get_slurm_info",
-	"get_job_details",
-	"get_job_output",
-	"get_queue_info",
-	"get_node_info",
-	"get_allocation_status",
-]);
-const SLURM_CONFIRM_TOOLS = new Set([
-	"slurm_submit",
-	"slurm_cancel",
-	"submit_slurm_job",
-	"cancel_slurm_job",
-	"submit_array_job",
-	"allocate_slurm_nodes",
-	"deallocate_slurm_nodes",
-]);
-
 function actionClassFor(declaration: GatewayMcpServer, tool: NamedTool): McpTrustActionClass {
-	const toolName = tool.name;
-	if (declaration.scope === "client") return "unknown";
-	const override = Object.hasOwn(declaration.toolActionClasses, toolName)
-		? declaration.toolActionClasses[toolName]
-		: undefined;
-	if (override !== undefined) return override;
-	if (declaration.id === "slurm") {
-		if (SLURM_CONFIRM_TOOLS.has(toolName)) return "execute";
-		if (SLURM_READ_TOOLS.has(toolName)) return "read";
-	}
 	return mcpToolActionClass(declaration, { name: tool.name, annotations: tool.annotations ?? null });
-}
-
-function requiresConfirmation(declaration: GatewayMcpServer, toolName: string): boolean {
-	return declaration.id === "slurm" && SLURM_CONFIRM_TOOLS.has(toolName);
 }
 
 /**
@@ -422,13 +385,14 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	const makeSpec = (state: ServerState, tool: McpToolDescriptor, name: DynamicToolName): ToolSpec => {
 		const { declaration } = state;
 		const trustClass = actionClassFor(declaration, tool);
+		const confirmationRuleId = mcpToolConfirmationRule(declaration, tool.name);
 		const timeoutMs = declaration.timeoutMs ?? options.requestTimeoutMs;
 		const spec: ToolSpec = {
 			name,
 			description: describeTool(declaration, tool),
 			parameters: tool.inputSchema as TSchema,
 			baseActionClass: trustClass,
-			...(requiresConfirmation(declaration, tool.name) ? { confirmationRuleId: "slurm-allocation" } : {}),
+			...(confirmationRuleId !== null ? { confirmationRuleId } : {}),
 			executionMode: "sequential",
 			placement: "gateway",
 			sourceInfo: { path: declaration.path, scope: "domain" },
@@ -653,20 +617,15 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		};
 	};
 
+	// The owner rule is shared with worker admission, so a dispatch and the
+	// session it runs in can never route one name to two servers.
 	const ownerOf = (name: string): ServerState | null => {
-		// IDs and tool names may contain __. Reserve each composed name for
-		// the longest declared server prefix, including untrusted declarations,
-		// so discovery order cannot change either routing or authority.
-		let owner: ServerState | null = null;
-		for (const state of resolveStates().values()) {
-			if (
-				name.startsWith(`mcp_${state.declaration.id}__`) &&
-				(owner === null || state.declaration.id.length > owner.declaration.id.length)
-			) {
-				owner = state;
-			}
-		}
-		return owner;
+		const all = resolveStates();
+		const owner = mcpToolOwner(
+			[...all.values()].map((state) => state.declaration),
+			name,
+		);
+		return owner === null ? null : (all.get(owner.declaration.id) ?? null);
 	};
 
 	/**
