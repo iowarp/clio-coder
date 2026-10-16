@@ -19,7 +19,12 @@ export function writeRestartIntent(stateDir: string, sessionId: string): void {
 }
 
 /** Called only after interactive boot has loaded the session domain, never by Stage 0. */
-export function consumeRestartIntent(stateDir: string, cwd: string, now = Date.now()): string | undefined {
+export function consumeRestartIntent(
+	stateDir: string,
+	cwd: string,
+	now = Date.now(),
+	expectedParentPid = process.ppid,
+): string | undefined {
 	const file = restartIntentPath(stateDir);
 	let raw: string;
 	try {
@@ -47,6 +52,8 @@ export function consumeRestartIntent(stateDir: string, cwd: string, now = Date.n
 		(intent.pid ?? 0) > 0 &&
 		Number.isFinite(Date.parse(intent.createdAt));
 	if (valid && intent?.cwd !== cwd) return undefined;
+	// Only the writer's direct child may consume the handoff; other boots must leave it intact (#420).
+	if (valid && intent?.pid !== expectedParentPid) return undefined;
 	// Delete before returning the id, so even a failed resume cannot loop.
 	rmSync(file, { force: true });
 	if (!valid || !intent?.createdAt) return undefined;
