@@ -13,8 +13,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { Playbook } from "../agents/playbook.js";
@@ -122,6 +122,8 @@ export interface FleetResumeStepDiff {
 
 export type FleetResumeRefusal =
 	| { ok: false; reason: "fleet-name"; priorFleet: string; currentFleet: string }
+	/** `priorCwd` is null for a record written before roots recorded their workspace. */
+	| { ok: false; reason: "workspace"; priorCwd: string | null; currentCwd: string }
 	| { ok: false; reason: "vars" }
 	| {
 			ok: false;
@@ -143,15 +145,33 @@ function stepIdentity(step: unknown): string {
 	return "(missing)";
 }
 
+function canonicalPath(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		// A workspace that no longer exists cannot match a live one by realpath;
+		// the resolved spelling still compares it honestly.
+		return resolve(path);
+	}
+}
+
 /** Validate a prior record and retain its longest ordered successful prefix. */
 export function planFleetResume(
 	record: FleetRunRecord,
 	plan: ExecutionPlan,
 	playbook: Pick<Playbook, "name">,
 	vars: Readonly<Record<string, string>>,
+	workspaceRoot: string,
 ): FleetResumePlan {
 	if (record.fleet !== playbook.name) {
 		return { ok: false, reason: "fleet-name", priorFleet: record.fleet, currentFleet: playbook.name };
+	}
+	// The plan hash holds no absolute path, so without this a same-named fleet
+	// in another project would replay that project's successful prefix here.
+	// Roots have recorded their workspace since 0.5.4; an older record cannot
+	// prove where it ran and is refused rather than guessed.
+	if (record.cwd === undefined || canonicalPath(record.cwd) !== canonicalPath(workspaceRoot)) {
+		return { ok: false, reason: "workspace", priorCwd: record.cwd ?? null, currentCwd: workspaceRoot };
 	}
 	if (sortedVars(record.vars) !== sortedVars(vars)) return { ok: false, reason: "vars" };
 	if (record.planHash !== plan.hash) {

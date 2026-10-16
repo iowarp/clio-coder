@@ -395,11 +395,19 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			await loaded.stop();
 			return refuse(`resume run '${resumeId}' was not found in the durable fleet ledger`);
 		}
-		const planned = planFleetResume(record, plan, playbook, vars);
+		const planned = planFleetResume(record, plan, playbook, vars, process.cwd());
 		if (!planned.ok) {
 			if (planned.reason === "fleet-name") {
 				await loaded.stop();
 				return refuse(`resume run '${resumeId}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`);
+			}
+			if (planned.reason === "workspace") {
+				await loaded.stop();
+				return refuse(
+					planned.priorCwd === null
+						? `resume run '${resumeId}' predates recorded workspaces, so it cannot be resumed in ${planned.currentCwd}`
+						: `resume run '${resumeId}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
+				);
 			}
 			if (planned.reason === "vars") {
 				await loaded.stop();

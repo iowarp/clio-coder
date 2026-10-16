@@ -279,11 +279,17 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		if (record === null) {
 			diagnostics.push(`resume run '${input.resume}' was not found in the durable fleet ledger`);
 		} else {
-			const planned = planFleetResume(record, plan, playbook, input.vars);
+			const planned = planFleetResume(record, plan, playbook, input.vars, input.workspaceRoot);
 			if (planned.ok) resume = { fromRunId: input.resume, record, replayed: planned.replayed };
 			else if (planned.reason === "fleet-name") {
 				diagnostics.push(
 					`resume run '${input.resume}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`,
+				);
+			} else if (planned.reason === "workspace") {
+				diagnostics.push(
+					planned.priorCwd === null
+						? `resume run '${input.resume}' predates recorded workspaces, so it cannot be resumed in ${planned.currentCwd}`
+						: `resume run '${input.resume}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
 				);
 			} else if (planned.reason === "vars") {
 				diagnostics.push(`resume run '${input.resume}' used different --var values`);

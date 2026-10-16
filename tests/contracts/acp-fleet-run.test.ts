@@ -1,5 +1,5 @@
 import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { realpathSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Value } from "typebox/value";
@@ -285,6 +285,7 @@ test("a resume id compiles the replayed prefix into every surface's approval", a
 		records.set("fleet-0123456789ab", {
 			version: 1,
 			id: "fleet-0123456789ab",
+			cwd: root,
 			fleet: "survey",
 			planHash: fresh.preview.plan.hash,
 			stepIds: fresh.preview.plan.steps.map((step) => step.id),
@@ -328,6 +329,58 @@ test("a resume id compiles the replayed prefix into every surface's approval", a
 			vars: { site: "plot-7" },
 			resume: "fleet-0123456789ab",
 		});
+	} finally {
+		scratch.restore();
+	}
+});
+
+test("a resume refuses a root another workspace launched", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-resume-workspace-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const other = join(root, "other-project");
+		mkdirSync(other);
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		ok(agents);
+		const records = new Map<string, FleetRunRecord>();
+		const compile = (workspaceRoot: string, resume?: string) =>
+			compileFleetRunPreview({
+				workspaceRoot,
+				name: "survey",
+				vars: { site: "plot-7" },
+				getAgentSpec: (id) => agents.getSpec(id),
+				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
+				load: () => ({ commands: null, playbook: playbook(workspaceRoot, ["survey", "report"]) }),
+				...(resume !== undefined ? { resume } : {}),
+				readRun: (id) => records.get(id) ?? null,
+			});
+		const fresh = compile(other);
+		ok(fresh.ok);
+		const prior = (id: string, cwd?: string): FleetRunRecord => ({
+			version: 1,
+			id,
+			...(cwd !== undefined ? { cwd } : {}),
+			fleet: "survey",
+			planHash: fresh.preview.plan.hash,
+			stepIds: fresh.preview.plan.steps.map((step) => step.id),
+			planSteps: [...fresh.preview.plan.steps],
+			vars: { site: "plot-7" },
+			startedAt: "2026-10-01T00:00:00.000Z",
+			endedAt: "2026-10-01T00:01:00.000Z",
+			resumedFrom: null,
+			steps: [],
+		});
+		records.set("fleet-aaaaaaaaaaaa", prior("fleet-aaaaaaaaaaaa", other));
+		records.set("fleet-bbbbbbbbbbbb", prior("fleet-bbbbbbbbbbbb"));
+		const foreign = compile(root, "fleet-aaaaaaaaaaaa");
+		ok(!foreign.ok);
+		deepStrictEqual(foreign.diagnostics, [`resume run 'fleet-aaaaaaaaaaaa' ran in ${other}, not ${root}`]);
+		const legacy = compile(root, "fleet-bbbbbbbbbbbb");
+		ok(!legacy.ok);
+		deepStrictEqual(legacy.diagnostics, [
+			`resume run 'fleet-bbbbbbbbbbbb' predates recorded workspaces, so it cannot be resumed in ${root}`,
+		]);
+		ok(compile(other, "fleet-aaaaaaaaaaaa").ok, "the launching workspace still resumes it");
 	} finally {
 		scratch.restore();
 	}

@@ -197,6 +197,7 @@ describe("fleet lifecycle boundary", () => {
 		const record: FleetRunRecord = {
 			version: 1,
 			id: "fleet-run-1",
+			cwd: "/workspace/release",
 			fleet: "release",
 			planHash: plan.hash,
 			stepIds: plan.steps.map(({ id }) => id),
@@ -211,10 +212,10 @@ describe("fleet lifecycle boundary", () => {
 				{ stepId: "publish", result: result("publish") },
 			],
 		};
-		const resumed = planFleetResume(record, plan, { name: "release" }, { channel: "stable" });
+		const resumed = planFleetResume(record, plan, { name: "release" }, { channel: "stable" }, "/workspace/release");
 		strictEqual(resumed.ok, true);
 		if (resumed.ok) deepStrictEqual([...resumed.replayed.keys()], ["build"]);
-		deepStrictEqual(planFleetResume(record, plan, { name: "release" }, { channel: "edge" }), {
+		deepStrictEqual(planFleetResume(record, plan, { name: "release" }, { channel: "edge" }, "/workspace/release"), {
 			ok: false,
 			reason: "vars",
 		});

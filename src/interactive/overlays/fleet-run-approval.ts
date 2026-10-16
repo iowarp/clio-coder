@@ -113,10 +113,12 @@ export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, wid
 		rows.push(theme.fg("annotation", `${preview.name} · plan ${preview.planHash.slice(0, 12)}`));
 		if (preview.resume !== undefined) {
 			const replayed = [...preview.resume.replayed.keys()];
+			// The workspace is shown so the operator sees which checkout's prefix is replayed.
+			const from = `resumes ${preview.resume.fromRunId} from ${preview.resume.record.cwd ?? "(unknown workspace)"}`;
 			const line =
 				replayed.length === 0
-					? `resumes ${preview.resume.fromRunId}: no successful prefix to replay; every step runs`
-					: `resumes ${preview.resume.fromRunId}: replays ${replayed.length} step${replayed.length === 1 ? "" : "s"} (${replayed.join(", ")}), runs the rest`;
+					? `${from}: no successful prefix to replay; every step runs`
+					: `${from}: replays ${replayed.length} step${replayed.length === 1 ? "" : "s"} (${replayed.join(", ")}), runs the rest`;
 			for (const wrapped of wrapTextWithAnsi(theme.fg("info", line), contentWidth)) rows.push(wrapped);
 		}
 		rows.push(rule(theme, contentWidth));
