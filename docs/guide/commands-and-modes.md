@@ -632,7 +632,7 @@ hydrated first frame. The seam is [terminal-lease.ts](../../src/interactive/term
 
 ## Exit summary
 
-A clean interactive exit prints a session summary on stdout after the TUI has stopped and the terminal is restored. `interface.exitSummary` picks the style: `full` (the default), `brief` or `off`. Change it under Settings → Appearance → Transcript → Session summary on exit or with `clio-coder configure --section interface`. The setting reloads hot, so the next exit uses the saved value.
+A clean interactive exit prints a session summary on stdout after the TUI has stopped and the terminal is restored. `interface.exitSummary` picks the style: `auto` (the default), `brief`, `standard`, `report` or `off`. `auto` follows `interface.outputDetail`: `compact` gives `brief`, `standard` gives `standard` and `detailed` gives `report`. The older value `full` is still read as `standard`; the settings file is not rewritten. Change it under Settings → Appearance → Transcript → Session summary on exit or with `clio-coder configure --section interface`. The setting reloads hot, so the next exit uses the saved value.
 
 **When it prints.** The summary runs on the application's own shutdown path: `/quit`, `Ctrl+D` on an empty idle composer, and the idle double `Ctrl+C`. It is skipped in these cases:
 
@@ -643,17 +643,18 @@ A clean interactive exit prints a session summary on stdout after the TUI has st
 
 **What "this visit" means.** The collector in `src/interactive/exit-summary-collector.ts` folds events as they arrive, so exit does no ledger reads, file work or provider calls. It starts when the interactive session starts and resets on `/new`. Turns count across sessions you resumed or parked during the visit. Usage and cost come from the observability session ledger. Wall time is measured from the start of the visit.
 
-**What it contains.** `src/interactive/exit-summary.ts` formats the snapshot and is pure.
+**What it contains.** `src/interactive/exit-summary.ts` formats the snapshot and is pure. Every style except `off` starts with `Session` (the session name and id, or the id alone) and ends with the resume line.
 
 | Style | Rows |
 | --- | --- |
 | `off` | One line: `To resume: clio-coder, then /resume <session id>`. |
-| `brief` | `Session` (the session name, else its id), one `Model` row per `target / model` used, `Total tokens`, `Total cost` and the resume line. |
-| `full` | Everything in `brief`, plus `Wall time`, `Model active`, `Turns`; per model `Requested` (ids the request named when they differ), `Tokens` and `Cost`, or `Usage: not reported; cost unknown`; `Tool calls` (per tool, main agent and workers together, sorted by name); `Files changed (observed)` with the first 8 paths and `N more`; `Workers dispatched` with the first 8 as `agent · outcome · runId` and `N more`; and `Compactions`. |
+| `brief` | `Model` with the last `target / model` used and `(+N others)` when there were more, `Tokens` as one total, and `Cost` followed by the wall time. |
+| `standard` | `Activity` (turns, files changed, workers), `Time` (wall and model time), `Tokens`, `Cost` and `Compactions` when there were any; then up to three `Model` rows with `Models` counting the rest, `Tools` with the first 8 tools by name and a count of further kinds, and `Workers` with the count per outcome. |
+| `report` | The same `Activity`, `Time`, `Tokens`, `Cost` and `Compactions` rows, then titled sections: `Models` (per model the call count, cost, tokens, ids the request named when they differ, and side questions, handoffs, prewarms, memory, failed compactions or system one calls; a model without usage reads `usage not reported; cost unknown`), `Tools` (calls and observed failures per tool), `Workers` (`agent · outcome · receipt · target / model · runId`), `Files` (change observations per path), `Approvals & refusals` and `Timeline`. |
 
-Tokens are printed as input, output, cache read, cache write and reasoning counts. `Model active` is the summed model-call time; when some API calls carried no timing it reads `<time> observed; some calls unmeasured`. Changed files are the paths that successful mutating tool calls and worker receipts reported, relative to the working directory when inside it. A command's side effects that no receipt names are not listed, which is why the row says observed.
+Outside `brief`, `Tokens` reads as input, output, cache read, cache write and reasoning counts. `Time` marks model time `(partly measured)` when some API calls carried no timing. Changed files are the paths that successful mutating tool calls and worker receipts reported, relative to the working directory when inside it. A command's side effects that no receipt names are not counted. A `report` fits one terminal page of at most 80 rows: sections that do not fit are dropped with `… N more sections; resume to inspect`, and a section cut short ends with `… N more detail lines`.
 
-Cost reads `$0.00 (free)` when every call was known free, `<amount> (known)` when every price came from a declared rate, a bare amount when it includes estimates, `<amount> (unknown pricing in total)` or `unknown` when some calls had no price, and `unknown (not measured)` when nothing was measured. On a terminal the block is a themed frame headed `Clio Coder · Session summary` with `this visit` on its right edge. On a pipe it is plain lines starting `Clio Coder · Session summary · this visit`, with no color, frame or wrapping.
+Cost reads `$0.00 (free)` when every call was known free and `<amount> (known)` when every price came from a declared rate. It reads `~<amount> est` when it includes estimates, `<amount> +? (partly unknown)` when some calls had no price (`(estimated; partly unknown)` when estimates are in it too), `unknown pricing` when no call had a price, and `unknown (not measured)` when nothing was measured. On a terminal the block is a themed frame headed `Clio Coder · Session summary`, or `· Session report` for `report`, with `this visit` on its right edge. On a pipe it is plain lines starting `Clio Coder · Session summary · this visit` (or `Session report`), with no color, frame or wrapping.
 
 ## Live Steering
 

@@ -129,7 +129,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `safety.review.enabled` | `false` | Boolean. After a mutating turn a read-only reviewer worker checks the changed files. Interactive sessions only. | hot reload |
 | `safety.sandbox` | `"auto"` | `auto`, `required` or `off`. OS sandbox for a dispatched worker's bash, `run_script` and verify commands; main-agent commands are not sandboxed. | next turn |
 | `safety.sandboxNetwork` | `false` | Boolean. Let sandboxed worker commands reach the network. Workers holding `web_fetch` get network either way. | next turn |
-| `interface.exitSummary` | `"full"` | `full` prints the visit's activity and usage, `brief` prints models, tokens and cost, `off` prints only how to resume. Read at the next exit. | hot reload |
+| `interface.exitSummary` | `"auto"` | `auto`, `brief`, `standard`, `report` or `off`. `auto` follows `interface.outputDetail` (`compact` gives `brief`, `detailed` gives `report`, otherwise `standard`). `brief` prints the model, total tokens and cost, `standard` the visit's activity and usage, `report` a one-page report, `off` only how to resume. `full` is read as `standard`. Read at the next exit. | hot reload |
 | `interface.demo` | `true` | Boolean. Full welcome presentation, tips and footer hints; off starts with a compact header. | hot reload |
 | `interface.terminalProgress` | `false` | Boolean. Running-task progress in terminals that show tab or taskbar badges. | next turn |
 | `interface.outputDetail` | `"standard"` | `compact`, `standard` or `detailed`. `minimal`, `default` and `verbose` are accepted as synonyms. | hot reload |

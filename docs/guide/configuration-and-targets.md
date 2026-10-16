@@ -266,7 +266,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `interface.mode` | `regular` | restart |
 | `interface.fullscreenScrollbar` | `auto` | restart |
 | `interface.smoothStreaming` | `auto` | immediately |
-| `interface.exitSummary` | `full` | immediately, at the next exit |
+| `interface.exitSummary` | `auto` | immediately, at the next exit |
 | `interface.desktopNotifications` | `false` | next turn |
 | `interface.panes.enabled` | `off` | restart |
 | `interface.panes.notifications` | `failures` | immediately |
@@ -475,7 +475,7 @@ Cost appears in these places, and every one reads the provenance. How each surfa
 - The footer shows the session total, and the footer dashboard page labels it `Tracked cost` and lists the session ceiling beside it as `Clio ceiling`, which reads `none` when `safety.limits.sessionCostUsd` is `0`.
 - `/usage` shows a `cost` row for the session and for each model.
 - The dispatch board, `clio-coder fleet` output and the `monitor` tool show a cost per run.
-- The exit summary prints `Total cost`, and under `full` a `Cost` line per model. It words the label itself: `(known)`, `(free)`, an estimate, `(unknown pricing in total)` or `unknown`.
+- The exit summary prints a `Cost` row, and under `report` a cost per model in its `Models` section. It words the label itself: `(known)`, `(free)`, `est`, `(partly unknown)`, `unknown pricing` or `unknown (not measured)`.
 
 | Provenance | What the footer, `/usage` and run tables show |
 | --- | --- |
