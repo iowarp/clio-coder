@@ -1,17 +1,21 @@
 import { PLAYBOOK_COMMANDS_REMEDY, PlaybookCommandRegistryMissingError } from "../domains/agents/index.js";
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { inspectPlaybook } from "./playbook-preflight.js";
+import { parsePlaybookVars, playbookVarsOrUndefined } from "./playbook-vars.js";
 
 export function runPlaybookValidate(args: ReadonlyArray<string>): number {
-	const json = args.includes("--json");
-	const unknown = args.find((arg, index) => (arg.startsWith("-") && arg !== "--json") || index > 1);
-	const name = args.find((arg) => !arg.startsWith("-"));
-	if (name === undefined || unknown !== undefined) {
-		process.stderr.write("clio-coder playbook: validate: usage: clio-coder playbook validate <name> [--json]\n");
+	const { vars, rest, error } = parsePlaybookVars(args);
+	const json = rest.includes("--json");
+	const unknown = rest.find((arg, index) => (arg.startsWith("-") && arg !== "--json") || index > 1);
+	const name = rest.find((arg) => !arg.startsWith("-"));
+	if (name === undefined || unknown !== undefined || error !== undefined) {
+		process.stderr.write(
+			`clio-coder playbook: validate: ${error !== undefined ? `${error}; ` : ""}usage: clio-coder playbook validate <name> [--var key=value ...] [--json]\n`,
+		);
 		return 2;
 	}
 	try {
-		const result = inspectPlaybook(name);
+		const result = inspectPlaybook(name, playbookVarsOrUndefined(vars));
 		preflightWriteBoundaries(result.plan, process.cwd());
 		if (json)
 			process.stdout.write(

@@ -1,5 +1,6 @@
 import type { ExecutionPlanStep } from "../domains/dispatch/execution-plan.js";
 import { inspectPlaybook } from "./playbook-preflight.js";
+import { parsePlaybookVars, playbookVarsOrUndefined } from "./playbook-vars.js";
 
 /**
  * The playbook-level kind of a compiled step. The execution plan knows only
@@ -34,15 +35,18 @@ function projectedStep(step: ExecutionPlanStep): Record<string, unknown> {
 }
 
 export function runPlaybookGraph(args: ReadonlyArray<string>): number {
-	const json = args.includes("--json");
-	const name = args.find((arg) => !arg.startsWith("-"));
-	const unknown = args.find((arg, index) => (arg.startsWith("-") && arg !== "--json") || index > 1);
-	if (name === undefined || unknown !== undefined) {
-		process.stderr.write("clio-coder playbook: graph: usage: clio-coder playbook graph <name> [--json]\n");
+	const { vars, rest, error } = parsePlaybookVars(args);
+	const json = rest.includes("--json");
+	const name = rest.find((arg) => !arg.startsWith("-"));
+	const unknown = rest.find((arg, index) => (arg.startsWith("-") && arg !== "--json") || index > 1);
+	if (name === undefined || unknown !== undefined || error !== undefined) {
+		process.stderr.write(
+			`clio-coder playbook: graph: ${error !== undefined ? `${error}; ` : ""}usage: clio-coder playbook graph <name> [--var key=value ...] [--json]\n`,
+		);
 		return 2;
 	}
 	try {
-		const { plan } = inspectPlaybook(name);
+		const { plan } = inspectPlaybook(name, playbookVarsOrUndefined(vars));
 		const byId = new Map(plan.steps.map((step) => [step.id, step]));
 		const waves = plan.waves.map((ids, index) => ({
 			wave: index + 1,

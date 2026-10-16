@@ -83,6 +83,7 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
+import { parsePlaybookVars } from "./playbook-vars.js";
 import { convertWorkspaceForCommand } from "./workspace-conversion.js";
 
 const HELP = `clio-coder fleet <subcommand>
@@ -130,31 +131,6 @@ function fail(message: string): number {
 function refuse(message: string): number {
 	process.stderr.write(`clio-coder fleet: ${message}\n`);
 	return 1;
-}
-
-function parseVars(args: ReadonlyArray<string>): { vars: Record<string, string>; rest: string[]; error?: string } {
-	const vars: Record<string, string> = {};
-	const rest: string[] = [];
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg !== "--var") {
-			if (arg !== undefined) rest.push(arg);
-			continue;
-		}
-		const pair = args[i + 1];
-		i += 1;
-		if (pair === undefined || !pair.includes("=")) {
-			return { vars, rest, error: "--var requires key=value" };
-		}
-		const eq = pair.indexOf("=");
-		const key = pair.slice(0, eq).trim();
-		const value = pair.slice(eq + 1);
-		if (key.length === 0) {
-			return { vars, rest, error: "--var requires a non-empty key" };
-		}
-		vars[key] = value;
-	}
-	return { vars, rest };
 }
 
 function newFleetRootId(): string {
@@ -253,7 +229,7 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 }
 
 async function runFleet(args: ReadonlyArray<string>): Promise<number> {
-	const { vars, rest, error } = parseVars(args);
+	const { vars, rest, error } = parsePlaybookVars(args);
 	if (error !== undefined) return fail(error);
 	// A positional scan, so an option value is never read as the playbook name
 	// (`--resume <runId> <name>` used to run a playbook named after the run id)
