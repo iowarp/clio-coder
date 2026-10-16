@@ -93,7 +93,7 @@ describe("job ownership, scheduling and execution settlement", () => {
 		});
 		return controller;
 	}
-	it("defaults to five finite occurrences, first after the interval", async () => {
+	it("defaults to five finite main occurrences, first at creation", async () => {
 		const starts: number[] = [];
 		const host = make({
 			run: async (context) => {
@@ -102,17 +102,17 @@ describe("job ownership, scheduling and execution settlement", () => {
 				return { outcome: "succeeded" };
 			},
 		});
-		const created = await host.create(input(), owner);
+		const created = await host.create({ intervalMs: 1000, runner: { kind: "main", prompt: "Check progress" } }, owner);
 		strictEqual(created.spec.count, 5);
 		host.tick();
 		await settle();
-		strictEqual(starts.length, 0);
+		deepStrictEqual(starts, [created.createdAt]);
 		for (let i = 1; i <= 5; i++) {
 			clock = 100000 + i * 1000;
 			host.tick();
 			await settle();
 		}
-		deepStrictEqual(starts, [101000, 102000, 103000, 104000, 105000]);
+		deepStrictEqual(starts, [100000, 101000, 102000, 103000, 104000]);
 		const final = present(host.get(created.id, owner));
 		strictEqual(final.starts, 5);
 		strictEqual(final.settled, 5);

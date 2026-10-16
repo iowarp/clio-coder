@@ -545,7 +545,11 @@ export function loopJobDetail(job: JobRecord, now: number): string[] {
 export function loopCreatedLines(job: JobRecord, args: LoopCreateArgs, now: number): string[] {
 	const countDefault = args.count === undefined && args.for_ms === undefined;
 	const bounds = [
-		job.nextDueAt === null ? "first run pending" : `first run in ${formatLoopDuration(Math.max(0, job.nextDueAt - now))}`,
+		job.nextDueAt === null
+			? "first run pending"
+			: job.nextDueAt <= now
+				? "first run due now"
+				: `first run in ${formatLoopDuration(job.nextDueAt - now)}`,
 		job.spec.count === null
 			? "runs until the deadline"
 			: `${job.spec.count} run${job.spec.count === 1 ? "" : "s"}${countDefault ? " (default)" : ""}`,

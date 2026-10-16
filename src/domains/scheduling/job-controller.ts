@@ -648,7 +648,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 						state: "active",
 						reason: null,
 						cancelRequested: false,
-						nextDueAt: createdAt + spec.intervalMs,
+						nextDueAt: createdAt,
 						starts: 0,
 						settled: 0,
 						consecutiveFailures: 0,
@@ -661,8 +661,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 						persistenceError: null,
 					};
 					await authorization(job, "create");
-					// Creation time is the immutable spec epoch; first due never precedes admission (#411).
-					job.nextDueAt = now() + spec.intervalMs;
+					// First run is due immediately after admission (#417), never before it (#411).
+					job.nextDueAt = now();
 					store.write(job, null);
 					const sessionRows = [...records.values()].filter((row) => sameJobOwner(row.owner, owner));
 					if (sessionRows.length >= JOB_SESSION_LIMIT) {

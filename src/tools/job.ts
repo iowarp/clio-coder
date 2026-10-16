@@ -178,7 +178,7 @@ export function createJobTool(deps: JobToolDeps): {
 		name: ToolNames.Job,
 		placement: "gateway",
 		description:
-			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. Bare main jobs default to five starts, first after one interval. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
+			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. The first run is due immediately after creation, then every interval. Bare main jobs default to five starts. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
 		parameters: Type.Object({
 			action: StringEnum(["create", "pause", "resume", "stop", "cancel"]),
 			job_id: Type.Optional(Type.String()),
