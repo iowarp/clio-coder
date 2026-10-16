@@ -4589,6 +4589,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Built on the first usage read: provider adapters and the quota cache are
 		// not worth constructing for a session that never opens the view.
 		let acpQuota: { read(): Promise<ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>> } | null = null;
+		// The fleet this ACP agent started and has not seen settle. A second start
+		// is refused while one runs, as the terminal's /fleet run refuses it, since
+		// two fleets would race over one workspace.
+		let acpFleetInFlight: { name: string; fleetRootId: string } | null = null;
 		try {
 			const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
 			const code = await serveClioAcpAgent({
@@ -4652,6 +4656,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								run: (preview) =>
 									new Promise((resolve) => {
 										const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
+										if (acpFleetInFlight !== null) {
+											resolve({
+												status: "failed",
+												fleetRootId,
+												reason: `fleet ${acpFleetInFlight.name} (root=${acpFleetInFlight.fleetRootId}) is still running; a new fleet run is refused until it settles. Nothing was dispatched`,
+											});
+											return;
+										}
+										acpFleetInFlight = { name: preview.name, fleetRootId };
 										let admitted = false;
 										const admit = () => {
 											if (admitted) return;
@@ -4688,17 +4701,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 												: {}),
 											onStepDispatched: admit,
 											onNotice: (text) => process.stderr.write(`[clio-coder:acp] fleet ${preview.name}: ${text}\n`),
-										}).then(
-											(outcome) => {
-												refuse(
-													`the run ended before dispatching a step: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded`,
-												);
-											},
-											(error: unknown) => {
-												const message = error instanceof Error ? error.message : String(error);
-												if (!refuse(message)) process.stderr.write(`[clio-coder:acp] fleet ${preview.name} failed: ${message}\n`);
-											},
-										);
+										})
+											.then(
+												(outcome) => {
+													refuse(
+														`the run ended before dispatching a step: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded`,
+													);
+												},
+												(error: unknown) => {
+													const message = error instanceof Error ? error.message : String(error);
+													if (!refuse(message)) process.stderr.write(`[clio-coder:acp] fleet ${preview.name} failed: ${message}\n`);
+												},
+											)
+											.finally(() => {
+												acpFleetInFlight = null;
+											});
 									}),
 							},
 						}
