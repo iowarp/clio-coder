@@ -664,13 +664,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const dispatchFleetRun = (preview: FleetRunPreview, agents: AgentsContract): void => {
 		const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
 		const run = deps.runFleet ?? executeFleetRun;
-		fleetInFlight = { name: preview.name, fleetRootId };
-		deps.notify(
-			"info",
-			`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
-			"fleet-run:started",
-		);
-		void run({
+		// The arguments are built before the single-run guard is taken: a throw
+		// from a settings or session read would otherwise leave it set and refuse
+		// every later fleet run in this session.
+		const args: Parameters<typeof executeFleetRun>[0] = {
 			plan: preview.plan,
 			playbookName: preview.name,
 			commands: preview.commands,
@@ -688,7 +685,14 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				deps.setFleetRunPhase?.(event.assignmentId, { wave: event.waveIndex, stepId: event.stepId });
 			},
 			onNotice: (text) => deps.stderr(`[fleet ${preview.name}] ${text}\n`),
-		})
+		};
+		deps.notify(
+			"info",
+			`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
+			"fleet-run:started",
+		);
+		fleetInFlight = { name: preview.name, fleetRootId };
+		void run(args)
 			.then((outcome) => {
 				fleetInFlight = null;
 				deps.notify(

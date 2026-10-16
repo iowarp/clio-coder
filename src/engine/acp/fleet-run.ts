@@ -36,11 +36,16 @@ export interface AcpFleetControl {
 	 * Start an approved, freshly compiled plan. Settles when its first step is
 	 * dispatched, or with the reason when the run ends before dispatching one:
 	 * dispatch admission can refuse a step the compiler accepted, and a client
-	 * told "started" would otherwise wait on a run that never began.
+	 * told "started" would otherwise wait on a run that never began. A run
+	 * refused while another is in flight never got a root of its own.
 	 */
 	run(
 		preview: FleetRunPreview,
-	): Promise<{ status: "started"; fleetRootId: string } | { status: "failed"; fleetRootId: string; reason: string }>;
+	): Promise<
+		| { status: "started"; fleetRootId: string }
+		| { status: "failed"; fleetRootId: string; reason: string }
+		| { status: "refused"; reason: string }
+	>;
 }
 
 export function bounded(text: string, maxBytes = MAX_TEXT_BYTES): string {

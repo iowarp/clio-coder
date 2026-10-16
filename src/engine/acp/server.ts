@@ -5378,6 +5378,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			options.diagnostics?.(`fleet run failed to start: ${acpErrorMessage(error)}`);
 			throw new AcpRequestError(-32603, "fleet run failed to start", { code: "internal_error" });
 		}
+		if (started.status === "refused") {
+			return {
+				status: "refused" as const,
+				name,
+				diagnostics: [boundedFleetText(started.reason, ACP_FLEET_MAX_REASON_BYTES)],
+			};
+		}
 		const fleetRootId = boundString(started.fleetRootId, 128);
 		if (started.status === "failed") {
 			return {

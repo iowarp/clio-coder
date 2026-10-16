@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -25,6 +25,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		let opened = 0;
 		let accept: (() => void) | undefined;
 		let finish: (() => void) | undefined;
+		let settingsReadable = false;
 		const transitions = { state: "closed", handle: null, showPermission: () => false, close: noop };
 		const deps: Partial<OverlayGeneralOpenersDeps> = {
 			dispatch: {} as DispatchContract,
@@ -34,6 +35,10 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 			terminal: { columns: 100 } as OverlayGeneralOpenersDeps["terminal"],
 			requestRender: noop,
 			stderr: noop,
+			getSettings: () => {
+				if (!settingsReadable) throw new Error("fixture: settings unreadable");
+				return DEFAULT_SETTINGS;
+			},
 			closeOverlay: () => {
 				transitions.state = "closed";
 			},
@@ -70,12 +75,18 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 				}),
 		};
 		const openers = createOverlayGeneralOpeners(deps as OverlayGeneralOpenersDeps);
+		// A run whose arguments throw before it starts must not leave the
+		// single-run guard set, or every later /fleet run reads as in flight.
 		openers.startFleetRun("survey", {});
 		ok(accept);
+		throws(accept, /settings unreadable/);
+		settingsReadable = true;
+		openers.startFleetRun("survey", {});
+		strictEqual(opened, 2, "the failed start left no run in flight");
 		accept();
 		strictEqual(notices.at(-1)?.[0], "fleet-run:started");
 		openers.startFleetRun("survey", {});
-		strictEqual(opened, 1, "no second approval while the first fleet runs");
+		strictEqual(opened, 2, "no second approval while the first fleet runs");
 		strictEqual(notices.at(-1)?.[0], "fleet-run:in-flight");
 		ok(notices.at(-1)?.[1].includes("is still running"));
 		ok(finish);
@@ -83,7 +94,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		await new Promise((settle) => setImmediate(settle));
 		strictEqual(notices.at(-1)?.[0], "fleet-run:settled");
 		openers.startFleetRun("survey", {});
-		strictEqual(opened, 2);
+		strictEqual(opened, 3);
 		deepStrictEqual(
 			notices.map(([key]) => key),
 			["fleet-run:started", "fleet-run:in-flight", "fleet-run:settled"],

@@ -4655,15 +4655,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								},
 								run: (preview) =>
 									new Promise((resolve) => {
-										const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
 										if (acpFleetInFlight !== null) {
+											// No root is minted for a run that never starts; the running
+											// root is named in the reason, not reported as this run's id.
 											resolve({
-												status: "failed",
-												fleetRootId,
+												status: "refused",
 												reason: `fleet ${acpFleetInFlight.name} (root=${acpFleetInFlight.fleetRootId}) is still running; a new fleet run is refused until it settles. Nothing was dispatched`,
 											});
 											return;
 										}
+										const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
+										// Read before the single-run guard is taken: a throw here would
+										// otherwise leave it set and refuse every later fleet run.
+										const attributionEnabled = getCurrentSettings().integrations.git.commitAttribution;
 										acpFleetInFlight = { name: preview.name, fleetRootId };
 										let admitted = false;
 										const admit = () => {
@@ -4694,7 +4698,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											dispatch,
 											agents: { getSpec: (agentId) => agents.getSpec(agentId) },
 											getDecisionBoard: () => decisionBoard.snapshot(),
-											attributionEnabled: getCurrentSettings().integrations.git.commitAttribution,
+											attributionEnabled,
 											vars: preview.vars,
 											...(preview.resume !== undefined
 												? { resume: { record: preview.resume.record, replayed: preview.resume.replayed } }
