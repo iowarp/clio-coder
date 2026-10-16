@@ -604,6 +604,56 @@ describe("execution scheduler lifecycle", () => {
 		deepStrictEqual([...log.slice(1, -1)].sort(), tasks);
 	});
 
+	it("skips a plan step's dependent when a task it generated fails under onFailure continue", async () => {
+		const f = fixture();
+		const log: string[] = [];
+		f.adapter.run = async (step) => {
+			log.push(step.id);
+			return { assignmentId: step.id, result: Promise.resolve(result(step.id, step.id !== "t2")) };
+		};
+		f.adapter.runCode = async (step) => {
+			log.push(step.id);
+			return result(step.id);
+		};
+		f.adapter.beginWriteBoundary = () => {};
+		f.adapter.verifyWriteBoundary = async (window) => ({ window, violated: false, failedStepIds: [], detail: null });
+		f.adapter.spliceAfter = (current, parent) =>
+			spliceExecutionPlan(
+				current,
+				parent.id,
+				["t1", "t2"].map((id) => ({
+					id,
+					agentId: "scout",
+					task: `Write ${id}`,
+					dependencies: [],
+					writes: [`work/${id}.md`],
+					requestedAuthority: "workspace-edit",
+					approvedAuthority: "workspace-edit",
+					expectedResultContract: "mutation-report",
+					executionRole: "builder",
+				})),
+			);
+		const p = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "plan then build on it",
+			maxWorkers: 2,
+			writers: 1,
+			onFailure: "continue",
+			steps: [
+				{
+					...step("next"),
+					scope: "workspace",
+					writes: ["work/"],
+					plan: { roster: ["scout"], maxTasks: 2, proposals: false },
+				},
+				{ kind: "code", id: "story", commandId: "story", scope: "workspace", writes: ["story/"], dependencies: ["next"] },
+			],
+		});
+		const outcome = await executePlan(p, f.adapter);
+		ok(!log.includes("story"), log.join(" -> "));
+		ok(outcome.skipped.includes("story"), JSON.stringify(outcome.skipped));
+	});
+
 	it("opens a ledger only for agent steps that can run together", async () => {
 		const ledgers = async (maxWorkers: number, steps: ExecutionPlanAgentStep[]) => {
 			const seen: Array<string | undefined> = [];
