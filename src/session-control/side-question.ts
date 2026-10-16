@@ -8,11 +8,12 @@
  * produces reaches the session JSONL, the transcript panel, the context ledger,
  * or the task board, and it never becomes a turn.
  *
- * The call goes through the same `src/engine/ai.ts` stream seam compaction uses
- * for its summarization call, which is what keeps this outside the turn state
+ * The call goes through the same `src/engine/ai.ts` simple-stream seam compaction
+ * uses for its summarization call, which is what keeps this outside the turn state
  * machine without adding an engine seam of its own. Tools are never sent.
  */
 
+import type { ThinkingLevel } from "../core/defaults.js";
 import {
 	isResponseSchemaRejection,
 	type ResponseSchemaDialect,
@@ -20,7 +21,7 @@ import {
 	responseSchemaDialectFor,
 } from "../core/response-schema.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
-import { stream } from "../engine/ai.js";
+import { streamSimple } from "../engine/ai.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import type { AgentMessage, EngineModel, Usage } from "../engine/types.js";
 
@@ -62,6 +63,13 @@ export interface SideQuestionInput {
 	apiKey?: string;
 	signal?: AbortSignal;
 	maxTokens?: number;
+	/**
+	 * The reasoning level this round asks for. The engine's bare `stream` infers
+	 * "medium" for any reasoning model, so a round that named no level reasoned
+	 * at full length on reasoning-by-default models and could spend its whole
+	 * output budget before it answered.
+	 */
+	thinkingLevel: ThinkingLevel;
 	/** Streamed answer text, delivered as the provider produces it. */
 	onDelta?: (partialText: string) => void;
 	onUsage?: (usage: SideQuestionUsage | null) => void;
@@ -204,6 +212,9 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.signal !== undefined) options.signal = input.signal;
 	if (input.temperature !== undefined) options.temperature = input.temperature;
+	// The agent loop's convention: "off" sends no reasoning option, which the
+	// simple-stream seam resolves to thinking off for every provider.
+	if (input.thinkingLevel !== "off") options.reasoning = input.thinkingLevel;
 	if (binding !== null) {
 		options.samplingParams = { response_format: responseFormatFor(binding.dialect, binding.schema, binding.name) };
 	}
@@ -221,10 +232,10 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 	let text = "";
 	let observed = false;
 	try {
-		const events = stream(
+		const events = streamSimple(
 			input.model,
-			context as unknown as Parameters<typeof stream>[1],
-			options as unknown as Parameters<typeof stream>[2],
+			context as unknown as Parameters<typeof streamSimple>[1],
+			options as unknown as Parameters<typeof streamSimple>[2],
 		);
 
 		for await (const event of events) {

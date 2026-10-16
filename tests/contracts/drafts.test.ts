@@ -3,6 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 
 import inceptionRuntime from "../../src/domains/providers/runtimes/cloud/inception.js";
+import litellmRuntime from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { draftTakenOutcome } from "../../src/domains/system-one/outcomes.js";
 import { setDiffusionFramesEnabled } from "../../src/engine/apis/diffusion-frames.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
@@ -305,6 +306,7 @@ describe("/draft rounds", () => {
 				systemPrompt: DRAFT_SYSTEM_PROMPT,
 				userText: "write f",
 				apiKey: "test-key",
+				thinkingLevel: "off",
 				temperature: 0.7,
 				onDelta: (text) => previews.push(text),
 			});
@@ -314,5 +316,44 @@ describe("/draft rounds", () => {
 		}
 		strictEqual(body.temperature, 0.7);
 		deepStrictEqual(previews, ["d%f f(x)", "def f(x)"], "a preview is one frame, never two glued together");
+	});
+
+	it("asks the wire for the round's own thinking level, never an inferred one", async () => {
+		// The bare engine stream inferred "medium" for any reasoning model, so a
+		// Qwen-template route got enable_thinking true on every handoff, triage,
+		// System One and side round, whatever the caller needed.
+		registerClioApiProviders();
+		const model = litellmRuntime.synthesizeModel(
+			{
+				id: "litellm",
+				runtime: "litellm",
+				url: "http://fixture.invalid",
+				capabilities: { reasoning: true, thinkingFormat: "qwen-chat-template" },
+			},
+			"mini/ornith1.5-35b-moe-q4km",
+			null,
+		);
+		const bodies: Array<Record<string, unknown>> = [];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+			bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+			return frames(["A"]);
+		}) as typeof fetch;
+		try {
+			for (const thinkingLevel of ["off", "high"] as const) {
+				await runOutOfTurnRound({
+					model: model as never,
+					messages: [],
+					systemPrompt: "Answer with one letter.",
+					userText: "A or B?",
+					apiKey: "test-key",
+					thinkingLevel,
+				});
+			}
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		const thinking = bodies.map((body) => (body.chat_template_kwargs as { enable_thinking?: unknown }).enable_thinking);
+		deepStrictEqual(thinking, [false, true]);
 	});
 });

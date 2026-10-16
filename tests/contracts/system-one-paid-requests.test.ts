@@ -184,6 +184,7 @@ describe("System One paid requests: admission and accounting", () => {
 			userText: "A) yes\nB) no",
 			apiKey: "local",
 			signal,
+			thinkingLevel: "off",
 			runtimeId: "llamacpp",
 			responseSchema: { name: "system_one_vote", schema: { type: "object", properties: { answer: { type: "string" } } } },
 			beforeRequest: async () => {

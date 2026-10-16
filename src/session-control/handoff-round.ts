@@ -88,6 +88,8 @@ export async function runHandoffRound(input: HandoffRoundInput): Promise<SideQue
 	const { goal, repair, ...rest } = input;
 	return runOutOfTurnRound({
 		...rest,
+		// Extraction into a fixed schema; reasoning only spends the output budget.
+		thinkingLevel: "off",
 		maxTokens: input.maxTokens ?? HANDOFF_MAX_TOKENS,
 		systemPrompt: HANDOFF_SYSTEM_PROMPT,
 		responseSchema: { name: HANDOFF_SCHEMA_NAME, schema: HANDOFF_RESPONSE_SCHEMA },

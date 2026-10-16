@@ -726,6 +726,9 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 			systemPrompt: request.system,
 			userText: request.user,
 			maxTokens: request.maxTokens,
+			// A vote, resolved for thinking off the way the memory role resolves;
+			// the round must ask for the same.
+			thinkingLevel: "off",
 			signal: request.signal,
 			runtimeId: refined.runtime.id,
 			beforeRequest: async () => {

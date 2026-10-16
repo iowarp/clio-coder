@@ -2219,6 +2219,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						entries: asked,
 					}),
 					maxTokens: TRIAGE_MAX_TOKENS,
+					// A schema-bound classification; reasoning only spends the output budget.
+					thinkingLevel: "off",
 					responseSchema: { name: TRIAGE_SCHEMA_NAME, schema: TRIAGE_RESPONSE_SCHEMA },
 					runtimeId: resolved.runtimeId,
 					signal: controller.signal,
@@ -3475,6 +3477,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// message, so the live agent's history is untouched.
 						messages: prepared.runtime.agent.state.messages,
 						question: text,
+						// The level the session's own next turn would use.
+						thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 						...(options.signal ? { signal: options.signal } : {}),
 						...(options.onDelta ? { onDelta: options.onDelta } : {}),
@@ -3519,6 +3523,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 										systemPrompt: sampling.systemPrompt,
 										userText: text,
 										maxTokens: DRAFT_MAX_TOKENS,
+										thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 										...(sampling.temperature === undefined ? {} : { temperature: sampling.temperature }),
 										...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 										...(options.signal ? { signal: options.signal } : {}),

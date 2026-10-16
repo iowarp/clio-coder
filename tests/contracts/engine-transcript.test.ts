@@ -141,6 +141,7 @@ test("side questions replace session prompts and tool declarations without chang
 			model: agent.state.model,
 			messages: agent.state.messages,
 			question: "where?",
+			thinkingLevel: "off",
 		});
 		strictEqual(answer.text, "side answer");
 		deepStrictEqual(agent.state.messages, before);
