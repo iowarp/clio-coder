@@ -2145,6 +2145,9 @@ export function resultContractRepairMessages(
 				cacheWrite: 0,
 				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				// Clio wrote this message; no provider was called for it. Receipts
+				// and journals count only calls that reached one.
+				callInvoked: false,
 			},
 			...origin,
 			timestamp,

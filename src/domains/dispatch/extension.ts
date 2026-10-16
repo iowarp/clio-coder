@@ -816,6 +816,29 @@ function upstreamResponse(
 		differingResponseModelId: readStringOrNull(message.responseModel),
 		providerResponseId: readStringOrNull(message.responseId),
 		...(gatewayRouting !== null ? { gatewayRouting } : {}),
+		...callOutcome(message),
+	};
+}
+
+const CALL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "toolUse", "error", "aborted"]);
+const CALL_ERROR_MESSAGE_MAX_CHARS = 512;
+
+/**
+ * How the call ended, as the engine reported it. A call that failed or was
+ * aborted before its first chunk has no response id or response model, and
+ * without this the receipt row could not say why.
+ */
+function callOutcome(
+	message: Record<string, unknown>,
+): Pick<RunReceiptUpstreamResponse, "stopReason" | "errorMessage"> {
+	const stopReason = typeof message.stopReason === "string" ? message.stopReason : null;
+	if (stopReason === null || !CALL_STOP_REASONS.has(stopReason)) return {};
+	const errorMessage = readStringOrNull(message.errorMessage);
+	return {
+		stopReason: stopReason as NonNullable<RunReceiptUpstreamResponse["stopReason"]>,
+		...((stopReason === "error" || stopReason === "aborted") && errorMessage !== null
+			? { errorMessage: errorMessage.slice(0, CALL_ERROR_MESSAGE_MAX_CHARS) }
+			: {}),
 	};
 }
 
@@ -5570,7 +5593,10 @@ export function createDispatchBundle(
 				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
 				// usage as missing, while its failure text and served-model observations remain real.
 				const u = isRecord(event.message.usage) ? event.message.usage : null;
-				if (u !== null) {
+				if (u !== null && u.callInvoked === false) {
+					// A message Clio wrote into the loop (a result-contract repair, a
+					// synthesis reprompt) never reached a provider and is not a call.
+				} else if (u !== null) {
 					accumulateNativeUsage(tokenMeter, u, null);
 					upstreamResponses.push(
 						upstreamResponse(
@@ -7104,7 +7130,10 @@ export function createDispatchBundle(
 						toolObservability: "unavailable",
 					};
 				}
-				if (u !== null) {
+				if (u !== null && u.callInvoked === false) {
+					// A message Clio wrote into the loop (a result-contract repair, a
+					// synthesis reprompt) never reached a provider and is not a call.
+				} else if (u !== null) {
 					accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
 					upstreamResponses.push(
 						upstreamResponse(

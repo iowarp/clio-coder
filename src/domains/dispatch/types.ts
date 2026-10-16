@@ -826,6 +826,10 @@ export interface RunReceiptUpstreamResponse {
 	providerResponseId: string | null;
 	/** Physical route and proxy attempts reported by LiteLLM, when this call used that gateway. */
 	gatewayRouting?: GatewayRoutingObservation;
+	/** How the call ended as the engine reported it; absent in older receipts and where no runtime reports it. */
+	stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted";
+	/** The engine's error text for an `error` or `aborted` call, clipped to 512 characters. */
+	errorMessage?: string;
 }
 
 /**

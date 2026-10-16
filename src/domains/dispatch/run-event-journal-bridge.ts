@@ -360,7 +360,9 @@ export function attachRunEventJournalBridge(
 					(event.type === "message_end" &&
 						isRecord(event.message) &&
 						event.message.role === "assistant" &&
-						(!isRecord(event.message.usage) || event.message.usage.clioSdkAggregate !== true)))
+						// A message Clio wrote into the loop reached no provider.
+						(!isRecord(event.message.usage) ||
+							(event.message.usage.clioSdkAggregate !== true && event.message.usage.callInvoked !== false))))
 					? ++feed.modelCallIndex
 					: undefined;
 			// Opening the run only once an event survives the feed's filter keeps
