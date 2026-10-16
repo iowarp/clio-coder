@@ -773,7 +773,9 @@ export async function executePlan(
 					if (spliced === null) continue;
 					const previousIds = new Set(plan.steps.map((entry) => entry.id));
 					const additions = spliced.steps.filter((entry) => !previousIds.has(entry.id));
-					for (const addition of additions) stepsById.set(addition.id, addition);
+					// A splice also rewires the plan step's dependents onto the new
+					// tasks, so every step is refreshed, not only the additions.
+					for (const entry of spliced.steps) stepsById.set(entry.id, entry);
 					const newAgentSteps = additions.filter(
 						(addition): addition is ExecutionPlanAgentStep => addition.kind === "agent",
 					);

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { parsePlaybook } from "../../src/domains/agents/playbook.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { ExecutionPlanAgentStep } from "../../src/domains/dispatch/execution-plan.js";
-import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
+import { compileExecutionPlan, spliceExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionSchedulerAdapter, ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
 import { executePlan } from "../../src/domains/dispatch/execution-scheduler.js";
 import { compileFleetExecutionPlan } from "../../src/domains/dispatch/fleet-plan.js";
@@ -519,6 +519,58 @@ describe("execution scheduler lifecycle", () => {
 		strictEqual(checks, 2);
 		deepStrictEqual(log, ["verify", "mutate", "verify", "dependent"]);
 		deepStrictEqual(outcome.revalidated, ["verify"]);
+	});
+
+	it("runs a plan step's dependents only after the tasks it generated", async () => {
+		const f = fixture();
+		const log: string[] = [];
+		f.adapter.run = async (step) => {
+			log.push(step.id);
+			return { assignmentId: step.id, result: Promise.resolve(result(step.id)) };
+		};
+		f.adapter.runCode = async (step) => {
+			log.push(step.id);
+			return result(step.id);
+		};
+		f.adapter.beginWriteBoundary = () => {};
+		f.adapter.verifyWriteBoundary = async (window) => ({ window, violated: false, failedStepIds: [], detail: null });
+		const tasks = ["t1", "t2", "t3"];
+		f.adapter.spliceAfter = (current, parent) =>
+			spliceExecutionPlan(
+				current,
+				parent.id,
+				tasks.map((id) => ({
+					id,
+					agentId: "scout",
+					task: `Write ${id}`,
+					dependencies: [],
+					writes: [`work/${id}.md`],
+					requestedAuthority: "workspace-edit",
+					approvedAuthority: "workspace-edit",
+					expectedResultContract: "mutation-report",
+					executionRole: "builder",
+				})),
+			);
+		const p = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "plan then build on it",
+			maxWorkers: 3,
+			writers: 1,
+			onFailure: "stop",
+			steps: [
+				{
+					...step("next"),
+					scope: "workspace",
+					writes: ["work/"],
+					plan: { roster: ["scout"], maxTasks: 3, proposals: false },
+				},
+				{ kind: "code", id: "story", commandId: "story", scope: "workspace", writes: ["story/"], dependencies: ["next"] },
+			],
+		});
+		await executePlan(p, f.adapter);
+		strictEqual(log[0], "next");
+		strictEqual(log.at(-1), "story", log.join(" -> "));
+		deepStrictEqual([...log.slice(1, -1)].sort(), tasks);
 	});
 
 	it("opens a ledger only for agent steps that can run together", async () => {

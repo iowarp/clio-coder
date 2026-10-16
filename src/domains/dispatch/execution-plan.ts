@@ -311,10 +311,26 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 		throw new Error("execution plan: writers must be 1 when present");
 	}
 	const steps = canonicalSteps(input.steps);
+	// A plan step's dependents wait on the tasks it generates (spliceExecutionPlan),
+	// so each one is checked against the predecessors it can end up with, before
+	// anything runs rather than when the plan settles.
+	const planTaskBound = new Map(
+		steps.flatMap((step) => (step.kind === "agent" && step.plan !== undefined ? [[step.id, step.plan.maxTasks]] : [])),
+	);
 	for (const step of steps) {
+		const predecessors = step.dependencies.reduce(
+			(count, dependency) =>
+				count + (step.kind === "agent" && step.planParentId === dependency ? 1 : (planTaskBound.get(dependency) ?? 1)),
+			0,
+		);
 		if (step.dependencies.length > EXECUTION_HANDOFF_MAX_ITEMS) {
 			throw new Error(
 				`execution plan: step '${step.id}' has ${step.dependencies.length} dependencies; at most ${EXECUTION_HANDOFF_MAX_ITEMS} predecessors are allowed`,
+			);
+		}
+		if (predecessors > EXECUTION_HANDOFF_MAX_ITEMS) {
+			throw new Error(
+				`execution plan: step '${step.id}' can wait on ${predecessors} predecessors once its plan steps' generated tasks join; at most ${EXECUTION_HANDOFF_MAX_ITEMS} are allowed, so lower those plan steps' maxTasks`,
 			);
 		}
 	}
@@ -412,13 +428,27 @@ export function spliceExecutionPlan(
 		...(task.profile !== undefined ? { profile: task.profile } : {}),
 		planParentId: parentId,
 	}));
+	// A step that depends on the plan step builds on what the plan produced,
+	// which is its generated tasks' work. It waits on those tasks instead, and
+	// each task depends on the plan step, so the plan stays its ancestor. Left
+	// alone it shared a wave with the tasks and, as a code step under one
+	// writer, ran before any of them wrote a file.
+	const insertedIds = inserted.map((task) => task.id);
+	const rewired = plan.steps.map((step) =>
+		step.dependencies.includes(parentId)
+			? {
+					...step,
+					dependencies: [...step.dependencies.filter((dependency) => dependency !== parentId), ...insertedIds],
+				}
+			: step,
+	);
 	return compileExecutionPlan({
 		topology: plan.topology,
 		rootTask: plan.rootTask,
 		maxWorkers: plan.maxWorkers,
 		...(plan.writers === 1 ? { writers: 1 as const } : {}),
 		onFailure: plan.onFailure,
-		steps: [...plan.steps, ...inserted],
+		steps: [...rewired, ...inserted],
 		loops: plan.loops,
 	});
 }
