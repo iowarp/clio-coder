@@ -20,8 +20,8 @@ import {
 	fleetEventJournalPath,
 	readFleetEventJournal,
 } from "../domains/dispatch/fleet-event-journal.js";
-import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
-import { fleetInspectionScope } from "./fleet-project-scope.js";
+import { readFleetRun } from "../domains/dispatch/state.js";
+import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.js";
 
 const HELP = `clio-coder fleet events <fleetRootId> [--follow] [--json] [--all]
 
@@ -36,13 +36,18 @@ a rewrite by someone who can write the file.
   --json    write the stored NDJSON lines verbatim
   --all     read a fleet root from any project
 
+The root id may be a unique prefix, as with fleet view.
+
 Exit codes: 0 sealed and intact, 1 integrity break or read error, 2 usage,
-4 --follow stopped because the fleet can no longer seal its journal (its root
+3 the journal read so far is intact but not sealed (the fleet may still be
+running; pass --follow to wait for the seal), 4 --follow stopped because the fleet can no longer seal its journal (its root
 record is gone, it ended without a seal, or the process running it is gone).
 `;
 
 const FOLLOW_POLL_MS = 250;
 
+/** An intact journal read without --follow that has no seal yet. */
+const EXIT_UNSEALED = 3;
 /** A --follow that stopped because the fleet can no longer append its seal. */
 const EXIT_WILL_NOT_SEAL = 4;
 
@@ -112,14 +117,18 @@ export async function runFleetEvents(args: ReadonlyArray<string>, io: FleetEvent
 		io.err(`clio-coder fleet events: a fleet root id is required\n${HELP}`);
 		return 2;
 	}
-	const record = readFleetRun(rootId);
-	if (record !== null && !all) {
-		const ledger = openLedger();
-		if (!fleetInspectionScope(false).seesRoot(record, (id) => ledger.get(id))) {
-			io.err(`clio-coder fleet events: ${rootId} belongs to another project; pass --all to read it\n`);
-			return 1;
-		}
+	const resolved = resolveFleetRootId(rootId, fleetInspectionScope(all));
+	if ("rootId" in resolved) rootId = resolved.rootId;
+	else if (resolved.candidates.length > 1) {
+		io.err(
+			`clio-coder fleet events: fleet root id '${rootId}' is ambiguous: ${resolved.candidates.slice(0, 8).join(", ")}\n`,
+		);
+		return 1;
+	} else if (readFleetRun(rootId) !== null) {
+		io.err(`clio-coder fleet events: ${rootId} belongs to another project; pass --all to read it\n`);
+		return 1;
 	}
+	// Otherwise no record matches, and the journal alone is read under the exact id.
 	let cursor = { offset: 0, seq: 0, prev: null as string | null };
 	let reported = false;
 	let broken = false;
@@ -164,7 +173,7 @@ export async function runFleetEvents(args: ReadonlyArray<string>, io: FleetEvent
 			}
 			if (read.sealed) return broken ? 1 : 0;
 		}
-		if (!follow) return broken ? 1 : 0;
+		if (!follow) return broken ? 1 : EXIT_UNSEALED;
 		// Only an idle poll asks whether a seal is still coming, and the answer
 		// must repeat on the next idle poll: the fleet stamps endedAt a moment
 		// before it appends the seal.

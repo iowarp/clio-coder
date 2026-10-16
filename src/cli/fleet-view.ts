@@ -33,7 +33,7 @@ import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.j
  * instant-shell chunk budget.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readSettings } from "../core/config.js";
 import { responseModelIdObservationFromRecord } from "../core/response-model-id.js";
@@ -52,7 +52,7 @@ import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js"
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
-import { fleetInspectionScope } from "./fleet-project-scope.js";
+import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.js";
 
 const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow] [--all]
 clio-coder fleet view <runId> --json [--all]
@@ -538,39 +538,9 @@ export interface FleetRunViewModel {
 
 function fleetRunsDir(): string {
 	// Mirrors fleetRunPath() in src/domains/dispatch/state.ts, which is private
-	// to that module; only the directory is needed here, for prefix resolution
-	// and for naming the path in a "no such root" message.
+	// to that module; only the directory is needed here, for naming the path in
+	// a "no such root" message.
 	return join(clioStateDir(), "fleet-runs");
-}
-
-/**
- * Resolve a fleet root the way {@link resolveRunId} resolves a run: exact id
- * first, then a unique prefix over the durable fleet-run records. An ambiguous
- * prefix resolves to nothing so the caller can name what it matched.
- */
-function resolveFleetRootId(
-	token: string,
-	scope: ReturnType<typeof fleetInspectionScope>,
-): { rootId: string } | { candidates: string[] } {
-	const ledger = openLedger();
-	const exact = readFleetRun(token);
-	if (exact !== null && scope.seesRoot(exact, (id) => ledger.get(id))) return { rootId: token };
-	let entries: string[];
-	try {
-		entries = readdirSync(fleetRunsDir());
-	} catch {
-		return { candidates: [] };
-	}
-	const candidates = entries
-		.filter((name) => name.endsWith(".json"))
-		.map((name) => name.slice(0, -".json".length))
-		.filter((id) => id.startsWith(token))
-		.filter((id) => {
-			const record = readFleetRun(id);
-			return record !== null && scope.seesRoot(record, (runId) => ledger.get(runId));
-		});
-	if (candidates.length === 1 && candidates[0] !== undefined) return { rootId: candidates[0] };
-	return { candidates };
 }
 
 /**

@@ -1,8 +1,11 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { readSettings } from "../core/config.js";
+import { clioStateDir } from "../core/xdg.js";
 import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
 import { readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
 import { dispatchOwnership } from "../domains/dispatch/ownership.js";
-import type { FleetRunRecord } from "../domains/dispatch/state.js";
+import { type FleetRunRecord, openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 
 /** The configured `fleet.worktrees.root`, so runs in a custom-root worktree stay visible to project scope. */
@@ -47,4 +50,34 @@ export function fleetInspectionScope(all: boolean, cwd = process.cwd()) {
 		});
 	};
 	return { all, seesRun, seesRunId, seesRoot };
+}
+
+/**
+ * Resolve a fleet root the way `fleet view` resolves a run: exact id
+ * first, then a unique prefix over the durable fleet-run records. An ambiguous
+ * prefix resolves to nothing so the caller can name what it matched.
+ */
+export function resolveFleetRootId(
+	token: string,
+	scope: ReturnType<typeof fleetInspectionScope>,
+): { rootId: string } | { candidates: string[] } {
+	const ledger = openLedger();
+	const exact = readFleetRun(token);
+	if (exact !== null && scope.seesRoot(exact, (id) => ledger.get(id))) return { rootId: token };
+	let entries: string[];
+	try {
+		entries = readdirSync(join(clioStateDir(), "fleet-runs"));
+	} catch {
+		return { candidates: [] };
+	}
+	const candidates = entries
+		.filter((name) => name.endsWith(".json"))
+		.map((name) => name.slice(0, -".json".length))
+		.filter((id) => id.startsWith(token))
+		.filter((id) => {
+			const record = readFleetRun(id);
+			return record !== null && scope.seesRoot(record, (runId) => ledger.get(runId));
+		});
+	if (candidates.length === 1 && candidates[0] !== undefined) return { rootId: candidates[0] };
+	return { candidates };
 }
