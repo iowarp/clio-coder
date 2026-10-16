@@ -1544,10 +1544,12 @@ export function createDispatchTraceMirror(
 	};
 	/**
 	 * One row that cannot be written loses that row, never the rest of the
-	 * process's capture. Its transaction already rolled back; the loss is
-	 * counted, the run's in-memory state is dropped so later rows start clean,
-	 * and the warning names the channel and run. Only a store that cannot be
-	 * opened at all degrades capture.
+	 * process's capture. Only the failing store transaction rolls back: a write
+	 * split across transactions, such as startRun's upsert and its running
+	 * update, may keep the part that committed. The loss is counted and the
+	 * warning names the channel and run. The run stays tracked, so its later
+	 * rows still land. Only a store that cannot be opened at all degrades
+	 * capture.
 	 */
 	const rowFailed = (row: TraceRow, error: unknown): void => {
 		const key = `${row.channel}\u0000${row.runId ?? ""}`;
@@ -1557,7 +1559,6 @@ export function createDispatchTraceMirror(
 				`${row.channel} run ${row.runId ?? "(none)"}: ${error instanceof Error ? error.message : String(error)}; that row was not captured and capture continues`,
 			);
 		}
-		if (row.runId !== null) forgetRun(row.runId);
 		try {
 			store?.recordCaptureLoss("failed_rows");
 		} catch (markerError) {
