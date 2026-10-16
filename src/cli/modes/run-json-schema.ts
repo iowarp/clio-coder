@@ -223,6 +223,12 @@ export interface RunJsonTerminalTurnEndFrame {
 	exitCode: number;
 	text: string;
 	error?: string;
+	/** The sealed receipt's outcome: `succeeded`, `failed`, `canceled` or `timed_out`. */
+	outcome?: RunReceipt["outcome"];
+	/** Machine-readable failure detail such as `noop` or `limitation`. */
+	outcomeDetail?: string;
+	/** The receipt's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
+	safety?: Pick<NonNullable<RunReceipt["safety"]>, "decisions" | "blockedAttempts" | "blockedAttemptsTruncated">;
 }
 
 export interface RunJsonDispatchScopeNoticeFrame extends DispatchScopeNoticeView {

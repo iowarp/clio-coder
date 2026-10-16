@@ -26,10 +26,13 @@ import {
 	writeMcpServerCatalog,
 } from "../../domains/gateway/mcp/index.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
+import type { SafetyDecision } from "../../domains/safety/contract.js";
+import { mcpServerPolicyRefusal } from "../../domains/safety/denial.js";
 import { mcpTransportIdentity } from "../../domains/safety/information-flow.js";
 import type { WorkerMcpAttestation } from "../../domains/safety/worker-permit.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
+import { nestedBlockedResult } from "../registry.js";
 
 /** An ACP client's declaration lives only for its hosted session. */
 export interface McpClientServerSpec {
@@ -112,6 +115,12 @@ export interface McpCatalogEntry {
 	actionClass: McpTrustActionClass;
 }
 
+export interface McpDiscoveryNote {
+	serverHint?: "read-only" | "destructive";
+	/** Set once the server refused this capability under its own policy this session. */
+	unavailable?: string;
+}
+
 export interface McpCatalog extends McpListing {
 	entries: McpCatalogEntry[];
 	/** Trusted servers with no usable catalog, so discovery can name what it could not answer. */
@@ -142,6 +151,36 @@ export interface McpRefreshResult {
 	listing: McpServerListing | null;
 	/** Why the refresh listed nothing new. */
 	reason?: string;
+}
+
+export interface McpLaunchOptions {
+	signal?: AbortSignal;
+	/**
+	 * The calling turn is read-only. Starting a server runs its code before any
+	 * call reaches admission, so a server trusted above read is never started (Z1).
+	 */
+	readOnly?: boolean;
+}
+
+/**
+ * Why a read-only turn may not start `declaration`'s server, or null when it
+ * may. A call to a tool the operator classes read, through toolActionClasses,
+ * may start it too: admission would admit that call by the same rule
+ * (f1cae16c5), and the server's own readOnlyHint is unknown before launch.
+ */
+function readOnlyLaunchRefusal(
+	declaration: GatewayMcpServer,
+	readOnly: boolean | undefined,
+	toolName?: string,
+): string | null {
+	if (readOnly !== true || declaration.trust.actionClass === "read") return null;
+	if (
+		toolName !== undefined &&
+		mcpToolActionClass(declaration, { name: toolName, annotations: null }, { readOnly: true }) === "read"
+	) {
+		return null;
+	}
+	return `mcp server ${declaration.id} is trusted as ${declaration.trust.actionClass}, and a read-only turn starts only servers trusted as read or for a tool the operator classes read`;
 }
 
 export interface McpEnsureResult {
@@ -192,12 +231,18 @@ export interface McpCapabilitySource {
 	catalog(): McpCatalog;
 	/** One capability's metadata from the registry or the catalog, again without constructing a client. */
 	metadata(name: string): McpMetadataResult;
-	/** Launch one declared trusted server, register its tools, and publish its catalog. */
-	refresh(id: string, options?: { signal?: AbortSignal }): Promise<McpRefreshResult>;
+	/**
+	 * Launch one declared trusted server, register its tools, and publish its
+	 * catalog. With `readOnly`, only a server trusted as read is launched.
+	 */
+	refresh(id: string, options?: McpLaunchOptions): Promise<McpRefreshResult>;
 	/** Ids of every declared server, trusted or not, for validating a scoped discovery request. */
 	declaredIds(): string[];
-	/** Make `name`'s server available (launching it when trusted) and return its registered spec. */
-	ensure(name: string, options?: { signal?: AbortSignal }): Promise<McpEnsureResult>;
+	/**
+	 * Make `name`'s server available (launching it when trusted) and return its
+	 * registered spec. With `readOnly`, only a server trusted as read is launched.
+	 */
+	ensure(name: string, options?: McpLaunchOptions): Promise<McpEnsureResult>;
 	/** One sentence of provenance and authority for describe, or null for a name this source does not own. */
 	authorityNote(name: string): string | null;
 	/**
@@ -208,6 +253,12 @@ export interface McpCapabilitySource {
 	 * claims `a__b`'s capabilities for `a`.
 	 */
 	ownerIdOf(name: string): string | null;
+	/**
+	 * What discovery can add to a capability's enforced action class: the
+	 * server's own read-only or destructive annotation, and a refusal under the
+	 * server's policy recorded this session. Null for a name this source does not own.
+	 */
+	discoveryNote(name: string): McpDiscoveryNote | null;
 	/** The pinned launch identity of the declared server owning `name`, for information-flow recipients; null when unowned. */
 	transportOf(name: string): string | null;
 	/** Ids of the servers launched this session and still open. */
@@ -256,6 +307,12 @@ interface ServerState {
 	 * find is not the place to re-stat every cache file.
 	 */
 	catalog: McpServerCatalog | null | undefined;
+	/**
+	 * Tools this session's server refused under its own policy, by tool name,
+	 * with the server's code. Discovery reports them as unavailable; a recovered
+	 * or relaunched server starts with a clean slate.
+	 */
+	refused: Map<string, string>;
 }
 
 /** The one call that fills a missing catalog, named so the model does not guess at a broader one. */
@@ -283,6 +340,70 @@ function describeTool(declaration: GatewayMcpServer, tool: NamedTool): string {
 		return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id}, supplied by the ACP client for this session. Its calls use the gateway's unknown action class and session autonomy.`;
 	}
 	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${actionClassFor(declaration, tool)}; ${launchConfinement()}.`;
+}
+
+/** The server's own read-only or destructive annotation, which Clio reports but never enforces. */
+function serverHintOf(tool: Partial<Pick<McpToolDescriptor, "annotations">>): "read-only" | "destructive" | undefined {
+	if (tool.annotations?.readOnlyHint === true) return "read-only";
+	if (tool.annotations?.destructiveHint === true) return "destructive";
+	return undefined;
+}
+
+/**
+ * A call the server refused under its own policy, settled as a refusal rather
+ * than a tool error: the server answered with a structured non-retryable
+ * denial, so the identical call cannot succeed, and no Clio trust record or
+ * approval reaches the server's policy. The registry refuses an identical
+ * repeat in the same turn without calling the server again.
+ */
+function serverPolicyRefusalResult(
+	state: ServerState,
+	tool: McpToolDescriptor,
+	name: string,
+	trustClass: McpTrustActionClass,
+	result: McpToolCallResult,
+): ToolResult | null {
+	const refusal = mcpServerPolicyRefusal(result.structuredContent ?? jsonObjectText(result.text));
+	if (refusal === null) return null;
+	const { id } = state.declaration;
+	state.refused.set(tool.name, refusal.code);
+	const reason = `${name} refused by MCP server ${id}: ${refusal.message}`;
+	const decision: SafetyDecision = {
+		kind: "block",
+		classification: { actionClass: trustClass, reasons: [refusal.message] },
+		rejection: {
+			short: reason,
+			detail: `The server's own policy refused ${tool.name} (${refusal.code}). Clio admitted the call; approving it again in Clio does not change the server's answer.`,
+			hints: ["Report the refusal and what would allow it; do not substitute another tool or target for the refused one."],
+		},
+	};
+	const hint = serverHintOf(tool);
+	return nestedBlockedResult({
+		kind: "blocked",
+		reason,
+		decision,
+		denial: {
+			layer: "mcp_server_policy",
+			actionClass: trustClass,
+			retryable: false,
+			allowedBy: `the MCP server ${id} must be configured to permit ${tool.name}${refusal.profile !== undefined ? `; its ${refusal.profile} profile excludes it` : ""}.`,
+			code: refusal.code,
+			server: id,
+			...(hint !== undefined ? { serverHint: hint } : {}),
+		},
+	});
+}
+
+/** A text block that is one JSON object, for a server that reports structure only as text. */
+function jsonObjectText(text: string): unknown {
+	const trimmed = text.trim();
+	if (!trimmed.startsWith("{") || trimmed.length > 16_384) return undefined;
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		// Prose that merely starts with a brace is not a structured refusal.
+		return undefined;
+	}
 }
 
 /** Remedies name the CLI first: it exists in every session, interactive or not. */
@@ -396,6 +517,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					truncated: false,
 					registered: [],
 					unregistrable: [],
+					refused: new Map(),
 					failure: null,
 					catalog: undefined,
 				},
@@ -460,6 +582,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			attested !== undefined && attested.actionClass !== liveClass
 				? `${name}: mcp server ${declaration.id} now gives this tool class ${liveClass}, but this run was admitted with ${attested.actionClass}; dispatch again so admission judges the new class`
 				: null;
+		// A worker's sealed class stays its class under read-only too; the
+		// permit already judged it against the run's ceiling.
+		const readOnlyClass =
+			attested?.actionClass ??
+			mcpToolActionClass(declaration, { name: tool.name, annotations: tool.annotations ?? null }, { readOnly: true });
 		const confirmationRuleId = mcpToolConfirmationRule(declaration, tool.name);
 		const timeoutMs = declaration.timeoutMs ?? options.requestTimeoutMs;
 		const spec: ToolSpec = {
@@ -467,6 +594,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			description: describeTool(declaration, tool),
 			parameters: tool.inputSchema as TSchema,
 			baseActionClass: trustClass,
+			...(readOnlyClass !== trustClass ? { readOnlyActionClass: readOnlyClass } : {}),
 			...(confirmationRuleId !== null ? { confirmationRuleId } : {}),
 			executionMode: "sequential",
 			placement: "gateway",
@@ -511,7 +639,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						...(result.structuredContent !== undefined ? { structuredContent: result.structuredContent } : {}),
 						...(result.structuredContentJson !== undefined ? { structuredContentJson: result.structuredContentJson } : {}),
 					};
-					if (result.isError) return { kind: "error", message: `${name}: ${result.text || "tool error"}`, details };
+					if (result.isError) {
+						const refusal = serverPolicyRefusalResult(state, tool, name, trustClass, result);
+						if (refusal !== null) return refusal;
+						return { kind: "error", message: `${name}: ${result.text || "tool error"}`, details };
+					}
 					const images = imageBlocks(result);
 					return { kind: "ok", output: result.text, details, ...(images.length > 0 ? { images } : {}) };
 				} catch (error) {
@@ -630,6 +762,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				for (const name of state.registered) registry.unregister?.(name);
 				state.registered = [];
 				state.unregistrable = [];
+				state.refused.clear();
 			})();
 			await state.recovery;
 			delete state.recovery;
@@ -779,6 +912,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					truncated: false,
 					registered: [],
 					unregistrable: [],
+					refused: new Map(),
 					failure: null,
 					catalog: null,
 				};
@@ -897,6 +1031,8 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					reason: `mcp server ${id} is ${trust.status} (${trust.reason}); it is never launched until trusted: run ${remedy.remedy} (${remedy.interactiveRemedy} in an interactive session)`,
 				};
 			}
+			const refusal = readOnlyLaunchRefusal(state.declaration, invokeOptions?.readOnly);
+			if (refusal !== null) return { listing: listingFor(state), reason: refusal };
 			await discover(state, invokeOptions?.signal);
 			return {
 				listing: listingFor(state),
@@ -918,6 +1054,12 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					reason: `mcp server ${owner.declaration.id} is ${trust.status} (${trust.reason}); it is never launched until trusted: run ${remedy.remedy} (${remedy.interactiveRemedy} in an interactive session)`,
 				};
 			}
+			const refusal = readOnlyLaunchRefusal(
+				owner.declaration,
+				invokeOptions?.readOnly,
+				name.slice(`mcp_${owner.declaration.id}__`.length),
+			);
+			if (refusal !== null) return { spec: null, reason: refusal };
 			await discover(owner, invokeOptions?.signal);
 			const spec = registry.get(name as DynamicToolName);
 			if (spec !== undefined && owner.registered.includes(spec.name as DynamicToolName)) return { spec };
@@ -946,6 +1088,22 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		},
 		ownerIdOf(name) {
 			return ownerOf(name)?.declaration.id ?? null;
+		},
+		discoveryNote(name) {
+			const state = ownerOf(name);
+			if (state === null) return null;
+			const toolName = name.slice(`mcp_${state.declaration.id}__`.length);
+			const tool =
+				state.tools.find((entry) => entry.name === toolName) ??
+				cachedCatalog(state)?.tools.find((entry) => entry.name === toolName);
+			const hint = tool === undefined ? undefined : serverHintOf(tool);
+			const refused = state.refused.get(toolName);
+			return {
+				...(hint !== undefined ? { serverHint: hint } : {}),
+				...(refused !== undefined
+					? { unavailable: `refused by MCP server ${state.declaration.id} policy (${refused}) this session` }
+					: {}),
+			};
 		},
 		transportOf(name) {
 			const declaration = ownerOf(name)?.declaration;

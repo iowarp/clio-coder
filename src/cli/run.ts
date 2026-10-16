@@ -64,7 +64,7 @@ Flags:
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
   --autonomy <level>        main-agent autonomy: default|yolo
-  --read-only              restrict --agent dispatch to read-only tools
+  --read-only              deny every write, command, and delegation; with --agent, the dispatch is read-only
   --record                 save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
@@ -201,7 +201,6 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 	return (
-		parsed.readOnly ||
 		parsed.record === true ||
 		parsed.agentProfile !== undefined ||
 		parsed.agentRuntime !== undefined ||
@@ -360,6 +359,9 @@ export async function runClioRun(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			// Without --agent, --read-only is the main agent's enforced ceiling,
+			// carried in the task scope so every continuation keeps it.
+			if (parsed.readOnly && parsed.agentId === undefined) parsed.constraints = { ...parsed.constraints, readOnly: true };
 			if (parsed.constraints && parsed.agentId !== undefined) {
 				process.stderr.write(
 					"clio-coder run: --turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task\n",

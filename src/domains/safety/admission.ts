@@ -279,7 +279,7 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	// Step 2: hard permit limits. None of them parks and no approval clears them.
 	const constraints = input.constraints ?? {};
 	if (
-		constraints.readOnly === true &&
+		(constraints.readOnly === true || constraints.turnConstraints?.readOnly === true) &&
 		(effectDecisions.some((d) => d.classification.actionClass !== "read") ||
 			input.confirmationRuleId !== undefined ||
 			readOutside ||

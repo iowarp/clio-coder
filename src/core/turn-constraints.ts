@@ -18,6 +18,12 @@ export interface TurnConstraints {
 	 */
 	readonly delegatedTools?: readonly string[];
 	readonly skills?: "allowed" | "disabled";
+	/**
+	 * Enforced read-only ceiling: admission denies every call that is not a
+	 * read inside the workspace, exactly as a read-only dispatch does. Unlike
+	 * `mode`, which only shapes the workflow, no approval clears it.
+	 */
+	readonly readOnly?: true;
 }
 
 /** Snapshot caller-owned input before asynchronous admission or queuing. */
@@ -30,6 +36,7 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		(value.mode !== undefined && !["answer", "proposal", "change"].includes(value.mode)) ||
 		(value.delegation !== undefined && !["allowed", "forbidden"].includes(value.delegation)) ||
 		(value.skills !== undefined && !["allowed", "disabled"].includes(value.skills)) ||
+		(value.readOnly !== undefined && value.readOnly !== true) ||
 		!isToolNameList(value.allowedTools) ||
 		!isToolNameList(value.delegatedTools)
 	) {
@@ -39,6 +46,7 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		...(value.mode === undefined ? {} : { mode: value.mode }),
 		...(value.delegation === undefined ? {} : { delegation: value.delegation }),
 		...(value.skills === undefined ? {} : { skills: value.skills }),
+		...(value.readOnly === true ? { readOnly: true as const } : {}),
 		...(value.allowedTools === undefined ? {} : { allowedTools: Object.freeze([...new Set(value.allowedTools)].sort()) }),
 		...(value.delegatedTools === undefined
 			? {}

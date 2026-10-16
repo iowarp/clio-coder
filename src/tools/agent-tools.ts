@@ -31,6 +31,7 @@ import {
 	sanitizeCallTargetText,
 } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import { denialLines, type ToolDenial } from "../domains/safety/denial.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { validateEngineToolArguments } from "../engine/ai.js";
@@ -179,6 +180,8 @@ export interface ToolFinishEvent {
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
+	/** Who refused a blocked call and what would allow it; see `src/domains/safety/denial.ts`. */
+	denial?: ToolDenial;
 	skillActivation?: SkillActivation;
 }
 
@@ -289,6 +292,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
 			...(verdict.kind === "blocked" && verdict.deniedPark === true ? { deniedPark: true } : {}),
 			...(verdict.kind === "blocked" && verdict.redundantRepeat === true ? { redundantRepeat: true } : {}),
+			...(verdict.kind === "blocked" && verdict.denial !== undefined ? { denial: verdict.denial } : {}),
 		});
 		// The model sees only this thrown message. The short verdict reason
 		// starves the next turn of the policy's why and how-to-recover, so
@@ -296,7 +300,10 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		// telemetry event above keeps the terse reason for receipts and UI.
 		const rejection =
 			verdict.kind === "blocked" && "rejection" in verdict.decision ? verdict.decision.rejection : undefined;
-		throw new Error(formatModelRejection(verdict.reason, rejection));
+		const denial = verdict.kind === "blocked" ? verdict.denial : undefined;
+		throw new Error(
+			formatModelRejection(verdict.reason, rejection, denial !== undefined ? denialLines(denial) : undefined),
+		);
 	}
 	const resultAudit = toolAuditFacts(spec.name, args, verdict.result);
 	const withResultAudit = { ...withCallId, ...(resultAudit ? { audit: resultAudit } : {}) };
@@ -359,6 +366,7 @@ function emitFinish(
 		decision?: SafetyDecision;
 		deniedPark?: true;
 		redundantRepeat?: true;
+		denial?: ToolDenial;
 		skillActivation?: SkillActivation;
 		toolCallId?: string;
 	},
@@ -376,6 +384,7 @@ function emitFinish(
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.deniedPark === true) event.deniedPark = true;
 	if (extra?.redundantRepeat === true) event.redundantRepeat = true;
+	if (extra?.denial !== undefined) event.denial = extra.denial;
 	if (extra?.decision !== undefined) {
 		event.actionClass = extra.decision.classification.actionClass;
 		const permissionWasRequired =

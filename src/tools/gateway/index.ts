@@ -27,7 +27,7 @@ import { type GatewayCapabilityKind, gatewayCapabilityKind, surfaceSpecPlacement
 import { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 import { runGatewayChain } from "./chain.js";
 import { capabilityArgumentShape, gatewayExamples } from "./guidance.js";
-import type { McpCapabilitySource, McpServerListing } from "./mcp-capabilities.js";
+import type { McpCapabilitySource, McpLaunchOptions, McpServerListing } from "./mcp-capabilities.js";
 
 export { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 export {
@@ -73,6 +73,10 @@ export interface GatewayCapabilityEntry {
 	/** Required field names are a compact cue, not a substitute for the full schema. */
 	requiredArgs?: ReadonlyArray<string>;
 	argumentShape?: string;
+	/** An MCP server's own read-only or destructive annotation; `actionClass` is what Clio enforces. */
+	serverHint?: "read-only" | "destructive";
+	/** Why an MCP capability cannot succeed as things stand, such as a server policy refusal. */
+	unavailable?: string;
 }
 
 /** What each action class is for, as a capability category's stated purpose. */
@@ -181,6 +185,14 @@ export const gatewayToolSurface = {
 	executionMode: "sequential",
 } satisfies ToolSurface;
 
+/** A read-only turn starts only MCP servers trusted as read, before any call reaches admission (Z1). */
+function mcpLaunchOptions(options: ToolInvokeOptions | undefined): McpLaunchOptions {
+	return {
+		...(options?.signal ? { signal: options.signal } : {}),
+		...(options?.turnConstraints?.readOnly === true ? { readOnly: true } : {}),
+	};
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -256,6 +268,18 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		return new Set((run ?? turn ?? []).filter((name) => turn === undefined || turn.includes(name)));
 	};
 
+	/** Whether this run's tool surface names any capability of MCP server `id`. */
+	const admitsServer = (id: string, allowed: ReadonlySet<string> | null): boolean =>
+		allowed === null || [...allowed].some((name) => deps.mcp?.ownerIdOf(name) === id);
+
+	/** A server listing projected onto the capabilities a restricted surface admits. */
+	const admittedListing = (entry: McpServerListing, allowed: ReadonlySet<string> | null): McpServerListing => {
+		if (allowed === null) return entry;
+		const { tools, unregistrable: _unregistrable, catalogCount: _catalogCount, ...rest } = entry;
+		const admitted = tools?.filter((name) => allowed.has(name));
+		return { ...rest, ...(admitted !== undefined ? { tools: admitted } : {}) };
+	};
+
 	const directCallGuidance = (name: string): string =>
 		`"${name}" is a direct tool with an attached schema; call it directly, not through the gateway`;
 
@@ -266,7 +290,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	): Promise<{ spec: ToolSpec } | { spec: null; message: string }> => {
 		let spec = registry.get(name as ToolName);
 		if (isMcpToolName(name) && deps.mcp) {
-			const ensured = await deps.mcp.ensure(name, options?.signal ? { signal: options.signal } : {});
+			const ensured = await deps.mcp.ensure(name, mcpLaunchOptions(options));
 			if (ensured.spec === null)
 				return { spec: null, message: `gateway: ${ensured.reason ?? `unknown capability ${name}`}` };
 			spec = ensured.spec;
@@ -345,16 +369,20 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			if (deps.mcp === undefined) {
 				return { kind: "error", message: "gateway: this session declares no local MCP servers" };
 			}
-			// A restricted surface already suppresses broad MCP discovery. Let it
-			// launch a server here and the recipe's tool ceiling would stop being
-			// a ceiling on what this run can start.
-			if (allowed !== null) {
+			const declared = deps.mcp.declaredIds();
+			// A restricted surface may discover and launch only a server it was
+			// given a capability of. Naming `mcp_<id>__<tool>` already lets a call
+			// start that server, so scoped discovery of it widens nothing; any other
+			// server stays out, or the tool ceiling would stop bounding what this
+			// run can start. Its refusal names only the admitted servers and reads
+			// the same for an undeclared id, so probing ids reveals no declaration.
+			if (allowed !== null && !admitsServer(server, allowed)) {
+				const admitted = declared.filter((id) => admitsServer(id, allowed)).sort();
 				return {
 					kind: "error",
-					message: `gateway: MCP discovery is not available on this run's admitted tool surface (${[...allowed].sort().join(", ")}); the recipe or explicit task scope excludes it`,
+					message: `gateway: MCP server "${server}" is not on this run's admitted tool surface; the recipe or explicit task scope names none of its capabilities${admitted.length > 0 ? ` (admitted servers: ${admitted.join(", ")})` : ""}`,
 				};
 			}
-			const declared = deps.mcp.declaredIds();
 			if (!declared.includes(server)) {
 				return {
 					kind: "error",
@@ -383,26 +411,26 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			let mcpEntries: GatewayCapabilityEntry[] = [];
 			let refreshNote: string | undefined;
 			// A named server narrows the whole answer to that server, so the
-			// registry's builtins and extensions are not part of it. The scoped
-			// form is rejected above on a restricted surface, so the two filters
-			// here never have to compose.
+			// registry's builtins and extensions are not part of it. A restricted
+			// surface narrows it again to the capabilities it names, and to the
+			// servers that own one of them.
 			const scoped = server.length > 0;
+			const shownServer = (id: string): boolean => (scoped ? id === server : admitsServer(id, allowed));
 			if (deps.mcp) {
 				if (refresh) {
-					const result = await deps.mcp.refresh(server, options?.signal ? { signal: options.signal } : {});
+					const result = await deps.mcp.refresh(server, mcpLaunchOptions(options));
 					if (result.reason !== undefined) refreshNote = result.reason;
 				}
 				const catalog = deps.mcp.catalog();
-				// A restricted surface reads metadata for its exact admitted
-				// capabilities only, and never lists the servers it may not reach.
-				if (allowed === null) {
-					servers = scoped ? catalog.servers.filter((entry) => entry.id === server) : catalog.servers;
-					diagnostics = catalog.diagnostics;
-					missing = scoped ? catalog.missing.filter((id) => id === server) : catalog.missing;
-				}
+				// A restricted surface lists only the servers it names a capability
+				// of, projected onto those capabilities, and never a server it may
+				// not reach.
+				servers = catalog.servers.filter((entry) => shownServer(entry.id)).map((entry) => admittedListing(entry, allowed));
+				diagnostics = allowed === null ? catalog.diagnostics : [];
+				missing = catalog.missing.filter(shownServer);
 				mcpEntries = catalog.entries
-					.filter((entry) => allowed === null || allowed.has(entry.name))
 					.filter((entry) => !scoped || deps.mcp?.ownerIdOf(entry.name) === server)
+					.filter((entry) => allowed === null || allowed.has(entry.name))
 					.map((entry) => ({
 						name: entry.name,
 						kind: gatewayCapabilityKind(entry.name),
@@ -417,7 +445,8 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				// `mcp_<id>__` prefix. Server ids may contain `__`, so with
 				// declarations `a` and `a__b` the prefix test hands `a__b`'s
 				// capabilities to a caller that asked for `a`.
-				.filter((spec) => (scoped ? deps.mcp?.ownerIdOf(spec.name) === server : allowed === null || allowed.has(spec.name)))
+				.filter((spec) => !scoped || deps.mcp?.ownerIdOf(spec.name) === server)
+				.filter((spec) => allowed === null || allowed.has(spec.name))
 				.map((spec) => {
 					const schema: unknown = spec.parameters;
 					const requiredArgs =
@@ -437,7 +466,13 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// name is the older snapshot of it and must not displace it.
 			const byName = new Map(registryEntries.map((entry) => [entry.name, entry]));
 			for (const entry of mcpEntries) if (!byName.has(entry.name)) byName.set(entry.name, entry);
-			const catalogEntries = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+			// Discovery states what Clio knows beyond the enforced class: the
+			// server's own read/write annotation, and a refusal the server's policy
+			// already gave this session, so an excluded read neither reads as a
+			// write nor as callable.
+			const catalogEntries = [...byName.values()]
+				.map((entry) => (entry.kind === "mcp" ? { ...entry, ...deps.mcp?.discoveryNote(entry.name) } : entry))
+				.sort((left, right) => left.name.localeCompare(right.name));
 			const exactName = catalogEntries.find((entry) => entry.name.toLowerCase() === query);
 			const discoveryText = (entry: GatewayCapabilityEntry): string => {
 				const spec = registry.get(entry.name as ToolName);

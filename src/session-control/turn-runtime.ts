@@ -235,6 +235,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| "ruleId"
 			| "reasonCode"
 			| "policySource"
+			| "denial"
 		>
 	>();
 	const toolTelemetry: ToolTelemetry = {
@@ -251,6 +252,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),
 				...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
 				...(event.policySource === undefined ? {} : { policySource: event.policySource }),
+				...(event.denial === undefined ? {} : { denial: event.denial }),
 			});
 		},
 	};
@@ -1002,6 +1004,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								...(admission.reasonCode === undefined ? {} : { reasonCode: admission.reasonCode }),
 								...(admission.policySource === undefined ? {} : { policySource: admission.policySource }),
 								...(admission.reason === undefined ? {} : { blockReason: admission.reason }),
+								...(admission.denial === undefined ? {} : { denial: admission.denial }),
 							}),
 				} as typeof event;
 			} else if (event.type === "agent_end") {

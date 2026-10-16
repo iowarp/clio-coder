@@ -25,6 +25,7 @@ import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } fro
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
+import { type DenialLayer, repeatedDenialReason, type ToolDenial } from "../domains/safety/denial.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
@@ -174,6 +175,12 @@ export interface ToolSpec {
 	modelParameters?: TSchema;
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
+	/**
+	 * The base class under a read-only ceiling, when the base class rests on
+	 * something the operator did not set: an MCP tool classed read only by
+	 * the server's own readOnlyHint.
+	 */
+	readOnlyActionClass?: ActionClass;
 	/** A safety-net confirmation required at every autonomy level. */
 	confirmationRuleId?: string;
 	/**
@@ -299,6 +306,12 @@ export interface RegistryDeps {
 	 */
 	principal?: AdmissionPrincipal;
 	workerExecuteAutonomy?: "yolo";
+	/**
+	 * The loop guard's parent-workspace mutation epoch for a turn. The main
+	 * agent's denial memory keys on it, so a refusal is repeated only while
+	 * nothing it was decided on has changed. Absent means epoch 0.
+	 */
+	mutationEpoch?: (turnId: string) => number;
 	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
 	readOnly?: boolean;
 	/**
@@ -652,16 +665,23 @@ export interface ToolRegistry {
 	 */
 	resumeParkedCalls(grant?: OneShotGrant): Promise<void>;
 	/**
-	 * Resolve one parked call with a `blocked` verdict carrying `reason`.
-	 * Returns true when the request was found.
+	 * Forget the main agent's remembered refusals, for a host whose policy or
+	 * settings reloaded: what decided them may have changed.
 	 */
-	cancelParkedCall(requestId: string, reason: string): boolean;
+	forgetRefusals(): void;
+	/**
+	 * Resolve one parked call with a `blocked` verdict carrying `reason`.
+	 * Returns true when the request was found. `denied` marks an answer that
+	 * refused the call, which alone carries an operator-approval refusal
+	 * account; a stop, an expiry or a shutdown only cancels the ask.
+	 */
+	cancelParkedCall(requestId: string, reason: string, options?: ParkCancelOptions): boolean;
 	/**
 	 * Resolve every parked call with a `blocked` verdict carrying `reason`.
 	 * Used when the confirmation overlay is cancelled so the agent loop sees a
 	 * clean rejection instead of an indefinitely pending tool call.
 	 */
-	cancelParkedCalls(reason: string): void;
+	cancelParkedCalls(reason: string, options?: ParkCancelOptions): void;
 	/**
 	 * Subscribe to the signal fired when a call is parked awaiting permission
 	 * confirmation. Returns an unsubscribe handle.
@@ -669,6 +689,12 @@ export interface ToolRegistry {
 	onPermissionRequired(
 		listener: (call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void,
 	): () => void;
+}
+
+/** How a parked call ended without an approval. */
+export interface ParkCancelOptions {
+	/** Someone answered the ask and refused the call. Absent means the ask was cancelled unanswered. */
+	denied?: boolean;
 }
 
 export type RegistryVerdict =
@@ -687,6 +713,12 @@ export type RegistryVerdict =
 			deniedPark?: true;
 			/** The guard withheld a duplicate of a call that already succeeded (`block_tool.redundantRepeat`). */
 			redundantRepeat?: true;
+			/**
+			 * Which layer refused the call and what would allow it. Set on the main
+			 * agent's refusals that an identical repeat cannot change; the registry
+			 * refuses that repeat in the same turn without running or asking again.
+			 */
+			denial?: ToolDenial;
 	  }
 	| { kind: "not_visible"; reason: string };
 
@@ -779,7 +811,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					reasonCode: FLOW_BLOCK_REASON_CODE,
 					reasons: [flowViolation],
 				});
-				return { kind: "blocked", reason: flowViolation, decision };
+				return flowBlockedVerdict(decision, call.tool, flowViolation);
 			}
 			// The hook layer is the only control stage past safety admission. Guards
 			// (loop, protected artifacts, dispatch dedup) are before_tool
@@ -855,8 +887,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// model, telemetry, and the ledger then see exactly what a direct
 				// call to the capability would have produced.
 				const nestedBlocked = nestedBlockedVerdict(result);
-				if (nestedBlocked !== null) return nestedBlocked;
-				decision = nestedDecisions.get(result) ?? decision;
+				if (nestedBlocked === null) decision = nestedDecisions.get(result) ?? decision;
 				// A trusted body (dispatch, monitor) labels what it carried back from
 				// a worker's context; that label joins the source rule's own.
 				const reportedRestrictions = result.details?.[FLOW_RESTRICTIONS_DETAIL];
@@ -880,9 +911,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					if (unlabeled !== null) {
 						const reason = `${spec.name} result withheld: ${unlabeled}`;
 						recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE, reasons: [reason] });
-						return { kind: "blocked", reason, decision };
+						return flowBlockedVerdict(decision, call.tool, reason);
 					}
 				}
+				// A refusal settles only after its label is absorbed: an MCP server's
+				// refusal quotes the server's own text, which the source rule labels
+				// exactly as it would label a result.
+				if (nestedBlocked !== null) return nestedBlocked;
 				const carriedForScreen = mergeFlowRestrictions(deps.flow?.carried() ?? null, sourceRestrictions);
 				const labeled = withFlowRestrictions(result, sourceRestrictions);
 				observeExternalResult(spec, call, labeled, options, carriedForScreen);
@@ -916,7 +951,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (unlabeled !== null) {
 					const reason = `${spec.name} error withheld: ${unlabeled}`;
 					recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE, reasons: [reason] });
-					return { kind: "blocked", reason, decision };
+					return flowBlockedVerdict(decision, call.tool, reason);
 				}
 				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
@@ -1178,7 +1213,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(grant !== undefined
 				? { authorization: { actionClass: grant.actionClass, issuer: grant.issuer ?? "operator" } }
 				: {}),
-			normalize: (decision) => applyRegisteredToolClassification(decision, spec),
+			normalize: (decision) =>
+				applyRegisteredToolClassification(
+					decision,
+					spec,
+					deps.readOnly === true || options?.turnConstraints?.readOnly === true,
+				),
 			...(deps.git !== undefined ? { git: deps.git } : {}),
 			autonomyExtra: {
 				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
@@ -1187,7 +1227,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
 		});
 		if (admission.kind === "deny" && admission.code === "safety_net") {
-			return { kind: "terminal", verdict: { kind: "blocked", reason: admission.reason, decision: admission.decision } };
+			const policy = admission.decision.policy;
+			const allowedBy =
+				policy?.policySource === "project-policy"
+					? `the project's safety policy${policy.ruleId !== undefined ? ` rule ${policy.ruleId}` : ""} must change, which only the operator can do.`
+					: "nothing within this run; it is a hard block of Clio's safety net.";
+			return {
+				kind: "terminal",
+				verdict: withDenial(
+					{ kind: "blocked", reason: admission.reason, decision: admission.decision },
+					"clio_policy",
+					allowedBy,
+					policy?.ruleId ?? policy?.reasonCode,
+				),
+			};
 		}
 		const effectRefusal = admitHostEffects(call, spec, admission.decision, level);
 		if (effectRefusal !== null) return effectRefusal;
@@ -1210,6 +1263,56 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		};
 	};
 
+	/**
+	 * Attach the structured account of a refusal. Worker registries leave it
+	 * off: a worker's refusals already end in the typed permission_required
+	 * contract (`src/engine/worker-refusals.ts`), which counts every ask.
+	 */
+	const withDenial = (
+		verdict: Extract<RegistryVerdict, { kind: "blocked" }>,
+		layer: DenialLayer,
+		allowedBy: string,
+		code?: string,
+	): Extract<RegistryVerdict, { kind: "blocked" }> =>
+		deps.principal === "worker"
+			? verdict
+			: {
+					...verdict,
+					denial: {
+						layer,
+						actionClass: verdict.decision.classification.actionClass,
+						retryable: false,
+						allowedBy,
+						...(code !== undefined ? { code } : {}),
+					},
+				};
+
+	/**
+	 * The refusal account of an ask that was answered without an approval.
+	 * Only a refusal carries one: an operator's or client's deny, or a headless
+	 * run or a registry without a listener, which refuse every ask. A run
+	 * cancelled or shut down, a stopped turn, an expired ask and the tool-call
+	 * limit never answered the question, so the identical call stays askable.
+	 */
+	const parkDenial = (
+		verdict: Extract<RegistryVerdict, { kind: "blocked" }>,
+		reason: string,
+		denied = false,
+	): Extract<RegistryVerdict, { kind: "blocked" }> => {
+		const headless = reason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER) || reason === NO_PARK_LISTENER_REASON;
+		if (!denied && !headless) return verdict;
+		const refused = withDenial(
+			verdict,
+			"operator_approval",
+			headless
+				? "an operator must approve it, which a headless run cannot do: rerun interactively, or let an approved policy or autonomy level admit it."
+				: "the operator must approve it; ask what to do instead of repeating it.",
+			verdict.decision.policy?.ruleId,
+		);
+		if (headless && refused.denial !== undefined) unattendedDenials.add(refused.denial);
+		return refused;
+	};
+
 	/** Registry verdict and audit row for a hard denial past the safety net. */
 	const deniedVerdict = (
 		call: ClassifierCall,
@@ -1217,9 +1320,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	): Extract<RegistryVerdict, { kind: "blocked" }> => {
 		const decision = admission.decision;
 		if (admission.code === "read_only") {
-			const verdict = readOnlyDeniedVerdict(decision, call.tool);
-			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: "dispatch:read_only" });
-			return verdict;
+			// A read-only dispatch and a host's read-only task scope deny alike;
+			// the reason code names which one the operator set.
+			const hostScoped = deps.readOnly !== true;
+			const reasonCode = hostScoped ? "task:read_only" : "dispatch:read_only";
+			const verdict = readOnlyDeniedVerdict(decision, call.tool, hostScoped, reasonCode);
+			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode });
+			return withDenial(
+				verdict,
+				"clio_policy",
+				hostScoped
+					? "the host must start the task without its read-only ceiling (clio-coder run --read-only)."
+					: "the dispatching agent must dispatch this work without read-only.",
+				reasonCode,
+			);
 		}
 		if (admission.code === "skill_surface" && admission.skillViolation !== undefined) {
 			const verdict = skillSurfaceBlockedVerdict(decision, call.tool, admission.skillViolation);
@@ -1241,23 +1355,41 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				},
 			};
 			recordRegistryDisposition(call, blocked, "blocked", { reasonCode: "turn_constraint", reasons: [reason] });
-			return { kind: "blocked", reason, decision: blocked };
+			return withDenial(
+				{ kind: "blocked", reason, decision: blocked },
+				"clio_policy",
+				admission.code === "skills_disabled"
+					? "the host must allow skills for this task."
+					: `the host's task scope must name ${call.tool} (clio-coder --allow-tools, or the ACP client's task ceiling).`,
+				"turn_constraint",
+			);
 		}
 		if (admission.code === "git_destructive") {
 			recordRegistryDisposition(call, decision, "blocked", {
 				reasons: [admission.reason],
 				reasonCode: "classification:git_destructive",
 			});
-			return { kind: "blocked", reason: admission.reason, decision };
+			return withDenial(
+				{ kind: "blocked", reason: admission.reason, decision },
+				"clio_policy",
+				"nothing within this run; destructive git is a hard block.",
+				"classification:git_destructive",
+			);
 		}
+		const reasonCode = `admission:${admission.code}`;
 		const blocked: SafetyDecision = {
 			kind: "block",
 			classification: decision.classification,
 			rejection: { short: admission.reason, detail: admission.reason, hints: [] },
-			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+			...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
 		};
-		recordRegistryDisposition(call, blocked, "blocked", { reasonCode: `admission:${admission.code}` });
-		return { kind: "blocked", reason: admission.reason, decision: blocked };
+		recordRegistryDisposition(call, blocked, "blocked", { reasonCode });
+		return withDenial(
+			{ kind: "blocked", reason: admission.reason, decision: blocked },
+			"clio_policy",
+			"nothing within this run.",
+			reasonCode,
+		);
 	};
 
 	/**
@@ -1308,6 +1440,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const refused = hard ?? soft;
 		if (refused === null) return null;
 		const reason = `${call.tool} refused: ${refused.label} would not be admitted as a direct call (${refused.cause})`;
+		const reasonCode = hard !== null ? "host_effect_blocked" : "host_effect_not_admitted";
 		const blocked: SafetyDecision = {
 			kind: "block",
 			classification: decision.classification,
@@ -1319,12 +1452,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					"Approving the dispatch does not approve the commands its verification runs.",
 				],
 			},
-			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+			...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
 		};
-		recordRegistryDisposition(call, blocked, "blocked", {
-			reasonCode: hard !== null ? "host_effect_blocked" : "host_effect_not_admitted",
-			reasons: [reason],
-		});
+		recordRegistryDisposition(call, blocked, "blocked", { reasonCode, reasons: [reason] });
 		return { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } };
 	};
 
@@ -1413,7 +1543,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		delete entry.abortCleanup;
 	};
 
-	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string): void => {
+	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string, denied?: boolean): void => {
 		cleanupParkedEntry(entry);
 		disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
 		// A denied/cancelled park is still a model attempt: observe it so
@@ -1422,7 +1552,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
 		entry.resolve(
 			guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ??
-				parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason),
+				parkDenial(parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason), reason, denied),
 		);
 	};
 
@@ -1487,16 +1617,126 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 	};
 
-	const cancelParkedCallById = (requestId: string, reason: string): boolean => {
+	const cancelParkedCallById = (requestId: string, reason: string, denied?: boolean): boolean => {
 		const index = parked.findIndex((entry) => entry.meta.requestId === requestId);
 		if (index === -1) return false;
 		const [entry] = parked.splice(index, 1);
 		if (!entry) return false;
-		resolveParkedAsBlocked(entry, reason);
+		resolveParkedAsBlocked(entry, reason, denied);
 		const next = parked[0];
 		if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 		return true;
 	};
+
+	/** Admit, park or run one call; `invoke` adds the main agent's denial memory around it. */
+	const invokeAdmitted = async (call: ClassifierCall, options?: ToolInvokeOptions): Promise<RegistryVerdict> => {
+		const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
+		const outcome = admit(admissionCall, undefined, options);
+		if (outcome.kind === "terminal") {
+			disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
+			return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
+		}
+		if (outcome.kind === "execute") {
+			observeUnrecognizedExecute(admissionCall, outcome.decision, options);
+			return runSpec(outcome.spec, admissionCall, outcome.decision, options);
+		}
+		// A park settles only through a listener's answer, so with no listener
+		// the promise would never resolve. Refuse the call instead, fail closed.
+		if (permissionListeners.size === 0) {
+			disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
+			recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
+				reasonCode: NO_PARK_LISTENER_REASON_CODE,
+			});
+			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+			return (
+				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
+				parkDenial(
+					parkAnsweredBlockedVerdict(outcome.decision, admissionCall.tool, loopReason ?? NO_PARK_LISTENER_REASON),
+					NO_PARK_LISTENER_REASON,
+				)
+			);
+		}
+		const abortReason = PARK_ABORT_REASON;
+		if (options?.signal?.aborted) {
+			disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
+			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+			return { kind: "blocked", reason: loopReason ?? abortReason, decision: outcome.decision };
+		}
+		return new Promise<RegistryVerdict>((resolve) => {
+			const meta: PermissionRequiredMeta = {
+				requestId: nextApprovalRequestId(),
+				axis: outcome.axis,
+				approvalAuthority: outcome.approvalAuthority,
+				...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+				...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
+				...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
+				...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
+			};
+			recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
+				requestId: meta.requestId,
+				...(outcome.decision.kind === "ask" && outcome.decision.confirmationRuleId !== undefined
+					? { reasonCode: `confirmation:${outcome.decision.confirmationRuleId}` }
+					: {}),
+			});
+			// The park ends when the operator decides, not when the verdict
+			// resolves: an approved call runs its body inside the resume pass,
+			// so measuring to the resolve would fold the tool's own execution
+			// into the park and the caller would subtract it. A dispatch that
+			// fanned out for 224.8s settled as a 15ms line that way (issue #82).
+			// closePark seals it at the decision; settle covers every path that
+			// ends a park without reaching a body, including one added later,
+			// because they all resolve the entry through this function.
+			const parkedAtClock = performance.now();
+			let parkReported = false;
+			const closePark = (): void => {
+				if (parkReported) return;
+				parkReported = true;
+				options?.onParked?.(Math.round(performance.now() - parkedAtClock));
+			};
+			const settle = (verdict: RegistryVerdict): void => {
+				closePark();
+				resolve(verdict);
+			};
+			const parkedCall: ParkedCall = {
+				call: admissionCall,
+				decision: outcome.decision,
+				meta,
+				resolve: settle,
+				closePark,
+			};
+			if (options !== undefined) parkedCall.options = options;
+			if (options?.signal) {
+				const onAbort = (): void => {
+					cancelParkedCallById(meta.requestId, abortReason);
+				};
+				options.signal.addEventListener("abort", onAbort, { once: true });
+				parkedCall.abortCleanup = () => {
+					options.signal?.removeEventListener("abort", onAbort);
+				};
+			}
+			parked.push(parkedCall);
+			notifyPermissionRequired(admissionCall, outcome.decision, meta);
+		});
+	};
+
+	/**
+	 * Refused calls of the main agent by turn, mutation epoch and call
+	 * identity, oldest first. Grants, a changed autonomy level and a reload
+	 * clear it, because each can change the answer.
+	 */
+	const deniedCalls = new Map<string, Extract<RegistryVerdict, { kind: "blocked" }>>();
+	let deniedCallsLevel: AutonomyLevel | null = null;
+	/**
+	 * Operator-approval refusals that no operator could have answered
+	 * otherwise: a headless run or a registry with no listener. An attended
+	 * operator who refused once may approve when asked again, so only these
+	 * are remembered.
+	 */
+	const unattendedDenials = new WeakSet<ToolDenial>();
+	const rememberedRefusal = (verdict: RegistryVerdict): verdict is Extract<RegistryVerdict, { kind: "blocked" }> =>
+		verdict.kind === "blocked" &&
+		verdict.denial !== undefined &&
+		(verdict.denial.layer !== "operator_approval" || unattendedDenials.has(verdict.denial));
 
 	return {
 		register(spec) {
@@ -1514,90 +1754,71 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listVisible: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "direct"),
 		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
 		async invoke(call, options) {
-			const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
-			const outcome = admit(admissionCall, undefined, options);
-			if (outcome.kind === "terminal") {
-				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
-				return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
+			if (deps.principal === "worker") return invokeAdmitted(call, options);
+			// A refusal is final for the identical call within the turn: the same
+			// policy, the same operator and the same server would answer it the
+			// same way. Refusing the repeat here, before admission, keeps it from
+			// asking the operator again or reaching the server again, where the
+			// loop guard would otherwise allow two more attempts first. A call with
+			// no turn (/council, an ACP host dispatch) is the operator's own
+			// command, so nothing is remembered for it.
+			const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+			if (level !== deniedCallsLevel) {
+				deniedCalls.clear();
+				deniedCallsLevel = level;
 			}
-			if (outcome.kind === "execute") {
-				observeUnrecognizedExecute(admissionCall, outcome.decision, options);
-				return runSpec(outcome.spec, admissionCall, outcome.decision, options);
-			}
-			// A park settles only through a listener's answer, so with no listener
-			// the promise would never resolve. Refuse the call instead, fail closed.
-			if (permissionListeners.size === 0) {
-				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
-				recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
-					reasonCode: NO_PARK_LISTENER_REASON_CODE,
-				});
-				const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
-				return (
-					guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
-					parkAnsweredBlockedVerdict(outcome.decision, admissionCall.tool, loopReason ?? NO_PARK_LISTENER_REASON)
-				);
-			}
-			const abortReason = "run aborted before the operator decided";
-			if (options?.signal?.aborted) {
-				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
-				const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
-				return { kind: "blocked", reason: loopReason ?? abortReason, decision: outcome.decision };
-			}
-			return new Promise<RegistryVerdict>((resolve) => {
-				const meta: PermissionRequiredMeta = {
-					requestId: nextApprovalRequestId(),
-					axis: outcome.axis,
-					approvalAuthority: outcome.approvalAuthority,
-					...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-					...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
-					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
-					...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
-				};
-				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
-					requestId: meta.requestId,
-					...(outcome.decision.kind === "ask" && outcome.decision.confirmationRuleId !== undefined
-						? { reasonCode: `confirmation:${outcome.decision.confirmationRuleId}` }
+			const turnId = options?.turnId;
+			const key =
+				turnId === undefined
+					? null
+					: `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
+			const prior = key === null ? undefined : deniedCalls.get(key);
+			if (prior?.denial !== undefined) {
+				const decision: SafetyDecision = {
+					kind: "block",
+					classification: prior.decision.classification,
+					rejection:
+						prior.decision.kind === "allow"
+							? { short: prior.reason, detail: prior.reason, hints: [] }
+							: prior.decision.rejection,
+					...(prior.decision.policy !== undefined
+						? { policy: { ...prior.decision.policy, reasonCode: DENIED_REPEAT_REASON_CODE } }
 						: {}),
-				});
-				// The park ends when the operator decides, not when the verdict
-				// resolves: an approved call runs its body inside the resume pass,
-				// so measuring to the resolve would fold the tool's own execution
-				// into the park and the caller would subtract it. A dispatch that
-				// fanned out for 224.8s settled as a 15ms line that way (issue #82).
-				// closePark seals it at the decision; settle covers every path that
-				// ends a park without reaching a body, including one added later,
-				// because they all resolve the entry through this function.
-				const parkedAtClock = performance.now();
-				let parkReported = false;
-				const closePark = (): void => {
-					if (parkReported) return;
-					parkReported = true;
-					options?.onParked?.(Math.round(performance.now() - parkedAtClock));
 				};
-				const settle = (verdict: RegistryVerdict): void => {
-					closePark();
-					resolve(verdict);
+				const repeat: Extract<RegistryVerdict, { kind: "blocked" }> = {
+					kind: "blocked",
+					reason: `${repeatedDenialReason(effectiveToolCall(call.tool, call.args).toolName, prior.denial)}\n${prior.reason}`,
+					decision,
+					// A repeat of an ask nobody could approve is still that unanswered
+					// ask, so receipts keep counting it as a permission request.
+					...(prior.deniedPark === true ? { deniedPark: true } : {}),
+					denial: prior.denial,
 				};
-				const parkedCall: ParkedCall = {
-					call: admissionCall,
-					decision: outcome.decision,
-					meta,
-					resolve: settle,
-					closePark,
+				recordRegistryDisposition(call, decision, "blocked", { reasonCode: DENIED_REPEAT_REASON_CODE });
+				return observeBlockedAttempt(call, repeat, options) ?? repeat;
+			}
+			const verdict = await invokeAdmitted(call, options);
+			// An operator's answer can grant what an earlier call was refused.
+			if (effectiveToolCall(call.tool, call.args).toolName === ToolNames.AskUser && askUserAnswered(verdict)) {
+				deniedCalls.clear();
+			}
+			if (key !== null && rememberedRefusal(verdict) && verdict.denial !== undefined) {
+				// Only a remembered refusal tells the model its repeat is refused
+				// without running; an attended operator's refusal, a worker's and a
+				// turnless call's are asked or run again.
+				const remembered: Extract<RegistryVerdict, { kind: "blocked" }> = {
+					...verdict,
+					denial: { ...verdict.denial, repeatRefused: true },
 				};
-				if (options !== undefined) parkedCall.options = options;
-				if (options?.signal) {
-					const onAbort = (): void => {
-						cancelParkedCallById(meta.requestId, abortReason);
-					};
-					options.signal.addEventListener("abort", onAbort, { once: true });
-					parkedCall.abortCleanup = () => {
-						options.signal?.removeEventListener("abort", onAbort);
-					};
+				deniedCalls.delete(key);
+				deniedCalls.set(key, remembered);
+				if (deniedCalls.size > DENIED_CALL_MEMORY_LIMIT) {
+					const oldest = deniedCalls.keys().next().value;
+					if (oldest !== undefined) deniedCalls.delete(oldest);
 				}
-				parked.push(parkedCall);
-				notifyPermissionRequired(admissionCall, outcome.decision, meta);
-			});
+				return remembered;
+			}
+			return verdict;
 		},
 		hasParkedCalls: () => parked.length > 0,
 		parkedCount: () => parked.length,
@@ -1606,6 +1827,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 		},
 		async resumeParkedCalls(grant?: OneShotGrant) {
+			// A grant, session consent included, changes what admission answers.
+			if (grant !== undefined) deniedCalls.clear();
 			if (parked.length === 0) return;
 			const pending: Array<{ entry: ParkedCall; reparkIndex?: number }> = [];
 			if (grant === undefined) {
@@ -1709,14 +1932,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const next = parked[0];
 			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 		},
-		cancelParkedCall(requestId, reason) {
-			return cancelParkedCallById(requestId, reason);
+		forgetRefusals() {
+			deniedCalls.clear();
 		},
-		cancelParkedCalls(reason) {
+		cancelParkedCall(requestId, reason, cancelOptions) {
+			return cancelParkedCallById(requestId, reason, cancelOptions?.denied);
+		},
+		cancelParkedCalls(reason, cancelOptions) {
 			if (parked.length === 0) return;
 			const pending = parked.splice(0, parked.length);
 			for (const entry of pending) {
-				resolveParkedAsBlocked(entry, reason);
+				resolveParkedAsBlocked(entry, reason, cancelOptions?.denied);
 			}
 		},
 		onPermissionRequired(listener) {
@@ -1794,10 +2020,10 @@ function prepareAdmissionCall(spec: ToolSpec | undefined, call: ClassifierCall):
 	}
 }
 
-function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolSpec): SafetyDecision {
+function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolSpec, readOnly = false): SafetyDecision {
 	if (decision.classification.actionClass !== "unknown") return decision;
 	const classification = {
-		actionClass: spec.baseActionClass,
+		actionClass: readOnly ? (spec.readOnlyActionClass ?? spec.baseActionClass) : spec.baseActionClass,
 		reasons: [`registered tool: ${spec.name}`],
 	};
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
@@ -1827,6 +2053,18 @@ function withFlowRestrictions(result: ToolResult, restrictions: FlowRestrictionS
 const NO_PARK_LISTENER_REASON_CODE = "no_park_listener";
 const NO_PARK_LISTENER_REASON =
 	"refused: this call needs operator confirmation and no permission listener is registered to ask for it";
+const PARK_ABORT_REASON = "run aborted before the operator decided";
+/** Audit and event code of an identical repeat refused from the turn's denial memory. */
+const DENIED_REPEAT_REASON_CODE = "denied_repeat";
+/** Refused calls remembered per registry; identical repeats rarely span more than a handful. */
+const DENIED_CALL_MEMORY_LIMIT = 64;
+
+/** An ask_user round the operator answered rather than cancelled. */
+function askUserAnswered(verdict: RegistryVerdict): boolean {
+	if (verdict.kind !== "ok" || verdict.result.kind !== "ok") return false;
+	const details = verdict.result.details;
+	return details?.cancelled !== true && Array.isArray(details?.answers) && details.answers.length > 0;
+}
 
 /**
  * Details key under which a tool body hands a refused nested verdict back to
@@ -1848,6 +2086,7 @@ interface NestedBlockedMarker {
 	decision: SafetyDecision;
 	deniedPark?: true;
 	redundantRepeat?: true;
+	denial?: ToolDenial;
 }
 
 /**
@@ -1862,6 +2101,7 @@ export function nestedBlockedResult(verdict: Extract<RegistryVerdict, { kind: "b
 		decision: verdict.decision,
 		...(verdict.deniedPark === true ? { deniedPark: true } : {}),
 		...(verdict.redundantRepeat === true ? { redundantRepeat: true } : {}),
+		...(verdict.denial !== undefined ? { denial: verdict.denial } : {}),
 	};
 	return { kind: "error", message: verdict.reason, details: { [NESTED_BLOCKED_DETAIL]: marker } };
 }
@@ -1870,7 +2110,7 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 	if (result.kind !== "error") return null;
 	const marker = result.details?.[NESTED_BLOCKED_DETAIL];
 	if (typeof marker !== "object" || marker === null) return null;
-	const { reason, decision, deniedPark, redundantRepeat } = marker as Partial<NestedBlockedMarker>;
+	const { reason, decision, deniedPark, redundantRepeat, denial } = marker as Partial<NestedBlockedMarker>;
 	if (
 		typeof reason !== "string" ||
 		typeof decision !== "object" ||
@@ -1886,6 +2126,7 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 		decision,
 		...(deniedPark === true ? { deniedPark: true } : {}),
 		...(redundantRepeat === true ? { redundantRepeat: true } : {}),
+		...(denial !== undefined ? { denial } : {}),
 	};
 }
 
@@ -1911,6 +2152,27 @@ function guardBlockedVerdict(
 			hints: [],
 		},
 		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: GUARD_BLOCK_REASON_CODE } } : {}),
+	};
+	return { kind: "blocked", reason, decision: blocked };
+}
+
+/**
+ * Terminal blocked verdict for an information-flow refusal past admission: a
+ * source that cannot be labeled, an outbound transfer the carried
+ * restrictions forbid, or content withheld because its label did not reach
+ * the ledger. The admission's allow is re-shaped as a block with the flow
+ * code, so receipts do not report the refusal as allowed.
+ */
+function flowBlockedVerdict(
+	decision: SafetyDecision,
+	tool: string,
+	reason: string,
+): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const blocked: SafetyDecision = {
+		kind: "block",
+		classification: decision.classification,
+		rejection: { short: `${tool} blocked: information flow`, detail: reason, hints: [] },
+		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: FLOW_BLOCK_REASON_CODE } } : {}),
 	};
 	return { kind: "blocked", reason, decision: blocked };
 }
@@ -2036,26 +2298,43 @@ function skillSurfaceBlockedVerdict(
 			detail: reason,
 			hints: ["Skill narrowing never grants tools; it only blocks calls outside the declared workflow surface."],
 		},
-		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: "skill_surface" } } : {}),
 	};
 	return { kind: "blocked", reason, decision: blocked };
 }
 
-/** A read-only dispatch resolves every forbidden call as a terminal denial. */
-function readOnlyDeniedVerdict(decision: SafetyDecision, tool: string): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const rejection = {
-		short: `${tool} denied: this run is read-only`,
-		detail: `The dispatch that started this run is read-only, so this call cannot execute.`,
-		hints: [
-			"Describe the proposed change as text for the dispatching agent.",
-			"Inspection tools remain available for paths inside the workspace.",
-		],
-	};
+/** A read-only dispatch or task scope resolves every forbidden call as a terminal denial. */
+function readOnlyDeniedVerdict(
+	decision: SafetyDecision,
+	tool: string,
+	hostScoped: boolean,
+	reasonCode: string,
+): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const rejection = hostScoped
+		? {
+				short: `${tool} denied: this task is read-only`,
+				detail:
+					"The host started this task read-only (clio-coder run --read-only), so this call cannot execute and no approval clears it.",
+				hints: [
+					"Describe the proposed change as text in the answer.",
+					"Inspection tools remain available for paths inside the workspace.",
+				],
+			}
+		: {
+				short: `${tool} denied: this run is read-only`,
+				detail: `The dispatch that started this run is read-only, so this call cannot execute.`,
+				hints: [
+					"Describe the proposed change as text for the dispatching agent.",
+					"Inspection tools remain available for paths inside the workspace.",
+				],
+			};
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,
 		rejection,
-		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+		// The net passed this call; the block is the read-only ceiling's, so the
+		// carried policy must not keep reporting the net's "allowed" code.
+		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
 	};
 	return { kind: "blocked", reason: rejection.short, decision: blocked };
 }

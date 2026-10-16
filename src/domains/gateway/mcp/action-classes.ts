@@ -54,6 +54,14 @@ const SLURM_CONFIRM_TOOLS = new Set([
 export function mcpToolActionClass(
 	server: McpClassifiedServer,
 	tool: Pick<McpToolDescriptor, "name" | "annotations">,
+	options?: {
+		/**
+		 * A read-only ceiling admits only a read class Clio or the operator set,
+		 * through the trust record or toolActionClasses; the server's own
+		 * readOnlyHint is a claim about itself and classes the tool unknown.
+		 */
+		readOnly?: boolean;
+	},
 ): McpTrustActionClass {
 	if (server.trust.status !== "trusted") return "unknown";
 	if (server.scope === "client") return "unknown";
@@ -65,7 +73,7 @@ export function mcpToolActionClass(
 	}
 	if (server.scope === "project" || server.actionClassExplicit || server.trust.actionClass !== "unknown")
 		return server.trust.actionClass;
-	if (tool.annotations?.readOnlyHint === true) return "read";
+	if (tool.annotations?.readOnlyHint === true) return options?.readOnly === true ? "unknown" : "read";
 	if (tool.annotations?.destructiveHint === true) return "destructive";
 	return "unknown";
 }

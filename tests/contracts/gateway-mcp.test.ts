@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { mcpCommandOutput } from "../../src/cli/mcp.js";
+import type { FlowRestrictionSet } from "../../src/core/flow-restrictions.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import {
 	canonicalProjectRoot,
@@ -21,12 +22,13 @@ import {
 import { mcpCatalogPath } from "../../src/domains/gateway/mcp/metadata-cache.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
+import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../../src/tools/gateway/index.js";
-import { createRegistry, type ToolRegistry } from "../../src/tools/registry.js";
+import { createRegistry, type RegistryDeps, type ToolRegistry } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -88,6 +90,7 @@ function wire(
 	readOnly = false,
 	wrapClient?: (client: McpClient) => McpClient,
 	pollBudget?: { soft: number; hard: number },
+	labelSafety?: (safety: SafetyContract) => Pick<RegistryDeps, "safety" | "flow">,
 ): Wired {
 	const clients: McpClient[] = [];
 	const parks: string[] = [];
@@ -101,6 +104,7 @@ function wire(
 		middleware,
 		autonomy: () => level,
 		...(readOnly ? { readOnly: true } : {}),
+		...labelSafety?.(safety),
 	});
 	const source = createMcpCapabilitySource({
 		cwd: scene.project,
@@ -121,7 +125,7 @@ function wire(
 	registerCoreTools(registry, { mcpCapabilities: source });
 	registry.onPermissionRequired((call, _decision, meta) => {
 		parks.push(call.tool);
-		registry.cancelParkedCall(meta.requestId, "denied by the test");
+		registry.cancelParkedCall(meta.requestId, "denied by the test", { denied: true });
 	});
 	return { registry, source, clients, parks };
 }
@@ -794,6 +798,38 @@ describe("gateway MCP capabilities", () => {
 		strictEqual(source.teardownReports()[0]?.outcome.complete, true);
 	});
 
+	it("starts for a read-only turn only servers trusted as read or called for a tool the operator classes read", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "marker", actionClass: "execute" }).ok);
+		const { registry, source, clients } = wire(scene);
+		const readOnly = { turnConstraints: { readOnly: true as const } };
+		const called = await registry.invoke(
+			{ tool: ToolNames.Gateway, args: { op: "call", capability: "mcp_marker__anything", args: {} } },
+			readOnly,
+		);
+		if (called.kind !== "ok" || called.result.kind !== "error") throw new Error(JSON.stringify(called));
+		ok(called.result.message.includes("trusted as execute"), called.result.message);
+		await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "marker", refresh: true } }, readOnly);
+		strictEqual(existsSync(scene.markerPath), false);
+		strictEqual(clients.length, 0);
+		await source.close();
+
+		// A tool the operator classes read starts the server for that call.
+		const declared = readFileSync(join(scene.project, ".clio-coder", "mcp.yaml"), "utf8");
+		writeFileSync(
+			join(scene.project, ".clio-coder", "mcp.yaml"),
+			declared.replace("  - id: marker", "  - id: marker\n    toolActionClasses: {anything: read}"),
+		);
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "marker", actionClass: "execute" }).ok);
+		const classed = wire(scene);
+		open.push(classed.source);
+		await classed.registry.invoke(
+			{ tool: ToolNames.Gateway, args: { op: "call", capability: "mcp_marker__anything", args: {} } },
+			readOnly,
+		);
+		strictEqual(existsSync(scene.markerPath), true, "an operator read class starts the server");
+	});
+
 	it("treats a trusted server whose declaration changed as stale and never launches it", async () => {
 		const scene = scenario();
 		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
@@ -966,28 +1002,161 @@ describe("gateway MCP capabilities", () => {
 		strictEqual(existsSync(scene.markerPath), false);
 	});
 
-	it("refuses scoped MCP discovery on a restricted tool surface", async () => {
+	it("discovers exactly the MCP capabilities a restricted tool surface names", async () => {
 		const scene = scenario();
 		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "marker", actionClass: "read" }).ok);
 		const { registry, clients, source } = wire(scene);
 		open.push(source);
 		const restricted = { allowedTools: [ToolNames.Gateway, ECHO] as ToolName[] };
 		const refused = await registry.invoke(
-			{ tool: ToolNames.Gateway, args: { op: "find", server: "fake", refresh: true } },
+			{ tool: ToolNames.Gateway, args: { op: "find", server: "marker", refresh: true } },
 			restricted,
 		);
 		ok(refused.kind === "ok" && refused.result.kind === "error", JSON.stringify(refused));
-		ok(refused.result.message.includes("not available on this run's admitted tool surface"), refused.result.message);
-		strictEqual(clients.length, 0, "a restricted run cannot launch a server it was not given");
+		ok(refused.result.message.includes("names none of its capabilities"), refused.result.message);
+		strictEqual(existsSync(scene.markerPath), false, "a restricted run cannot launch a server it was not given");
+		// An undeclared id reads exactly like a declared one outside the surface,
+		// and neither names a server the surface does not admit.
+		const undeclared = await registry.invoke(
+			{ tool: ToolNames.Gateway, args: { op: "find", server: "nope", refresh: true } },
+			restricted,
+		);
+		ok(undeclared.kind === "ok" && undeclared.result.kind === "error", JSON.stringify(undeclared));
+		strictEqual(undeclared.result.message.replace('"nope"', '"marker"'), refused.result.message);
+		ok(!refused.result.message.includes("marker,") && !refused.result.message.includes(", marker"));
+		const names = (payload: Record<string, unknown>): unknown =>
+			(payload.capabilities as Array<{ name: string }>).map((entry) => entry.name);
+		const scoped = payloadOf(
+			await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "fake", refresh: true } }, restricted),
+		);
+		deepStrictEqual(names(scoped), [ECHO]);
+		deepStrictEqual(
+			(scoped.servers as Array<{ id: string; tools?: string[] }>).map(({ id, tools }) => ({ id, tools })),
+			[{ id: "fake", tools: [ECHO] }],
+		);
 		const listing = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find" } }, restricted));
-		strictEqual(listing.servers, undefined, "a restricted find still reports no MCP servers");
-		// An admitted exact capability still reaches its server through the call path.
+		deepStrictEqual(names(listing), [ECHO]);
+		deepStrictEqual(
+			(listing.servers as Array<{ id: string }>).map(({ id }) => id),
+			["fake"],
+		);
 		const called = await registry.invoke(
 			{ tool: ToolNames.Gateway, args: { op: "call", capability: ECHO, args: { text: "admitted" } } },
 			restricted,
 		);
 		ok(called.kind === "ok" && called.result.kind === "ok", JSON.stringify(called));
 		strictEqual(clients.length, 1);
+		strictEqual(existsSync(scene.markerPath), false);
+	});
+
+	it("refuses an identical repeat of a server or operator refusal in the same turn, and says who refused", async () => {
+		const scene = scenario();
+		writeConfig(scene.project, scene.markerPath, "raw-result");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		let serverCalls = 0;
+		const counted = wire(scene, "default", false, (client) => ({
+			...client,
+			callTool: (...args: Parameters<McpClient["callTool"]>) => {
+				serverCalls += 1;
+				return client.callTool(...args);
+			},
+		}));
+		open.push(counted.source);
+		const refusal = {
+			status: "error",
+			error: "The read-only tool profile does not permit this tool",
+			error_code: "POLICY_DENIED",
+			retryable: false,
+			profile: "read-only",
+		};
+		const call = {
+			tool: ToolNames.Gateway,
+			args: {
+				op: "call",
+				capability: ECHO,
+				args: { result: { isError: true, structuredContent: refusal, content: [{ type: "text", text: "denied" }] } },
+			},
+		};
+		const first = await counted.registry.invoke(call, { turnId: "t1" });
+		if (first.kind !== "blocked") throw new Error(JSON.stringify(first));
+		deepStrictEqual(first.denial, {
+			layer: "mcp_server_policy",
+			actionClass: "read",
+			retryable: false,
+			allowedBy: "the MCP server fake must be configured to permit echo; its read-only profile excludes it.",
+			code: "POLICY_DENIED",
+			server: "fake",
+			repeatRefused: true,
+		});
+		const repeat = await counted.registry.invoke(call, { turnId: "t1" });
+		if (repeat.kind !== "blocked") throw new Error(JSON.stringify(repeat));
+		ok(repeat.reason.startsWith(`${ECHO} refused again`), repeat.reason);
+		strictEqual(serverCalls, 1, "the identical repeat never reached the server");
+		const listing = payloadOf(await counted.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find" } }));
+		const entry = (listing.capabilities as Array<{ name: string; unavailable?: string }>).find(
+			(capability) => capability.name === ECHO,
+		);
+		strictEqual(entry?.unavailable, "refused by MCP server fake policy (POLICY_DENIED) this session");
+		strictEqual((await counted.registry.invoke(call, { turnId: "t2" })).kind, "blocked");
+		strictEqual(serverCalls, 2, "a new turn asks the server again");
+		await counted.source.close();
+
+		writeConfig(scene.project, scene.markerPath, "normal");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake" }).ok);
+		const asked = wire(scene, "default");
+		open.push(asked.source);
+		const echo = { tool: ToolNames.Gateway, args: { op: "call", capability: ECHO, args: { text: "x" } } };
+		const denied = await asked.registry.invoke(echo, { turnId: "t1" });
+		if (denied.kind !== "blocked") throw new Error(JSON.stringify(denied));
+		strictEqual(denied.denial?.layer, "operator_approval");
+		strictEqual(denied.denial?.actionClass, "unknown");
+		strictEqual(denied.denial?.repeatRefused, undefined, "an attended refusal never claims its repeat is refused");
+		strictEqual((await asked.registry.invoke(echo, { turnId: "t1" })).kind, "blocked");
+		deepStrictEqual(asked.parks, [ECHO, ECHO], "an attended operator who refused once is asked again");
+	});
+
+	it("labels a server policy refusal from a flow-restricted server before the model reads it", async () => {
+		const scene = scenario();
+		writeConfig(scene.project, scene.markerPath, "raw-result");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const restrictions: FlowRestrictionSet = {
+			version: 1,
+			restrictions: [{ ruleId: "fake-private", policyHash: "h", sourceRef: ECHO, recipients: [] }],
+		};
+		const absorbed: Array<{ set: FlowRestrictionSet; tool?: string }> = [];
+		const labeled = wire(scene, "yolo", false, undefined, undefined, (safety) => ({
+			safety: {
+				...safety,
+				policy: {
+					...(safety.policy as NonNullable<SafetyContract["policy"]>),
+					flowRestrictionsFor: (call) => (call.tool === ECHO ? restrictions : null),
+				},
+			},
+			flow: {
+				carried: () => null,
+				refusal: () => null,
+				absorb: (set, origin) => {
+					absorbed.push({ set, ...(origin.tool !== undefined ? { tool: origin.tool } : {}) });
+				},
+			},
+		}));
+		open.push(labeled.source);
+		const refusal = { error: "private profile excludes echo", error_code: "POLICY_DENIED", retryable: false };
+		const verdict = await labeled.registry.invoke(
+			{
+				tool: ToolNames.Gateway,
+				args: {
+					op: "call",
+					capability: ECHO,
+					args: { result: { isError: true, structuredContent: refusal, content: [{ type: "text", text: "denied" }] } },
+				},
+			},
+			{ turnId: "t1" },
+		);
+		if (verdict.kind !== "blocked") throw new Error(JSON.stringify(verdict));
+		strictEqual(verdict.denial?.layer, "mcp_server_policy");
+		deepStrictEqual(absorbed, [{ set: restrictions, tool: ECHO }]);
 	});
 
 	it("checks a chain's capability ceiling before connecting an MCP server", async () => {

@@ -619,6 +619,13 @@ export interface SafetyBlockedAttempt {
 	reasonCode?: string;
 	policySource?: string;
 	reason?: string;
+	/**
+	 * The call needed an approval this run could not give: a headless run
+	 * denies every ask. Absent for a hard block that no approval clears.
+	 */
+	permissionRequired?: true;
+	/** Which layer refused the call (`src/domains/safety/denial.ts`), when the main agent's registry recorded one. */
+	layer?: "clio_policy" | "operator_approval" | "mcp_server_policy";
 }
 
 export interface DelegationToolCallLogEntry {

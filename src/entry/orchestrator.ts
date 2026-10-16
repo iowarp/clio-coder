@@ -2202,20 +2202,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// is constructed here but registered after user hooks below, so it can
 	// absorb their protect_path effects. Workers register their own guards in
 	// worker-runtime.ts; these instances carry the bus and session persistence.
-	middleware.registerHook(
-		createLoopGuardRegistration({
-			safety,
-			bus,
-			turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
-			turnToolCallBudget: () => readOrchTurnToolCallBudget(),
-			// Interactive/headless/ACP all share this orchestrator guard: at the
-			// block budget, lock tools for the rest of the turn so the model
-			// answers from what it gathered instead of hard-cancelling a turn that
-			// may already hold the answer. The bounded backstop still cancels a
-			// model that keeps calling tools.
-			turnSynthesisLockout: true,
-		}),
-	);
+	const loopGuard = createLoopGuardRegistration({
+		safety,
+		bus,
+		turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
+		turnToolCallBudget: () => readOrchTurnToolCallBudget(),
+		// Interactive/headless/ACP all share this orchestrator guard: at the
+		// block budget, lock tools for the rest of the turn so the model
+		// answers from what it gathered instead of hard-cancelling a turn that
+		// may already hold the answer. The bounded backstop still cancels a
+		// model that keeps calling tools.
+		turnSynthesisLockout: true,
+	});
+	middleware.registerHook(loopGuard);
 	let initialProtectedArtifactState: ProtectedArtifactState | undefined;
 	let initialProtectionReadError: string | null = null;
 	if (session) {
@@ -3006,6 +3005,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Awaited extension hooks return after the guard's own before_tool step.
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
 		autonomy: resolveEffectiveAutonomy,
+		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read
 		// through the host so the registry never learns which engine answered, and
@@ -3026,6 +3026,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Headless runs deny every ask, so they keep #377's test-runner allow.
 		...(options.headless === undefined ? { sessionCodeConsent } : {}),
 	});
+	// Reloaded settings can change what refused a call, so the memory of it goes.
+	bus.on(BusChannels.ConfigHotReload, () => toolRegistry.forgetRefusals());
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {
 		bus.emit(BusChannels.PermissionRequested, {

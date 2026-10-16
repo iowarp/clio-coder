@@ -75,7 +75,11 @@ const MODEL_REJECTION_PIVOT =
 const MODEL_REJECTION_MAX_LINES = 16;
 const MODEL_REJECTION_MAX_LINE_CHARS = 300;
 
-export function formatModelRejection(reason: string, rejection?: RejectionMessage): string {
+export function formatModelRejection(
+	reason: string,
+	rejection?: RejectionMessage,
+	account?: ReadonlyArray<string>,
+): string {
 	const lines: string[] = [];
 	const seen = new Set<string>();
 	const push = (line: string): void => {
@@ -89,6 +93,9 @@ export function formatModelRejection(reason: string, rejection?: RejectionMessag
 		lines.push(trimmed);
 	};
 	for (const line of reason.split("\n")) push(line);
+	// The structured refusal account (`denialLines`) follows the reason so the
+	// line budget below never elides who refused and what would allow it.
+	for (const line of account ?? []) push(line);
 	if (rejection) {
 		for (const line of rejection.detail.split("\n")) push(line);
 		for (const hint of rejection.hints) push(hint);

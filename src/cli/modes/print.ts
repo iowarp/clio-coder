@@ -373,6 +373,7 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		blockReason?: unknown;
 		deniedPark?: unknown;
 		redundantRepeat?: unknown;
+		denial?: { layer?: unknown; code?: unknown };
 	};
 	const decision = (event as { decision?: unknown }).decision;
 	// A call that parked for approval and was denied because a headless run has
@@ -395,6 +396,9 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		if (typeof detail.reasonCode === "string") attempt.reasonCode = detail.reasonCode;
 		if (typeof detail.policySource === "string") attempt.policySource = detail.policySource;
 		if (typeof detail.blockReason === "string") attempt.reason = detail.blockReason;
+		if (deniedAsk) attempt.permissionRequired = true;
+		const layer = detail.denial?.layer;
+		if (layer === "clio_policy" || layer === "operator_approval" || layer === "mcp_server_policy") attempt.layer = layer;
 		recordBlockedAttempt(stats, attempt);
 	}
 	// A terminating result (the artifact tool's plan, review, or report) is the
@@ -417,8 +421,13 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		detail.reasonCode === "guard_block" &&
 		detail.deniedPark !== true &&
 		actionClass === "read";
+	// The host's read-only ceiling refuses every call that is not a read, by
+	// the operator's own choice: `run --read-only "explain X"` asked for an
+	// answer, not a change, so a write or command the model tried is no unmet
+	// part of the task. The refusal stays in the receipt's blocked attempts.
+	const readOnlyCeiling = detail.reasonCode === "task:read_only" || detail.denial?.code === "task:read_only";
 	if (outcome === "blocked" || decision === "blocked") {
-		if (!withheldDuplicateRead) stats.unresolvedBlocks.add(action);
+		if (!withheldDuplicateRead && !readOnlyCeiling) stats.unresolvedBlocks.add(action);
 	} else if (outcome === "ok" || (outcome === undefined && !event.isError)) {
 		const capability =
 			tool === ToolNames.Gateway
@@ -1113,6 +1122,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			exitCode,
 			text: result.sawTerminatingToolResult ? result.terminatingToolText : result.text,
 			...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
+			// The receipt's own verdict, so a host bridge reads why the run ended,
+			// and which calls a headless run refused, without parsing prose.
+			outcome: terminal.outcome,
+			...(terminal.outcomeDetail !== undefined ? { outcomeDetail: terminal.outcomeDetail } : {}),
+			safety: {
+				decisions: { ...receiptStats.decisions },
+				blockedAttempts: [...receiptStats.blockedAttempts],
+				...(receiptStats.blockedAttemptsTruncated > 0
+					? { blockedAttemptsTruncated: receiptStats.blockedAttemptsTruncated }
+					: {}),
+			},
 		});
 	}
 

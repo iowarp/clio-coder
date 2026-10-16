@@ -549,6 +549,8 @@ export interface CreateLoopGuardRegistrationOptions {
 export interface LoopGuardRegistration extends MiddlewareHookRegistration {
 	/** Read-only attempt counter for tests and telemetry. */
 	callCount(): number;
+	/** The turn's parent-workspace mutation epoch, which the registry's denial memory keys on. */
+	mutationEpoch(turnId: string): number;
 	/** One-way worker phase growth admitted before launch for a result-contract revision. */
 	extendWorkerToolCallPhase(phase: { toolCalls: number; readReserve: number }): boolean;
 }
@@ -1185,6 +1187,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			"blocks repeated tool calls, enforces tool-call caps, and annotates substantial identical read results across distinct arguments",
 		hooks: ["before_tool", "after_tool"],
 		callCount: () => count,
+		mutationEpoch: (turnId) => mutationEpochByTurn.get(turnId) ?? 0,
 		extendWorkerToolCallPhase(phase): boolean {
 			// A repair may extend a soft work phase, never a sealed loop or hard-cap lock.
 			if (

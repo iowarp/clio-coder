@@ -11,6 +11,10 @@ import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
 import { configureWorkerProcessSandbox } from "../../src/core/sandbox/worker-process.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { clioConfigDir } from "../../src/core/xdg.js";
+import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
+import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceiptSafetySummary } from "../../src/domains/dispatch/types.js";
@@ -19,7 +23,9 @@ import {
 	canonicalProjectRoot,
 	createMcpStdioClient,
 	type McpClient,
+	resolveMcpServers,
 	trustMcpServer,
+	writeMcpServerCatalog,
 } from "../../src/domains/gateway/mcp/index.js";
 import { mcpCatalogPath } from "../../src/domains/gateway/mcp/metadata-cache.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
@@ -202,6 +208,79 @@ describe("native worker MCP capabilities", () => {
 			/the Claude SDK runtime runs its own tool loop/,
 		);
 		strictEqual(clients.length, 0, "admission launched nothing");
+	});
+
+	it("refuses a read-only worker a tool classed read only by its server's readOnlyHint", async () => {
+		writeFileSync(
+			join(clioConfigDir(), "mcp.yaml"),
+			["version: 1", "servers:", "  - id: hinted", `    command: ${JSON.stringify(process.execPath)}`, ""].join("\n"),
+		);
+		const declaration = resolveMcpServers({ cwd: project }).servers.find((server) => server.id === "hinted");
+		ok(declaration);
+		const projectRoot = canonicalProjectRoot(project);
+		ok(
+			writeMcpServerCatalog(
+				{
+					projectRoot,
+					scope: declaration.scope,
+					declarationPath: declaration.path,
+					serverId: declaration.id,
+					digest: declaration.digest,
+					cwd: declaration.cwd,
+				},
+				{
+					tools: [
+						{
+							name: "sleep",
+							title: null,
+							description: "",
+							inputSchema: { type: "object" },
+							annotations: { readOnlyHint: true },
+						},
+					],
+					truncated: false,
+				},
+			),
+		);
+		const sleep = "mcp_hinted__sleep" as ToolName;
+		const context = dispatchStubContext({ agentTools: [ToolNames.Read, sleep] });
+		// The stub coder keeps its git worktree allowance, which a read-only class refuses.
+		const readOnly = (recipe: AgentRecipe | null): AgentRecipe | null => {
+			if (recipe === null) return null;
+			const { permissions: _git, ...rest } = recipe;
+			return rest;
+		};
+		const bundle = makeDispatchBundle({
+			...context,
+			getContract<T extends object>(name: string): T | undefined {
+				const contract = context.getContract<T>(name);
+				if (name !== "agents" || contract === undefined) return contract;
+				const agents = contract as unknown as AgentsContract;
+				return {
+					...agents,
+					get: (id: string) => readOnly(agents.get(id)),
+					getSpec: (id: string) => {
+						const recipe = readOnly(agents.get(id));
+						return recipe ? normalizeAgentSpec(recipe) : null;
+					},
+				} as unknown as T;
+			},
+		});
+		await bundle.extension.start();
+		try {
+			throws(
+				() =>
+					bundle.contract.preview?.({
+						agentId: "coder",
+						task: "Inspect evidence.",
+						cwd: project,
+						executionRole: "builder",
+					}),
+				/mcp_hinted__sleep.*gives action class unknown.*readOnlyHint never counts as read.*`clio-coder mcp trust hinted --action-class read`.*toolActionClasses/,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("names the server and safety.sandboxNetwork when a sandbox without network will start an admitted MCP server", async () => {

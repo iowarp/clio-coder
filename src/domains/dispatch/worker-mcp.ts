@@ -23,6 +23,8 @@ export interface WorkerMcpAdmissionInput {
 	tools: ReadonlyArray<string>;
 	/** Override for the user config directory; defaults to clioConfigDir(). */
 	configDir?: string;
+	/** A read-only worker takes a read class only from the operator, never from a server's readOnlyHint. */
+	readOnly?: boolean;
 }
 
 /** Null when the tool list names no MCP capability. Throws a refusal naming the server and its remedy. */
@@ -68,7 +70,11 @@ export function resolveWorkerMcpAdmission(input: WorkerMcpAdmissionInput): Worke
 			serverId: declaration.id,
 			digest: declaration.digest,
 			tool: owner.tool,
-			actionClass: mcpToolActionClass(declaration, { name: owner.tool, annotations: recorded?.annotations ?? null }),
+			actionClass: mcpToolActionClass(
+				declaration,
+				{ name: owner.tool, annotations: recorded?.annotations ?? null },
+				input.readOnly === true ? { readOnly: true } : undefined,
+			),
 		});
 	}
 	return { projectRoot, tools };
@@ -97,9 +103,11 @@ export function workerMcpScopeRefusal(
 	allowedActions: ReadonlySet<string>,
 	scopeLabel: string,
 ): string | null {
+	const readOnly = allowedActions.size === 1 && allowedActions.has("read");
 	for (const entry of attestation?.tools ?? []) {
 		if (allowedActions.has(entry.actionClass)) continue;
-		return `dispatch: admission denied: agent '${agentId}' names MCP capability mcp_${entry.serverId}__${entry.tool}, which MCP server '${entry.serverId}' gives action class ${entry.actionClass}; a ${scopeLabel} worker takes only ${[...allowedActions].sort().join(", ")}. Record the class its tools deserve with \`clio-coder mcp trust ${entry.serverId} --action-class <class>\` for a project server, or actionClass or toolActionClasses in its declaration`;
+		const hint = readOnly ? ", and a server's own readOnlyHint never counts as read" : "";
+		return `dispatch: admission denied: agent '${agentId}' names MCP capability mcp_${entry.serverId}__${entry.tool}, which MCP server '${entry.serverId}' gives action class ${entry.actionClass}; a ${scopeLabel} worker takes only ${[...allowedActions].sort().join(", ")}${hint}. Record the class its tools deserve with \`clio-coder mcp trust ${entry.serverId} --action-class ${readOnly ? "read" : "<class>"}\` for a project server, or actionClass or toolActionClasses in its declaration`;
 	}
 	return null;
 }

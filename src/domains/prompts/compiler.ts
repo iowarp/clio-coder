@@ -368,6 +368,8 @@ function renderTurnGuidance(constraints: TurnConstraints | undefined): string {
 	if (constraints.mode === "change") lines.push("Carry out the requested change within the authorized scope.");
 	if (constraints.delegation === "forbidden") lines.push("Work directly; do not delegate.");
 	if (constraints.skills === "disabled") lines.push("Skill activation and discovery are disabled for this turn.");
+	if (constraints.readOnly === true)
+		lines.push("This task is read-only: every write, command, or delegation is denied, and no approval clears it.");
 	if (constraints.allowedTools) {
 		const names = [...new Set(constraints.allowedTools)].sort();
 		lines.push(

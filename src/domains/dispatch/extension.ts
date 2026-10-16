@@ -2683,17 +2683,25 @@ function resolveDispatchAdmissionStage(
 	// operator reviewed; reading them from the worktree would see none of them.
 	// A compete candidate carries its checkout only as the protected-artifact
 	// remap's source root, with cwd set to its own worktree.
-	const mcp = resolveWorkerMcpAdmission({
+	const mcpInput = {
 		agentId: req.agentId,
 		projectCwd: req.taskWorktree?.root ?? req.protectedArtifactRemap?.sourceRoot ?? req.cwd ?? process.cwd(),
 		tools: allowedTools,
-	});
+	};
+	let mcp = resolveWorkerMcpAdmission(mcpInput);
 	const requestedActions = deriveRequestedActions(allowedTools, safety, mcp);
 	const orchScope = pickOrchestratorScope(safety);
 	const workerScope = pickWorkerScope(safety, requestedActions, {
 		...pathScope,
 		writeBoundaries: admissionWriteBoundaries(req, pathScope.writeBoundaries),
 	});
+	// A server's readOnlyHint can make every requested action read and so pick
+	// the read-only scope; under it, as for the main agent's read-only turn,
+	// only the operator's class counts, so the hint-only tool attests unknown
+	// and the scope refusal below names the remedy.
+	if (mcp !== null && workerScope === safety.scopes.readonly) {
+		mcp = resolveWorkerMcpAdmission({ ...mcpInput, readOnly: true });
+	}
 	const mcpRefusal = workerMcpScopeRefusal(
 		req.agentId,
 		mcp,

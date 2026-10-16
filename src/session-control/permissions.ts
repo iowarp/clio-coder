@@ -32,11 +32,17 @@ export function resolvePermission(
 				...(resolution.payload.requestId !== undefined ? { requestId: resolution.payload.requestId } : {}),
 				requestedBy: resolution.grantRequestedBy,
 			});
-		case "deny":
+		case "deny": {
+			// A deny that someone decided refuses the call. One settled by a
+			// cancelled prompt or a request that could not be put only cancels it,
+			// so the identical call is not refused as already denied.
+			const decidedBy = resolution.payload.decidedBy;
+			const options = decidedBy === "cancelled" || decidedBy === "error" ? {} : { denied: true };
 			if (resolution.payload.requestId !== undefined)
-				ports.registry?.cancelParkedCall(resolution.payload.requestId, reason);
-			else ports.registry?.cancelParkedCalls(reason);
+				ports.registry?.cancelParkedCall(resolution.payload.requestId, reason, options);
+			else ports.registry?.cancelParkedCalls(reason, options);
 			return;
+		}
 		case "stop":
 		case "expire":
 			ports.registry?.cancelParkedCalls(reason);

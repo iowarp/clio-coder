@@ -80,12 +80,15 @@ test("headless denied asks preserve the actual cause/rule, final denial and boun
 
 test("interactive denials remain terminal, while actual hard blocks retain hard-block guidance", async () => {
 	const { safety, registry } = tools();
-	registry.onPermissionRequired(() => registry.cancelParkedCalls("Operator denied this action."));
+	registry.onPermissionRequired(() => registry.cancelParkedCalls("Operator denied this action.", { denied: true }));
 	const bash = resolveAgentTools({ registry })[0];
 	ok(bash);
 	await rejects(bash.execute("interactive", { command: inline }), (error: unknown) => {
 		ok(error instanceof Error);
-		strictEqual(error.message, `Operator denied this action.\n${pivot}`);
+		strictEqual(
+			error.message,
+			`Operator denied this action.\nRefused by operator approval (bash-hidden-content); Clio classifies this call as execute. Not retryable: an identical call asks the operator again.\nTo allow it: the operator must approve it; ask what to do instead of repeating it.\n${pivot}`,
+		);
 		return true;
 	});
 	strictEqual(safety.evaluate({ tool: "bash", args: { command: 'rm -f "$PWD/sentinel.txt"' } }).kind, "block");
@@ -373,11 +376,11 @@ describe("headless no-op contract through the built binary", () => {
 	});
 
 	test("repeated denied gateway shell writes preserve permission requests and the guard's hard block", async () => {
-		// The gateway guard sees retries before the nested command can park;
-		// the third attempt is a real guard block, not another unanswered ask.
-		// A direct bash call would park all three times, because safety admission
-		// precedes the guard. The chain wrapper is admitted twice, and those two
-		// admissions are the only allowed decisions.
+		// The first attempt parks and is denied. The identical second one is
+		// refused from the turn's denial memory without being asked again, and
+		// still counts as the permission request it repeats. The third is the
+		// gateway guard's hard block. The chain wrapper is admitted twice, and
+		// those two admissions are the only allowed decisions.
 		const { receipt } = await headlessTurn({
 			autonomy: "default",
 			steps: [1, 2, 3].map((attempt) => ({
