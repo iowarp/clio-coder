@@ -2346,8 +2346,18 @@ function effectiveToolNames(
 	 */
 	denied: ReadonlySet<string> = new Set(),
 	cwd = process.cwd(),
+	mcp?: WorkerMcpAttestation,
 ): ReadonlyArray<ToolName> {
 	if (!targetToolCapability(target)) return [];
+	// An execute-class MCP tool escapes write roots no OS sandbox enforces, the
+	// way bash does, so the confinement rail refuses every call of it.
+	const writeEscapingMcp = new Set(
+		writeConfined
+			? (mcp?.tools ?? [])
+					.filter((entry) => entry.actionClass === "execute")
+					.map((entry) => `mcp_${entry.serverId}__${entry.tool}`)
+			: [],
+	);
 	// A hermetic process registers no network plane, so the worker's registry
 	// would drop web_fetch whatever the recipe declared. Subtracting it here too
 	// keeps the signature the orchestrator expects equal to the one the worker
@@ -2371,6 +2381,7 @@ function effectiveToolNames(
 			!(networkStripped && (tool === ToolNames.WebFetch || tool === ToolNames.WebRead)) &&
 			!denied.has(tool) &&
 			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
+			!writeEscapingMcp.has(tool) &&
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
 	);
 	// A native worker reaches a gateway-placed capability (git, web_fetch, an
@@ -5111,7 +5122,14 @@ export function createDispatchBundle(
 		}
 		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
+			effectiveToolNames(
+				admission.allowedTools,
+				target,
+				writeConfined,
+				deniedToolNames(req),
+				req.cwd ?? process.cwd(),
+				admission.mcp,
+			),
 			req,
 		);
 		if (writeConfined) {
@@ -8804,7 +8822,14 @@ export function createDispatchBundle(
 		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
-			effectiveToolNames(admission.allowedTools, target, writeConfined, deniedToolNames(req), req.cwd ?? process.cwd()),
+			effectiveToolNames(
+				admission.allowedTools,
+				target,
+				writeConfined,
+				deniedToolNames(req),
+				req.cwd ?? process.cwd(),
+				admission.mcp,
+			),
 			req,
 		);
 		assertPostRuntimeToolCompatibility(
