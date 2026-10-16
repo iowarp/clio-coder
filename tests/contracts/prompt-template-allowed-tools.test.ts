@@ -143,3 +143,29 @@ test("a native template's allowed-tools keep an MCP tool name and reach it throu
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+// WTF-P loaded with one "registers later" warning per template naming its desk
+// tools, because only core and MCP-form names were kept silently. A name in the
+// extension runtime form is kept silently too; only a name in no known form warns.
+
+test("a native template's allowed-tools keep an extension tool name without a warning", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-template-extension-"));
+	try {
+		const promptRoot = join(root, "prompts");
+		mkdirSync(promptRoot, { recursive: true });
+		writeFileSync(join(promptRoot, "desk.md"), "---\nallowed-tools: Read, extension_wtfp__desk_status\n---\nDesk\n");
+		writeFileSync(join(promptRoot, "odd.md"), "---\nallowed-tools: Read, desk_status\n---\nOdd\n");
+		const loaded = loadPromptTemplates({ roots: [{ path: promptRoot, scope: "project" as const, trusted: true }] });
+		assert.deepEqual(loaded.items.find((item) => item.name === "desk")?.allowedTools, [
+			"read",
+			"extension_wtfp__desk_status",
+		]);
+		assert.deepEqual(loaded.items.find((item) => item.name === "odd")?.allowedTools, ["read", "desk_status"]);
+		const warnings = loaded.diagnostics.filter((entry) => entry.type === "warning");
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0]?.message ?? "", /desk_status/);
+		assert.doesNotMatch(warnings[0]?.message ?? "", /extension_wtfp__/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

@@ -5,7 +5,7 @@ import path from "node:path";
 import { CLIO_SELF_DEVELOPMENT_SKILLS, detectClioCoderRepo } from "../../../core/clio-repo.js";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { isToolLimitName } from "../../../core/tool-limit-flags.js";
-import { isMcpToolName, type ToolName, ToolNames } from "../../../core/tool-names.js";
+import { isHarnessExtensionToolName, isMcpToolName, type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { INTEROP_AGENT_KINDS, interopSourceRank, interopUserRoot } from "../../interop/registry.js";
 import { enabledPluginResourceRoots, pluginBaseDir, withPluginDiscoveryPass } from "../../plugins/index.js";
@@ -477,7 +477,9 @@ function declaredToolSurface(
  * turn to read plus one MCP tool could not reach that tool at all. Core names
  * are canonicalized; any other name valid under the flag grammar is kept
  * verbatim, because MCP and extension tools register after templates load.
- * Only a kept name that is neither core nor MCP-form is worth a warning.
+ * Only a kept name that is neither core, MCP-form nor extension-form is worth
+ * a warning; warning on `extension_<id>__<tool>` names printed one line per
+ * WTF-P template on every load.
  */
 export function templateToolSurface(
 	frontmatter: Record<string, unknown>,
@@ -498,7 +500,8 @@ export function templateToolSurface(
 		}
 		if (tools.includes(name)) continue;
 		tools.push(name);
-		if (!TOOL_NAMES_BY_LOWERCASE.has(name) && !isMcpToolName(name)) deferred.push(name);
+		if (!TOOL_NAMES_BY_LOWERCASE.has(name) && !isMcpToolName(name) && !isHarnessExtensionToolName(name))
+			deferred.push(name);
 	}
 	if (invalid.length > 0) {
 		diagnostics.push({
@@ -510,7 +513,7 @@ export function templateToolSurface(
 	if (deferred.length > 0) {
 		diagnostics.push({
 			type: "warning",
-			message: `${key} keeps ${deferred.join(", ")} for an extension tool that registers later; it is no Clio or MCP tool name`,
+			message: `${key} keeps ${deferred.join(", ")}, which is no Clio, MCP or extension tool name`,
 			path: filePath,
 		});
 	}
