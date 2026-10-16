@@ -66,6 +66,11 @@ export function workerSandboxConfinesWrites(): boolean {
 	return availability.available && availability.backend === "bwrap";
 }
 
+/** True when this process is a worker whose children, MCP servers included, start under an OS sandbox. */
+export function workerSandboxApplies(): boolean {
+	return active !== null && sandboxAvailability().available;
+}
+
 /**
  * Sockets and runtime directories reachable through the read-only root that
  * would let a sandboxed command act outside it: the session bus, agent

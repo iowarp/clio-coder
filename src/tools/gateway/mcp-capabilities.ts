@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { TSchema } from "typebox";
+import { workerSandboxApplies } from "../../core/sandbox/worker-process.js";
 import type { DynamicToolName } from "../../core/tool-names.js";
 import { mcpToolName } from "../../core/tool-names.js";
 import { mcpToolActionClass, mcpToolConfirmationRule, mcpToolOwner } from "../../domains/gateway/mcp/action-classes.js";
@@ -53,9 +54,15 @@ function actionClassFor(declaration: GatewayMcpServer, tool: NamedTool): McpTrus
  * trusted and only when the first find, describe, or call needs it, registers
  * each of its tools in the registry as `mcp_<id>__<tool>` (placement gateway,
  * action class from operator policy or advisory hints), and closes every client it opened at
- * session end. Launching a server does not sandbox it; the trust record is the
- * operator's explicit acceptance of that.
+ * session end. In the orchestrator launching a server does not sandbox it, and
+ * the trust record is the operator's explicit acceptance of that; a worker's
+ * servers start under the worker's OS sandbox when one applies.
  */
+
+/** What confines a launched server, as discovery tells the model. */
+function launchConfinement(): string {
+	return workerSandboxApplies() ? "it runs under this worker's OS sandbox" : "launching it does not sandbox it";
+}
 
 /**
  * Where a server's tool metadata came from. Deliberately separate from
@@ -275,7 +282,7 @@ function describeTool(declaration: GatewayMcpServer, tool: NamedTool): string {
 	if (declaration.scope === "client") {
 		return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id}, supplied by the ACP client for this session. Its calls use the gateway's unknown action class and session autonomy.`;
 	}
-	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${actionClassFor(declaration, tool)}; launching it does not sandbox it.`;
+	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${actionClassFor(declaration, tool)}; ${launchConfinement()}.`;
 }
 
 /** Remedies name the CLI first: it exists in every session, interactive or not. */
@@ -935,7 +942,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					: declaration.trust.actionClass === "execute"
 						? "calls are admitted like an unrecognized shell command"
 						: "calls run as reads at every autonomy level"
-			}. Launching the server does not sandbox it.`;
+			}; ${launchConfinement()}.`;
 		},
 		ownerIdOf(name) {
 			return ownerOf(name)?.declaration.id ?? null;
