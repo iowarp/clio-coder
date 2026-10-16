@@ -318,17 +318,18 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 }
 
 /**
- * Run one registered command and return its typed report plus the provenance
- * record. Never throws for a failing command: a red suite is a successful run
- * of the runner and a conformant report, and the plan decides what that means.
+ * Every refusal runCodeStep can throw before it spawns anything. A caller that
+ * announces a step as started runs this first, so a step that could never
+ * start is reported as an error rather than as running.
  */
-export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutcome> {
+export function preflightCodeStep(
+	input: Pick<CodeStepRunInput, "command" | "workspaceRoot" | "artifactDir" | "args" | "substitutions">,
+): { cwd: string; argv: string[] } {
 	const command = input.command;
 	if (input.artifactDir !== undefined && !isAbsolute(input.artifactDir)) {
 		throw new Error("code step: artifactDir must be absolute");
 	}
 	const cwd = resolveCwd(command, input.workspaceRoot);
-	const runId = input.runId ?? newCodeRunId();
 	const extraArgs = input.args ?? [];
 	if (
 		extraArgs.length > 64 ||
@@ -337,7 +338,18 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		throw new Error("code step: invalid additional arguments");
 	}
 	validatePlaybookCommandArgs(command, extraArgs);
-	const argv = [...resolveCommandArgv(command, input.substitutions), ...extraArgs];
+	return { cwd, argv: [...resolveCommandArgv(command, input.substitutions), ...extraArgs] };
+}
+
+/**
+ * Run one registered command and return its typed report plus the provenance
+ * record. Never throws for a failing command: a red suite is a successful run
+ * of the runner and a conformant report, and the plan decides what that means.
+ */
+export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutcome> {
+	const command = input.command;
+	const { cwd, argv } = preflightCodeStep(input);
+	const runId = input.runId ?? newCodeRunId();
 	const startedAtMs = Date.now();
 	const clock = process.hrtime.bigint();
 	const startedAt = new Date(startedAtMs).toISOString();

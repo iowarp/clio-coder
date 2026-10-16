@@ -32,7 +32,7 @@ import {
 	recordAssignmentAttempt,
 	settleStoredAssignment,
 } from "./assignment-store.js";
-import { newCodeRunId, runCodeStep } from "./code-step.js";
+import { type CodeStepRunInput, newCodeRunId, preflightCodeStep, runCodeStep } from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
 import type { DispatchContract, DispatchPlanTaskResolution, DispatchRequest } from "./contract.js";
 import { buildDelegationProposalBriefing, validateDelegationPlan } from "./delegation-plan.js";
@@ -904,19 +904,8 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 						}
 					}
 				}
-				// Announced before the command runs, as an agent step is at launch, so
-				// a code-only fleet reads as running while it runs and an ACP client
-				// learns it started without waiting for the first command to finish.
 				const codeRunId = newCodeRunId();
-				const event = {
-					stepId: step.id,
-					kind: "code" as const,
-					waveIndex: fleetPlanWaveIndex(livePlan, step.id),
-					assignmentId: codeRunId,
-					commandId: command.id,
-				};
-				stepDispatched(event);
-				const outcome = await runCodeStep({
+				const runInput: CodeStepRunInput = {
 					runId: codeRunId,
 					...(mutatedPaths.size > 0 ? { mutatedPaths: [...mutatedPaths] } : {}),
 					...(step.args ? { args: step.args } : {}),
@@ -935,7 +924,21 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 								commitAttribution: { enabled: input.attributionEnabled, evidence },
 							}
 						: {}),
-				});
+				};
+				// Announced before the command runs, as an agent step is at launch, so
+				// a code-only fleet reads as running while it runs and an ACP client
+				// learns it started without waiting for the first command to finish.
+				// Validated first, so a step that cannot start never reads as started.
+				preflightCodeStep(runInput);
+				const event = {
+					stepId: step.id,
+					kind: "code" as const,
+					waveIndex: fleetPlanWaveIndex(livePlan, step.id),
+					assignmentId: codeRunId,
+					commandId: command.id,
+				};
+				stepDispatched(event);
+				const outcome = await runCodeStep(runInput);
 				if (step.verification === true) validationFresh = outcome.report.passed;
 				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
 				input.onStepSettled?.({
