@@ -723,6 +723,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					signal ? { signal } : undefined,
 				);
 				if (!currentRun() || signal?.aborted) throw new Error("Request ownership changed while resolving authentication.");
+				// A failed OAuth refresh carries its remedy in detail; Pi's own "No API key" error would drop it.
+				if (
+					resolved.apiKey === undefined &&
+					resolved.source === "stored-oauth" &&
+					resolved.detail &&
+					resolved.detail !== resolved.providerId
+				)
+					throw new Error(resolved.detail);
 				return resolved.apiKey;
 			},
 		});
