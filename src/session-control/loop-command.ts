@@ -58,7 +58,7 @@ export type LoopCommand =
 	| { kind: "create"; args: LoopCreateArgs }
 	| { kind: "list" }
 	| { kind: "status"; id: string | undefined }
-	| { kind: "control"; action: LoopControlAction; id: string };
+	| { kind: "control"; action: LoopControlAction; id: string | undefined };
 
 export type LoopParseResult = { ok: true; command: LoopCommand } | { ok: false; reason: string };
 
@@ -354,6 +354,8 @@ export function parseLoopArgv(tokens: ReadonlyArray<string>): LoopParseResult {
 		return "error" in parsed ? fail(parsed.error) : { ok: true, command: { kind: "status", id: parsed.id } };
 	}
 	if ((LOOP_CONTROL_ACTIONS as ReadonlyArray<string>).includes(verb)) {
+		if (verb === "cancel" && tokens.length === 1)
+			return { ok: true, command: { kind: "control", action: "cancel", id: undefined } };
 		const parsed = parseId(verb, tokens);
 		return "error" in parsed
 			? fail(parsed.error)
@@ -657,8 +659,22 @@ export async function runLoopCommand(command: LoopCommand, host: LoopHost): Prom
 			report(host, loopJobLevel(job, now), loopJobDetail(job, now));
 			return;
 		}
+		let jobId = command.kind === "control" ? command.id : undefined;
+		if (command.kind === "control" && jobId === undefined) {
+			const active = command.action === "cancel" ? jobs.list().filter((job) => job.state === "active") : [];
+			if (active.length !== 1) {
+				host.notice(
+					"error",
+					active.length === 0
+						? "No active loop to cancel. Run /loop list to see the jobs"
+						: "/loop cancel needs a job id when several loops are active. Run /loop list to see them",
+				);
+				return;
+			}
+			jobId = active[0]?.id;
+		}
 		const args: Record<string, unknown> =
-			command.kind === "create" ? command.args : { action: command.action, job_id: command.id };
+			command.kind === "create" ? command.args : { action: command.action, job_id: jobId };
 		const result = await jobs.invoke(args);
 		if (result.kind === "error") {
 			host.notice("error", result.message);
