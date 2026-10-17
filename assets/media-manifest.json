@@ -155,8 +155,8 @@
 		{
 			"id": "gui-icon-192",
 			"source": "assets/clio-coder-app-icon-192.png",
-			"sha256": "2e2544d15cd9149fa0bb2bad04a561caf97e07a4db1127354e2e77deacc6e8e6",
-			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry and colors.",
+			"sha256": "e12e1148cd8778615667cd82c01fe5b6e76ef6b1d472b77c86ca2d100ab46d51",
+			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry, then palette-quantized with pngquant 2.18.0 (quality 90-100) after resizing.",
 			"dimensions": {
 				"width": 192,
 				"height": 192
@@ -170,8 +170,8 @@
 		{
 			"id": "gui-icon-512",
 			"source": "assets/clio-coder-app-icon-512.png",
-			"sha256": "fa5fadff9b50f8f6380032919be2e0d6be973696729304fa4e2f803c472815c3",
-			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry and colors.",
+			"sha256": "f0643709aa249eb0c3e6b6739532b3de3f0cf66f70332661f7058b9758eabd16",
+			"provenance": "Canonical cyan Clio ring with copper C; square safe-area projection from site/export-brand.mjs, unchanged geometry, then palette-quantized with pngquant 2.18.0 (quality 90-100) after resizing.",
 			"dimensions": {
 				"width": 512,
 				"height": 512
@@ -215,34 +215,34 @@
 		{
 			"id": "tui-boot-png",
 			"source": "assets/screenshots/tui-boot.png",
-			"sha256": "ffe935bbac401140128f72c770df47669c5e950195629f91f9ee5421fa9d90ba",
-			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Live terminal ANSI rendered with xterm.js, an isolated single-model profile, and MesloLGS Nerd Font. Blank bottom margin cropped; no interface content changed.",
+			"sha256": "fe1d390cfa40f09bde7e5fd511eb05494bdd764ec32a4254add1f62ba577a761",
+			"provenance": "Actual capture of Clio Coder 0.6.0-dev (commit 9ade954) on 2026-10-01, installed with scripts/install.sh in an isolated profile. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane and rendered with xterm.js; Nemotron 3.5 Lightning through a LiteLLM gateway. Welcome panel and composer (rows 1-21).",
 			"dimensions": {
-				"width": 2680,
-				"height": 988
+				"width": 2240,
+				"height": 870
 			},
-			"role": "Terminal boot with the model, workspace, fleet, composer, and guidance footer",
+			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer",
+			"altTextSeed": "Clio Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.png"],
-			"capturedVersion": "0.5.7"
+			"capturedVersion": "0.6.0-dev"
 		},
 		{
 			"id": "tui-boot-webp",
 			"source": "assets/screenshots/tui-boot.webp",
-			"sha256": "74794030799bfad96c76b3d90f0ff8834590ce944986b5b604d4c3da98fdfdf3",
-			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Live terminal ANSI rendered with xterm.js, an isolated single-model profile, and MesloLGS Nerd Font. Blank bottom margin cropped; no interface content changed.",
+			"sha256": "9bcdbac229a5f296d16b90ba8b2cc6f961157e84d52616e066d0388e363ed93f",
+			"provenance": "Actual capture of Clio Coder 0.6.0-dev (commit 9ade954) on 2026-10-01, installed with scripts/install.sh in an isolated profile. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane and rendered with xterm.js; Nemotron 3.5 Lightning through a LiteLLM gateway. Welcome panel and composer (rows 1-21).",
 			"dimensions": {
-				"width": 1920,
-				"height": 708
+				"width": 2240,
+				"height": 870
 			},
-			"role": "Terminal boot with the model, workspace, fleet, composer, and guidance footer",
+			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer",
+			"altTextSeed": "Clio Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.webp"],
-			"capturedVersion": "0.5.7"
+			"capturedVersion": "0.6.0-dev"
 		},
 		{
 			"id": "gui-conversation-png",
@@ -254,10 +254,10 @@
 				"height": 1000
 			},
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation.png"],
+			"copies": [],
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2"
 		},
@@ -271,10 +271,10 @@
 				"height": 1000
 			},
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation.webp"],
+			"copies": [],
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2"
 		},
@@ -288,10 +288,10 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview.png"],
+			"copies": [],
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2"
 		},
@@ -305,10 +305,10 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview.webp"],
+			"copies": [],
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2"
 		},
@@ -330,8 +330,8 @@
 		{
 			"id": "gui-favicon",
 			"source": "assets/clio-coder-app-favicon.png",
-			"sha256": "ad27cbf1df85b46eeff96cb8794e2fe31c461c8815ec84b80cdcad25c8aa682c",
-			"provenance": "Canonical Clio mark exported from site/export-brand.mjs; original provenance and derived hashes in the GUI brand/provenance.json.",
+			"sha256": "aee4987b90c10325893ccc86394d1e6fd94212b3f9be9d432df6738b98a171ef",
+			"provenance": "Canonical Clio mark exported from site/export-brand.mjs; palette-quantized with pngquant 2.18.0 (quality 90-100) after resizing; original provenance and derived hashes in the GUI brand/provenance.json.",
 			"dimensions": {
 				"width": 32,
 				"height": 32
@@ -424,7 +424,7 @@
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2",
-			"copies": ["site/assets/gui-artifacts.png"],
+			"copies": [],
 			"sha256": "617f51d0b2bb102c7b9f10d78243512e39a0b2651326f51f2704cd3f983b2705"
 		},
 		{
@@ -441,7 +441,7 @@
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
 			"capturedRevision": "6d8fbaea2",
-			"copies": ["site/assets/gui-artifacts.webp"],
+			"copies": [],
 			"sha256": "c2bbb9801aa933e142b83f74781faea1d27c7c6026a2ec8010f6e08de1492fee"
 		},
 		{
@@ -453,10 +453,10 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume in the light theme",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume in the light theme",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview-light.png"],
+			"copies": [],
 			"capturedVersion": "0.5.7",
 			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. Recent-project absolute path redacted in the capture. No fixture mode or invented conversation content."
 		},
@@ -469,19 +469,19 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume in the light theme",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume in the light theme",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-overview-light.webp"],
+			"copies": [],
 			"capturedVersion": "0.5.7",
 			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. Recent-project absolute path redacted in the capture. No fixture mode or invented conversation content."
 		},
 		{
 			"id": "gui-conversation-light-png",
 			"source": "assets/screenshots/gui-conversation-light.png",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation-light.png"],
+			"copies": [],
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
 			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
 			"capturedVersion": "0.5.7",
@@ -495,9 +495,9 @@
 		{
 			"id": "gui-conversation-light-webp",
 			"source": "assets/screenshots/gui-conversation-light.webp",
-			"channels": ["repository", "website"],
+			"channels": ["repository"],
 			"representation": "real-product-capture",
-			"copies": ["site/assets/gui-conversation-light.webp"],
+			"copies": [],
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
 			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
 			"capturedVersion": "0.5.7",
@@ -546,8 +546,8 @@
 			"id": "social-link-dark",
 			"template": "site/cards/link.html",
 			"output": "site/assets/social-card.png",
-			"sourceSha256": "271b0501e4c18cd2cc29ec8ece3c63fe54fdceb425a42ee580fdc83dd6baca60",
-			"sha256": "58464e5d23c72c6c45e99a913ea037afd5e951deae2301cf9ca4f56ffe085e4e",
+			"sourceSha256": "48c97c2315f8836dcc9575e3a6a849372b91415fcd5dd1e07671a0f024cee74b",
+			"sha256": "71d71ed6c094d1e951208e4254c22e2bdd5d3e85f3a2d3b2bb42bba41b218558",
 			"sources": [
 				"site/cards/link.html",
 				"site/css/cards.css",
@@ -572,8 +572,8 @@
 			"id": "social-link-light",
 			"template": "site/cards/link-light.html",
 			"output": "site/assets/social-card-light.png",
-			"sourceSha256": "ca81d66b15a3b2f4d22b4cdb0dba943aadbf87fea739b9f0d473f6bf7b4090c4",
-			"sha256": "a34f3f43329f07701f9399566ea966d29b4cb8c3f69c141564a7a1af7b7d544f",
+			"sourceSha256": "ddf7b6a135c9f551dc361e93e0532e72483a3b0670e6d1193a5ffe6880b47442",
+			"sha256": "a5e2bc786d7ea3480ba82fa794aa07f026795907d812b1a6b5541c5e5417ca55",
 			"sources": [
 				"site/cards/link-light.html",
 				"site/css/cards.css",
@@ -598,8 +598,8 @@
 			"id": "social-square-dark",
 			"template": "site/cards/square.html",
 			"output": "site/assets/social-square.png",
-			"sourceSha256": "bbcb8e9ab5dce8da8d6f2bd327a43afea35705eedb3ab34a92b46d60261e0da0",
-			"sha256": "ebfb2896c75dd5499a268606d56e26a6aa0bfb3b57cc01bc8176f565778d58b5",
+			"sourceSha256": "16b72832d740819688f6a51a43c563b8a6208d290301c87c0539a635647e73b8",
+			"sha256": "cc5cc188078b6b3bd5d95a2bf879b5eae7312e357ebdf09d5516a6a8293b8dde",
 			"sources": [
 				"site/cards/square.html",
 				"site/css/cards.css",
@@ -624,8 +624,8 @@
 			"id": "social-square-light",
 			"template": "site/cards/square-light.html",
 			"output": "site/assets/social-square-light.png",
-			"sourceSha256": "994bb271f0909e9cd052870daec3b797588e0655517fffa572f0d81b6c63e6ef",
-			"sha256": "59b71b93e91aaee55e91284858b19826973ec5ee9bd860f096c5dad9b9b262e3",
+			"sourceSha256": "1ff1c831d02b8f922eb9e97814535566bc9b05d7789bfcb411427e50b0beca0a",
+			"sha256": "96dc306f5dc1f2ec7e48f8b64316433a70aaf98b1820935f31a6d28cc9e52cfc",
 			"sources": [
 				"site/cards/square-light.html",
 				"site/css/cards.css",
