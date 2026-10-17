@@ -5,7 +5,10 @@ import {
 } from "../core/safe-exec.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 
-type FleetTermination = Pick<ReturnType<typeof getTerminationCoordinator>, "installSignalHandlers" | "onTerminate" | "getExitCode"> &
+type FleetTermination = Pick<
+	ReturnType<typeof getTerminationCoordinator>,
+	"installSignalHandlers" | "onTerminate" | "getExitCode"
+> &
 	Partial<Pick<ReturnType<typeof getTerminationCoordinator>, "onForceExit">>;
 
 export async function runFleetWithShutdown<T>(

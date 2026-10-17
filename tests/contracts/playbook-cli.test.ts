@@ -1,12 +1,23 @@
-import { match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runPlaybookGraph } from "../../src/cli/playbook-graph.js";
 import { runPlaybookValidate } from "../../src/cli/playbook-validate.js";
+import { updateSettings } from "../../src/core/config.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /** Run a synchronous CLI entry with its output captured. */
@@ -107,7 +118,7 @@ describe("playbook CLI variables", () => {
 				"steps:",
 				"  - kind: agent",
 				"    id: build",
-				"    agent: scout",
+				"    agent: coder",
 				"    target: project-route",
 				"    scope: readonly",
 				"    dependencies: []",
@@ -131,5 +142,47 @@ describe("playbook CLI variables", () => {
 		recordProjectSurfaceTrust(root, "settings", captureProjectSurface(root, "settings").contentHash as string);
 		const trusted = captured(() => runPlaybookValidate(["routed"]));
 		strictEqual(trusted.code, 0, `${trusted.stdout}${trusted.stderr}`);
+	});
+	it("refuses shadow agents during playbook validation", () => {
+		const path = join(root, ".clio-coder", "playbooks", "stage.md");
+		const source = readFileSync(path, "utf8");
+		for (const agent of ["scout", "oracle", "provenance", "researcher", "world-knowledge"]) {
+			writeFileSync(
+				path,
+				source.replace(
+					/ {2}- kind: code[\s\S]*? {4}dependencies: \[\]/,
+					`  - kind: agent\n    id: stage\n    agent: ${agent}\n    scope: readonly\n    dependencies: []`,
+				),
+			);
+			const result = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
+			strictEqual(result.code, 1, result.stdout + result.stderr);
+			match(result.stdout, /reserved for Clio internal orchestration/);
+		}
+	});
+
+	it("refuses a shadow agent before fleet writes a run journal", async () => {
+		const path = join(root, ".clio-coder", "playbooks", "stage.md");
+		writeFileSync(
+			path,
+			readFileSync(path, "utf8").replace(
+				/ {2}- kind: code[\s\S]*? {4}dependencies: \[\]/,
+				"  - kind: agent\n    id: stage\n    agent: scout\n    scope: readonly\n    dependencies: []",
+			),
+		);
+		process.env.HOME = env.dir;
+		updateSettings((settings) => {
+			settings.targets.push({
+				id: "fixture",
+				runtime: "openai-compat",
+				url: "http://127.0.0.1:1/v1",
+				defaultModel: "fixture",
+			});
+			settings.fleet.default.target = "fixture";
+			settings.fleet.default.model = "fixture";
+		});
+		const { runFleetCommand } = await import("../../src/cli/fleet.js");
+		strictEqual(await runFleetCommand(["run", "stage", "--var", "fixture=r7"]), 2);
+		const runs = join(clioStateDir(), "fleet-runs");
+		deepStrictEqual(existsSync(runs) ? readdirSync(runs) : [], []);
 	});
 });

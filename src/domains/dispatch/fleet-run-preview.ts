@@ -16,6 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import {
 	loadPlaybook,
 	loadPlaybookCommands,
@@ -34,6 +35,7 @@ import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep } from "./execution-plan.js";
 import { type AgentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "./execution-role.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
+import { hasConcurrentAgentSteps } from "./execution-scheduler.js";
 import { compileFleetExecutionPlan } from "./fleet-plan.js";
 import { planFleetResume } from "./fleet-run.js";
 import { type FleetRunRecord, readFleetRun } from "./state.js";
@@ -129,6 +131,7 @@ export interface FleetRunPreviewInput {
 		scope: "readonly" | "workspace";
 		target?: string;
 		profile?: string;
+		ledger?: DispatchRequest["ledger"];
 	}) => FleetRunPreviewRoute | null;
 	/** Playbook and registry loaders, overridable so tests project a fixture. */
 	load?: (workspaceRoot: string, name: string) => { playbook: Playbook; commands: PlaybookCommandRegistry | null };
@@ -236,6 +239,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		diagnostics.push(describeError(error));
 		return fail();
 	}
+	const ledger = hasConcurrentAgentSteps(plan) ? { id: "fleet-preview", sequence: 0 } : undefined;
 	const routes = new Map<string, FleetRunPreviewRoute>();
 	if (input.resolveRoute !== undefined) {
 		for (const step of plan.steps) {
@@ -246,6 +250,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					agentId: step.agentId,
 					task: step.task,
 					scope: step.scope,
+					...(ledger !== undefined ? { ledger } : {}),
 					...(step.target !== undefined ? { target: step.target } : {}),
 					...(step.profile !== undefined ? { profile: step.profile } : {}),
 				});
@@ -430,12 +435,15 @@ export function fleetRouteResolver(
 	preview: DispatchContract["preview"],
 	roleFacts: AgentRoleFactsResolver,
 	foregroundUsage: () => Readonly<Record<string, number>> = foregroundStreamUsage,
+	turnConstraints?: TurnConstraints,
 ): NonNullable<FleetRunPreviewInput["resolveRoute"]> {
 	return (step) => {
 		const request: DispatchRequest = {
 			agentId: step.agentId,
 			executionRole: requestExecutionRole({ agentId: step.agentId, resolveFacts: roleFacts }),
 			task: step.task,
+			...(step.ledger !== undefined ? { ledger: step.ledger } : {}),
+			...(turnConstraints !== undefined ? { turnConstraints } : {}),
 			...(step.scope === "readonly" ? { readOnly: true as const } : {}),
 			...(step.target !== undefined ? { target: step.target } : {}),
 			...(step.profile !== undefined ? { workerProfile: step.profile } : {}),

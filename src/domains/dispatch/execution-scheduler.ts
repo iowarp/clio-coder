@@ -188,7 +188,10 @@ function isExecutionPlanWriter(step: ExecutionPlanStep): boolean {
 }
 
 /** Whether two agent steps can be in flight together: workers allow it and neither depends on the other. */
-function hasConcurrentAgentSteps(plan: ExecutionPlan, agentSteps: ReadonlyArray<ExecutionPlanAgentStep>): boolean {
+export function hasConcurrentAgentSteps(
+	plan: ExecutionPlan,
+	agentSteps: ReadonlyArray<ExecutionPlanAgentStep> = plan.steps.filter((step) => step.kind === "agent"),
+): boolean {
 	if (plan.maxWorkers < 2) return false;
 	const ancestors = new Map(agentSteps.map((step) => [step.id, executionPlanAncestors(plan, step.id)]));
 	return agentSteps.some((a, index) =>

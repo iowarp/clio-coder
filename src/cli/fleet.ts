@@ -33,6 +33,7 @@ import {
 	PlaybookCommandRegistryMissingError,
 	renderPlaybookPrompt,
 } from "../domains/agents/index.js";
+import { isShadowAgent, userOriginAudienceRefusal } from "../domains/agents/spec.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
@@ -217,6 +218,10 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 	for (const step of playbookAgents(playbook)) {
 		if (!deps.agents.get(step.agent)) {
 			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio-coder agents')`;
+		}
+		const spec = deps.agents.getSpec(step.agent);
+		if (spec !== null && isShadowAgent(spec)) {
+			return `${userOriginAudienceRefusal(spec)} (step '${step.id}')`;
 		}
 		const requested = step.scope === "readonly" ? deps.safety.scopes.readonly : deps.safety.scopes.workspace;
 		if (!deps.safety.isSubset(requested, deps.safety.scopes.workspace)) {
@@ -469,70 +474,70 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			(signal, registerEmergencySeal) => {
 				runSignal = signal;
 				return executeFleetRun({
-						registerEmergencySeal,
-						plan,
-						signal,
-						playbookName: playbook.name,
-						commands,
-						workspaceRoot: process.cwd(),
-						fleetRootId,
-						dispatch,
-						agents: { getSpec: (agentId) => agents.getSpec(agentId) },
-						attributionEnabled: config?.get().integrations.git.commitAttribution ?? true,
-						vars,
-						...(resume !== undefined ? { resume } : {}),
-						onStarted() {
-							process.stderr.write(
-								`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
-							);
-						},
-						onStepSettled(step) {
-							if (step.replayed === true && step.result !== undefined) {
-								if (json) {
-									process.stdout.write(
-										`${JSON.stringify({
-											stepId: step.stepId,
-											status: "replayed",
-											receipt: {
-												runId: step.result.terminalRunId,
-												digest: step.result.receiptDigest,
-											},
-										})}\n`,
-									);
-								} else {
-									process.stdout.write(
-										`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
-									);
-								}
-								return;
+					registerEmergencySeal,
+					plan,
+					signal,
+					playbookName: playbook.name,
+					commands,
+					workspaceRoot: process.cwd(),
+					fleetRootId,
+					dispatch,
+					agents: { getSpec: (agentId) => agents.getSpec(agentId) },
+					attributionEnabled: config?.get().integrations.git.commitAttribution ?? true,
+					vars,
+					...(resume !== undefined ? { resume } : {}),
+					onStarted() {
+						process.stderr.write(
+							`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
+						);
+					},
+					onStepSettled(step) {
+						if (step.replayed === true && step.result !== undefined) {
+							if (json) {
+								process.stdout.write(
+									`${JSON.stringify({
+										stepId: step.stepId,
+										status: "replayed",
+										receipt: {
+											runId: step.result.terminalRunId,
+											digest: step.result.receiptDigest,
+										},
+									})}\n`,
+								);
+							} else {
+								process.stdout.write(
+									`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
+								);
 							}
-							if (step.receipt !== undefined) {
-								if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
-								else {
-									process.stdout.write(
-										`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,
-									);
-								}
-								return;
+							return;
+						}
+						if (step.receipt !== undefined) {
+							if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
+							else {
+								process.stdout.write(
+									`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,
+								);
 							}
-							if (step.codeStep !== undefined) {
-								if (json) {
-									process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
-								} else {
-									process.stdout.write(
-										`step ${step.stepId} code:${step.commandId}: ${
-											step.succeeded ? "passed" : "failed"
-										} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
-									);
-								}
+							return;
+						}
+						if (step.codeStep !== undefined) {
+							if (json) {
+								process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
+							} else {
+								process.stdout.write(
+									`step ${step.stepId} code:${step.commandId}: ${
+										step.succeeded ? "passed" : "failed"
+									} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
+								);
 							}
-						},
-						onNotice(text, kind) {
-							// A notice without a kind (a failed workspace lock release) goes to stderr like a write boundary.
-							if (kind === "gate") {
-								if (!json) process.stdout.write(`${text}\n`);
-							} else process.stderr.write(`${text}\n`);
-						},
+						}
+					},
+					onNotice(text, kind) {
+						// A notice without a kind (a failed workspace lock release) goes to stderr like a write boundary.
+						if (kind === "gate") {
+							if (!json) process.stdout.write(`${text}\n`);
+						} else process.stderr.write(`${text}\n`);
+					},
 				});
 			},
 			async () => {

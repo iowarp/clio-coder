@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
-import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { FleetRunOutcome } from "../../src/domains/dispatch/fleet-run.js";
 import {
 	createOverlayGeneralOpeners,
@@ -113,3 +113,67 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		scratch.restore();
 	}
 });
+
+for (const outside of ["bash", "ledger"]) {
+	test(`fleet approval refuses ${outside} outside the standing delegation ceiling`, async () => {
+		const scratch = await isolateClioEnv("clio-coder-fleet-preview-scope-");
+		try {
+			const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+			ok(agents);
+			let refused = false;
+			const constraints = { delegatedTools: ["read", "grep"] };
+			const deps: Partial<OverlayGeneralOpenersDeps> = {
+				agents,
+				dispatch: {
+					preview: (request: DispatchRequest) => {
+						if (
+							request.turnConstraints?.delegatedTools !== undefined &&
+							(outside === "bash" || request.ledger !== undefined)
+						) {
+							deepStrictEqual(request.turnConstraints, constraints);
+							throw new Error(`dispatch: worker tool surface exceeds the parent task's explicit scope: ${outside}`);
+						}
+						return undefined;
+					},
+				} as unknown as DispatchContract,
+				standingTurnConstraints: () => constraints,
+				transitions: { state: "closed", handle: null } as unknown as OverlayGeneralOpenersDeps["transitions"],
+				getSessionMeta: () => ({ cwd: scratch.dir }) as ReturnType<OverlayGeneralOpenersDeps["getSessionMeta"]>,
+				terminal: { columns: 100 } as OverlayGeneralOpenersDeps["terminal"],
+				requestRender: noop,
+				loadFleetSources: () => ({
+					commands: null,
+					playbook: {
+						version: 3,
+						name: "build",
+						description: "Build",
+						path: join(scratch.dir, "build.md"),
+						body: "Build.",
+						maxWorkers: 2,
+						budgetUsd: null,
+						onFailure: "stop",
+						steps: ["build", "check"].map((id) => ({
+							kind: "agent",
+							id,
+							agent: "coder",
+							scope: "readonly",
+							dependencies: [],
+						})),
+					} as never,
+				}),
+				openFleetRunApprovalOverlay: (_tui, options) => {
+					strictEqual(options.subject.ok, false);
+					if (!options.subject.ok) {
+						ok(options.subject.diagnostics.some((text) => text.includes(`explicit scope: ${outside}`)));
+						refused = true;
+					}
+					return {} as ReturnType<NonNullable<OverlayGeneralOpenersDeps["openFleetRunApprovalOverlay"]>>;
+				},
+			};
+			createOverlayGeneralOpeners(deps as OverlayGeneralOpenersDeps).startFleetRun("build", {});
+			ok(refused);
+		} finally {
+			scratch.restore();
+		}
+	});
+}

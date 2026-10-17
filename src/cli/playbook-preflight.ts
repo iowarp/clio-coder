@@ -7,7 +7,8 @@ import {
 	renderPlaybookPrompt,
 } from "../domains/agents/index.js";
 import { discoverAgentRecipes } from "../domains/agents/registry.js";
-import { type AgentSpec, normalizeAgentSpec } from "../domains/agents/spec.js";
+import type { AgentSpec } from "../domains/agents/spec.js";
+import { isShadowAgent, normalizeAgentSpec, userOriginAudienceRefusal } from "../domains/agents/spec.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
@@ -66,6 +67,9 @@ export function inspectPlaybook(name: string, vars?: Readonly<Record<string, str
 				throw new Error(
 					`unknown agent '${context.agentId}' (step '${context.stepId}' must name a recipe from 'clio-coder agents')`,
 				);
+			}
+			if (isShadowAgent(spec)) {
+				throw new Error(`${userOriginAudienceRefusal(spec)} (step '${context.stepId}')`);
 			}
 			if (spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
 				throw new Error(`playbook step '${context.stepId}' has no automatable agent authority`);

@@ -4718,7 +4718,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										roleFacts,
 										...(budget ? { budget } : {}),
 										...(resume !== undefined ? { resume } : {}),
-										resolveRoute: fleetRouteResolver(dispatch.preview, roleFacts),
+										resolveRoute: fleetRouteResolver(dispatch.preview, roleFacts, undefined, chat.toolLimits?.()),
 									});
 								},
 								run: (preview, turnConstraints) =>

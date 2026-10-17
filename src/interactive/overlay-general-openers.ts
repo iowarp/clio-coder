@@ -652,7 +652,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			...(budget ? { budget } : {}),
 			...(deps.loadFleetSources ? { load: deps.loadFleetSources } : {}),
 			...(options.resume !== undefined ? { resume: options.resume } : {}),
-			resolveRoute: fleetRouteResolver(deps.dispatch.preview, roleFacts),
+			resolveRoute: fleetRouteResolver(deps.dispatch.preview, roleFacts, undefined, deps.standingTurnConstraints?.()),
 		});
 
 		deps.transitions.state = "fleet-run-approval";
