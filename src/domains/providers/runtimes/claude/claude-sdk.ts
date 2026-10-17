@@ -34,13 +34,16 @@ async function probeClaudeSdkModels(
 		const models: string[] = [];
 		const modelLabels: Record<string, string> = {};
 		const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
-		// #416: "default" resolves to a concrete model that also has its own family row, so that row names it.
+		// #416: concrete ids use family or catalog names even when only "default" resolves to them.
 		const familyLabels = new Map(rows.filter((row) => row.id !== "default").map((row) => [row.catalogId, row.label]));
 		for (const row of rows) {
 			for (const id of new Set([row.id, row.catalogId])) {
 				if (!id.trim() || models.includes(id)) continue;
 				models.push(id);
-				modelLabels[id] = id === row.id ? row.label : (familyLabels.get(id) ?? row.label);
+				modelLabels[id] =
+					id === row.id
+						? row.label
+						: (familyLabels.get(id) ?? getCatalogModelForRuntime("claude-sdk", id)?.name ?? row.label);
 				modelCapabilities[id] = capabilitiesFromCatalogModel(
 					claudeCodeCapabilities,
 					getCatalogModelForRuntime("claude-sdk", row.catalogId),

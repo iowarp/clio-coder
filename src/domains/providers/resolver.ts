@@ -106,10 +106,22 @@ function collectCandidates(providers: ProvidersContract): CandidateRef[] {
 	return out;
 }
 
-function matchCandidates(base: string, candidates: CandidateRef[]): CandidateRef[] {
-	const lower = base.toLowerCase();
+function matchCandidates(base: string, candidates: CandidateRef[], exact = true): CandidateRef[] {
+	let lower = base.toLowerCase();
 	const exactFull = candidates.filter((c) => c.full.toLowerCase() === lower);
-	if (exactFull.length > 0) return exactFull;
+	if (exact && exactFull.length > 0) return exactFull;
+
+	// #416: a known target qualifier scopes both exact ids and family patterns.
+	const slash = base.indexOf("/");
+	if (slash !== -1) {
+		const target = lower.slice(0, slash);
+		const scoped = candidates.filter((candidate) => candidate.target.toLowerCase() === target);
+		if (scoped.length > 0) {
+			candidates = scoped;
+			base = base.slice(slash + 1);
+			lower = base.toLowerCase();
+		}
+	}
 
 	if (GLOB_CHARS.test(base)) {
 		const re = globToRegExp(base);
@@ -117,7 +129,7 @@ function matchCandidates(base: string, candidates: CandidateRef[]): CandidateRef
 	}
 
 	const exactModel = candidates.filter((c) => c.model.toLowerCase() === lower);
-	if (exactModel.length > 0) return exactModel;
+	if (exact && exactModel.length > 0) return exactModel;
 
 	return candidates.filter((c) => c.model.toLowerCase().includes(lower));
 }
@@ -127,6 +139,7 @@ function buildResult(
 	candidates: CandidateRef[],
 	thinkingLevel: ThinkingLevel | undefined,
 	options: ResolveModelOptions,
+	familyPattern = false,
 ): ResolveModelResult {
 	if (options.preferTarget !== undefined) {
 		candidates = [
@@ -139,8 +152,15 @@ function buildResult(
 		return { ref: null, error: `no models match pattern "${pattern}"` };
 	}
 	// Preserve the active target and unrelated-family ordering when ranking dates (#416).
-	const family = modelFamilyForId(first.model);
 	const preferred = first.target === options.preferTarget ? options.preferTarget : undefined;
+	const family =
+		modelFamilyForId(first.model) ??
+		(familyPattern
+			? (candidates
+					.filter((candidate) => preferred === undefined || candidate.target === preferred)
+					.map((candidate) => modelFamilyForId(candidate.model))
+					.find((candidate) => candidate !== null) ?? null)
+			: null);
 	const familyMatches = candidates.filter(
 		(candidate) =>
 			(preferred === undefined || candidate.target === preferred) &&
@@ -174,10 +194,12 @@ function buildResult(
  * Resolve a user-supplied model pattern against the configured targets.
  * Order of attempts:
  *   1. Exact `target/model` reference (case-insensitive).
- *   2. Glob (`*`, `?`, `[…]`) against `target/model` and bare `model`.
+ *   2. Target-qualified pattern within that target, or glob (`*`, `?`, `[…]`).
  *   3. Bare model id, exact case-insensitive.
  *   4. Bare model id, case-insensitive substring.
  *
+ * Chat family names (no version token) match eligible targets before ranking;
+ * concrete ids retain exact-match precedence and worker-only refusals (#416).
  * Trailing `:low`/`:medium`/`:high`/`:xhigh`/`:minimal`/`:off` is parsed off
  * before matching and surfaced on the returned ref so callers can apply it
  * to settings.chat.thinkingLevel.
@@ -196,9 +218,14 @@ export function resolveModelReference(
 		return { ref: null, error: "no targets configured; add one with `clio-coder configure` or `clio-coder targets add`" };
 	}
 
-	// Preserve exact-id precedence before excluding worker-only targets (#416).
-	const allMatches = matchCandidates(base, candidates);
-	const matches = options.use === "chat" ? allMatches.filter((candidate) => candidate.chatEligible) : allMatches;
+	// #416: worker aliases cannot shadow chat families; versioned ids keep explicit refusals.
+	const modelPattern = base.slice(base.indexOf("/") + 1);
+	const familyPattern = options.use === "chat" && !/\d/u.test(modelPattern);
+	const eligible = options.use === "chat" ? candidates.filter((candidate) => candidate.chatEligible) : candidates;
+	const allMatches = matchCandidates(base, candidates, !familyPattern);
+	const matches = familyPattern
+		? matchCandidates(base, eligible, false)
+		: allMatches.filter((candidate) => options.use !== "chat" || candidate.chatEligible);
 	if (options.use === "chat" && matches.length === 0) {
 		const targets = [...new Set(allMatches.map((candidate) => candidate.target))];
 		if (targets.length > 0) {
@@ -208,5 +235,5 @@ export function resolveModelReference(
 			};
 		}
 	}
-	return buildResult(base, matches, thinkingLevel, options);
+	return buildResult(base, matches, thinkingLevel, options, familyPattern);
 }
