@@ -252,6 +252,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.limits.chatToolCallsPerTurn` | `60` | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | next turn |
 | `safety.limits.observationBytesPerTurn` | `196608` | next turn |
+| `safety.limits.workerResponseSeconds` | `600` | next turn |
 | `safety.review.enabled` | `false` | immediately |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately |

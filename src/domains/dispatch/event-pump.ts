@@ -278,6 +278,18 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 				// Any message boundary flushes the in-flight stream: its deltas
 				// belong to the message that just completed.
 				const message = isRecord(event.message) ? event.message : null;
+				if (
+					message?.role === "assistant" &&
+					(message.clioCoderAbortReason === "worker_turn_timeout" ||
+						message.clioCoderAbortReason === "worker_output_cap_exhausted")
+				) {
+					const text = assistantTextFromContent(message.content);
+					partialText = truncateUtf8(text, maxBytes, WORKER_OUTPUT_TRUNCATION_MARKER);
+					partialBytes = Buffer.byteLength(text, "utf8");
+					partialStored = Buffer.byteLength(partialText, "utf8");
+					finalText = null;
+					return;
+				}
 				partialText = "";
 				partialBytes = 0;
 				partialStored = 0;

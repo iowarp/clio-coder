@@ -446,6 +446,8 @@ placement does not read it; use `fleet.defaultNode` or a profile pin.
 
 ### Worker limits and `fleet.concurrency: auto`
 
+Each native worker response has a host deadline of `safety.limits.workerResponseSeconds` (default 600 seconds), starting after local residency waits and model loading complete. After tools lock or during synthesis, the deadline is at most 120 seconds and the request allows at most 4096 output tokens, preserving tighter limits; those rounds also request thinking off wherever the model and runtime support it. Reaching any response deadline or exhausting a locked round’s output cap fails the run with `worker_turn_timeout` or `worker_output_cap_exhausted` and keeps unfinished output partial. Both codes are sealed in the receipt and suppress automatic dispatch retry and failover without penalizing the target breaker; the fleet step settles as failed and follows its `onFailure` policy. Unlocked output truncation retains the normal provider and tool-call recovery behavior. Usage is retained only when the provider reported it; otherwise the interrupted call records usage as unknown (`observed: false`), since compatible providers may send usage only in their final chunk.
+
 `fleet.concurrency` sets the global worker pool and the implicit local node's
 limit. SSH nodes always use their own `maxWorkers`. A number means exactly that
 many workers for both. The default is `auto`. An explicit value in

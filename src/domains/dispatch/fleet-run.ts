@@ -879,7 +879,9 @@ async function runFleetHoldingWorkspace(
 						const integrityValid = envelope !== null && verifyReceiptIntegrity(receipt, envelope).ok;
 						const succeeded = receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded");
 						let stepSucceeded = succeeded;
-						let failureReason: string | undefined;
+						let failureReason: string | undefined = succeeded
+							? undefined
+							: (receipt.outcomeDetail ?? receipt.outcomeCode ?? receipt.outcome ?? "worker failed");
 						let gatePathHash: string | undefined;
 						let delegationPlanHash: string | undefined;
 						let delegationPlan: ExecutionStepResult["delegationPlan"];

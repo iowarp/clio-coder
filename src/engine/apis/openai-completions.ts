@@ -42,6 +42,7 @@ import { normalizeContext, resolvedRequestContext } from "../context.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
+import { deferResponseDeadline } from "../response-deadline.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream, type WatchDegradedInferenceOptions } from "./degraded-inference.js";
 import {
@@ -1068,6 +1069,7 @@ export function withLocalResidency(
 	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model) && !gatewayLmStudioProfile(model)) {
 		return sourceFactory(model);
 	}
+	const startResponseDeadline = deferResponseDeadline(options);
 	const stream = createDegradedInferenceStream(degradedWatchOptions(model, options));
 	(async () => {
 		let release = NO_RELEASE;
@@ -1076,6 +1078,7 @@ export function withLocalResidency(
 			const residency = await ensureLocalResidency(model, options);
 			release = residency.release;
 			options.signal?.throwIfAborted();
+			startResponseDeadline();
 			for await (const event of sourceFactory(residency.model)) {
 				if (event.type === "error" && isLmStudioModel(model)) {
 					invalidateLmStudioCatalog({

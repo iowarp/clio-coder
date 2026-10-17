@@ -476,6 +476,10 @@ const OPTIONAL_STRINGS = new Set([
 	"context.compaction.systemPrompt",
 ]);
 const EXTRA_HELP: Record<string, [string, string]> = {
+	"safety.limits.workerResponseSeconds": [
+		"Worker response time",
+		"Seconds one native worker model response may run; locked synthesis rounds stop at 120.",
+	],
 	"context.semantic.enabled": [
 		"Semantic search",
 		"Make the optional project search index available to Clio after pinning a qualified embedding route.",

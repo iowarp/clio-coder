@@ -65,6 +65,8 @@ export type RunOutcomeCode =
 	| "vram_capacity_fit_failure"
 	| "worker_tool_call_cap_exhausted"
 	| "worker_context_exhausted"
+	| "worker_turn_timeout"
+	| "worker_output_cap_exhausted"
 	| "loop_guard_tools_disabled_exhausted"
 	| "result_contract_exhausted"
 	| "worker_final_output_missing"
@@ -80,6 +82,8 @@ export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 		value === "vram_capacity_fit_failure" ||
 		value === "worker_tool_call_cap_exhausted" ||
 		value === "worker_context_exhausted" ||
+		value === "worker_turn_timeout" ||
+		value === "worker_output_cap_exhausted" ||
 		value === "loop_guard_tools_disabled_exhausted" ||
 		value === "result_contract_exhausted" ||
 		value === "worker_final_output_missing" ||

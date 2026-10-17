@@ -126,6 +126,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `safety.limits.chatToolCallsPerTurn` | `60` | Integer at least 1. At the limit Clio stops using tools and summarizes the turn. | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | Integer at least 1. Most text one file read returns; a read gets at least 1 KB. | next turn |
 | `safety.limits.observationBytesPerTurn` | `196608` | Integer at least 1. Combined tool output the model may receive in one turn. While the value stays at this default the pool scales to 1.5 bytes per context-window token, between 192 KiB and 1 MiB; any other value applies exactly. | next turn |
+| `safety.limits.workerResponseSeconds` | `600` | Integer at least 1. Host deadline per native worker model response; locked synthesis rounds also have a 120 second ceiling and request at most 4096 output tokens. | next turn |
 | `safety.review.enabled` | `false` | Boolean. After a mutating turn a read-only reviewer worker checks the changed files. Interactive sessions only. | hot reload |
 | `safety.sandbox` | `"auto"` | `auto`, `required` or `off`. OS sandbox for a dispatched worker's bash, `run_script` and verify commands; main-agent commands are not sandboxed. | next turn |
 | `safety.sandboxNetwork` | `false` | Boolean. Let sandboxed worker commands reach the network. Workers holding `web_fetch` get network either way. | next turn |

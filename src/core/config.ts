@@ -2347,12 +2347,18 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"chatToolCallsPerTurn",
 						"readBytesPerCall",
 						"observationBytesPerTurn",
+						"workerResponseSeconds",
 					]);
 					if ("sessionCostUsd" in limits) {
 						const parsed = expectNumber(issues, "safety.limits.sessionCostUsd", limits.sessionCostUsd, { min: 0 });
 						if (parsed !== undefined) settings.safety.limits.sessionCostUsd = parsed;
 					}
-					for (const key of ["chatToolCallsPerTurn", "readBytesPerCall", "observationBytesPerTurn"] as const) {
+					for (const key of [
+						"chatToolCallsPerTurn",
+						"readBytesPerCall",
+						"observationBytesPerTurn",
+						"workerResponseSeconds",
+					] as const) {
 						if (!(key in limits)) continue;
 						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 1 });
 						if (parsed !== undefined) settings.safety.limits[key] = parsed;

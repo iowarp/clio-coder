@@ -620,6 +620,7 @@ export interface SafetySettings {
 		chatToolCallsPerTurn: number;
 		readBytesPerCall: number;
 		observationBytesPerTurn: number;
+		workerResponseSeconds: number;
 	};
 	review: ReviewSettings;
 	/**
@@ -765,6 +766,7 @@ export const DEFAULT_SETTINGS = {
 			chatToolCallsPerTurn: GUARDRAIL_DEFAULTS.turnToolCallBudget,
 			readBytesPerCall: GUARDRAIL_DEFAULTS.readMaxBytes,
 			observationBytesPerTurn: GUARDRAIL_DEFAULTS.observationTurnBudgetBytes,
+			workerResponseSeconds: 600,
 		},
 		review: { enabled: false } as ReviewSettings,
 		sandbox: "auto" as SandboxMode,
@@ -958,6 +960,7 @@ safety:
     chatToolCallsPerTurn: 60
     readBytesPerCall: 51200
     observationBytesPerTurn: 196608
+    workerResponseSeconds: 600
   review:
     enabled: false
   # OS sandbox for dispatched worker commands: auto | required | off.

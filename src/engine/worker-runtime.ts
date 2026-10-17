@@ -9,6 +9,7 @@ import { engineStreamSimple } from "./api-registry.js";
 import { recommendedOutputTokens, resolvePressureOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
 import { retryStreamOnceOnOverflow } from "./overflow-retry-stream.js";
+import { boundWorkerResponse } from "./worker-response-stream.js";
 /**
  * Worker-subprocess engine boundary.
  *
@@ -343,7 +344,7 @@ function isTerminalAssistantMessage(message: AgentMessage | undefined): boolean 
 		message.content.some((block) => block.type === "toolCall")
 	)
 		return false;
-	return message.stopReason !== "toolUse" && message.stopReason !== "error";
+	return message.stopReason !== "toolUse" && message.stopReason !== "error" && message.stopReason !== "aborted";
 }
 
 /**
@@ -646,6 +647,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// declarations (Anthropic, Google and Vertex keep them and send tool choice
 	// none instead; see toolsRemovedRound).
 	let synthesisToolLock = false;
+	let responseRound = 0;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
 	// Last HTTP status a provider answered. Pi's error messages drop it on some
@@ -1139,6 +1141,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				: undefined;
 		},
 		streamFn: (currentModel, transcript, streamOptions) => {
+			const round = ++responseRound;
 			const resolvedContext = resolvedRequestContext(transcript);
 			helperTerminalRequest = synthesisToolLock || helperTerminalPhase;
 			helperExposedThisRound =
@@ -1233,14 +1236,36 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				// Pi's SDK adapters report onResponse only for a 2xx answer, so the
 				// status is read at the fetch boundary every adapter routes through.
 				const fetchImpl = controlled.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
-				return engineStreamSimple(currentModel, controlled.context, {
-					...controlled.options,
-					fetch: async (url, init) => {
-						const response = await fetchImpl(url, init);
-						lastProviderHttpStatus = response.status;
-						return response;
+				const lockedRound = synthesisToolLock || helperTerminalPhase;
+				const {
+					reasoning: _reasoning,
+					thinkingBudgets: _thinkingBudgets,
+					...thinkingOffOptions
+				} = controlled.options ?? {};
+
+				return boundWorkerResponse(
+					currentModel,
+					controlled.context,
+					lockedRound ? thinkingOffOptions : controlled.options,
+					{
+						locked: lockedRound,
+						responseSeconds: workerSettings.safety.limits.workerResponseSeconds,
+						round,
+						onLimit: (outcomeCode, detail) => {
+							workerBoundFailure ??= detail;
+							emit({ type: "clio_coder_run_outcome", payload: { outcomeCode, detail } });
+						},
 					},
-				});
+					(boundedOptions) =>
+						engineStreamSimple(currentModel, controlled.context, {
+							...boundedOptions,
+							fetch: async (url, init) => {
+								const response = await fetchImpl(url, init);
+								lastProviderHttpStatus = response.status;
+								return response;
+							},
+						}),
+				);
 			};
 			const first = request(messages);
 			// The server is the authority on its own limit. An unreported window, a
@@ -1414,7 +1439,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// the same message and the run then ran out of repairs on a later
 		// grounding violation).
 		let repromptedThisMessage = false;
-		if (synthesisToolLock && !helperToolAvailable && event.type === "message_end") {
+		if (workerBoundFailure === null && synthesisToolLock && !helperToolAvailable && event.type === "message_end") {
 			const stripped = sanitizeLockedSynthesisMessage(event.message);
 			// A model that calls a tool anyway hands its markup back as text and
 			// the sanitizer leaves only the fallback notice: the training habit
