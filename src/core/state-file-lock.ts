@@ -192,12 +192,36 @@ export function withStateFileLockSync<T>(targetPath: string, fn: () => T, option
 	}
 }
 
-export async function withStateFileLock<T>(
+/**
+ * Run `fn` under the lock only if the lock is free right now; never waits and
+ * never blocks. A caller with an asynchronous fallback keeps its uncontended
+ * path synchronous with this, and waits through `withStateFileLockSection`
+ * only when another holder is present.
+ */
+export function tryWithStateFileLockSync<T>(
 	targetPath: string,
-	fn: () => T | Promise<T>,
-	options: StateFileLockOptions = {},
-): Promise<T> {
+	fn: () => T,
+): { held: true; value: T } | { held: false } {
 	const lockPath = `${targetPath}.lock`;
+	mkdirSync(dirname(lockPath), { recursive: true });
+	if (!tryAcquire(lockPath)) return { held: false };
+	try {
+		return { held: true, value: fn() };
+	} finally {
+		release(lockPath);
+	}
+}
+
+/**
+ * The asynchronous acquisition loop shared by both yielding variants. `enter`
+ * runs in the same synchronous step that took the lock, so nothing else in
+ * this process runs between acquisition and the critical section.
+ */
+async function acquireAsync<T>(
+	lockPath: string,
+	options: StateFileLockOptions,
+	enter: (held: boolean) => T | Promise<T>,
+): Promise<T> {
 	const timeoutMs = options.timeoutMs ?? FILE_LOCK_ACQUIRE_TIMEOUT_MS;
 	let held = false;
 	try {
@@ -215,14 +239,55 @@ export async function withStateFileLock<T>(
 		held = true;
 		options.signal?.throwIfAborted();
 	} catch (err) {
+		// An abort that lands after a successful acquisition must hand the lock
+		// back: the rethrow below skips the caller's release, and a live pid
+		// keeps every other waiter out until this process exits.
+		if (held) {
+			release(lockPath);
+			held = false;
+		}
 		options.signal?.throwIfAborted();
 		if (options.onAcquireFailure !== "run-unlocked") throw err;
 	}
-	const stopRefresh = held ? startRefresh(lockPath) : null;
-	try {
-		return await fn();
-	} finally {
-		stopRefresh?.();
-		if (held) release(lockPath);
-	}
+	return enter(held);
+}
+
+export async function withStateFileLock<T>(
+	targetPath: string,
+	fn: () => T | Promise<T>,
+	options: StateFileLockOptions = {},
+): Promise<T> {
+	const lockPath = `${targetPath}.lock`;
+	return acquireAsync(lockPath, options, async (held) => {
+		const stopRefresh = held ? startRefresh(lockPath) : null;
+		try {
+			return await fn();
+		} finally {
+			stopRefresh?.();
+			if (held) release(lockPath);
+		}
+	});
+}
+
+/**
+ * Wait for the lock without blocking the event loop, then run a synchronous
+ * critical section and release before returning. `withStateFileLock` holds the
+ * lock across at least one microtask after `fn` returns; a same-process
+ * `withStateFileLockSync` caller reached in that gap would spin on its own pid
+ * until the acquisition budget runs out. Admission paths that mix both
+ * variants on one lock use this one.
+ */
+export function withStateFileLockSection<T>(
+	targetPath: string,
+	fn: () => T,
+	options: StateFileLockOptions = {},
+): Promise<T> {
+	const lockPath = `${targetPath}.lock`;
+	return acquireAsync(lockPath, options, (held) => {
+		try {
+			return fn();
+		} finally {
+			if (held) release(lockPath);
+		}
+	});
 }

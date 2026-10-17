@@ -10,7 +10,9 @@ import type { FlowRestrictionSet } from "../../core/flow-restrictions.js";
  *
  *   - stdout is the bulk lane. Frames are length-checked before parsing and
  *     land in a bounded queue that drops display-only frames under pressure
- *     and never drops a receipt-bearing frame.
+ *     and never drops a receipt-bearing frame. When evidence alone fills the
+ *     queue's soft bound the lane pauses, so the backlog waits in the pipe
+ *     and the worker instead of in this process.
  *   - stderr carries the structured control lane behind a marker prefix
  *     (announce, heartbeat, and cancellation acknowledgements) plus
  *     free-form diagnostics, which are tailed. A bulk flood cannot delay a
@@ -52,15 +54,21 @@ import {
 	approvedIdentityForSpec,
 	createBoundedEventQueue,
 	isControlLine,
+	isReceiptBearingFrame,
 	parseBulkFrame,
 	parseControlFrame,
 	parseWorkerHookRequest,
 	verifyWorkerAttestation,
 	WORKER_ANNOUNCE_DEADLINE_MS,
 	WORKER_BULK_FRAME_MAX_BYTES,
+	WORKER_EVENT_QUEUE_HARD_BYTES,
+	WORKER_EVENT_QUEUE_HARD_FRAMES,
 	WORKER_HOOK_REQUEST_EVENT,
+	WORKER_QUARANTINE_MAX_BYTES,
+	WORKER_QUARANTINE_MAX_FRAMES,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	WORKER_STDIN_QUEUE_MAX_BYTES,
+	WORKER_STDOUT_INCOMPLETE_MARKER,
 	type WorkerAdmitFrame,
 	type WorkerAttestation,
 	WorkerChannelFailure,
@@ -83,6 +91,14 @@ export interface SpawnedWorkerResult {
 	malformedStdoutLines?: number;
 	/** Display-only frames the bounded queue dropped under backpressure. */
 	droppedDisplayFrames?: number;
+	/**
+	 * Why the bulk lane could not deliver every frame the worker wrote: a
+	 * retention bound was reached, a frame could not be classified, the final
+	 * frame was truncated, the worker reported its own output gap or died by
+	 * signal before finishing it, or the consumer detached. Present only then;
+	 * a clean exit code is reported as 1.
+	 */
+	evidenceIncomplete?: string;
 	/**
 	 * The control operation whose write could not reach the worker. Present only
 	 * when the channel failed, so failure classification attributes it to the
@@ -113,6 +129,23 @@ export interface SpawnedWorker {
 	lastChannelFailure?(): WorkerChannelFailure | null;
 	/** Route and node identity the worker attested, once it has announced. */
 	attestation?(): WorkerAttestation | null;
+	/** Current and peak bulk-lane retention, for capacity diagnostics. */
+	bulkLaneStats?(): WorkerBulkLaneStats;
+}
+
+export interface WorkerBulkLaneStats {
+	retainedFrames: number;
+	retainedBytes: number;
+	peakFrames: number;
+	peakBytes: number;
+	/** Bytes already read from the pipe but not yet split into frames. */
+	heldBytes: number;
+	/** Unattested frames held before the announce verdict. */
+	quarantinedFrames: number;
+	quarantinedBytes: number;
+	/** Times the lane paused for a full evidence backlog. */
+	pauses: number;
+	paused: boolean;
 }
 
 /**
@@ -239,6 +272,117 @@ function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 	}
 }
 
+/**
+ * Bytes the bulk reader may hold unsplit: one partial frame at the lane
+ * ceiling plus the rest of the chunk that arrived as the lane paused. Only a
+ * source that keeps delivering after the pause can pass it.
+ */
+const BULK_HELD_MAX_BYTES = 2 * WORKER_BULK_FRAME_MAX_BYTES;
+
+interface LineReader {
+	write(chunk: Buffer): void;
+	/** Split bytes kept while held; stops again if `hold` turns true. */
+	resume(): void;
+	/** Bytes read from the pipe and not yet delivered as a line. */
+	heldBytes(): number;
+	/** An unterminated line is pending, which a closed pipe leaves truncated. */
+	truncated(): boolean;
+}
+
+/**
+ * Bounded line reader. readline would buffer an unterminated line without
+ * limit, so lines are split here and anything past the lane ceiling is
+ * discarded before it can be parsed or retained. Lines are cut on raw bytes
+ * and decoded whole, so a multibyte character split across two pipe chunks
+ * arrives intact. While `hold` answers true the rest of the current chunk
+ * stays unsplit: pausing the pipe cannot take back bytes it already delivered,
+ * so they wait here as bytes rather than as parsed frames.
+ */
+function createLineReader(
+	maxBytes: number,
+	onLine: (line: string, bytes: number) => void,
+	onOversize: () => void,
+	hold: () => boolean = () => false,
+): LineReader {
+	let pieces: Buffer[] = [];
+	let pieceBytes = 0;
+	let discarding = false;
+	// Chunks kept unsplit while held, oldest first. Node resumes a paused
+	// child stdout itself once the child exits, so more can arrive here.
+	let held: Buffer[] = [];
+	let heldLength = 0;
+
+	function split(chunk: Buffer): void {
+		let start = 0;
+		while (start < chunk.length) {
+			if (hold()) {
+				held.push(chunk.subarray(start));
+				heldLength += chunk.length - start;
+				return;
+			}
+			const newline = chunk.indexOf(0x0a, start);
+			if (newline < 0) {
+				const rest = chunk.length - start;
+				if (discarding) return;
+				if (pieceBytes + rest > maxBytes) {
+					pieces = [];
+					pieceBytes = 0;
+					discarding = true;
+					return;
+				}
+				pieces.push(chunk.subarray(start));
+				pieceBytes += rest;
+				return;
+			}
+			const bytes = pieceBytes + newline - start;
+			if (discarding) {
+				discarding = false;
+				onOversize();
+			} else if (bytes > maxBytes) {
+				onOversize();
+			} else {
+				const last = chunk.subarray(start, newline);
+				const line = pieces.length === 0 ? last.toString("utf8") : Buffer.concat([...pieces, last]).toString("utf8");
+				pieces = [];
+				pieceBytes = 0;
+				start = newline + 1;
+				onLine(line, bytes + 1);
+				continue;
+			}
+			pieces = [];
+			pieceBytes = 0;
+			start = newline + 1;
+		}
+	}
+
+	return {
+		write(chunk: Buffer): void {
+			if (held.length === 0) {
+				split(chunk);
+				return;
+			}
+			held.push(chunk);
+			heldLength += chunk.length;
+		},
+		resume(): void {
+			const chunks = held;
+			held = [];
+			heldLength = 0;
+			// A chunk that holds again leaves the rest queued behind it, in order.
+			for (const chunk of chunks) {
+				if (held.length === 0) {
+					split(chunk);
+					continue;
+				}
+				held.push(chunk);
+				heldLength += chunk.length;
+			}
+		},
+		heldBytes: () => heldLength + pieceBytes,
+		truncated: () => pieceBytes > 0 || discarding,
+	};
+}
+
 /** Start the worker process itself. The spec, and with it the approved identity, comes later. */
 function launchWorkerChild(
 	command: string,
@@ -321,18 +465,94 @@ function attachWorkerChannel(
 			...(stderrText.length > 0 ? { stderrTail: stderrText } : {}),
 			...(malformedStdoutLines > 0 ? { malformedStdoutLines } : {}),
 			...(dropped > 0 ? { droppedDisplayFrames: dropped } : {}),
+			...(evidenceIncomplete !== null ? { evidenceIncomplete } : {}),
 			...(channelFailure !== null ? { channelFailure: channelFailure.operation } : {}),
 		};
 	}
 
-	function push(value: unknown): void {
+	// Bulk-lane pressure. `bulkHeld` pauses stdout and holds the line reader;
+	// `bulkDiscarding` drains the pipe without retaining anything once the
+	// trail can no longer be complete or nobody reads it.
+	let bulkHeld = false;
+	let bulkPauses = 0;
+	let bulkReleaseScheduled = false;
+	let bulkDiscarding = false;
+	let bulkOverflowed = false;
+	let finishing = false;
+	let evidenceIncomplete: string | null = null;
+
+	function markEvidenceIncomplete(reason: string): void {
+		if (evidenceIncomplete !== null) return;
+		evidenceIncomplete = reason;
+		appendStderr(`[worker] bulk evidence incomplete: ${reason}\n`);
+	}
+
+	function holdBulkLane(): void {
+		if (bulkHeld || finishing || bulkDiscarding) return;
+		bulkHeld = true;
+		bulkPauses += 1;
+		child.stdout?.pause();
+	}
+
+	function releaseBulkLane(): void {
+		if (!bulkHeld) return;
+		bulkHeld = false;
+		// Held bytes precede anything still in the pipe, so they are split
+		// first, and a backlog they rebuild keeps the pipe paused.
+		stdoutReader.resume();
+		if (!bulkHeld) child.stdout?.resume();
+	}
+
+	/** Resume off the consumer's own `next()` call, so no frame handler runs inside it. */
+	function scheduleBulkRelease(): void {
+		if (!bulkHeld || bulkReleaseScheduled || !queue.relieved) return;
+		bulkReleaseScheduled = true;
+		queueMicrotask(() => {
+			bulkReleaseScheduled = false;
+			if (queue.relieved) releaseBulkLane();
+		});
+	}
+
+	/**
+	 * Pressure could not hold the bulk lane inside its hard bound, so a frame
+	 * the receipt needs was refused. Nothing after that gap can seal as a
+	 * complete trail: the worker is stopped through its process owner and the
+	 * rest of the pipe drains unretained so its close still arrives.
+	 */
+	function overflowBulkLane(reason: string): void {
+		markEvidenceIncomplete(reason);
+		if (bulkOverflowed) return;
+		bulkOverflowed = true;
+		bulkDiscarding = true;
+		forceOwnedKill();
+		releaseBulkLane();
+	}
+
+	/** The consumer stopped reading. Unread frames are released and the pipe drains unretained. */
+	function detachConsumer(live: boolean): void {
+		if (bulkDiscarding) return;
+		bulkDiscarding = true;
+		const unread = queue.size > 0;
+		queue.clear();
+		if ((unread || live) && !settled) markEvidenceIncomplete("the event consumer detached before the bulk lane ended");
+		releaseBulkLane();
+	}
+
+	function push(value: unknown, bytes = 0): void {
 		stampHeartbeat();
+		if (bulkDiscarding) return;
 		const w = waiters.shift();
 		if (w) {
 			w({ value, done: false });
 			return;
 		}
-		queue.push(value);
+		if (queue.push(value, bytes) === "overflow") {
+			overflowBulkLane(
+				`the bulk lane reached its ${WORKER_EVENT_QUEUE_HARD_FRAMES} frame / ${WORKER_EVENT_QUEUE_HARD_BYTES} byte retention bound`,
+			);
+			return;
+		}
+		if (queue.pressured) holdBulkLane();
 	}
 
 	function end(): void {
@@ -377,6 +597,8 @@ function attachWorkerChannel(
 		if (announceFailed) return;
 		announceFailed = true;
 		clearAnnounceDeadline();
+		// Held unattested frames are never released, so nothing keeps them.
+		preAnnounce.clear();
 		appendStderr(`[worker] ${message}\n`);
 		// A peer that did not prove the approved route identity must not execute.
 		// Terminate the whole group authoritatively rather than offering a
@@ -408,49 +630,20 @@ function attachWorkerChannel(
 	}
 
 	/**
-	 * Bounded line reader. readline would buffer an unterminated line without
-	 * limit, so lines are split here and anything past the lane ceiling is
-	 * discarded before it can be parsed or retained.
-	 */
-	function createLineReader(
-		maxBytes: number,
-		onLine: (line: string) => void,
-		onOversize: () => void,
-	): (chunk: Buffer) => void {
-		let buffer = "";
-		let discarding = false;
-		return (chunk: Buffer): void => {
-			buffer += chunk.toString("utf8");
-			let idx = buffer.indexOf("\n");
-			while (idx >= 0) {
-				const line = buffer.slice(0, idx);
-				buffer = buffer.slice(idx + 1);
-				if (discarding) {
-					discarding = false;
-					onOversize();
-				} else if (Buffer.byteLength(line, "utf8") > maxBytes) {
-					onOversize();
-				} else {
-					onLine(line);
-				}
-				idx = buffer.indexOf("\n");
-			}
-			if (Buffer.byteLength(buffer, "utf8") > maxBytes) {
-				buffer = "";
-				discarding = true;
-			}
-		};
-	}
-
-	/**
 	 * Bulk frames that arrived before the announce verdict. stdout and stderr are
 	 * separate pipes with no ordering guarantee between them, so an early bulk
-	 * frame is not evidence of a missing attestation. Frames are held (under the
-	 * same bounded queue policy) and released only once the attestation verifies;
-	 * a peer that fails or never attests has its held frames discarded, so no
-	 * unattested output ever reaches a consumer.
+	 * frame is not evidence of a missing attestation. Frames are held in a
+	 * quarantine that drops nothing and released only once the attestation
+	 * verifies; a peer that floods past its bound, fails or never attests is
+	 * stopped and its held frames discarded, so no unattested output ever
+	 * reaches a consumer.
 	 */
-	const preAnnounce = createBoundedEventQueue();
+	const preAnnounce = createBoundedEventQueue(WORKER_QUARANTINE_MAX_FRAMES, {
+		softFrames: Number.POSITIVE_INFINITY,
+		softBytes: Number.POSITIVE_INFINITY,
+		hardFrames: WORKER_QUARANTINE_MAX_FRAMES,
+		hardBytes: WORKER_QUARANTINE_MAX_BYTES,
+	});
 	let attestationGraceTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function releaseHeldFrames(): void {
@@ -458,7 +651,7 @@ function attachWorkerChannel(
 			clearTimeout(attestationGraceTimer);
 			attestationGraceTimer = null;
 		}
-		while (preAnnounce.size > 0) push(preAnnounce.shift());
+		for (let held = preAnnounce.take(); held !== undefined; held = preAnnounce.take()) push(held.value, held.bytes);
 	}
 
 	/**
@@ -476,12 +669,14 @@ function attachWorkerChannel(
 		attestationGraceTimer.unref?.();
 	}
 
-	function handleBulkLine(line: string): void {
+	function handleBulkLine(line: string, bytes: number): void {
 		const trimmed = line.trim();
 		if (trimmed.length === 0) return;
 		const frame = parseBulkFrame(trimmed);
 		if (!frame.ok) {
 			malformedStdoutLines += 1;
+			// isReceiptBearingFrame treats an unclassifiable frame as evidence.
+			markEvidenceIncomplete(`a bulk frame could not be parsed: ${frame.reason}`);
 			return;
 		}
 		if (announceFailed) return;
@@ -492,12 +687,24 @@ function attachWorkerChannel(
 			else opts?.onHookRequest?.(request);
 			return;
 		}
+		if (bulkDiscarding) {
+			// An overflow already failed the run; a detached consumer loses what it never read.
+			if (!bulkOverflowed && isReceiptBearingFrame(frame.value)) {
+				markEvidenceIncomplete("the event consumer detached before the bulk lane ended");
+			}
+			return;
+		}
 		if (!announceAccepted) {
-			preAnnounce.push(frame.value);
+			if (preAnnounce.push(frame.value, bytes) === "overflow") {
+				failAttestation(
+					`Unattested worker output exceeded the ${WORKER_QUARANTINE_MAX_FRAMES} frame / ${WORKER_QUARANTINE_MAX_BYTES} byte quarantine before announcing its route identity`,
+				);
+				return;
+			}
 			startAttestationGrace();
 			return;
 		}
-		push(frame.value);
+		push(frame.value, bytes);
 	}
 
 	function handleControlLine(line: string): void {
@@ -558,37 +765,48 @@ function attachWorkerChannel(
 		opts?.onControl?.({ kind: frame.value.kind });
 	}
 
+	const stdoutReader = createLineReader(
+		WORKER_BULK_FRAME_MAX_BYTES,
+		handleBulkLine,
+		() => {
+			malformedStdoutLines += 1;
+			markEvidenceIncomplete(`a bulk frame over the ${WORKER_BULK_FRAME_MAX_BYTES} byte lane limit was dropped`);
+		},
+		() => bulkHeld,
+	);
 	if (child.stdout) {
-		child.stdout.on(
-			"data",
-			createLineReader(WORKER_BULK_FRAME_MAX_BYTES, handleBulkLine, () => {
-				malformedStdoutLines += 1;
-				appendStderr(`[worker] dropped a bulk frame over the ${WORKER_BULK_FRAME_MAX_BYTES} byte lane limit\n`);
-			}),
-		);
+		child.stdout.on("data", (chunk: Buffer) => {
+			stdoutReader.write(chunk);
+			if (stdoutReader.heldBytes() > BULK_HELD_MAX_BYTES) {
+				overflowBulkLane(`the bulk lane kept delivering past its ${BULK_HELD_MAX_BYTES} byte pause bound`);
+			}
+		});
 	}
 
 	if (child.stderr) {
-		child.stderr.on(
-			"data",
-			createLineReader(
-				WORKER_BULK_FRAME_MAX_BYTES,
-				(line) => {
-					if (isControlLine(line)) {
-						handleControlLine(line);
-						return;
-					}
-					appendStderr(`${line}\n`);
-				},
-				() => appendStderr("[worker] dropped an oversized stderr line\n"),
-			),
+		const stderrReader = createLineReader(
+			WORKER_BULK_FRAME_MAX_BYTES,
+			(line) => {
+				if (isControlLine(line)) {
+					handleControlLine(line);
+					return;
+				}
+				appendStderr(`${line}\n`);
+				if (line.startsWith(WORKER_STDOUT_INCOMPLETE_MARKER)) {
+					markEvidenceIncomplete(`the worker reported ${line.slice(WORKER_STDOUT_INCOMPLETE_MARKER.length)}`);
+				}
+			},
+			() => appendStderr("[worker] dropped an oversized stderr line\n"),
 		);
+		child.stderr.on("data", (chunk: Buffer) => stderrReader.write(chunk));
 	}
 
 	const events: AsyncIterableIterator<unknown> = {
 		next(): Promise<IteratorResult<unknown>> {
 			if (queue.size > 0) {
-				return Promise.resolve({ value: queue.shift(), done: false });
+				const value = queue.shift();
+				scheduleBulkRelease();
+				return Promise.resolve({ value, done: false });
 			}
 			if (finished) return Promise.resolve({ value: undefined, done: true });
 			return new Promise<IteratorResult<unknown>>((resolve) => {
@@ -596,7 +814,12 @@ function attachWorkerChannel(
 			});
 		},
 		return(): Promise<IteratorResult<unknown>> {
+			// A consumer leaving a live stream would orphan the worker's provider
+			// and tool work, so the run stops through the process owner.
+			const live = !finished;
 			end();
+			detachConsumer(live);
+			if (live) abort();
 			return Promise.resolve({ value: undefined, done: true });
 		},
 		[Symbol.asyncIterator](): AsyncIterableIterator<unknown> {
@@ -656,6 +879,18 @@ function attachWorkerChannel(
 
 	function finish(): void {
 		if (settled || cleanupStatus === null || (!closed && !pipeDrainFinished)) return;
+		finishing = true;
+		if (bulkHeld) {
+			// Bytes already read are split into the queue under its hard bound
+			// before the pipes close. Node resumes a paused child stdout itself
+			// once the child exits, so the pause withholds nothing past that point.
+			bulkHeld = false;
+			stdoutReader.resume();
+		}
+		if (stdoutReader.truncated()) {
+			malformedStdoutLines += 1;
+			markEvidenceIncomplete("the final bulk frame was truncated");
+		}
 		settled = true;
 		if (drainTimer !== null) clearTimeout(drainTimer);
 		if (attestationGraceTimer !== null) clearTimeout(attestationGraceTimer);
@@ -676,9 +911,17 @@ function attachWorkerChannel(
 		}
 		const code = leaderExit?.code ?? child.exitCode;
 		const signal = leaderExit?.signal ?? child.signalCode;
-		let exitCode: number | null = code ?? 0;
+		// A worker killed by a signal never ran its own drain, so even a trail
+		// that ends on a frame boundary cannot be known to be whole.
+		if (code === null && signal !== null && !sawSpawnError) {
+			markEvidenceIncomplete(`the worker was terminated by ${signal} before it finished its output`);
+		}
+		// The signal itself stays in `signal`; receipts admit only exit codes 0-2,
+		// so a signal death reads as the generic failure code, never as 0.
+		let exitCode: number | null = code ?? (signal !== null ? 1 : 0);
 		if (sawSpawnError || (cleanupStatus.incomplete && leaderExit === null)) exitCode = null;
 		else if (announceFailed) exitCode = code !== null && code !== 0 ? code : 1;
+		else if (evidenceIncomplete !== null && exitCode === 0) exitCode = 1;
 		resolveResult({
 			exitCode,
 			signal: sawSpawnError ? null : signal,
@@ -811,6 +1054,20 @@ function attachWorkerChannel(
 		send,
 		lastChannelFailure: () => channelFailure,
 		attestation: () => attestation,
+		bulkLaneStats: () => {
+			const stats = queue.stats();
+			return {
+				retainedFrames: queue.size,
+				retainedBytes: queue.bytes,
+				peakFrames: stats.peakDepth,
+				peakBytes: stats.peakBytes,
+				heldBytes: stdoutReader.heldBytes(),
+				quarantinedFrames: preAnnounce.size,
+				quarantinedBytes: preAnnounce.bytes,
+				pauses: bulkPauses,
+				paused: bulkHeld,
+			};
+		},
 	};
 }
 

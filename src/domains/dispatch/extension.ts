@@ -3758,6 +3758,17 @@ export function createDispatchBundle(
 		now,
 		reservedPlanPeak: (planId) =>
 			reservedPlanPeakSlots(planId, (error) => reportDispatchDiagnostic("read reserved plan peak", error)),
+		onRenewalError: (error) => reportDispatchDiagnostic("renew capacity leases", error),
+		onLeaseLost: (lease, detail) => {
+			reportDispatchDiagnostic("capacity lease lost", new Error(detail));
+			stopLostCapacityOwners(lease.assignmentId, detail);
+			// A member whose only remaining work was a retry in backoff settles no
+			// assignment when that retry is canceled, so with no run left under the
+			// lease nothing would ever release it and local admission would stay
+			// refused. The store already lacks it; this clears the local record.
+			if (![...active.values()].some((run) => run.lineage.rootRunId === lease.assignmentId))
+				capacityAdmission.release(lease.leaseId);
+		},
 	});
 	scheduling.fleet?.bindActiveWorkers(
 		createNodeLeaseUsageReader({
@@ -4031,10 +4042,6 @@ export function createDispatchBundle(
 				: planQueueSlot(req.reservation.ownerId, req.reservation.memberId, (error) =>
 						reportDispatchDiagnostic("read plan queue identity", error),
 					);
-		const cancel = (): void => {
-			capacityAdmission.cancel(assignmentId);
-		};
-		signal?.addEventListener("abort", cancel, { once: true });
 		try {
 			signal?.throwIfAborted();
 			const admitted = await capacityAdmission.admit({
@@ -4050,6 +4057,8 @@ export function createDispatchBundle(
 				...(req.reservation !== undefined && (req.lineage === undefined || req.lineage.attempt === 0)
 					? { reservation: req.reservation }
 					: {}),
+				// This attempt's own signal; siblings sharing the assignment keep waiting.
+				...(signal !== undefined ? { signal } : {}),
 			});
 			timing.admittedAt = new Date(admitted.admittedAt).toISOString();
 			return admitted.lease;
@@ -4063,8 +4072,6 @@ export function createDispatchBundle(
 				else await failQueuedAssignment(assignmentId);
 			}
 			throw error;
-		} finally {
-			signal?.removeEventListener("abort", cancel);
 		}
 	}
 
@@ -6503,6 +6510,7 @@ export function createDispatchBundle(
 			}
 		})().then(resolveFinal, rejectFinal);
 		active.set(envelope.id, activeRun);
+		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
 		watchAssignmentDeadline(activeRun, callerDeadlineAt);
 
 		return {
@@ -7830,7 +7838,10 @@ export function createDispatchBundle(
 			const finalToolStats = snapshotToolStats(toolStats);
 			const typedValidations = typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls);
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
-			const telemetryIngestionErrors = toolTelemetryIngestionErrors + malformedWorkerStdoutLineCount(result);
+			const telemetryIngestionErrors =
+				toolTelemetryIngestionErrors +
+				malformedWorkerStdoutLineCount(result) +
+				(result.evidenceIncomplete !== undefined ? 1 : 0);
 			const workspaceMutationPossible =
 				lifecycle.runtimeKind === "subprocess"
 					? !["claude-code", "codex-cli", "pi-cli"].includes(lifecycle.target.runtime.id) || !lifecycle.readOnly
@@ -8769,6 +8780,7 @@ export function createDispatchBundle(
 		})().then(resolveFinal, rejectFinal);
 
 		active.set(envelope.id, activeRun);
+		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
 		watchAssignmentDeadline(activeRun, preparation?.deadlineAt);
 
 		return attachRouteObservation({
@@ -9787,7 +9799,7 @@ export function createDispatchBundle(
 				// Clio process, and a crash before the clearing write would wedge the
 				// machine.
 				await drain();
-				capacityAdmission.stop();
+				await capacityAdmission.stop();
 				for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
 				ownedReservations.clear();
 				publishedPathScopeRoots.clear();
@@ -10007,6 +10019,49 @@ export function createDispatchBundle(
 		// assignment; a receipt's root may instead name its main host run.
 		const stored = listStoredAssignments().find((record) => record.assignmentId === id || record.attempts.includes(id));
 		return stored?.assignmentId ?? ledger?.get(id)?.lineage?.rootRunId ?? id;
+	}
+
+	/**
+	 * A renewal found an assignment's lease gone from the shared store, so its
+	 * slot may already run someone else's worker. Every member that owns the
+	 * assignment is stopped through its own control root: the assignment id of
+	 * a fleet names several members and `abort` refuses it, while a control
+	 * root reaches the member's live attempt, its queued retry and a retry
+	 * still in admission, and leaves finalization, receipts and settlement to
+	 * their usual owners. A run that starts after this sweep is stopped where
+	 * it enters `active`, through `lostLeaseDetail`.
+	 */
+	function stopLostCapacityOwners(assignmentId: string, detail: string): void {
+		const roots = new Set<string>();
+		for (const [attempt, root] of assignmentRootsByAttempt) {
+			if (root === assignmentId) roots.add(controlRootsByAttempt.get(attempt) ?? attempt);
+		}
+		for (const run of active.values()) {
+			if (run.lineage.rootRunId === assignmentId) roots.add(controlRootsByAttempt.get(run.runId) ?? run.runId);
+		}
+		for (const root of roots) {
+			// An aborted or stall-killed run already carries its own cause and its
+			// retries are already refused; a run on its merge card has no worker left.
+			// Aborting again would relabel or cancel work that holds no endpoint slot.
+			const current = currentAssignmentRun(root);
+			if (current !== null && (current.aborted || current.stallKilled || current.awaitingOperator === true)) continue;
+			try {
+				contract.abort(root, { cause: "capacity", detail });
+			} catch (error) {
+				reportDispatchDiagnostic(`stop member ${root} after lost capacity`, error);
+			}
+		}
+	}
+
+	/** The run just entered `active`; stop it if its lease was lost while it launched. */
+	function stopIfCapacityLost(runId: string, leaseId: string): void {
+		const detail = capacityAdmission.lostLeaseDetail(leaseId);
+		if (detail === null) return;
+		try {
+			contract.abort(runId, { cause: "capacity", detail });
+		} catch (error) {
+			reportDispatchDiagnostic(`stop run ${runId} after lost capacity`, error);
+		}
 	}
 
 	function controlRootFor(id: string): string {

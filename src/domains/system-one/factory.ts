@@ -331,6 +331,37 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				return null;
 			}
 		},
+		identity(site: SiteId): string | null {
+			try {
+				const resolution = resolve(site);
+				const { usable } = resolution;
+				if (usable === undefined) return null;
+				const prefix = `${site}.`;
+				const cuts: Record<string, Record<string, number>> = {};
+				for (const [identity, table] of Object.entries(deps.settings().systemOne.cuts)) {
+					const own = Object.entries(table).filter(([key]) => key.startsWith(prefix));
+					if (own.length > 0) cuts[identity] = Object.fromEntries(own);
+				}
+				// The engine digests are the same ones that rebuild an engine and key its
+				// breaker, so an answer is reused exactly as long as the engine is.
+				return createHash("sha256")
+					.update(
+						JSON.stringify({
+							engine: digestOf(usable),
+							timeoutMs: usable.timeoutMs ?? null,
+							routes: (resolution.routes ?? []).map((route) => ({
+								name: route.name,
+								tasks: route.tasks,
+								digest: route.usable !== undefined ? digestOf(route.usable) : `unavailable:${route.problem ?? ""}`,
+							})),
+							cuts,
+						}),
+					)
+					.digest("hex");
+			} catch {
+				return null;
+			}
+		},
 		describe(): ReadonlyArray<SiteBindingInfo> {
 			return SITE_IDS.map((site) => {
 				try {

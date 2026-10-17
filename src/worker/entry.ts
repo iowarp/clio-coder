@@ -57,7 +57,7 @@ import { emitControlFrame } from "./control-lane.js";
 import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { createWorkerAgentLedgerPort } from "./ledger-mirror.js";
-import { drainStdout, emitEvent } from "./ndjson.js";
+import { emitEvent, exitAfterDrain, onStdoutFailure } from "./ndjson.js";
 import {
 	endpointIdentityHash,
 	WORKER_ADMISSION_WAIT_MS,
@@ -387,6 +387,10 @@ async function main(): Promise<number> {
 		forceExit = setTimeout(() => process.exit(1), CHANNEL_CLOSE_EXIT_GRACE_MS);
 		forceExit.unref?.();
 	});
+	// A gap in the bulk trail cannot seal as a complete run, so the run stops
+	// through the same owner as a cancel and exitAfterDrain refuses a clean code.
+	// The failure surfaces inside an event sink; abort after it unwinds.
+	onStdoutFailure(() => queueMicrotask(abortOnce));
 	const onSignal = abortOnce;
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
@@ -410,14 +414,10 @@ async function main(): Promise<number> {
 }
 
 main().then(
-	async (code) => {
-		await drainStdout();
-		process.exit(code);
-	},
-	async (err) => {
+	(code) => exitAfterDrain(code),
+	(err) => {
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`[worker] fatal: ${msg}\n`);
-		await drainStdout();
-		process.exit(2);
+		return exitAfterDrain(2);
 	},
 );

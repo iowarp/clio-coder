@@ -1,9 +1,11 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { hostname, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
@@ -13,10 +15,16 @@ import {
 	createCapacityAdmissionController,
 	foregroundEndpointBlock,
 } from "../../src/domains/dispatch/admission.js";
-import { AdmissionTimedOutError } from "../../src/domains/dispatch/admission-error.js";
+import { AdmissionCanceledError, AdmissionTimedOutError } from "../../src/domains/dispatch/admission-error.js";
 import type { AdmissionQueueRequest } from "../../src/domains/dispatch/admission-queue.js";
 import { createAdmissionQueue, orderAdmissionRequests } from "../../src/domains/dispatch/admission-queue.js";
 import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
+import type { CapacityLease } from "../../src/domains/dispatch/capacity-lease.js";
+import {
+	capacityLeaseUsage,
+	capacityStateLockPath,
+	readCapacityStateUnsafe,
+} from "../../src/domains/dispatch/capacity-lease.js";
 import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.js";
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
@@ -61,6 +69,31 @@ function queued(id: string, priority = 0): AdmissionQueueRequest<string> {
 
 function agent(id: string, capabilityClass: AgentSpec["capabilityClass"]): AgentSpec {
 	return { id, capabilityClass } as AgentSpec;
+}
+
+/**
+ * Stand in for another live Clio process holding the shared admission lock:
+ * this host, a live pid that is not ours, no birth token to contradict it.
+ */
+function holdCapacityLockAsPeer(): () => void {
+	const lockPath = `${capacityStateLockPath()}.lock`;
+	mkdirSync(dirname(lockPath), { recursive: true });
+	writeFileSync(lockPath, `${JSON.stringify({ host: hostname(), pid: process.ppid, at: new Date().toISOString() })}\n`);
+	return () => rmSync(lockPath, { force: true });
+}
+
+async function settledWithin<T>(promise: Promise<T>, turns: number): Promise<boolean> {
+	let settled = false;
+	void promise.then(
+		() => {
+			settled = true;
+		},
+		() => {
+			settled = true;
+		},
+	);
+	for (let turn = 0; turn < turns && !settled; turn += 1) await sleep(5);
+	return settled;
 }
 
 function capacityLimit(capacity: ReturnType<typeof endpointCapacityFor>): number {
@@ -996,6 +1029,153 @@ describe("dispatch admission boundary", () => {
 			);
 		} finally {
 			controller.stop();
+		}
+	});
+	it("keeps the event loop running while admission and lease renewal wait on a peer's capacity lock", async () => {
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 1, nodes: { local: 1 }, endpoints: {} }),
+			heartbeatMs: 5,
+		});
+		const releasePeer = holdCapacityLockAsPeer();
+		try {
+			// A synchronous wait would hold this loop until the 20 s acquisition
+			// budget expired; these timers could not fire and the peer could not let go.
+			const waiting = controller.admit({ assignmentId: "behind-peer", nodeId: "local" });
+			let turns = 0;
+			for (; turns < 10; turns += 1) await sleep(5);
+			strictEqual(turns, 10);
+			strictEqual(await settledWithin(waiting, 1), false, "nothing is granted while the peer holds the lock");
+			releasePeer();
+			const { lease } = await waiting;
+			strictEqual(lease.assignmentId, "behind-peer");
+
+			const releaseAgain = holdCapacityLockAsPeer();
+			for (turns = 0; turns < 10; turns += 1) await sleep(5);
+			strictEqual(turns, 10, "the heartbeat waits for the peer without stalling timers");
+			releaseAgain();
+			let renewed: CapacityLease | undefined;
+			for (let attempt = 0; attempt < 400 && renewed === undefined; attempt += 1) {
+				await sleep(5);
+				renewed = readCapacityStateUnsafe().leases.find(
+					(entry) => entry.leaseId === lease.leaseId && entry.heartbeatAt !== lease.heartbeatAt,
+				);
+			}
+			ok(renewed, "the waiting heartbeat renews once the peer lets go");
+			strictEqual(controller.release(lease.leaseId), true);
+		} finally {
+			releasePeer();
+			await controller.stop();
+		}
+	});
+
+	it("never grants or leaks a lease for requests canceled, signaled or drained behind a peer's lock", async () => {
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 4, nodes: { local: 4 }, endpoints: {} }),
+		});
+		const releasePeer = holdCapacityLockAsPeer();
+		try {
+			const canceled = controller.admit({ assignmentId: "cancel-me", nodeId: "local" });
+			const abort = new AbortController();
+			// Fleet members share their root's assignment and wait together.
+			const signaled = controller.admit({ assignmentId: "shared", nodeId: "local", signal: abort.signal });
+			const siblings = [
+				controller.admit({ assignmentId: "shared", nodeId: "local" }),
+				controller.admit({ assignmentId: "shared", nodeId: "local" }),
+			];
+			strictEqual(controller.cancel("cancel-me"), true);
+			await rejects(canceled, AdmissionCanceledError);
+			abort.abort();
+			await rejects(signaled, AdmissionCanceledError);
+			for (const sibling of siblings)
+				strictEqual(await settledWithin(sibling, 2), false, "one member's signal leaves its siblings waiting");
+
+			// The peer lets go: the owned pump wakes and grants only what is still queued.
+			releasePeer();
+			const granted = await Promise.all(siblings);
+			strictEqual(granted[0]?.lease.leaseId, granted[1]?.lease.leaseId, "siblings share the assignment's lease");
+			strictEqual(capacityLeaseUsage().global, 1, "the canceled and signaled requests hold nothing");
+			strictEqual(controller.releaseAssignment("shared"), true);
+
+			const releaseAgain = holdCapacityLockAsPeer();
+			const drained = [
+				controller.admit({ assignmentId: "drained", nodeId: "local" }),
+				controller.admit({ assignmentId: "drained", nodeId: "local" }),
+				controller.admit({ assignmentId: "other", nodeId: "local" }),
+			];
+			// Stop settles every queued request, repeated assignments included, and
+			// joins the pump's lock wait before it resolves.
+			await controller.stop();
+			for (const request of drained) await rejects(request, AdmissionCanceledError);
+			releaseAgain();
+			strictEqual(capacityLeaseUsage().global, 0);
+		} finally {
+			releasePeer();
+			await controller.stop();
+		}
+	});
+
+	it("renews every owned lease in one committed write per heartbeat", async (context) => {
+		// A period no test waits out, so the only heartbeat is the one fired below.
+		const HEARTBEAT_MS = 60_000;
+		const beats: Array<() => void> = [];
+		const realSetInterval = globalThis.setInterval;
+		context.mock.method(
+			globalThis,
+			"setInterval",
+			(callback: (...args: unknown[]) => void, delay: number, ...args: unknown[]) => {
+				if (delay === HEARTBEAT_MS) beats.push(() => callback(...args));
+				return realSetInterval(callback, delay, ...args);
+			},
+		);
+		// Every clock read is distinct, so leases renewed in separate transactions
+		// could never share a heartbeat timestamp.
+		let clock = Date.now();
+		const controller = createCapacityAdmissionController({
+			limits: () => ({ global: 3, nodes: { local: 3 }, endpoints: {} }),
+			now: () => {
+				clock += 1;
+				return clock;
+			},
+			heartbeatMs: HEARTBEAT_MS,
+		});
+		const statePath = capacityStateLockPath();
+		const realRename = fs.renameSync;
+		try {
+			const held: CapacityLease[] = [];
+			for (const assignmentId of ["a", "b", "c"])
+				held.push((await controller.admit({ assignmentId, nodeId: "local" })).lease);
+			strictEqual(new Set(held.map((lease) => lease.heartbeatAt)).size, 3);
+			strictEqual(beats.length, 1);
+			// safeResourceWrite commits the state file with one rename onto its path;
+			// count those commits while exactly one heartbeat runs.
+			let commits = 0;
+			let renewed: CapacityLease[] = [];
+			fs.renameSync = (from: fs.PathLike, to: fs.PathLike): void => {
+				if (String(to) === statePath) commits += 1;
+				realRename(from, to);
+			};
+			syncBuiltinESMExports();
+			try {
+				beats[0]?.();
+				for (let attempt = 0; attempt < 400; attempt += 1) {
+					renewed = readCapacityStateUnsafe().leases;
+					if (renewed.every((lease) => !held.some((before) => before.heartbeatAt === lease.heartbeatAt))) break;
+					await sleep(5);
+				}
+			} finally {
+				fs.renameSync = realRename;
+				syncBuiltinESMExports();
+			}
+			strictEqual(commits, 1, "one committed write renews all three leases");
+			strictEqual(renewed.length, 3);
+			strictEqual(new Set(renewed.map((lease) => lease.heartbeatAt)).size, 1, "one timestamp, one transaction");
+			strictEqual(new Set(renewed.map((lease) => lease.expiresAt)).size, 1);
+			ok(renewed.every((lease) => !held.some((before) => before.heartbeatAt === lease.heartbeatAt)));
+			for (const lease of held) controller.release(lease.leaseId);
+		} finally {
+			fs.renameSync = realRename;
+			syncBuiltinESMExports();
+			await controller.stop();
 		}
 	});
 });

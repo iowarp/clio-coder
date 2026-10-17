@@ -337,6 +337,7 @@ import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
+import { backgroundSlotKey, relevanceStartRefusal } from "./relevance-eligibility.js";
 import { createReloadClasses } from "./reload-classes.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
@@ -818,16 +819,16 @@ function backgroundMemoryEndpointKey(
 	wireModelId: string,
 	targets: ReadonlyArray<TargetDescriptor>,
 ): string | null {
-	const gateway = canonicalEndpointKey(target);
-	const model = modelEndpointKey(target, wireModelId);
-	if (gateway === null || model === gateway) return gateway;
-	const bounded =
-		resolveEndpointCapacities({
-			statuses: providers.list(),
-			targets,
-			runtimeFor: (id) => providers.getRuntime(id),
-		})[gateway] !== undefined;
-	return bounded ? gateway : model;
+	return backgroundSlotKey(
+		target,
+		wireModelId,
+		(gateway) =>
+			resolveEndpointCapacities({
+				statuses: providers.list(),
+				targets,
+				runtimeFor: (id) => providers.getRuntime(id),
+			})[gateway] !== undefined,
+	);
 }
 
 function backgroundMemoryEndpointBusy(
@@ -3173,6 +3174,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		stateDir: clioStateDir(),
 	});
+	const systemOneEndpointCapacity = (targetId: string): number => {
+		const target = providers.getTarget(targetId);
+		const key = target === null ? null : canonicalEndpointKey(target);
+		if (key === null) return Number.POSITIVE_INFINITY;
+		const capacity = resolveEndpointCapacities({
+			statuses: providers.list(),
+			targets: getCurrentSettings().targets,
+			runtimeFor: (runtimeId) => providers.getRuntime(runtimeId),
+		})[key];
+		// An endpoint with no fixed slot count (a cloud API, vllm, sglang) reports no
+		// limit, and the engine applies its own default.
+		return capacity?.limit ?? Number.POSITIVE_INFINITY;
+	};
 	const systemOneCore = createSystemOne({
 		settings: () => capabilitySettings(getCurrentSettings()),
 		// Every engine request is judged against the restrictions it inherited
@@ -3202,19 +3216,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// settle after /new, /resume or a branch switch, and reading the session when
 		// it settles would file it under the wrong one.
 		currentSession: currentSessionId,
-		endpointCapacity: (targetId) => {
-			const target = providers.getTarget(targetId);
-			const key = target === null ? null : canonicalEndpointKey(target);
-			if (key === null) return Number.POSITIVE_INFINITY;
-			const capacity = resolveEndpointCapacities({
-				statuses: providers.list(),
-				targets: getCurrentSettings().targets,
-				runtimeFor: (runtimeId) => providers.getRuntime(runtimeId),
-			})[key];
-			// An endpoint with no fixed slot count (a cloud API, vllm, sglang) reports no
-			// limit, and the engine applies its own default.
-			return capacity?.limit ?? Number.POSITIVE_INFINITY;
-		},
+		endpointCapacity: systemOneEndpointCapacity,
 		recorder: () => decisionUsage.recorder,
 	});
 	// Every caller that reaches System One through this instance inherits the
@@ -3224,6 +3226,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bound: (site) => systemOneCore.bound(site),
 		shadowed: (site, moment) => systemOneCore.shadowed(site, moment),
 		describe: () => systemOneCore.describe(),
+		identity: (site) => systemOneCore.identity?.(site) ?? null,
 		settled: (maxWaitMs) => systemOneCore.settled(maxWaitMs),
 		...(systemOneCore.limits !== undefined ? { limits: (site, task) => systemOneCore.limits?.(site, task) ?? null } : {}),
 		run: (site, object, options) => {
@@ -3275,6 +3278,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			for (const id of ids) followUps.used("memory", id);
 		},
 	});
+	// Optional ranking never starts on the chat's own model, through any route of
+	// the binding or any target alias for it, nor on an endpoint whose declared
+	// slots are already in use. Memory, skills and the gateway all reach this one
+	// ranker, so the policy covers every caller; a cached answer is still served.
+	const relevanceMayStart = (): boolean => {
+		const settings = getCurrentSettings();
+		return (
+			relevanceStartRefusal({
+				settings: capabilitySettings(settings),
+				getTarget: (targetId) => providers.getTarget(targetId),
+				capacities: resolveEndpointCapacities({
+					statuses: providers.list(),
+					targets: settings.targets,
+					runtimeFor: (runtimeId) => providers.getRuntime(runtimeId),
+				}),
+				usage: endpointCapacityUsage(),
+			}) === null
+		);
+	};
 	const relevanceRanker = createRelevanceRanker({
 		maxPending: 1,
 		systemOne,
@@ -3282,16 +3304,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		task: () => systemOneHost.task(),
 		tracker: followUps,
 		recording: () => getCurrentSettings().systemOne.record,
+		mayStart: relevanceMayStart,
+	});
+	// A ranking asked under a session, branch or binding that is gone cannot help
+	// the next listing, so it stops holding the ranker's slot and its endpoint, and
+	// the old owner's finished rankings go with it so their refs join nothing new.
+	// A new operator task supersedes at `readTurn` below. Shutdown aborts every
+	// fill and starts none before System One's settle wait.
+	const unsubscribeRelevanceLifecycle = [
+		bus.on(BusChannels.SessionStart, () => relevanceRanker.release("session started")),
+		bus.on(BusChannels.SessionResumed, () => relevanceRanker.release("session resumed")),
+		bus.on(BusChannels.SessionParked, () => relevanceRanker.release("session parked")),
+		bus.on(BusChannels.SessionTurnSwitched, () => relevanceRanker.release("branch switched")),
+		bus.on(BusChannels.ConfigHotReload, () => relevanceRanker.abortStale()),
+		bus.on(BusChannels.ConfigNextTurn, () => relevanceRanker.abortStale()),
+		bus.on(BusChannels.ShutdownRequested, () => relevanceRanker.dispose()),
+	];
+	termination.onDrain(() => {
+		for (const unsubscribe of unsubscribeRelevanceLifecycle) unsubscribe();
+		relevanceRanker.dispose();
 	});
 	capabilityGate = createCapabilityGate({
 		relevance: relevanceRanker,
 		relevanceCandidateLimit: () =>
 			systemOne.describe().find((binding) => binding.site === "relevance")?.kind === "llm" ? 12 : 64,
-		allowRelevance: () => {
-			const binding = systemOne.describe().find((entry) => entry.site === "relevance");
-			const settings = getCurrentSettings();
-			return binding?.kind !== "llm" || binding.target !== settings.chat.target || binding.model !== settings.chat.model;
-		},
 	});
 	const catalogRanker = Object.assign(
 		(request: Parameters<typeof relevanceRanker>[0]) => {
@@ -4145,6 +4181,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				seedOutcomeFromSession();
 				seedOrientationFromSession();
 			}
+			// A new operator task makes every ranking still in flight answer the old
+			// one; cancelling it here keeps it off the endpoint this turn needs. Turn
+			// settle and cancel keep the task, so a continuation may still use them.
+			relevanceRanker.supersede("new operator task");
 			systemOneHost.readTurn(input);
 		},
 		readSteer: (input) => systemOneHost.readSteer(input),

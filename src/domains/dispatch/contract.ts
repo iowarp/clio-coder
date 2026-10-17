@@ -344,9 +344,11 @@ export interface DispatchSnapshot {
  * receipt names the timeout instead of laundering it into "operator abort".
  * An operator cancel that arrives from another process (`fleet cancel`) passes
  * the operator cause so the receipt names where the cancel came from.
+ * Admission passes the capacity cause when a renewal finds the run's lease gone
+ * from the shared store.
  */
 export interface AbortReason {
-	cause: "timeout" | "operator" | "budget";
+	cause: "timeout" | "operator" | "budget" | "capacity";
 	detail: string;
 }
 

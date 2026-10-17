@@ -22,6 +22,10 @@ import {
 	isControlLine,
 	parseControlFrame,
 	verifyWorkerAttestation,
+	WORKER_BULK_FRAME_MAX_BYTES,
+	WORKER_EVENT_QUEUE_HARD_FRAMES,
+	WORKER_EVENT_QUEUE_MAX_FRAMES,
+	WORKER_EVENT_QUEUE_SOFT_BYTES,
 	type WorkerAttestation,
 	type WorkerHookRequest,
 } from "../../src/domains/dispatch/worker-protocol.js";
@@ -29,6 +33,7 @@ import {
 	type SpawnedWorker,
 	type SpawnedWorkerResult,
 	spawnWorkerProcess,
+	WORKER_PROCESS_CLEANUP_BOUND_MS,
 	type WorkerSpec,
 } from "../../src/domains/dispatch/worker-spawn.js";
 import { mergeCapabilities } from "../../src/domains/providers/capabilities.js";
@@ -424,6 +429,124 @@ function startWorkerEntry(spec: WorkerSpec, cwd: string) {
 	};
 	return { child, seen, exit, stop };
 }
+
+const bulkFixtureSpec = {
+	specVersion: 1,
+	settingsFingerprint: "b".repeat(64),
+	runtimeId: "fixture",
+	target: { id: "fixture", url: "http://127.0.0.1:1" },
+	wireModelId: "fixture",
+	allowedTools: [],
+} as unknown as WorkerSpec;
+
+/**
+ * An attested peer that heartbeats every 20 ms and, once admitted, writes tool
+ * results: `burst` writes `count` frames (every 1000th a 1 MiB multibyte
+ * result) and exits through a drainStdout-like bound; `flood` never stops.
+ */
+function spawnBulkFixture(mode: "burst" | "flood", count: number, onHeartbeat: () => void = () => {}): SpawnedWorker {
+	const child = `
+const [prefix, identity, mode, count] = process.argv.slice(1);
+setInterval(() => process.stderr.write(prefix + JSON.stringify({ kind: "heartbeat" }) + "\\n"), 20);
+const big = "é𝄞x".repeat(1024 * 1024 / 8);
+const frame = (i) => JSON.stringify({ type: "tool_execution_end", toolCallId: "call-" + i, toolName: "read",
+  result: { text: i % 1000 === 0 ? big : "result " + i } }) + "\\n";
+let lines = 0;
+require("node:readline").createInterface({ input: process.stdin }).on("line", () => {
+  lines += 1;
+  if (lines === 1) {
+    const unknown = { known: false };
+    const attestation = { ...JSON.parse(identity), protocolVersion: ${WORKER_PROTOCOL_VERSION}, pid: process.pid,
+      processGroupId: process.pid, host: "fixture", resources: { labels: [], cpuCount: unknown,
+      totalMemoryBytes: unknown, freeMemoryBytes: unknown, gpuCount: unknown, vramBytes: unknown, residentModels: unknown } };
+    process.stderr.write(prefix + JSON.stringify({ kind: "announce", attestation }) + "\\n");
+  } else if (lines === 2 && mode === "flood") {
+    let i = 1;
+    const pump = () => { for (let k = 0; k < 500; k++) process.stdout.write(frame(i++)); setImmediate(pump); };
+    pump();
+  } else if (lines === 2) {
+    for (let i = 0; i < Number(count); i++) process.stdout.write(frame(i));
+    const bound = setTimeout(() => process.exit(0), 2000);
+    process.stdout.write("", () => { clearTimeout(bound); process.exit(0); });
+  }
+});
+`;
+	return spawnWorkerProcess(
+		process.execPath,
+		["-e", child, CONTROL_FRAME_PREFIX, JSON.stringify(approvedIdentityForSpec(bulkFixtureSpec)), mode, String(count)],
+		bulkFixtureSpec,
+		{ onControl: (frame) => (frame.kind === "heartbeat" ? onHeartbeat() : undefined) },
+	);
+}
+
+describe("bulk-lane backpressure", () => {
+	it("delivers every tool result intact and in order through a paused lane", { timeout: 30_000 }, async () => {
+		const count = 6000;
+		const worker = spawnBulkFixture("burst", count);
+		// A consumer that has not started yet backs the evidence up past the soft bound.
+		ok(await waitFor(() => worker.bulkLaneStats?.().paused === true, 10_000), "the evidence backlog pauses the lane");
+		const ids: string[] = [];
+		let bigResults = 0;
+		for await (const frame of worker.events) {
+			const event = frame as { toolCallId: string; result: { text: string } };
+			ids.push(event.toolCallId);
+			if (event.result.text.length > 1000) {
+				strictEqual(event.result.text, "é𝄞x".repeat((1024 * 1024) / 8));
+				bigResults += 1;
+			}
+		}
+		const result = await worker.promise;
+		deepStrictEqual(
+			ids,
+			Array.from({ length: count }, (_, i) => `call-${i}`),
+		);
+		strictEqual(bigResults, count / 1000);
+		strictEqual(result.exitCode, 0, result.stderrTail);
+		strictEqual(result.evidenceIncomplete, undefined);
+		strictEqual(result.droppedDisplayFrames, undefined);
+		const stats = worker.bulkLaneStats?.();
+		ok(stats && stats.pauses >= 1);
+		ok(stats.peakFrames <= WORKER_EVENT_QUEUE_MAX_FRAMES, `peak ${stats.peakFrames} frames`);
+		ok(stats.peakBytes <= WORKER_EVENT_QUEUE_SOFT_BYTES + WORKER_BULK_FRAME_MAX_BYTES, `peak ${stats.peakBytes} bytes`);
+	});
+
+	it("keeps output within its bound and Stop effective while nothing reads it", { timeout: 30_000 }, async () => {
+		let heartbeats = 0;
+		const worker = spawnBulkFixture("flood", 0, () => {
+			heartbeats += 1;
+		});
+		ok(await waitFor(() => worker.bulkLaneStats?.().paused === true, 10_000), "the evidence backlog pauses the lane");
+		const before = heartbeats;
+		await sleep(300);
+		const stalled = worker.bulkLaneStats?.();
+		ok(stalled?.paused, "the lane stays paused while the consumer is stalled");
+		ok(stalled.retainedFrames <= WORKER_EVENT_QUEUE_MAX_FRAMES, `${stalled.retainedFrames} frames retained`);
+		ok(stalled.retainedBytes <= WORKER_EVENT_QUEUE_SOFT_BYTES + WORKER_BULK_FRAME_MAX_BYTES);
+		ok(heartbeats - before >= 3, `${heartbeats - before} heartbeats while the bulk lane was paused`);
+		const stopAt = performance.now();
+		worker.abort();
+		const result = await worker.promise;
+		ok(performance.now() - stopAt < WORKER_PROCESS_CLEANUP_BOUND_MS, "Stop settles within the cleanup bound");
+		strictEqual(result.processCleanup?.incomplete, false);
+		throws(() => process.kill(-(worker.pid as number), 0), /ESRCH/u);
+		ok((worker.bulkLaneStats?.().retainedFrames ?? 0) <= WORKER_EVENT_QUEUE_HARD_FRAMES);
+	});
+
+	it("stops the worker when its consumer leaves a live stream", { timeout: 30_000 }, async () => {
+		const worker = spawnBulkFixture("flood", 0);
+		let read = 0;
+		for await (const _frame of worker.events) {
+			read += 1;
+			if (read === 10) break;
+		}
+		const stopAt = performance.now();
+		const result = await worker.promise;
+		ok(performance.now() - stopAt < WORKER_PROCESS_CLEANUP_BOUND_MS, "early exit settles within the cleanup bound");
+		throws(() => process.kill(-(worker.pid as number), 0), /ESRCH/u);
+		strictEqual(result.exitCode, 1);
+		match(result.evidenceIncomplete ?? "", /consumer detached/u);
+	});
+});
 
 describe("worker admission", () => {
 	it("starts no model run until the orchestrator admits the attested digest", { timeout: 90_000 }, async () => {

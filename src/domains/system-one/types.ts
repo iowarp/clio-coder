@@ -247,6 +247,14 @@ export interface SystemOne {
 	): { readonly windowTokens: number | null; readonly maxOptions: number } | null;
 	/** One row per site, bound or not. */
 	describe(): ReadonlyArray<SiteBindingInfo>;
+	/**
+	 * An opaque digest of everything that decides how the site answers: each
+	 * engine's full configuration, its target and runtime, task routes, the
+	 * binding deadline and the operator cuts for the site. Null when unbound.
+	 * Cheap like `bound`: it constructs no engine and reads no credential, and it
+	 * carries no configuration value in the clear.
+	 */
+	identity?(site: SiteId): string | null;
 }
 
 export type CallOutcome =

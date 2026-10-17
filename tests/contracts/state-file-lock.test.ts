@@ -115,6 +115,31 @@ describe("contracts/state-file-lock", () => {
 		strictEqual(existsSync(lockPath), false);
 	});
 
+	it("hands the lock back when an abort lands just after acquisition", async () => {
+		// The abort is observed on the check that follows a successful take: the
+		// path that used to rethrow before reaching the release.
+		let checks = 0;
+		const signal = {
+			throwIfAborted() {
+				checks += 1;
+				if (checks >= 2) throw new Error("aborted after acquisition");
+			},
+		} as unknown as AbortSignal;
+		let ran = false;
+		await rejects(
+			withStateFileLock(
+				target,
+				() => {
+					ran = true;
+				},
+				{ signal },
+			),
+			/aborted after acquisition/,
+		);
+		strictEqual(ran, false);
+		strictEqual(existsSync(lockPath), false, "the lock taken before the abort was released");
+	});
+
 	it("run-unlocked runs the section anyway when the lock cannot be taken", async () => {
 		holdLock(process.pid);
 		let ran = false;

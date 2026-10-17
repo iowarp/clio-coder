@@ -793,6 +793,12 @@ describe("dispatch member controls", () => {
 			let ownerId: string | undefined;
 			let ledgerId: string | undefined;
 			const handles: Awaited<ReturnType<typeof f.contract.dispatch>>[] = [];
+			// Members launch concurrently, so a handle's index in arrival order
+			// names no particular member; each case reads its member's own handle.
+			const handleOf = {
+				first: deferred<Awaited<ReturnType<typeof f.contract.dispatch>>>(),
+				second: deferred<Awaited<ReturnType<typeof f.contract.dispatch>>>(),
+			};
 			const reservations = f.contract.reservations;
 			ok(reservations);
 			f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
@@ -823,6 +829,7 @@ describe("dispatch member controls", () => {
 					ledgerId ??= request.ledger?.id;
 					const handle = await f.contract.dispatch(request);
 					handles.push(handle);
+					if (request.task === "first" || request.task === "second") handleOf[request.task].resolve(handle);
 					if (request.task === "first" && phase === "running") await deliverFirst.promise;
 					return handle;
 				},
@@ -869,7 +876,7 @@ describe("dispatch member controls", () => {
 				await initial.promise;
 				f.workers[0]?.finish({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" });
 				if (phase !== "admitting") {
-					const first = handles[0];
+					const first = await handleOf.first.promise;
 					ok(first);
 					await first.finalPromise;
 					strictEqual(cancellations.length, 0);
@@ -892,7 +899,7 @@ describe("dispatch member controls", () => {
 				f.workers[1]?.finish({ exitCode: null, signal: "SIGTERM" });
 				if (phase !== "queued") {
 					// The peer's terminal is insufficient while the continuation is owned.
-					const peer = handles[1];
+					const peer = await handleOf.second.promise;
 					ok(peer);
 					await peer.finalPromise;
 					strictEqual(released, false);
@@ -904,7 +911,7 @@ describe("dispatch member controls", () => {
 				strictEqual(getDispatchReservation(ownerId)?.status, "released");
 				ok(readAgentLedger(ledgerId)?.closedAt);
 				deepStrictEqual(cancellations.sort(), phase === "queued" ? [2] : [2, 4]);
-				const first = handles[0];
+				const first = await handleOf.first.promise;
 				ok(first);
 				const receipt = await first.finalPromise;
 				strictEqual(receipt.outcome, "failed");

@@ -15,7 +15,11 @@ import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recover
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
-import { createBoundedEventQueue } from "../../src/domains/dispatch/worker-protocol.js";
+import {
+	createBoundedEventQueue,
+	WORKER_BULK_FRAME_MAX_BYTES,
+	WORKER_EVENT_QUEUE_HARD_BYTES,
+} from "../../src/domains/dispatch/worker-protocol.js";
 import { spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -45,6 +49,28 @@ describe("bulk-lane backpressure", () => {
 			evidence,
 		);
 		ok(queue.stats().droppedDisplayFrames > 0, "the bound must still drop display frames");
+	});
+
+	it("bounds retained evidence by frames and bytes and asks for pressure before refusing", () => {
+		const frame = (index: number) => ({ type: "tool_execution_end", toolCallId: `call-${index}` });
+		const byFrames = createBoundedEventQueue(4);
+		const results = Array.from({ length: 100 }, (_, index) => byFrames.push(frame(index), 100));
+		equal(byFrames.size, 8);
+		equal(results.indexOf("overflow"), 8);
+		equal(results.filter((result) => result === "overflow").length, 92);
+		const bySize = createBoundedEventQueue();
+		equal(bySize.push(frame(0), WORKER_BULK_FRAME_MAX_BYTES), "queued");
+		equal(bySize.pressured, false);
+		equal(bySize.push(frame(1), WORKER_BULK_FRAME_MAX_BYTES), "queued");
+		equal(bySize.pressured, true);
+		bySize.push(frame(2), WORKER_BULK_FRAME_MAX_BYTES);
+		bySize.push(frame(3), WORKER_BULK_FRAME_MAX_BYTES);
+		equal(bySize.push(frame(4), 1), "overflow");
+		equal(bySize.bytes, WORKER_EVENT_QUEUE_HARD_BYTES);
+		const kept: unknown[] = [];
+		while (bySize.size > 0) kept.push(bySize.shift());
+		deepStrictEqual(kept, [0, 1, 2, 3].map(frame));
+		equal(bySize.bytes, 0);
 	});
 });
 

@@ -3,7 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
-import { FILE_LOCK_ACQUIRE_TIMEOUT_MS, withStateFileLock, withStateFileLockSync } from "../../core/state-file-lock.js";
+import {
+	FILE_LOCK_ACQUIRE_TIMEOUT_MS,
+	withStateFileLockSection,
+	withStateFileLockSync,
+} from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { endpointLabel, foregroundStreamUsage } from "../providers/endpoint-capacity.js";
@@ -12,9 +16,10 @@ export { processBirthToken } from "../../core/process-identity.js";
 
 export const MAX_CAPACITY_LEASES = 1_000;
 export const DEFAULT_CAPACITY_LEASE_TTL_MS = 30_000;
-// Every admission mutation blocks the event loop while it waits for the lock,
-// which stalls this process's own 10s lease heartbeat. If a caller could wait
-// longer than a lease lives, a live holder would watch its own lease expire.
+// Admission waits and lease renewal yield while they wait for the lock, but
+// release, rename, reservation writes and the planners' usage reads still block
+// the event loop, and a blocked process cannot renew. If such a caller could
+// wait longer than a lease lives, a live holder would watch its own lease expire.
 if (FILE_LOCK_ACQUIRE_TIMEOUT_MS >= DEFAULT_CAPACITY_LEASE_TTL_MS)
 	throw new Error(
 		`dispatch: lock acquire timeout (${FILE_LOCK_ACQUIRE_TIMEOUT_MS}ms) must stay under the capacity lease TTL (${DEFAULT_CAPACITY_LEASE_TTL_MS}ms)`,
@@ -343,7 +348,7 @@ function assertCapacity(
 		}
 	}
 }
-export function acquireCapacityLease(input: {
+export interface AcquireCapacityLeaseInput {
 	assignmentId: string;
 	nodeId: string;
 	endpointKey?: string;
@@ -355,61 +360,64 @@ export function acquireCapacityLease(input: {
 	reservation?: { ownerId: string; memberId: string };
 	probe?: LeaseOwnerProbe;
 	onAcquiredUnderLock?: (state: CapacityStateFile) => void;
-}): CapacityLease {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const nowMs = input.nowMs ?? Date.now();
-		const file = readCapacityStateUnsafe();
-		reclaim(file, nowMs, input.probe ?? defaultProbe);
-		const drain = activeCapacityDrainUnsafe(file, nowMs);
-		if (drain !== null)
-			throw new Error(
-				`dispatch: admission denied: capacity is draining (requested by pid ${drain.requestedByPid} at ${drain.requestedAt})`,
+}
+export function acquireCapacityLease(input: AcquireCapacityLeaseInput): CapacityLease {
+	return withStateFileLockSync(capacityStateLockPath(), () => acquireCapacityLeaseUnsafe(input));
+}
+/** The caller holds the capacity state lock; a throw leaves the stored state untouched. */
+export function acquireCapacityLeaseUnsafe(input: AcquireCapacityLeaseInput): CapacityLease {
+	const nowMs = input.nowMs ?? Date.now();
+	const file = readCapacityStateUnsafe();
+	reclaim(file, nowMs, input.probe ?? defaultProbe);
+	const drain = activeCapacityDrainUnsafe(file, nowMs);
+	if (drain !== null)
+		throw new Error(
+			`dispatch: admission denied: capacity is draining (requested by pid ${drain.requestedByPid} at ${drain.requestedAt})`,
+		);
+	const existing = file.leases.find((lease) => lease.assignmentId === input.assignmentId);
+	if (existing) {
+		if (existing.nodeId !== input.nodeId || existing.endpointKey !== input.endpointKey) {
+			const without = { ...file, leases: file.leases.filter((lease) => lease !== existing) };
+			assertCapacity(
+				without,
+				input.nodeId,
+				input.endpointKey,
+				input.limits,
+				existing.reservationOwnerId !== null && existing.reservationMemberId !== null
+					? { ownerId: existing.reservationOwnerId, memberId: existing.reservationMemberId }
+					: undefined,
 			);
-		const existing = file.leases.find((lease) => lease.assignmentId === input.assignmentId);
-		if (existing) {
-			if (existing.nodeId !== input.nodeId || existing.endpointKey !== input.endpointKey) {
-				const without = { ...file, leases: file.leases.filter((lease) => lease !== existing) };
-				assertCapacity(
-					without,
-					input.nodeId,
-					input.endpointKey,
-					input.limits,
-					existing.reservationOwnerId !== null && existing.reservationMemberId !== null
-						? { ownerId: existing.reservationOwnerId, memberId: existing.reservationMemberId }
-						: undefined,
-				);
-				existing.nodeId = input.nodeId;
-				if (input.endpointKey === undefined) delete existing.endpointKey;
-				else existing.endpointKey = input.endpointKey;
-			}
-			existing.heartbeatAt = new Date(nowMs).toISOString();
-			existing.expiresAt = new Date(nowMs + (input.ttlMs ?? DEFAULT_CAPACITY_LEASE_TTL_MS)).toISOString();
-			writeCapacityStateUnsafe(file);
-			return clone(existing);
+			existing.nodeId = input.nodeId;
+			if (input.endpointKey === undefined) delete existing.endpointKey;
+			else existing.endpointKey = input.endpointKey;
 		}
-		input.onAcquiredUnderLock?.(file);
-		assertCapacity(file, input.nodeId, input.endpointKey, input.limits, input.reservation);
-		const token = input.processBirthToken ?? processBirthToken(input.ownerPid ?? process.pid);
-		if (!token) throw new Error("dispatch: cannot establish process birth token");
-		const at = new Date(nowMs).toISOString();
-		const lease: CapacityLease = {
-			leaseId: `lease-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
-			assignmentId: input.assignmentId,
-			nodeId: input.nodeId,
-			...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
-			host: hostname(),
-			ownerPid: input.ownerPid ?? process.pid,
-			processBirthToken: token,
-			acquiredAt: at,
-			heartbeatAt: at,
-			expiresAt: new Date(nowMs + (input.ttlMs ?? DEFAULT_CAPACITY_LEASE_TTL_MS)).toISOString(),
-			reservationOwnerId: input.reservation?.ownerId ?? null,
-			reservationMemberId: input.reservation?.memberId ?? null,
-		};
-		file.leases.push(lease);
+		existing.heartbeatAt = new Date(nowMs).toISOString();
+		existing.expiresAt = new Date(nowMs + (input.ttlMs ?? DEFAULT_CAPACITY_LEASE_TTL_MS)).toISOString();
 		writeCapacityStateUnsafe(file);
-		return clone(lease);
-	});
+		return clone(existing);
+	}
+	input.onAcquiredUnderLock?.(file);
+	assertCapacity(file, input.nodeId, input.endpointKey, input.limits, input.reservation);
+	const token = input.processBirthToken ?? processBirthToken(input.ownerPid ?? process.pid);
+	if (!token) throw new Error("dispatch: cannot establish process birth token");
+	const at = new Date(nowMs).toISOString();
+	const lease: CapacityLease = {
+		leaseId: `lease-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
+		assignmentId: input.assignmentId,
+		nodeId: input.nodeId,
+		...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
+		host: hostname(),
+		ownerPid: input.ownerPid ?? process.pid,
+		processBirthToken: token,
+		acquiredAt: at,
+		heartbeatAt: at,
+		expiresAt: new Date(nowMs + (input.ttlMs ?? DEFAULT_CAPACITY_LEASE_TTL_MS)).toISOString(),
+		reservationOwnerId: input.reservation?.ownerId ?? null,
+		reservationMemberId: input.reservation?.memberId ?? null,
+	};
+	file.leases.push(lease);
+	writeCapacityStateUnsafe(file);
+	return clone(lease);
 }
 export function renameCapacityLeaseAssignment(leaseId: string, assignmentId: string): CapacityLease {
 	return withStateFileLockSync(capacityStateLockPath(), () => {
@@ -424,20 +432,34 @@ export function renameCapacityLeaseAssignment(leaseId: string, assignmentId: str
 	});
 }
 
-export function heartbeatCapacityLease(
-	leaseId: string,
+/**
+ * Renew every listed lease in one read and one write. The caller holds the
+ * capacity state lock. A lease absent from the store is reported as missing,
+ * because whoever removed it has already handed its slot to someone else.
+ */
+export function renewCapacityLeasesUnsafe(
+	leaseIds: ReadonlyArray<string>,
 	nowMs = Date.now(),
 	ttlMs = DEFAULT_CAPACITY_LEASE_TTL_MS,
-): CapacityLease | null {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const file = readCapacityStateUnsafe();
-		const lease = file.leases.find((entry) => entry.leaseId === leaseId);
-		if (!lease) return null;
-		lease.heartbeatAt = new Date(nowMs).toISOString();
-		lease.expiresAt = new Date(nowMs + ttlMs).toISOString();
-		writeCapacityStateUnsafe(file);
-		return clone(lease);
-	});
+): { renewed: CapacityLease[]; missing: string[] } {
+	const file = readCapacityStateUnsafe();
+	const byId = new Map(file.leases.map((lease) => [lease.leaseId, lease]));
+	const renewed: CapacityLease[] = [];
+	const missing: string[] = [];
+	const heartbeatAt = new Date(nowMs).toISOString();
+	const expiresAt = new Date(nowMs + ttlMs).toISOString();
+	for (const leaseId of leaseIds) {
+		const lease = byId.get(leaseId);
+		if (lease === undefined) {
+			missing.push(leaseId);
+			continue;
+		}
+		lease.heartbeatAt = heartbeatAt;
+		lease.expiresAt = expiresAt;
+		renewed.push(lease);
+	}
+	if (renewed.length > 0) writeCapacityStateUnsafe(file);
+	return { renewed: renewed.map(clone), missing };
 }
 export function releaseCapacityLease(leaseId: string): boolean {
 	return withStateFileLockSync(capacityStateLockPath(), () => {
@@ -496,11 +518,11 @@ export function capacityLeaseUsageAsync(options?: {
 	nowMs?: number;
 	probe?: LeaseOwnerProbe;
 }): Promise<ReturnType<typeof capacityLeaseUsage>> {
-	return withStateFileLock(capacityStateLockPath(), () => capacityLeaseUsageUnsafe(options));
+	return withStateFileLockSection(capacityStateLockPath(), () => capacityLeaseUsageUnsafe(options));
 }
 
 /** The caller holds the capacity state lock for this read and any reclamation write. */
-function capacityLeaseUsageUnsafe(options?: {
+export function capacityLeaseUsageUnsafe(options?: {
 	nowMs?: number;
 	probe?: LeaseOwnerProbe;
 }): ReturnType<typeof capacityLeaseUsage> {

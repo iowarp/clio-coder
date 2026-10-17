@@ -1,23 +1,25 @@
 import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
+import { tryWithStateFileLockSync, withStateFileLockSection } from "../../core/state-file-lock.js";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import { AdmissionCanceledError, AdmissionTimedOutError } from "./admission-error.js";
 import { createAdmissionQueue } from "./admission-queue.js";
 import {
-	acquireCapacityLease,
+	acquireCapacityLeaseUnsafe,
 	type CapacityLease,
 	type CapacityLimits,
-	capacityLeaseUsage,
+	capacityLeaseUsageUnsafe,
+	capacityStateLockPath,
 	describeEndpointCapacityHolders,
 	type EndpointCapacityHolders,
-	heartbeatCapacityLease,
 	releaseCapacityLease,
 	renameCapacityLeaseAssignment,
+	renewCapacityLeasesUnsafe,
 } from "./capacity-lease.js";
-import { transferDispatchReservationToLease } from "./reservation-store.js";
+import { transferDispatchReservationToLeaseUnsafe } from "./reservation-store.js";
 
 /**
  * Dispatch admission gate. Given a worker's requested scope and the
@@ -53,7 +55,10 @@ export interface CapacityAdmissionController {
 		planId?: string;
 		planOrder?: number;
 		reservation?: { ownerId: string; memberId: string };
+		/** Cancels this request alone; requests sharing its assignment keep waiting. */
+		signal?: AbortSignal;
 	}): Promise<{ lease: CapacityLease; queuedAt: number; admittedAt: number }>;
+	/** Cancel every queued request of the assignment. */
 	cancel(assignmentId: string): boolean;
 	rename(leaseId: string, assignmentId: string): CapacityLease;
 	release(leaseId: string): boolean;
@@ -61,12 +66,19 @@ export interface CapacityAdmissionController {
 	/** Requests this process admitted for a plan and has not settled yet. */
 	activePlanCount(planId: string): number;
 	/**
+	 * The loss detail once a renewal found this lease gone from the shared store
+	 * and the owner was told, null otherwise. A run that starts after that
+	 * notice checks here, since the owner's sweep could not see it yet.
+	 */
+	lostLeaseDetail(leaseId: string): string | null;
+	/**
 	 * Process-local shutdown drain. New admissions fail closed and everything
 	 * still queued is canceled. This never touches the durable machine-wide
 	 * drain, which belongs to the operator and outlives one process.
 	 */
 	drain(): void;
-	stop(): void;
+	/** Drain, abort lock waits, and settle in-flight admission and renewal work. Never rejects. */
+	stop(): Promise<void>;
 }
 
 /**
@@ -190,41 +202,178 @@ function describeAdmissionFailure(input: {
 	].join("");
 }
 
+/**
+ * A request whose deadline ran out before any admission pass read the shared
+ * state for it, so there is no occupancy to report. Why no pass ran (a held
+ * lock, a busy loop) is not known here and is not guessed at.
+ */
+function describeUnobservedTimeout(input: { waitedMs: number; overdueAtQueueMs: number }): string {
+	if (input.overdueAtQueueMs >= 0)
+		return [
+			`dispatch: the admission deadline had already passed ${Math.round(input.overdueAtQueueMs)}ms`,
+			" before this request reached the queue, so it never waited on capacity.",
+			" The budget went to work before admission, not to a busy fleet.",
+		].join("");
+	return [
+		`dispatch: admission timed out after ${Math.round(input.waitedMs)}ms waiting for a worker slot;`,
+		" no capacity snapshot was obtained before the deadline.",
+	].join("");
+}
+
+type AdmissionUsage = {
+	global: number;
+	nodes: Readonly<Record<string, number>>;
+	endpoints: Readonly<Record<string, number>>;
+	endpointHolders?: Readonly<Record<string, EndpointCapacityHolders>>;
+};
+
 export function createCapacityAdmissionController(options: {
 	limits: () => CapacityLimits;
 	/** Live lease counts for the timeout message; defaults to the durable state file. */
-	usage?: () => {
-		global: number;
-		nodes: Readonly<Record<string, number>>;
-		endpoints: Readonly<Record<string, number>>;
-		endpointHolders?: Readonly<Record<string, EndpointCapacityHolders>>;
-	};
+	usage?: () => AdmissionUsage;
 	now?: () => number;
 	maxQueueSize?: number;
 	heartbeatMs?: number;
 	/** Reserved concurrent peak for a plan; one plan never exceeds it. */
 	reservedPlanPeak?: (planId: string) => number | undefined;
+	/** Report a renewal transaction that failed; the next heartbeat retries it. */
+	onRenewalError?: (error: Error) => void;
+	/**
+	 * A renewal found this lease gone from the shared store, so its slot may
+	 * already belong to someone else. The owner stops the run holding it.
+	 */
+	onLeaseLost?: (lease: CapacityLease, detail: string) => void;
 }): CapacityAdmissionController {
 	const now = options.now ?? Date.now;
 	const leases = new Map<string, CapacityLease>();
-	const pending = new Map<string, string>();
+	/** Queued request ids by assignment; fleet members share their root's assignment and wait together. */
+	const pending = new Map<string, Set<string>>();
+	const forgetPending = (assignmentId: string, requestId: string): void => {
+		const ids = pending.get(assignmentId);
+		if (ids === undefined) return;
+		ids.delete(requestId);
+		if (ids.size === 0) pending.delete(assignmentId);
+	};
+	/**
+	 * Queued requests by request id. The foreground check runs once per request,
+	 * on the first pass that sees it, as it used to at entry; `usage` is the
+	 * latest snapshot a pass took while it waited, for its timeout message.
+	 */
+	const requests = new Map<string, { endpointKey?: string; foregroundChecked: boolean; usage: AdmissionUsage | null }>();
+	/**
+	 * Granted leases awaiting their admit() continuation, by request id: one
+	 * pass can grant several requests that share an assignment (fleet members
+	 * share their root's lease) before any continuation runs.
+	 */
 	const acquired = new Map<string, CapacityLease>();
+	/** Leases this process still runs work under that the shared store no longer holds. */
+	const lost = new Set<string>();
+	/**
+	 * Lost leases whose owner has been told, with the detail it was given. Kept
+	 * past release so a run still launching under the lease is stopped on entry;
+	 * one entry per confirmed loss.
+	 */
+	const lostNotified = new Map<string, string>();
+	/** The last renewal transaction failed; cleared by a successful one or once no lease is held. */
+	let renewalFault: Error | null = null;
 	let draining = false;
+	let stopped = false;
+	const stopSignal = new AbortController();
 	const queue = createAdmissionQueue<() => CapacityLease>({
 		maxSize: options.maxQueueSize ?? 256,
 		now,
 		...(options.reservedPlanPeak !== undefined ? { reservedPlanPeak: options.reservedPlanPeak } : {}),
 	});
-	// Every admission attempt takes the cross-process admission lock, so a
-	// request blocked behind someone else's lease backs off instead of hammering
-	// the lock and starving lease heartbeats and reservation writes.
-	let pumpBackoffMs = PUMP_MIN_MS;
-	let pumpTimer: ReturnType<typeof setTimeout> | null = null;
-	const pump = (): void => {
+	const notify = (fn: () => void): void => {
+		try {
+			fn();
+		} catch {
+			// The owner's handler is best effort; the controller has already recorded the fault.
+		}
+	};
+	// Admission passes and renewals share one in-process chain, so this process
+	// never has two of its own transactions backing off against each other on
+	// the shared lock. Each section is synchronous: nothing else in this process
+	// runs while it holds the lock, which keeps a grant and its queue removal
+	// one step that cancellation cannot split. With nothing in flight the
+	// section starts at once, so an uncontended admission still runs its pass
+	// inside admit() as the synchronous gate did.
+	let transactions: Promise<unknown> = Promise.resolve();
+	/** Transactions waiting for or holding the lock; each one leaves in the step it ends. */
+	let inFlight = 0;
+	const transact = <T>(section: () => T): Promise<T> => {
+		let open = true;
+		const leave = (): void => {
+			if (!open) return;
+			open = false;
+			inFlight -= 1;
+		};
+		const guarded = (): T => {
+			try {
+				return section();
+			} finally {
+				leave();
+			}
+		};
+		const start = (): Promise<T> =>
+			withStateFileLockSection(capacityStateLockPath(), guarded, { signal: stopSignal.signal });
+		const run = inFlight === 0 ? start() : transactions.then(start);
+		inFlight += 1;
+		transactions = run.then(leave, leave);
+		return run;
+	};
+	/**
+	 * Local grants fail closed while this process cannot vouch for the leases it
+	 * holds. An unrenewed lease may be reclaimed by a sibling, and a lost lease
+	 * is a running worker the shared store no longer counts; admitting more here
+	 * in either state could put the machine past its cap.
+	 */
+	const ownershipFault = (): Error | null => {
+		if (lost.size > 0)
+			return new Error(
+				`dispatch: admission denied: ${lost.size} capacity ${lost.size === 1 ? "lease" : "leases"} this process still runs work under ${lost.size === 1 ? "is" : "are"} no longer in the shared admission store; new work is refused until ${lost.size === 1 ? "that run settles" : "those runs settle"}`,
+			);
+		if (renewalFault !== null)
+			return new Error(
+				`dispatch: admission denied: this process could not renew its capacity leases (${renewalFault.message}); new work is refused until a renewal succeeds or those runs settle`,
+			);
+		return null;
+	};
+	/**
+	 * Refuse every newly queued request whose endpoint is held by a foreground
+	 * stream, before any grant in this pass. It walks every queued request, so
+	 * one held back by its plan's peak is still refused rather than left to wait
+	 * on a slot that cannot open.
+	 */
+	const refuseForegroundDeadlocks = (): void => {
+		const usage = options.usage?.() ?? capacityLeaseUsageUnsafe({ nowMs: now() });
+		let limits: CapacityLimits | null = null;
+		for (const [requestId, request] of requests) {
+			request.usage = usage;
+			if (request.foregroundChecked) continue;
+			request.foregroundChecked = true;
+			limits ??= options.limits();
+			const block = foregroundEndpointBlock({
+				...(request.endpointKey !== undefined ? { endpointKey: request.endpointKey } : {}),
+				limits,
+				usage,
+			});
+			if (block !== null) queue.fail(requestId, new Error(block));
+		}
+	};
+	/** One admission pass under the held lock. */
+	const admitUnderLock = (): boolean => {
+		if (draining) return false;
+		refuseForegroundDeadlocks();
+		const fault = ownershipFault();
 		let progressed = false;
 		for (;;) {
 			let admittedLease: CapacityLease | null = null;
 			const admitted = queue.admitNext(now(), (request) => {
+				if (fault !== null) {
+					queue.fail(request.requestId, fault);
+					return false;
+				}
 				try {
 					admittedLease = request.value();
 					return true;
@@ -238,46 +387,168 @@ export function createCapacityAdmissionController(options: {
 				}
 			});
 			if (!admitted || !admittedLease) break;
-			acquired.set(admitted.assignmentId, admittedLease);
-			pending.delete(admitted.assignmentId);
+			acquired.set(admitted.requestId, admittedLease);
+			forgetPending(admitted.assignmentId, admitted.requestId);
 			progressed = true;
 		}
-		pumpBackoffMs = progressed ? PUMP_MIN_MS : Math.min(PUMP_MAX_MS, pumpBackoffMs * 2);
-		if (queue.size() > 0 && pumpTimer === null) {
-			pumpTimer = setTimeout(() => {
-				pumpTimer = null;
-				pump();
-			}, pumpBackoffMs);
-			pumpTimer.unref();
+		return progressed;
+	};
+	// Every admission attempt takes the cross-process admission lock, so a
+	// request blocked behind someone else's lease backs off instead of hammering
+	// the lock and starving lease heartbeats and reservation writes.
+	let pumpBackoffMs = PUMP_MIN_MS;
+	let pumpTimer: ReturnType<typeof setTimeout> | null = null;
+	let pumpRun: Promise<void> | null = null;
+	let pumping = false;
+	let pumpAgain = false;
+	const schedulePump = (): void => {
+		if (stopped || queue.size() === 0 || pumpTimer !== null) return;
+		pumpTimer = setTimeout(() => {
+			pumpTimer = null;
+			pump();
+		}, pumpBackoffMs);
+		pumpTimer.unref();
+	};
+	/** The lock itself could not be taken; fail the candidates a pass would have tried. */
+	const failCandidates = (error: unknown): void => {
+		// Each candidate used to take the lock in turn and fail the same way, one
+		// acquisition budget apiece; fail the same candidates once.
+		const failure = error instanceof Error ? error : new Error(String(error));
+		queue.admitNext(now(), (request) => {
+			queue.fail(request.requestId, failure);
+			return false;
+		});
+	};
+	const pump = (): void => {
+		if (stopped) return;
+		if (pumping) {
+			pumpAgain = true;
+			return;
 		}
+		if (inFlight === 0 && queue.size() > 0) {
+			// Uncontended, the pass runs here and now, as the synchronous gate did,
+			// so admission order relative to the callers' own continuations is
+			// unchanged. Only a held lock sends the pass to the owned async pump.
+			let attempt: ReturnType<typeof tryWithStateFileLockSync<boolean>>;
+			try {
+				attempt = tryWithStateFileLockSync(capacityStateLockPath(), admitUnderLock);
+			} catch (error) {
+				failCandidates(error);
+				attempt = { held: true, value: false };
+			}
+			if (attempt.held) {
+				pumpBackoffMs = attempt.value ? PUMP_MIN_MS : Math.min(PUMP_MAX_MS, pumpBackoffMs * 2);
+				schedulePump();
+				return;
+			}
+		}
+		pumping = true;
+		pumpRun = (async () => {
+			try {
+				do {
+					pumpAgain = false;
+					if (queue.size() === 0) break;
+					let progressed = false;
+					try {
+						progressed = await transact(admitUnderLock);
+					} catch (error) {
+						if (stopSignal.signal.aborted) return;
+						failCandidates(error);
+					}
+					pumpBackoffMs = progressed ? PUMP_MIN_MS : Math.min(PUMP_MAX_MS, pumpBackoffMs * 2);
+				} while (pumpAgain && !stopped);
+			} finally {
+				// The loop's exit test and this release run in one synchronous step
+				// with no await between them, so a wake can never land after the
+				// decision to stop and before the slot opens.
+				pumping = false;
+				schedulePump();
+			}
+		})();
 	};
 	/** Capacity just changed, so retry immediately rather than after a backoff. */
 	const pumpNow = (): void => {
 		pumpBackoffMs = PUMP_MIN_MS;
 		pump();
 	};
-	const heartbeatTimer = setInterval(() => {
-		for (const lease of leases.values()) {
-			const renewed = heartbeatCapacityLease(lease.leaseId);
-			if (renewed) leases.set(renewed.leaseId, renewed);
+	let heartbeatRun: Promise<void> | null = null;
+	/**
+	 * Renew every owned lease in one transaction; a tick that finds one still
+	 * running skips. A failed transaction leaves ownership unknown, not lost: a
+	 * sibling never reclaims a live owner whose birth token matches, and where
+	 * tokens are synthetic and expiry does decide, the next renewal that
+	 * succeeds finds the lease missing. So a failure refuses every queued local request
+	 * and is retried at the next tick, and only a lease confirmed missing stops
+	 * its run.
+	 */
+	const heartbeat = (): void => {
+		if (stopped || heartbeatRun !== null) return;
+		const owned = [...leases.keys()].filter((leaseId) => !lost.has(leaseId));
+		if (owned.length === 0) {
+			renewalFault = null;
+			return;
 		}
-	}, options.heartbeatMs ?? 10_000);
+		heartbeatRun = transact(() => {
+			const { renewed, missing } = renewCapacityLeasesUnsafe(owned, now());
+			// Applied under the lock: a lease released before this section is gone
+			// from both maps, and one released after it must not be resurrected.
+			for (const lease of renewed) if (leases.has(lease.leaseId)) leases.set(lease.leaseId, lease);
+			const newlyLost: CapacityLease[] = [];
+			for (const leaseId of missing) {
+				const lease = leases.get(leaseId);
+				if (lease === undefined) continue;
+				lost.add(leaseId);
+				newlyLost.push(lease);
+			}
+			return newlyLost;
+		})
+			.then(
+				(newlyLost) => {
+					const recovered = renewalFault !== null;
+					renewalFault = null;
+					if (recovered) pumpNow();
+					for (const lease of newlyLost) {
+						// Released in the gap since the section: nothing runs under it to stop.
+						if (!lost.has(lease.leaseId)) continue;
+						const detail = `capacity lost: lease '${lease.leaseId}' for assignment '${lease.assignmentId}' is no longer in the shared admission store, so its slot may already run another worker`;
+						lostNotified.set(lease.leaseId, detail);
+						notify(() => options.onLeaseLost?.(lease, detail));
+					}
+					// The loss gate refuses every queued local request; apply it now, not at the next backoff.
+					if (newlyLost.length > 0) pumpNow();
+				},
+				(error: unknown) => {
+					if (stopSignal.signal.aborted) return;
+					const failure = error instanceof Error ? error : new Error(String(error));
+					renewalFault = failure;
+					notify(() => options.onRenewalError?.(failure));
+				},
+			)
+			.finally(() => {
+				heartbeatRun = null;
+			});
+	};
+	const heartbeatTimer = setInterval(heartbeat, options.heartbeatMs ?? 10_000);
 	heartbeatTimer.unref();
 	const controller: CapacityAdmissionController = {
 		async admit(input) {
 			if (draining) throw new Error("dispatch: admission denied: this process is shutting down");
-			const limits = options.limits();
-			const usage = options.usage?.() ?? capacityLeaseUsage({ nowMs: now() });
-			const foregroundBlock = foregroundEndpointBlock({
-				...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
-				limits,
-				usage,
-			});
-			if (foregroundBlock !== null) throw new Error(foregroundBlock);
 			const queuedAt = now();
 			const startedAt = performance.now();
 			const requestId = `admit-${queuedAt.toString(36)}-${randomBytes(5).toString("hex")}`;
-			pending.set(input.assignmentId, requestId);
+			input.signal?.throwIfAborted();
+			const ids = pending.get(input.assignmentId) ?? new Set<string>();
+			ids.add(requestId);
+			pending.set(input.assignmentId, ids);
+			const onAbort = (): void => {
+				queue.cancel(requestId);
+			};
+			input.signal?.addEventListener("abort", onAbort, { once: true });
+			requests.set(requestId, {
+				...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
+				foregroundChecked: false,
+				usage: null,
+			});
 			try {
 				const outcomePromise = queue.enqueue({
 					requestId,
@@ -287,9 +558,10 @@ export function createCapacityAdmissionController(options: {
 					...(input.deadlineAt === undefined ? {} : { deadlineAt: input.deadlineAt }),
 					planId: input.planId ?? null,
 					planOrder: input.planOrder ?? null,
+					// Runs inside admitUnderLock, which already holds the shared lock.
 					value: () =>
 						input.reservation
-							? transferDispatchReservationToLease({
+							? transferDispatchReservationToLeaseUnsafe({
 									ownerId: input.reservation.ownerId,
 									memberId: input.reservation.memberId,
 									assignmentId: input.assignmentId,
@@ -298,7 +570,7 @@ export function createCapacityAdmissionController(options: {
 									limits: options.limits(),
 									nowMs: now(),
 								})
-							: acquireCapacityLease({
+							: acquireCapacityLeaseUnsafe({
 									assignmentId: input.assignmentId,
 									nodeId: input.nodeId,
 									...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
@@ -309,36 +581,53 @@ export function createCapacityAdmissionController(options: {
 				pumpNow();
 				const outcome = await outcomePromise;
 				if (outcome.state !== "admitted") {
-					const detail = describeAdmissionFailure({
-						state: outcome.state,
-						nodeId: input.nodeId,
-						...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
-						waitedMs: performance.now() - startedAt,
-						overdueAtQueueMs: input.deadlineAt === undefined ? 0 : queuedAt - input.deadlineAt,
-						queueDepth: queue.size(),
-						limits: options.limits(),
-						usage: options.usage?.() ?? capacityLeaseUsage({ nowMs: now() }),
-					});
-					if (outcome.state === "canceled") throw new AdmissionCanceledError(detail);
-					throw new AdmissionTimedOutError(detail);
+					if (outcome.state === "canceled") throw new AdmissionCanceledError();
+					const waitedMs = performance.now() - startedAt;
+					const overdueAtQueueMs = input.deadlineAt === undefined ? 0 : queuedAt - input.deadlineAt;
+					// The latest snapshot a pass took; a diagnostic never waits on the lock again.
+					const usage = options.usage?.() ?? requests.get(requestId)?.usage ?? null;
+					throw new AdmissionTimedOutError(
+						usage === null
+							? describeUnobservedTimeout({ waitedMs, overdueAtQueueMs })
+							: describeAdmissionFailure({
+									state: outcome.state,
+									nodeId: input.nodeId,
+									...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
+									waitedMs,
+									overdueAtQueueMs,
+									queueDepth: queue.size(),
+									limits: options.limits(),
+									usage,
+								}),
+					);
 				}
-				const lease = acquired.get(input.assignmentId);
+				const lease = acquired.get(requestId);
 				if (!lease) throw new Error("dispatch: admitted request has no capacity lease");
-				acquired.delete(input.assignmentId);
+				acquired.delete(requestId);
 				leases.set(lease.leaseId, lease);
+				if (draining) {
+					// Granted in the step before drain began; hand it back rather
+					// than start work in a process that is shutting down.
+					controller.release(lease.leaseId);
+					throw new AdmissionCanceledError();
+				}
 				return { lease, queuedAt, admittedAt: outcome.admittedAt };
 			} finally {
+				input.signal?.removeEventListener("abort", onAbort);
+				requests.delete(requestId);
 				// Runs on rejection too: a queue-full, duplicate, or failed request
 				// must not leave its assignment marked pending, or a later cancel
 				// would target a request id that no longer exists.
-				if (pending.get(input.assignmentId) === requestId) pending.delete(input.assignmentId);
+				forgetPending(input.assignmentId, requestId);
 			}
 		},
 		cancel(assignmentId) {
-			const requestId = pending.get(assignmentId);
-			if (requestId === undefined) return false;
+			const ids = pending.get(assignmentId);
+			if (ids === undefined) return false;
 			pending.delete(assignmentId);
-			return queue.cancel(requestId);
+			let canceled = false;
+			for (const requestId of ids) canceled = queue.cancel(requestId) || canceled;
+			return canceled;
 		},
 		rename(leaseId, assignmentId) {
 			const previous = leases.get(leaseId)?.assignmentId;
@@ -351,6 +640,10 @@ export function createCapacityAdmissionController(options: {
 		release(leaseId) {
 			const assignmentId = leases.get(leaseId)?.assignmentId;
 			leases.delete(leaseId);
+			lost.delete(leaseId);
+			// The fault is about leases this process holds; with none left there
+			// is nothing to vouch for.
+			if (leases.size === 0) renewalFault = null;
 			const released = releaseCapacityLease(leaseId);
 			if (assignmentId !== undefined) queue.complete(assignmentId);
 			pumpNow();
@@ -367,20 +660,26 @@ export function createCapacityAdmissionController(options: {
 		activePlanCount(planId) {
 			return queue.activePlanCount(planId);
 		},
+		lostLeaseDetail(leaseId) {
+			return lostNotified.get(leaseId) ?? null;
+		},
 		drain() {
 			draining = true;
-			for (const [assignmentId, requestId] of [...pending]) {
-				pending.delete(assignmentId);
-				queue.cancel(requestId);
-			}
+			pending.clear();
+			// Every request in flight, not only the latest per assignment: requests
+			// that share an assignment would otherwise outlive shutdown in the queue.
+			for (const requestId of [...requests.keys()]) queue.cancel(requestId);
 		},
 		stop() {
 			controller.drain();
+			stopped = true;
+			stopSignal.abort(new AdmissionCanceledError());
 			if (pumpTimer !== null) {
 				clearTimeout(pumpTimer);
 				pumpTimer = null;
 			}
 			clearInterval(heartbeatTimer);
+			return Promise.allSettled([pumpRun, heartbeatRun, transactions]).then(() => undefined);
 		},
 	};
 	return controller;

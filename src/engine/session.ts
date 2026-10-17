@@ -757,7 +757,10 @@ function createWriter(
 ): ClioSessionWriter {
 	const paths = sessionPaths(meta);
 	const tree: SessionTreeNode[] = initialTree.map((node) => ({ ...node }));
-	const fileEntries = ensureSessionHeader(meta, initialFileEntries, headerOptions);
+	const normalizedEntries = ensureSessionHeader(meta, initialFileEntries, headerOptions);
+	// replaceEntries needs only the header; retaining every appended payload
+	// would grow the writer with the whole transcript.
+	const header = normalizedEntries[0] as ClioSessionJsonlHeader;
 	let closed = false;
 	let appendFd: number | null = null;
 	let fsyncTimer: NodeJS.Timeout | null = null;
@@ -809,9 +812,9 @@ function createWriter(
 	}
 
 	// One-time normalization for resumes of pre-header files: rewrite once so
-	// fd-appended lines land after a header. Disk and memory match from here on.
+	// fd-appended lines land after a header.
 	if (!isSessionJsonlHeader(initialFileEntries[0])) {
-		writeJsonlFileAtomic(paths.current, fileEntries);
+		writeJsonlFileAtomic(paths.current, normalizedEntries);
 	}
 
 	function openAppendFd(): number {
@@ -921,7 +924,6 @@ function createWriter(
 			if (closed) throw new Error("session writer closed");
 			const record = recordFromTurn(turn);
 			appendLine(record);
-			fileEntries.push(record);
 			treeDirty = true;
 			tree.push({
 				id: turn.id,
@@ -936,7 +938,6 @@ function createWriter(
 		): void {
 			if (closed) throw new Error("session writer closed");
 			const observation = appendLine(entry);
-			fileEntries.push(entry);
 			if (opts?.treeNode) {
 				tree.push({ ...opts.treeNode });
 				treeDirty = true;
@@ -948,12 +949,9 @@ function createWriter(
 			// The rename below replaces the inode; the held fd would keep
 			// appending to the orphaned old file. Drop it, reopen lazily.
 			closeAppendFd({ flush: false });
-			const existingHeader = fileEntries.find(isSessionJsonlHeader);
 			const body = entries.filter((entry) => !isSessionJsonlHeader(entry));
-			const nextEntries = existingHeader ? [existingHeader, ...body] : ensureSessionHeader(meta, body, headerOptions);
+			const nextEntries = [header, ...body];
 			writeJsonlFileAtomic(paths.current, nextEntries);
-			fileEntries.length = 0;
-			fileEntries.push(...nextEntries);
 			const recoveredTree = treeFromFileEntries(nextEntries);
 			if (recoveredTree.length > 0) {
 				treeDirty = true;

@@ -19,6 +19,7 @@ import {
 	endpointIdentityHash,
 	isReceiptBearingFrame,
 	toolSignatureOf,
+	WORKER_BULK_FRAME_MAX_BYTES,
 	WORKER_EVENT_QUEUE_MAX_FRAMES,
 	WORKER_PROTOCOL_VERSION,
 	type WorkerAttestation,
@@ -69,6 +70,7 @@ export {
 	WORKER_PROTOCOL_VERSION,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	WORKER_STDIN_QUEUE_MAX_BYTES,
+	WORKER_STDOUT_INCOMPLETE_MARKER,
 	withinFrameBudget,
 	workerSpecDigest,
 } from "../../worker/protocol.js";
@@ -208,37 +210,126 @@ export class WorkerChannelFailure extends Error {
 	}
 }
 
+/**
+ * Retained bulk bytes at which display frames start to drop and, once evidence
+ * alone reaches it, the bulk lane pauses. Two maximal frames, so one large tool
+ * result never pauses the lane by itself.
+ */
+export const WORKER_EVENT_QUEUE_SOFT_BYTES = 2 * WORKER_BULK_FRAME_MAX_BYTES;
+/**
+ * Hard retention bound. The lane pauses at the soft level and parses nothing
+ * while paused, so retention past it is at most the one frame that crossed
+ * it; reaching the hard bound means pressure could not hold, and the run fails
+ * as incomplete evidence instead of growing or dropping a fact silently.
+ */
+export const WORKER_EVENT_QUEUE_HARD_FRAMES = 2 * WORKER_EVENT_QUEUE_MAX_FRAMES;
+export const WORKER_EVENT_QUEUE_HARD_BYTES = 4 * WORKER_BULK_FRAME_MAX_BYTES;
+/**
+ * Bulk output held before the attestation verdict. A protocol 2 worker emits
+ * no bulk frame before its admit, so this only covers pipe reordering from a
+ * nonconforming peer; one maximal frame and its newline fit, and a flood past
+ * that is refused.
+ */
+export const WORKER_QUARANTINE_MAX_FRAMES = 256;
+export const WORKER_QUARANTINE_MAX_BYTES = WORKER_BULK_FRAME_MAX_BYTES + 1;
+
+export interface BoundedEventQueueLimits {
+	/** Retained frames above which display frames drop and evidence applies pressure. */
+	softFrames: number;
+	/** Retained bytes above which display frames drop and evidence applies pressure. */
+	softBytes: number;
+	/** Retention a frame may never push the queue past. */
+	hardFrames: number;
+	hardBytes: number;
+}
+
 export interface BoundedEventQueueStats {
 	/** Display-only frames dropped because the queue was at its ceiling. */
 	droppedDisplayFrames: number;
 	/** Highest observed queue depth, for capacity diagnostics. */
 	peakDepth: number;
+	/** Highest observed retained frame bytes, as measured on the wire. */
+	peakBytes: number;
+	/** Frames refused because admitting them would pass the hard bound. */
+	overflowFrames: number;
 }
 
+/** `overflow` means the frame was not retained and the caller must fail the run. */
+export type BoundedEventQueuePush = "queued" | "dropped" | "overflow";
+
 export interface BoundedEventQueue {
-	/** Enqueue one bulk frame. Returns false when a display frame was dropped. */
-	push(value: unknown): boolean;
+	/** Enqueue one bulk frame of `bytes` wire bytes. */
+	push(value: unknown, bytes?: number): BoundedEventQueuePush;
 	shift(): unknown;
+	/** Dequeue with the byte charge it was admitted under, for moving frames between queues. */
+	take(): { value: unknown; bytes: number } | undefined;
+	clear(): void;
 	readonly size: number;
+	readonly bytes: number;
+	/** Evidence alone has reached the soft bound; the producer should stop. */
+	readonly pressured: boolean;
+	/** Retention has fallen to half the soft bound; a paused producer may resume. */
+	readonly relieved: boolean;
 	stats(): BoundedEventQueueStats;
 }
 
+interface QueuedFrame {
+	value: unknown;
+	bytes: number;
+	evidence: boolean;
+}
+
 /**
- * Bounded orchestrator queue for the bulk lane. At the ceiling the queue drops
- * the oldest display-only frame to admit the new one; a receipt-bearing frame
- * is never dropped, and when the queue holds nothing but evidence it grows no
- * further and refuses the new display frame instead. Memory is bounded either
- * way, and no protocol fact a receipt must seal is ever lost to backpressure.
+ * Bounded orchestrator queue for the bulk lane. Above the soft bound the queue
+ * drops the oldest display-only frame to admit a new one, and refuses a new
+ * display frame when only evidence remains. A receipt-bearing frame is never
+ * dropped: it is retained up to the hard bound, `pressured` tells the producer
+ * to pause well before that, and a frame the hard bound refuses comes back as
+ * `overflow` for the caller to fail the run. Frames live in a sequence-indexed
+ * map, with a second index of display frames, so push, drop and dequeue never
+ * move or scan the backlog.
  */
-export function createBoundedEventQueue(maxFrames: number = WORKER_EVENT_QUEUE_MAX_FRAMES): BoundedEventQueue {
-	const items: unknown[] = [];
+export function createBoundedEventQueue(
+	maxFrames: number = WORKER_EVENT_QUEUE_MAX_FRAMES,
+	limits: Partial<BoundedEventQueueLimits> = {},
+): BoundedEventQueue {
+	const softFrames = limits.softFrames ?? maxFrames;
+	const softBytes = limits.softBytes ?? WORKER_EVENT_QUEUE_SOFT_BYTES;
+	const hardFrames = limits.hardFrames ?? 2 * maxFrames;
+	const hardBytes = limits.hardBytes ?? WORKER_EVENT_QUEUE_HARD_BYTES;
+	const frames = new Map<number, QueuedFrame>();
+	// Sequence numbers of retained display frames, oldest first. Entries whose
+	// frame was already dequeued are skipped lazily when a drop looks for one.
+	const displays = new Map<number, number>();
+	let head = 0;
+	let tail = 0;
+	let displayHead = 0;
+	let displayTail = 0;
+	let retainedBytes = 0;
+	let evidenceFrames = 0;
+	let evidenceBytes = 0;
 	let droppedDisplayFrames = 0;
 	let peakDepth = 0;
+	let peakBytes = 0;
+	let overflowFrames = 0;
 
-	function dropOneDisplayFrame(): boolean {
-		for (let index = 0; index < items.length; index += 1) {
-			if (!isReceiptBearingFrame(items[index])) {
-				items.splice(index, 1);
+	function remove(seq: number): QueuedFrame | undefined {
+		const frame = frames.get(seq);
+		if (frame === undefined) return undefined;
+		frames.delete(seq);
+		retainedBytes -= frame.bytes;
+		if (frame.evidence) {
+			evidenceFrames -= 1;
+			evidenceBytes -= frame.bytes;
+		}
+		return frame;
+	}
+
+	function dropOldestDisplay(): boolean {
+		while (displayHead < displayTail) {
+			const seq = displays.get(displayHead) as number;
+			displays.delete(displayHead++);
+			if (remove(seq) !== undefined) {
 				droppedDisplayFrames += 1;
 				return true;
 			}
@@ -246,31 +337,80 @@ export function createBoundedEventQueue(maxFrames: number = WORKER_EVENT_QUEUE_M
 		return false;
 	}
 
-	return {
-		push(value: unknown): boolean {
-			if (items.length >= maxFrames && !dropOneDisplayFrame()) {
-				if (isReceiptBearingFrame(value)) {
-					// Evidence outranks the ceiling: an all-evidence queue accepts the
-					// frame rather than losing a fact the receipt must carry.
-					items.push(value);
-					peakDepth = Math.max(peakDepth, items.length);
-					return true;
+	const overSoft = (bytes: number): boolean => frames.size >= softFrames || retainedBytes + bytes > softBytes;
+
+	function take(): { value: unknown; bytes: number } | undefined {
+		// Dropped display frames leave gaps; each gap is skipped once.
+		while (head < tail) {
+			const seq = head++;
+			const frame = remove(seq);
+			if (frame === undefined) continue;
+			if (frames.size === 0) clear();
+			else if (!frame.evidence) {
+				// Every display older than this one is gone, so its index entries
+				// go too; a backlog that never empties keeps the index bounded.
+				while (displayHead < displayTail && (displays.get(displayHead) as number) <= seq) {
+					displays.delete(displayHead++);
 				}
-				droppedDisplayFrames += 1;
-				return false;
 			}
-			items.push(value);
-			peakDepth = Math.max(peakDepth, items.length);
-			return true;
+			return { value: frame.value, bytes: frame.bytes };
+		}
+		return undefined;
+	}
+
+	function clear(): void {
+		frames.clear();
+		displays.clear();
+		head = tail = displayHead = displayTail = 0;
+		retainedBytes = evidenceFrames = evidenceBytes = 0;
+	}
+
+	return {
+		push(value: unknown, bytes = 0): BoundedEventQueuePush {
+			const evidence = isReceiptBearingFrame(value);
+			while (overSoft(bytes) && dropOldestDisplay()) {
+				// Each pass removed one display frame; loop until under or none remain.
+			}
+			if (!evidence && overSoft(bytes)) {
+				droppedDisplayFrames += 1;
+				return "dropped";
+			}
+			if (frames.size + 1 > hardFrames || retainedBytes + bytes > hardBytes) {
+				overflowFrames += 1;
+				return "overflow";
+			}
+			const seq = tail++;
+			frames.set(seq, { value, bytes, evidence });
+			retainedBytes += bytes;
+			if (evidence) {
+				evidenceFrames += 1;
+				evidenceBytes += bytes;
+			} else {
+				displays.set(displayTail++, seq);
+			}
+			peakDepth = Math.max(peakDepth, frames.size);
+			peakBytes = Math.max(peakBytes, retainedBytes);
+			return "queued";
 		},
 		shift(): unknown {
-			return items.shift();
+			return take()?.value;
 		},
+		take,
+		clear,
 		get size(): number {
-			return items.length;
+			return frames.size;
+		},
+		get bytes(): number {
+			return retainedBytes;
+		},
+		get pressured(): boolean {
+			return evidenceFrames >= softFrames || evidenceBytes >= softBytes;
+		},
+		get relieved(): boolean {
+			return frames.size <= softFrames / 2 && retainedBytes <= softBytes / 2;
 		},
 		stats(): BoundedEventQueueStats {
-			return { droppedDisplayFrames, peakDepth };
+			return { droppedDisplayFrames, peakDepth, peakBytes, overflowFrames };
 		},
 	};
 }

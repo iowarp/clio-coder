@@ -16,10 +16,12 @@ import {
 	reserveObservation,
 } from "../observation.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
+import { byteLength } from "../truncate-utf8.js";
 import {
 	codeNavToolSurface,
 	CODE_NAV_DEFAULT_ENTRY_LIMIT as DEFAULT_ENTRY_LIMIT,
 	CODE_NAV_DEFAULT_LIMIT as DEFAULT_LIMIT,
+	CODE_NAV_DEFAULT_RELATED_LIMIT as DEFAULT_RELATED_LIMIT,
 	CODE_NAV_MAX_LIMIT as MAX_LIMIT,
 } from "./code-nav-surface.js";
 import { loadCodewikiForTool, renderJson } from "./shared.js";
@@ -431,6 +433,230 @@ function runDependents(index: NavIndex, query: string, limit: number): NavPayloa
 	};
 }
 
+// The related bundle answers "what surrounds this definition" from the same
+// index the single-relation modes read, so one call replaces outline + deps +
+// dependents without a second scan. Its limit is one budget for the whole
+// bundle: categories fill round-robin, so a heavily imported module cannot
+// crowd out its own definitions and the response stays proportional.
+const RELATED_NOTE =
+	"importers import this file directly and are not call sites; testImporters are role=test importers, a hint for which checks to run, not proof of coverage";
+
+interface RelatedCategory {
+	key: "definitions" | "imports" | "importers" | "testImporters" | "externalImports";
+	items: unknown[];
+	/** Legacy-mode call that lists this category in full. */
+	more: string;
+}
+
+function allocateRelatedBudget(budget: number, sizes: readonly number[]): number[] {
+	const shown = sizes.map(() => 0);
+	let left = budget;
+	while (left > 0) {
+		let progressed = false;
+		for (let i = 0; i < sizes.length && left > 0; i++) {
+			if ((shown[i] ?? 0) < (sizes[i] ?? 0)) {
+				shown[i] = (shown[i] ?? 0) + 1;
+				left--;
+				progressed = true;
+			}
+		}
+		if (!progressed) break;
+	}
+	return shown;
+}
+
+function definitionSummary(symbol: CodewikiSymbol): Record<string, unknown> {
+	return { name: symbol.name, kind: symbol.kind, line: symbol.line, ...(symbol.sig ? { sig: symbol.sig } : {}) };
+}
+
+function relatedLimit(count: number): number {
+	return Math.min(Math.max(count, 1), MAX_LIMIT);
+}
+
+function relatedBundle(
+	index: NavIndex,
+	file: CodewikiFile,
+	definitions: CodewikiSymbol[],
+	head: Record<string, unknown>,
+	definitionsMore: string,
+	budget: number,
+	capBytes: number,
+	sourcePrefix: string,
+): NavPayload {
+	const deps = index.depsByFileId.get(file.id) ?? { internal: [], external: [] };
+	const importers: string[] = [];
+	const testImporters: string[] = [];
+	for (const path of index.dependentsByFileId.get(file.id) ?? []) {
+		if (index.filesByPath.get(path)?.role === "test") testImporters.push(path);
+		else importers.push(path);
+	}
+	const depsMore = `mode=deps query=${file.path} limit=${relatedLimit(Math.max(deps.internal.length, deps.external.length))}`;
+	const dependentsMore = `mode=dependents query=${file.path} limit=${relatedLimit(importers.length + testImporters.length)}`;
+	// Priority order: round-robin hands out slots in this order each pass.
+	const categories: RelatedCategory[] = [
+		{ key: "definitions", items: definitions.map(definitionSummary), more: definitionsMore },
+		{ key: "imports", items: deps.internal, more: depsMore },
+		{ key: "importers", items: importers, more: dependentsMore },
+		{ key: "testImporters", items: testImporters, more: dependentsMore },
+		{ key: "externalImports", items: deps.external, more: depsMore },
+	];
+	const totalCount = categories.reduce((sum, category) => sum + category.items.length, 0);
+	const build = (items: number): NavPayload => {
+		const shown = allocateRelatedBudget(
+			items,
+			categories.map((category) => category.items.length),
+		);
+		const slice = (i: number): unknown[] => categories[i]?.items.slice(0, shown[i] ?? 0) ?? [];
+		const more: Record<string, { omitted: number; next: string }> = {};
+		let next: string | undefined;
+		let largestOmitted = 0;
+		categories.forEach((category, i) => {
+			const omitted = category.items.length - (shown[i] ?? 0);
+			if (omitted === 0) return;
+			more[category.key] = { omitted, next: `${sourcePrefix}${category.more}` };
+			if (omitted > largestOmitted) {
+				largestOmitted = omitted;
+				next = category.more;
+			}
+		});
+		const shownCount = shown.reduce((sum, count) => sum + count, 0);
+		return {
+			payload: {
+				related: true,
+				...head,
+				file: fileSummary(file),
+				definitions: slice(0),
+				imports: { internal: slice(1), external: slice(4) },
+				importers: slice(2),
+				testImporters: slice(3),
+				omitted: totalCount - shownCount,
+				budget: items,
+				...(items < budget ? { byteLimited: true } : {}),
+				...(Object.keys(more).length > 0 ? { more } : {}),
+				...(next !== undefined ? { next } : {}),
+				note: RELATED_NOTE,
+			},
+			shownCount,
+			totalCount,
+			...(next !== undefined ? { next } : {}),
+		};
+	};
+	// The item budget bounds the shape; the call's observation cap bounds the
+	// bytes. Shrink the item budget until the JSON fits so a pool-limited or
+	// signature-heavy bundle degrades to fewer facts with honest omitted counts
+	// instead of the all-or-nothing oversize stub.
+	const fits = (nav: NavPayload): boolean => byteLength(renderJson(nav.payload)) <= capBytes;
+	const full = build(budget);
+	if (fits(full)) return full;
+	let low = 0;
+	let high = budget - 1;
+	let best = build(0);
+	while (low <= high) {
+		const mid = Math.floor((low + high) / 2);
+		const candidate = build(mid);
+		if (fits(candidate)) {
+			best = candidate;
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+	return best;
+}
+
+function runSymbolRelated(
+	index: NavIndex,
+	query: string,
+	budget: number,
+	capBytes: number,
+	sourcePrefix: string,
+): NavPayload {
+	const files = (index.symbolToFileIds.get(query) ?? [])
+		.map((id) => index.filesById.get(id))
+		.filter((file): file is CodewikiFile => Boolean(file))
+		.sort(comparePath);
+	if (files.length === 0) {
+		const next = `mode=path query=${query}`;
+		return {
+			payload: { related: true, symbol: query, definitions: [], omitted: 0, next },
+			shownCount: 0,
+			totalCount: 0,
+			next,
+		};
+	}
+	const definitionsIn = (file: CodewikiFile): CodewikiSymbol[] =>
+		(index.symbolsByFileId.get(file.id) ?? []).filter((symbol) => symbol.name === query);
+	const [only] = files;
+	if (files.length === 1 && only) {
+		return relatedBundle(
+			index,
+			only,
+			definitionsIn(only),
+			{ symbol: query },
+			`mode=symbol query=${query} limit=${relatedLimit(definitionsIn(only).length)}`,
+			budget,
+			capBytes,
+			sourcePrefix,
+		);
+	}
+	// Same name in several files: the neighborhood belongs to one owning file,
+	// and choosing for the model would answer a question it did not ask.
+	const candidates = files.slice(0, budget).map((file) => {
+		const defs = definitionsIn(file);
+		const first = defs[0];
+		return {
+			path: file.path,
+			role: file.role,
+			...(first ? { line: first.line, kind: first.kind, ...(first.sig ? { sig: first.sig } : {}) } : {}),
+			...(defs.length > 1 ? { definitions: defs.length } : {}),
+		};
+	});
+	const firstPath = files[0]?.path ?? "";
+	const next = `mode=outline related=true query=${firstPath}`;
+	return {
+		payload: {
+			related: true,
+			symbol: query,
+			ambiguous: true,
+			message: `'${query}' is defined in ${files.length} indexed files; related=true needs one owning file. Re-run mode=outline related=true with the exact path you mean.`,
+			candidates,
+			omitted: files.length - candidates.length,
+			next,
+		},
+		shownCount: candidates.length,
+		totalCount: files.length,
+		next,
+	};
+}
+
+function runOutlineRelated(
+	index: NavIndex,
+	query: string,
+	budget: number,
+	capBytes: number,
+	sourcePrefix: string,
+): NavPayload | ToolResult {
+	const file = resolveFile(index, query);
+	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
+	if (file.path !== query) {
+		return {
+			kind: "error",
+			message: `code_nav: related=true takes an exact indexed path; '${query}' only partially matches. Re-run with query=${file.path}`,
+		};
+	}
+	const symbols = index.symbolsByFileId.get(file.id) ?? [];
+	return relatedBundle(
+		index,
+		file,
+		symbols,
+		{},
+		`mode=outline query=${file.path} limit=${relatedLimit(symbols.length)}`,
+		budget,
+		capBytes,
+		sourcePrefix,
+	);
+}
+
 const WIKI_UPDATE_COMMAND = "clio-coder context wiki --update";
 
 function wikiPageId(path: string): string {
@@ -546,6 +772,8 @@ function runWiki(cwd: string, query: string): NavPayload | ToolResult {
 	};
 }
 
+const MODES: readonly string[] = ["symbol", "path", "entries", "outline", "deps", "dependents", "wiki", "project"];
+
 function parseLimit(value: unknown, fallback: number): number {
 	if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.min(Math.floor(value), MAX_LIMIT);
 	return fallback;
@@ -571,8 +799,22 @@ export const codeNavTool: ToolSpec = {
 			};
 		}
 
+		if (args.related !== undefined && typeof args.related !== "boolean") {
+			return { kind: "error", message: `code_nav: related must be true or false; got '${String(args.related)}'` };
+		}
+		const related = args.related === true;
+		if (related && mode !== "symbol" && mode !== "outline" && MODES.includes(mode)) {
+			return {
+				kind: "error",
+				message: `code_nav: related=true applies only to mode=symbol or mode=outline; got mode=${mode}. Drop related, or use mode=outline related=true query=<exact path>.`,
+			};
+		}
+
 		const query = typeof args.query === "string" ? args.query.trim() : "";
-		const limit = parseLimit(args.limit, mode === "entries" ? DEFAULT_ENTRY_LIMIT : DEFAULT_LIMIT);
+		const limit = parseLimit(
+			args.limit,
+			related ? DEFAULT_RELATED_LIMIT : mode === "entries" ? DEFAULT_ENTRY_LIMIT : DEFAULT_LIMIT,
+		);
 		const reservation = reserveObservation(OBSERVE_SELF_CAPS.codeNav, options);
 		if (reservation.exhausted) {
 			return observationBudgetExhausted({
@@ -600,7 +842,7 @@ export const codeNavTool: ToolSpec = {
 				...(options ? { options } : {}),
 			});
 		};
-		if (!["symbol", "path", "entries", "outline", "deps", "dependents", "wiki", "project"].includes(mode))
+		if (!MODES.includes(mode))
 			return {
 				kind: "error",
 				message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, wiki, or project; got '${mode}'`,
@@ -623,8 +865,10 @@ export const codeNavTool: ToolSpec = {
 		}
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const index = navIndexFor(loaded.loaded.codewiki);
+		const sourcePrefix = source === "clio" ? "source=clio " : "";
 		if (mode === "symbol") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };
+			if (related) return close(runSymbolRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
 			return close(runSymbol(index, query, limit));
 		}
 		if (mode === "path") {
@@ -634,6 +878,7 @@ export const codeNavTool: ToolSpec = {
 		if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot));
 		if (mode === "outline") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=outline requires query path" };
+			if (related) return close(runOutlineRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
 			return close(runOutline(index, query, limit));
 		}
 		if (mode === "deps") {

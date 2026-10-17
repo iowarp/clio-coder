@@ -97,10 +97,17 @@ for (const scenario of [
 			ok(envelope);
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(envelope.status, "failed");
+			// A signal death is never a clean exit, so it fails as an incomplete
+			// trail on the signal's own code rather than reaching the result
+			// contract as a finished run.
+			const sealedCause =
+				scenario.signal === null
+					? /result contract failed: missing final result/u
+					: /terminated by SIGKILL before it finished its output/u;
 			strictEqual(receipt.exitCode, 1);
-			strictEqual(receipt.outcomeCode, "result_contract_exhausted");
-			match(receipt.outcomeDetail ?? "", /result contract failed: missing final result/u);
-			match(receipt.failureMessage ?? "", /result contract failed: missing final result/u);
+			strictEqual(receipt.outcomeCode, scenario.signal === null ? "result_contract_exhausted" : null);
+			match(receipt.outcomeDetail ?? "", sealedCause);
+			match(receipt.failureMessage ?? "", sealedCause);
 			strictEqual(envelope.outcomeDetail, receipt.outcomeDetail);
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;
 			ok(stateDir);
@@ -128,7 +135,7 @@ for (const scenario of [
 				match(receipt.outcomeDetail ?? "", /worker process signal: SIGKILL/u);
 				match(receipt.failureMessage ?? "", /worker process signal: SIGKILL/u);
 				strictEqual(
-					verifyReceiptIntegrity({ ...receipt, outcomeDetail: "result contract failed: missing final result" }, envelope).ok,
+					verifyReceiptIntegrity({ ...receipt, outcomeDetail: "exit code 1" }, envelope).ok,
 					false,
 					"removing the observed cause must invalidate the receipt seal",
 				);

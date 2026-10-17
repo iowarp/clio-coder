@@ -26,8 +26,10 @@ function sameSnapshot(a: BigIntStats | null, b: BigIntStats | null): boolean {
 /** One live ledger index; no state survives closing or reopening its manager. */
 export class SessionEntriesIndex {
 	private stat: BigIntStats | null = null;
+	// Private storage grows in place; published snapshots are separate frozen
+	// copies, built only when a reader asks, so appends never copy the prefix.
 	private entries: SessionEntry[] = [];
-	private snapshot: ReadonlyArray<SessionEntry> = Object.freeze([]);
+	private snapshot: ReadonlyArray<SessionEntry> | null = Object.freeze([]);
 	private completeEntries = 0;
 	private offset = 0;
 	private lineNumber = 0;
@@ -43,7 +45,7 @@ export class SessionEntriesIndex {
 
 	refreshAfterWrite(): void {
 		try {
-			this.read();
+			this.ingest();
 		} catch {
 			// Accepted writes keep their existing success contract. The next read
 			// revalidates and reports corrupt or unavailable external ledger state.
@@ -52,6 +54,12 @@ export class SessionEntriesIndex {
 	}
 
 	read(): ReadonlyArray<SessionEntry> {
+		this.ingest();
+		this.snapshot ??= Object.freeze(this.entries.slice());
+		return this.snapshot;
+	}
+
+	private ingest(): void {
 		let current: BigIntStats | null;
 		try {
 			current = statSync(this.path, { bigint: true });
@@ -61,7 +69,7 @@ export class SessionEntriesIndex {
 		}
 		const prior = this.stat;
 		const sameFile = prior !== null && current !== null && prior.dev === current.dev && prior.ino === current.ino;
-		if (sameSnapshot(prior, current)) return this.snapshot;
+		if (sameSnapshot(prior, current)) return;
 		// Appends preserve the prefix; atomic rewrites change identity. Same-size
 		// edits and truncation must invalidate even when the entry count is unchanged.
 		let append = sameFile && prior !== null && current !== null && current.size > prior.size;
@@ -85,18 +93,27 @@ export class SessionEntriesIndex {
 			(prior === null || range.stat.dev !== prior.dev || range.stat.ino !== prior.ino || range.stat.size < prior.size)
 		) {
 			this.stat = null;
-			return this.read();
+			this.ingest();
+			return;
 		}
 		const parsed = collectSessionEntries(
 			range.entries.filter((entry) => !isSessionJsonlHeader(entry)),
 			this.path,
 		);
 		for (const entry of parsed) freezeJson(entry);
-		const prefix = append ? this.entries.slice(0, this.completeEntries) : [];
-		this.entries = prefix.concat(parsed);
+		// Entries past completeEntries came from an unterminated tail that the
+		// range just reparsed from the committed cursor; drop them, never duplicate.
+		const prefixLength = append ? this.completeEntries : 0;
+		if (append) {
+			this.entries.length = prefixLength;
+			for (const entry of parsed) this.entries.push(entry);
+		} else {
+			this.entries = parsed;
+		}
+		let completeParsed = 0;
 		// A header consumes an engine entry but does not appear in the domain list.
-		this.completeEntries =
-			prefix.length + range.entries.slice(0, range.completeEntries).filter((entry) => !isSessionJsonlHeader(entry)).length;
+		for (let i = 0; i < range.completeEntries; i++) if (!isSessionJsonlHeader(range.entries[i])) completeParsed++;
+		this.completeEntries = prefixLength + completeParsed;
 		const rangeOffset = append ? this.offset : 0;
 		if (!append) this.chunks = [];
 		const completeBytes = range.nextOffset - rangeOffset;
@@ -105,7 +122,6 @@ export class SessionEntriesIndex {
 		this.offset = range.nextOffset;
 		this.lineNumber = range.nextLineNumber;
 		this.stat = range.stat;
-		this.snapshot = Object.freeze(this.entries.slice());
-		return this.snapshot;
+		this.snapshot = null;
 	}
 }

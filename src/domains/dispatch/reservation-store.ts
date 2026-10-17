@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { withStateFileLock, withStateFileLockSync } from "../../core/state-file-lock.js";
+import { withStateFileLockSection, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
+import type { AcquireCapacityLeaseInput } from "./capacity-lease.js";
 import {
 	acquireCapacityLease,
+	acquireCapacityLeaseUnsafe,
 	activeCapacityDrainUnsafe,
 	type CapacityLease,
 	type CapacityLimits,
@@ -296,8 +298,7 @@ export function createDispatchReservation(input: {
 	});
 }
 
-/** Atomically convert one held plan member into the assignment's durable lease. */
-export function transferDispatchReservationToLease(input: {
+interface ReservationTransferInput {
 	ownerId: string;
 	memberId: string;
 	assignmentId: string;
@@ -306,9 +307,21 @@ export function transferDispatchReservationToLease(input: {
 	limits: CapacityLimits;
 	nowMs?: number;
 	ttlMs?: number;
-}): CapacityLease {
+}
+
+/** Atomically convert one held plan member into the assignment's durable lease. */
+export function transferDispatchReservationToLease(input: ReservationTransferInput): CapacityLease {
+	return acquireCapacityLease(reservationTransferLease(input));
+}
+
+/** The same transfer for a caller that already holds the capacity state lock. */
+export function transferDispatchReservationToLeaseUnsafe(input: ReservationTransferInput): CapacityLease {
+	return acquireCapacityLeaseUnsafe(reservationTransferLease(input));
+}
+
+function reservationTransferLease(input: ReservationTransferInput): AcquireCapacityLeaseInput {
 	const nowMs = input.nowMs ?? Date.now();
-	return acquireCapacityLease({
+	return {
 		assignmentId: input.assignmentId,
 		nodeId: input.nodeId,
 		...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
@@ -326,7 +339,7 @@ export function transferDispatchReservationToLease(input: {
 			member.consumedAt = new Date(nowMs).toISOString();
 			state.reservations = records.map(copyRecord);
 		},
-	});
+	};
 }
 
 /**
@@ -349,7 +362,9 @@ export function rebindDispatchReservationMember(input: {
 }): Promise<DispatchReservationRecord> {
 	// Retry admission runs inside the async dispatch attempt, so it can yield
 	// while waiting for the cross-process lock instead of blocking the event loop.
-	return withStateFileLock(capacityStateLockPath(), () => {
+	// The section form releases before returning, so a same-process sync caller
+	// never meets this lock still held across a microtask.
+	return withStateFileLockSection(capacityStateLockPath(), () => {
 		const nowMs = input.nowMs ?? Date.now();
 		const records = expireRecords(readStore(), nowMs, false);
 		const record = records.find((entry) => entry.ownerId === input.ownerId);
