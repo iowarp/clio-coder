@@ -91,7 +91,7 @@ export interface ToolResultDispositionMetadata {
 		reason: "hard-budget";
 	};
 	offloadPath?: string;
-	retrieval: string;
+	retrieval?: string;
 	summaryProvenance?: ToolResultSummaryProvenance;
 	fallback?: ToolResultDispositionFallback;
 }
@@ -443,8 +443,9 @@ function contextHeader(
 	const lines = [
 		`[tool-result ${appliedMode}]`,
 		`kind=${input.kind} capturedBytes=${input.capturedBytes} displayedBytes=${input.displayedBytes} truncated=${String(truncated)}`,
-		retrievalLine(input.offloadPath, input.followUpHint),
-		`followUp=${JSON.stringify(input.followUpHint)}`,
+		...(truncated
+			? [retrievalLine(input.offloadPath, input.followUpHint), `followUp=${JSON.stringify(input.followUpHint)}`]
+			: []),
 	];
 	if (provenance !== undefined) {
 		lines.push(`summary=code/${provenance.algorithm} sha256=${provenance.sourceSha256} lines=${provenance.sourceLines}`);
@@ -476,7 +477,6 @@ function fullTrailer(input: ProjectToolResultContextInput): string {
 	const facts = essentialFacts(input.details);
 	const lines: string[] = [];
 	if (facts !== null) lines.push(`facts=${stableJson(facts)}`);
-	if (input.followUpHint.length > 0) lines.push(`followUp=${JSON.stringify(input.followUpHint)}`);
 	return lines.length === 0 ? "" : `[tool-result metadata]\n${lines.join("\n")}`;
 }
 
@@ -529,6 +529,8 @@ export function projectToolResultContext(input: ProjectToolResultContextInput): 
 		const diagnostic = input.disposition.context.strategy === "diagnostic";
 		const algorithm = diagnostic ? "sha256-diagnostic-v1" : "sha256-head-tail-v1";
 		const redact = input.disposition.context.redact !== false;
+		// Budget against the truncated header, which adds the retrieve and followUp
+		// lines; a complete selection drops them below, so this only ever over-reserves.
 		const budgetHeader = contextHeader(input, "summary", true, summaryProvenance(input.text, algorithm));
 		const bodyBudget = Math.max(0, maxBytes - byteLength(budgetHeader) - 1);
 		const selected = diagnostic
@@ -548,12 +550,14 @@ export function projectToolResultContext(input: ProjectToolResultContextInput): 
 			summaryProvenance: provenance,
 		};
 	}
-	const header = contextHeader(input, "bounded", input.capturedBytes > maxBytes);
+	const completeHeader = contextHeader(input, "bounded", false);
+	const truncated = byteLength(completeHeader) + 1 + byteLength(body) > maxBytes || !capturedTextIsComplete;
+	const header = contextHeader(input, "bounded", truncated);
 	const text = joinHeaderAndBody(header, body, maxBytes, input.disposition.context.excerpt);
 	return {
 		text,
 		appliedMode: "bounded",
-		truncated: byteLength(header) + 1 + byteLength(body) > maxBytes || !capturedTextIsComplete,
+		truncated,
 	};
 }
 

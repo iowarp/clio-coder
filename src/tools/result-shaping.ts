@@ -513,8 +513,14 @@ function shapeTextToolResultBody(
 		contextTruncated: projection.truncated,
 		...(projection.downgrade === undefined ? {} : { downgrade: projection.downgrade }),
 		...(offloadPath === null ? {} : { offloadPath }),
-		retrieval:
-			offloadPath === null ? followUpHint(spec) : `read ${offloadPath} with offset and limit to retrieve omitted content`,
+		...(projection.truncated
+			? {
+					retrieval:
+						offloadPath === null
+							? followUpHint(spec)
+							: `read ${offloadPath} with offset and limit to retrieve omitted content`,
+				}
+			: {}),
 		...(projection.summaryProvenance === undefined ? {} : { summaryProvenance: projection.summaryProvenance }),
 		...(disposition.fallback === undefined ? {} : { fallback: disposition.fallback }),
 	};
