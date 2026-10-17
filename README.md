@@ -240,7 +240,7 @@ artifacts, worker receipts, shell commands, and steering-queue controls. Client
 support determines which extensions are available in your editor.
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot with the model, workspace, fleet, composer, and guidance footer" width="1000" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal boot with the session start, project workspace and Git state, AI usage, selected model, composer and context size" width="1000" /></a>
 </p>
 <p align="center"><sub>Terminal workspace. Select a capture to open its full-resolution image.</sub></p>
 <p align="center">
