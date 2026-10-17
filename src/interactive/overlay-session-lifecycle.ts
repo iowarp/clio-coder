@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
@@ -9,6 +10,7 @@ import {
 	prepareHandoff,
 } from "../domains/session/handoff-service.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
+import { liveSessionOwner } from "../domains/session/live-owner.js";
 import type { TUI } from "../engine/tui.js";
 import type { ChatLoop } from "../session-control/chat-loop.js";
 import { replayCurrentSession, restoreSession } from "../session-control/index.js";
@@ -144,6 +146,20 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 	 * gets the same #93 identity check and #107 active-path replay.
 	 */
 	async function resumeSession(session: SessionContract, sessionId: string, preResumeSessionId: string | null) {
+		// Two processes appending to one ledger corrupt it. Refuse only a session whose
+		// owner is still running; a crashed one never ended and must stay resumable (#420).
+		const target = sessionId === preResumeSessionId ? undefined : session.history().find((meta) => meta.id === sessionId);
+		const owner = target ? liveSessionOwner(target) : null;
+		if (owner && owner.pid !== process.pid) {
+			emitCommandNotice(
+				deps.getSlashNotice(),
+				"warn",
+				"resume",
+				`session ${sessionId.slice(0, 13)} is open in another terminal (pid ${owner.pid}${owner.host === hostname() ? "" : ` on ${owner.host}`}); end it there first`,
+			);
+			deps.requestRender();
+			return;
+		}
 		const settlement = settleChatBeforeSessionSwitch(deps.chat);
 		if (settlement) await settlement;
 		try {

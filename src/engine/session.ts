@@ -42,10 +42,12 @@ import {
 	unlinkSync,
 	writeSync,
 } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { normalizeClioCoderEventTree } from "../core/naming-events.js";
 import { readClioVersion } from "../core/package-root.js";
+import { processBirthToken } from "../core/process-identity.js";
 import { assertSafeId } from "../core/safe-id.js";
 import { fsyncDirectory, safeResourceWrite } from "../core/safe-resource-write.js";
 import { clioStateDir, stateRootRemoved } from "../core/xdg.js";
@@ -67,6 +69,24 @@ export interface ClioSessionMeta {
 	 * that omit this field, and versions from the future.
 	 */
 	sessionFormatVersion?: number;
+	/**
+	 * The process that last opened this ledger for writing, stamped on create and
+	 * on every resume. With `endedAt === null` it tells a session still live in
+	 * another terminal from one whose process crashed (#420). Older sessions
+	 * omit it and read as not live.
+	 */
+	owner?: ClioSessionOwner;
+}
+
+export interface ClioSessionOwner {
+	pid: number;
+	host: string;
+	/** `processBirthToken` of the owner, so a reused pid does not read as the owner. */
+	birth: string | null;
+}
+
+function currentOwner(): ClioSessionOwner {
+	return { pid: process.pid, host: hostname(), birth: processBirthToken() };
 }
 
 /**
@@ -555,6 +575,7 @@ function buildMeta(input: { cwd: string; model?: string | null; target?: string 
 		platform: process.platform,
 		nodeVersion: process.version,
 		sessionFormatVersion: CURRENT_SESSION_FORMAT_VERSION,
+		owner: currentOwner(),
 	};
 }
 
@@ -1038,15 +1059,17 @@ export function resumeSession(
 	const writer = createWriter(meta, existingTree, existingFileEntries);
 	// Prepare headerless ledgers before publishing that a closed session has
 	// reopened. A failed normalization must preserve its prior ended state.
-	// Reopening and a migration restamp are one atomic publication: a refused
-	// resume can never leave the session marked open under its old version.
+	// Reopening, the owner stamp and a migration restamp are one atomic
+	// publication: a refused resume can never leave the session marked open
+	// under its old version. The owner moves on every resume, including a
+	// crashed session that never ended, so liveness names this process (#420).
 	const restamp = options.sessionFormatVersion;
 	const restamped = restamp !== undefined && meta.sessionFormatVersion !== restamp;
-	if (meta.endedAt !== null || restamped) {
-		const reopened = { ...meta, endedAt: null, ...(restamped ? { sessionFormatVersion: restamp } : {}) };
-		atomicWrite(metaPath, JSON.stringify(reopened, null, 2));
-		meta.endedAt = null;
-		if (restamped) meta.sessionFormatVersion = restamp;
-	}
+	const owner = currentOwner();
+	const reopened = { ...meta, endedAt: null, owner, ...(restamped ? { sessionFormatVersion: restamp } : {}) };
+	atomicWrite(metaPath, JSON.stringify(reopened, null, 2));
+	meta.endedAt = null;
+	meta.owner = owner;
+	if (restamped) meta.sessionFormatVersion = restamp;
 	return { meta, writer, tree: existingTree };
 }

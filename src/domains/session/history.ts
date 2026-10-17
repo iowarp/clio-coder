@@ -1,10 +1,17 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
-import { atomicWrite, cwdHash, readSessionFileEntries, sessionPaths } from "../../engine/session.js";
+import {
+	atomicWrite,
+	type ClioSessionOwner,
+	cwdHash,
+	readSessionFileEntries,
+	sessionPaths,
+} from "../../engine/session.js";
 import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionMeta } from "./contract.js";
 import { isSessionHeader, type LabelEntry, type SessionInfoEntry } from "./entries.js";
+import { liveSessionOwner } from "./live-owner.js";
 
 /**
  * Walks `clioStateDir()/sessions/<cwdHash>/` and returns every session meta
@@ -39,6 +46,30 @@ export function listSessionsForCwd(cwd: string): SessionMeta[] {
 		return aKey === bKey ? 0 : aKey > bKey ? -1 : 1;
 	});
 	return metas;
+}
+
+/**
+ * Sessions in `cwd` held open by a process other than this one (#420). Reads only
+ * each meta.json, never a ledger, because the interactive boot notice runs this on
+ * the event loop right after first paint.
+ */
+export function liveSessionsElsewhere(cwd: string): Array<{ id: string; owner: ClioSessionOwner }> {
+	const dir = join(clioStateDir(), "sessions", cwdHash(cwd));
+	if (!existsSync(dir)) return [];
+	const live: Array<{ id: string; owner: ClioSessionOwner }> = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (!entry.isDirectory()) continue;
+		let meta: SessionMeta;
+		try {
+			meta = JSON.parse(readFileSync(join(dir, entry.name, "meta.json"), "utf8")) as SessionMeta;
+		} catch {
+			// A missing or malformed meta.json names no live owner.
+			continue;
+		}
+		const owner = liveSessionOwner(meta);
+		if (owner && owner.pid !== process.pid && typeof meta.id === "string") live.push({ id: meta.id, owner });
+	}
+	return live;
 }
 
 /** A workspace directory that has recorded sessions, whichever interface recorded them. */

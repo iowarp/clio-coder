@@ -54,7 +54,7 @@ export function isHeld(session: Pick<SessionSnapshot, "state">): boolean {
 	return session.state === "open" || session.state === "starting" || session.state === "parked";
 }
 
-/** True for an open session nobody has typed into. "New task" reuses it instead of spawning another child. */
+/** True for an open session nobody has typed into. "New task" reuses one its own window made instead of spawning another child. */
 export function isUntouched(session: Pick<SessionSnapshot, "state" | "turns" | "timeline" | "contextWork">): boolean {
 	return (
 		session.state === "open" &&
@@ -63,6 +63,29 @@ export function isUntouched(session: Pick<SessionSnapshot, "state" | "turns" | "
 		!session.contextWork?.active &&
 		!session.contextWork?.latest
 	);
+}
+
+/** How many drafts a window remembers creating. A window rarely holds more than one or two at a time. */
+const OWN_DRAFT_LIMIT = 16;
+
+/**
+ * The untouched draft a window may reuse when it starts a task in a project. Only a draft this window
+ * created qualifies: one server serves every window, so reusing another window's draft would put two
+ * windows on one session and its steering queue (#420).
+ */
+export function reusableDraft(
+	sessions: readonly SessionSnapshot[],
+	workspaceId: string,
+	ownDrafts: readonly string[],
+): SessionSnapshot | undefined {
+	return sessions.find(
+		(session) => session.workspaceId === workspaceId && ownDrafts.includes(session.id) && isUntouched(session),
+	);
+}
+
+/** The window's draft list after it creates `id`, newest last and bounded so storage never grows. */
+export function withOwnDraft(ownDrafts: readonly string[], id: string): string[] {
+	return [...ownDrafts.filter((entry) => entry !== id), id].slice(-OWN_DRAFT_LIMIT);
 }
 
 function parsed(value: string | undefined): number {

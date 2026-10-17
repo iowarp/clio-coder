@@ -2073,6 +2073,27 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					// Upgrade advice is optional when cached metadata cannot be read (#416).
 				});
 		});
+		// A second terminal in this folder gets its own session; say so when another
+		// one is live here, so a shared folder never reads as a shared session (#420).
+		setImmediate(() => {
+			if (startupAbort.signal.aborted) return;
+			void import("../domains/session/history.js")
+				.then(({ liveSessionsElsewhere }) => {
+					if (startupAbort.signal.aborted) return;
+					const currentId = deps.session?.current()?.id;
+					const live = liveSessionsElsewhere(process.cwd()).filter((session) => session.id !== currentId);
+					const first = live[0];
+					if (!first) return;
+					const more = live.length > 1 ? ` and ${live.length - 1} more` : "";
+					appendNotice(
+						"info",
+						`another Clio session is live in this folder (pid ${first.owner.pid}, session ${first.id.slice(0, 13)})${more}; this terminal has its own session`,
+						busNoticeSink,
+					);
+				})
+				// The notice is advisory; a failed scan leaves the transcript as it was.
+				.catch(() => {});
+		});
 		// Docks are prepared hidden only now that the first frame is out: pane
 		// host traffic and a Yazi or cliamp boot never sit in front of the paint.
 		// A failure stays silent; the key that wants the dock finds it absent and

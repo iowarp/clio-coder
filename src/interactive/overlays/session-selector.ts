@@ -3,6 +3,7 @@ import { formatFooterTokens } from "../../core/display-units.js";
 import { formatCostAggregate } from "../../domains/observability/cost.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/index.js";
+import { liveSessionOwner } from "../../domains/session/live-owner.js";
 import type { TuiMouseEvent, TuiMouseEventResult } from "../../engine/tui.js";
 import {
 	getKeybindings,
@@ -96,8 +97,9 @@ function previewLine(meta: SessionMeta): string {
 }
 
 function metaStrip(meta: SessionMeta, now: number): string {
-	// Closing a session does not establish that its run succeeded.
-	const status = meta.endedAt ? GLYPH.scoped : GLYPH.running;
+	// Closing a session does not establish that its run succeeded. A session that
+	// never ended reads as running only while its owning process is (#420).
+	const status = liveSessionOwner(meta) ? GLYPH.running : GLYPH.scoped;
 	const when = formatRelativeTime(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt, now);
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;

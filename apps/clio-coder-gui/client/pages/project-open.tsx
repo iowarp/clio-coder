@@ -7,6 +7,7 @@ import { useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
+import { rememberOwnDraft } from "../shell/own-drafts.js";
 
 export interface ProjectLaunch {
 	/** Open a folder as a project, then start a conversation there or show its saved ones. */
@@ -28,6 +29,7 @@ export function useProjectLaunch(client: Client): ProjectLaunch {
 		mutationFn: (workspaceId: string) =>
 			client.call(routes.newSession, { params: { id: workspaceId }, query: {}, body: {} }),
 		onSuccess: (session) => {
+			rememberOwnDraft(session.id);
 			sessionBuffer(session.id).snapshot(session);
 			queries.setQueryData(["session", session.id], session);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });

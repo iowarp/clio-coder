@@ -10,7 +10,8 @@ import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
-import { isUntouched, sessionIdFromPath } from "./shell-model.js";
+import { ownDrafts } from "./own-drafts.js";
+import { reusableDraft, sessionIdFromPath } from "./shell-model.js";
 import { openAppWindow } from "./windows.js";
 
 const WORKSPACE_KEY = "clio-coder-gui-workspace";
@@ -33,7 +34,7 @@ export function rememberWorkspace(id: string): void {
 
 export interface TaskActions {
 	readonly launch: ProjectLaunch;
-	/** Start a task in a project, or return to its untouched draft instead of spawning a second child. */
+	/** Start a task in a project, or return to the untouched draft this window made there instead of spawning a second child. */
 	newTask(workspaceId: string): void;
 	resume(sessionId: string, workspaceId: string): void;
 	/** Show a task in a second window. A saved one is loaded here first, so the new window finds it open. */
@@ -73,7 +74,7 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 	const newTask = useCallback(
 		(workspaceId: string) => {
 			rememberWorkspace(workspaceId);
-			const draft = sessions.data?.find((session) => session.workspaceId === workspaceId && isUntouched(session));
+			const draft = reusableDraft(sessions.data ?? [], workspaceId, ownDrafts());
 			afterNavigate?.();
 			if (draft) void navigate(`/sessions/${draft.id}`);
 			else launch.start(workspaceId);

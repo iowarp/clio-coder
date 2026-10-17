@@ -14,8 +14,9 @@ import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { ClioStage } from "../shell/ClioStage.js";
 import { HomeAside } from "../shell/HomeAside.js";
+import { ownDrafts, rememberOwnDraft } from "../shell/own-drafts.js";
 import { useShell } from "../shell/shell-context.js";
-import { isUntouched } from "../shell/shell-model.js";
+import { reusableDraft } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import "../chat/composer-box.css";
@@ -167,8 +168,12 @@ export function Home({ client }: { client: Client }) {
 				queryFn: () => client.call(routes.sessions, emptyInput),
 				staleTime: 0,
 			});
-			const draft = sessions.find((session) => session.workspaceId === workspace && isUntouched(session));
-			const session = draft ?? (await client.call(routes.newSession, { params: { id: workspace }, query: {}, body: {} }));
+			let session = reusableDraft(sessions, workspace, ownDrafts());
+			if (!session) {
+				session = await client.call(routes.newSession, { params: { id: workspace }, query: {}, body: {} });
+				// A failed first request leaves the draft untouched, and only this window may retry in it.
+				rememberOwnDraft(session.id);
+			}
 			await client.call(routes.turn, { params: { id: session.id }, query: {}, body: { text: request } }, key.current);
 			return session;
 		},
