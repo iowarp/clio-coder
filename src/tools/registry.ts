@@ -5,6 +5,7 @@ import { Value } from "typebox/value";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
+import { TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import {
 	type YoloScriptSandboxPolicy,
 	type YoloScriptSandboxState,
@@ -2770,7 +2771,7 @@ function applyToolResultEffects(
 	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
 	const prefix = !bannered && annotations.includes(warning) ? `${warning}\n\n` : "";
 	const remaining = annotations.filter((annotation) => annotation !== warning);
-	const suffix = remaining.length > 0 ? `\n\n${remaining.join("\n")}` : "";
+	const suffix = remaining.length > 0 ? `${TOOL_RESULT_NOTES_SEPARATOR}${remaining.join("\n")}` : "";
 	if (result.kind === "ok") {
 		const annotated: ToolResult = { kind: "ok", output: `${prefix}${result.output}${suffix}` };
 		if (result.details !== undefined) annotated.details = result.details;
@@ -2788,7 +2789,7 @@ function annotationMessages(effects: ReadonlyArray<MiddlewareEffect>): string[] 
 	for (const effect of effects) {
 		if (effect.kind !== "annotate_tool_result") continue;
 		const severity = effect.severity ?? "info";
-		messages.push(`[middleware:${severity}] ${effect.message}`);
+		messages.push(toolResultNote(severity, effect.message));
 	}
 	return messages;
 }

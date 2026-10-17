@@ -5,6 +5,7 @@
  * nudge. Owns every `deps.middleware` interaction of the loop.
  */
 
+import { systemReminderBlock } from "../core/reminder-framing.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
 import {
@@ -31,7 +32,7 @@ import type { NoticeSource } from "./notice-source.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
 export interface TurnMiddlewareDeps {
-	memoryContentGuard?: (() => () => boolean) | undefined;
+	memoryContentGuard?: ((content?: string) => () => boolean) | undefined;
 	state: ChatTurnState;
 	middleware?: MiddlewareContract | undefined;
 	toolRegistry?: ToolRegistry | undefined;
@@ -140,7 +141,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		isCurrent?: () => boolean,
 	): void => {
 		dropStale();
-		isCurrent ??= message.startsWith("Memory:") ? deps.memoryContentGuard?.() : undefined;
+		// Memory text revalidates its own offer (cited facts, open failures) until the request carries it.
+		isCurrent ??= message.startsWith("Memory:") ? deps.memoryContentGuard?.(message) : undefined;
 		if (isCurrent?.() === false) return;
 		if (pendingReminders.some((entry) => entry.message === message && entry.severity === severity)) return;
 		pendingReminders.push({ message, severity, deferred, isCurrent });
@@ -354,7 +356,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			dropStale();
 			const ready = pendingReminders.filter((entry) => entry.deferred);
 			if (ready.length === 0) return false;
-			const content = `<system-reminder>\n${[...new Set(ready.map((entry) => entry.message))].join("\n\n")}\n</system-reminder>`;
+			const content = systemReminderBlock([...new Set(ready.map((entry) => entry.message))]);
 			// injectDeferredReminder already persisted a middleware receipt. Update
 			// context directly: message events would invent a new operator turn and
 			// reset task/tool authority in appendQueuedUserTurn.
@@ -477,7 +479,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				const messages = [
 					...new Set(entries.filter((entry) => entry.isCurrent?.() !== false).map((entry) => entry.message)),
 				];
-				return messages.length ? `<system-reminder>\n${messages.join("\n\n")}\n</system-reminder>` : "";
+				return messages.length ? systemReminderBlock(messages) : "";
 			};
 		},
 		flushPendingReminders(): string {
@@ -487,7 +489,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// A paired continuation/info and reminder/warn still needs one copy.
 			const messages = [...new Set(pendingReminders.map((entry) => entry.message))];
 			pendingReminders.length = 0;
-			return `<system-reminder>\n${messages.join("\n\n")}\n</system-reminder>`;
+			return systemReminderBlock(messages);
 		},
 
 		clearPendingReminders(): void {

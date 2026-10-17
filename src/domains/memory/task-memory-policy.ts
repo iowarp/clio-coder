@@ -567,7 +567,8 @@ export async function runTaskMemoryPolicy(
 				}))
 		)
 			return settle("gated", "no_lost_context", counts);
-		bank.recordInjection(citedIds);
+		// Producing a reminder is not delivering it: the intervention counts the
+		// cited entries' injections when the host reports the reminder submitted.
 		return settle("injected", "intervened", { ...counts, reminder });
 	} catch (error) {
 		if (error instanceof TaskMemoryEndpointBusyError) return settle("silent", "endpoint_busy");

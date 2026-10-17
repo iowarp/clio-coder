@@ -1,4 +1,5 @@
 import { ceilChars } from "../session/context-accounting.js";
+import { keptLessonLabel, projectKeptLesson } from "./lesson-projection.js";
 import { eligibleMemoryRecords } from "./operations.js";
 import {
 	type MemoryRelevanceInput,
@@ -150,13 +151,15 @@ export function renderMemoryPromptSection(records: ReadonlyArray<MemoryRecord>):
 	const lines: string[] = [
 		"# Memory",
 		"",
-		"Approved long-term memory records that may apply. Each lesson is gated by human approval and cited evidence; do not extrapolate beyond the cited findings.",
+		"Long-term memory records that may apply. Each names who stands behind it: an operator who approved it, or the evidence gate that retained it automatically from a session's own execution receipts. Do not extrapolate beyond the cited findings.",
 		"",
 	];
 	for (const record of records) {
 		const lesson = record.lesson.replace(/\s+/g, " ").trim();
 		const evidence = record.evidenceRefs.join(", ");
-		lines.push(`- [${record.id}] (${renderApplicability(record)}) ${lesson} Evidence: ${evidence}.`);
+		lines.push(
+			`- [${record.id}] (${renderApplicability(record)}; ${keptLessonLabel(projectKeptLesson(record))}) ${lesson} Evidence: ${evidence}.`,
+		);
 		if (record.appliesWhen.length > 0) lines.push(`  Applies when: ${record.appliesWhen.map(compactText).join("; ")}.`);
 		if (record.avoidWhen.length > 0) lines.push(`  Avoid when: ${record.avoidWhen.map(compactText).join("; ")}.`);
 	}
