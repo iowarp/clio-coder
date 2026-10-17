@@ -52,6 +52,8 @@ The block holds the full instruction text. The operator note, prefix included, i
 
 An automatic compaction and `/context compact` each emit one canonical compaction notice and leave a persistent row in the transcript, for example `[context engine] compacted 36.2K → 28.6K tokens; 42 messages summarized to 1823 chars`. A cut that lands mid-turn appends ` (split turn)`. Later notices do not replace it. The two figures are the ones the footer shows: the whole next request, with the system prompt, tool schemas, summary and retained suffix, not the summary alone. After `/resume` the stored summary renders as `[compaction summary] compacted 36.2K → 28.6K tokens, cont. at turn <id>`, with ` via <trigger>` appended where the entry recorded `auto`, `force` or `overflow`. A summary stored before the after figure was recorded shows `~<tokens> tokens before` instead.
 
+The settled `Context compact` card in the transcript adds `· no summary` when the run completed without a summarizer checkpoint, so an eviction or masking pass, whose output stays recallable, does not read like a summary (`src/interactive/context-operation-view.ts`).
+
 Other outcomes have their own notices:
 
 | Outcome | Notice |
@@ -65,6 +67,8 @@ Other outcomes have their own notices:
 The summarizer writes a fixed checkpoint shape: Goal, Constraints & Preferences, Progress (Done, In Progress, Blocked), Key Decisions, Next Steps, Critical Context. A cut never separates a tool result from its call, and the suffix after the cut keeps at least 20,000 estimated tokens of recent context (less when the request budget is tight). The summary output is capped at 8,192 tokens. A previous checkpoint and its retained suffix enter the next summarizer call as `<previous-context>`, so each compaction produces one cumulative replacement. The summarizer's system prompt is built in; `context.compaction.systemPrompt` replaces it with the text of a UTF-8 file of at most 64 KiB, resolved against the session workspace when the path is relative.
 
 Sentences in which you asked Clio Coder to remember something (starting `remember`, `keep in mind` or `don't forget`, optionally after `please`) are copied verbatim into an `<operator-notes encoding="xml">` block beside the generated summary, and the summarizer is told to keep every literal you stated. Each note is cut at 400 characters, the newest 30 are kept across later compactions, and `&`, `<` and `>` are escaped so a note cannot close the block. A model that declined to store a value as memory therefore does not lose it to a summary. The summary also lists the files read and modified in the summarized span, and a bounded `<recallable-refs>` preview of tool results the cut hid (see [Working Set](../architecture/context-working-set.md#recall)).
+
+With `context.memory.observations.enabled`, the summarizer request can carry prepared observation notes in place of the history they cover, but only when the substituted request fits and is smaller than the ordinary one; see [Prepare observation notes for compaction](proactive-memory.md#prepare-observation-notes-for-compaction).
 
 The summarizer runs on the chat route unless `context.compaction.model` names a `target/model` reference that matches exactly one configured model. It always runs with thinking off, passes the session's information-flow admission, and waits for paid-request admission when its cost is known or estimated. The summary and its usage stay attributed to the executing target and model.
 

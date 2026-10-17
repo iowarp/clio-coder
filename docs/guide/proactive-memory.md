@@ -72,8 +72,16 @@ context engine. The registration is `observer.memory-intervention` in
 
 Knowledge and procedural entries have stable short IDs (`tm-k-<n>` and
 `tm-p-<n>`, with the counter in base 36; status is `tm-s-<n>`). A visible
-reminder is one `Memory:` advisory block and records the cited entry IDs'
-injection counts.
+reminder is one `Memory:` advisory block. Producing it records nothing: the
+cited entry IDs' injection counts and every other delivery effect start only
+when the host finds the reminder's exact text inside its own framing of an
+admitted request, which is a `<system-reminder>` block or a trailing
+`[middleware:<severity>]` note on a tool result
+(`src/core/reminder-framing.ts`). A reminder missing from three submitted
+requests is released. One whose cited entry was rewritten or deleted, or whose
+correction's failure has since resolved, is dropped before it is sent; a
+failure that only repeated keeps its correction current
+(`src/domains/memory/intervention.ts`).
 
 The bank lives in process memory only. Each entry holds at most 1,200 characters
 of whitespace-normalized text. The knowledge class keeps at most 20 entries and
@@ -96,7 +104,7 @@ or a labeled prompt section, never a tool or a permission.
 | Tool-result annotation | The second identical failure in the bounded trajectory, at most once per operation per turn | One cited `Memory:` line appended to the failing tool's own result | `annotateRepeatedFailure` in `src/domains/middleware/memory-intervention.ts` |
 | Deferred or turn-end reminder | At a native tool-batch boundary while the turn runs, at turn end for the rules tier, or on the next accepted prompt for a finished background step | A `Memory:` block inside `<system-reminder>`, recorded in the session ledger | `src/session-control/turn-middleware.ts` |
 | Post-compaction restoration | After a durable continuity or summary commit is installed | Status (when no handoff note or summary already carries current state), knowledge and procedural entries, labeled unverified | `src/domains/memory/restoration.ts`, `src/session-control/turn-context.ts` |
-| Approved durable memory | Every prepared operator turn, as part of the compiled system prompt | A `# Memory` section of at most 5 approved records within 400 estimated tokens | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |
+| Approved durable memory | Every prepared operator turn, as part of the compiled system prompt | A `# Memory` section of at most 5 approved records within 400 estimated tokens, each naming whether an operator approved it or the evidence gate retained it | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |
 
 A background model never writes directly to the system prompt. Durable records
 must pass operator approval or the repository-lesson evidence gate described
@@ -107,12 +115,27 @@ below before prompt selection can include them.
 With `context.memory.enabled: true` (the default), completed-task retention
 extracts reusable lessons from the session's own receipts. The host also keeps
 commands the evidence proves, regardless of whether the lesson model proposes
-them. A command qualifies when the same program on the same repository file
-failed earlier and then succeeded, or when the session read the named file,
-the file contains every passed option and environment assignment, and the
-command succeeded. Shell chains and substitutions do not qualify because their
-exit status cannot prove which part worked. Source:
+them. A command qualifies when it is one simple invocation that executes a
+repository file, as the program itself or as the script an interpreter such as
+`node` or `python` runs (launchers such as `npx`, `env`, `pnpm exec` and
+`uv run` are looked through), and either the same program on the same file
+failed earlier and then succeeded, or the session read that file, the file
+contains every passed option and environment assignment, and the command
+succeeded. Naming a file is not running it, and a help or version call teaches
+nothing about running it. A recipe whose command an approved lesson already
+carries as evidence in other words is not filed again. Source:
 `src/domains/memory/recipes.ts` and `src/domains/memory/completion-retention.ts`.
+
+Only an exact receipt counts as a successful run. The shell tool's own ok
+result with exit 0 vouches for the command it ran. A successful pure `&&`
+chain run from the workspace root also counts each of its segments as a run of
+its own, because exit 0 proves every segment exited 0; one leading `cd` to the
+root itself is allowed. `;`, `||`, pipes, background launches, substitutions,
+comments and multi-line scripts do not qualify because their exit status
+cannot prove which part ran, and a chain with another `cd` or a state-changing
+word such as `export`, `source`, `exec`, `builtin` or `command` is not split.
+A shell call given a `cwd` other than the workspace root counts for nothing.
+Source: `src/domains/memory/command-evidence.ts`.
 
 Retention records its bounded progress under `<stateDir>/memory/retention/`.
 A process that finds an unsettled retention can recover the completed task from
@@ -121,26 +144,61 @@ are revalidated before retention continues. This uses the existing memory route,
 deadline and evidence gate rather than making the bank durable. Source:
 `src/domains/memory/runtime.ts`.
 
+Retention that extracted lessons but could bind none of them to a receipt or a
+quoted source settles as `abstained` with reason `missing-source-evidence`
+instead of trying again: the same ledger yields the same evidence, so a second
+extraction could only reword them. In the live session those lessons stay in
+the bank and are filed as unapproved proposals when its scope ends. Source:
+`src/domains/memory/completion-retention.ts`.
+
+Between turns the guardian also reviews earlier sessions of the same
+repository for lessons. An excerpt counts as reviewed only after what it
+taught is durable: filed in the store, or saved as pending candidates under
+`<stateDir>/memory/history-candidates/`, which a later guardian step files
+without a model call. When neither succeeds, the excerpt stays unreviewed and
+the review parks until the guardian's next wake. At most 64 candidate files
+are kept; past that, a failing store holds the review where it is. Source:
+`src/domains/memory/guardian.ts` and `src/domains/memory/lesson-feedback.ts`.
+
 ## When a repository lesson becomes approved
 
 Repository-scoped knowledge produced from a task-bank entry can receive
 guardian approval after one session records that the lesson held, with no
-contradiction or recorded regression. Procedural proposals still wait for an
+contradiction or recorded regression. It waits for the operator instead when
+another approved repository lesson already carries one of its `command:`
+evidence refs: two wordings of one command stay separate claims, and which one
+stands is the operator's call. Procedural proposals still wait for an
 operator. Global, runtime and agent scopes also require operator approval.
 The guardian never reverses an operator approval or rejection. A later
 contradiction demotes a guardian-approved lesson. The `held` observation is an
 evidence-gate input, not proof of a general claim. Source:
 `src/domains/memory/guardian-gate.ts`.
 
+In a live session a delivered lesson holds only when a later receipt satisfies
+its own evidence: its exact command succeeded as one simple invocation, or a
+read showed its quoted source and the checkout still contains it. Quiet steps
+and unrelated successes decide nothing. Two recurrences, after submission, of
+the failure the reminder was about record it as contradicted. Source:
+`src/domains/memory/intervention.ts`.
+
 ## Offer a lesson beside the action it concerns
 
 An eligible approved lesson can appear at the session's first workspace change,
-when a read, edit or command touches a file the lesson names, when verification
-finds no declared check, or when a failed command uses the same program and file
-as a kept working command. A lesson appears at most once per session and is
-omitted once its quoted command has already succeeded there. The reminder is
-advice and never grants permission to execute the command. Source:
-`src/domains/memory/intervention.ts`.
+with lessons about the changed file first; when a read, edit or command touches
+a file the lesson names; when verification finds no declared check; or when a
+failed command runs the same repository file through the same program as a
+command the lesson recommends, or is exactly a failed example the lesson
+quotes. A lesson recommends the command its `command:` evidence names. Without
+one, it recommends every command it quotes except help and version calls and
+those its own clause says failed or rules out. A lesson appears at most once
+per session, counted from the request that carried it, and is omitted once its
+recommended command has already succeeded there exactly. Each line names who
+stands behind the lesson, `operator-approved` or `retained automatically`, and
+carries its stored `Applies when` and `Avoid when` conditions. An approved
+lesson whose reminder was submitted is observed `delivered`, and `held` once
+its recommended command then succeeds exactly. The reminder is advice and never
+grants permission to execute the command. Source:
+`src/domains/memory/intervention.ts` and `src/domains/memory/lesson-projection.ts`.
 
 `/memory` opens on **Lessons**: the reusable lessons eligible for this session,
 what each concerns, whether the main prompt carries it, its evidence and its
@@ -155,6 +213,54 @@ notes that the existing compactor can use in place of the history they cover.
 These continuity notes are separate from reusable lessons and preserve source
 references; they do not approve a durable record. Source:
 `src/domains/memory/observations.ts` and `src/domains/memory/runtime.ts`.
+
+Preparation is sized so a session that never nears compaction pays little:
+
+- It waits until the live context fills 0.4 of the main route's usable history.
+  When that share is unknown, this gate does not apply.
+- The observer is called only for a source group of at least the smaller of
+  1,024 and half the source budget (and at least 256) estimated tokens, never
+  for a group whose exact user material leaves no room for smaller notes. Each
+  source revision gets at most two model attempts.
+- Between turns it waits while the intervention owes a turn-boundary step, so a
+  turn-end lesson pass runs first. A preparation call already in flight is not
+  interrupted.
+
+Observer input comes from the session's own messages through a reasoning-free
+projection. Thinking blocks and provider signature fields never reach the
+observer, and a payload shape the projection cannot carry exactly leaves its
+unit uncovered (`src/domains/session/message-projection.ts`).
+
+The observer answers with one JSON envelope of notes. A note that cites a
+source reference the host did not supply, or that the host cannot read, is
+dropped and the others stand. A `supersedes` link that resolves to no note is
+removed without dropping its note. A batch with no acceptable note is refused.
+The only repair the host makes is one missing final brace after the notes
+array; any other malformed envelope is refused.
+
+When prepared notes outgrow the journal budget, a reflection consolidates a run
+of adjacent batches. It asks for at most 8 notes whose `supersedes` lists
+account for every input note. A constraint, unresolved item or attempt that no
+output note represents is carried forward verbatim. The reflection is refused
+when that would exceed 16 notes or when the result is not smaller than its
+inputs, and its inputs are deleted only after the reflection is written.
+
+At compaction, memory receives the raw ledger slice the cut selected and
+offers whole prepared batches that lie inside it. Uncovered units are
+serialized from the same working-set projection the ordinary summary uses. The
+compactor uses the offer only when the whole substituted summarizer request
+fits the model's window and is smaller than the ordinary request; otherwise it
+summarizes the ordinary history (`src/domains/session/compaction/compact.ts`).
+Lifecycle rows such as `batch-ready`, `notes-rejected`, `offer-declined` and
+`offer-used`, which records `originalInputTokens` and `substitutedInputTokens`,
+are appended to `<stateDir>/memory/observation-events.jsonl` without note or
+message text.
+
+Each session keeps at most 64 artifacts under
+`<stateDir>/memory/observations/<sessionId>/`. When the directory is full,
+unreadable files go first, then batches prepared against another checkpoint or
+branch anchor, then batches a reflection replaced
+(`src/domains/memory/observation-store.ts`).
 
 ## Paper mapping and Clio Coder constraints
 
@@ -348,10 +454,10 @@ A well-formed reminder is still gated, and stays invisible, in these cases:
 | Reason | Condition |
 | --- | --- |
 | `uncited` | A reminder started by the interval alone cites no current knowledge or procedural ID. Steps started by an error streak or a loop signal may be uncited. |
-| `duplicate_reminder` | The text repeats the reminder already on screen. Recorded as `silent`. |
+| `duplicate_reminder` | The text repeats the reminder already on screen, or one this session already submitted. Recorded as `silent`. |
 | `suppressed` | The rules tier already spoke for this boundary. Recorded as `silent`; phase one still applied. |
 | `over_budget` | The reminder exceeds `context.memory.maxOutputTokens` once prefixed with `Memory:`. It is dropped rather than truncated, because truncation could strip the citation that earns it a voice. |
-| `resolved_failure` | A cited procedural entry records a call that has since succeeded in the observed trajectory. |
+| `resolved_failure` | A cited procedural entry records a call that has since succeeded in the observed trajectory, or, while the model answered, the failure it was asked about resolved or a fact it cites was rewritten. |
 | `invalid_path` | The reminder names a workspace file that does not exist, holds more than 16 path references, or names a path over 320 characters. A path outside the workspace is not checked. |
 | `no_repeated_failure` | The trajectory holds a failed tool call but no operation fingerprint seen at least twice with an error among them, and the reminder restores no unchanged bank fact. A `read` of a guessed path that does not exist does not count. |
 
@@ -428,7 +534,11 @@ LiteLLM is a gateway protocol, so Clio does not invent a local one-slot limit fo
 its URL. Distinct model routes can share that gateway URL (for example, separate
 chat and memory target profiles pointing to the same LiteLLM proxy); the gateway
 owns their physical routing and backend residency. An explicit or observed
-endpoint-wide bound still applies when present. Clio Coder's process-local foreground
+endpoint-wide bound still applies when present. When the gateway has no
+declared or discovered capacity, a `litellm` or `openrouter` memory step counts
+only streams on its own model, plus gateway streams attributed to no model, so a
+turn on another model through the same gateway no longer skips it
+(`src/domains/providers/endpoint-capacity.ts`). Clio Coder's process-local foreground
 holds and observed dispatch state are not a global scheduler for every client
 using the gateway. Slot holds are released on success, failure and abort.
 
@@ -458,7 +568,7 @@ kind from its resolved pricing and runtime; there is no setting for it.
 - **Local** (`known_free`) and **unpriced** routes, such as a LiteLLM proxy
   without declared `pricing`, have no dollar limit. The endpoint is the budget:
   a step takes a free slot or is skipped with `endpoint_busy`, and a foreground
-  request still preempts it. Once the endpoint has reported prefill and
+  request competing for the same slot still preempts it. Once the endpoint has reported prefill and
   generation speed, the step's deadline is the time it needs for its prompt plus
   `context.memory.maxOutputTokens`. When that exceeds `context.memory.timeoutMs`
   the step is skipped with `time_budget`. With no measurement yet the deadline
@@ -591,12 +701,15 @@ set)** in the Memory connection picker does the same.
 
 ## Where what the tier writes ends up
 
-A bank entry lives and dies with its session. When a model-tier reminder actually
-reaches the operator, the entries it cited are also proposed into the durable store at
+A bank entry lives and dies with its session. When the host finds a model-tier
+reminder inside an admitted request, the entries it cited are also proposed into the durable store at
 `<dataDir>/memory/records.json`, unapproved, scoped to the repository the session
 is working in, with provenance naming the session and the source entry. The record
 cites `session:<sessionId>` as its evidence reference and starts at confidence
-`0.6`. Completed-task retention also writes evidence-backed candidates through
+`0.6`. An entry saved with one simple command quoted whole in its text also
+carries a `command:` identity, and one saved with a quoted source a `source:`
+identity. These name what the lesson recommends; whether a receipt satisfied
+them is decided by the evidence gate. Completed-task retention also writes evidence-backed candidates through
 this store bridge (`src/domains/memory/task-bank-promotion.ts`).
 
 `/memory` and `clio-coder memory list` show the proposal.
@@ -637,8 +750,9 @@ by one line per distinct content, each quoting the entry text and naming its IDs
 Entries with equal whitespace-normalized content share one line. Status leads and
 is labeled `historical status`, but it is omitted when the accepted handoff note
 or compaction summary already carries current state. Knowledge and procedural
-entries follow in recency order, and entries that do not fit the budget are
-omitted. The budget is the smaller of the room left in the context window and
+entries follow in recency order. An entry whose text the accepted checkpoint
+already states in whole words, whitespace normalized, is omitted rather than
+repeated, and entries that do not fit the budget are omitted. The budget is the smaller of the room left in the context window and
 `context.memory.maxOutputTokens`. The offer is consumed only after the host
 installs the exact message into the admitted context; a cancelled or stale offer
 is discarded and the pending restoration stays.
