@@ -16,15 +16,17 @@
  * admission for another session's labels.
  */
 
-import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { redactSecretString } from "../safety/redaction.js";
 import type { SessionEntry } from "../session/index.js";
 import type { SessionLedgerStat } from "../session/related-ledgers.js";
 import { sessionLedgersForRoots } from "../session/related-ledgers.js";
+import { succeededCommandForms, successfulShellReceipt } from "./command-evidence.js";
 import { recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
 import { observationDigest } from "./observations.js";
 import { relatedRepositoryRoots } from "./operations.js";
@@ -37,6 +39,8 @@ export interface CompletedLessonSource {
 	readonly observedReads: ReadonlyMap<string, readonly string[]>;
 	/** Every exact shell command the task ran, in order, with its receipt; the host's own recipe evidence. */
 	readonly commandRuns: readonly CommandRun[];
+	/** Tool-call identities the rendered excerpt showed; history review skips them once retention settles. */
+	readonly callIds?: readonly string[];
 }
 
 export interface CommandRun {
@@ -79,6 +83,7 @@ function renderCompletedLessonSource(entries: readonly SessionEntry[], root: str
 	const succeededCommands = new Set<string>();
 	const observedReads = new Map<string, string[]>();
 	const commandRuns: CommandRun[] = [];
+	const callIds: string[] = [];
 	let worthwhile = false;
 	let sourceReads = 0;
 	let chars = 0;
@@ -91,13 +96,14 @@ function renderCompletedLessonSource(entries: readonly SessionEntry[], root: str
 		let full = false;
 		for (const item of rendered.items) {
 			// Receipts are evidence whether or not their line fits the model's excerpt.
-			if (item.run !== null) commandRuns.push(item.run);
-			if (item.succeeded !== null) succeededCommands.add(item.succeeded);
+			commandRuns.push(...item.runs);
+			for (const form of item.succeeded) succeededCommands.add(form);
 			full ||= chars + item.line.length > 4000;
 			if (full) continue;
 			lines.push(item.line);
 			chars += item.line.length + 1;
 			refs.push(entry.turnId);
+			if (item.callId !== null) callIds.push(item.callId);
 			if (item.read !== null) recordObservedRead(observedReads, item.read.path, item.read.excerpt);
 			if (item.worthReview === "command") worthwhile = true;
 			if (item.worthReview === "source") sourceReads++;
@@ -105,7 +111,45 @@ function renderCompletedLessonSource(entries: readonly SessionEntry[], root: str
 	}
 	if (calls.size > 0 || (!worthwhile && sourceReads < SOURCE_READS_WORTH_REVIEW)) return null;
 	const text = lines.join("\n");
-	return { revision: observationDigest([refs, text]), refs, text, succeededCommands, observedReads, commandRuns };
+	return {
+		revision: observationDigest([refs, text]),
+		refs,
+		text,
+		succeededCommands,
+		observedReads,
+		commandRuns,
+		callIds,
+	};
+}
+
+/**
+ * Record tool calls a settled completed-task retention already reviewed, so
+ * history review passes over them without another model call. A session that
+ * closes right after its task used to be mined twice: once by retention and
+ * again by the guardian reading the same ledger as history.
+ */
+export function recordReviewedHistoryCalls(stateDir: string, cwd: string, callIds: readonly string[]): void {
+	const repositoryKey = relatedRepositoryRoots(cwd)?.repository.key ?? null;
+	if (repositoryKey === null || callIds.length === 0) return;
+	const path = historyReviewCursorPath(stateDir);
+	try {
+		withStateFileLockSync(
+			path,
+			() => {
+				const file = readCursorFile(path) ?? { version: CURSOR_FILE_VERSION, repositories: {} };
+				const current = readRepositoryCursors(path, repositoryKey) ?? { sessions: {}, seenCalls: [] };
+				const known = new Set(current.seenCalls);
+				file.repositories[repositoryKey] = boundCursors({
+					sessions: current.sessions,
+					seenCalls: [...current.seenCalls, ...callIds.filter((id) => !known.has(id))],
+				});
+				safeResourceWrite(path, `${JSON.stringify(file)}\n`);
+			},
+			{ timeoutMs: 100 },
+		);
+	} catch {
+		// An optimization only: a lost write costs one repeated review.
+	}
 }
 
 const CURSOR_FILE_VERSION = 1;
@@ -115,6 +159,12 @@ const CURSOR_SESSION_LIMIT = 1_000;
 const SEEN_CALL_LIMIT = 4_000;
 /** Largest window one read takes from a ledger; a slice may take several. */
 const READ_WINDOW_MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * First window a slice reads. A slice is a few thousand rendered characters,
+ * so reading the largest window every time read and materialized megabytes to
+ * use kilobytes; the window grows only when a line or a call's result needs it.
+ */
+const READ_WINDOW_INITIAL_BYTES = 256 * 1024;
 const COMMAND_MAX_CHARS = 400;
 const TASK_MAX_CHARS = 300;
 const DIAGNOSTIC_MAX_CHARS = 160;
@@ -135,6 +185,8 @@ interface SessionCursor {
 	size: number;
 	/** The ledger recorded a flow restriction at or before `offset`; nothing later is read. */
 	restricted?: true;
+	/** Ledger file identity the offset was recorded against; absent on cursors written before it existed. */
+	identity?: string;
 }
 
 interface RepositoryCursors {
@@ -202,31 +254,86 @@ export function createHistoryReviewSource(input: {
 	const repositoryKey = related?.repository.key ?? null;
 	const path = historyReviewCursorPath(input.stateDir);
 	let cursors: RepositoryCursors | null = null;
-	const load = (): RepositoryCursors => {
-		if (cursors !== null) return cursors;
-		cursors = readRepositoryCursors(path, repositoryKey ?? "") ?? { sessions: {}, seenCalls: [] };
+	const ledgerIdentity = (key: string): string | null => {
+		try {
+			const info = statSync(join(input.stateDir, "sessions", key, "current.jsonl"));
+			return `${info.dev}:${info.ino}`;
+		} catch {
+			return null; /* A removed ledger has no cursor worth keeping. */
+		}
+	};
+	/** Another process's progress is merged in, never overwritten by a stale copy. */
+	const refresh = (): RepositoryCursors => {
+		const disk = readRepositoryCursors(path, repositoryKey ?? "");
+		cursors =
+			cursors === null
+				? (disk ?? { sessions: {}, seenCalls: [] })
+				: disk === null
+					? cursors
+					: mergeCursors(disk, cursors, ledgerIdentity);
 		return cursors;
 	};
 	const persist = (): void => {
 		if (repositoryKey === null || cursors === null) return;
 		try {
-			const file = readCursorFile(path) ?? { version: CURSOR_FILE_VERSION, repositories: {} };
-			file.repositories[repositoryKey] = boundCursors(cursors);
-			safeResourceWrite(path, `${JSON.stringify(file)}\n`);
+			withStateFileLockSync(
+				path,
+				() => {
+					const file = readCursorFile(path) ?? { version: CURSOR_FILE_VERSION, repositories: {} };
+					const disk = readRepositoryCursors(path, repositoryKey);
+					const merged = disk === null || cursors === null ? cursors : mergeCursors(disk, cursors, ledgerIdentity);
+					if (merged === null) return;
+					cursors = merged;
+					file.repositories[repositoryKey] = boundCursors(merged);
+					safeResourceWrite(path, `${JSON.stringify(file)}\n`);
+				},
+				{ timeoutMs: 100 },
+			);
 		} catch {
 			// Cursors are an optimization: a lost write costs one repeated review, never correctness.
 		}
+	};
+	// The bytes of the last window read, so consecutive slices of one ledger read
+	// only what they have not seen and are charged only for that.
+	let cache: { key: string; identity: string; start: number; bytes: Buffer } | null = null;
+	/** At most `length` bytes from `offset`, of which no more than `maxFresh` come from disk. */
+	const readWindow = (
+		ledger: SessionLedgerStat,
+		offset: number,
+		length: number,
+		maxFresh: number,
+	): { buffer: Buffer; fresh: number } => {
+		const cached = cache;
+		if (
+			cached !== null &&
+			cached.key === ledger.key &&
+			cached.identity === ledger.identity &&
+			cached.start + cached.bytes.length <= ledger.size &&
+			offset >= cached.start &&
+			offset <= cached.start + cached.bytes.length
+		) {
+			const have = cached.bytes.subarray(offset - cached.start);
+			if (have.length >= length) return { buffer: have.subarray(0, length), fresh: 0 };
+			const extra = readBytes(ledger.path, offset + have.length, Math.max(0, Math.min(length - have.length, maxFresh)));
+			const buffer = Buffer.concat([have, extra]);
+			cache = { key: ledger.key, identity: ledger.identity, start: offset, bytes: buffer };
+			return { buffer, fresh: extra.length };
+		}
+		const buffer = readBytes(ledger.path, offset, Math.max(0, Math.min(length, maxFresh)));
+		cache = { key: ledger.key, identity: ledger.identity, start: offset, bytes: buffer };
+		return { buffer, fresh: buffer.length };
 	};
 	return {
 		repositoryKey,
 		next(request) {
 			if (related === null) return { slice: null, exhausted: true };
-			const state = load();
+			const state = refresh();
 			const nowMs = request.nowMs ?? Date.now();
 			const seen = new Set(state.seenCalls);
 			const ledgers = sessionLedgersForRoots(input.stateDir, related.roots, {
 				excludeSessionId: input.currentSessionId,
 			}).filter((ledger) => request.horizonMs === Number.POSITIVE_INFINITY || nowMs - ledger.mtimeMs <= request.horizonMs);
+			// Charged for bytes actually read from disk, not for the cursor distance consumed.
 			let budget = request.maxReadBytes;
 			let advanced = false;
 			// A call held for its result past this request's budget: the horizon is
@@ -234,20 +341,49 @@ export function createHistoryReviewSource(input: {
 			let budgetHeld = false;
 			for (const ledger of ledgers) {
 				const prior = state.sessions[ledger.key];
-				if (prior?.restricted) continue;
-				// A ledger shorter than its cursor was rewritten; read it again from the
+				// A cursor recorded against another file identity, or past the end of a
+				// shorter file, belongs to a rewritten ledger; read it again from the
 				// start and let the seen-call set drop what was already reviewed.
-				let offset = prior !== undefined && prior.offset <= ledger.size ? prior.offset : 0;
+				const sameLedger = prior !== undefined && (prior.identity === undefined || prior.identity === ledger.identity);
+				if (sameLedger && prior?.restricted) continue;
+				let offset = sameLedger && prior !== undefined && prior.offset <= ledger.size ? prior.offset : 0;
 				if (offset >= ledger.size) continue;
+				let window = READ_WINDOW_INITIAL_BYTES;
 				while (offset < ledger.size && budget > 0) {
-					const read = readSlice(ledger, offset, Math.min(budget, READ_WINDOW_MAX_BYTES), request.maxChars, seen);
-					budget -= Math.max(1, read.endOffset - offset);
+					const remaining = budget;
+					const read = readSlice(
+						ledger,
+						offset,
+						Math.min(window, ledger.size - offset),
+						request.maxChars,
+						seen,
+						(target, at, length) => readWindow(target, at, length, remaining),
+						window >= READ_WINDOW_MAX_BYTES,
+					);
+					budget -= read.bytesRead;
 					if (read.endOffset <= offset) {
-						if (read.heldForBudget) budgetHeld = true;
+						// A line or a call's result lies past what was read. Out of budget,
+						// the next request resumes from the bytes already held; otherwise
+						// widen the window, paying only for the bytes not yet read.
+						if (read.needsWider) {
+							if (budget <= 0) {
+								budgetHeld = true;
+								break;
+							}
+							if (window < READ_WINDOW_MAX_BYTES && offset + window < ledger.size) {
+								window = Math.min(READ_WINDOW_MAX_BYTES, window * 4);
+								continue;
+							}
+						}
 						break;
 					}
 					if (read.restricted) {
-						state.sessions[ledger.key] = { offset: read.endOffset, size: ledger.size, restricted: true };
+						state.sessions[ledger.key] = {
+							offset: read.endOffset,
+							size: ledger.size,
+							restricted: true,
+							identity: ledger.identity,
+						};
 						advanced = true;
 						break;
 					}
@@ -263,7 +399,7 @@ export function createHistoryReviewSource(input: {
 								commandRuns: read.commandRuns,
 								advance: {
 									key: ledger.key,
-									cursor: { offset: read.endOffset, size: ledger.size },
+									cursor: { offset: read.endOffset, size: ledger.size, identity: ledger.identity },
 									seenCalls: read.callIds,
 								},
 							},
@@ -272,9 +408,10 @@ export function createHistoryReviewSource(input: {
 					}
 					// Nothing worth a model call here: advance past it deterministically.
 					offset = read.endOffset;
+					window = READ_WINDOW_INITIAL_BYTES;
 					for (const id of read.callIds) seen.add(id);
 					state.seenCalls.push(...read.callIds);
-					state.sessions[ledger.key] = { offset, size: ledger.size };
+					state.sessions[ledger.key] = { offset, size: ledger.size, identity: ledger.identity };
 					advanced = true;
 				}
 				if (budget <= 0) {
@@ -286,18 +423,65 @@ export function createHistoryReviewSource(input: {
 			return { slice: null, exhausted: !budgetHeld };
 		},
 		commit(slice) {
-			const state = load();
-			state.sessions[slice.advance.key] = slice.advance.cursor;
+			const state = refresh();
+			const previous = state.sessions[slice.advance.key];
+			// Monotonic within one ledger identity: a slice read before another
+			// process moved further never moves the cursor back.
+			if (
+				previous === undefined ||
+				previous.identity !== slice.advance.cursor.identity ||
+				previous.offset < slice.advance.cursor.offset
+			)
+				state.sessions[slice.advance.key] = slice.advance.cursor;
 			state.seenCalls.push(...slice.advance.seenCalls);
 			persist();
 		},
 	};
 }
 
+/**
+ * Union of two processes' progress for one repository. Within one ledger
+ * identity the furthest offset wins (and a restriction sticks); across
+ * identities only the cursor recorded against the ledger's current file
+ * survives, because an offset into a replaced file means nothing.
+ */
+function mergeCursors(
+	disk: RepositoryCursors,
+	mine: RepositoryCursors,
+	identityOf: (key: string) => string | null,
+): RepositoryCursors {
+	const sessions: Record<string, SessionCursor> = { ...disk.sessions };
+	for (const [key, cursor] of Object.entries(mine.sessions)) {
+		const other = sessions[key];
+		if (other === undefined) {
+			sessions[key] = cursor;
+			continue;
+		}
+		if (other.identity === cursor.identity || other.identity === undefined || cursor.identity === undefined) {
+			const furthest = cursor.offset >= other.offset ? cursor : other;
+			sessions[key] = {
+				...furthest,
+				...(cursor.restricted || other.restricted ? { restricted: true as const } : {}),
+				...((furthest.identity ?? cursor.identity ?? other.identity)
+					? { identity: furthest.identity ?? cursor.identity ?? other.identity }
+					: {}),
+			};
+			continue;
+		}
+		const current = identityOf(key);
+		if (current === cursor.identity) sessions[key] = cursor;
+		else if (current !== other.identity) delete sessions[key];
+	}
+	const seen = new Set(disk.seenCalls);
+	return { sessions, seenCalls: [...disk.seenCalls, ...mine.seenCalls.filter((id) => !seen.has(id))] };
+}
+
 interface SliceRead {
 	endOffset: number;
-	/** The read stopped at a call whose result lies past this budget-cut window; a fresh budget resumes it. */
-	heldForBudget?: boolean;
+	/** Bytes this read took from disk; bytes already held from the previous window cost nothing. */
+	bytesRead: number;
+	/** No progress because a line or a call's result lies past this window; a wider window resumes it. */
+	needsWider?: boolean;
 	text: string;
 	useful: boolean;
 	restricted: boolean;
@@ -318,9 +502,12 @@ function readSlice(
 	maxBytes: number,
 	maxChars: number,
 	seen: ReadonlySet<string>,
+	readWindow: (ledger: SessionLedgerStat, offset: number, length: number) => { buffer: Buffer; fresh: number },
+	widestWindow: boolean,
 ): SliceRead {
 	const empty: SliceRead = {
 		endOffset: offset,
+		bytesRead: 0,
 		text: "",
 		useful: false,
 		restricted: false,
@@ -330,15 +517,26 @@ function readSlice(
 		commandRuns: [],
 	};
 	let buffer: Buffer;
+	let bytesRead = 0;
 	try {
-		buffer = readBytes(ledger.path, offset, Math.min(maxBytes, ledger.size - offset));
+		const read = readWindow(ledger, offset, Math.min(maxBytes, ledger.size - offset));
+		buffer = read.buffer;
+		bytesRead = read.fresh;
 	} catch {
 		return empty;
 	}
+	empty.bytesRead = bytesRead;
 	const atEnd = offset + buffer.length >= ledger.size;
+	// Only a full read of the widest window may skip or abandon what does not fit;
+	// a read the budget shortened resumes with more bytes instead.
+	const widest = widestWindow && buffer.length >= Math.min(maxBytes, ledger.size - offset);
 	const lastNewline = buffer.lastIndexOf(0x0a);
-	// A final line without its newline may still be being written.
-	if (lastNewline < 0) return atEnd ? empty : { ...empty, endOffset: offset + buffer.length };
+	// A final line without its newline may still be being written. A line
+	// longer than the widest window is skipped, as it always was.
+	if (lastNewline < 0) {
+		if (atEnd) return empty;
+		return widest ? { ...empty, endOffset: offset + buffer.length } : { ...empty, needsWider: true };
+	}
 	const lines: Array<{ text: string; start: number; end: number }> = [];
 	let start = 0;
 	while (start <= lastNewline) {
@@ -358,7 +556,7 @@ function readSlice(
 	let sourceReads = 0;
 	let endOffset = offset;
 	let stoppedByChars = false;
-	let heldForBudget = false;
+	let needsWider = false;
 	/** Start of the last result line taken; a result after a pending call means the session moved on. */
 	let lastResultStart = -1;
 	for (const line of lines) {
@@ -366,6 +564,7 @@ function readSlice(
 		if (entry?.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE) {
 			return {
 				endOffset: line.end,
+				bytesRead,
 				text: "",
 				useful: false,
 				restricted: true,
@@ -397,8 +596,8 @@ function readSlice(
 					rendered.push(item.counted ? `${step}. ${item.line}` : item.line);
 					chars += item.line.length + 1;
 				}
-				if (item.succeeded !== null) succeededCommands.add(item.succeeded);
-				if (item.run !== null) commandRuns.push(item.run);
+				for (const form of item.succeeded) succeededCommands.add(form);
+				commandRuns.push(...item.runs);
 				if (item.read !== null) recordObservedRead(observedReads, item.read.path, item.read.excerpt);
 				if (item.worthReview === "command") commandWorth = true;
 				else if (item.worthReview === "source") sourceReads += 1;
@@ -415,23 +614,24 @@ function readSlice(
 		if (earliestPending > offset) endOffset = earliestPending;
 		else {
 			// The call opens this read, so rolling back makes no progress. Hold here
-			// when a larger read can still reach the result (this window was cut by
-			// the per-wake budget) or when the ledger simply ends before it (a live
-			// session has not written it yet). A call the session moved on from (a
-			// later result exists) or one no window can pair is abandoned, so a
-			// cancelled tool or an oversize line cannot pin the cursor.
-			const budgetCut = !stoppedByChars && !atEnd && maxBytes < READ_WINDOW_MAX_BYTES;
+			// when a wider read can still reach the result (this window was not the
+			// widest) or when the ledger simply ends before it (a live session has
+			// not written it yet). A call the session moved on from (a later result
+			// exists) or one no window can pair is abandoned, so a cancelled tool or
+			// an oversize line cannot pin the cursor.
+			const windowCut = !stoppedByChars && !atEnd && !widest;
 			const awaitingResult = atEnd && !stoppedByChars && lastResultStart < earliestPending;
-			if (budgetCut || awaitingResult) endOffset = offset;
-			heldForBudget = budgetCut;
+			if (windowCut || awaitingResult) endOffset = offset;
+			needsWider = windowCut;
 		}
 	}
 	return {
 		endOffset,
+		bytesRead,
 		text: rendered.join("\n"),
 		useful: commandWorth || sourceReads >= SOURCE_READS_WORTH_REVIEW,
 		restricted: false,
-		heldForBudget,
+		needsWider,
 		callIds,
 		succeededCommands,
 		observedReads,
@@ -459,13 +659,14 @@ interface RenderedItem {
 	counted: boolean;
 	/** Unique id of the observation, for fork deduplication. */
 	callId: string | null;
-	succeeded: string | null;
+	/** Exact commands this receipt proves ran with exit 0: the command, and each segment of a pure `&&` chain. */
+	succeeded: readonly string[];
 	/** A successful read's repository-relative path and the excerpt shown for it, for source evidence. */
 	read: { path: string; excerpt: string } | null;
 	/** `command` for a non-trivial shell command, `source` for a successful source read, else null. */
 	worthReview: "command" | "source" | null;
-	/** An exact shell command and its receipt; null for anything else or a command shown inexactly. */
-	run: CommandRun | null;
+	/** Exact shell commands and their receipts; empty for anything else or a command shown inexactly. */
+	runs: readonly CommandRun[];
 }
 
 /** Source reads that make a stretch worth review on their own, without a shell command. */
@@ -490,10 +691,10 @@ function renderEntry(
 					line: `task: ${shortText(redactSecretString(text), TASK_MAX_CHARS)}`,
 					counted: false,
 					callId: null,
-					succeeded: null,
+					succeeded: [],
 					read: null,
 					worthReview: null,
-					run: null,
+					runs: [],
 				},
 			],
 		};
@@ -570,10 +771,10 @@ function renderOutcome(
 			line: `${label}${failed ? " FAILED" : ""}${excerpt ? ` => ${excerpt}` : ""}`,
 			counted: true,
 			callId: id,
-			succeeded: null,
+			succeeded: [],
 			read: path === null || excerpt.length === 0 ? null : { path, excerpt },
 			worthReview: !failed && detail.length > 0 ? "source" : null,
-			run: null,
+			runs: [],
 		};
 	}
 	const redacted = redactSecretString(command);
@@ -583,17 +784,20 @@ function renderOutcome(
 	const shown = exact ? command : shortText(redacted, COMMAND_MAX_CHARS);
 	// The same receipt the live guardian accepts: the shell tool's own success
 	// outcome and a zero exit it reported.
-	const succeeded = !failed && details.outcome === "success" && details.exitCode === 0;
+	const succeeded = successfulShellReceipt(!failed, details);
 	const worthReview = TRIVIAL_COMMAND.test(command.trim()) ? null : "command";
 	if (succeeded) {
+		// The exact command and, for a pure `&&` chain run from the root, each
+		// of its segments: exit 0 proves every one of them finished with exit 0.
+		const forms = exact ? succeededCommandForms(command, root, typeof args.cwd === "string" ? args.cwd : undefined) : [];
 		return {
 			line: `ok: ${shown}`,
 			counted: true,
 			callId: id,
-			succeeded: exact ? command : null,
+			succeeded: forms,
 			read: null,
 			worthReview,
-			run: exact ? { command, ok: true, diagnostic: "" } : null,
+			runs: forms.map((form) => ({ command: form, ok: true, diagnostic: "" })),
 		};
 	}
 	const failure = shortText(redactSecretString(diagnostic(result)), DIAGNOSTIC_MAX_CHARS);
@@ -601,10 +805,10 @@ function renderOutcome(
 		line: `FAILED: ${shown} => ${failure}`,
 		counted: true,
 		callId: id,
-		succeeded: null,
+		succeeded: [],
 		read: null,
 		worthReview,
-		run: exact ? { command, ok: false, diagnostic: failure } : null,
+		runs: exact ? [{ command, ok: false, diagnostic: failure }] : [],
 	};
 }
 
@@ -682,6 +886,7 @@ function readRepositoryCursors(path: string, repositoryKey: string): RepositoryC
 			offset: cursor.offset,
 			size: cursor.size,
 			...(cursor.restricted === true ? { restricted: true as const } : {}),
+			...(typeof cursor.identity === "string" ? { identity: cursor.identity } : {}),
 		};
 	}
 	const seenCalls = Array.isArray(entry.seenCalls)

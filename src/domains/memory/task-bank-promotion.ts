@@ -15,6 +15,7 @@
  * made by hand from `/memory`.
  */
 
+import { commandEvidenceRef, simpleInvocation, sourceEvidenceRef } from "./command-evidence.js";
 import { applyMemoryGate } from "./guardian-gate.js";
 import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord } from "./operations.js";
 import { memoryRecordFromPromotion } from "./promotion.js";
@@ -61,7 +62,7 @@ export async function proposeInjectedTaskMemory(
 		if (entry.kind === "status") continue;
 		try {
 			const record = memoryRecordFromPromotion(
-				{ kind: "task-bank-entry", sessionId, evidenceRefs: [`session:${sessionId}`], entry },
+				{ kind: "task-bank-entry", sessionId, evidenceRefs: [`session:${sessionId}`, ...evidenceIdentity(entry)], entry },
 				{ scope: "repo", repository },
 				input.now ?? new Date(),
 			);
@@ -80,13 +81,18 @@ export async function proposeInjectedTaskMemory(
 			let changed = false;
 			const at = (input.now ?? new Date()).toISOString();
 			for (const item of prepared) {
+				// Claim identity is the record or its exact wording. Evidence identity
+				// rides separately in `command:`/`source:` refs: two lessons quoting
+				// the same command can state different prerequisites, so a shared
+				// command never makes one claim's evidence count for the other.
 				const existing =
 					updated.find((record) => record.id === item.record.id) ??
-					(item.entry.durable === true
-						? (similarRepositoryLesson(updated, repository, item.entry.content) ??
-							sameCommandLesson(updated, repository, item.entry))
-						: null);
+					(item.entry.durable === true ? similarRepositoryLesson(updated, repository, item.entry.content) : null);
 				const record = cloneMemoryRecord(existing ?? item.record);
+				const addedEvidence = existing
+					? item.record.evidenceRefs.filter((ref) => !record.evidenceRefs.includes(ref) && /^(?:command|source):/u.test(ref))
+					: [];
+				if (addedEvidence.length > 0) record.evidenceRefs = [...record.evidenceRefs, ...addedEvidence];
 				// One verdict per session: a repeat from the same session adds nothing the gate
 				// counts, and stacking it would push older contradictions out of the window.
 				const held =
@@ -97,9 +103,9 @@ export async function proposeInjectedTaskMemory(
 					record.observations = [...(record.observations ?? []), { at, sessionId, kind: "held" as const }].slice(
 						-MEMORY_OBSERVATIONS_MAX,
 					);
-					applyMemoryGate(record, at);
+					applyMemoryGate(record, at, updated);
 				}
-				changed ||= !existing || held;
+				changed ||= !existing || held || addedEvidence.length > 0;
 				if (existing) updated[updated.indexOf(existing)] = record;
 				else updated.push(record);
 				result.records.push(record);
@@ -138,31 +144,19 @@ function similarRepositoryLesson(
 }
 
 /**
- * The repository lesson that already quotes this entry's evidence command.
- * Command evidence binds a lesson to one exact command the shell ran with exit
- * 0, so every such lesson claims the same thing: that command works here. Live
- * sessions filed that one validator recipe as an approved record and a pending
- * rewording of it, and the rewording waited for review forever. As with exact
- * text, a rejected record still matches: the operator declined that recipe.
- * Lessons without command evidence keep the exact-text rule above.
+ * The evidence identities an entry was saved with: its command when that is
+ * one simple invocation quoted whole in the lesson (a compound or commented
+ * command proves nothing about the program it names), and its quoted source.
+ * These name what the lesson recommends; they are not verdicts. Whether a
+ * receipt satisfied them is decided by `lessonEvidence` and the gate.
  */
-function sameCommandLesson(
-	records: ReadonlyArray<MemoryRecord>,
-	repository: MemoryRepositoryIdentity,
-	entry: TaskMemoryEntry,
-): MemoryRecord | null {
+function evidenceIdentity(entry: TaskMemoryEntry): string[] {
+	const refs: string[] = [];
 	const command = entry.evidenceCommand?.trim();
-	if (!command) return null;
-	const quoted = `\`${command}\``;
-	return (
-		records.find(
-			(record) =>
-				record.scope === "repo" &&
-				record.repository?.key === repository.key &&
-				record.provenance?.sourceEntryKind === "knowledge" &&
-				record.lesson.includes(quoted),
-		) ?? null
-	);
+	if (command && simpleInvocation(command) !== null && entry.content.includes(`\`${command}\``))
+		refs.push(commandEvidenceRef(command));
+	if (entry.evidenceSource) refs.push(sourceEvidenceRef(entry.evidenceSource.path, entry.evidenceSource.quote));
+	return refs;
 }
 
 function normalizeLesson(value: string): string {

@@ -18,7 +18,14 @@
  */
 
 import { readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, posix, relative, resolve, sep } from "node:path";
+import {
+	COMMAND_EVIDENCE_REF_PREFIX,
+	commandEvidenceRef,
+	diagnosticInvocation,
+	type SimpleInvocation,
+	simpleInvocation,
+} from "./command-evidence.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 
 export type LessonEvidenceKind = "command" | "source";
@@ -43,6 +50,9 @@ export function lessonEvidence(entry: TaskMemoryEntry, input: LessonEvidenceInpu
 	if (
 		entry.evidenceCommand !== undefined &&
 		input.succeededCommands.has(entry.evidenceCommand) &&
+		// A compound, commented or background command exits 0 without proving
+		// the program it names finished, and a help call exercises nothing.
+		simpleEvidenceCommand(entry.evidenceCommand) &&
 		// The text has to make the same claim the evidence supports: the exact
 		// command, delimited, so `node a.mjs --quick` does not vouch for `--full`.
 		entry.content.includes(`\`${entry.evidenceCommand}\``)
@@ -59,6 +69,11 @@ export function lessonEvidence(entry: TaskMemoryEntry, input: LessonEvidenceInpu
 	if (!observed.some((snippet) => collapse(snippet).includes(quote))) return null;
 	const content = readInsideRoot(input.workspaceRoot, path);
 	return content !== null && collapse(content).includes(quote) ? "source" : null;
+}
+
+function simpleEvidenceCommand(command: string): boolean {
+	const invocation = simpleInvocation(command);
+	return invocation !== null && !diagnosticInvocation(invocation);
 }
 
 /**
@@ -162,4 +177,137 @@ function unique(values: readonly string[]): string[] {
 
 function collapse(value: string): string {
 	return value.replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * Lessons quote commands in backticks, and not every quoted command is advice:
+ * a recipe names the command that failed first, and a `--help` call explains a
+ * tool without exercising it. A record's `command:` evidence ref names the
+ * recommended command exactly; without one, a command is advice unless its
+ * own clause says it failed or rules it out.
+ */
+export interface LessonCommands {
+	/** Commands the lesson tells a session to run. */
+	readonly recommended: readonly string[];
+	/** Failed examples, prohibitions and help/version calls the text quotes for contrast. */
+	readonly examples: readonly string[];
+}
+
+/**
+ * Wording that, right after a quoted command, says it failed. Read only up to
+ * the end of the clause, so `run \`a\`; \`b\` failed` marks only `b`.
+ */
+const FAILED_AFTER =
+	/^\s*(?:fail(?:s|ed|ing)?|errors?|errored|crash(?:es|ed)?|exits? (?:non-?zero|[1-9])|is broken|does(?: not|n['’]t) work|hangs?)\b/iu;
+/** Wording that, right before a quoted command, rules it out. */
+const PROHIBITED_BEFORE =
+	/\b(?:not|never|avoid|instead of|rather than|don['’]t(?: run| use)?|do not(?: run| use)?|stop|without)\s*$/iu;
+
+export function lessonCommands(text: string, evidenceRefs: readonly string[] = []): LessonCommands {
+	const spans = lessonSubject(text).commands;
+	const declared = new Set(evidenceRefs.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX)));
+	const recommended: string[] = [];
+	const examples: string[] = [];
+	for (const span of spans) {
+		const invocation = simpleInvocation(span);
+		const diagnostic = invocation !== null && diagnosticInvocation(invocation);
+		const advised =
+			declared.size > 0 ? declared.has(commandEvidenceRef(span)) : !diagnostic && !contrastedSpan(text, span);
+		(advised && !diagnostic ? recommended : examples).push(span);
+	}
+	return { recommended, examples };
+}
+
+function contrastedSpan(text: string, span: string): boolean {
+	const quoted = `\`${span}\``;
+	for (let at = text.indexOf(quoted); at >= 0; at = text.indexOf(quoted, at + 1)) {
+		const before =
+			text
+				.slice(Math.max(0, at - 40), at)
+				.split(/[.;:!?]/u)
+				.at(-1) ?? "";
+		const after = text.slice(at + quoted.length, at + quoted.length + 48).split(/[.;,!?]/u)[0] ?? "";
+		if (FAILED_AFTER.test(after) || PROHIBITED_BEFORE.test(before)) return true;
+	}
+	return false;
+}
+
+/** Programs that run the script named by their first repository-file argument. */
+const INTERPRETERS: ReadonlySet<string> = new Set([
+	"node",
+	"nodejs",
+	"python",
+	"python3",
+	"bash",
+	"sh",
+	"zsh",
+	"ruby",
+	"perl",
+	"deno",
+	"bun",
+	"tsx",
+	"ts-node",
+	"php",
+	"Rscript",
+	"julia",
+	"lua",
+	"pwsh",
+]);
+/** Words that launch the program after them unchanged. */
+const LAUNCHERS: ReadonlyArray<readonly string[]> = [
+	["npx"],
+	["env"],
+	["pnpm", "exec"],
+	["uv", "run"],
+	["poetry", "run"],
+	["pipenv", "run"],
+	["bundle", "exec"],
+];
+
+export interface ExecutedFile {
+	/** The executing program: the file itself, or the interpreter that runs it. */
+	readonly program: string;
+	/** Repository-relative path of the file the command executes. */
+	readonly file: string;
+	/** Every argument after the executed file, plus environment assignments. */
+	readonly options: readonly string[];
+}
+
+/**
+ * The repository file one simple invocation actually executes, or null. Naming
+ * a file is not running it: `cat x.mjs` and `echo node x.mjs` mention a file
+ * that never ran, so the file has to be the program itself or the script an
+ * interpreter was asked to run.
+ */
+export function executedFile(invocation: SimpleInvocation, root: string): ExecutedFile | null {
+	let argv = [...invocation.argv];
+	for (let changed = true; changed; ) {
+		changed = false;
+		for (const launcher of LAUNCHERS) {
+			if (argv.length > launcher.length && launcher.every((word, index) => argv[index] === word)) {
+				argv = argv.slice(launcher.length);
+				while (argv[0]?.startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(argv[0] ?? "")) argv.shift();
+				changed = true;
+			}
+		}
+	}
+	const program = argv[0];
+	if (program === undefined) return null;
+	const direct = repositoryFile(program, root);
+	if (direct !== null) return { program: direct, file: direct, options: [...invocation.assignments, ...argv.slice(1)] };
+	if (!INTERPRETERS.has(basename(program))) return null;
+	for (let index = 1; index < argv.length; index++) {
+		const word = argv[index] ?? "";
+		if (word.startsWith("-")) continue;
+		const file = repositoryFile(word, root);
+		if (file !== null)
+			return { program: basename(program), file, options: [...invocation.assignments, ...argv.slice(index + 1)] };
+	}
+	return null;
+}
+
+/** The repository-relative path of an existing file inside the checkout, or null. */
+function repositoryFile(token: string, root: string): string | null {
+	const path = repositoryRelativePath(token, [root]);
+	return path !== null && readInsideRoot(root, path) !== null ? path : null;
 }

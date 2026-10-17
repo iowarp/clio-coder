@@ -12,6 +12,12 @@ export interface SessionLedgerStat {
 	path: string;
 	size: number;
 	mtimeMs: number;
+	/**
+	 * File identity (device and inode). Appends keep it; a rewrite replaces the
+	 * file and changes it, so a byte cursor recorded against one identity is
+	 * meaningless against another even when the new file is longer.
+	 */
+	identity: string;
 }
 
 /**
@@ -45,7 +51,15 @@ export function sessionLedgersForRoots(
 			try {
 				const info = statSync(path);
 				if (!info.isFile()) continue;
-				found.push({ key: `${bucket}/${sessionId}`, sessionId, root, path, size: info.size, mtimeMs: info.mtimeMs });
+				found.push({
+					key: `${bucket}/${sessionId}`,
+					sessionId,
+					root,
+					path,
+					size: info.size,
+					mtimeMs: info.mtimeMs,
+					identity: `${info.dev}:${info.ino}`,
+				});
 			} catch {
 				// A directory without a ledger is not a recorded session.
 			}

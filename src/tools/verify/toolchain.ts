@@ -441,75 +441,7 @@ export function goProposals(workspaceRoot: string, diagnostics: string[]): RawPr
 	];
 }
 
-export function shellLikeArgv(command: string): string[] | Error {
-	const argv: string[] = [];
-	let token = "";
-	let quote: "single" | "double" | null = null;
-	let tokenStarted = false;
-	for (let index = 0; index < command.length; index += 1) {
-		const character = command[index] ?? "";
-		if (quote === "single") {
-			if (character === "'") quote = null;
-			else token += character;
-			tokenStarted = true;
-			continue;
-		}
-		if (quote === "double") {
-			if (character === '"') {
-				quote = null;
-				continue;
-			}
-			if (character === "\\") {
-				const next = command[index + 1];
-				if (next === undefined) return new Error("trailing escape");
-				token += next;
-				index += 1;
-			} else if (character === "$" || character === "`") {
-				return new Error(`shell expansion '${character}' is ambiguous`);
-			} else {
-				token += character;
-			}
-			tokenStarted = true;
-			continue;
-		}
-		if (/\s/u.test(character)) {
-			if (tokenStarted) {
-				argv.push(token);
-				token = "";
-				tokenStarted = false;
-			}
-			continue;
-		}
-		if (character === "'") {
-			quote = "single";
-			tokenStarted = true;
-			continue;
-		}
-		if (character === '"') {
-			quote = "double";
-			tokenStarted = true;
-			continue;
-		}
-		if (character === "\\") {
-			const next = command[index + 1];
-			if (next === undefined) return new Error("trailing escape");
-			token += next;
-			tokenStarted = true;
-			index += 1;
-			continue;
-		}
-		if ("|&;<>()`$\n\r".includes(character)) {
-			return new Error(`shell operator or expansion '${character}' is ambiguous`);
-		}
-		token += character;
-		tokenStarted = true;
-	}
-	if (quote !== null) return new Error(`unterminated ${quote}-quoted argument`);
-	if (tokenStarted) argv.push(token);
-	if (argv.length === 0) return new Error("empty command");
-	if ((argv[0] ?? "").includes("=")) return new Error("environment assignments are not argv executables");
-	return argv;
-}
+export { shellLikeArgv } from "../../core/shell-argv.js";
 
 export interface DeclaredProjectEntry {
 	id: string;
