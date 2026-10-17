@@ -110,7 +110,12 @@ export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, wid
 		}
 	} else {
 		const { preview } = subject;
-		rows.push(theme.fg("annotation", `${preview.name} · plan ${preview.planHash.slice(0, 12)}`));
+		rows.push(theme.fg("annotation", `${preview.name} · plan ${preview.plan.hash.slice(0, 12)}`));
+		for (const line of wrapTextWithAnsi(
+			theme.fg("annotation", `approval ${preview.planHash.slice(0, 12)}: recipes, routes, commands, budget and replay`),
+			contentWidth,
+		))
+			rows.push(line);
 		if (preview.resume !== undefined) {
 			const replayed = [...preview.resume.replayed.keys()];
 			// The workspace is shown so the operator sees which checkout's prefix is replayed.

@@ -699,7 +699,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onStarted: () =>
 				deps.notify(
 					"info",
-					`fleet ${preview.name}: root=${fleetRootId} plan=${preview.planHash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
+					`fleet ${preview.name}: root=${fleetRootId} plan=${preview.plan.hash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
 					"fleet-run:started",
 				),
 			onNotice: (text) => deps.stderr(`[fleet ${preview.name}] ${text}\n`),

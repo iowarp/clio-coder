@@ -23,6 +23,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		ok(agents);
 		const notices: Array<[string, string]> = [];
 		let opened = 0;
+		let expectedPlanHash = "";
 		let accept: (() => void) | undefined;
 		let finish: (() => void) | undefined;
 		let settingsReadable = false;
@@ -61,6 +62,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 			openFleetRunApprovalOverlay: (_tui, options) => {
 				opened += 1;
 				ok(options.subject.ok, JSON.stringify(options.subject));
+				expectedPlanHash = options.subject.preview.plan.hash.slice(0, 12);
 				accept = options.onAccept;
 				return {} as ReturnType<NonNullable<OverlayGeneralOpenersDeps["openFleetRunApprovalOverlay"]>>;
 			},
@@ -91,6 +93,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		strictEqual(opened, 2, "the failed start left no run in flight");
 		accept();
 		strictEqual(notices.at(-1)?.[0], "fleet-run:started");
+		ok(notices.at(-1)?.[1].includes(`plan=${expectedPlanHash} `));
 		deepStrictEqual(runLimits, [{ delegatedTools: ["read"] }]);
 		openers.startFleetRun("survey", {});
 		strictEqual(opened, 2, "no second approval while the first fleet runs");
