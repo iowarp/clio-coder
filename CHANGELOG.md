@@ -2,6 +2,8 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
 ## 0.6.3 - 2026-10-17
 
 Clio Coder 0.6.3 is the first stable release since 0.6.2 and includes everything published in 0.6.3-rc.1. Fleet workers can use MCP servers under explicit operator trust, an outside driver can follow, resume and bound a fleet or headless run, and tool ceilings set by a headless run, an ACP client or a prompt template are enforced. In the operator's own session, `yolo` drops routine approval asks while damage control stays on, and the scripts it lets run execute inside the OS sandbox. Claude subscription and Agent SDK targets list their models live, and a second terminal in the same folder always gets its own session. The [0.6.3-rc.1 entry](https://github.com/iowarp/clio-coder/blob/v0.6.3/CHANGELOG.md#063-rc1---2026-10-17) lists those changes in full.
