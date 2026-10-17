@@ -165,9 +165,10 @@ are kept; past that, a failing store holds the review where it is. Source:
 Repository-scoped knowledge produced from a task-bank entry can receive
 guardian approval after one session records that the lesson held, with no
 contradiction or recorded regression. It waits for the operator instead when
-another approved repository lesson already carries one of its `command:`
-evidence refs: two wordings of one command stay separate claims, and which one
-stands is the operator's call. Procedural proposals still wait for an
+another approved or operator-rejected repository lesson already carries one of
+its `command:` evidence refs: two wordings of one command stay separate claims,
+a rejection keeps its authority over rewordings, and which one stands is the
+operator's call. Procedural proposals still wait for an
 operator. Global, runtime and agent scopes also require operator approval.
 The guardian never reverses an operator approval or rejection. A later
 contradiction demotes a guardian-approved lesson. The `held` observation is an
@@ -217,7 +218,9 @@ references; they do not approve a durable record. Source:
 Preparation is sized so a session that never nears compaction pays little:
 
 - It waits until the live context fills 0.4 of the main route's usable history.
-  When that share is unknown, this gate does not apply.
+  When the live budget cannot say what that share is, preparation defers with
+  the status reason `pressure-unknown`; only a composition that supplies no
+  pressure signal at all runs without the gate.
 - The observer is called only for a source group of at least the smaller of
   1,024 and half the source budget (and at least 256) estimated tokens, never
   for a group whose exact user material leaves no room for smaller notes. Each
