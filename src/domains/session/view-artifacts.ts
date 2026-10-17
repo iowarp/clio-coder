@@ -1163,15 +1163,17 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 				...(env.sessionId ? { sessionId: env.sessionId } : {}),
 				searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
 				load: async () => {
-					let output: RunReceipt["output"];
+					let receipt: RunReceipt | undefined;
+					let receiptTooLarge = false;
 					try {
-						if ((await stat(receiptPath)).size <= JSON_PRETTY_MAX_BYTES) {
-							const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as RunReceipt;
-							if (typeof receipt.output?.text === "string") output = receipt.output;
+						receiptTooLarge = (await stat(receiptPath)).size > JSON_PRETTY_MAX_BYTES;
+						if (!receiptTooLarge) {
+							receipt = JSON.parse(await readFile(receiptPath, "utf8")) as RunReceipt;
 						}
 					} catch {
 						// A missing or unreadable receipt can still have session tool output to show.
 					}
+					const output = receipt?.output;
 					const text = output?.text ?? dispatchResultForRun(entries, env.id);
 					const lines = [
 						`Dispatch run ${env.id}`,
@@ -1188,6 +1190,15 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`tokens: ${formatFooterTokens(env.tokenCount)}`,
 						`cost: ${formatUsd(env.costUsd)}`,
 						`receipt: ${env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id)}`,
+						"",
+						"## What changed",
+						...(receipt
+							? renderReceiptChanges(receipt)
+							: [
+									receiptTooLarge
+										? "Receipt was too large to read; changed paths could not be summarized."
+										: "Changed paths were not recorded.",
+								]),
 						"",
 						output?.state === "partial" ? "agent output (partial):" : "agent output:",
 						...(text ? text.split(/\r?\n/) : ["(no recorded agent output found)"]),

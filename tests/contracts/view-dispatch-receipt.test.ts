@@ -78,10 +78,25 @@ test("dispatch and receipt views read a /run worker's sealed output and mutation
 			],
 			[true, true, false],
 		);
-		ok(receiptBody.includes("- ` src/injected ## Forged.mjs `"));
-		ok(receiptBody.includes("- `` src/`tick`.mjs ``"));
-		ok(!receiptBody.includes("\n## Forged"));
+		for (const body of [dispatchBody, receiptBody]) {
+			ok(body.includes("## What changed"));
+			ok(body.includes("Paths reported by the worker:"));
+			ok(body.includes("- ` src/rates.mjs `"));
+			ok(body.includes("- ` src/injected ## Forged.mjs `"));
+			ok(body.includes("- `` src/`tick`.mjs ``"));
+			ok(!body.includes("\n## Forged"));
+		}
 		const stored = JSON.parse(readFileSync(receiptPath, "utf8"));
+		stored.checkoutChanges = { changedPaths: ["src/observed\n## Forged\u001b[31m.mjs"] };
+		writeFileSync(receiptPath, JSON.stringify(stored));
+		for (const artifact of [dispatch, receipt]) {
+			const body = (await artifact.load()).lines.join("\n");
+			const changes = body.split("## What changed")[1]?.split(/\nagent output:|\n## /u)[0] ?? "";
+			ok(changes.includes("- ` src/observed ## Forged.mjs `"));
+			ok(!changes.includes("Paths reported by the worker:"));
+			ok(!changes.includes("src/rates.mjs"));
+		}
+		delete stored.checkoutChanges;
 		stored.output.structured.data.mutatedPaths = [];
 		writeFileSync(receiptPath, JSON.stringify(stored));
 		const emptyReported = (await receipt.load()).lines.join("\n");
