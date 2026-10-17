@@ -26,6 +26,44 @@ function run(label, command, args) {
 	}
 }
 
+const git = (...args) =>
+	execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+/** A stable docs pin is committed before its tag exists and cannot name its own commit,
+ * so the release flow pins the release commit in "repository" mode (3a59f1946 pins 7699f23a9).
+ * A tag-based "release" pin stays valid once the tag resolves to the pinned commit.
+ */
+function docsPinErrors(source, version) {
+	const pin = `website docs pin ${source.mode ?? "<no mode>"} ${source.ref ?? "<missing>"}`;
+	if (source.mode === "release") {
+		if (source.ref !== `v${version}`) return [`${pin}: a release pin must name ref v${version}`];
+		try {
+			const commit = git("rev-parse", "--verify", `${source.ref}^{commit}`);
+			return commit === source.commit ? [] : [`${pin}: commit ${source.commit} differs from ${source.ref} at ${commit}`];
+		} catch (error) {
+			return [`${pin}: cannot resolve ${source.ref}: ${error instanceof Error ? error.message : String(error)}`];
+		}
+	}
+	if (source.mode === "repository") {
+		if (!/^[0-9a-f]{40}$/u.test(source.commit ?? "") || source.ref !== source.commit)
+			return [`${pin}: a repository pin must name the full commit ${source.commit ?? "<missing>"} as its ref`];
+		try {
+			git("merge-base", "--is-ancestor", source.commit, "HEAD");
+		} catch {
+			return [`${pin}: commit ${source.commit} is not an ancestor of HEAD`];
+		}
+		try {
+			const pinned = JSON.parse(git("show", `${source.commit}:package.json`)).version;
+			return pinned === version ? [] : [`${pin}: package.json at ${source.commit} is ${pinned}, not ${version}`];
+		} catch (error) {
+			return [
+				`${pin}: cannot read package.json at ${source.commit}: ${error instanceof Error ? error.message : String(error)}`,
+			];
+		}
+	}
+	return [`${pin}: mode must be release or repository`];
+}
+
 function checkVersions() {
 	const pkg = json("package.json");
 	const registry = json("assets/acp-registry/agent.json");
@@ -50,19 +88,7 @@ function checkVersions() {
 		errors.push(`website version ${product.version} differs from the latest dated stable release ${stable}`);
 	if (docs.source?.version !== product.version)
 		errors.push(`website docs version ${docs.source?.version ?? "<missing>"} differs from website ${product.version}`);
-	if (docs.source?.ref !== `v${product.version}`)
-		errors.push(`website docs ref ${docs.source?.ref ?? "<missing>"} must be v${product.version}`);
-	try {
-		const commit = execFileSync("git", ["rev-parse", "--verify", `${docs.source.ref}^{commit}`], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		}).trim();
-		if (commit !== docs.source.commit)
-			errors.push(`website docs commit ${docs.source.commit} differs from ${docs.source.ref} at ${commit}`);
-	} catch (error) {
-		errors.push(`cannot resolve website docs ref ${docs.source?.ref ?? "<missing>"}: ${error.message}`);
-	}
+	errors.push(...docsPinErrors(docs.source ?? {}, product.version));
 	const literals = [];
 	for (const name of readdirSync(join(root, "site"))
 		.filter((entry) => entry.endsWith(".html"))
