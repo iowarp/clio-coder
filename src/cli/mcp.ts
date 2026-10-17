@@ -1,6 +1,6 @@
 import { mcpToolName } from "../core/tool-names.js";
 import { mcpToolActionClass } from "../domains/gateway/mcp/action-classes.js";
-import type { McpClient } from "../domains/gateway/mcp/client.js";
+import type { McpClient, McpServerInfo } from "../domains/gateway/mcp/client.js";
 import type { McpServerEntryScript, ResolvedMcpServer } from "../domains/gateway/mcp/index.js";
 import {
 	MCP_TRUST_ACTION_CLASSES,
@@ -114,6 +114,19 @@ function networkLabel(grant: ReturnType<typeof networkGrant>): string {
 	return grant.network
 		? `network=true (${grant.networkSource === "trust" ? "trust record" : "user declaration"})`
 		: "network=false";
+}
+
+/**
+ * The first line of text `mcp test` output. It names the network grant and its
+ * source the way `mcp list` does; only --json carried it before.
+ */
+export function mcpTestHeadline(
+	id: string,
+	info: McpServerInfo,
+	toolCount: number,
+	grant: ReturnType<typeof networkGrant>,
+): string {
+	return `${id}: protocol ${info.protocolVersion}, server ${info.serverInfo?.name ?? "?"} ${info.serverInfo?.version ?? "?"}, ${toolCount} tools, ${networkLabel(grant)}`;
 }
 
 export interface McpCommandOutput {
@@ -415,7 +428,7 @@ async function mcpTestOutput(id: string, calls: ReadonlyArray<McpTestCall>): Pro
 			calls: results,
 		};
 		const lines = [
-			`${id}: protocol ${info.protocolVersion}, server ${info.serverInfo?.name ?? "?"} ${info.serverInfo?.version ?? "?"}, ${tools.length} tools`,
+			mcpTestHeadline(id, info, tools.length, described),
 			...tools.map((tool) => `  ${tool.capability} actionClass=${tool.actionClass}`),
 			...results.map(
 				(result) =>
