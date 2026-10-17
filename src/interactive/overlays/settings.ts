@@ -3184,6 +3184,10 @@ function formatSettingsValue(path: string, value: string): string {
 		if (number >= 1_000 && number % 1_000 === 0) return `${number / 1_000} sec`;
 		return `${number.toLocaleString()} ms`;
 	}
+	if (path.endsWith("Seconds")) {
+		if (number >= 60 && number % 60 === 0) return `${number / 60} min`;
+		return `${number.toLocaleString()} sec`;
+	}
 	if (path.endsWith("Bytes")) return `${(number / 1024).toLocaleString()} KB`;
 	if (path === "safety.limits.sessionCostUsd" || path === "turnControl.orientation.maxCostUsdPerTurn")
 		return `$${number.toLocaleString()}`;

@@ -395,6 +395,15 @@ function inspectSafetyAndMemory(cwd: string, graph: CustomizationGraph): void {
 			precedence: "single",
 			detail: { autonomy: layered.settings.safety.autonomy ?? "default" },
 		});
+		graph.entries.push({
+			category: "safety",
+			id: "safety.limits",
+			scope: "effective",
+			reloadClass: "next-turn",
+			trust: "n/a",
+			precedence: "single",
+			detail: { ...layered.settings.safety.limits },
+		});
 	} catch (err) {
 		graph.issues.push(`safety: ${err instanceof Error ? err.message : String(err)}`);
 	}

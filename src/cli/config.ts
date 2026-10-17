@@ -49,7 +49,8 @@ function renderText(cwd: string): string {
 			const precedence = entry.precedence ? `, ${entry.precedence}` : "";
 			out.push(`  ${entry.id}  [${entry.scope}${precedence}, reload:${entry.reloadClass}${hash}${cost}]`);
 			if (entry.sourcePath) out.push(`    from ${entry.sourcePath}`);
-			if (entry.id === "safety.policy" && entry.detail !== undefined) out.push(`    ${JSON.stringify(entry.detail)}`);
+			if ((entry.id === "safety.policy" || entry.id === "safety.limits") && entry.detail !== undefined)
+				out.push(`    ${JSON.stringify(entry.detail)}`);
 		}
 		out.push("");
 	}

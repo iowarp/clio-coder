@@ -9,6 +9,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { getAtPath, setAtPath } from "../../src/core/session-routing.js";
 import { applyControlValue, SETTING_CONTROLS } from "../../src/core/settings-controls.js";
 import { renderYamlPreservingLayout } from "../../src/core/yaml-preserve.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import {
 	buildSettingItems,
 	buildSettingsSections,
@@ -194,3 +195,31 @@ test("layout-preserving YAML edits round-trip tagged values and structural chang
 		assert.deepEqual(parse(renderYamlPreservingLayout(existing, next)), next, existing);
 	}
 });
+
+for (const [seconds, shown] of [
+	[600, "10 min"],
+	[61, "61 sec"],
+] as const) {
+	test(`worker response time renders ${seconds} seconds with a duration unit`, () => {
+		const settings = fixture();
+		settings.safety.limits.workerResponseSeconds = seconds;
+		const items = buildSettingItems(settings);
+		const section = buildSettingsSections(items).find((section) =>
+			section.items.some((row) => row.configPath === "safety.limits.workerResponseSeconds"),
+		);
+		assert.ok(section);
+		const index = section.items.findIndex((row) => row.configPath === "safety.limits.workerResponseSeconds");
+		const center = new SettingsCenter(items, {
+			getBodyHeight: () => 30,
+			prepareChange: () => null,
+			onApply: () => {},
+			onCancel: () => {},
+		});
+		center.setSelection(section.id, index);
+		const rows = center.render(180).map(stripTerminalSequences);
+		assert.ok(
+			rows.some((line) => line.includes("Worker response time") && line.includes(shown)),
+			rows.join("\n"),
+		);
+	});
+}
