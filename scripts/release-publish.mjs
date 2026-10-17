@@ -156,7 +156,7 @@ export function forwardedTags(tags, version, channel) {
 	return follow.filter((tag) => tags[tag] && compareVersions(tags[tag], version) < 0);
 }
 
-async function registryTags(name) {
+export async function registryTags(name) {
 	const response = await fetch(`https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`, {
 		signal: AbortSignal.timeout(30_000),
 	});
@@ -292,7 +292,7 @@ export async function rehearseBytes(directory, commit, branch) {
 	return plan;
 }
 
-async function registryVersion(name, version) {
+export async function registryVersion(name, version) {
 	const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`, {
 		signal: AbortSignal.timeout(30_000),
 	});
@@ -305,7 +305,7 @@ function integrity(tarball) {
 	return `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`;
 }
 
-function requireIntegrity(published, receipt) {
+export function requireIntegrity(published, receipt) {
 	if (
 		published.name !== receipt.name ||
 		published.version !== receipt.version ||
@@ -342,6 +342,11 @@ function tagCommit(tag) {
 }
 
 export async function preflight(directory, commit, runId, branch, rehearse = false) {
+	// The snapshot code stays for when CI can publish again; rehearsal still exercises it.
+	if (!rehearse && process.env.CLIO_CODER_RELEASE_MODE === "dev")
+		throw new Error(
+			"Dev snapshots need working CI trusted publishing. The release job's npm OIDC exchange returns 404, and a snapshot's bytes exist only inside CI, so the owner cannot publish them.",
+		);
 	const receipt = verifyCandidate(directory, commit);
 	await qualification(runId, commit, { inProgress: rehearse });
 	if (String(receipt.run) !== String(runId)) throw new Error("Artifact belongs to another qualification run.");
@@ -380,7 +385,7 @@ export async function preflight(directory, commit, runId, branch, rehearse = fal
 		else if (tag !== null || (plan.tag !== null && existingRelease(plan.tag)))
 			throw new Error("An existing GitHub release has no matching npm version; resolve it explicitly.");
 	}
-	const summary = `Clio Coder ${plan.version}\nSource: ${commit}\nQualification: https://github.com/${repository}/actions/runs/${runId}\nPackage: ${plan.tarball}\nSHA-256: ${plan.sha256}\nTests: ${results.total} plus runtime/platform boot checks\n\n${plan.channel === "dev" ? "Approval authorizes provenance-backed npm dev publication of the verified version stamp only; no git tag, GitHub release, website or branch writes." : plan.channel === "beta" ? "Approval authorizes npm beta publication, dev tag forwarding where lower, and GitHub prerelease/tag creation." : "Approval authorizes npm publication, beta/dev tag forwarding where lower, GitHub release/tag creation, main fast-forward, gh-pages deployment, and version-branch cleanup."}\n`;
+	const summary = `Clio Coder ${plan.version}\nSource: ${commit}\nQualification: https://github.com/${repository}/actions/runs/${runId}\nPackage: ${plan.tarball}\nSHA-256: ${plan.sha256}\nTests: ${results.total} plus runtime/platform boot checks\n\n${plan.channel === "dev" ? "Approval verifies the owner-published npm dev snapshot only; no git tag, GitHub release, website or branch writes." : plan.channel === "beta" ? "Approval authorizes GitHub prerelease/tag creation for the owner-published npm beta version." : "Approval authorizes GitHub release/tag creation, main fast-forward, gh-pages deployment, and version-branch cleanup for the owner-published npm version."}\n`;
 	console.log(summary);
 	if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 	return { receipt: publishedReceipt, plan };
@@ -478,15 +483,15 @@ export async function publish(directory, commit, runId, branch) {
 	)
 		throw new Error("Publication is restricted to the approved release.yml job on the exact candidate commit.");
 	const { receipt, plan } = await preflight(directory, commit, runId, branch);
+	// The job's OIDC exchange has never authorized a publish (HTTP 404, then
+	// ENEEDAUTH), so the owner publishes before this job writes anything to GitHub.
 	const published = await registryVersion(receipt.name, receipt.version);
-	if (!published) run("npm", ["publish", receipt.tarball, "--access", "public", "--provenance", "--tag", plan.channel]);
-	else {
-		requireIntegrity(published, receipt);
-		console.log("npm already contains the qualified bytes; continuing publication.");
-	}
-	const onNpm = await registryVersion(receipt.name, receipt.version);
-	if (!onNpm) throw new Error("npm publication is not visible yet; resume the release job.");
-	requireIntegrity(onNpm, receipt);
+	if (!published)
+		throw new Error(
+			`npm has no ${plan.package}. The owner publishes the qualified tarball through \`pnpm run release\`, then resumes this job.`,
+		);
+	requireIntegrity(published, receipt);
+	console.log("npm contains the qualified bytes; continuing publication.");
 	if (plan.channel === "dev") {
 		await verifyPublic(receipt, plan);
 		console.log(`SNAPSHOT_COMPLETE ${receipt.version} ${commit}`);

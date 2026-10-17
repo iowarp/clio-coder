@@ -4,8 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { git, run, source } from "./release-candidate.mjs";
-import { api } from "./release-publish.mjs";
+import { git, run, source, verifyCandidate } from "./release-candidate.mjs";
+import {
+	api,
+	forwardedTags,
+	publicationPlan,
+	registryTags,
+	registryVersion,
+	requireIntegrity,
+} from "./release-publish.mjs";
 
 const repository = "iowarp/clio-coder";
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,6 +52,35 @@ async function watch(record) {
 		throw new Error(`Run ${record.id} did not pass. Resume its failed jobs after correcting the cause.`);
 }
 
+// release.yml cannot authenticate to npm (its OIDC exchange returns 404), so the
+// owner publishes the qualified bytes here, before the job writes to GitHub.
+async function ownerPublish(receipt, plan, ask, foreground) {
+	const published = await registryVersion(receipt.name, receipt.version);
+	if (published) {
+		requireIntegrity(published, receipt);
+		console.log(`npm already contains the qualified bytes of ${plan.package}.`);
+		return;
+	}
+	const args = ["publish", receipt.tarball, "--access", "public", "--tag", plan.channel];
+	await ask(
+		`npm has no ${plan.package}. Publish the qualified tarball as the owner:\n  npm ${args.join(" ")}\nnpm may ask for browser two-factor approval in this terminal.`,
+	);
+	foreground("npm", args);
+	for (let attempt = 0; attempt < 30; attempt++) {
+		const visible = await registryVersion(receipt.name, receipt.version);
+		if (visible) {
+			requireIntegrity(visible, receipt);
+			console.log(`npm serves ${plan.package} with the qualified integrity.`);
+			return;
+		}
+		console.log(`Waiting for npm to serve ${plan.package}...`);
+		await delay(10_000);
+	}
+	throw new Error(
+		`npm accepted the publish but has not served ${plan.package} for 5 minutes. Rerun \`pnpm run release\` once it is visible; matching bytes are reused.`,
+	);
+}
+
 async function main() {
 	const { values } = parseArgs({
 		args: process.argv.slice(2).filter((argument) => argument !== "--"),
@@ -52,7 +88,7 @@ async function main() {
 	});
 	if (values.help) {
 		console.log(
-			"pnpm run release [-- --platforms]\npnpm run release:rehearse [-- --platforms]\nInteractive qualification and publication. The release environment requires the owner's final approval.\nRehearsal uses ci-scratch-* and makes no package, tag, main, or site changes.",
+			"pnpm run release [-- --platforms]\npnpm run release:rehearse [-- --platforms]\nInteractive qualification, owner npm publication, and release dispatch. The release environment requires the owner's final approval.\nRehearsal uses ci-scratch-* and makes no package, tag, main, or site changes.",
 		);
 		return;
 	}
@@ -62,6 +98,15 @@ async function main() {
 	const ask = async (description) => {
 		const reply = await prompt.question(`${description}\nContinue? [y/N] `);
 		if (!/^y(?:es)?$/iu.test(reply.trim())) throw new Error("Stopped at your request. No later step was executed.");
+	};
+	// readline keeps the TTY raw; npm's login and two-factor prompts need it cooked.
+	const foreground = (command, args) => {
+		process.stdin.setRawMode(false);
+		try {
+			run(command, args);
+		} finally {
+			process.stdin.setRawMode(true);
+		}
 	};
 	let scratchBranch;
 	let scratchDirectory;
@@ -137,8 +182,11 @@ async function main() {
 			"--branch",
 			branch,
 		]);
+		const candidate = verifyCandidate(scratchDirectory, commit);
+		const plan = publicationPlan(candidate, branch);
+		await ownerPublish(candidate, plan, ask, foreground);
 		await ask(
-			"Request the owner's final GitHub approval for npm, GitHub release/tag, main, website, and branch cleanup? Review the receipt above first.",
+			"Request the owner's final GitHub approval for the GitHub release/tag, main, website, and branch cleanup? Review the receipt above first.",
 		);
 		const publication = await dispatch("release.yml", branch, commit, {
 			sha: commit,
@@ -148,6 +196,15 @@ async function main() {
 			"Open the run above and approve the protected release environment as the owner. Agents must leave that decision to you.",
 		);
 		await watch(publication);
+		// The job's dist-tag writes fail the same way its publish did.
+		const tags = forwardedTags(await registryTags(candidate.name), candidate.version, plan.channel);
+		if (tags.length) {
+			const commands = tags.map((tag) => ["dist-tag", "add", plan.package, tag]);
+			await ask(
+				`Forward the npm tags release.yml could not write:\n${commands.map((args) => `  npm ${args.join(" ")}`).join("\n")}`,
+			);
+			for (const args of commands) foreground("npm", args);
+		}
 		await ask(
 			"The public release completed. Update clean local main to origin/main and remove this finished local version branch?",
 		);
