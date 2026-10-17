@@ -4,9 +4,9 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.6.2",
-    "ref": "40ea10b3e2918429cc0b0bf80b4a3a23ecfce4c6",
-    "commit": "40ea10b3e2918429cc0b0bf80b4a3a23ecfce4c6",
-    "mode": "repository"
+    "ref": "v0.6.2",
+    "commit": "e4b3c7b18e20db767cdc92139b85dac6d1219d1a",
+    "mode": "release"
   },
   "files": [
     {
