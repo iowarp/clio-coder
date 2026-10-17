@@ -848,7 +848,10 @@ function renderReceiptChanges(receipt: RunReceipt): string[] {
 						let longest = 0;
 						for (const match of clean.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
 						const fence = "`".repeat(longest + 1);
-						return `- ${fence} ${clean} ${fence}`;
+						// CommonMark needs padding only when the code span would otherwise merge with the
+						// fence or lose an edge space; anything else reads cleanly on plain-text surfaces.
+						const pad = /^`|`$/.test(clean) || (/^ .* $/s.test(clean) && clean.trim().length > 0) ? " " : "";
+						return `- ${fence}${pad}${clean}${pad}${fence}`;
 					})),
 		...(receipt.worktree
 			? [

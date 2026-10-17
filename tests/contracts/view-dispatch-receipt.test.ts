@@ -73,7 +73,7 @@ test("dispatch and receipt views read a /run worker's sealed output and mutation
 		deepStrictEqual(
 			[
 				dispatchBody.includes(text),
-				receiptBody.includes("- ` src/rates.mjs `"),
+				receiptBody.includes("- `src/rates.mjs`"),
 				receiptBody.includes("Changed paths were not recorded"),
 			],
 			[true, true, false],
@@ -81,9 +81,9 @@ test("dispatch and receipt views read a /run worker's sealed output and mutation
 		for (const body of [dispatchBody, receiptBody]) {
 			ok(body.includes("## What changed"));
 			ok(body.includes("Paths reported by the worker:"));
-			ok(body.includes("- ` src/rates.mjs `"));
-			ok(body.includes("- ` src/injected ## Forged.mjs `"));
-			ok(body.includes("- `` src/`tick`.mjs ``"));
+			ok(body.includes("- `src/rates.mjs`"));
+			ok(body.includes("- `src/injected ## Forged.mjs`"));
+			ok(body.includes("- ``src/`tick`.mjs``"));
 			ok(!body.includes("\n## Forged"));
 		}
 		const stored = JSON.parse(readFileSync(receiptPath, "utf8"));
@@ -92,7 +92,7 @@ test("dispatch and receipt views read a /run worker's sealed output and mutation
 		for (const artifact of [dispatch, receipt]) {
 			const body = (await artifact.load()).lines.join("\n");
 			const changes = body.split("## What changed")[1]?.split(/\nagent output:|\n## /u)[0] ?? "";
-			ok(changes.includes("- ` src/observed ## Forged.mjs `"));
+			ok(changes.includes("- `src/observed ## Forged.mjs`"));
 			ok(!changes.includes("Paths reported by the worker:"));
 			ok(!changes.includes("src/rates.mjs"));
 		}
