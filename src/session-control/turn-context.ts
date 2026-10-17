@@ -65,6 +65,7 @@ import {
 	type ContextWindowSource,
 	canonicalEndpointKey,
 	isOrchestratorEligibleRuntime,
+	modelEndpointKey,
 	type ProvidersContract,
 	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
@@ -588,7 +589,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		deps.bus?.on(BusChannels.MemoryStepCompleted, (payload: MemoryStepCompletedPayload) => {
 			const target = state.runtime?.runtimeResolution.target;
 			if (target === undefined) return;
-			if (canonicalEndpointKey(target) !== payload.endpointKey) return;
+			// Behind a model-routed gateway only a step on this session's own model shares its backend.
+			const own = [canonicalEndpointKey(target), modelEndpointKey(target, state.runtime?.wireModelId)];
+			if (!own.includes(payload.endpointKey)) return;
 			noteColdReason("background_memory");
 		}) ?? null,
 		deps.bus?.on(BusChannels.ContextRecalled, (payload: ContextRecalledPayload) => {
