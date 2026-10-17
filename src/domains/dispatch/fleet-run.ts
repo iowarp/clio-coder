@@ -912,9 +912,11 @@ async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<Fl
 							receipt,
 							...(failureReason !== undefined ? { failureReason } : {}),
 						});
-						notice(
-							`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=${renderCostAmount(receipt.costUsd, receipt.costProvenance, receipt.costSummary)}`,
-						);
+						if (input.onStepSettled === undefined) {
+							notice(
+								`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=${renderCostAmount(receipt.costUsd, receipt.costProvenance, receipt.costSummary)}`,
+							);
+						}
 						return {
 							stepId: step.id,
 							assignmentId: handle.runId,
@@ -1002,19 +1004,21 @@ async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<Fl
 				const outcome = await runCodeStep(runInput);
 				if (step.verification === true) validationFresh = outcome.report.passed;
 				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
-				input.onStepSettled?.({
-					...event,
-					succeeded: outcome.report.passed,
-					terminalRunId: outcome.record.runId,
-					costUsd: 0,
-					// No model ran, so nothing needed pricing. This zero was observed.
-					costProvenance: "known_free",
-					codeStep: outcome.record,
-					recordPath,
-				});
-				notice(
-					`step ${step.id} code:${command.id}: ${outcome.report.passed ? "passed" : "failed"} exit=${outcome.report.exitCode} ${outcome.record.durationMs}ms record=${recordPath}`,
-				);
+				if (input.onStepSettled)
+					input.onStepSettled({
+						...event,
+						succeeded: outcome.report.passed,
+						terminalRunId: outcome.record.runId,
+						costUsd: 0,
+						// No model ran, so nothing needed pricing. This zero was observed.
+						costProvenance: "known_free",
+						codeStep: outcome.record,
+						recordPath,
+					});
+				else
+					notice(
+						`step ${step.id} code:${command.id}: ${outcome.report.passed ? "passed" : "failed"} exit=${outcome.report.exitCode} ${outcome.record.durationMs}ms record=${recordPath}`,
+					);
 				return {
 					stepId: step.id,
 					assignmentId: outcome.record.runId,

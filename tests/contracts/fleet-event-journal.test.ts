@@ -57,6 +57,8 @@ test("a fleet appends a hash-chained journal whose settled steps name the manife
 		// The record is rewritten as the fleet goes on; the bytes stage's settle
 		// wrote are on disk only until the next write, which follows check's dispatch.
 		let afterStage: string | null = null;
+		const progress: string[] = [];
+		const notices: string[] = [];
 		const outcome = await executeFleetRun({
 			plan,
 			playbookName: "stage-check",
@@ -73,11 +75,15 @@ test("a fleet appends a hash-chained journal whose settled steps name the manife
 			dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
 			agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
 			attributionEnabled: false,
+			onStepSettled: (step) => progress.push(step.stepId),
+			onNotice: (text) => notices.push(text),
 			onStepDispatched: (event) => {
 				if (event.stepId === "check") afterStage = readFileSync(recordPath, "utf8");
 			},
 		});
 		strictEqual(outcome.cleanRun, true);
+		deepStrictEqual(progress, ["stage", "check"]);
+		deepStrictEqual(notices, [], "step callbacks must not also emit human notices in text or JSON mode");
 		const read = readFleetEventJournal(rootId);
 		ok(read);
 		strictEqual(read.broken, null);
