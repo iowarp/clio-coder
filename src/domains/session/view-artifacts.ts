@@ -3,6 +3,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { formatFooterTokens, formatUsd } from "../../core/display-units.js";
 import { clockLocal } from "../../core/format-time.js";
+import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
 import type { DispatchContract } from "../dispatch/contract.js";
@@ -820,13 +821,35 @@ function receiptVerificationLine(report: ReceiptVerificationReport): string {
 }
 
 function renderReceiptChanges(receipt: RunReceipt): string[] {
-	const changed = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths;
+	const observed = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths;
+	const output = receipt.output;
+	const contract = receipt.quality?.resultContract;
+	const kind =
+		output?.structured?.kind ?? (contract?.conformance === "pass" ? contract.sourceId.split(":")[1] : undefined);
+	const parsed =
+		output?.state === "final" && !output.truncated && kind === "mutation-report"
+			? output.structured
+				? { ok: true as const, value: output.structured.data }
+				: parseJsonObjectPayload(output.text)
+			: null;
+	const reported =
+		parsed?.ok && Array.isArray(parsed.value.mutatedPaths)
+			? parsed.value.mutatedPaths.filter((path): path is string => typeof path === "string" && path.trim().length > 0)
+			: undefined;
+	const changed = observed ?? (reported?.length ? reported : undefined);
 	return [
+		...(observed === undefined && changed !== undefined ? ["Paths reported by the worker:"] : []),
 		...(changed === undefined
 			? ["Changed paths were not recorded."]
 			: changed.length === 0
 				? ["No changed paths recorded."]
-				: changed.map((path) => `- ${path}`)),
+				: changed.map((path) => {
+						const clean = viewArtifactDisplayText(path);
+						let longest = 0;
+						for (const match of clean.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
+						const fence = "`".repeat(longest + 1);
+						return `- ${fence} ${clean} ${fence}`;
+					})),
 		...(receipt.worktree
 			? [
 					receipt.worktree.applied
@@ -1140,7 +1163,16 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 				...(env.sessionId ? { sessionId: env.sessionId } : {}),
 				searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
 				load: async () => {
-					const text = dispatchResultForRun(entries, env.id);
+					let output: RunReceipt["output"];
+					try {
+						if ((await stat(receiptPath)).size <= JSON_PRETTY_MAX_BYTES) {
+							const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as RunReceipt;
+							if (typeof receipt.output?.text === "string") output = receipt.output;
+						}
+					} catch {
+						// A missing or unreadable receipt can still have session tool output to show.
+					}
+					const text = output?.text ?? dispatchResultForRun(entries, env.id);
 					const lines = [
 						`Dispatch run ${env.id}`,
 						`agent: ${env.agentId}`,
@@ -1157,8 +1189,9 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`cost: ${formatUsd(env.costUsd)}`,
 						`receipt: ${env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id)}`,
 						"",
-						"agent output:",
-						...(text ? text.split(/\r?\n/) : ["(no session dispatch tool output found)"]),
+						output?.state === "partial" ? "agent output (partial):" : "agent output:",
+						...(text ? text.split(/\r?\n/) : ["(no recorded agent output found)"]),
+						...(output?.truncated ? ["Stored result was truncated."] : []),
 					];
 					return { lines: splitLinesCapped(lines.join("\n"), path), format: "text" };
 				},
