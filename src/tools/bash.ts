@@ -2,6 +2,7 @@ import path from "node:path";
 import { Type } from "typebox";
 import { BASH_HARD_CAP_BYTES, type BashCommandResult, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
+import { yoloScriptSandboxWriteHint } from "../core/sandbox/yolo-script.js";
 import { ToolNames } from "../core/tool-names.js";
 import { expandPath } from "./path-utils.js";
 import { toolPresentationPolicy } from "./presentation.js";
@@ -321,6 +322,7 @@ export const bashTool: ToolSpec = {
 				cwd,
 				timeoutMs: timeout,
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
+				...(options?.scriptSandbox === undefined ? {} : { scriptSandbox: options.scriptSandbox }),
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {
@@ -357,7 +359,9 @@ export const bashTool: ToolSpec = {
 			if (outputCapped) return bashOutputCapResult(result, outputPolicy, options);
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
-				const status = `bash: command failed (exit ${code ?? "?"})`;
+				const sandboxHint =
+					options?.scriptSandbox === undefined ? null : yoloScriptSandboxWriteHint(rawOutput, options.scriptSandbox);
+				const status = `bash: command failed (exit ${code ?? "?"})${sandboxHint === null ? "" : `\n${sandboxHint}`}`;
 				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
 				return { kind: "error", message, details: bashResultDetails(result, rawOutput, "nonzero") };
 			}

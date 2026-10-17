@@ -1,5 +1,6 @@
 import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
+import type { YoloScriptSandboxState } from "../core/sandbox/yolo-script.js";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
@@ -85,6 +86,8 @@ export interface ContractDryRunOptions {
 	autonomy: AutonomyLevel;
 	/** The operator's `safety.scratchRoots`, for the yolo verdict of the operator's own session. */
 	scratchRoots?: ReadonlyArray<string>;
+	/** How this host runs a yolo script, so a validator that runs one gets the verdict the session would (#419). */
+	scriptSandbox?: YoloScriptSandboxState;
 }
 
 /**
@@ -113,7 +116,10 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 	const engine = createSafetyPolicyEngine({ cwd: workspaceRoot });
 	const level = options.autonomy;
 	const posture = level === "yolo" ? "yolo" : undefined;
-	const operatorYolo = { scratchRoots: options.scratchRoots ?? [] };
+	const operatorYolo = {
+		scratchRoots: options.scratchRoots ?? [],
+		...(options.scriptSandbox !== undefined ? { scriptSandbox: options.scriptSandbox } : {}),
+	};
 	return validators.map((command, index): DoctorFinding => {
 		const name = `validator ${index + 1}`;
 		const program = commandProgram(command);

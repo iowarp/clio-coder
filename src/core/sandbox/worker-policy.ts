@@ -36,7 +36,7 @@ function workerSandboxNetwork(allowedTools: ReadonlyArray<string>, networkSettin
 }
 
 /** Paths inside a writable root that stay read-only, as in Codex's workspace-write mode. */
-function protectedInside(root: string): string[] {
+export function protectedInside(root: string): string[] {
 	const base = root.length > 1 ? root.replace(/\/+$/u, "") : root;
 	return [path.join(base, ".git"), path.join(base, ".clio-coder")];
 }

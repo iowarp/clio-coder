@@ -35,7 +35,7 @@ export function workerReadOnlyTargetViolation(target: string): string | null {
 	const candidate = canonicalizePath(target);
 	if (candidate === null) return "sandbox: write target could not be resolved";
 	for (const entry of active.readOnlyPaths) {
-		const root = physical(entry);
+		const root = physicalSandboxPath(entry);
 		const relative = path.relative(root, candidate);
 		if (relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) {
 			return `sandbox: ${target} is read-only`;
@@ -99,7 +99,8 @@ function workerSandboxMaskedPaths(candidates?: ReadonlyArray<string>): SandboxMa
 	return masks;
 }
 
-function cachedMasks(): ReadonlyArray<SandboxMaskedPath> {
+/** The worker sandbox's credential and escape masks, which the yolo script sandbox reuses as they are. */
+export function workerSandboxMasks(): ReadonlyArray<SandboxMaskedPath> {
 	maskCache ??= workerSandboxMaskedPaths();
 	return maskCache;
 }
@@ -109,7 +110,7 @@ function cachedMasks(): ReadonlyArray<SandboxMaskedPath> {
  * symlinked component points at inside the new root, and the /tmp re-exposure
  * compares spellings.
  */
-function physical(entry: string): string {
+export function physicalSandboxPath(entry: string): string {
 	try {
 		return realpathSync(entry);
 	} catch {
@@ -122,7 +123,7 @@ function physical(entry: string): string {
 function writableRoot(entry: string, workspace: string): string {
 	// Exact-file boundaries cannot be replaced with directories or widened to
 	// their parent just to make the mount possible.
-	if (!entry.endsWith("/")) return physical(entry);
+	if (!entry.endsWith("/")) return physicalSandboxPath(entry);
 	const root = realpathSync(workspace);
 	const target = canonicalizePath(entry);
 	const contained = (candidate: string): boolean => {
@@ -162,18 +163,18 @@ export function composeWorkerSandboxInvocation(
 	command: SandboxCommand,
 	cwd: string,
 	availability: SandboxAvailability,
-	maskedPaths: ReadonlyArray<SandboxMaskedPath> = cachedMasks(),
+	maskedPaths: ReadonlyArray<SandboxMaskedPath> = workerSandboxMasks(),
 ): SandboxInvocation | null {
 	if (!availability.available || availability.backend === null || availability.executable === null) return null;
 	const spec: SandboxInvocationSpec = {
 		command,
-		cwd: physical(cwd),
+		cwd: physicalSandboxPath(cwd),
 		writableRoots: policy.writableRoots.map((entry) =>
-			availability.backend === "bwrap" ? writableRoot(entry, policy.readableRoots[0] ?? cwd) : physical(entry),
+			availability.backend === "bwrap" ? writableRoot(entry, policy.readableRoots[0] ?? cwd) : physicalSandboxPath(entry),
 		),
-		readOnlyPaths: policy.readOnlyPaths.map(physical),
-		gitWritablePaths: policy.gitWritablePaths.map(physical),
-		readableRoots: policy.readableRoots.map(physical),
+		readOnlyPaths: policy.readOnlyPaths.map(physicalSandboxPath),
+		gitWritablePaths: policy.gitWritablePaths.map(physicalSandboxPath),
+		readableRoots: policy.readableRoots.map(physicalSandboxPath),
 		network: policy.network,
 		maskedPaths,
 		// Agent sockets are masked; a dangling variable only produces confusing

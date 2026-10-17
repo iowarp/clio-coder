@@ -23,6 +23,7 @@ import {
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
 	type SafeCommandResult,
 } from "../core/safe-exec.js";
+import { yoloScriptSandboxWriteHint } from "../core/sandbox/yolo-script.js";
 import type { DynamicToolName } from "../core/tool-names.js";
 import { isSecretArgKey } from "../domains/safety/redaction.js";
 import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
@@ -796,6 +797,7 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 					timeoutMs: request.timeoutMs,
 					env: request.env,
 					...(signal ? { signal } : {}),
+					...(options?.scriptSandbox === undefined ? {} : { scriptSandbox: options.scriptSandbox }),
 					output: {
 						retainHeadBytes: 0,
 						retainTailBytes: RUN_SCRIPT_CAPS.resultTailBytes,
@@ -929,6 +931,12 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			} else if (outcome === "spawn-failed") {
 				lines.push(`the interpreter did not start: ${failure ?? (result.stderr.trim() || "unknown spawn failure")}`);
 			}
+			// The tail sections hold the end of each stream, where a refused write reports itself.
+			const sandboxHint =
+				outcome === "succeeded" || options?.scriptSandbox === undefined
+					? null
+					: yoloScriptSandboxWriteHint(`${result.stdout}\n${result.stderr}`, options.scriptSandbox);
+			if (sandboxHint !== null) lines.push(sandboxHint);
 			if (result.sinkError !== undefined) {
 				lines.push(`log write failed (${result.sinkError}); the script was stopped and the logs are incomplete`);
 			}

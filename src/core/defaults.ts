@@ -627,7 +627,9 @@ export interface SafetySettings {
 	 * OS sandbox for a dispatched worker's own commands (bash, run_script,
 	 * verification). auto sandboxes when a backend is available and records
 	 * when it is not; required refuses those commands without one; off never
-	 * sandboxes. Main-agent commands are not sandboxed.
+	 * sandboxes. Main-agent commands are not sandboxed, except a script the
+	 * operator's yolo runs (#419), which runs in the yolo script sandbox when
+	 * a backend exists and asks under required when none does.
 	 */
 	sandbox: SandboxMode;
 	/** Let sandboxed worker commands reach the network even without web_fetch. */
@@ -970,7 +972,7 @@ safety:
     workerResponseSeconds: 600
   review:
     enabled: false
-  # OS sandbox for dispatched worker commands: auto | required | off.
+  # OS sandbox for dispatched worker commands and yolo scripts: auto | required | off.
   sandbox: auto
   sandboxNetwork: false
   # Extra absolute trees yolo may clean up like the workspace, beside the temp

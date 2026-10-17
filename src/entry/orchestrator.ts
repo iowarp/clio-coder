@@ -29,6 +29,8 @@ import {
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../core/safe-exec.js";
+import { sandboxAvailability } from "../core/sandbox/availability.js";
+import { yoloScriptSandboxState } from "../core/sandbox/yolo-script.js";
 import {
 	applyOverrides,
 	applyRoutingPatch,
@@ -3032,6 +3034,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		autonomy: resolveEffectiveAutonomy,
 		// Only this registry carries the operator's yolo relaxations (#419).
 		scratchRoots: () => getCurrentSettings().safety.scratchRoots,
+		scriptSandbox: () => yoloScriptSandboxState(getCurrentSettings().safety.sandbox, sandboxAvailability()),
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read

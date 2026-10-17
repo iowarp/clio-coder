@@ -1,4 +1,8 @@
 import { type ClioSettings, readSettings } from "../core/config.js";
+import { canonicalizePath } from "../core/path-canonical.js";
+import { sandboxAvailability } from "../core/sandbox/availability.js";
+import type { SandboxMode } from "../core/sandbox/types.js";
+import { yoloScriptSandboxLine, yoloScriptSandboxPolicy, yoloScriptSandboxState } from "../core/sandbox/yolo-script.js";
 import {
 	type DoctorFinding,
 	formatDoctorReport,
@@ -12,7 +16,7 @@ import {
 } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
-import { droppedScratchRoots } from "../domains/safety/scratch-roots.js";
+import { droppedScratchRoots, effectiveScratchRoots } from "../domains/safety/scratch-roots.js";
 import {
 	describeHostCapacity,
 	observeHostCapacityFacts,
@@ -102,6 +106,36 @@ export function scratchRootFindings(workspaceRoot: string): DoctorFinding[] {
 	}));
 }
 
+/**
+ * Whether a script the operator's yolo runs is confined by the OS sandbox on
+ * this host, and where it may write (#419). Without a backend the static scan
+ * alone judges it; under `safety.sandbox: required` it asks.
+ */
+function yoloScriptSandboxFinding(workspaceRoot: string): DoctorFinding {
+	const availability = sandboxAvailability();
+	const state = yoloScriptSandboxState(configuredSandboxMode(), availability);
+	const workspace = canonicalizePath(workspaceRoot) ?? workspaceRoot;
+	const roots = yoloScriptSandboxPolicy({
+		workspace,
+		scratchRoots: effectiveScratchRoots(configuredScratchRoots(), workspaceRoot),
+	}).writableRoots;
+	return {
+		ok: true,
+		name: "yolo script sandbox",
+		level: state === "refused" ? "warn" : "ok",
+		detail: yoloScriptSandboxLine(state, availability, roots),
+	};
+}
+
+function configuredSandboxMode(): SandboxMode {
+	try {
+		return readSettings().safety.sandbox;
+	} catch {
+		// An unreadable settings file has its own doctor row; judge with the default.
+		return "auto";
+	}
+}
+
 function configuredScratchRoots(): ReadonlyArray<string> {
 	try {
 		return readSettings().safety.scratchRoots;
@@ -152,6 +186,7 @@ async function deepFindings(
 		workspaceRoot,
 		autonomy: deep.autonomy ?? configuredAutonomy(),
 		scratchRoots: configuredScratchRoots(),
+		scriptSandbox: yoloScriptSandboxState(configuredSandboxMode(), sandboxAvailability()),
 	});
 	return [...toolRows, ...contractRows];
 }
@@ -358,7 +393,9 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// The validation contract lives in the workspace, not the home, so it is
 	// checked on every run: a broken contract is why rigor stayed normal.
 	const contractChecks = [validationContractFinding(workspaceRoot)];
-	const scratchChecks = untouched ? [] : scratchRootFindings(workspaceRoot);
+	const scratchChecks = untouched
+		? []
+		: [...scratchRootFindings(workspaceRoot), yoloScriptSandboxFinding(workspaceRoot)];
 	// Task worktrees live in the workspace too. The sweep reads claims and asks
 	// git; it removes nothing.
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });

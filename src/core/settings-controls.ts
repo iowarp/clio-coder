@@ -526,7 +526,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.sandbox": [
 		"Worker command sandbox",
-		"Run dispatched workers' shell and verification commands in an OS sandbox that can write only the run's writable roots and a private /tmp. auto uses it when available, required refuses those commands without it, off never sandboxes. Your own chat commands are not sandboxed.",
+		"Run dispatched workers' shell and verification commands in an OS sandbox that can write only the run's writable roots and a private /tmp. auto uses it when available, required refuses those commands without it, off never sandboxes. Your own chat commands are not sandboxed, except scripts under yolo, which run in a sandbox that writes only the workspace and scratch roots.",
 	],
 	"safety.sandboxNetwork": [
 		"Worker sandbox network",

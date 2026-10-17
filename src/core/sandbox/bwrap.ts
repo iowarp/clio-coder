@@ -29,7 +29,7 @@ function uniquePaths(entries: ReadonlyArray<string> | undefined): string[] {
 /**
  * Pure bubblewrap argv for one sandboxed command. Mount order is the policy:
  * later mounts shadow earlier ones, so the sequence is read-only root, fresh
- * /dev, /proc and private /tmp, then writable roots, then read-only
+ * /dev, /proc and private /tmp (unless `privateTmp` is false), then writable roots, then read-only
  * re-protection inside them, then the Git metadata the run may write, then
  * masks over secrets.
  *
@@ -47,10 +47,13 @@ export function buildBwrapInvocation(
 ): SandboxInvocation {
 	const args: string[] = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts"];
 	if (!spec.network) args.push("--unshare-net");
-	args.push("--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", SANDBOX_TMP);
-	const readable = uniquePaths([spec.cwd, ...(spec.readableRoots ?? [])]);
-	for (const entry of readable) {
-		if (isUnder(SANDBOX_TMP, entry)) args.push("--ro-bind-try", entry, entry);
+	args.push("--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc");
+	if (spec.privateTmp !== false) {
+		args.push("--tmpfs", SANDBOX_TMP);
+		const readable = uniquePaths([spec.cwd, ...(spec.readableRoots ?? [])]);
+		for (const entry of readable) {
+			if (isUnder(SANDBOX_TMP, entry)) args.push("--ro-bind-try", entry, entry);
+		}
 	}
 	for (const entry of uniquePaths(spec.writableRoots)) args.push("--bind-try", entry, entry);
 	for (const entry of uniquePaths(spec.readOnlyPaths)) args.push("--ro-bind-try", entry, entry);

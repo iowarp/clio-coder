@@ -5,6 +5,11 @@ import { Value } from "typebox/value";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
+import {
+	type YoloScriptSandboxPolicy,
+	type YoloScriptSandboxState,
+	yoloScriptSandboxPolicy,
+} from "../core/sandbox/yolo-script.js";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
@@ -325,6 +330,8 @@ export interface RegistryDeps {
 	 * yolo as the operator's own (#419): workers, grants and jobs never carry it.
 	 */
 	scratchRoots?: () => ReadonlyArray<string>;
+	/** How the operator's yolo runs a script on this host, from `safety.sandbox` and the probed backend (#419). */
+	scriptSandbox?: () => YoloScriptSandboxState;
 	/**
 	 * The loop guard's parent-workspace mutation epoch for a turn. The main
 	 * agent's denial memory keys on it, so a refusal is repeated only while
@@ -456,6 +463,12 @@ export interface ToolInvokeOptions {
 	 * admission that passed. Never taken from a caller.
 	 */
 	operatorYolo?: true;
+	/**
+	 * Set by the main session's registry when admission allowed a script under
+	 * the operator's yolo on the sandbox (#419): bash and run_script spawn it in
+	 * the yolo script sandbox with this policy. Never taken from a caller.
+	 */
+	scriptSandbox?: YoloScriptSandboxPolicy;
 	/** Trusted resolved model capability; never read from tool arguments. */
 	supportsImages?: boolean;
 	/** Trusted effective context window in tokens; sizes the per-turn observation pool. */
@@ -775,7 +788,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	// The operator's own yolo exists only on the main session's registry (#419).
 	const operatorYoloScope = (level: AutonomyLevel): OperatorYoloScope | undefined =>
 		level === "yolo" && (deps.principal ?? "main") === "main" && deps.scratchRoots !== undefined
-			? { scratchRoots: deps.scratchRoots() }
+			? {
+					scratchRoots: deps.scratchRoots(),
+					...(deps.scriptSandbox !== undefined ? { scriptSandbox: deps.scriptSandbox() } : {}),
+				}
 			: undefined;
 	const withOperatorYolo = (level: AutonomyLevel): { operatorYolo?: OperatorYoloScope } => {
 		const scope = operatorYoloScope(level);
@@ -918,6 +934,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					flowAdmitsUrl: _callerFlowAdmitsUrl,
 					hookLanding: _callerHookLanding,
 					operatorYolo: _callerOperatorYolo,
+					scriptSandbox: _callerScriptSandbox,
 					...callerOptions
 				} = options ?? {};
 				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
@@ -936,6 +953,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(deps.principal === "worker" && deps.git !== undefined ? { gitContext: deps.git } : {}),
 					...(operatorYoloScope(deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL) !== undefined
 						? { operatorYolo: true as const }
+						: {}),
+					...(decision.policy?.scriptSandbox !== undefined
+						? { scriptSandbox: yoloScriptSandboxPolicy(decision.policy.scriptSandbox) }
 						: {}),
 					...(landing !== undefined && landing !== null ? { hookLanding: landing } : {}),
 					...(deps.flow !== undefined

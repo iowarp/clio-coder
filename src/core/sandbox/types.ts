@@ -67,6 +67,12 @@ export interface SandboxInvocationSpec {
 	setEnv?: Readonly<Record<string, string>>;
 	/** Variables removed inside the sandbox. */
 	unsetEnv?: ReadonlyArray<string>;
+	/**
+	 * False keeps the host's /tmp instead of mounting a private one, so a
+	 * writable root under it (the yolo script sandbox binds the real /tmp)
+	 * reaches the operator's own files. Default true.
+	 */
+	privateTmp?: boolean;
 }
 
 export interface SandboxInvocation {

@@ -12,6 +12,7 @@ import {
 	createPathWalkMemo,
 	type PathWalkMemo,
 } from "../../core/path-canonical.js";
+import type { YoloScriptSandboxState } from "../../core/sandbox/yolo-script.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
@@ -173,6 +174,13 @@ export interface SafetyPolicyDecision {
 	 * autonomy mapping asks for it in default mode.
 	 */
 	readScope?: "outside-workspace";
+	/**
+	 * Set on an allowed call that runs a script file under the operator's yolo
+	 * while the host has a sandbox backend (#419): the tool runs it inside the
+	 * yolo script sandbox, which may write only the canonical workspace and
+	 * the effective scratch roots.
+	 */
+	scriptSandbox?: { workspace: string; scratchRoots: ReadonlyArray<string> };
 }
 
 export interface SafetyPolicyMetadata {
@@ -199,6 +207,8 @@ export interface SafetyPolicyMetadata {
 export interface OperatorYoloScope {
 	/** `safety.scratchRoots` from the operator's own settings, unvalidated here. */
 	scratchRoots: ReadonlyArray<string>;
+	/** How a script runs on this host; absent reads as `unsandboxed`, the static scan alone. */
+	scriptSandbox?: YoloScriptSandboxState;
 }
 
 export interface SafetyPolicyEngine {
@@ -264,6 +274,8 @@ interface YoloRelaxation {
 	workspace: string;
 	/** The authority, protected-path and zero-access rails a top-level command meets, for one script line run from `cwd`. */
 	pathRail: (command: string, cwd: string) => ScriptLineVerdict;
+	/** `sandboxed` turns the scan's asks into sandboxed runs; `refused` makes every script ask. */
+	scriptSandbox: YoloScriptSandboxState;
 }
 
 /** A hard block from the authority and protected-path rails. */
@@ -759,395 +771,423 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		};
 	};
 
-	const engine: SafetyPolicyEngine = {
-		evaluate(rawCall, posture, operatorYolo) {
-			const call = normalizeCallPaths(rawCall);
-			const clioOwned = operatorYolo === undefined ? null : clioOwnedTrees();
-			// A call that reaches Clio's own config, data or state is judged without
-			// the operator's scope (#419): runtimes there load in-process at boot,
-			// agent recipes carry worker permissions and settings name the scratch
-			// roots, so yolo must never let a model widen its own rails.
-			if (clioOwned !== null && reachesClioOwnedTree(call, cwdArg(call.args, cwd), commandArg(call.args), clioOwned))
-				return engine.evaluate(rawCall, posture);
-			// A link made earlier in the same command can point a path the judges
-			// placed in a scratch root at the home directory before the delete or
-			// write runs, so such a command keeps today's verdict as well (#419).
-			if (clioOwned !== null && linksBeforeOtherSteps(commandArg(call.args))) return engine.evaluate(rawCall, posture);
-			const yolo: YoloRelaxation | undefined =
-				operatorYolo === undefined || clioOwned === null
-					? undefined
-					: {
-							scratchRoots: effectiveScratchRoots(operatorYolo.scratchRoots, cwd),
-							blockRules,
-							clioOwned,
-							workspace: cwd,
-							pathRail: scriptPathRail,
-						};
-			const rawClassification = yoloBranchDelete(classify(call), yolo);
-			const command = commandArg(call.args);
-			// Resolve verify exactly as the tool does: the check id alone is not the
-			// command when the model also supplied argv. Scan and admit that full argv.
-			const verifyArgs = call.tool === ToolNames.Verify ? prepareVerifyArguments(call.args ?? {}) : null;
-			const verifyResolution = verifyArgs === null ? null : resolveVerifyCall(cwd, verifyArgs);
-			const resolvedCheckCwd =
-				verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain"
-					? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
-					: null;
-			const callCwd = typeof resolvedCheckCwd === "string" ? resolvedCheckCwd : cwdArg(call.args, cwd);
-			const verifyArgv =
-				verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs);
-			const verifyCommand = verifyArgv?.join(" ") ?? null;
-			const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call, rawClassification)).filter(
-				(scan) => scan !== "",
-			);
-			const hit =
-				scans.length > 0
-					? matchSourcedRule(
-							scans,
-							yolo === undefined
-								? sourcedRules
-								: yoloSourcedRules(sourcedRules, scans, yolo, { command, callCwd, workspace: cwd }),
-						)
-					: null;
-			const classification = effectiveClassification(rawClassification, hit?.match);
+	const evaluateCall = (
+		rawCall: ClassifierCall,
+		posture: string | undefined,
+		operatorYolo: OperatorYoloScope | undefined,
+	): SafetyPolicyDecision => {
+		const call = normalizeCallPaths(rawCall);
+		const clioOwned = operatorYolo === undefined ? null : clioOwnedTrees();
+		// A call that reaches Clio's own config, data or state is judged without
+		// the operator's scope (#419): runtimes there load in-process at boot,
+		// agent recipes carry worker permissions and settings name the scratch
+		// roots, so yolo must never let a model widen its own rails.
+		if (clioOwned !== null && reachesClioOwnedTree(call, cwdArg(call.args, cwd), commandArg(call.args), clioOwned))
+			return engine.evaluate(rawCall, posture);
+		// A link made earlier in the same command can point a path the judges
+		// placed in a scratch root at the home directory before the delete or
+		// write runs, so such a command keeps today's verdict as well (#419).
+		if (clioOwned !== null && linksBeforeOtherSteps(commandArg(call.args))) return engine.evaluate(rawCall, posture);
+		const yolo: YoloRelaxation | undefined =
+			operatorYolo === undefined || clioOwned === null
+				? undefined
+				: {
+						scratchRoots: effectiveScratchRoots(operatorYolo.scratchRoots, cwd),
+						blockRules,
+						clioOwned,
+						workspace: cwd,
+						pathRail: scriptPathRail,
+						scriptSandbox: operatorYolo.scriptSandbox ?? "unsandboxed",
+					};
+		const rawClassification = yoloBranchDelete(classify(call), yolo);
+		const command = commandArg(call.args);
+		// Resolve verify exactly as the tool does: the check id alone is not the
+		// command when the model also supplied argv. Scan and admit that full argv.
+		const verifyArgs = call.tool === ToolNames.Verify ? prepareVerifyArguments(call.args ?? {}) : null;
+		const verifyResolution = verifyArgs === null ? null : resolveVerifyCall(cwd, verifyArgs);
+		const resolvedCheckCwd =
+			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain"
+				? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
+				: null;
+		const callCwd = typeof resolvedCheckCwd === "string" ? resolvedCheckCwd : cwdArg(call.args, cwd);
+		const verifyArgv =
+			verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs);
+		const verifyCommand = verifyArgv?.join(" ") ?? null;
+		const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call, rawClassification)).filter(
+			(scan) => scan !== "",
+		);
+		const hit =
+			scans.length > 0
+				? matchSourcedRule(
+						scans,
+						yolo === undefined
+							? sourcedRules
+							: yoloSourcedRules(sourcedRules, scans, yolo, { command, callCwd, workspace: cwd }),
+					)
+				: null;
+		const classification = effectiveClassification(rawClassification, hit?.match);
 
-			// Verify carries no command argument; the resolved argv is what runs, and
-			// a refusal or audit row names it.
-			const base = baseDecision(call, classification, callCwd, posture, command ?? verifyCommand);
+		// Verify carries no command argument; the resolved argv is what runs, and
+		// a refusal or audit row names it.
+		const base = baseDecision(call, classification, callCwd, posture, command ?? verifyCommand);
 
-			// Worker write-root containment (Slice C). A write-class tool whose
-			// target escapes every permitted root is a final block, ranked ahead of
-			// the git/system-modify/path-policy rails so an out-of-root write reports
-			// "write-root" even when the classifier escalated it to system_modify
-			// (e.g. a write outside cwd). No-op unless the run carries writeRoots.
-			const writeRootReason = evaluateWriteRoots(writeRoots, writeRootCwd, call);
-			if (writeRootReason !== null) {
-				return blockDecision(base, {
-					ruleId: "write-root",
-					reasonCode: "write-root",
-					reasons: [writeRootReason],
-					policySource: "builtin-classifier",
-				});
-			}
+		// Worker write-root containment (Slice C). A write-class tool whose
+		// target escapes every permitted root is a final block, ranked ahead of
+		// the git/system-modify/path-policy rails so an out-of-root write reports
+		// "write-root" even when the classifier escalated it to system_modify
+		// (e.g. a write outside cwd). No-op unless the run carries writeRoots.
+		const writeRootReason = evaluateWriteRoots(writeRoots, writeRootCwd, call);
+		if (writeRootReason !== null) {
+			return blockDecision(base, {
+				ruleId: "write-root",
+				reasonCode: "write-root",
+				reasons: [writeRootReason],
+				policySource: "builtin-classifier",
+			});
+		}
 
-			// Write-confinement is only honest if the run cannot escape the roots by
-			// running an arbitrary command or spawning an unconfined child. Under
-			// active writeRoots, execute-class tools (bash, verify, which run project
-			// scripts) and dispatch (which spawns a worker not bound to these roots)
-			// are blocked outright: they can mutate the filesystem outside the roots.
-			if (writeRoots.length > 0 && isWriteConfinementEscape(call, classification.actionClass, writeRootsOsConfined)) {
-				return blockDecision(base, {
-					ruleId: "write-root",
-					reasonCode: "write-root",
-					reasons: [
-						`tool '${call.tool}' (${classification.actionClass}) can mutate the filesystem outside the permitted write roots and is blocked under write-root confinement`,
-					],
-					policySource: "builtin-classifier",
-				});
-			}
-			if (resolvedCheckCwd instanceof Error) {
-				return blockDecision(base, {
-					ruleId: "verify-cwd-invalid",
-					reasonCode: "verify-cwd-invalid",
-					reasons: [resolvedCheckCwd.message],
-					policySource: "builtin-classifier",
-				});
-			}
+		// Write-confinement is only honest if the run cannot escape the roots by
+		// running an arbitrary command or spawning an unconfined child. Under
+		// active writeRoots, execute-class tools (bash, verify, which run project
+		// scripts) and dispatch (which spawns a worker not bound to these roots)
+		// are blocked outright: they can mutate the filesystem outside the roots.
+		if (writeRoots.length > 0 && isWriteConfinementEscape(call, classification.actionClass, writeRootsOsConfined)) {
+			return blockDecision(base, {
+				ruleId: "write-root",
+				reasonCode: "write-root",
+				reasons: [
+					`tool '${call.tool}' (${classification.actionClass}) can mutate the filesystem outside the permitted write roots and is blocked under write-root confinement`,
+				],
+				policySource: "builtin-classifier",
+			});
+		}
+		if (resolvedCheckCwd instanceof Error) {
+			return blockDecision(base, {
+				ruleId: "verify-cwd-invalid",
+				reasonCode: "verify-cwd-invalid",
+				reasons: [resolvedCheckCwd.message],
+				policySource: "builtin-classifier",
+			});
+		}
 
-			// An explicit `ask: true` damage-control rule is an authored
-			// confirm rail and takes precedence over classifier escalation for
-			// the same command (sd-01 M3). Without this, the unconditional
-			// git_destructive block made every authored git ask rule dead
-			// config. Commands matched only by classifier patterns, and rules
-			// with `block: true`, stay hard blocks. The ask rail itself runs
-			// only after the fail-closed and path-policy blocks below: hard
-			// blocks always win, and the ask rail decides among survivors.
-			const askRule = hit?.match.ask === true && hit.match.block !== true;
-			if (
-				!askRule &&
-				(classification.actionClass === "git_destructive" ||
-					hit?.match.actionClass === "git_destructive" ||
-					hit?.match.block === true)
-			) {
-				const blockInput: Omit<
-					SafetyPolicyDecision,
-					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
-				> = {
-					reasonCode: hit ? `damage-control:${hit.match.ruleId}` : "classification:git_destructive",
-					reasons: [...classification.reasons, ...(hit ? [hit.match.reason] : [])],
-					policySource: hit?.source ?? "damage-control:base",
-				};
-				if (hit?.match.ruleId !== undefined) blockInput.ruleId = hit.match.ruleId;
-				if (hit?.match !== undefined) blockInput.match = hit.match;
-				return blockDecision(base, blockInput);
-			}
-
-			// A delete is judged by where it lands, at every autonomy level, after the
-			// authored rules so a named catastrophic rule reports itself. The
-			// flag rules this replaces let `rm -v -r /` through, blocked scratch
-			// cleanup, and taught the model that dropping `-f` got around a block.
-			const deleteReasons = command === null ? [] : bashDeleteReasons(command, bashCwdArg(call.args), yolo?.scratchRoots);
-			if (deleteReasons.length > 0) {
-				const match: DamageControlMatch = {
-					ruleId: DELETE_TARGET_RULE_ID,
-					reason: `matched ${DELETE_TARGET_RULE_ID}: ${DELETE_TARGET_RULE_DESCRIPTION}`,
-					actionClass: "system_modify",
-					block: true,
-				};
-				return blockDecision(base, {
-					ruleId: DELETE_TARGET_RULE_ID,
-					reasonCode: `damage-control:${DELETE_TARGET_RULE_ID}`,
-					reasons: [...deleteReasons, match.reason],
-					match,
-					policySource: "damage-control:base",
-				});
-			}
-
-			// run_script is the typed twin of `bash x.sh`, and the operator's yolo
-			// reads its script the same way before it runs (#419).
-			if (yolo !== undefined && posture !== "confirmed" && call.tool === ToolNames.RunScript) {
-				const script = typeof call.args?.script === "string" ? call.args.script.trim() : "";
-				const scan =
-					script === ""
-						? null
-						: scanNamedScript(scriptPath(script, cwd), yolo, callCwd, [callCwd], newScriptBudget(), {
-								zero: scriptPath(script, cwd),
-								source: scriptPath(script, cwd),
-							});
-				if (scan !== null && "unscannable" in scan) {
-					return askDecision(base, {
-						ruleId: "bash-hidden-content",
-						reasonCode: "bash-hidden-content",
-						reasons: [scan.unscannable],
-						policySource: "builtin-command-allowlist",
-					});
-				}
-				if (scan !== null) {
-					const { kind: _kind, ...input } = scriptBlock(scan);
-					return blockDecision(base, input);
-				}
-			}
-
-			if (!projectPolicy.valid && EXECUTION_TOOLS.has(call.tool)) {
-				const blockInput: Omit<
-					SafetyPolicyDecision,
-					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
-				> = {
-					ruleId: "project-policy-invalid",
-					reasonCode: "project-policy-invalid",
-					reasons: [`project safety policy is invalid and execution fails closed: ${projectPolicy.errors.join("; ")}`],
-					policySource: "project-policy-invalid",
-				};
-				if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
-				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
-				return blockDecision(base, blockInput);
-			}
-
-			// Editing active instructions is an operator privilege at every autonomy
-			// level, in both the coordinator and the shared worker safety contract.
-			const mutationCommand = call.tool === ToolNames.Bash ? command : verifyCommand;
-			const scannedCommand = mutationCommand;
-			// Reuse the canonical authority boundary scan for parent deletions,
-			// shell cwd changes and aliases that a literal path-policy lookup misses.
-			// Every authority check judges the same targets, so they share one
-			// resolution and one walk memo, both dropped when this call is decided.
-			const walkMemo = createPathWalkMemo();
-			const targets = pathPolicyTargets(
-				verifyCommand === null ? call : { tool: ToolNames.Bash, args: { command: verifyCommand } },
-				callCwd,
-			);
-			const candidates = mutationCandidates(
-				yolo === undefined || mutationCommand === null ? targets : operatorAuthorityTargets(targets, mutationCommand),
-				callCwd,
-				mutationCommand,
-				walkMemo,
-			);
-			const authority = authorityBlock(
-				call,
-				callCwd,
-				mutationCommand,
-				scannedCommand,
-				candidates,
-				walkMemo,
-				deletePathPolicy(yolo),
-			);
-			if (authority !== null) {
-				const blockInput: Omit<
-					SafetyPolicyDecision,
-					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
-				> = { ruleId: authority.reasonCode, ...authority };
-				if (authority.policySource === "project-policy") {
-					if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
-					if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
-				}
-				return blockDecision(base, blockInput);
-			}
-			// The main session at yolo edits an existing file outside the workspace
-			// without asking (#419); secret, protected and Clio-owned paths were
-			// refused above on their own rails.
-			const outsideReplacement =
-				yolo === undefined ? outsideExistingTypedMutationTarget(call, cwd, classification, posture) : null;
-			if (outsideReplacement !== null) {
-				const input = {
-					ruleId: "outside-file-replacement",
-					reasonCode: "outside-file-replacement",
-					reasons: [
-						`Existing file '${outsideReplacement}' lies outside the workspace; replacing its contents requires operator approval`,
-					],
-					policySource: "builtin-classifier" as const,
-				};
-				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
-			}
-			// Project settings carry persistent fleet routing. A model edit is file
-			// level, so it cannot be told apart from a routing change: every mutation
-			// asks at every autonomy level, and a headless denial repeats reasons[0].
-			if (mutatesProjectSettings(cwd, candidates)) {
-				const input = {
-					ruleId: "project-settings-confirm",
-					reasonCode: "project-settings-confirm",
-					reasons: [
-						`Project settings under .clio-coder/ hold persistent fleet routing and are operator-owned; changing them requires operator approval. ${ROUTING_PIN_HINT}`,
-					],
-					policySource: "builtin-classifier" as const,
-				};
-				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
-			}
-
-			if (
-				scannedCommand !== null &&
-				posture !== "confirmed" &&
-				scanShellLikeDeep(scannedCommand).some((token) => token.hiddenContent)
-			) {
-				// The operator's yolo judges locale quoting by what it decodes to: the
-				// whole net runs again on the decoded command, and that verdict stands
-				// (#419). An ANSI-C escape that cannot be decoded keeps the ask.
-				const decoded = yolo !== undefined && call.tool === ToolNames.Bash ? decodedLocaleQuoting(scannedCommand) : null;
-				if (decoded !== null) {
-					const verdict = engine.evaluate({ ...call, args: { ...call.args, command: decoded } }, posture, operatorYolo);
-					return { ...verdict, reasons: [...verdict.reasons, `judged as its decoded form: ${decoded}`] };
-				}
-				return askDecision(base, {
-					ruleId: "bash-hidden-quoting",
-					reasonCode: "bash-hidden-quoting",
-					reasons: ["ambiguous ANSI-C escapes or locale quoting require one-shot operator confirmation"],
-					policySource: "builtin-command-allowlist",
-					execRecognition: "unrecognized",
-				});
-			}
-
-			// Managed library changes can be authorized by the operator. Direct
-			// mutations and all hard path/trust blocks above remain non-overridable.
-			if (mutationCommand !== null && invokesClioSkillMutation(mutationCommand) && !(posture === "yolo" && askRule)) {
-				const input = {
-					ruleId: "library-confirm",
-					reasonCode: "library-confirm",
-					reasons: [
-						posture === "confirmed"
-							? "library change confirmed by operator"
-							: posture === "yolo"
-								? "library change admitted by yolo"
-								: "library changes require one-shot operator confirmation in default",
-					],
-					policySource: "builtin-classifier" as const,
-				};
-				return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
-			}
-
-			// The authored ask rail (sd-01 M3) decides only among calls that
-			// survived every hard block above. A confirmed posture admits the
-			// matched command; an unconfirmed one parks it for confirmation.
-			if (askRule && hit !== null && posture !== "confirmed") {
-				return askDecision(base, {
-					ruleId: hit.match.ruleId,
-					reasonCode: `damage-control:${hit.match.ruleId}`,
-					reasons: [...classification.reasons, hit.match.reason, "damage-control rule requires confirmation"],
-					policySource: hit.source,
-					match: hit.match,
-				});
-			}
-			if (askRule && hit !== null && posture === "confirmed") {
-				return allowDecision(base, {
-					ruleId: hit.match.ruleId,
-					reasonCode: `damage-control:${hit.match.ruleId}`,
-					reasons: [...classification.reasons, hit.match.reason, "damage-control rule confirmed by operator"],
-					policySource: hit.source,
-					match: hit.match,
-				});
-			}
-
-			if (classification.actionClass === "system_modify") {
-				const input: Omit<
-					SafetyPolicyDecision,
-					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
-				> = {
-					ruleId: "system-modify-confirm",
-					reasonCode: "system-modify-confirm",
-					reasons: [
-						...classification.reasons,
-						posture === "confirmed"
-							? "system-level change confirmed by operator"
-							: posture === "yolo"
-								? "system-level change admitted by yolo"
-								: "system-level changes require one-shot confirmation in default",
-					],
-					policySource: "builtin-classifier",
-				};
-				return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
-			}
-
-			// A verify call that resolves to no argv lists the checks or names the
-			// ids it accepts and runs nothing. Scanning it as `npm run <check>` made
-			// an unknown id a permission ask, which a non-interactive worker turns
-			// into a terminal denial instead of reading the id list it would get.
-			if ((call.tool === ToolNames.Bash || verifyArgv !== null) && classification.actionClass === "execute") {
-				const bash = evaluateBashPolicy(
-					verifyArgv ?? command ?? "",
-					callCwd,
-					cwd,
-					posture,
-					projectPolicy,
-					{
-						exemptRoots: readExemptRoots,
-						memo: walkMemo,
-						readable: (target) => evaluatePathPolicy(zeroAccessPolicy, "read", target, callCwd, walkMemo).kind === "allow",
-						walkBudget: { remaining: RG_WALK_BUDGET },
-						notes: [],
-					},
-					yolo,
-				);
-				// A typed verifier still runs through the same command safety scan.
-				// Unrecognized checks are left to the autonomy mapping: default asks,
-				// while yolo admits them headlessly.
-				if (bash.kind === "block") return blockDecision(base, bash);
-				if (bash.kind === "ask") return askDecision(base, bash);
-				return allowDecision(base, bash);
-			}
-
-			const allowInput: Omit<
+		// An explicit `ask: true` damage-control rule is an authored
+		// confirm rail and takes precedence over classifier escalation for
+		// the same command (sd-01 M3). Without this, the unconditional
+		// git_destructive block made every authored git ask rule dead
+		// config. Commands matched only by classifier patterns, and rules
+		// with `block: true`, stay hard blocks. The ask rail itself runs
+		// only after the fail-closed and path-policy blocks below: hard
+		// blocks always win, and the ask rail decides among survivors.
+		const askRule = hit?.match.ask === true && hit.match.block !== true;
+		if (
+			!askRule &&
+			(classification.actionClass === "git_destructive" ||
+				hit?.match.actionClass === "git_destructive" ||
+				hit?.match.block === true)
+		) {
+			const blockInput: Omit<
 				SafetyPolicyDecision,
 				"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 			> = {
-				reasonCode: "allowed",
-				reasons: classification.reasons,
-				policySource: hit?.source ?? "none",
+				reasonCode: hit ? `damage-control:${hit.match.ruleId}` : "classification:git_destructive",
+				reasons: [...classification.reasons, ...(hit ? [hit.match.reason] : [])],
+				policySource: hit?.source ?? "damage-control:base",
 			};
-			if (hit?.match.ruleId !== undefined) allowInput.ruleId = hit.match.ruleId;
-			if (hit?.match !== undefined) allowInput.match = hit.match;
-			// Catalog argv already went through canonical command recognition above.
-			// Package scripts and the frontend validator retain their fixed typed surface.
-			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
-			// Search scope: the zero-access list above is the only path rail a
-			// read-class tool meets, so a path through a link or a plain `..` used
-			// to be read, listed, and searched at every level. The net still passes
-			// it; the flag lets the autonomy mapping ask in default mode.
-			if (isReadScopeTool(call.tool) && posture !== "confirmed") {
-				const escaped = readScopeEscape(pathArg(call.args) ?? ".", callCwd, cwd, readExemptRoots, walkMemo);
-				if (escaped !== null) {
-					allowInput.readScope = "outside-workspace";
-					allowInput.reasons = [...allowInput.reasons, `read-path-outside-workspace: ${escaped}`];
-				}
+			if (hit?.match.ruleId !== undefined) blockInput.ruleId = hit.match.ruleId;
+			if (hit?.match !== undefined) blockInput.match = hit.match;
+			return blockDecision(base, blockInput);
+		}
+
+		// A delete is judged by where it lands, at every autonomy level, after the
+		// authored rules so a named catastrophic rule reports itself. The
+		// flag rules this replaces let `rm -v -r /` through, blocked scratch
+		// cleanup, and taught the model that dropping `-f` got around a block.
+		const deleteReasons = command === null ? [] : bashDeleteReasons(command, bashCwdArg(call.args), yolo?.scratchRoots);
+		if (deleteReasons.length > 0) {
+			const match: DamageControlMatch = {
+				ruleId: DELETE_TARGET_RULE_ID,
+				reason: `matched ${DELETE_TARGET_RULE_ID}: ${DELETE_TARGET_RULE_DESCRIPTION}`,
+				actionClass: "system_modify",
+				block: true,
+			};
+			return blockDecision(base, {
+				ruleId: DELETE_TARGET_RULE_ID,
+				reasonCode: `damage-control:${DELETE_TARGET_RULE_ID}`,
+				reasons: [...deleteReasons, match.reason],
+				match,
+				policySource: "damage-control:base",
+			});
+		}
+
+		// run_script is the typed twin of `bash x.sh`, and the operator's yolo
+		// reads its script the same way before it runs (#419).
+		if (yolo !== undefined && posture !== "confirmed" && call.tool === ToolNames.RunScript) {
+			const script = typeof call.args?.script === "string" ? call.args.script.trim() : "";
+			const scan =
+				script === ""
+					? null
+					: scanNamedScript(scriptPath(script, cwd), yolo, callCwd, [callCwd], newScriptBudget(), {
+							zero: scriptPath(script, cwd),
+							source: scriptPath(script, cwd),
+						});
+			// With a sandbox backend the OS enforces the writable roots, so a
+			// script the scan could not read through runs sandboxed instead.
+			if (scan !== null && "unscannable" in scan && yolo.scriptSandbox !== "sandboxed") {
+				return askDecision(base, {
+					ruleId: "bash-hidden-content",
+					reasonCode: "bash-hidden-content",
+					reasons: [scan.unscannable],
+					policySource: "builtin-command-allowlist",
+				});
 			}
-			return allowDecision(base, allowInput);
+			if (scan !== null && !("unscannable" in scan)) {
+				const { kind: _kind, ...input } = scriptBlock(scan);
+				return blockDecision(base, input);
+			}
+			if (yolo.scriptSandbox === "refused") {
+				return askDecision(base, {
+					ruleId: "bash-hidden-content",
+					reasonCode: "bash-hidden-content",
+					reasons: [YOLO_SCRIPT_SANDBOX_REFUSED],
+					policySource: "builtin-command-allowlist",
+				});
+			}
+		}
+
+		if (!projectPolicy.valid && EXECUTION_TOOLS.has(call.tool)) {
+			const blockInput: Omit<
+				SafetyPolicyDecision,
+				"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+			> = {
+				ruleId: "project-policy-invalid",
+				reasonCode: "project-policy-invalid",
+				reasons: [`project safety policy is invalid and execution fails closed: ${projectPolicy.errors.join("; ")}`],
+				policySource: "project-policy-invalid",
+			};
+			if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
+			if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
+			return blockDecision(base, blockInput);
+		}
+
+		// Editing active instructions is an operator privilege at every autonomy
+		// level, in both the coordinator and the shared worker safety contract.
+		const mutationCommand = call.tool === ToolNames.Bash ? command : verifyCommand;
+		const scannedCommand = mutationCommand;
+		// Reuse the canonical authority boundary scan for parent deletions,
+		// shell cwd changes and aliases that a literal path-policy lookup misses.
+		// Every authority check judges the same targets, so they share one
+		// resolution and one walk memo, both dropped when this call is decided.
+		const walkMemo = createPathWalkMemo();
+		const targets = pathPolicyTargets(
+			verifyCommand === null ? call : { tool: ToolNames.Bash, args: { command: verifyCommand } },
+			callCwd,
+		);
+		const candidates = mutationCandidates(
+			yolo === undefined || mutationCommand === null ? targets : operatorAuthorityTargets(targets, mutationCommand),
+			callCwd,
+			mutationCommand,
+			walkMemo,
+		);
+		const authority = authorityBlock(
+			call,
+			callCwd,
+			mutationCommand,
+			scannedCommand,
+			candidates,
+			walkMemo,
+			deletePathPolicy(yolo),
+		);
+		if (authority !== null) {
+			const blockInput: Omit<
+				SafetyPolicyDecision,
+				"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+			> = { ruleId: authority.reasonCode, ...authority };
+			if (authority.policySource === "project-policy") {
+				if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
+				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
+			}
+			return blockDecision(base, blockInput);
+		}
+		// The main session at yolo edits an existing file outside the workspace
+		// without asking (#419); secret, protected and Clio-owned paths were
+		// refused above on their own rails.
+		const outsideReplacement =
+			yolo === undefined ? outsideExistingTypedMutationTarget(call, cwd, classification, posture) : null;
+		if (outsideReplacement !== null) {
+			const input = {
+				ruleId: "outside-file-replacement",
+				reasonCode: "outside-file-replacement",
+				reasons: [
+					`Existing file '${outsideReplacement}' lies outside the workspace; replacing its contents requires operator approval`,
+				],
+				policySource: "builtin-classifier" as const,
+			};
+			return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
+		}
+		// Project settings carry persistent fleet routing. A model edit is file
+		// level, so it cannot be told apart from a routing change: every mutation
+		// asks at every autonomy level, and a headless denial repeats reasons[0].
+		if (mutatesProjectSettings(cwd, candidates)) {
+			const input = {
+				ruleId: "project-settings-confirm",
+				reasonCode: "project-settings-confirm",
+				reasons: [
+					`Project settings under .clio-coder/ hold persistent fleet routing and are operator-owned; changing them requires operator approval. ${ROUTING_PIN_HINT}`,
+				],
+				policySource: "builtin-classifier" as const,
+			};
+			return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
+		}
+
+		if (
+			scannedCommand !== null &&
+			posture !== "confirmed" &&
+			scanShellLikeDeep(scannedCommand).some((token) => token.hiddenContent)
+		) {
+			// The operator's yolo judges locale quoting by what it decodes to: the
+			// whole net runs again on the decoded command, and that verdict stands
+			// (#419). An ANSI-C escape that cannot be decoded keeps the ask.
+			const decoded = yolo !== undefined && call.tool === ToolNames.Bash ? decodedLocaleQuoting(scannedCommand) : null;
+			if (decoded !== null) {
+				const verdict = engine.evaluate({ ...call, args: { ...call.args, command: decoded } }, posture, operatorYolo);
+				return { ...verdict, reasons: [...verdict.reasons, `judged as its decoded form: ${decoded}`] };
+			}
+			return askDecision(base, {
+				ruleId: "bash-hidden-quoting",
+				reasonCode: "bash-hidden-quoting",
+				reasons: ["ambiguous ANSI-C escapes or locale quoting require one-shot operator confirmation"],
+				policySource: "builtin-command-allowlist",
+				execRecognition: "unrecognized",
+			});
+		}
+
+		// Managed library changes can be authorized by the operator. Direct
+		// mutations and all hard path/trust blocks above remain non-overridable.
+		if (mutationCommand !== null && invokesClioSkillMutation(mutationCommand) && !(posture === "yolo" && askRule)) {
+			const input = {
+				ruleId: "library-confirm",
+				reasonCode: "library-confirm",
+				reasons: [
+					posture === "confirmed"
+						? "library change confirmed by operator"
+						: posture === "yolo"
+							? "library change admitted by yolo"
+							: "library changes require one-shot operator confirmation in default",
+				],
+				policySource: "builtin-classifier" as const,
+			};
+			return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
+		}
+
+		// The authored ask rail (sd-01 M3) decides only among calls that
+		// survived every hard block above. A confirmed posture admits the
+		// matched command; an unconfirmed one parks it for confirmation.
+		if (askRule && hit !== null && posture !== "confirmed") {
+			return askDecision(base, {
+				ruleId: hit.match.ruleId,
+				reasonCode: `damage-control:${hit.match.ruleId}`,
+				reasons: [...classification.reasons, hit.match.reason, "damage-control rule requires confirmation"],
+				policySource: hit.source,
+				match: hit.match,
+			});
+		}
+		if (askRule && hit !== null && posture === "confirmed") {
+			return allowDecision(base, {
+				ruleId: hit.match.ruleId,
+				reasonCode: `damage-control:${hit.match.ruleId}`,
+				reasons: [...classification.reasons, hit.match.reason, "damage-control rule confirmed by operator"],
+				policySource: hit.source,
+				match: hit.match,
+			});
+		}
+
+		if (classification.actionClass === "system_modify") {
+			const input: Omit<
+				SafetyPolicyDecision,
+				"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+			> = {
+				ruleId: "system-modify-confirm",
+				reasonCode: "system-modify-confirm",
+				reasons: [
+					...classification.reasons,
+					posture === "confirmed"
+						? "system-level change confirmed by operator"
+						: posture === "yolo"
+							? "system-level change admitted by yolo"
+							: "system-level changes require one-shot confirmation in default",
+				],
+				policySource: "builtin-classifier",
+			};
+			return posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input);
+		}
+
+		// A verify call that resolves to no argv lists the checks or names the
+		// ids it accepts and runs nothing. Scanning it as `npm run <check>` made
+		// an unknown id a permission ask, which a non-interactive worker turns
+		// into a terminal denial instead of reading the id list it would get.
+		if ((call.tool === ToolNames.Bash || verifyArgv !== null) && classification.actionClass === "execute") {
+			const bash = evaluateBashPolicy(
+				verifyArgv ?? command ?? "",
+				callCwd,
+				cwd,
+				posture,
+				projectPolicy,
+				{
+					exemptRoots: readExemptRoots,
+					memo: walkMemo,
+					readable: (target) => evaluatePathPolicy(zeroAccessPolicy, "read", target, callCwd, walkMemo).kind === "allow",
+					walkBudget: { remaining: RG_WALK_BUDGET },
+					notes: [],
+				},
+				yolo,
+			);
+			// A typed verifier still runs through the same command safety scan.
+			// Unrecognized checks are left to the autonomy mapping: default asks,
+			// while yolo admits them headlessly.
+			if (bash.kind === "block") return blockDecision(base, bash);
+			if (bash.kind === "ask") return askDecision(base, bash);
+			return allowDecision(base, bash);
+		}
+
+		const allowInput: Omit<
+			SafetyPolicyDecision,
+			"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+		> = {
+			reasonCode: "allowed",
+			reasons: classification.reasons,
+			policySource: hit?.source ?? "none",
+		};
+		if (hit?.match.ruleId !== undefined) allowInput.ruleId = hit.match.ruleId;
+		if (hit?.match !== undefined) allowInput.match = hit.match;
+		// Catalog argv already went through canonical command recognition above.
+		// Package scripts and the frontend validator retain their fixed typed surface.
+		if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
+		// Search scope: the zero-access list above is the only path rail a
+		// read-class tool meets, so a path through a link or a plain `..` used
+		// to be read, listed, and searched at every level. The net still passes
+		// it; the flag lets the autonomy mapping ask in default mode.
+		if (isReadScopeTool(call.tool) && posture !== "confirmed") {
+			const escaped = readScopeEscape(pathArg(call.args) ?? ".", callCwd, cwd, readExemptRoots, walkMemo);
+			if (escaped !== null) {
+				allowInput.readScope = "outside-workspace";
+				allowInput.reasons = [...allowInput.reasons, `read-path-outside-workspace: ${escaped}`];
+			}
+		}
+		return allowDecision(base, allowInput);
+	};
+
+	const engine: SafetyPolicyEngine = {
+		evaluate(rawCall, posture, operatorYolo) {
+			const decision = evaluateCall(rawCall, posture, operatorYolo);
+			// A script the operator's yolo admitted runs in the yolo script sandbox,
+			// whatever stage allowed it, so the tool learns its roots here (#419).
+			if (decision.kind !== "allow" || operatorYolo?.scriptSandbox !== "sandboxed" || !runsScriptFile(rawCall))
+				return decision;
+			const scriptSandbox = {
+				workspace: canonicalizePath(cwd) ?? cwd,
+				scratchRoots: effectiveScratchRoots(operatorYolo.scratchRoots, cwd),
+			};
+			return { ...decision, scriptSandbox };
 		},
 		writeTargetViolation(target) {
 			if (writeRoots.length === 0) return null;
@@ -1426,6 +1466,12 @@ function evaluateBashPolicy(
 		if (scan !== null && "unscannable" in scan) unscannable ??= scan.unscannable;
 		else if (scan !== null) return scriptBlock(scan);
 	}
+	// A named script under a sandbox backend runs in the yolo script sandbox,
+	// so a script the scan could not read through no longer asks; without a
+	// backend under `safety.sandbox: required` every named script asks (#419).
+	const namesScripts = namedScripts !== null && namedScripts.length > 0;
+	if (namesScripts && yolo?.scriptSandbox === "sandboxed") unscannable = null;
+	if (namesScripts && yolo?.scriptSandbox === "refused") unscannable ??= YOLO_SCRIPT_SANDBOX_REFUSED;
 	if (
 		typeof input === "string" &&
 		posture !== "confirmed" &&
@@ -1746,6 +1792,18 @@ interface ScriptHit {
 	match: DamageControlMatch;
 	source: SafetyPolicySource;
 }
+
+/** True for run_script and for a bash command that hands a shell a script file it names (#419). */
+function runsScriptFile(call: ClassifierCall): boolean {
+	if (call.tool === ToolNames.RunScript) return true;
+	if (call.tool !== ToolNames.Bash) return false;
+	const command = commandArg(call.args);
+	return command !== null && hasUnparsedShellScript(command) && (shellScriptSources(command)?.length ?? 0) > 0;
+}
+
+/** Why a yolo script asks when `safety.sandbox` is `required` and the host has no backend. */
+const YOLO_SCRIPT_SANDBOX_REFUSED =
+	'safety.sandbox is "required" and no OS sandbox is available, so a script under yolo asks before it runs';
 
 /** A script operand as the shell resolves it; a name it expands at run time stays unplaceable. */
 function scriptPath(operand: string, callCwd: string): string | null {

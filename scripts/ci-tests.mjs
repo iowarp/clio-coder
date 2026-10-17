@@ -122,6 +122,7 @@ export const coreTests = [
 	"worker-readonly-dispatch",
 	"worker-refusal-limit",
 	"worker-sandbox",
+	"yolo-script-sandbox",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	.concat([

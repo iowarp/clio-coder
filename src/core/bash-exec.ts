@@ -8,6 +8,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
+import { planYoloScriptSpawn, type YoloScriptSandboxPolicy } from "./sandbox/yolo-script.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
@@ -57,6 +58,8 @@ export interface RunBashCommandOptions {
 	signal?: AbortSignal;
 	/** Cumulative snapshots, throttled to keep terminal rendering responsive. */
 	onUpdate?: (progress: BashCommandProgress) => void;
+	/** Set by the bash tool for a script the operator's yolo admitted on the sandbox (#419). */
+	scriptSandbox?: YoloScriptSandboxPolicy;
 }
 
 const BASH_UPDATE_THROTTLE_MS = 100;
@@ -340,8 +343,14 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 	// succeeded. A caller can explicitly opt out with `set +o pipefail`.
 	const shellArgv = ["/bin/bash", "-o", "pipefail", plan.mode, command];
 	// Inside a dispatched worker the command runs under the worker's OS
-	// sandbox (decision Q8); everywhere else the plan is a direct spawn.
-	const sandbox = planSandboxedSpawn({ argv: shellArgv }, options.cwd ?? process.cwd());
+	// sandbox (decision Q8), and a script the operator's yolo admitted runs
+	// under the yolo script sandbox (#419); everywhere else the plan is a
+	// direct spawn.
+	const yoloPlan =
+		options.scriptSandbox !== undefined
+			? planYoloScriptSpawn(options.scriptSandbox, { argv: shellArgv }, options.cwd ?? process.cwd())
+			: undefined;
+	const sandbox = yoloPlan ?? planSandboxedSpawn({ argv: shellArgv }, options.cwd ?? process.cwd());
 	if (sandbox.kind === "refused") return sandboxRefusedResult(sandbox.message);
 	const spawnFile = sandbox.kind === "sandboxed" ? sandbox.file : "/bin/bash";
 	const spawnArgs = sandbox.kind === "sandboxed" ? sandbox.args : shellArgv.slice(1);
@@ -362,6 +371,10 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
+
+		// The yolo script sandbox removes git config and commondir files its script
+		// planted once the sandbox is gone, before the result resolves (#419).
+		if (yoloPlan?.kind === "sandboxed") child.once("exit", yoloPlan.afterExit);
 
 		output.start();
 
