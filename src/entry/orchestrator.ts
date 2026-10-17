@@ -20,6 +20,7 @@ import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from ".
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
+import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
 import { consumeRestartIntent } from "../core/restart-intent.js";
@@ -106,23 +107,17 @@ import {
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
 	loadMemoryRecordsSync,
-	type MemoryGateOutcome,
-	type MemoryRecord,
 	MemoryRuntime,
 	OBSERVATION_PROMPT,
-	proposeInjectedTaskMemory,
 	readTaskMemorySpendSummary,
-	recordMemoryObservations,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
-	type TaskMemoryEntry,
 	type TaskMemoryModelClient,
 	type TaskMemoryStepUsage,
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
 	taskMemoryTracePath,
 } from "../domains/memory/index.js";
-import { eligibleMemoryRecords } from "../domains/memory/operations.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { createMemoryRelevance } from "../domains/memory/relevance-source.js";
 import {
@@ -157,11 +152,7 @@ import {
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
 import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/memory-guardian.js";
-import {
-	MEMORY_INTERVENTION_ACTIVITY_LIMIT,
-	type MemoryDeliveryOutcome,
-	type MemoryKnowledgeReview,
-} from "../domains/middleware/memory-intervention.js";
+import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/middleware/memory-intervention.js";
 import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-endpoint.js";
 import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
@@ -188,6 +179,8 @@ import {
 	endpointThroughput,
 	firstRuntimeResolutionError,
 	isOrchestratorEligibleRuntime,
+	modelEndpointKey,
+	modelStreamUsage,
 	normalizeCostProvenance,
 	probeCapabilitiesForModel,
 	recordEndpointThroughput,
@@ -810,6 +803,33 @@ function memoryAdmissionLimitFor(
 	return backgroundMemoryAdmissionLimit(capacity);
 }
 
+/**
+ * The slot key a background memory step admits against. Behind a model-routed
+ * gateway that nothing bounds (no override, no discovered slots), the step's
+ * own model is the scheduler it competes with, so it counts only that model's
+ * streams; another model's turn through the same gateway no longer reads as
+ * busy. Once the gateway carries a bound, the step admits against the
+ * gateway total exactly as before, so optional work never exceeds what the
+ * operator declared.
+ */
+function backgroundMemoryEndpointKey(
+	providers: ProvidersContract,
+	target: TargetDescriptor,
+	wireModelId: string,
+	targets: ReadonlyArray<TargetDescriptor>,
+): string | null {
+	const gateway = canonicalEndpointKey(target);
+	const model = modelEndpointKey(target, wireModelId);
+	if (gateway === null || model === gateway) return gateway;
+	const bounded =
+		resolveEndpointCapacities({
+			statuses: providers.list(),
+			targets,
+			runtimeFor: (id) => providers.getRuntime(id),
+		})[gateway] !== undefined;
+	return bounded ? gateway : model;
+}
+
 function backgroundMemoryEndpointBusy(
 	providers: ProvidersContract,
 	endpointKey: string | null,
@@ -817,7 +837,7 @@ function backgroundMemoryEndpointBusy(
 ): boolean {
 	if (endpointKey === null) return false;
 	const limit = memoryAdmissionLimitFor(providers, endpointKey, targets);
-	return (endpointCapacityUsage()[endpointKey] ?? 0) >= limit;
+	return modelStreamUsage(endpointCapacityUsage(), endpointKey) >= limit;
 }
 
 function prepareBackgroundMemoryRoute(
@@ -833,7 +853,8 @@ function prepareBackgroundMemoryRoute(
 ): BackgroundMemoryRoute {
 	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
 	const { refined } = initial;
-	const endpointKey = canonicalEndpointKey(refined.target);
+	const gatewayKey = canonicalEndpointKey(refined.target);
+	const endpointKey = backgroundMemoryEndpointKey(providers, refined.target, refined.wireModelId, targets);
 	const routeFacts = backgroundRouteFacts(refined);
 	return {
 		selection,
@@ -870,7 +891,7 @@ function prepareBackgroundMemoryRoute(
 					},
 					quota: routeFacts.quotaProviderId === null ? null : observedQuota(routeFacts.quotaProviderId, nowMs),
 					endpoint: {
-						occupied: endpointKey === null ? 0 : (endpointCapacityUsage()[endpointKey] ?? 0),
+						occupied: endpointKey === null ? 0 : modelStreamUsage(endpointCapacityUsage(), endpointKey),
 						admissionLimit:
 							endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets),
 						prefillTokensPerSecond: throughput?.prefillTokensPerSecond ?? null,
@@ -885,7 +906,7 @@ function prepareBackgroundMemoryRoute(
 				}
 				await prepareBackgroundModelMetadata(providers, targetId, request.signal);
 				const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
-				if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== endpointKey) {
+				if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
 					throw new Error("background memory target changed during preparation");
 				}
 				if (request.purpose) {
@@ -915,7 +936,7 @@ function prepareBackgroundMemoryRoute(
 						endpointKey,
 						targetId,
 						admissionLimit,
-						admit: () => endpointKey === null || (endpointCapacityUsage()[endpointKey] ?? 0) < admissionLimit,
+						admit: () => endpointKey === null || modelStreamUsage(endpointCapacityUsage(), endpointKey) < admissionLimit,
 					},
 					async (request: TaskMemoryModelRequest) => {
 						const startedAt = performance.now();
@@ -1191,7 +1212,7 @@ async function resolveCompactionModel(
 		targetId: route.targetId,
 		runtimeId: route.runtime.id,
 		wireModelId: route.wireModelId,
-		endpointKey: canonicalEndpointKey(route.target),
+		endpointKey: modelEndpointKey(route.target, route.wireModelId),
 		apiKey,
 		...(route.target.auth?.headers ? { headers: route.target.auth.headers } : {}),
 	};
@@ -1434,14 +1455,17 @@ async function runCompactionFlow(
 	try {
 		result = await compact({
 			entries,
-			offerMemory: (slice, ordinary) => {
+			offerMemory: (slice, ordinary, projected) => {
 				const scope = admission?.memory?.observationStatus().scope;
 				if (!scope) return null;
+				// Units come from the raw ledger slice, the material the batches were
+				// prepared from; an uncovered unit is serialized from the projected
+				// entries so it costs what the ordinary summary would have paid for it.
 				return (
 					admission?.memory?.offerCompaction({
 						source: { ...scope, checkpoint: observationCheckpoint(entries), units: observationSourceUnits(slice) },
 						ordinary,
-						serialize: (refs) => serializeConversation(slice.filter((entry) => refs.includes(entry.turnId))),
+						serialize: (refs) => serializeConversation(projected.filter((entry) => refs.includes(entry.turnId))),
 					}) ?? null
 				);
 			},
@@ -2353,166 +2377,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(observability === undefined ? {} : { observability }),
 		});
 	};
-	// Bank entry id to the durable proposal it became, held until the guardian
-	// reports what the session saw after delivery. Entry ids restart with every
-	// bank reset, so a final outcome report clears the map.
-	const proposedMemoryByEntry = new Map<
-		string,
-		{
-			content: string;
-			record: Promise<{ memoryId: string; sessionId: string } | null>;
-			/**
-			 * Whether this session already reported the proposal held. Filing and
-			 * evidence are separate: a lesson filed before its command had run is
-			 * still owed its held observation when the command later succeeds.
-			 */
-			held: boolean;
-		}
-	>();
-	const reportGateOutcome = (result: MemoryGateOutcome): void => {
-		const lines = [
-			...result.approved.map((record) => `Memory: kept a repository lesson (${record.id}): ${record.lesson}`),
-			...result.demoted.map((record) => `Memory: withdrew a repository lesson that stopped holding (${record.id}).`),
-		];
-		for (const line of lines) {
-			if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(line);
-			else writeDiagnostic(`[clio-coder:memory] ${line}\n`);
-		}
+	// Lesson gate decisions reach the operator through the transcript notice
+	// path once the chat loop has bound it; before that, a diagnostic line.
+	const memoryNotice = (line: string): void => {
+		if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(line);
+		else writeDiagnostic(`[clio-coder:memory] ${line}\n`);
 	};
-	const reportMemoryStoreFailure = (what: string) => (error: unknown) => {
-		writeDiagnostic(`[clio-coder:memory] ${what}: ${error instanceof Error ? error.message : String(error)}\n`);
-	};
-	/** Propose entries at repository scope and record what the session observed about each. */
-	const proposeMemoryEntries = (
-		entries: ReadonlyArray<TaskMemoryEntry>,
-		kind: "delivered" | "held" | null,
-		scopeSessionId?: string,
-	): void => {
-		const meta = session?.current() ?? null;
-		const sessionId = scopeSessionId ?? meta?.id ?? null;
-		const proposal = proposeInjectedTaskMemory(clioDataDir(), {
-			sessionId,
-			cwd: meta?.cwd || process.cwd(),
-			entries,
-		})
-			.then(async (result) => {
-				for (const error of result.errors) {
-					writeDiagnostic(`[clio-coder:memory] proposed record not written for ${error}\n`);
-				}
-				if (sessionId !== null && kind !== null && result.records.length > 0) {
-					reportGateOutcome(
-						await recordMemoryObservations(
-							clioDataDir(),
-							// Only lessons collect evidence. A cited plain entry is still filed
-							// for the operator, and stays pending without them.
-							[
-								...new Set(
-									entries.flatMap((entry) => {
-										const record = entry.durable === true ? result.recordByEntry.get(entry.id) : undefined;
-										return record === undefined ? [] : [record.id];
-									}),
-								),
-							].map((memoryId) => ({ memoryId, sessionId, kind })),
-						),
-					);
-				}
-				return result.recordByEntry;
-			})
-			.catch((error: unknown) => {
-				reportMemoryStoreFailure("proposed records not written")(error);
-				return new Map<string, MemoryRecord>();
-			});
-		for (const entry of entries) {
-			proposedMemoryByEntry.set(entry.id, {
-				content: entry.content,
-				held: kind === "held" && entry.durable === true,
-				record: proposal.then((records) => {
-					const record = entry.durable === true ? records.get(entry.id) : undefined;
-					return record === undefined || sessionId === null ? null : { memoryId: record.id, sessionId };
-				}),
-			});
-		}
-	};
-	const proposeInjectedMemoryEntries = (entries: ReadonlyArray<TaskMemoryEntry>): void =>
-		proposeMemoryEntries(entries, "delivered");
-	/**
-	 * A knowledge entry the guardian kept across a later step becomes a
-	 * repository lesson; one it deleted or rewrote takes its lesson back.
-	 */
-	const reviewMemoryKnowledge = (review: MemoryKnowledgeReview): void => {
-		const fresh = review.kept.filter((entry) => proposedMemoryByEntry.get(entry.id)?.content !== entry.content);
-		// Already filed, now grounded: the observation goes to the existing
-		// proposal. The gate still holds a record the operator rejected.
-		const nowHeld = review.kept.flatMap((entry) => {
-			const filed = proposedMemoryByEntry.get(entry.id);
-			if (filed === undefined || filed.content !== entry.content || filed.held) return [];
-			filed.held = true;
-			return [filed.record];
-		});
-		if (fresh.length > 0) proposeMemoryEntries(fresh, "held");
-		if (nowHeld.length > 0) {
-			void Promise.all(nowHeld)
-				.then((resolved) =>
-					recordMemoryObservations(
-						clioDataDir(),
-						resolved.filter((item) => item !== null).map((item) => ({ ...item, kind: "held" as const })),
-					),
-				)
-				.then(reportGateOutcome)
-				.catch(reportMemoryStoreFailure("held lessons not recorded"));
-		}
-		const unfounded = review.ungrounded.filter((entry) => proposedMemoryByEntry.get(entry.id)?.content !== entry.content);
-		if (unfounded.length > 0) proposeMemoryEntries(unfounded, null);
-		const withdrawn = review.withdrawn.flatMap((entry) => {
-			const proposed = proposedMemoryByEntry.get(entry.id);
-			if (proposed?.content !== entry.content) return [];
-			proposedMemoryByEntry.delete(entry.id);
-			return [proposed.record];
-		});
-		if (withdrawn.length === 0) return;
-		void Promise.all(withdrawn)
-			.then((resolved) =>
-				recordMemoryObservations(
-					clioDataDir(),
-					resolved.filter((item) => item !== null).map((item) => ({ ...item, kind: "contradicted" as const })),
-				),
-			)
-			.then(reportGateOutcome)
-			.catch(reportMemoryStoreFailure("withdrawn knowledge not recorded"));
-	};
-	/**
-	 * Feed what the session saw after a delivery into the durable store's gate
-	 * and tell the operator when it changed a record, since nobody reviews these
-	 * by hand any more.
-	 */
-	const settleMemoryDeliveries = (outcomes: ReadonlyArray<MemoryDeliveryOutcome>, final: boolean): void => {
-		const pending = outcomes.flatMap((outcome) =>
-			outcome.entries.map(async (entry) => {
-				// Bound to the fact that was delivered: an entry rewritten since then
-				// holds a different proposal under the same id, and that one was not
-				// what this outcome observed.
-				const current = proposedMemoryByEntry.get(entry.id);
-				if (current?.content !== entry.content) return null;
-				if (outcome.kind === "held") {
-					if (current.held) return null;
-					current.held = true;
-				}
-				const proposed = await current.record;
-				return proposed ? { ...proposed, kind: outcome.kind } : null;
-			}),
-		);
-		if (final) proposedMemoryByEntry.clear();
-		if (pending.length === 0) return;
-		void Promise.all(pending)
-			.then((resolved) =>
-				recordMemoryObservations(
-					clioDataDir(),
-					resolved.filter((item) => item !== null),
-				),
-			)
-			.then(reportGateOutcome)
-			.catch(reportMemoryStoreFailure("delivery outcomes not recorded"));
-	};
+	const memoryDiagnostic = (line: string): void => writeDiagnostic(`[clio-coder:memory] ${line}\n`);
 	const memoryFlowNoticedSessions = new Set<string | null>();
 	const admitMemoryFlow: AdmitBackgroundModelFlow = (destination) => {
 		const refusal = admitModelFlow(destination);
@@ -2542,13 +2413,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		MEMORY_INTERVENTION_ACTIVITY_LIMIT,
 	);
 	const memoryWorkspaceRoot = (): string => session?.current()?.cwd || process.cwd();
-	const keptRepositoryLessons = () =>
-		eligibleMemoryRecords(loadMemoryRecordsSync(clioDataDir()), {
-			scopes: ["repo"],
-			activeRepository: canonicalMemoryRepositoryIdentity(memoryWorkspaceRoot()),
-		})
-			.slice(0, 10)
-			.map((record) => ({ id: record.id, text: record.lesson }));
 	// Bound late: the guardian needs the registration, and the registration
 	// reports turn boundaries and step activity to the guardian.
 	let memoryGuardian: MemoryGuardian | null = null;
@@ -2601,78 +2465,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			backgroundSessionSpendUsd,
 		),
 		captureStepUsage: captureBackgroundMemoryUsage,
-		onInjectedEntries: (entries) => proposeInjectedMemoryEntries(entries),
-		onDeliveryOutcomes: settleMemoryDeliveries,
-		onKnowledgeReview: reviewMemoryKnowledge,
-		getKeptLessons: keptRepositoryLessons,
-		onKeptLessonsRetired: (memoryIds) => {
-			const sessionId = session?.current()?.id;
-			if (sessionId === undefined) return;
-			void recordMemoryObservations(
-				clioDataDir(),
-				memoryIds.map((memoryId) => ({ memoryId, sessionId, kind: "contradicted" as const })),
-			)
-				.then(reportGateOutcome)
-				.catch(reportMemoryStoreFailure("retired lessons not recorded"));
-		},
-		onDurableLessonOutcomes: ({ sessionId, delivered, held }) => {
-			if (sessionId === undefined) return;
-			void recordMemoryObservations(clioDataDir(), [
-				...delivered.map((memoryId) => ({ memoryId, sessionId, kind: "delivered" as const })),
-				...held.map((memoryId) => ({ memoryId, sessionId, kind: "held" as const })),
-			])
-				.then(reportGateOutcome)
-				.catch(reportMemoryStoreFailure("durable lesson outcomes not recorded"));
-		},
-		onScopeEnd: ({ sessionId, lessons }) => {
-			// A lesson a later step already kept is in the store; the rest are filed
-			// without evidence and wait for a later session to learn the same thing.
-			const unfiled = lessons.filter((entry) => proposedMemoryByEntry.get(entry.id)?.content !== entry.content);
-			if (unfiled.length > 0) proposeMemoryEntries(unfiled, null, sessionId);
-		},
 	});
 	middleware.registerHook(memoryIntervention);
-	/**
-	 * File lessons the guardian found in an earlier session, with that session
-	 * as provenance. A lesson the host could bind to evidence it observed in
-	 * that session (an exact successful command, or a successful read whose
-	 * quote the current checkout still holds) is observed held; the store's
-	 * gate decides from there. Everything else is filed for operator review.
-	 */
-	const fileHistoryLessons = (input: {
-		sessionId: string;
-		grounded: ReadonlyArray<TaskMemoryEntry>;
-		ungrounded: ReadonlyArray<TaskMemoryEntry>;
-	}): void => {
-		const entries = [...input.grounded, ...input.ungrounded];
-		if (entries.length === 0) return;
-		void proposeInjectedTaskMemory(clioDataDir(), {
-			sessionId: input.sessionId,
-			cwd: memoryWorkspaceRoot(),
-			entries,
-		})
-			.then(async (result) => {
-				for (const error of result.errors) {
-					writeDiagnostic(`[clio-coder:memory] proposed record not written for ${error}\n`);
-				}
-				const held = [
-					...new Set(
-						input.grounded.flatMap((entry) => {
-							const record = result.recordByEntry.get(entry.id);
-							return record === undefined ? [] : [record.id];
-						}),
-					),
-				];
-				if (held.length === 0) return;
-				reportGateOutcome(
-					await recordMemoryObservations(
-						clioDataDir(),
-						held.map((memoryId) => ({ memoryId, sessionId: input.sessionId, kind: "held" as const })),
-					),
-				);
-			})
-			.catch(reportMemoryStoreFailure("history lessons not recorded"));
-	};
 	const memoryRouteAvailable = (): boolean => {
 		const settings = effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings();
 		const route = resolveMemoryRoute(settings);
@@ -2703,8 +2497,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return { maxTokens: memory.maxOutputTokens, timeoutMs: memory.timeoutMs };
 		},
 		workspaceRoot: memoryWorkspaceRoot,
-		getKeptLessons: keptRepositoryLessons,
-		onHistoryLessons: fileHistoryLessons,
 		captureStepUsage: captureBackgroundMemoryUsage,
 		telemetry: historyReviews.telemetry,
 		onStateChange: publishGuardianState,
@@ -2750,10 +2542,41 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 		return memoryProjection;
 	};
+	/**
+	 * The main route's live history capacity after fixed prompt and reserves,
+	 * and how much of it the conversation occupies. Null while the live budget
+	 * is unavailable or only a persisted measurement exists.
+	 */
+	const liveHistoryBudget = (): { usable: number; used: number } | null => {
+		const budget = chat.inspectLiveBudget();
+		if (
+			budget.status !== "available" ||
+			budget.view.historical ||
+			!budget.view.breakdown ||
+			budget.view.outputReserveTokens === null
+		)
+			return null;
+		const view = budget.view;
+		return {
+			usable:
+				(view.effectiveWindow ?? 0) -
+				(view.outputReserveTokens ?? 0) -
+				(view.breakdown?.systemPromptTokens ?? 0) -
+				(view.breakdown?.toolSchemaTokens ?? 0) -
+				64,
+			used: (view.breakdown?.messageTokens ?? 0) + (view.breakdown?.pendingUserTokens ?? 0),
+		};
+	};
 	memoryOwner.configure({
 		stateDir: clioStateDir,
 		dataDir: clioDataDir,
 		cwd: memoryWorkspaceRoot,
+		currentSession: () => {
+			const meta = session?.current();
+			return meta ? { id: meta.id, cwd: meta.cwd || process.cwd() } : null;
+		},
+		notice: memoryNotice,
+		diagnostic: memoryDiagnostic,
 		getLessonJudge: () => getMemoryLessonJudge?.() ?? null,
 		observerHistoryTokens: () =>
 			memoryObservationCapacity(providers, effectiveSettingsForDispatch?.() ?? getCurrentSettings()),
@@ -2789,23 +2612,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...projection.observation,
 			};
 		},
-		usableHistoryTokens: () => {
-			const budget = chat.inspectLiveBudget();
-			if (
-				budget.status !== "available" ||
-				budget.view.historical ||
-				!budget.view.breakdown ||
-				budget.view.outputReserveTokens === null
-			)
-				return 0;
-			const view = budget.view;
-			return (
-				(view.effectiveWindow ?? 0) -
-				(view.outputReserveTokens ?? 0) -
-				(view.breakdown?.systemPromptTokens ?? 0) -
-				(view.breakdown?.toolSchemaTokens ?? 0) -
-				64
-			);
+		usableHistoryTokens: () => liveHistoryBudget()?.usable ?? 0,
+		historyPressure: () => {
+			const live = liveHistoryBudget();
+			return live === null || live.usable <= 0 ? null : live.used / live.usable;
 		},
 		client: createBackgroundMemoryRouting(
 			providers,
@@ -2821,8 +2631,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
 	const unsubscribeGuardianWakes = [
 		bus.on(BusChannels.SessionStart, () => guardedMemory.reset()),
-		bus.on(BusChannels.ConfigHotReload, () => guardedMemory.wake("settings")),
-		bus.on(BusChannels.ConfigNextTurn, () => guardedMemory.wake("settings")),
+		bus.on(BusChannels.ConfigHotReload, () => {
+			memoryOwner.settingsChanged();
+			guardedMemory.wake("settings");
+		}),
+		bus.on(BusChannels.ConfigNextTurn, () => {
+			memoryOwner.settingsChanged();
+			guardedMemory.wake("settings");
+		}),
 	];
 	const disposeMemoryLifecycle = bindTaskMemoryLifecycle(bus, memoryOwner, {
 		save: (sessionId) => {
@@ -3630,7 +3446,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				const runtimeId =
 					lastMemoryPromptRuntimeId ?? (settingsTarget ? providers.getTarget(settingsTarget)?.runtime : undefined);
 				return {
-					activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
+					// The session's workspace, which a GUI or resumed session need not share with the process.
+					activeRepository: canonicalMemoryRepositoryIdentity(memoryWorkspaceRoot()),
 					activeRuntime: runtimeId === undefined ? null : { kind: "runtime", key: runtimeId },
 					activeAgent: null,
 				};
@@ -4282,7 +4099,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// The pre-warm holds one slot on its endpoint while it runs, so dispatch
 		// admission (#250) sees it exactly as it sees the orchestrator's own turn.
 		registerPrewarmEndpointSlot: (runtime) => {
-			const key = canonicalEndpointKey(runtime.runtimeResolution.target);
+			const key = modelEndpointKey(runtime.runtimeResolution.target, runtime.wireModelId);
 			return key === null ? null : registerForegroundStream(key);
 		},
 		getSettings: getCurrentSettings,
@@ -4385,7 +4202,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		memoryCommitBridge: memoryIntervention,
 		onMemoryRequestSubmitted: (messages, systemPrompt) =>
-			memoryOwner.recordSubmittedMemoryContext(messages, systemPrompt),
+			memoryOwner.recordSubmittedMemoryContext(hostFramedTexts(messages), systemPrompt),
 		registerDeferredReminderSink: (sink) => {
 			deferredMemoryReminderSink = sink;
 		},

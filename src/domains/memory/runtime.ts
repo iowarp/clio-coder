@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { MemoryCommitScope } from "./commit-state.js";
@@ -9,22 +9,31 @@ import type {
 	MemoryContract,
 	MemoryObservationCommands,
 	MemoryOfferInput,
+	MemoryOfferUse,
 	MemoryPromptSelection,
 	ObservationSource,
+	ObservationSourceUnit,
 	ObservationStatus,
 	SessionObservation,
 } from "./contract.js";
 import type { MemoryGuardian, MemoryGuardianDeps } from "./guardian.js";
 import { createMemoryGuardian } from "./guardian.js";
-import type { CompletedLessonSource } from "./history-review.js";
+import { type CompletedLessonSource, recordReviewedHistoryCalls } from "./history-review.js";
 import type {
 	MemoryInterventionDeps,
 	MemoryInterventionRegistration,
 	MemoryStepLaunchOutcome,
 } from "./intervention.js";
 import { createMemoryInterventionRegistration } from "./intervention.js";
+import { type HistoryFiling, type HistoryLessons, MemoryLessonFeedback } from "./lesson-feedback.js";
 import type { MemoryLessonJudge } from "./lesson-judge.js";
-import { loadObservations, persistObservation, pruneConsumedObservations } from "./observation-store.js";
+import { createKeptLessonSource, type KeptLesson } from "./lesson-projection.js";
+import {
+	loadObservations,
+	persistObservation,
+	pruneConsumedObservations,
+	retireObservations,
+} from "./observation-store.js";
 import { observationEvent, traceObservation } from "./observation-trace.js";
 import {
 	buildObservationOffer,
@@ -35,6 +44,7 @@ import {
 	observationDigest,
 	observationTokens,
 	prepareObservation,
+	reflectionRequest,
 	sourceCoverageDigest,
 } from "./observations.js";
 import { TaskMemoryBank } from "./task-bank.js";
@@ -61,6 +71,14 @@ export interface MemoryRuntimeInfrastructure {
 	/** Session owns active ancestry, original bytes and checkpoint lineage. */
 	source(): ObservationSource | null;
 	usableHistoryTokens(): number;
+	/**
+	 * Fraction of the main route's usable history capacity the live context
+	 * occupies (0 to 1 and beyond), or null when unknown. Preparation waits
+	 * until compaction is plausibly near; most sessions end before it. A port
+	 * that answers null defers new preparation; leaving it unwired removes the
+	 * gate.
+	 */
+	historyPressure?(): number | null;
 	/** Preparation can use its own route before an actor exists; offers still require the actual compactor's fit. */
 	observerHistoryTokens?(): number;
 	client: {
@@ -69,7 +87,45 @@ export interface MemoryRuntimeInfrastructure {
 		backgroundEndpointBusy(): boolean;
 	};
 	captureStepUsage?: () => (usage: TaskMemoryStepUsage, isCurrent: boolean) => void;
+	/** The current session and its workspace, for lesson provenance; a read-only query. */
+	currentSession?(): { id: string; cwd: string } | null;
+	/** Where lesson gate decisions reach the operator. */
+	notice?(line: string): void;
+	/** Where durable store failures are reported; never steers a session. */
+	diagnostic?(line: string): void;
 }
+
+/** Composition supplies scheduling infrastructure; memory supplies its own lesson queries and filing. */
+export type MemoryGuardianInfrastructure = Omit<
+	MemoryGuardianDeps,
+	"observations" | "getKeptLessons" | "onHistoryLessons"
+> &
+	Partial<Pick<MemoryGuardianDeps, "getKeptLessons" | "onHistoryLessons">>;
+
+/** Retention markers read per discovery step, and closed ledgers rebuilt per step. */
+const RETENTION_SCAN_BATCH = 16;
+const RETENTION_SCAN_LEDGERS = 2;
+/** Settled retention markers older than this are removed; the ledger stays the work source. */
+const RETENTION_TERMINAL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** Artifact slots only consolidation may use, so a full journal can still be reflected. */
+const OBSERVATION_RESERVED_ARTIFACTS = 4;
+/** Prepared-observation wrapper and the smallest useful note set, in estimated tokens. */
+const OBSERVATION_WRAPPER_TOKENS = 48;
+const OBSERVATION_MIN_NOTE_TOKENS = 64;
+/**
+ * No preparation below this share of usable main-route history: a session
+ * that never nears compaction never pays for notes it cannot use. The share
+ * leaves the ordinary idle cadence time to cover the backlog before the
+ * compaction threshold (0.9 of the window by default).
+ */
+const OBSERVATION_PRESSURE_START = 0.4;
+/**
+ * Smallest source group worth a model call. The observer's fixed cost (its
+ * prompt and a full note set) is paid per call, so a group may span user
+ * turns until it reaches this size; above it, groups end at a user turn so a
+ * cut at a turn boundary keeps whole batches usable.
+ */
+const OBSERVATION_MIN_GROUP_TOKENS = 1024;
 
 /** The sole composition-owned lifecycle. No additional timer, commit epoch or task bank. */
 export class MemoryRuntime implements MemoryObservationCommands {
@@ -129,32 +185,91 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	 * repeated the whole validator discovery the lesson would have saved.
 	 */
 	#closedQueue: { scope: MemoryCommitScope; source: CompletedLessonSource }[] = [];
-	#closedDiscovered = false;
 	/** The job in flight belongs to a closed session; navigation does not cancel it. */
 	#orphanJob = false;
 	#promptSelection: MemoryPromptSelection | null = null;
 	/** What the last request carried, so lifecycle rows record changes rather than every request. */
 	#submittedSection: string | null = null;
-	#submittedReminders = new Set<string>();
+	/** Incremental, bounded discovery of retention markers left by earlier processes. */
+	#retentionScan: { names: string[]; index: number } | null = null;
+	/** Pending history candidates may exist on disk; cleared once a replay finds none. */
+	#historyReplayDue = true;
+	readonly #keptLessons = createKeptLessonSource(() => {
+		const dataDir = this.#infrastructure?.dataDir?.();
+		if (!dataDir) throw new Error("memory data root unavailable");
+		return dataDir;
+	});
+	/** Proposal tracking, delivery feedback and history filing, owned here rather than by composition. */
+	readonly #feedback = new MemoryLessonFeedback({
+		dataDir: () => {
+			const dataDir = this.#infrastructure?.dataDir?.();
+			if (!dataDir) throw new Error("memory data root unavailable");
+			return dataDir;
+		},
+		stateDir: () => {
+			const stateDir = this.#infrastructure?.stateDir();
+			if (!stateDir) throw new Error("memory state root unavailable");
+			return stateDir;
+		},
+		session: () => this.#infrastructure?.currentSession?.() ?? null,
+		notice: (line) => {
+			try {
+				this.#infrastructure?.notice?.(line);
+			} catch {
+				// A notice sink failure never reaches the store or the session.
+			}
+		},
+		diagnostic: (line) => {
+			try {
+				this.#infrastructure?.diagnostic?.(line);
+			} catch {
+				// Diagnostics are best effort.
+			}
+		},
+		event: (name, facts) => this.#event(name, facts),
+	});
 
 	configure(infrastructure: MemoryRuntimeInfrastructure): void {
 		this.#infrastructure = infrastructure;
+	}
+
+	/**
+	 * Approved repository lessons for the configured workspace, with conditions
+	 * and provenance, cached by store revision and repository authority.
+	 */
+	keptLessons(): readonly KeptLesson[] {
+		const infra = this.#infrastructure;
+		if (!infra?.settings().enabled || !infra.dataDir) return [];
+		try {
+			return this.#keptLessons.lessons(infra.cwd?.() ?? process.cwd());
+		} catch {
+			return []; /* An unreadable store surfaces nothing; the session continues without it. */
+		}
+	}
+
+	/** Resolves when lesson store writes started so far have settled, for a caller that must wait on them. */
+	whenLessonsSettled(): Promise<void> {
+		return this.#feedback.whenSettled();
 	}
 
 	createIntervention(deps: Omit<MemoryInterventionDeps, "bank">): MemoryInterventionRegistration {
 		if (this.#registration) throw new Error("memory intervention already bound");
 		const original = createMemoryInterventionRegistration({
 			...deps,
+			getKeptLessons: deps.getKeptLessons ?? (() => this.keptLessons()),
 			// Only a job actually in flight holds the boundary step back. Pending observation
 			// work runs only when idle, so waiting on it starved every mid-turn step.
 			deferBoundaryPolicy: () => this.#controller !== null,
+			// Called at submission, never at production: the host saw the reminder in an admitted request.
 			onInjectedEntries: (entries) => {
-				this.#event("reminder-produced", { count: entries.length, ids: entries.map((entry) => entry.id) });
+				this.#event("reminder-entries-submitted", { count: entries.length, ids: entries.map((entry) => entry.id) });
+				this.#feedback.delivered(entries);
 				deps.onInjectedEntries?.(entries);
 			},
 			onDurableLessonOutcomes: (input) => {
-				if (input.delivered.length) this.#event("durable-lessons-surfaced", { ids: input.delivered });
+				if (input.delivered.length) this.#event("durable-lessons-submitted", { ids: input.delivered });
 				if (input.held.length) this.#event("durable-lessons-held", { ids: input.held });
+				this.#feedback.durableOutcomes(input);
 				deps.onDurableLessonOutcomes?.(input);
 			},
 			onDeliveryOutcomes: (outcomes, final) => {
@@ -162,16 +277,28 @@ export class MemoryRuntime implements MemoryObservationCommands {
 					final,
 					outcomes: outcomes.map((outcome) => ({ kind: outcome.kind, ids: outcome.entries.map((entry) => entry.id) })),
 				});
+				this.#feedback.settleDeliveries(outcomes, final);
 				deps.onDeliveryOutcomes?.(outcomes, final);
+			},
+			onKnowledgeReview: (review) => {
+				this.#feedback.reviewKnowledge(review);
+				deps.onKnowledgeReview?.(review);
+			},
+			onKeptLessonsRetired: (memoryIds) => {
+				this.#feedback.retiredKept(memoryIds);
+				deps.onKeptLessonsRetired?.(memoryIds);
 			},
 			bank: this.bank,
 			onContentCancelled: () => this.#invalidate("cancelled"),
-			onScopeEnd: (input) =>
-				deps.onScopeEnd?.({
+			onScopeEnd: (input) => {
+				const scoped = {
 					...input,
 					// The bounded retention job owns these proposals, including its recoverable pending candidates.
 					lessons: input.lessons.filter((entry) => !this.#retention.candidateIds?.includes(entry.id)),
-				}),
+				};
+				this.#feedback.scopeEnd(scoped);
+				deps.onScopeEnd?.(scoped);
+			},
 		});
 		const registration: MemoryInterventionRegistration = {
 			...original,
@@ -207,15 +334,42 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	}
 	#disposeIntervention: (() => void) | null = null;
 
-	startGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
+	startGuardian(deps: MemoryGuardianInfrastructure): MemoryGuardian {
 		if (this.#guardian) throw new Error("memory guardian already bound");
-		this.#guardian = createMemoryGuardian({ ...deps, observations: this });
+		this.#guardian = createMemoryGuardian({
+			getKeptLessons: () => this.keptLessons(),
+			onHistoryLessons: (input) => this.#fileHistory(input),
+			...deps,
+			observations: this,
+		});
 		return this.#guardian;
+	}
+
+	async #fileHistory(input: HistoryLessons): Promise<HistoryFiling> {
+		const filing = await this.#feedback.fileHistory(input);
+		if (filing === "pending") this.#historyReplayDue = true;
+		this.#event("history-lessons-filed", {
+			sourceSessionId: input.sessionId,
+			filing,
+			grounded: input.grounded.length,
+			ungrounded: input.ungrounded.length,
+		});
+		return filing;
 	}
 
 	reset(): void {
 		this.#registration?.reset();
 		this.#guardian?.reset();
+	}
+
+	/**
+	 * Settings changed or a new turn applied them. Disabling memory or its
+	 * observations revokes every issued offer now, rather than whenever the next
+	 * preparation step happens to look, so a quick disable and re-enable cannot
+	 * leave an old offer valid.
+	 */
+	settingsChanged(): void {
+		this.#source();
 	}
 	dispose(): void {
 		if (this.#disposed) return;
@@ -256,7 +410,6 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#retention = EMPTY_RETENTION;
 		this.#promptSelection = null;
 		this.#submittedSection = null;
-		this.#submittedReminders.clear();
 	}
 
 	#source(): ObservationSource | null {
@@ -277,10 +430,42 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		return source;
 	}
 
+	/** Current representations: a valid reflection hides the batches it consolidated. */
 	#ready(source: ObservationSource): SessionObservation[] {
-		const ready = this.#batches.filter((batch) => !this.#consumed.has(batch.id) && compatibleObservation(batch, source));
+		const ready = this.#offerable(source);
 		const replaced = new Set(ready.flatMap((batch) => batch.inputs.map((input) => input.id)));
 		return ready.filter((batch) => !replaced.has(batch.id));
+	}
+
+	/**
+	 * Everything a compaction offer may choose from. A reflection's inputs stay
+	 * available so a cut that splits the reflected run can still use the
+	 * originals inside it; the offer never takes both for the same units.
+	 */
+	#offerable(source: ObservationSource): SessionObservation[] {
+		return this.#batches.filter((batch) => !this.#consumed.has(batch.id) && compatibleObservation(batch, source));
+	}
+
+	/**
+	 * Free artifact slots before deciding work: artifacts no offer on this
+	 * lineage can use, then, under pressure, batches a valid reflection already
+	 * replaces. Only optimization artifacts are removed; raw history and
+	 * committed checkpoints are untouched.
+	 */
+	#makeArtifactRoom(source: ObservationSource, stateDir: string): void {
+		if (this.#batches.length < OBSERVATION_MAX_BATCHES - OBSERVATION_RESERVED_ARTIFACTS) return;
+		const retired = new Map<string, string>();
+		for (const batch of this.#batches)
+			if (!this.#consumed.has(batch.id) && !compatibleObservation(batch, source)) retired.set(batch.id, batch.digest);
+		const live = this.#offerable(source);
+		for (const reflection of live)
+			for (const input of reflection.inputs)
+				if (live.some((batch) => batch.id === input.id && batch.digest === input.digest))
+					retired.set(input.id, input.digest);
+		if (retired.size === 0) return;
+		this.#batches = this.#batches.filter((batch) => retired.get(batch.id) !== batch.digest);
+		retireObservations(stateDir, source.sessionId, retired);
+		this.#event("artifacts-retired", { count: retired.size, reason: "capacity" });
 	}
 
 	#work() {
@@ -292,59 +477,66 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			this.#lastReason = "insufficient-budget";
 			return null;
 		}
-		if (this.#batches.length >= OBSERVATION_MAX_BATCHES) {
-			this.#lastReason = "artifact-limit";
+		// Null from a wired port means the live budget view is unavailable (before
+		// the first measured turn, or only a persisted one), and an unknown budget
+		// defers new preparation (SPEC R13): the observer's own capacity says
+		// nothing about how near the main route's compaction is. Reflection over
+		// batches already prepared still runs. An unwired port is a bare runtime
+		// with no live budget to consult, which prepares ungated.
+		const pressure = infra.historyPressure === undefined ? undefined : infra.historyPressure();
+		if (pressure !== undefined && pressure !== null && pressure < OBSERVATION_PRESSURE_START) {
+			this.#lastReason = "below-pressure";
 			return null;
 		}
+		this.#makeArtifactRoom(source, infra.stateDir());
 		const ready = this.#ready(source);
-		const covered = new Set(ready.flatMap((batch) => batch.coverage.flatMap((unit) => unit.refs)));
-		const units: (typeof source.units)[number][] = [];
-		let tokens = 0;
-		for (const unit of source.units) {
-			if (!unit.complete || unit.refs.some((ref) => covered.has(ref))) {
-				if (units.length) break;
-				continue;
+		// New preparation stops short of the cap; the reserved slots are for consolidation.
+		const hasRoom = this.#batches.length < OBSERVATION_MAX_BATCHES - OBSERVATION_RESERVED_ARTIFACTS;
+		if (hasRoom && pressure !== null) {
+			const covered = new Set(ready.flatMap((batch) => batch.coverage.flatMap((unit) => unit.refs)));
+			// Half the source budget, between 256 and the ceiling: a small window
+			// still prepares its tool units, a large one no longer pays per turn.
+			const minimum = Math.min(OBSERVATION_MIN_GROUP_TOKENS, Math.max(256, Math.floor(budgets.source / 2)));
+			let noGain = false;
+			// A group that cannot gain or already used its attempts is passed over,
+			// so it never starves the groups after it. A group still under the
+			// minimum waits for more source rather than paying a call for little.
+			for (let index = 0; index < source.units.length; ) {
+				const group = observationGroup(source.units, index, covered, budgets.source, minimum);
+				index = group.next;
+				if (group.units.length === 0) continue;
+				if (group.tokens < minimum) continue;
+				if (!plausibleObservationGain(group.units)) {
+					noGain = true;
+					continue;
+				}
+				const revision = observationDigest([
+					source.sessionId,
+					source.branchAnchorTurnId,
+					source.checkpoint,
+					sourceCoverageDigest(group.units),
+					source.units.at(-1)?.digest,
+					infra.settings(),
+				]);
+				if ((this.#attempts.get(revision) ?? 0) >= 2) continue;
+				return { source, units: group.units, revision, inputs: [] as SessionObservation[] };
 			}
-			if (units.length && unit.exact.length > 0) break;
-			const cost = observationTokens(unit.text);
-			if (cost > budgets.source) {
-				if (units.length) break;
-				continue;
+			if (noGain) this.#lastReason = "no-plausible-gain";
+		}
+		// A captured reflection is prepared through this same one-in-flight lane,
+		// over one run of batches whose coverage is contiguous in the source. It is
+		// never refused for capacity: writing it frees the inputs it replaces, so
+		// a full journal can still consolidate.
+		const tokens = ready.reduce((n, batch) => n + observationTokens(batch.rendered), 0);
+		if (ready.length >= 2 && tokens > budgets.journal) {
+			for (const inputs of contiguousRuns(source, ready)) {
+				const reflectionRevision = observationDigest(inputs.map((batch) => [batch.id, batch.digest]));
+				if ((this.#attempts.get(reflectionRevision) ?? 0) < 2)
+					return { source, units: inputs.flatMap((batch) => batch.coverage), revision: reflectionRevision, inputs };
 			}
-			if (tokens + cost > budgets.source) break;
-			units.push(unit);
-			tokens += cost;
 		}
-		const revision = observationDigest([
-			source.sessionId,
-			source.branchAnchorTurnId,
-			source.checkpoint,
-			sourceCoverageDigest(units),
-			source.units.at(-1)?.digest,
-			infra.settings(),
-		]);
-		if (
-			units.length > 0 &&
-			(tokens >= 512 ||
-				source.units.some(
-					(unit) => unit.complete && unit.toolCallIds.length > 0 && !unit.refs.some((ref) => covered.has(ref)),
-				)) &&
-			(this.#attempts.get(revision) ?? 0) < 2
-		)
-			return { source, units, revision, inputs: [] as SessionObservation[] };
-		// A captured reflection is prepared through this same one-in-flight lane.
-		if (ready.length >= 2 && ready.reduce((n, batch) => n + observationTokens(batch.rendered), 0) > budgets.journal) {
-			const inputs = ready
-				.slice()
-				.sort(
-					(a, b) =>
-						source.units.findIndex((unit) => unit.digest === a.coverage[0]?.digest) -
-						source.units.findIndex((unit) => unit.digest === b.coverage[0]?.digest),
-				);
-			const reflectionRevision = observationDigest(inputs.map((batch) => [batch.id, batch.digest]));
-			if ((this.#attempts.get(reflectionRevision) ?? 0) < 2)
-				return { source, units: inputs.flatMap((batch) => batch.coverage), revision: reflectionRevision, inputs };
-		}
+		if (pressure === null) this.#lastReason = "pressure-unknown";
+		else if (!hasRoom) this.#lastReason = "artifact-limit";
 		return null;
 	}
 	#historyBudget(): { tokens: number; basis: "main" | "memory" | "unknown" } {
@@ -360,17 +552,49 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	 * the routed client still yields when the memory endpoint is the turn's own.
 	 */
 	pendingWork(foreground = false): boolean {
-		if (foreground) return this.#controller === null && this.#retentionWork(true) !== null;
-		return this.#controller !== null || this.#work() !== null || this.#retentionWork() !== null;
+		// Beside a streaming turn only a closed session's retention qualifies, and
+		// finding one is the bounded discovery step this wake gets.
+		if (foreground) return this.#controller === null && this.#retentionWork(true, true) !== null;
+		if (this.#yieldsToBoundaryStep()) return false;
+		return (
+			this.#controller !== null ||
+			this.#work() !== null ||
+			this.#historyReplayPending() ||
+			this.#retentionWork() !== null ||
+			this.#retentionScanPending()
+		);
+	}
+
+	/**
+	 * Between turns this lane waits while the intervention owes a boundary step
+	 * (SPEC R05). Both serve the current session, but the owed step reviews a
+	 * turn that already ended and is one call, while preparation is a run of
+	 * calls for a compaction that may never come. Live, a turn-end lesson pass
+	 * that yielded at the turn's own endpoint release waited behind up to eight
+	 * batches (36 s); the guardian now runs it first and this lane resumes after.
+	 * A job already in flight is never preempted, so the wait is at most one batch.
+	 */
+	#yieldsToBoundaryStep(): boolean {
+		return this.#controller === null && (this.#registration?.owesBoundaryStep() ?? false);
 	}
 
 	async runIdleStep(foreground = false): Promise<MemoryStepLaunchOutcome> {
 		if (this.#controller) return "none";
+		if (!foreground && this.#yieldsToBoundaryStep()) return "none";
 		const work = foreground ? null : this.#work();
 		const infra = this.#infrastructure;
 		const authority = this.#registration?.captureMemoryAuthority();
 		if (!work || !infra || !authority) {
-			if (this.#retentionWork(foreground)) {
+			// Saved history candidates are filed before any new model work: no call, bounded files per step.
+			if (!foreground && this.#historyReplayPending()) {
+				const filed = await this.#feedback.replayHistory();
+				const remaining = this.#feedback.hasPendingHistory();
+				if (!remaining) this.#historyReplayDue = false;
+				// Files that failed again wait for the next process rather than looping on a broken store.
+				return filed > 0 || !remaining ? "ran" : "skipped";
+			}
+			// The step advances marker discovery by one bounded batch.
+			if (this.#retentionWork(foreground, true)) {
 				const result = await this.retainTask("resume", undefined, foreground);
 				if (
 					[
@@ -392,7 +616,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 						? "unavailable"
 						: "ran";
 			}
-			return "none";
+			// A discovery step that found nothing yet still made bounded progress.
+			return this.#retentionScanPending() ? "ran" : "none";
 		}
 		let client: TaskMemoryModelClient | null;
 		try {
@@ -412,16 +637,15 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			this.#lastReason = "output-budget";
 			return "skipped";
 		}
-		const userPrompt = work.inputs.length
-			? JSON.stringify({
-					consolidate: work.inputs.map((batch) => ({ id: batch.id, digest: batch.digest, notes: batch.notes })),
-					sourceRefs: work.units.flatMap((unit) => unit.refs),
-					successfulResultRefs: work.units.flatMap((unit) => unit.successfulResultRefs),
-				})
-			: JSON.stringify({
-					source: work.units.map((unit) => JSON.parse(unit.text)),
-					successfulResultRefs: work.units.flatMap((unit) => unit.successfulResultRefs),
-				});
+		const { systemPrompt, userPrompt } = work.inputs.length
+			? reflectionRequest(work.inputs, work.units)
+			: {
+					systemPrompt: OBSERVATION_PROMPT,
+					userPrompt: JSON.stringify({
+						source: work.units.map((unit) => JSON.parse(unit.text)),
+						successfulResultRefs: work.units.flatMap((unit) => unit.successfulResultRefs),
+					}),
+				};
 		const controller = new AbortController();
 		this.#controller = controller;
 		this.#reflection = work.inputs.length > 0;
@@ -453,7 +677,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				source: work.source,
 				authority,
 				revision: work.revision,
-				systemPrompt: OBSERVATION_PROMPT,
+				systemPrompt,
 				userPrompt,
 				maxTokens,
 				route: client.route ?? null,
@@ -461,7 +685,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			// Race an abort-ignoring client; late usage still belongs to its captured launch.
 			const completion = client.complete({
 				purpose: work.inputs.length ? "reflection" : "observation",
-				systemPrompt: OBSERVATION_PROMPT,
+				systemPrompt,
 				userPrompt,
 				maxTokens,
 				signal: controller.signal,
@@ -501,6 +725,10 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				route: client.route ?? null,
 				usage,
 				...(work.inputs.length ? { inputs: work.inputs } : {}),
+				onRejectedNotes: (rejected, offered) => {
+					this.#event("notes-rejected", { revision: work.revision, rejected, offered });
+					traceObservation("notes-rejected", { revision: work.revision, rejected, offered });
+				},
 			});
 			if (
 				!current ||
@@ -576,7 +804,10 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	 * one this process saw close, then any found on disk. A settled current task
 	 * no longer hides the closed ones behind it.
 	 */
-	#retentionWork(orphanOnly = false): {
+	#retentionWork(
+		orphanOnly = false,
+		discover = false,
+	): {
 		infra: MemoryRuntimeInfrastructure;
 		scope: MemoryCommitScope;
 		source: CompletedLessonSource;
@@ -595,7 +826,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		let orphan = this.#orphan;
 		if (orphan && retentionSettled(readRetention(retentionPath(infra.stateDir(), orphan.scope, orphan.source))))
 			orphan = null;
-		orphan ??= this.#nextClosedSession(infra, current?.sessionId ?? null);
+		orphan ??= this.#nextClosedSession(infra, current?.sessionId ?? null, discover);
 		this.#orphan = orphan;
 		return orphan ? { infra, scope: orphan.scope, source: orphan.source, orphan } : null;
 	}
@@ -624,57 +855,86 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	#nextClosedSession(
 		infra: MemoryRuntimeInfrastructure,
 		currentSessionId: string | null,
+		discover: boolean,
 	): { scope: MemoryCommitScope; source: CompletedLessonSource } | null {
-		// Read synchronously, so the guardian's first step already sees interrupted retentions
-		// ahead of historical mining: a live cold start spent its first seconds re-mining the
-		// closed session while that session's one-second retention waited behind it.
-		if (!this.#closedDiscovered) {
-			this.#closedDiscovered = true;
-			this.#discoverInterrupted(infra, currentSessionId);
-		}
-		for (let next = this.#closedQueue.shift(); next; next = this.#closedQueue.shift()) {
-			if (next.scope.sessionId === currentSessionId) continue;
-			if (!retentionSettled(readRetention(retentionPath(infra.stateDir(), next.scope, next.source)))) return next;
+		// Interrupted retentions run ahead of historical mining, but discovering
+		// them is bounded per step: a long-lived state root holds a marker for
+		// every task ever retained, and reading all of them blocked the first wake.
+		for (let pass = 0; pass < 2; pass++) {
+			for (let next = this.#closedQueue.shift(); next; next = this.#closedQueue.shift()) {
+				if (next.scope.sessionId === currentSessionId) continue;
+				if (!retentionSettled(readRetention(retentionPath(infra.stateDir(), next.scope, next.source)))) return next;
+			}
+			if (pass === 0 && discover) this.#scanRetentionMarkers(infra, currentSessionId);
 		}
 		return null;
 	}
 
+	#historyReplayPending(): boolean {
+		return this.#historyReplayDue && !!this.#infrastructure?.settings().enabled && this.#feedback.hasPendingHistory();
+	}
+
+	#retentionScanPending(): boolean {
+		const infra = this.#infrastructure;
+		if (!infra?.settings().enabled || !infra.closedLessonSource) return false;
+		// Listing first: a state root with no markers has nothing to discover, and
+		// reporting work for it showed every fresh session's guardian as reviewing.
+		const scan = this.#retentionMarkers(infra);
+		return scan.index < scan.names.length;
+	}
+
+	/** The marker names this process walks, listed once on first use. */
+	#retentionMarkers(infra: MemoryRuntimeInfrastructure): { names: string[]; index: number } {
+		if (this.#retentionScan !== null) return this.#retentionScan;
+		let names: string[] = [];
+		try {
+			names = readdirSync(join(infra.stateDir(), "memory", "retention"))
+				.filter((name) => name.endsWith(".json"))
+				.sort();
+		} catch {
+			/* No retention ever ran here. */
+		}
+		this.#retentionScan = { names, index: 0 };
+		return this.#retentionScan;
+	}
+
 	/**
-	 * Every unsettled retention marker, rebuilt from its own session's ledger
-	 * when that session belongs to this workspace and still ends on the task the
-	 * marker was written for. No count or age bound: each marker settles once.
+	 * One bounded discovery step over retention markers: at most
+	 * `RETENTION_SCAN_BATCH` markers read and `RETENTION_SCAN_LEDGERS` closed
+	 * ledgers rebuilt. An unsettled marker whose session belongs to this
+	 * workspace and still ends on the marked task is queued for recovery. A
+	 * settled marker past its lifetime is removed; the ledger stays the
+	 * recoverable source, so this costs at most one more review of an old task.
 	 */
-	#discoverInterrupted(infra: MemoryRuntimeInfrastructure, currentSessionId: string | null): void {
+	#scanRetentionMarkers(infra: MemoryRuntimeInfrastructure, currentSessionId: string | null): void {
 		if (!infra.closedLessonSource) return;
 		const directory = join(infra.stateDir(), "memory", "retention");
-		let names: string[];
-		try {
-			names = readdirSync(directory);
-		} catch {
-			return; /* No retention ever ran here. */
-		}
-		const unsettled = new Map<string, string>();
-		for (const name of names) {
-			if (!name.endsWith(".json")) continue;
-			const marker = readRetention(join(directory, name));
-			const sessionId = (marker as { sessionId?: unknown } | null)?.sessionId;
-			if (
-				marker &&
-				typeof sessionId === "string" &&
-				sessionId !== currentSessionId &&
-				marker.revision &&
-				!retentionSettled(marker)
-			)
-				unsettled.set(sessionId, marker.revision);
-		}
-		for (const [sessionId, revision] of unsettled) {
+		const scan = this.#retentionMarkers(infra);
+		let ledgers = 0;
+		const stop = Math.min(scan.names.length, scan.index + RETENTION_SCAN_BATCH);
+		while (scan.index < stop && ledgers < RETENTION_SCAN_LEDGERS) {
+			const name = scan.names[scan.index++] ?? "";
+			const path = join(directory, name);
+			const marker = readRetention(path);
+			if (marker === null) continue;
+			if (retentionSettled(marker)) {
+				try {
+					if (Date.now() - statSync(path).mtimeMs > RETENTION_TERMINAL_TTL_MS) unlinkSync(path);
+				} catch {
+					// Another process removed it first.
+				}
+				continue;
+			}
+			const sessionId = (marker as { sessionId?: unknown }).sessionId;
+			if (typeof sessionId !== "string" || sessionId === currentSessionId || !marker.revision) continue;
+			ledgers += 1;
 			let closed: ReturnType<NonNullable<MemoryRuntimeInfrastructure["closedLessonSource"]>> = null;
 			try {
 				closed = infra.closedLessonSource(sessionId);
 			} catch {
 				// An unreadable ledger leaves its task to history review.
 			}
-			if (closed && closed.source.revision === revision) this.#closedQueue.push(closed);
+			if (closed && closed.source.revision === marker.revision) this.#closedQueue.push(closed);
 		}
 	}
 
@@ -777,8 +1037,12 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				onProgress: (next) => {
 					if (isCurrent()) publish(next);
 				},
+				keptLessons: () => this.keptLessons(),
 			});
 			if (isCurrent() || orphan) publish(retained);
+			// A settled review covers this task: history review need not pay for it again.
+			if (retentionSettled(retained))
+				recordReviewedHistoryCalls(infra.stateDir(), infra.cwd?.() ?? "", source.callIds ?? []);
 			if (orphan && this.#orphan === orphan && retentionSettled(retained)) this.#orphan = null;
 		} catch (error) {
 			if (isCurrent() || orphan)
@@ -801,8 +1065,14 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#promptSelection = structuredClone(selection);
 	}
 
-	/** Submission follows request admission and actual stream invocation; it does not certify model uptake. */
-	recordSubmittedMemoryContext(messages: readonly { role: string; content: unknown }[], systemPrompt?: string): void {
+	/**
+	 * Submission follows request admission and actual stream invocation; it does
+	 * not certify model uptake. `framed` holds only the texts the host itself
+	 * framed in that request (reminder blocks, tool-result notes), so a tool
+	 * output that merely quotes a reminder, such as the agent reading its own
+	 * ledger, never acknowledges one.
+	 */
+	recordSubmittedMemoryContext(framed: readonly string[], systemPrompt?: string): void {
 		const selection = this.#promptSelection;
 		const section = selection?.section && systemPrompt?.includes(selection.section) ? selection.section : "";
 		const at = new Date().toISOString();
@@ -822,50 +1092,72 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		if (sectionKey !== null && sectionKey !== this.#submittedSection)
 			this.#event("memory-section-submitted", { ids: recordIds, count: recordIds.length });
 		this.#submittedSection = sectionKey;
-		const visible = new Set(
-			this.bank
-				.snapshot()
-				.knowledge.concat(this.bank.snapshot().procedural)
-				.map((entry) => entry.id),
-		);
-		const ids = new Set<string>();
-		for (const message of messages) {
-			if (message.role !== "user" && message.role !== "toolResult") continue;
-			const blocks =
-				typeof message.content === "string" ? [message.content] : Array.isArray(message.content) ? message.content : [];
-			for (const block of blocks) {
-				const text = typeof block === "string" ? block : block?.type === "text" ? block.text : null;
-				if (typeof text !== "string") continue;
-				for (const line of text.matchAll(/(?:^|\n)Memory:[^\n]*/gu))
-					for (const citation of line[0].matchAll(/\[([a-zA-Z0-9_-]+)\]/gu))
-						if (citation[1] && visible.has(citation[1])) ids.add(citation[1]);
-			}
-		}
-		const fresh = [...ids].filter((id) => !this.#submittedReminders.has(id));
-		for (const id of fresh) this.#submittedReminders.add(id);
-		if (fresh.length) this.#event("memory-reminders-submitted", { count: fresh.length, ids: fresh });
+		// Reminders are acknowledged by their exact offered text inside the
+		// admitted request, never by matching cited ids in arbitrary prose.
+		const registration = this.#registration;
+		if (!registration?.hasPendingOffers()) return;
+		const submitted = registration.acknowledgeSubmission(framed.filter((text) => text.includes("Memory:")));
+		if (submitted.length)
+			this.#event("memory-reminders-submitted", {
+				count: submitted.length,
+				offers: submitted.map((offer) => ({
+					id: offer.id,
+					kind: offer.kind,
+					tier: offer.tier,
+					cited: offer.cited.map((cited) => cited.id),
+					trigger: offer.trigger.reasons,
+					lessons: offer.lessons.map((lesson) => ({
+						id: lesson.id,
+						approval: lesson.approval,
+						appliesWhen: lesson.appliesWhen.length,
+						avoidWhen: lesson.avoidWhen.length,
+						evidence: lesson.evidenceRefs.length,
+					})),
+				})),
+			});
 	}
 
 	offerCompaction(input: MemoryOfferInput) {
 		const current = this.#source();
 		if (!current || !this.#registration) return null;
 		const guard = this.#registration.isContentCurrent();
-		const offer = buildObservationOffer(
-			input,
-			this.#ready(current),
-			() =>
+		// The closure checks its own issuance: cancellation, navigation, disabling
+		// and any other invalidation clear the registry, and a cleared offer stays
+		// invalid even if memory is enabled again in the same scope.
+		let issued: MemoryConsumptionReceipt | null = null;
+		const offer = buildObservationOffer(input, this.#offerable(current), () => {
+			if (issued === null || this.#issued.get(issued.offerId) !== issued) return false;
+			const live =
 				guard() &&
 				this.#enabled &&
 				!!this.#infrastructure?.settings().observations.enabled &&
-				!!this.#infrastructure?.settings().enabled,
-		);
+				!!this.#infrastructure?.settings().enabled;
+			// Revocation is permanent: an offer seen invalid once never comes back.
+			if (!live) this.#issued.delete(issued.offerId);
+			return live;
+		});
 		if (!offer) {
 			this.#lastReason = "no-eligible-gain";
+			this.#event("offer-declined", {
+				reason: "no-eligible-gain",
+				offerable: this.#offerable(current).length,
+				units: input.source.units.length,
+				incompleteUnits: input.source.units.filter((unit) => !unit.complete).length,
+			});
 			return null;
 		}
 		if (this.#issued.size >= 4) this.#issued.delete(this.#issued.keys().next().value ?? "");
+		issued = offer.receipt;
 		this.#issued.set(offer.receipt.offerId, offer.receipt);
-		return Object.freeze({ ...offer, onUse: () => this.#event("offer-used", { receipt: offer.receipt }) });
+		return Object.freeze({
+			...offer,
+			onUse: (use: MemoryOfferUse) =>
+				this.#event("offer-used", {
+					receipt: offer.receipt,
+					originalInputTokens: use.originalInputTokens,
+					substitutedInputTokens: use.substitutedInputTokens,
+				}),
+		});
 	}
 
 	consume(commitId: string, receipt: MemoryConsumptionReceipt): void {
@@ -987,4 +1279,78 @@ function retentionSettled(
 			status.phase === "exhausted" ||
 			(status.attempts >= 2 && !status.candidates?.length))
 	);
+}
+
+/**
+ * The next observation group from `start`: consecutive complete, uncovered
+ * units within the source budget. Once the group holds at least `minimum`
+ * tokens it ends before the next unit that carries exact user material;
+ * below that it spans user turns, so a run of small turns shares one call.
+ * `next` is where the following group starts.
+ */
+function observationGroup(
+	units: readonly ObservationSourceUnit[],
+	start: number,
+	covered: ReadonlySet<string>,
+	budget: number,
+	minimum: number,
+): { units: ObservationSourceUnit[]; tokens: number; next: number } {
+	const group: ObservationSourceUnit[] = [];
+	let tokens = 0;
+	for (let index = start; index < units.length; index++) {
+		const unit = units[index];
+		if (unit === undefined) continue;
+		if (!unit.complete || unit.refs.some((ref) => covered.has(ref))) {
+			if (group.length) return { units: group, tokens, next: index };
+			continue;
+		}
+		if (group.length && unit.exact.length > 0 && tokens >= minimum) return { units: group, tokens, next: index };
+		const cost = observationTokens(unit.text);
+		if (cost > budget) {
+			if (group.length) return { units: group, tokens, next: index };
+			continue;
+		}
+		if (tokens + cost > budget) return { units: group, tokens, next: index };
+		group.push(unit);
+		tokens += cost;
+	}
+	return { units: group, tokens, next: units.length };
+}
+
+/**
+ * Notes replace a group's ordinary representation only if they are smaller,
+ * and the exact user material and wrapper ride along unchanged. A group whose
+ * protected material already fills its ordinary cost cannot gain, so no model
+ * call is spent on it.
+ */
+function plausibleObservationGain(units: readonly ObservationSourceUnit[]): boolean {
+	const ordinary = units.reduce((n, unit) => n + (unit.ordinaryTokens ?? observationTokens(unit.text)), 0);
+	const exact = units.reduce((n, unit) => n + observationTokens(JSON.stringify(unit.exact)), 0);
+	return exact + OBSERVATION_WRAPPER_TOKENS + OBSERVATION_MIN_NOTE_TOKENS < ordinary;
+}
+
+/** Runs of two or more ready batches whose coverage is contiguous in the source, oldest first. */
+function contiguousRuns(source: ObservationSource, ready: readonly SessionObservation[]): SessionObservation[][] {
+	const position = (unit: ObservationSourceUnit | undefined) =>
+		unit === undefined
+			? -1
+			: source.units.findIndex(
+					(current) => current.digest === unit.digest && observationDigest(current.refs) === observationDigest(unit.refs),
+				);
+	const placed = ready
+		.map((batch) => ({ batch, start: position(batch.coverage[0]), end: position(batch.coverage.at(-1)) }))
+		.filter((item) => item.start >= 0 && item.end >= item.start)
+		.sort((a, b) => a.start - b.start);
+	const runs: SessionObservation[][] = [];
+	let run: typeof placed = [];
+	for (const item of placed) {
+		const previous = run.at(-1);
+		if (previous !== undefined && item.start !== previous.end + 1) {
+			if (run.length >= 2) runs.push(run.map((entry) => entry.batch));
+			run = [];
+		}
+		run.push(item);
+	}
+	if (run.length >= 2) runs.push(run.map((entry) => entry.batch));
+	return runs;
 }

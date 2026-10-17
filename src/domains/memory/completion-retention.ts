@@ -11,7 +11,7 @@ import { lessonEvidence } from "./lesson-evidence.js";
 import type { MemoryLessonJudge } from "./lesson-judge.js";
 import { observationEvent, traceObservation } from "./observation-trace.js";
 import { observationDigest } from "./observations.js";
-import { provenRecipes } from "./recipes.js";
+import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
 import type { TaskMemoryBank, TaskMemoryEntry } from "./task-bank.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
 import { proposeInjectedTaskMemory } from "./task-bank-promotion.js";
@@ -103,6 +103,11 @@ export async function retainCompletedTask(input: {
 	onUsage?: (usage: TaskMemoryStepUsage, current: boolean) => void;
 	judge?: MemoryLessonJudge;
 	onProgress?: (status: RetentionStatus) => void;
+	/**
+	 * Approved repository claims. The pass is shown them so it does not restate
+	 * one in new words, and a host recipe never duplicates one.
+	 */
+	keptLessons?: () => ReadonlyArray<{ id: string; text: string; evidenceRefs?: readonly string[] }>;
 }): Promise<RetentionStatus> {
 	// One deadline covers inference and durable store waits. Returning on a raced promise alone
 	// would leave a writer alive after headless shutdown or scope cancellation.
@@ -245,6 +250,9 @@ async function retainWithinDeadline(
 						systemPrompt: MEMORY_HISTORY_REVIEW_SYSTEM_PROMPT,
 						trajectoryText: input.source.text,
 						trajectoryMaxChars: 4000,
+						// Separate claims stay separate records, so a rewording of a kept
+						// lesson would file a second one; the pass sees what is kept.
+						keptLessons: (input.keptLessons?.() ?? []).slice(0, 10).map(({ id, text }) => ({ id, text })),
 					},
 					onStepUsage: (step) => {
 						usage = step;
@@ -301,8 +309,9 @@ async function retainWithinDeadline(
 		}
 		const quoted = (command: string) =>
 			input.bank.snapshot().knowledge.some((entry) => entry.durable === true && entry.content.includes(`\`${command}\``));
+		const kept = input.keptLessons?.() ?? [];
 		for (const recipe of proven)
-			if (!quoted(recipe.command))
+			if (!quoted(recipe.command) && !recipeAlreadyClaimed(recipe, kept))
 				input.bank.saveKnowledge(recipe.content, { durable: true, evidenceCommand: recipe.command });
 		const candidates = savedCandidates.length
 			? [...savedCandidates]
@@ -371,6 +380,12 @@ async function retainWithinDeadline(
 		// candidates restores them free of an attempt and would only append the same
 		// session's `held` again, which once evicted an older contradiction. Only an
 		// unavailable judge or a failed store write leaves saved candidates pending.
+		// Lessons the host could bind to no receipt or source are a deterministic
+		// verdict over this source: the same ledger yields the same evidence, so a
+		// second extraction could only reword them. In the live session they stay
+		// in its bank for scope-end filing as pending; a closed session's job runs
+		// on a bank nothing files, so there they are dropped, as a second attempt
+		// would have dropped them. The task itself is settled (SPEC R07).
 		const final: RetentionStatus = {
 			...prepared,
 			phase: retained.length
@@ -379,7 +394,7 @@ async function retainWithinDeadline(
 					? "pending"
 					: lessons.length > 0
 						? "gated"
-						: extracted || result.droppedOperations
+						: result.droppedOperations
 							? "pending"
 							: "abstained",
 			reason: proposed.errors.length
