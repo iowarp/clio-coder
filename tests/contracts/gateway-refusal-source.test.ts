@@ -1,13 +1,16 @@
-import { doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, ok, strictEqual, throws } from "node:assert/strict";
 import { test } from "node:test";
+import { parseAcpFlags } from "../../src/cli/acp.js";
 import { parseRunCliArgs } from "../../src/cli/args.js";
 import { extractGlobalFlags } from "../../src/cli/argv.js";
 import type { TurnConstraints } from "../../src/core/turn-constraints.js";
 import {
 	narrowTurnConstraints,
 	snapshotTurnConstraints,
+	templateToolConstraints,
 	workerTurnConstraints,
 } from "../../src/core/turn-constraints.js";
+import { assertTurnConstraintCompatibility } from "../../src/domains/dispatch/tool-constraints.js";
 import type { ResourcesContract } from "../../src/domains/resources/contract.js";
 import { expandSubmitText } from "../../src/domains/resources/submit-expansion.js";
 import { createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
@@ -77,5 +80,37 @@ test("gateway refusals preserve the narrowing source and put its remedy on a sep
 		doesNotMatch(grep.message, /Refused by: --allow-tools/u);
 	} finally {
 		env.restore();
+	}
+});
+
+test("dispatch delegation refusal names the restricting source and how to widen it", () => {
+	const cli = parseRunCliArgs(["--delegate-tools", "read"]);
+	const acp = parseAcpFlags(["--allow-tools", "dispatch", "--delegate-tools", "read"]);
+	if (typeof acp === "string") throw new Error(acp);
+	const template = { name: "review", delegatedTools: ["read"] };
+	const resources = templateToolConstraints(template);
+	for (const [constraints, source] of [
+		[cli.constraints, "--delegate-tools"],
+		[acp.toolLimits, "--delegate-tools"],
+		[resources, 'prompt template "review" delegated-tools'],
+		[{ delegatedTools: ["read"] }, "explicit task scope"],
+	] as const) {
+		const request = {
+			agentId: "coder",
+			task: "Check",
+			executionRole: "builder" as const,
+			...(constraints ? { turnConstraints: constraints } : {}),
+		};
+		throws(
+			() => assertTurnConstraintCompatibility(request, ["read", "bash"], true),
+			(error: unknown) => {
+				ok(error instanceof Error);
+				match(error.message, /worker tool surface exceeds.*bash/u);
+				ok(error.message.includes(`\nRefused by: ${source}.\nRemedy: `));
+				match(error.message, /Remedy: .*wid(?:en|er).*resubmit/iu);
+				return true;
+			},
+		);
+		assertTurnConstraintCompatibility(request, ["read"], true);
 	}
 });

@@ -19,6 +19,7 @@ import {
 	flowUnmediatedAgentRefusal,
 	resolveModelDestination,
 } from "../safety/information-flow.js";
+import { assertTurnConstraintCompatibility } from "./tool-constraints.js";
 /**
  * Dispatch domain wire-up (post-W5).
  *
@@ -69,13 +70,7 @@ import {
 	type ToolName,
 	ToolNames,
 } from "../../core/tool-names.js";
-import {
-	snapshotTurnConstraints,
-	toolSurfaceSources,
-	turnAllowsTool,
-	turnDelegatesTool,
-	workerTurnConstraints,
-} from "../../core/turn-constraints.js";
+import { snapshotTurnConstraints, toolSurfaceSources, workerTurnConstraints } from "../../core/turn-constraints.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -2460,38 +2455,6 @@ function deniedToolNames(req: DispatchRequest): ReadonlySet<string> {
 			return isMcpToolName(name) ? name : name.toLowerCase();
 		}),
 	);
-}
-
-function assertTurnConstraintCompatibility(
-	req: DispatchRequest,
-	tools: ReadonlyArray<string>,
-	mediated: boolean,
-): void {
-	const constraints = req.turnConstraints;
-	if (!constraints) return;
-	if (!turnAllowsTool(constraints, "dispatch"))
-		throw new Error("dispatch: forbidden by the parent task's explicit scope");
-	if (
-		!mediated &&
-		(constraints.allowedTools !== undefined ||
-			constraints.delegatedTools !== undefined ||
-			constraints.skills === "disabled")
-	) {
-		throw new Error(
-			"dispatch: this external runtime cannot enforce the parent task's tool/skill constraints; use a native worker",
-		);
-	}
-	const outside = tools.filter((name) => !turnDelegatesTool(constraints, name));
-	if (outside.length > 0)
-		throw new Error(
-			`dispatch: worker tool surface exceeds the parent task's explicit scope: ${outside.join(", ")}. Select a narrower recipe or tool profile.`,
-		);
-	if ((req.resolvedVerification?.length ?? 0) > 0 && !turnDelegatesTool(constraints, "verify")) {
-		throw new Error("dispatch: host verification is outside the parent task's explicit tool scope");
-	}
-	if (req.worktree === true && !turnDelegatesTool(constraints, "write")) {
-		throw new Error("dispatch: worktree creation requires write in the parent task's explicit tool scope");
-	}
 }
 
 function assertPostRuntimeToolCompatibility(

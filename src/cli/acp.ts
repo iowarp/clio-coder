@@ -1,7 +1,8 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
-import { parseToolLimitList, type SessionToolLimits } from "../core/tool-limit-flags.js";
+import type { SessionToolLimits } from "../core/tool-limit-flags.js";
+import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
@@ -32,7 +33,7 @@ interface AcpFlags {
 }
 
 /** Parsed flags, or the message explaining why the invocation is not usable. */
-function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
+export function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 	const flags: AcpFlags = {};
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
@@ -58,7 +59,7 @@ function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 			if ("error" in names) return names.error;
 			flags.toolLimits = {
 				...flags.toolLimits,
-				...(arg === "--allow-tools" ? { allowedTools: names } : { delegatedTools: names }),
+				...toolLimitConstraints(arg, names),
 			};
 			index += 1;
 			continue;
