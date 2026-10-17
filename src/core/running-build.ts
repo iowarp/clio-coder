@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { hostname } from "node:os";
-import { dirname, isAbsolute, join, sep } from "node:path";
+import { hostname, userInfo } from "node:os";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { runningBuildId } from "./build-info.js";
 import { resolvePackageRoot } from "./package-root.js";
 import { processAlive, processBirthToken, processStartedAtMs } from "./process-identity.js";
@@ -101,6 +101,28 @@ export function registerRunningBuild(surface: "gui" | "tui" | "acp" | "run"): vo
 	}
 }
 
+/**
+ * The Linux state dir a process resolves from its NUL-separated environment,
+ * by the same precedence as resolveClioDirs, so the /proc scan reports only
+ * processes of the home being diagnosed and not another home's GUI server.
+ */
+export function stateDirOfEnviron(environ: string): string {
+	const env = new Map<string, string>();
+	for (const pair of environ.split("\0")) {
+		const at = pair.indexOf("=");
+		if (at > 0) env.set(pair.slice(0, at), pair.slice(at + 1));
+	}
+	const set = (key: string): string | null => {
+		const value = env.get(key)?.trim();
+		return value ? value : null;
+	};
+	const specific = set("CLIO_CODER_STATE_DIR");
+	if (specific) return specific;
+	const home = set("CLIO_CODER_HOME");
+	if (home) return join(home, "state");
+	return join(env.get("XDG_STATE_HOME") ?? join(env.get("HOME") ?? userInfo().homedir, ".local", "state"), "clio-coder");
+}
+
 export function staleRunningBuilds(state = resolveClioDirs().state): RunningBuild[] {
 	const directory = join(state, "running-builds");
 	const records: RunningBuild[] = [];
@@ -137,6 +159,7 @@ export function staleRunningBuilds(state = resolveClioDirs().state): RunningBuil
 				const args = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
 				const entry = args.find((arg) => /\/dist\/(?:cli\/index|gui\/server)\.js$/.test(arg));
 				if (!entry || !isAbsolute(entry)) continue;
+				if (resolve(stateDirOfEnviron(readFileSync(`/proc/${pid}/environ`, "utf8"))) !== resolve(state)) continue;
 				const root = entry.replace(/\/dist\/(?:cli\/index|gui\/server)\.js$/, "");
 				if (
 					!existsSync(join(root, ".git")) ||
