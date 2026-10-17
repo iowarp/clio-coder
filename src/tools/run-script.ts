@@ -255,7 +255,7 @@ function insideRoot(realRoot: string, candidate: string): boolean {
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function validateRequest(args: Record<string, unknown>, workspaceRoot: string): Validation {
+function validateRequest(args: Record<string, unknown>, workspaceRoot: string, outsideAllowed: boolean): Validation {
 	const interpreterArg = typeof args.interpreter === "string" ? args.interpreter.trim() : "";
 	if (interpreterArg.length === 0) return invalid("missing interpreter argument");
 	if (!isInterpreter(interpreterArg)) {
@@ -292,7 +292,9 @@ function validateRequest(args: Record<string, unknown>, workspaceRoot: string): 
 		if (code === "ENOENT") return invalid(`script not found: ${scriptArg}`);
 		return invalid(`script cannot be resolved: ${error instanceof Error ? error.message : String(error)}`);
 	}
-	if (!insideRoot(realRoot, scriptRealPath)) {
+	// The main session at yolo was admitted to run a script and a cwd outside
+	// the workspace after the net scanned the script (#419).
+	if (!outsideAllowed && !insideRoot(realRoot, scriptRealPath)) {
 		return invalid(`script resolves outside the workspace root: ${scriptArg} -> ${scriptRealPath}`);
 	}
 	const scriptRelative = workspaceRelativePath(realRoot, scriptRealPath) ?? scriptArg;
@@ -311,11 +313,12 @@ function validateRequest(args: Record<string, unknown>, workspaceRoot: string): 
 	const cwdArg = typeof args.cwd === "string" && args.cwd.trim().length > 0 ? args.cwd.trim() : undefined;
 	let cwdExecution: string;
 	try {
-		const resolved = resolveSafeCwd(cwdArg, realRoot);
+		const resolved =
+			outsideAllowed && cwdArg !== undefined ? path.resolve(realRoot, cwdArg) : resolveSafeCwd(cwdArg, realRoot);
 		const stat = statSync(resolved);
 		if (!stat.isDirectory()) return invalid(`cwd is not a directory: ${cwdArg ?? "."}`);
 		cwdExecution = realpathSync(resolved);
-		if (!insideRoot(realRoot, cwdExecution)) {
+		if (!outsideAllowed && !insideRoot(realRoot, cwdExecution)) {
 			return invalid(`cwd escapes the workspace root through a symbolic link: ${cwdArg ?? "."}`);
 		}
 	} catch (error) {
@@ -323,7 +326,7 @@ function validateRequest(args: Record<string, unknown>, workspaceRoot: string): 
 		if (message.includes("escapes workspace root")) return invalid(`cwd escapes the workspace root: ${cwdArg ?? "."}`);
 		return invalid(`cwd cannot be resolved: ${cwdArg ?? "."} (${message})`);
 	}
-	const cwdRelative = workspaceRelativePath(realRoot, cwdExecution) ?? ".";
+	const cwdRelative = workspaceRelativePath(realRoot, cwdExecution) ?? cwdExecution;
 
 	// A fractional value would floor to zero, which the runner reads as no
 	// limit at all; only whole milliseconds from 1 up are accepted.
@@ -732,7 +735,7 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 		...runScriptToolSurface,
 		async run(rawArgs, options): Promise<ToolResult> {
 			const args = prepareRunScriptArguments(rawArgs);
-			const validation = validateRequest(args, path.resolve(getWorkspaceRoot()));
+			const validation = validateRequest(args, path.resolve(getWorkspaceRoot()), options?.operatorYolo === true);
 			if (!validation.ok) return { kind: "error", message: validation.message };
 			const request = validation.request;
 			const workspaceRoot = request.workspaceRoot;
@@ -788,7 +791,8 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			try {
 				result = await runCommand(request.interpreterPath, vector, {
 					cwd: request.cwdExecution,
-					workspaceRoot,
+					// The runner confines cwd to this root; an admitted outside cwd is its own root.
+					workspaceRoot: insideRoot(workspaceRoot, request.cwdExecution) ? workspaceRoot : request.cwdExecution,
 					timeoutMs: request.timeoutMs,
 					env: request.env,
 					...(signal ? { signal } : {}),

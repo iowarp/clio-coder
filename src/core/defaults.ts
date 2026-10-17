@@ -632,6 +632,12 @@ export interface SafetySettings {
 	sandbox: SandboxMode;
 	/** Let sandboxed worker commands reach the network even without web_fetch. */
 	sandboxNetwork: boolean;
+	/**
+	 * Absolute trees the main session at yolo may delete, truncate and chmod in
+	 * as it does in the workspace, beside the built-in temp roots (#419). Read
+	 * only from the operator's own settings file.
+	 */
+	scratchRoots: string[];
 }
 
 export interface IntegrationsSettings {
@@ -771,6 +777,7 @@ export const DEFAULT_SETTINGS = {
 		review: { enabled: false } as ReviewSettings,
 		sandbox: "auto" as SandboxMode,
 		sandboxNetwork: false,
+		scratchRoots: [] as string[],
 	} as SafetySettings,
 	interface: {
 		exitSummary: "auto",
@@ -966,6 +973,9 @@ safety:
   # OS sandbox for dispatched worker commands: auto | required | off.
   sandbox: auto
   sandboxNetwork: false
+  # Extra absolute trees yolo may clean up like the workspace, beside the temp
+  # dirs. Honored only in this file; project settings cannot set it.
+  scratchRoots: []
 
 interface:
   # Clean-exit summary: auto follows outputDetail; brief | standard | report | off override it.

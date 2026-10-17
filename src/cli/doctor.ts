@@ -12,6 +12,7 @@ import {
 } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
+import { droppedScratchRoots } from "../domains/safety/scratch-roots.js";
 import {
 	describeHostCapacity,
 	observeHostCapacityFacts,
@@ -79,6 +80,37 @@ function configuredAutonomy(): AutonomyLevel {
 	}
 }
 
+/**
+ * Configured scratch roots the operator's yolo leaves out in this workspace:
+ * one that contains the workspace, or resolves through a link to a place that
+ * cannot be one. Validation rejects the rest; these depend on where the
+ * session runs, so doctor names them instead of letting them drop silently (#419).
+ */
+export function scratchRootFindings(workspaceRoot: string): DoctorFinding[] {
+	let configured: ReadonlyArray<string>;
+	try {
+		configured = readSettings().safety.scratchRoots;
+	} catch {
+		// An unreadable settings file has its own doctor row.
+		return [];
+	}
+	return droppedScratchRoots(configured, workspaceRoot).map(({ root, reason }) => ({
+		ok: true,
+		name: "safety.scratchRoots",
+		level: "warn",
+		detail: `${root} is not a scratch root in this workspace: it ${reason}`,
+	}));
+}
+
+function configuredScratchRoots(): ReadonlyArray<string> {
+	try {
+		return readSettings().safety.scratchRoots;
+	} catch {
+		// An unreadable settings file has its own doctor row; judge with the temp roots alone.
+		return [];
+	}
+}
+
 async function deepFindings(
 	untouched: boolean,
 	workspaceRoot: string,
@@ -116,7 +148,11 @@ async function deepFindings(
 			}
 		}
 	}
-	const contractRows = contractDryRunFindings({ workspaceRoot, autonomy: deep.autonomy ?? configuredAutonomy() });
+	const contractRows = contractDryRunFindings({
+		workspaceRoot,
+		autonomy: deep.autonomy ?? configuredAutonomy(),
+		scratchRoots: configuredScratchRoots(),
+	});
 	return [...toolRows, ...contractRows];
 }
 
@@ -322,6 +358,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// The validation contract lives in the workspace, not the home, so it is
 	// checked on every run: a broken contract is why rigor stayed normal.
 	const contractChecks = [validationContractFinding(workspaceRoot)];
+	const scratchChecks = untouched ? [] : scratchRootFindings(workspaceRoot);
 	// Task worktrees live in the workspace too. The sweep reads claims and asks
 	// git; it removes nothing.
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });
@@ -344,6 +381,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 		...paneChecks,
 		...namingChecks,
 		...contractChecks,
+		...scratchChecks,
 		...worktreeChecks,
 		...deepChecks,
 	].map(withDoctorCommand);

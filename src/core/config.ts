@@ -17,6 +17,7 @@ import { isAbsolute, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
+import { scratchRootProblem } from "../domains/safety/scratch-roots.js";
 import type { DecisionTask } from "../domains/system-one/contract.js";
 import { SITE_TASKS } from "../domains/system-one/contract.js";
 import { PROFILE_IDS } from "../domains/system-one/profiles.js";
@@ -2325,7 +2326,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.safety)) issues.add("safety", `expected a map, got ${describe(raw.safety)}`);
 		else {
 			const safety = raw.safety;
-			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review", "sandbox", "sandboxNetwork"]);
+			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review", "sandbox", "sandboxNetwork", "scratchRoots"]);
 			if ("autonomy" in safety) {
 				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS, RETIRED_AUTONOMY_VALUES);
 				if (parsed !== undefined) settings.safety.autonomy = parsed;
@@ -2337,6 +2338,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("sandboxNetwork" in safety) {
 				const parsed = expectBoolean(issues, "safety.sandboxNetwork", safety.sandboxNetwork);
 				if (parsed !== undefined) settings.safety.sandboxNetwork = parsed;
+			}
+			if ("scratchRoots" in safety) {
+				const parsed = expectStringArray(issues, "safety.scratchRoots", safety.scratchRoots);
+				if (parsed !== undefined) {
+					settings.safety.scratchRoots = parsed.filter((root) => {
+						const problem = scratchRootProblem(root);
+						if (problem !== null) issues.add("safety.scratchRoots", `${root}: ${problem}`);
+						return problem === null;
+					});
+				}
 			}
 			if ("limits" in safety) {
 				if (!isPlainObject(safety.limits)) issues.add("safety.limits", `expected a map, got ${describe(safety.limits)}`);

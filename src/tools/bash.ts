@@ -1,3 +1,4 @@
+import path from "node:path";
 import { Type } from "typebox";
 import { BASH_HARD_CAP_BYTES, type BashCommandResult, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
@@ -301,8 +302,13 @@ export const bashTool: ToolSpec = {
 		// resolves `~` before checking so a home-relative cwd cannot slip past
 		// as an unexpanded literal.
 		let cwd: string;
+		const requestedCwd = cwdArg === undefined ? undefined : expandPath(cwdArg);
 		try {
-			cwd = resolveSafeCwd(cwdArg === undefined ? undefined : expandPath(cwdArg), process.cwd());
+			// The main session at yolo was admitted with a cwd outside the workspace (#419).
+			cwd =
+				options?.operatorYolo === true && requestedCwd !== undefined
+					? path.resolve(process.cwd(), requestedCwd)
+					: resolveSafeCwd(requestedCwd, process.cwd());
 		} catch {
 			return {
 				kind: "error",

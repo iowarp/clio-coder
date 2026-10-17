@@ -3030,6 +3030,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Awaited extension hooks return after the guard's own before_tool step.
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
 		autonomy: resolveEffectiveAutonomy,
+		// Only this registry carries the operator's yolo relaxations (#419).
+		scratchRoots: () => getCurrentSettings().safety.scratchRoots,
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read

@@ -40,6 +40,7 @@ import {
 	resolveToolDestination,
 } from "../domains/safety/information-flow.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
+import type { OperatorYoloScope } from "../domains/safety/policy-engine.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import type { SessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
@@ -319,6 +320,12 @@ export interface RegistryDeps {
 	principal?: AdmissionPrincipal;
 	workerExecuteAutonomy?: "yolo";
 	/**
+	 * The operator's `safety.scratchRoots`, read per admission. Only the main
+	 * session's registry wires it, and its presence is what marks this registry's
+	 * yolo as the operator's own (#419): workers, grants and jobs never carry it.
+	 */
+	scratchRoots?: () => ReadonlyArray<string>;
+	/**
 	 * The loop guard's parent-workspace mutation epoch for a turn. The main
 	 * agent's denial memory keys on it, so a refusal is repeated only while
 	 * nothing it was decided on has changed. Absent means epoch 0.
@@ -443,6 +450,12 @@ export interface ToolInvokeOptions {
 	flowAdmitsUrl?: (url: string) => string | null;
 	/** Trusted submitting host identity for nested dispatch; never model arguments. */
 	hostRun?: import("../domains/dispatch/contract.js").DispatchPreparationOptions["hostRun"];
+	/**
+	 * Set by the main session's registry while it admits at yolo (#419), so a
+	 * tool's own workspace confinement (a bash or run_script cwd) can follow the
+	 * admission that passed. Never taken from a caller.
+	 */
+	operatorYolo?: true;
 	/** Trusted resolved model capability; never read from tool arguments. */
 	supportsImages?: boolean;
 	/** Trusted effective context window in tokens; sizes the per-turn observation pool. */
@@ -759,6 +772,15 @@ interface ParkedCall {
 
 export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const tools = new Map<ToolName, ToolSpec>();
+	// The operator's own yolo exists only on the main session's registry (#419).
+	const operatorYoloScope = (level: AutonomyLevel): OperatorYoloScope | undefined =>
+		level === "yolo" && (deps.principal ?? "main") === "main" && deps.scratchRoots !== undefined
+			? { scratchRoots: deps.scratchRoots() }
+			: undefined;
+	const withOperatorYolo = (level: AutonomyLevel): { operatorYolo?: OperatorYoloScope } => {
+		const scope = operatorYoloScope(level);
+		return scope === undefined ? {} : { operatorYolo: scope };
+	};
 	const parked: ParkedCall[] = [];
 	const permissionListeners = new Set<
 		(call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void
@@ -895,6 +917,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					gitContext: _callerGitContext,
 					flowAdmitsUrl: _callerFlowAdmitsUrl,
 					hookLanding: _callerHookLanding,
+					operatorYolo: _callerOperatorYolo,
 					...callerOptions
 				} = options ?? {};
 				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
@@ -911,6 +934,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
 					...(writeTargetViolation ? { writeTargetViolation } : {}),
 					...(deps.principal === "worker" && deps.git !== undefined ? { gitContext: deps.git } : {}),
+					...(operatorYoloScope(deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL) !== undefined
+						? { operatorYolo: true as const }
+						: {}),
 					...(landing !== undefined && landing !== null ? { hookLanding: landing } : {}),
 					...(deps.flow !== undefined
 						? { flowAdmitsUrl: (url: string) => outboundFlowViolation(spec, { tool: spec.name, args: { url } }) }
@@ -1271,6 +1297,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(projectedCall !== undefined ? { capability: call, effects: [projectedCall] } : { effects: [call] }),
 			safety: deps.safety,
 			autonomy: level,
+			...withOperatorYolo(level),
 			...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
 			constraints: {
 				...(deps.readOnly === true ? { readOnly: true } : {}),
@@ -1519,6 +1546,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				effects: [effect.call],
 				safety: deps.safety,
 				autonomy: level,
+				...withOperatorYolo(level),
 				...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
 				...(effectSpec !== undefined
 					? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }

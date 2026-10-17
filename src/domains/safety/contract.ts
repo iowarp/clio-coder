@@ -3,7 +3,7 @@ import type { CompletionContractAuditInput, ToolCallAuditInput } from "./audit.j
 import type { DamageControlMatch } from "./damage-control.js";
 import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import type { LoopVerdict } from "./loop-detector.js";
-import type { SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
+import type { OperatorYoloScope, SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
 import type { RejectionMessage } from "./rejection-feedback.js";
 import type { ScopeSpec } from "./scope.js";
 
@@ -47,9 +47,10 @@ export interface SafetyContract {
 	/**
 	 * Full evaluation: classify + damage-control match + decision. Writes the
 	 * safety-net audit row and emits safety.blocked on a block. Registry admission writes any final autonomy disposition
-	 * through `audit.recordToolCall`.
+	 * through `audit.recordToolCall`. `operatorYolo` is present only for the
+	 * main session's own calls at yolo (#419).
 	 */
-	evaluate(call: ClassifierCall, posture?: string): SafetyDecision;
+	evaluate(call: ClassifierCall, posture?: string, operatorYolo?: OperatorYoloScope): SafetyDecision;
 
 	/** Observe a call for loop detection. Returns the updated verdict. */
 	observeLoop(key: string, now?: number): LoopVerdict;

@@ -317,8 +317,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		classify(call) {
 			return classifyCall(call);
 		},
-		evaluate(call, posture) {
-			const policy = activePolicyEngine().evaluate(call, posture);
+		evaluate(call, posture, operatorYolo) {
+			const policy = activePolicyEngine().evaluate(call, posture, operatorYolo);
 			const classification = policy.classification;
 
 			if (policy.kind === "block") {

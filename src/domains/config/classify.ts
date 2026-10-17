@@ -41,6 +41,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// enabling it, retargeting it, or changing its cadence takes effect on the
 	// next turn boundary without a restart or a session-routing patch.
 	"safety.review",
+	// The main registry reads it at every admission, so the next tool call
+	// observes a change (#419).
+	"safety.scratchRoots",
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([

@@ -532,6 +532,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Worker sandbox network",
 		"Let sandboxed worker commands reach the network. Workers that have web_fetch get network either way.",
 	],
+	"safety.scratchRoots": [
+		"Yolo scratch roots",
+		"Absolute directories where the yolo main session may delete, truncate and chmod as it does in the workspace. The temp directories always count. User settings only.",
+	],
 	"interface.demo": [
 		"Demo presentation and guidance",
 		"The full welcome artwork, dashboard, and shortcut hints. Off starts with a compact identity header and skips welcome-only reads. Also controls a short tip after some turns, picked from what the turn did, plus idle footer tips and key hints. On by default before 1.0. Off stops every tip and the guidance profile. No automatic demonstrations or permission changes.",

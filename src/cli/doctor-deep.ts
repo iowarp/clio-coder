@@ -83,6 +83,8 @@ function resolveProgram(program: string, workspaceRoot: string): string | null {
 export interface ContractDryRunOptions {
 	workspaceRoot?: string;
 	autonomy: AutonomyLevel;
+	/** The operator's `safety.scratchRoots`, for the yolo verdict of the operator's own session. */
+	scratchRoots?: ReadonlyArray<string>;
 }
 
 /**
@@ -92,10 +94,16 @@ export interface ContractDryRunOptions {
  * engine's verdict under the session posture, then the autonomy mapping at the
  * configured level. The posture matters because yolo clears the ordinary
  * rails inside the engine, so evaluating without it reported a `$(...)`
- * validator as asking at yolo when admission runs it. Nothing is executed. A
+ * validator as asking at yolo when admission runs it. A yolo verdict is the
+ * operator's own session's, with its scope and configured scratch roots
+ * (#419), and says so: a worker or a command job at yolo keeps the rails that
+ * scope relaxes. Nothing is executed. A
  * row warns when the program is missing or when the command would stop for
  * approval or be refused, because either one stalls an unattended validation.
  */
+/** Where a yolo verdict holds: the operator's own session, not its workers or command jobs (#419). */
+const OPERATOR_VIEW = "the operator's session";
+
 export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFinding[] {
 	const workspaceRoot = options.workspaceRoot ?? process.cwd();
 	const loaded = loadValidationContract(workspaceRoot);
@@ -105,6 +113,7 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 	const engine = createSafetyPolicyEngine({ cwd: workspaceRoot });
 	const level = options.autonomy;
 	const posture = level === "yolo" ? "yolo" : undefined;
+	const operatorYolo = { scratchRoots: options.scratchRoots ?? [] };
 	return validators.map((command, index): DoctorFinding => {
 		const name = `validator ${index + 1}`;
 		const program = commandProgram(command);
@@ -112,7 +121,7 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 		const where =
 			program === null ? "no program" : resolved === null ? `${program} not found` : `${program} is ${resolved}`;
 		const call = { tool: ToolNames.Bash, args: { command } };
-		const decision = engine.evaluate(call, posture);
+		const decision = posture === "yolo" ? engine.evaluate(call, posture, operatorYolo) : engine.evaluate(call);
 		let verdict: string;
 		let runs = false;
 		if (decision.kind === "block") {
@@ -121,10 +130,10 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 			// An ask that survives the yolo posture is a damage-control
 			// confirmation, which holds at both levels. Any other engine ask is
 			// an ordinary rail that yolo clears.
-			const asksAtYolo = level === "yolo" || engine.evaluate(call, "yolo").kind === "ask";
+			const asksAtYolo = level === "yolo" || engine.evaluate(call, "yolo", operatorYolo).kind === "ask";
 			verdict = asksAtYolo
-				? `asks for confirmation at default and yolo (${decision.reasonCode})`
-				: `asks for approval at default and runs at yolo (${decision.reasonCode})`;
+				? `asks for confirmation at default and at yolo in ${OPERATOR_VIEW} (${decision.reasonCode})`
+				: `asks for approval at default and runs at yolo in ${OPERATOR_VIEW} (${decision.reasonCode})`;
 		} else {
 			const disposition = mapAutonomy(level, decision.actionClass, {
 				executeRecognized: decision.execRecognition !== "unrecognized",
@@ -134,9 +143,9 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 			// classes admission hard-blocks at both levels (git_destructive).
 			verdict =
 				disposition === "allow"
-					? `runs without approval at ${level}`
+					? `runs without approval at ${level === "yolo" ? `yolo in ${OPERATOR_VIEW}` : level}`
 					: disposition === "ask"
-						? "asks for approval at default and runs at yolo; declare it in .clio-coder/safety.yaml to run it unattended"
+						? `asks for approval at default and runs at yolo in ${OPERATOR_VIEW}; declare it in .clio-coder/safety.yaml to run it unattended`
 						: `blocked by the safety policy (classification:${decision.actionClass})`;
 		}
 		return {

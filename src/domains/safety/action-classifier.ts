@@ -327,10 +327,10 @@ function mergeBases(left: ShellBases, right: ShellBases): ShellBases {
  * repeat or redirect, leaves the base unknown, and a relative write after it
  * cannot be placed.
  */
-function bashPathReasons(command: string, argCwd: string | undefined): string[] {
+function bashPathReasons(command: string, argCwd: string | undefined, scratchRoots?: ReadonlyArray<string>): string[] {
 	const reasons = new Set<string>();
 	for (const walk of extractCommandPathWalks(command)) {
-		for (const reason of walkPathReasons(walk, argCwd)) reasons.add(reason);
+		for (const reason of walkPathReasons(walk, argCwd, scratchRoots)) reasons.add(reason);
 	}
 	return [...reasons];
 }
@@ -338,9 +338,35 @@ function bashPathReasons(command: string, argCwd: string | undefined): string[] 
 /** Every reason a delete target produces starts with this; the policy engine hard-blocks on it. */
 export const DELETE_PATH_REASON_PREFIX = "delete-path-";
 
-/** Deletes a bash command would make outside the workspace, in its .git, or at a place it cannot name. */
-export function bashDeleteReasons(command: string, argCwd: string | undefined): string[] {
-	return bashPathReasons(command, argCwd).filter((reason) => reason.startsWith(DELETE_PATH_REASON_PREFIX));
+/**
+ * Deletes a bash command would make outside the workspace, in its .git, or at a
+ * place it cannot name. `scratchRoots` (canonical) come only from the
+ * operator's own yolo (#419): deletes inside them are judged like ones inside
+ * the workspace, and a cd into one is followed as a base.
+ */
+export function bashDeleteReasons(
+	command: string,
+	argCwd: string | undefined,
+	scratchRoots?: ReadonlyArray<string>,
+): string[] {
+	return bashPathReasons(command, argCwd, scratchRoots).filter((reason) => reason.startsWith(DELETE_PATH_REASON_PREFIX));
+}
+
+/**
+ * Delete and write reasons for one line of a script the operator's yolo reads
+ * (#419), judged from `cwd`. A null `cwd` is a directory the scan could not
+ * place, so every relative delete or write on the line is unresolved.
+ */
+export function bashScriptLineReasons(
+	command: string,
+	cwd: string | null,
+	scratchRoots: ReadonlyArray<string>,
+): string[] {
+	const reasons = new Set<string>();
+	for (const walk of extractCommandPathWalks(command)) {
+		for (const reason of walkPathReasons(walk, cwd, scratchRoots)) reasons.add(reason);
+	}
+	return [...reasons];
 }
 
 /** Scratch roots a delete may clean without leaving the workspace rules. */
@@ -367,6 +393,7 @@ function deleteTargetReason(
 	scope: "path" | "children",
 	base: string | undefined,
 	pattern: string | null,
+	scratchRoots: ReadonlyArray<string>,
 ): string | null {
 	const abs = canonicalizeRawPath(target, candidateBase(base));
 	const workspace = canonicalizePath(path.resolve(process.cwd()));
@@ -380,20 +407,28 @@ function deleteTargetReason(
 	if (scope === "children" ? isUnderPrefix(abs, workspace) : isStrictlyUnder(abs, workspace)) return null;
 	if (abs === workspace) return `${DELETE_PATH_REASON_PREFIX}workspace-root: ${abs}`;
 	if (isUnderPrefix(workspace, abs)) return `${DELETE_PATH_REASON_PREFIX}outside-workspace: ${abs}`;
-	const inScratch = tmpDeleteRoots().some((root) =>
+	const inScratch = [...tmpDeleteRoots(), ...scratchRoots].some((root) =>
 		scope === "children" ? isUnderPrefix(abs, root) : isStrictlyUnder(abs, root),
 	);
 	return inScratch ? null : `${DELETE_PATH_REASON_PREFIX}outside-workspace: ${abs}`;
 }
 
-function deleteEventReasons(event: Extract<CommandPathEvent, { kind: "delete" }>, bases: ShellBases): string[] {
+function deleteEventReasons(
+	event: Extract<CommandPathEvent, { kind: "delete" }>,
+	bases: ShellBases,
+	scratchRoots: ReadonlyArray<string> | undefined,
+): string[] {
 	if (event.scope === "input") return [`${DELETE_PATH_REASON_PREFIX}unresolved: operands from input`];
+	if (event.scope === "remote") return [`${DELETE_PATH_REASON_PREFIX}remote: ${event.target}`];
 	const raw = event.target;
 	const expanded = expandShellHome(raw);
 	// A variable or substitution is named only at run time.
 	if (expanded === null || /[$`]/u.test(expanded)) return [`${DELETE_PATH_REASON_PREFIX}unresolved: ${raw}`];
 	let target = expanded;
-	let scope: "path" | "children" = event.scope;
+	// Only the operator's yolo, which passes its scratch roots, judges an
+	// unfiltered find root like `rm -rf` of it; default and worker views keep
+	// judging its children, as they always have (#419).
+	let scope: "path" | "children" = scratchRoots !== undefined && event.findRoot === "unfiltered" ? "path" : event.scope;
 	let pattern: string | null = null;
 	if (isDynamicShellPath(expanded)) {
 		// A glob or brace expands to entries of the directory before its first
@@ -408,16 +443,20 @@ function deleteEventReasons(event: Extract<CommandPathEvent, { kind: "delete" }>
 	const from = path.isAbsolute(target) ? [undefined] : (bases ?? []);
 	const reasons = new Set<string>();
 	for (const base of from) {
-		const reason = deleteTargetReason(target, scope, base, pattern);
+		const reason = deleteTargetReason(target, scope, base, pattern, scratchRoots ?? []);
 		if (reason !== null) reasons.add(reason);
 	}
 	return [...reasons];
 }
 
-function walkPathReasons(walk: ReadonlyArray<CommandPathEvent>, argCwd: string | undefined): string[] {
+function walkPathReasons(
+	walk: ReadonlyArray<CommandPathEvent>,
+	argCwd: string | null | undefined,
+	scratchRoots?: ReadonlyArray<string>,
+): string[] {
 	const writeReasons = new Set<string>();
 	const cdReasons = new Set<string>();
-	let bases: ShellBases = [candidateBase(argCwd)];
+	let bases: ShellBases = argCwd === null ? null : [candidateBase(argCwd)];
 	const subshells: ShellBases[] = [];
 	// An outside cd is reported but never becomes a base, so a relative delete
 	// after it would otherwise resolve from the workspace it already left.
@@ -457,9 +496,15 @@ function walkPathReasons(walk: ReadonlyArray<CommandPathEvent>, argCwd: string |
 			continue;
 		}
 		if (event.kind === "delete") {
-			if (escaped && event.scope !== "input" && !path.isAbsolute(event.target) && !event.target.startsWith("~"))
+			if (
+				escaped &&
+				event.scope !== "input" &&
+				event.scope !== "remote" &&
+				!path.isAbsolute(event.target) &&
+				!event.target.startsWith("~")
+			)
 				writeReasons.add(`${DELETE_PATH_REASON_PREFIX}outside-workspace: ${event.target} after a cd out of the workspace`);
-			for (const reason of deleteEventReasons(event, bases)) writeReasons.add(reason);
+			for (const reason of deleteEventReasons(event, bases, scratchRoots)) writeReasons.add(reason);
 			continue;
 		}
 		const target = event.target;
@@ -479,7 +524,10 @@ function walkPathReasons(walk: ReadonlyArray<CommandPathEvent>, argCwd: string |
 				// Inside means inside under the logical and the physical reading.
 				if (landing === null || !isInsideCwd(landing)) {
 					cdReasons.add(`bash-cd-outside-workspace: ${landing ?? target}`);
-					escaped = true;
+					// Under the operator's yolo a cd into a scratch root becomes a base,
+					// so `cd /tmp/run && rm -rf out` is judged where it lands (#419).
+					if (landing !== null && (scratchRoots ?? []).some((root) => isUnderPrefix(landing, root))) landed.push(landing);
+					else escaped = true;
 				} else landed.push(landing);
 			}
 		}

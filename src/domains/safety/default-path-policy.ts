@@ -2,6 +2,23 @@ import { foreignAgentDirs } from "../interop/registry.js";
 import type { PathPolicyInput } from "./path-policy.js";
 
 /**
+ * Generated trees the default policy keeps out of hand edits. The operator's
+ * yolo may delete them (#419); a write into one stays refused at every level.
+ */
+export const BUILD_OUTPUT_PATHS: ReadonlyArray<string> = [
+	"dist/",
+	"build/",
+	".next/",
+	".nuxt/",
+	".output/",
+	"node_modules/",
+	"__pycache__/",
+	".venv/",
+	"venv/",
+	"target/",
+];
+
+/**
  * Source-level damage-control path defaults adapted from the reference
  * extension. These apply even when a project has no `.clio-coder/safety.yaml`, so the
  * agent has a useful safety net out of the box. Project policy can add more
@@ -90,16 +107,7 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		"*.min.css",
 		"*.bundle.js",
 		"*.chunk.js",
-		"dist/",
-		"build/",
-		".next/",
-		".nuxt/",
-		".output/",
-		"node_modules/",
-		"__pycache__/",
-		".venv/",
-		"venv/",
-		"target/",
+		...BUILD_OUTPUT_PATHS,
 	],
 	// Another agent's own configuration. Clio reads these roots for skills,
 	// prompts, and rule prose and has no reason to author them, so the guard is

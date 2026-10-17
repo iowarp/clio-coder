@@ -63,7 +63,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `RouteCandidate` in [route-decision.ts](../../src/domains/dispatch/route-decision.ts).
 
 ### 15. Posture (Autonomy Level)
-- **Definition**: The operator-set dial, `default` or `yolo`, that decides which action classes ask for approval and which run at once. Hard blocks and damage-control rules apply at both levels. A dispatched worker resolves its own approval asks through `fleet.permissions.mode`, and a read-only dispatch restricts its tools. Routing postures (`quality`, `balanced`, `latency`, `economy`) under `fleet.adaptiveRouting.postures` are a different axis that ranks candidate routes.
+- **Definition**: The operator-set dial, `default` or `yolo`, that decides which action classes ask for approval and which run at once. Hard blocks and damage-control rules apply at both levels, apart from the main session's yolo relaxations that judge a few rules by their target. A dispatched worker resolves its own approval asks through `fleet.permissions.mode`, and a read-only dispatch restricts its tools. Routing postures (`quality`, `balanced`, `latency`, `economy`) under `fleet.adaptiveRouting.postures` are a different axis that ranks candidate routes.
 - **Owning Type**: `AutonomyLevel` in [autonomy.ts](../../src/domains/safety/autonomy.ts).
 
 ### 16. Capability Class

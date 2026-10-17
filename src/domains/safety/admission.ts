@@ -12,6 +12,7 @@ import { autonomyCallInputs } from "./autonomy-inputs.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
 import { classifyBashGit } from "./git-policy.js";
+import type { OperatorYoloScope } from "./policy-engine.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 import type { WorkerGitAllowance } from "./worker-permit.js";
 
@@ -87,6 +88,15 @@ export interface AdmissionInput {
 	safety: Pick<SafetyContract, "evaluate">;
 	/** Operator autonomy. Read for the main principal only; workers never inherit it. */
 	autonomy?: AutonomyLevel;
+	/**
+	 * The main session's own yolo relaxations (#419). Only the session's registry
+	 * passes it, and it reaches the net only for the main principal at yolo.
+	 * Scheduled `main` jobs and `main_turn` deliveries are turns of the
+	 * operator's own session through that registry, so they get it; unattended
+	 * loops are the case #419 asks for. A worker grant and a scheduled command
+	 * job are judged as main without it and keep today's rails.
+	 */
+	operatorYolo?: OperatorYoloScope;
 	/** Standing execute authority bound by the host permit, independent of model fields. */
 	workerExecuteAutonomy?: "yolo";
 	constraints?: AdmissionConstraints;
@@ -245,8 +255,9 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 					? "yolo"
 					: undefined;
 	const normalize = input.normalize ?? ((decision: SafetyDecision) => decision);
+	const operatorYolo = principal === "main" && level === "yolo" ? input.operatorYolo : undefined;
 	const evaluate = (call: ClassifierCall): SafetyDecision =>
-		normalize(input.safety.evaluate(withCwd(call, input.cwd), posture));
+		normalize(input.safety.evaluate(withCwd(call, input.cwd), posture, operatorYolo));
 	if (input.cwd !== undefined && !isAbsolute(input.cwd)) {
 		const reason = `admission cwd must be absolute: ${input.cwd}`;
 		return deny("context", reason, syntheticBlock(reason));

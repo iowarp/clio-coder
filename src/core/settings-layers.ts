@@ -10,7 +10,8 @@
  * the one strict schema (core/config.ts). Project layers are committed
  * team configuration and must stay secrets-free, so credential-bearing keys are
  * stripped from the project and project.local layers with a diagnostic.
- * Autonomy is operator-owned and is also stripped from project layers.
+ * Autonomy is operator-owned and is also stripped from project layers, as are
+ * yolo's scratch roots.
  *
  * Merge semantics, documented and explicit: objects deep-merge key by key;
  * arrays and scalars replace wholesale (a later layer's array wins entirely).
@@ -199,6 +200,28 @@ function stripProjectAutonomy(
 }
 
 /**
+ * Scratch roots widen where yolo may delete outside the workspace (#419), so a
+ * repository can neither set nor extend them; only the operator's file names them.
+ */
+function stripProjectScratchRoots(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+): Record<string, unknown> {
+	if (!isRecord(blob.safety) || !Object.hasOwn(blob.safety, "scratchRoots")) return blob;
+	issues.push({
+		origin,
+		path: "safety.scratchRoots",
+		message: "scratch roots are set only in user settings; project value ignored",
+	});
+	const { scratchRoots: _ignored, ...safety } = blob.safety;
+	const cleaned = { ...blob };
+	if (Object.keys(safety).length === 0) delete cleaned.safety;
+	else cleaned.safety = safety;
+	return cleaned;
+}
+
+/**
  * `trustedUnmediated` hands a runtime its own authority over writes, so only
  * the operator's user settings may grant it. A trusted project layer that
  * defines targets or external agents could otherwise trust itself.
@@ -312,7 +335,11 @@ function prepareProjectLayers(
 		const blob =
 			raw.blob === undefined
 				? undefined
-				: stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues);
+				: stripProjectScratchRoots(
+						stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+						origin,
+						issues,
+					);
 		if (snapshot.verdict !== "trusted") {
 			issues.push({ origin, path, message: projectSurfaceTrustNotice(snapshot, file.path) });
 			return { origin, path, blob: undefined };

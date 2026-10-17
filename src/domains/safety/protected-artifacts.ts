@@ -354,27 +354,139 @@ const INNER_SHELL_MAX_DEPTH = 3;
  * the shell reads them the same way.
  */
 function segmentShellScript(segment: ReadonlyArray<string>): string | null | undefined {
+	const invocation = segmentShellInvocation(segment);
+	if (invocation.kind === "none") return null;
+	return invocation.kind === "inline" ? invocation.script : undefined;
+}
+
+/**
+ * How a segment hands a shell its script: not a shell at all, inline through
+ * `-c`, from a named file operand, from standard input, or through a startup
+ * option this scanner does not model.
+ */
+type ShellInvocation =
+	| { kind: "none" }
+	| { kind: "inline"; script: string | undefined }
+	| { kind: "file"; path: string }
+	| { kind: "stdin" }
+	| { kind: "opaque" };
+
+function segmentShellInvocation(segment: ReadonlyArray<string>): ShellInvocation {
 	const commandIndex = commandTokenIndex(segment);
-	if (commandIndex === null) return null;
-	if (!INNER_SHELLS.has(basenameToken(segment[commandIndex]))) return null;
+	if (commandIndex === null) return { kind: "none" };
+	if (!INNER_SHELLS.has(basenameToken(segment[commandIndex]))) return { kind: "none" };
 	for (let index = commandIndex + 1; index < segment.length; index += 1) {
 		const token = segment[index];
-		if (token === undefined) return undefined;
+		if (token === undefined) return { kind: "opaque" };
 		if (token === "-o" || token === "+o" || token === "-O" || token === "+O") {
 			const option = segment[++index];
-			if (option === undefined || option.startsWith("-") || option.startsWith("+")) return undefined;
+			if (option === undefined || option.startsWith("-") || option.startsWith("+")) return { kind: "opaque" };
 			continue;
 		}
 		if (["--norc", "--noprofile", "--posix", "--login", "--restricted", "--verbose"].includes(token)) continue;
-		if (token === "--rcfile" || token === "--init-file") return undefined;
+		if (token === "--rcfile" || token === "--init-file") return { kind: "opaque" };
 		if (/^[-+][a-zA-Z]+$/u.test(token)) {
-			if (!/^[-+][abCefhiklmnprstuvxBDEHILPTXc]+$/u.test(token)) return undefined;
-			if (token.startsWith("-") && token.slice(1).includes("c")) return segment[index + 1];
+			if (!/^[-+][abCefhiklmnprstuvxBDEHILPTXc]+$/u.test(token)) return { kind: "opaque" };
+			if (token.startsWith("-") && token.slice(1).includes("c")) return { kind: "inline", script: segment[index + 1] };
+			// `-s` reads the script from standard input even with operands.
+			if (token.startsWith("-") && token.slice(1).includes("s")) return { kind: "stdin" };
 			continue;
 		}
-		return undefined;
+		if (token === "--")
+			return segment[index + 1] === undefined ? { kind: "stdin" } : { kind: "file", path: segment[index + 1] as string };
+		return token.startsWith("-") ? { kind: "opaque" } : { kind: "file", path: token };
 	}
-	return undefined;
+	return { kind: "stdin" };
+}
+
+/**
+ * Script files a command runs through a shell, for the operator's yolo to scan
+ * (#419): `bash x.sh`, `sh -e x.sh` and `bash < x.sh`, also inside an `sh -c`
+ * script or a substitution. Null when some script cannot be named: one fed
+ * through a pipe, a here-document, `-s` or a startup option keeps its ask.
+ */
+export function shellScriptSources(command: string): ScriptSource[] | null {
+	const sources: ScriptSource[] = [];
+	return collectScriptSources(command, 0, false, sources) ? sources : null;
+}
+
+/**
+ * A file one line of a script hands the shell; `program` marks an `exec`
+ * target, which may be a binary, `sourced` one that `source` or `.` runs in
+ * the script's own shell, and `stdin` one fed to the shell on standard input,
+ * where `$0` names the shell rather than the file.
+ */
+export interface ScriptSource {
+	path: string;
+	program: boolean;
+	stdin: boolean;
+	sourced: boolean;
+}
+
+/**
+ * The files one line of a scanned script runs (#419): what
+ * {@link shellScriptSources} names, plus `source x`, `. x` and `exec` of a
+ * shell or of a path. Null when the line runs a script it cannot name.
+ */
+export function scriptLineSources(line: string): ScriptSource[] | null {
+	const sources: ScriptSource[] = [];
+	return collectScriptSources(line, 0, true, sources) ? sources : null;
+}
+
+/** Options of `exec` that take the next word: `-a name`. */
+const EXEC_VALUE_OPTIONS: ReadonlySet<string> = new Set(["-a"]);
+
+function collectScriptSources(command: string, depth: number, sourced: boolean, sources: ScriptSource[]): boolean {
+	for (const segment of splitSegments(scanShellLike(command))) {
+		for (const token of segment) {
+			for (const substitution of token.substitutions ?? []) {
+				if (depth >= INNER_SHELL_MAX_DEPTH || !collectScriptSources(substitution, depth + 1, sourced, sources))
+					return false;
+			}
+		}
+		let argv = shellCommandArguments(segment);
+		if (sourced) {
+			const commandIndex = commandTokenIndex(argv);
+			const executable = commandIndex === null ? "" : basenameToken(argv[commandIndex]);
+			if (commandIndex !== null && (executable === "source" || executable === ".")) {
+				const operands = argv.slice(commandIndex + 1);
+				const target = operands[0] === "--" ? operands[1] : operands[0];
+				if (target === undefined || target.startsWith("-")) return false;
+				sources.push({ path: target, program: false, sourced: true, stdin: false });
+				continue;
+			}
+			if (commandIndex !== null && executable === "exec") {
+				let next = commandIndex + 1;
+				while (argv[next]?.startsWith("-") === true) next += EXEC_VALUE_OPTIONS.has(argv[next] ?? "") ? 2 : 1;
+				const target = argv[next];
+				// `exec >log` only redirects; `exec node app.js` runs a program found on PATH.
+				if (target === undefined) continue;
+				if (!INNER_SHELLS.has(basenameToken(target))) {
+					if (target.includes("/")) sources.push({ path: target, program: true, sourced: false, stdin: false });
+					continue;
+				}
+				argv = argv.slice(next);
+			}
+		}
+		const invocation = segmentShellInvocation(argv);
+		if (invocation.kind === "none") continue;
+		if (invocation.kind === "opaque") return false;
+		if (invocation.kind === "file") sources.push({ path: invocation.path, program: false, sourced: false, stdin: false });
+		else if (invocation.kind === "inline") {
+			if (
+				invocation.script === undefined ||
+				depth >= INNER_SHELL_MAX_DEPTH ||
+				!collectScriptSources(invocation.script, depth + 1, sourced, sources)
+			)
+				return false;
+		} else {
+			const redirect = segment.findIndex((token) => token.operator && token.value === "<");
+			const target = redirect < 0 ? undefined : segment[redirect + 1];
+			if (target === undefined || target.operator) return false;
+			sources.push({ path: target.value, program: false, sourced: false, stdin: true });
+		}
+	}
+	return true;
 }
 
 /** Shell source that cannot be inspected must keep the one-shot confirmation rail. */
@@ -462,8 +574,16 @@ export type CommandPathEvent =
 	| { kind: "cd"; target: string; unmodeled: boolean }
 	| { kind: "write"; target: string }
 	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[]; origin: LinkOrigin }
-	| { kind: "delete"; target: string; scope: DeleteScope }
+	| { kind: "delete"; target: string; scope: DeleteScope; findRoot?: FindRootFilter }
 	| { kind: "subshell"; open: boolean };
+
+/**
+ * Whether a find root's expression narrows what its delete removes before the
+ * delete runs. Only the operator's yolo reads it (#419): there an unfiltered
+ * root is judged like `rm -rf` of it, while every other view keeps judging
+ * the root's children.
+ */
+export type FindRootFilter = "filtered" | "unfiltered";
 
 /**
  * What a delete event names. `path` is the operand itself. `children` is a
@@ -471,7 +591,7 @@ export type CommandPathEvent =
  * directory may be the workspace root. `input` is `xargs rm`, whose operands
  * the scanner never sees.
  */
-export type DeleteScope = "path" | "children" | "input";
+export type DeleteScope = "path" | "children" | "input" | "remote";
 
 /**
  * How a link event knows its sources. `text` is a link made from the words
@@ -737,6 +857,24 @@ function wrappedCommandIndex(
  * `xargs` nothing does.
  */
 function collectDeleteEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[]): void {
+	const outerIndex = commandTokenIndex(argv);
+	const outerCommand = outerIndex === null ? "" : basenameToken(argv[outerIndex]);
+	// `find -delete` and `rsync --delete` remove what lies under their roots, so
+	// they are judged by those roots like any other delete (#419). A find root
+	// carries whether its expression filters, because an unfiltered one can
+	// match every entry: under the operator's yolo `find . -delete` empties the
+	// workspace and its .git. Every rsync operand counts, sources included: a
+	// misread option value can only add a judged path, never hide the
+	// destination. A remote operand cannot be placed.
+	if (outerIndex !== null && outerCommand === "find" && argv.includes("-delete")) {
+		out.push(...findRootDeletes(argv.slice(outerIndex + 1)));
+	}
+	if (outerIndex !== null && outerCommand === "rsync" && argv.some((word) => /^--delete(?:-|$)/u.test(word))) {
+		for (const operand of pathArgs(argv, outerIndex)) {
+			const remote = /^[^/]*:/u.test(operand);
+			out.push({ kind: "delete", target: operand, scope: remote ? "remote" : "children" });
+		}
+	}
 	const found = wrappedCommandIndex(argv, DELETE_COMMANDS);
 	if (found === null || !DELETE_COMMANDS.has(basenameToken(argv[found.index]))) return;
 	if (!found.fromInput) {
@@ -746,7 +884,7 @@ function collectDeleteEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[
 	}
 	const outer = commandTokenIndex(argv);
 	if (outer !== null && basenameToken(argv[outer]) === "find") {
-		for (const root of findRoots(argv.slice(outer + 1))) out.push({ kind: "delete", target: root, scope: "children" });
+		out.push(...findRootDeletes(argv.slice(outer + 1)));
 		return;
 	}
 	out.push({ kind: "delete", target: "<input>", scope: "input" });
@@ -881,6 +1019,25 @@ export function extractCommandDeleteTargets(command: string): string[] {
 		}
 	}
 	return targets.filter(isInterestingWriteTarget);
+}
+
+/**
+ * Roots of the `find -delete` calls in a command whose expression filters
+ * what goes. The operator's yolo judges such a root by what lies under it, so
+ * the authority rails treat it as a write there rather than a delete of the
+ * root and every tree above (#419).
+ */
+export function extractFilteredFindDeleteRoots(command: string): string[] {
+	const roots: string[] = [];
+	for (const tokens of expandedShellSegments(command)) {
+		const segment = shellCommandArguments(tokens);
+		const commandIndex = commandTokenIndex(segment);
+		if (commandIndex === null || basenameToken(segment[commandIndex]) !== "find" || !segment.includes("-delete"))
+			continue;
+		const args = segment.slice(commandIndex + 1);
+		if (findExpressionFilters(args)) roots.push(...findRoots(args));
+	}
+	return roots.filter(isInterestingWriteTarget);
 }
 
 /** Recognizable operator CLI installation paths invoked through a model shell.
@@ -1250,9 +1407,81 @@ function classifyFindDelete(
 	return { kind: "benign", matches: [] };
 }
 
+/**
+ * Tests that narrow which entries a find expression reaches. `-type`, depth
+ * and traversal options do not: `find . -type f -delete` still removes every
+ * file.
+ */
+const FIND_FILTER_TESTS = new Set([
+	"-name",
+	"-iname",
+	"-path",
+	"-ipath",
+	"-wholename",
+	"-iwholename",
+	"-regex",
+	"-iregex",
+	"-lname",
+	"-ilname",
+	"-newer",
+	"-anewer",
+	"-cnewer",
+	"-mtime",
+	"-mmin",
+	"-atime",
+	"-amin",
+	"-ctime",
+	"-cmin",
+	"-size",
+	"-empty",
+	"-user",
+	"-group",
+	"-uid",
+	"-gid",
+	"-nouser",
+	"-nogroup",
+	"-perm",
+	"-links",
+	"-inum",
+	"-samefile",
+]);
+
+/**
+ * A find expression filters its delete when a narrowing test comes before the
+ * first action and nothing can route around it: `-o`, `,` or a negation lets
+ * entries the test rejects reach the action (`find . -name x -o -delete`).
+ */
+function findExpressionFilters(args: ReadonlyArray<string>): boolean {
+	let filtered = false;
+	for (const [index, token] of args.entries()) {
+		if (/^-(?:delete|exec|execdir|ok|okdir)$/u.test(token)) return filtered;
+		if (token === "-o" || token === "-or" || token === "," || token === "!" || token === "-not") return false;
+		if (findTestMatchesAll(token, args[index + 1])) continue;
+		if (FIND_FILTER_TESTS.has(token) || /^-newer[aBcmt][aBcmt]$/u.test(token)) filtered = true;
+	}
+	return filtered;
+}
+
+/** `-name '*'` and `-regex '.*'` name a test that rejects nothing. */
+function findTestMatchesAll(test: string, value: string | undefined): boolean {
+	if (value === undefined) return false;
+	if (/^-i?(?:name|path|wholename)$/u.test(test)) return /^\**$/u.test(value);
+	if (/^-i?regex$/u.test(test)) return /^(?:\.\*)*$/u.test(value);
+	return false;
+}
+
+function findRootDeletes(args: ReadonlyArray<string>): CommandPathEvent[] {
+	const findRoot: FindRootFilter = findExpressionFilters(args) ? "filtered" : "unfiltered";
+	return findRoots(args).map((target) => ({ kind: "delete", target, scope: "children", findRoot }));
+}
+
 function findRoots(args: ReadonlyArray<string>): string[] {
 	const roots: string[] = [];
-	for (const token of args) {
+	// find's own leading options (`-L`, `-D tree`, `-O3`) come before the roots;
+	// stopping at them judged `find -L /x -delete` by `.` instead of `/x`.
+	let start = 0;
+	while (start < args.length && /^-(?:[HLP]|O\d*|D)$/u.test(args[start] ?? "")) start += args[start] === "-D" ? 2 : 1;
+	for (const token of args.slice(start)) {
 		if (token === "-delete" || token.startsWith("-") || token === "(" || token === "!" || token === "not") break;
 		if (token === "--") continue;
 		roots.push(token);
@@ -1761,6 +1990,26 @@ function substitutionSegments(tokens: ReadonlyArray<ShellToken>, depth: number):
 }
 
 /** scanShellLike with each substitution's tokens appended after a `;`, for scans that read every word. */
+/**
+ * A command with its locale quotes (`$"..."`) read as the plain double quotes
+ * bash runs them as when no message catalog translates them, or null (#419).
+ * Every `$"` is rewritten, so the result is accepted only when it scans to the
+ * same words and operators as the original and hides nothing: a `$"` that was
+ * not a locale opener (inside single quotes, after a backslash) changes a word
+ * and is refused, as is an ANSI-C escape that cannot be decoded.
+ */
+export function decodedLocaleQuoting(command: string): string | null {
+	const decoded = command.replaceAll('$"', '"');
+	if (decoded === command) return null;
+	const before = scanShellLikeDeep(command);
+	const after = scanShellLikeDeep(decoded);
+	if (after.some((token) => token.hiddenContent) || before.length !== after.length) return null;
+	const same = before.every(
+		(token, index) => token.value === after[index]?.value && token.operator === after[index]?.operator,
+	);
+	return same ? decoded : null;
+}
+
 export function scanShellLikeDeep(command: string, depth = 0): ShellToken[] {
 	const tokens = scanShellLike(command);
 	if (depth >= INNER_SHELL_MAX_DEPTH) return tokens;
