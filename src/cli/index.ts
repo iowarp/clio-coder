@@ -5,6 +5,19 @@
 // a crashed boot are both legible to `ps`, `pgrep -f`, and htop.
 process.title = "clio-coder";
 
+function installHumanStdoutHandler(command: string, args: readonly string[]): void {
+	const streamsToReader =
+		(command === "fleet" && ["events", "status", "view"].includes(args[0] ?? "")) ||
+		command === "trace" ||
+		command === "export" ||
+		(command === "systemone" && args[0] === "export");
+	if (!streamsToReader) return;
+	process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+		if (error.code === "EPIPE") process.exit(141);
+		throw error;
+	});
+}
+
 import { markClioAgentProcess } from "../core/agent-environment.js";
 
 // Pi and other agent-aware developer tools use this generic marker to
@@ -410,6 +423,7 @@ function isCommandToken(token: string): boolean {
 async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliBootOptions): Promise<number> {
 	const handler = COMMAND_HANDLERS.get(subcommand);
 	if (handler) {
+		installHumanStdoutHandler(subcommand, subArgs);
 		try {
 			return await handler(subArgs, bootOptions);
 		} catch (err) {
