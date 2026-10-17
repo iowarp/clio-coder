@@ -2,6 +2,16 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## 0.6.3 - 2026-10-17
+
+Clio Coder 0.6.3 is the first stable release since 0.6.2 and includes everything published in 0.6.3-rc.1. Fleet workers can use MCP servers under explicit operator trust, an outside driver can follow, resume and bound a fleet or headless run, and tool ceilings set by a headless run, an ACP client or a prompt template are enforced. In the operator's own session, `yolo` drops routine approval asks while damage control stays on, and the scripts it lets run execute inside the OS sandbox. Claude subscription and Agent SDK targets list their models live, and a second terminal in the same folder always gets its own session. The [0.6.3-rc.1 entry](https://github.com/iowarp/clio-coder/blob/v0.6.3/CHANGELOG.md#063-rc1---2026-10-17) lists those changes in full.
+
+Since 0.6.3-rc.1, the `/model` notice for a typed family name says which family it ranked, so its two counts no longer read as one set.
+
+### Providers and sessions
+
+- When `/model opus` or another family name matches several models, the notice names the family it ranked and how many of its models matched, or says the match was the newest by release date when every match is in that family.
+
 ## 0.6.3-rc.1 - 2026-10-17
 
 Clio Coder 0.6.3-rc.1 is the release candidate for 0.6.3, published on the `beta` channel. Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trust, lets an outside driver follow, resume and bound a fleet or headless run, and enforces tool ceilings that a headless run, an ACP client or a prompt template sets. In the operator's own session, `yolo` drops routine approval asks while damage control stays on, and the scripts it lets run execute inside the OS sandbox. Claude subscription and Agent SDK targets list their models live. Memory now keeps commands a task proved to work and offers them when a later session touches the same files. Extension api 2 runtimes run in every host and in dispatched workers, and gpt-oss models keep their tool turns intact.
