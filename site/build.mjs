@@ -396,8 +396,6 @@ function renderMarkdown(markdown, sourcePath, guide = false) {
 		if (image && normalized.startsWith("assets/")) {
 			const known = {
 				"assets/screenshots/tui-boot.webp": "/assets/tui-boot.webp",
-				"assets/screenshots/gui-overview.webp": "/assets/gui-overview.webp",
-				"assets/screenshots/gui-conversation.webp": "/assets/gui-conversation.webp",
 			};
 			if (known[normalized]) return known[normalized];
 		}
