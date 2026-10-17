@@ -125,7 +125,7 @@ describe("fleet run worker extension hooks", () => {
 				"    dependencies: []",
 				"  - kind: agent",
 				"    id: hand",
-				"    agent: scout",
+				"    agent: documenter",
 				"    target: sdk",
 				"    scope: readonly",
 				"    dependencies: [look]",

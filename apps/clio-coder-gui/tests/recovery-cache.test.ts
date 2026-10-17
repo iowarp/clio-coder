@@ -5,6 +5,9 @@ import { runInNewContext } from "node:vm";
 
 test("recovery upgrade replaces only owned caches and never caches API or external requests", async () => {
 	const source = await readFile(new URL("../client/public/sw.js", import.meta.url), "utf8");
+	// The worker bumps its cache version with each recovery asset change, so read the current name from it.
+	const cacheName = /const cacheName = "(clio-coder-recovery-v\d+)";/.exec(source)?.[1];
+	assert.ok(cacheName);
 	const listeners = new Map<string, (event: Record<string, unknown>) => void>();
 	const stores = new Map<string, string[]>([
 		["clio-coder-recovery-v2", ["/offline.html", "/icon-192.png"]],
@@ -55,7 +58,7 @@ test("recovery upgrade replaces only owned caches and never caches API or extern
 	assert.equal(stores.has("clio-coder-recovery-v2"), false);
 	assert.equal(stores.has("another-app"), true);
 	assert.deepEqual(
-		[...(stores.get("clio-coder-recovery-v4") ?? [])],
+		[...(stores.get(cacheName) ?? [])],
 		["/offline.html", "/offline.css", "/offline.js", "/icon-192.png"],
 	);
 	for (const [url, method] of [

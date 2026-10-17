@@ -70,10 +70,15 @@ test("real domain workers: inventory, fabricated install over SSE, idempotency, 
 	const finished = events.find((event) => event.type === "operation.finished");
 	assert.ok(finished?.type === "operation.finished");
 	assert.deepEqual(finished.payload.operation, record);
-	const installed = await json(await h.request("/api/toolchain/tools"), Tools);
-	assert.equal(installed[0]?.installed, true);
-	assert.equal(installed[0]?.resolution.source, "vendored");
-	const file = join(h.home.path, "data/tools/herdr", PINNED_TOOLS[0]?.version ?? "", "herdr");
+	const installed = (await json(await h.request("/api/toolchain/tools"), Tools)).find((row) => row.id === "herdr");
+	assert.equal(installed?.installed, true);
+	assert.equal(installed?.resolution.source, "vendored");
+	const file = join(
+		h.home.path,
+		"data/tools/herdr",
+		PINNED_TOOLS.find((row) => row.id === "herdr")?.version ?? "",
+		"herdr",
+	);
 	assert.ok(existsSync(file));
 	const removal = await h.post("/api/toolchain/tools/herdr/remove");
 	assert.equal(removal.status, 202);
@@ -132,22 +137,22 @@ test("removing the vendored copy preserves the compatible executable on the oper
 	const directory = join(pathHome.path, "path");
 	await mkdir(directory);
 	const executable = join(directory, "herdr");
-	const source = `#!/bin/sh\nprintf 'herdr ${PINNED_TOOLS[0]?.version}\\n'\n`;
+	const source = `#!/bin/sh\nprintf 'herdr ${PINNED_TOOLS.find((row) => row.id === "herdr")?.version}\\n'\n`;
 	await writeFile(executable, source);
 	await chmod(executable, 0o755);
 	const h = await harness({}, { env: { PATH: directory } });
 	t.after(h.close);
 	const installed = await json(await h.post("/api/toolchain/tools/herdr/install"), Accepted);
 	assert.equal((await terminal(h.operations, installed.operationId)).status, "succeeded");
-	const before = await json(await h.request("/api/toolchain/tools"), Tools);
-	assert.equal(before[0]?.installed, true);
-	assert.equal(before[0]?.resolution.source, "path");
-	assert.equal(before[0]?.resolution.binaryPath, executable);
+	const before = (await json(await h.request("/api/toolchain/tools"), Tools)).find((row) => row.id === "herdr");
+	assert.equal(before?.installed, true);
+	assert.equal(before?.resolution.source, "path");
+	assert.equal(before?.resolution.binaryPath, executable);
 	const removed = await json(await h.post("/api/toolchain/tools/herdr/remove"), Accepted);
 	assert.equal((await terminal(h.operations, removed.operationId)).status, "succeeded");
-	const after = await json(await h.request("/api/toolchain/tools"), Tools);
-	assert.equal(after[0]?.installed, false);
-	assert.equal(after[0]?.resolution.source, "path");
-	assert.equal(after[0]?.resolution.binaryPath, executable);
+	const after = (await json(await h.request("/api/toolchain/tools"), Tools)).find((row) => row.id === "herdr");
+	assert.equal(after?.installed, false);
+	assert.equal(after?.resolution.source, "path");
+	assert.equal(after?.resolution.binaryPath, executable);
 	assert.equal(await readFile(executable, "utf8"), source);
 });

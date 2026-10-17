@@ -79,7 +79,7 @@ test("a run's four totals are tokens, cost, wall time and the runtime that produ
 	assert.deepEqual(runTotals(run(), Date.parse("2026-09-20T10:05:00.000Z")), [
 		{ label: "Tokens", value: "4,200" },
 		// A local runtime that prices at zero is not a run whose cost was never recorded.
-		{ label: "Cost", value: "$0.00" },
+		{ label: "Cost", value: "$0.00 (pricing unknown)" },
 		{ label: "Wall time", value: "30s" },
 		{ label: "Runtime", value: "openai" },
 	]);
