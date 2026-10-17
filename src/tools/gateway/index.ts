@@ -345,6 +345,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		options: ToolInvokeOptions | undefined,
 	): ToolResult => ({
 		kind: "error",
+		details: { refusal: { kind: "tool_surface" } },
 		message: `gateway: capability "${name}" is not on this run's admitted tool surface; admitted capabilities: ${[...allowed].sort().join(", ") || "(none)"}. Use one of these exact names.\n${surfaceRefusal(options, (tools) => tools.includes(name))}`,
 	});
 
@@ -708,7 +709,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (allowed !== null && !allowed.has(name) && name !== ToolNames.Gateway)
 			return outsideSurface(name, allowed, options);
 		if (allowed === null && unknownCapability(name))
-			return { kind: "error", message: unknownCapabilityMessage(name, options) };
+			return {
+				kind: "error",
+				message: unknownCapabilityMessage(name, options),
+				details: { refusal: { kind: "unknown_capability" } },
+			};
 		let spec = registry.get(name as ToolName);
 		if (spec === undefined && isMcpToolName(name) && deps.mcp) {
 			// A restricted surface cannot refresh a catalog (runFind refuses it), so
@@ -823,7 +828,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		// cannot probe which registered tools or declared MCP servers exist.
 		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed, options);
 		if (allowed === null && unknownCapability(name))
-			return { kind: "error", message: unknownCapabilityMessage(name, options) };
+			return {
+				kind: "error",
+				message: unknownCapabilityMessage(name, options),
+				details: { refusal: { kind: "unknown_capability" } },
+			};
 		const resolved = await resolveCapability(name, options, allowDirect);
 		if (resolved.spec === null) return { kind: "error", message: resolved.message };
 		const spec = resolved.spec;

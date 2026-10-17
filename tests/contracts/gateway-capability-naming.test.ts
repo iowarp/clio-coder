@@ -16,6 +16,7 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { writeTranscriptExport } from "../../src/domains/session/transcript-export.js";
 import { buildTurnPreview } from "../../src/domains/session/tree/preview.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { createInteractiveEventProjection } from "../../src/interactive/interactive-event-projection.js";
 import {
 	renderToolExecution,
@@ -25,6 +26,8 @@ import {
 } from "../../src/interactive/renderers/tool-execution.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
+import { resolveAgentTools } from "../../src/tools/agent-tools.js";
+import { createGatewayTool } from "../../src/tools/gateway/index.js";
 
 const event = (value: Record<string, unknown>): ChatLoopEvent => value as unknown as ChatLoopEvent;
 const plain = (rows: readonly string[]): string[] => rows.map((row) => stripTerminalSequences(row));
@@ -403,4 +406,51 @@ test("footer tallies count the capability a gateway call ran and each settled ch
 		["bash", "c:b", true],
 	]);
 	projection.dispose();
+});
+
+test("a refused unknown gateway capability keeps its requested name without a read classification", async () => {
+	const registry = createWorkerToolRegistry();
+	registry.register(createGatewayTool({ registry }));
+	const gateway = resolveAgentTools({ registry }).find((tool) => tool.name === "gateway");
+	assert.ok(gateway);
+	const result = await gateway.execute("unknown-shell", {
+		op: "call",
+		capability: "shell",
+		args: { command: "npm test" },
+	});
+	const refused: ToolExecutionFinished = {
+		toolCallId: "unknown-shell",
+		toolName: "gateway",
+		args: { op: "call", capability: "shell", args: { command: "npm test" } },
+		result,
+		isError: true,
+		actionClass: "read",
+	};
+	const title = stripTerminalSequences(toolRowTitle(refused));
+	assert.match(title, /refused shell/u);
+	assert.doesNotMatch(title, /\bread(?:ing)? shell/u);
+	assert.match(title, /command "npm test"/u);
+	const admitted = {
+		...refused,
+		result: { ...(refused.result as object), details: { capability: "dynamic_read" } },
+		args: { op: "call", capability: "dynamic_read", args: {} },
+	};
+	assert.match(stripTerminalSequences(toolRowTitle(admitted)), /read dynamic_read/u);
+});
+
+test("a failed gateway capability with discarded details keeps its admitted action class", () => {
+	for (const details of [undefined, {}]) {
+		const failed: ToolExecutionFinished = {
+			toolCallId: "failed-dynamic-read",
+			toolName: "gateway",
+			args: { op: "call", capability: "dynamic_read", args: {} },
+			result: { content: [{ type: "text", text: "dynamic_read failed" }], ...(details ? { details } : {}) },
+			isError: true,
+			actionClass: "read",
+		};
+		const title = stripTerminalSequences(toolRowTitle(failed));
+		assert.match(title, /read dynamic_read/u);
+		assert.doesNotMatch(title, /refused/u);
+		assert.match(plain(renderToolExecution(failed, 120)).join("\n"), /failed/u);
+	}
 });

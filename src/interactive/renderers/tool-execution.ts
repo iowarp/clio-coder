@@ -915,13 +915,24 @@ function resolveRow(call: ToolExecutionStart | ToolExecutionFinished): ResolvedT
 			context,
 		};
 	}
+	const details = detailsOf(finished?.result);
+	const refusedGateway =
+		finished?.isError === true &&
+		call.viaGateway === true &&
+		(finished.outcome === "blocked" ||
+			details?.nestedBlockedVerdict !== undefined ||
+			(isPlainObject(details?.refusal) &&
+				(details.refusal.kind === "unknown_capability" || details.refusal.kind === "tool_surface")));
 	const row = resolveToolRow(
 		call.toolName,
 		redactToolArgs(call.args),
-		detailsOf(finished?.result),
-		call.actionClass,
+		details,
+		refusedGateway ? undefined : call.actionClass,
 		context,
 	);
+	if (refusedGateway && row.spec.class === "external" && row.externalLabel === null) {
+		return { ...row, spec: { ...row.spec, verbs: ["calling", "refused"] }, viaGateway: true };
+	}
 	return call.viaGateway === true ? { ...row, viaGateway: true } : row;
 }
 
