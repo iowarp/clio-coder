@@ -100,7 +100,18 @@ export interface CompactionCallObservation {
 }
 
 export interface CompactInput {
-	offerMemory?: (slice: readonly SessionEntry[], ordinary: string) => MemoryCompactionOffer | null;
+	/**
+	 * Memory's substitute for one history slice. `slice` holds the raw ledger
+	 * entries the slice covers, which is what observation batches were prepared
+	 * from and are keyed on; `projected` holds the same positions after the
+	 * working-set projection (evicted results as stubs), which is what any
+	 * uncovered unit is serialized from so the fallback text stays the ordinary one.
+	 */
+	offerMemory?: (
+		slice: readonly SessionEntry[],
+		ordinary: string,
+		projected: readonly SessionEntry[],
+	) => MemoryCompactionOffer | null;
 	/** Admission after exact request-fit, before each provider call. */
 	beforeSummaryCall?: (() => void | Promise<void>) | undefined;
 	/** Price the proposed replay before persisting the operator-visible figures. */
@@ -958,7 +969,14 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const turnPrefix = cut.isSplitTurn
 		? entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
 		: [];
+	// The projection keeps every ledger position, so the same ranges over
+	// `input.entries` are the raw slices memory prepared its observations from.
+	const rawPre = input.entries.slice(boundaryStart, Math.max(boundaryStart, historyEnd));
+	const rawTurnPrefix = cut.isSplitTurn
+		? input.entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
+		: [];
 	const previousContextEntries = priorCompactionContextEntries(entries, prevCompactionIndex);
+	const rawPriorSuffix = priorCompactionContextEntries(input.entries, prevCompactionIndex).slice(1);
 	const previousContextText = serializeConversation(previousContextEntries);
 	const fileOps = extractFileOps([
 		...priorCompactionContextEntries(input.entries, prevCompactionIndex),
@@ -1007,28 +1025,41 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 				)
 			: undefined;
 	let memoryOffer: MemoryCompactionOffer | null = null;
-	const represent = (slice: readonly SessionEntry[], previous: string, split: boolean): string => {
+	const represent = (
+		slice: readonly SessionEntry[],
+		rawSlice: readonly SessionEntry[],
+		previous: string,
+		split: boolean,
+	): string => {
 		const ordinary = serializeConversation(slice);
 		const build = (text: string) =>
 			split
 				? buildTurnPrefixUserText(text, input.instructions, previous)
 				: buildUserText(text, input.instructions, previous);
 		const raw = build(ordinary);
-		const offer = memoryOffer === null ? input.offerMemory?.(slice, ordinary) : null;
-		if (!offer?.isCurrent()) return raw;
+		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
+		const offer = input.offerMemory(rawSlice, ordinary, slice);
+		const declined = (reason: string, facts: Record<string, unknown> = {}) => {
+			traceObservation("offer-declined", { reason, split, entries: slice.length, ...facts });
+			return raw;
+		};
+		if (!offer) return declined("no-offer");
+		if (!offer.isCurrent()) return declined("not-current");
 		const proposed = build(offer.text);
 		const price = (userText: string) =>
 			estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(userText)] });
 		const fits =
 			input.model.contextWindow > 0 &&
 			price(proposed) + Math.min(maxTokens ?? 1024, 1024) + 64 <= input.model.contextWindow;
-		if (!fits || price(proposed) >= price(raw)) return raw;
+		if (!fits) return declined("no-fit", { proposed: price(proposed), window: input.model.contextWindow });
+		const use = { originalInputTokens: price(raw), substitutedInputTokens: price(proposed) };
+		if (use.substitutedInputTokens >= use.originalInputTokens)
+			return declined("no-gain", { proposed: use.substitutedInputTokens, raw: use.originalInputTokens });
 		memoryOffer = offer;
-		offer.onUse?.();
+		offer.onUse?.(use);
 		traceObservation("offer-used", {
 			receipt: offer.receipt,
-			originalInputTokens: price(raw),
-			substitutedInputTokens: price(proposed),
+			...use,
 			retainedBoundary: firstKept?.turnId ?? null,
 		});
 		return proposed;
@@ -1039,7 +1070,12 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		const previousText = summarizePriorSuffix
 			? serializeConversation(previousContextEntries.slice(0, 1))
 			: previousContextText;
-		const userText = represent(summarizePriorSuffix ? priorSuffix : pre, previousText, false);
+		const userText = represent(
+			summarizePriorSuffix ? priorSuffix : pre,
+			summarizePriorSuffix ? rawPriorSuffix : rawPre,
+			previousText,
+			false,
+		);
 		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
 		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
@@ -1047,7 +1083,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		summaryParts.push(historySummary.text);
 	}
 	if (turnPrefix.length > 0) {
-		const userText = represent(turnPrefix, previousContextText, true);
+		const userText = represent(turnPrefix, rawTurnPrefix, previousContextText, true);
 		const prefixSummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, prefixSummary.usage);
 		if (prefixSummary.text.length === 0) throw new Error("compaction returned an empty split-turn summary");

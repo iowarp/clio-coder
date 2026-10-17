@@ -22,6 +22,7 @@ export type {
 	MemoryContract,
 	MemoryObservationCommands,
 	MemoryOfferInput,
+	MemoryOfferUse,
 	MemoryPromptSelection,
 	ObservationSource,
 	ObservationSourceUnit,

@@ -27,7 +27,10 @@ const PREFIX = "Memory: remembered execution context (unverified; current instru
  * never verification. Equal whitespace-normalized content shares one rendered
  * row with all source IDs; near duplicates remain distinct. Knowledge and
  * procedure have equal access in recency order, with ID as the stable tie.
- * Nothing is deleted, marked injected, promoted, or inferred to be current.
+ * A fact the admitted checkpoint already states word for word (whitespace
+ * normalized) is omitted; anything less than an exact match is restored,
+ * because deciding paraphrase equivalence would take a model call. Nothing
+ * is deleted, marked injected, promoted, or inferred to be current.
  */
 export function renderMemoryRestoration(input: MemoryRestorationInput): MemoryRestorationRender {
 	const hasCurrentState = input.currentState !== null && input.currentState.text.trim().length > 0;
@@ -51,6 +54,7 @@ export function renderMemoryRestoration(input: MemoryRestorationInput): MemoryRe
 	const lines: string[] = [];
 	const cited: string[] = [];
 	const omitted = hasCurrentState && input.bank.status !== null ? [input.bank.status.id] : [];
+	const represented = hasCurrentState ? normalize(input.currentState?.text ?? "") : "";
 	const validBudget = Number.isFinite(input.maxTokens) && input.maxTokens > 0;
 	for (const [content, group] of groups) {
 		const kinds = [...group.kinds]
@@ -61,6 +65,10 @@ export function renderMemoryRestoration(input: MemoryRestorationInput): MemoryRe
 		// Normalization above is only the dedup key, never a rewrite of evidence.
 		const line = `- ${group.ids.map((id) => `[${id}]`).join(" ")} ${kinds}: ${JSON.stringify(group.content)}`;
 		const candidate = PREFIX + [...lines, line].join("\n");
+		if (content.length > 0 && statesWholeWords(represented, content)) {
+			omitted.push(...group.ids);
+			continue;
+		}
 		if (!validBudget || content.length === 0 || ceilChars(candidate.length) > input.maxTokens) {
 			omitted.push(...group.ids);
 			continue;
@@ -75,4 +83,25 @@ export function renderMemoryRestoration(input: MemoryRestorationInput): MemoryRe
 		citedEntryIds: Object.freeze(cited),
 		omittedEntryIds: Object.freeze(omitted),
 	});
+}
+
+function normalize(text: string): string {
+	return text.replace(/\s+/gu, " ").trim();
+}
+
+const WORD_CHARACTER = /[\p{L}\p{N}_]/u;
+
+/**
+ * The text contains the phrase as whole words: a substring that starts or
+ * ends inside a word (`port 80` within `port 8080`) states something else.
+ */
+function statesWholeWords(text: string, phrase: string): boolean {
+	const opensWord = WORD_CHARACTER.test(phrase[0] ?? "");
+	const closesWord = WORD_CHARACTER.test(phrase.at(-1) ?? "");
+	for (let at = text.indexOf(phrase); at >= 0; at = text.indexOf(phrase, at + 1)) {
+		const before = text[at - 1] ?? "";
+		const after = text[at + phrase.length] ?? "";
+		if ((!opensWord || !WORD_CHARACTER.test(before)) && (!closesWord || !WORD_CHARACTER.test(after))) return true;
+	}
+	return false;
 }
