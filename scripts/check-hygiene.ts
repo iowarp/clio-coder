@@ -1691,7 +1691,7 @@ function checkTrackedIgnored(): void {
 // docs and directs the model to context(scope="docs") for the rest. Prove
 // the two named docs exist, the directive is phrased as a call rather than
 // an availability note, the docs ship, and the docs engine's own corpus
-// covers every doc in the checkout, so nothing the directive promises is
+// covers every bundled doc in the checkout, so nothing the directive promises is
 // missing from what context(scope="docs") can actually return.
 // ---------------------------------------------------------------------------
 function checkPromptsDocLinks(): void {
@@ -1731,7 +1731,7 @@ function checkPromptsDocLinks(): void {
 	// Corpus coverage: the directive promises every bundled doc is one call away.
 	const onDisk = collectFiles([join(root, "docs")], [".md"])
 		.map((absolute) => relative(root, absolute).replaceAll("\\", "/"))
-		.filter((path) => !path.startsWith("docs/html/"))
+		.filter((path) => !path.startsWith("docs/html/") && !path.startsWith("docs/wiki/"))
 		.sort();
 	const corpus = listDocsCorpus();
 	if (!corpus.ok) {

@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -66,6 +66,45 @@ describe("clio_docs and clio_library", () => {
 		env = await isolateClioEnv("clio-coder-gateway-context-");
 	});
 	afterEach(() => env.restore());
+
+	it("excludes generated docs and retrieves installation, worktrees and remembering vocabulary", () => {
+		const root = join(env.dir, "docs-package");
+		for (const [file, heading] of [
+			["guide/install.md", "Install"],
+			["guide/installation.md", "Installation"],
+			["guide/worktree.md", "Worktree"],
+			["guide/memory.md", "Durable memory and recall"],
+			["html/nested/generated.md", "Remember installation worktrees"],
+			["wiki/nested/generated.md", "Remember installation worktrees"],
+		] as const) {
+			const path = join(root, "docs", file);
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, `# ${heading}\n\nOperator reference.\n`);
+		}
+		process.env.CLIO_CODER_PACKAGE_ROOT = root;
+		const corpus = listDocsCorpus();
+		ok(corpus.ok, corpus.ok ? "" : corpus.message);
+		if (!corpus.ok) return;
+		const indexed = corpus.payload.corpus as { files: string[]; excludes: string[] };
+		strictEqual(indexed.files.length, 4);
+		ok(indexed.files.every((file) => file.startsWith("docs/guide/")));
+		deepStrictEqual(indexed.excludes, ["docs/html/**", "docs/wiki/**"]);
+		for (const [query, expected] of [
+			["install", "installation"],
+			["installation", "install"],
+			["worktrees", "worktree"],
+			["remember", "memory"],
+		] as const) {
+			const result = searchDocs(query, 3);
+			ok(result.ok, result.ok ? "" : result.message);
+			if (!result.ok) return;
+			const hits = result.payload.results as Array<{ file: string }>;
+			ok(
+				hits.some((hit) => hit.file === `docs/guide/${expected}.md`),
+				JSON.stringify(result.payload),
+			);
+		}
+	});
 
 	it("returns the documentation corpus and ranked sections exactly as the docs scope did", async () => {
 		const docs = createClioDocsTool();

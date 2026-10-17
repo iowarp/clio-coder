@@ -64,6 +64,14 @@ const STOP_WORDS = new Set([
 
 const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expansions: ReadonlyArray<string> }> = [
 	{
+		triggers: ["install", "installation"],
+		expansions: ["install", "installation"],
+	},
+	{
+		triggers: ["remember"],
+		expansions: ["memory", "durable", "recall"],
+	},
+	{
 		triggers: ["approval", "confirm", "confirmation", "deny", "permission", "permissions", "prompt"],
 		expansions: ["autonomy", "ask", "deny", "safety", "policy", "yolo", "read-only"],
 	},
@@ -201,6 +209,7 @@ function rawTokens(text: string): string[] {
 }
 
 function stemToken(token: string): string {
+	if (token === "worktrees") return "worktree";
 	if (token.length <= 3) return token;
 	if (token.endsWith("ies") && token.length > 4) return `${token.slice(0, -3)}y`;
 	if (token.endsWith("ing") && token.length > 5) return token.slice(0, -3);
@@ -333,7 +342,7 @@ function indexSection(section: RawSection): IndexedSection {
 
 function candidateDocFiles(root: string): string[] {
 	const docsDir = join(root, "docs");
-	const htmlDir = join(docsDir, "html");
+	const excludedDirs = new Set([join(docsDir, "html"), join(docsDir, "wiki")]);
 	const files: string[] = [];
 	const walk = (dir: string): void => {
 		let entries: import("node:fs").Dirent[];
@@ -345,7 +354,7 @@ function candidateDocFiles(root: string): string[] {
 		for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
 			const absolute = join(dir, entry.name);
 			if (entry.isDirectory()) {
-				if (absolute !== htmlDir) walk(absolute);
+				if (!excludedDirs.has(absolute)) walk(absolute);
 				continue;
 			}
 			if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
@@ -610,7 +619,7 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 			docs: index.docCount,
 			sections: index.sections.length,
 			files: index.files,
-			excludes: ["docs/html/**"],
+			excludes: ["docs/html/**", "docs/wiki/**"],
 		},
 		terms: {
 			query: plan.originalTokens,
@@ -646,7 +655,7 @@ export function listDocsCorpus(): DocsCorpusOutcome {
 			docs: index.docCount,
 			sections: index.sections.length,
 			files: index.files,
-			excludes: ["docs/html/**"],
+			excludes: ["docs/html/**", "docs/wiki/**"],
 		},
 		followUp:
 			'Call gateway(op="call", capability="clio_docs", args={query:"<terms>"}) to search these bundled docs; omit query to list the corpus. They ship with Clio and are not workspace files. ' +

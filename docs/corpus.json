@@ -7,7 +7,7 @@
 		"excludes": ["html/**", "wiki/**"],
 		"enforcedBy": {
 			"html/**": "src/tools/context/docs-engine.ts skips docs/html when it indexes",
-			"wiki/**": "package.json files omits docs/wiki from the npm package"
+			"wiki/**": "src/tools/context/docs-engine.ts skips docs/wiki when it indexes; package.json files also omits it from the npm package"
 		}
 	},
 	"developmentWiki": {
