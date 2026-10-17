@@ -98,6 +98,28 @@ export function approvalNote(input: ApprovalNoteInput): string {
 	}
 }
 
+/**
+ * Whose grant a released call ran under, as a noun phrase for a note that
+ * names it (a rewrite that kept the approval, WX3). The surfaces match
+ * approvalNote's, so an ACP client or a remembered decision is never called
+ * the operator's.
+ */
+export function approvalGiver(requestedBy: string): string {
+	switch (requestedBy) {
+		case "tool:one_shot":
+		case "escalation:operator":
+			return "the operator's approval";
+		case "acp-client":
+			return "the connected ACP client's approval";
+		case "grant:main":
+			return "the main agent's grant";
+		case "escalation:remembered":
+			return "a remembered escalation decision";
+		default:
+			return `the approval released by '${requestedBy}'`;
+	}
+}
+
 function capitalize(text: string): string {
 	return text.length === 0 ? text : `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
 }

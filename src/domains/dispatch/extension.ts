@@ -256,6 +256,7 @@ import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout
 import type {
 	DispatchAdmissionObserver,
 	DispatchContract,
+	DispatchDerivedGrants,
 	DispatchPlanTaskResolution,
 	DispatchPreparationOptions,
 	DispatchRequest,
@@ -9047,6 +9048,19 @@ export function createDispatchBundle(
 		req: DispatchRequest,
 		settings: EffectiveSettings = getEffectiveSettings(),
 	): DispatchPlanTaskResolution {
+		return previewFixedStages(req, settings).resolution;
+	}
+
+	/**
+	 * The fixed-route preview and the grants admission derives on the way: the
+	 * requested actions, the MCP attestation after writable servers lose their
+	 * network grant, and the worker permit. Null grants for an ACP delegation,
+	 * whose tool surface Clio cannot observe.
+	 */
+	function previewFixedStages(
+		req: DispatchRequest,
+		settings: EffectiveSettings,
+	): { resolution: DispatchPlanTaskResolution; grants: DispatchDerivedGrants | null } {
 		const isAcpAgent = settings?.integrations.externalAgents?.entries?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) req = { ...req, delegationAgentId: req.agentId };
 		const validation = routeValidationProjection(req, true);
@@ -9077,7 +9091,7 @@ export function createDispatchBundle(
 			}
 			const lifecycle = resolveAcpDelegationLifecycle(req, settings);
 			const delegationRecipe = agents.get(req.agentId);
-			return {
+			const resolution: DispatchPlanTaskResolution = {
 				agentId: req.agentId,
 				specFingerprint:
 					delegationRecipe !== null ? agentSpecFingerprint(normalizeAgentSpec(delegationRecipe)) : ACP_SPEC_FINGERPRINT,
@@ -9095,6 +9109,7 @@ export function createDispatchBundle(
 				costUpperBoundKnown: false,
 				routeApproval: null,
 			};
+			return { resolution, grants: null };
 		}
 
 		const recipe = agents.get(req.agentId);
@@ -9178,7 +9193,7 @@ export function createDispatchBundle(
 			readOnly: req.readOnly === true || agentSpec.capabilityClass === "read-only",
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
-		return {
+		const resolution: DispatchPlanTaskResolution = {
 			agentId: req.agentId,
 			specFingerprint: agentSpecFingerprint(agentSpec),
 			targetId: target.target.id,
@@ -9197,6 +9212,14 @@ export function createDispatchBundle(
 			),
 			costUpperBoundKnown: target.effectivePricing.provenance !== "unknown",
 			routeApproval: null,
+		};
+		return {
+			resolution,
+			grants: {
+				requestedActions: admission.requestedActions,
+				mcp: admission.mcp ?? null,
+				permit: previewPermit,
+			},
 		};
 	}
 
@@ -10139,6 +10162,7 @@ export function createDispatchBundle(
 		publishesProgress: true,
 		ownsProgressBus: (bus) => bus === context.bus,
 		preview,
+		derivedGrants: (req) => previewFixedStages(req, getEffectiveSettings()).grants,
 		planAgentSelection,
 		routeCandidates,
 		reservations: {

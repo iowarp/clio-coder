@@ -2558,6 +2558,16 @@ export async function runDispatchTool(
 						approvalRequestedBy: authenticatedApproval.requestedBy,
 					}
 				: {}),
+			// The approval was given for another plan hash than the one sealed above (WX3).
+			...(authenticatedApproval?.carriedOver !== undefined
+				? {
+						approvalCarry: {
+							approvedPlanHash: authenticatedApproval.carriedOver.approvedPlanHash ?? null,
+							rewrittenPlanHash: planView.hash,
+							extension: authenticatedApproval.carriedOver.extension,
+						},
+					}
+				: {}),
 			...(planView.costCeilingUsd !== undefined ? { costCeilingUsd: planView.costCeilingUsd } : {}),
 		};
 		requests = requests.map((request) => ({ ...request, plan }));

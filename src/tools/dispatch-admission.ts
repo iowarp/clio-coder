@@ -2,7 +2,11 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
-import type { DispatchPlanTaskResolution, DispatchRequest } from "../domains/dispatch/contract.js";
+import type {
+	DispatchDerivedGrants,
+	DispatchPlanTaskResolution,
+	DispatchRequest,
+} from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { councilJudgeAgentId, gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import {
@@ -26,6 +30,7 @@ import {
 	stringArg,
 	timeoutMsArg,
 } from "./dispatch-arguments.js";
+import { derivedGrantsNarrow, dispatchInputChangesOnlyIntent, dispatchRewriteNarrows } from "./dispatch-narrowing.js";
 import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
 	type DispatchPlanView,
@@ -74,6 +79,7 @@ export interface DispatchAdmissionController {
 	prepareArguments(args: Record<string, unknown>): Record<string, unknown>;
 	describeDispatchPlan(args: Record<string, unknown>): DispatchPlanView;
 	hostEffectCalls(args: Record<string, unknown>): ReadonlyArray<HostEffectCall>;
+	rewriteNarrows(original: Record<string, unknown>, rewritten: Record<string, unknown>): boolean;
 }
 
 type ResolvedPlanTask = ResolvedDispatchPlanArtifact["tasks"][number];
@@ -247,6 +253,23 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		trustedExecutionSnapshots: new WeakMap<Record<string, unknown>, DispatchExecutionSnapshot>(),
 		trustedExecutionPlans: new WeakMap<Record<string, unknown>, ExecutionPlan>(),
 		taskResolutions: new WeakMap<object, DispatchPlanTaskResolution>(),
+	};
+	/**
+	 * A frozen deep copy of the arguments each preparation started from. A
+	 * before_tool hook sees the live arguments through a shallow clone and can
+	 * edit a nested task in place, so the rewrite check reads this copy (WX3).
+	 */
+	const preparedInputs = new WeakMap<Record<string, unknown>, Readonly<Record<string, unknown>>>();
+
+	/** Null when the domain cannot derive them or refuses the request, which refuses a carry. */
+	const derivedGrants = (request: DispatchRequest): DispatchDerivedGrants | null => {
+		try {
+			// Snapshot requests are frozen; preview gets its own copy to read.
+			return deps.dispatch.derivedGrants?.(structuredClone(request)) ?? null;
+		} catch {
+			// A request preview refuses has no grants to compare; the rewrite still re-admits without the approval.
+			return null;
+		}
 	};
 
 	const parseRequests = (args: Record<string, unknown>) =>
@@ -468,6 +491,13 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 
 	const prepareAdmissionArguments = (rawArgs: Record<string, unknown>): Record<string, unknown> => {
 		const args = stripUntrustedPlanFields(rawArgs);
+		const input = deepFreeze(structuredClone(args));
+		const prepared = prepareStrippedArguments(args);
+		preparedInputs.set(prepared, input);
+		return prepared;
+	};
+
+	const prepareStrippedArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 		if (args.list === true) {
 			const marked = markPrepared(args);
 			return trustExecution(marked, { kind: "list" });
@@ -895,6 +925,27 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			}
 			return calls;
 		},
+		rewriteNarrows(original, rewritten) {
+			const originalInput = preparedInputs.get(original);
+			const rewrittenInput = preparedInputs.get(rewritten);
+			const originalSnapshot = state.trustedExecutionSnapshots.get(original);
+			const rewrittenSnapshot = state.trustedExecutionSnapshots.get(rewritten);
+			if (
+				originalInput === undefined ||
+				rewrittenInput === undefined ||
+				!dispatchInputChangesOnlyIntent(originalInput, rewrittenInput) ||
+				!dispatchRewriteNarrows(originalSnapshot, rewrittenSnapshot) ||
+				originalSnapshot?.kind !== "dispatch" ||
+				rewrittenSnapshot?.kind !== "dispatch"
+			)
+				return false;
+			// Narrower write roots can switch an MCP server's network grant on, so
+			// the grants admission derives are compared, not just the inputs (WX4).
+			return originalSnapshot.requests.every((request, index) => {
+				const next = rewrittenSnapshot.requests[index];
+				return next !== undefined && derivedGrantsNarrow(derivedGrants(request), derivedGrants(next));
+			});
+		},
 	};
 }
 
@@ -905,4 +956,5 @@ export type DispatchAdmissionToolHooks = Pick<
 	| "prepareArguments"
 	| "describeDispatchPlan"
 	| "hostEffectCalls"
+	| "rewriteNarrows"
 >;

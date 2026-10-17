@@ -7,10 +7,16 @@ import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { WorkerContextSeed } from "../context/worker/contract.js";
 import type { CostProvenance } from "../providers/index.js";
+import type { ActionClass } from "../safety/action-classifier.js";
 import type { ApprovalAuthority } from "../safety/admission.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
-import type { WorkerPermissionDeclaration, WorkerPermitAllowance } from "../safety/worker-permit.js";
+import type {
+	WorkerMcpAttestation,
+	WorkerPermissionDeclaration,
+	WorkerPermit,
+	WorkerPermitAllowance,
+} from "../safety/worker-permit.js";
 import type { AgentTaskFeatures } from "./agent-candidates.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
@@ -263,6 +269,19 @@ export interface DispatchPlanTaskResolution {
 	routeApproval: ApprovedAssignmentRoute | null;
 }
 
+/**
+ * Capabilities admission derives for a request beyond its input fields. A
+ * narrower write scope can switch an MCP server's network grant on, so a
+ * caller judging whether two requests grant the same authority compares these
+ * rather than the arguments (WX4).
+ */
+export interface DispatchDerivedGrants {
+	requestedActions: ReadonlyArray<ActionClass>;
+	/** The MCP attestation after servers whose code the run can write lose their network grant. */
+	mcp: WorkerMcpAttestation | null;
+	permit: WorkerPermit;
+}
+
 export interface DispatchAgentPlanResolution {
 	resolution: DispatchPlanTaskResolution;
 	decision: RouteDecisionV1;
@@ -372,6 +391,12 @@ export interface DispatchContract {
 	 * failure aborts rather than choosing a different unapproved node.
 	 */
 	preview?(req: DispatchRequest): DispatchPlanTaskResolution;
+	/**
+	 * The grants preview derives for a request on its fixed route, refusing
+	 * what preview refuses. Null for an ACP delegation, whose tool surface Clio
+	 * cannot observe.
+	 */
+	derivedGrants?(req: DispatchRequest): DispatchDerivedGrants | null;
 	/**
 	 * Speculative dispatch: hold up to `count` worker processes for the recipe a
 	 * pre-turn forecast predicted, so a matching dispatch skips process start.

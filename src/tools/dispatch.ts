@@ -166,6 +166,7 @@ export function createDispatchTool(
 		prepareArguments: admission.prepareArguments,
 		describeDispatchPlan: admission.describeDispatchPlan,
 		hostEffectCalls: admission.hostEffectCalls,
+		rewriteNarrows: admission.rewriteNarrows,
 		describeHookLanding: (args) =>
 			dispatchHookLanding(
 				admission.state.trustedExecutionSnapshots.get(args),

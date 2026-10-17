@@ -51,7 +51,7 @@ import type { SessionCodeConsent } from "../domains/safety/session-code-consent.
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
 import type { ImageContent } from "../engine/types.js";
-import { withApprovalNote } from "./approval-note.js";
+import { approvalGiver, withApprovalNote } from "./approval-note.js";
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
@@ -239,6 +239,12 @@ export interface ToolSpec {
 	/** Trusted admission artifact renderer used by policy after preparation. */
 	describeDispatchPlan?(args: Record<string, unknown>): DispatchPlanView;
 	/**
+	 * Whether a before_tool rewrite of prepared admission arguments provably
+	 * narrows the original's authority, so an operator approval of the original
+	 * carries over to it (WX2). Absent means a rewrite never keeps an approval.
+	 */
+	rewriteNarrows?(original: Record<string, unknown>, rewritten: Record<string, unknown>): boolean;
+	/**
 	 * Host commands this call will run as its caller outside its own body, read
 	 * from prepared admission arguments. Each is admitted as the direct call it
 	 * stands for, at the caller's autonomy and never under a one-shot grant for
@@ -422,6 +428,17 @@ export function createHarnessHold(): HarnessHold {
 	};
 }
 
+/**
+ * What an approval carried over a narrowing rewrite (WX3), so the receipt can
+ * link the plan the approver saw to the one that ran.
+ */
+export interface ApprovalCarry {
+	/** Extension whose before_tool rewrite the approval carried over. */
+	extension: string;
+	/** Hash of the approved call's plan view, when the tool renders one. */
+	approvedPlanHash?: string;
+}
+
 export interface ToolInvokeOptions {
 	/** An invocation the harness runner makes on its own decision; never derived from model arguments. */
 	origin?: "harness";
@@ -486,7 +503,14 @@ export interface ToolInvokeOptions {
 	/** Host-derived display copy for an ask_user round. It has no admission authority. */
 	decisionPresentation?: DecisionPresentation;
 	/** Registry-authenticated one-shot operator approval for this execution. */
-	approval?: { requestId: string; requestedBy: string; actionClass: ActionClass };
+	approval?: {
+		requestId: string;
+		requestedBy: string;
+		actionClass: ActionClass;
+		issuer?: ApprovalAuthority;
+		/** Set when the approval carried over a before_tool rewrite of the approved call (WX3). */
+		carriedOver?: ApprovalCarry;
+	};
 	/**
 	 * True for an invocation a tool body makes on the model's behalf (the
 	 * gateway calling the capability it was asked for). The nested call keeps
@@ -893,6 +917,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const rewrite = block ? undefined : awaited.find((effect) => effect.kind === "rewrite_tool_input");
 				if (rewrite?.kind === "rewrite_tool_input") {
 					const rewritten = admitRewrite(spec, call, rewrite, options);
+					const carried = "carriedApproval" in rewritten ? rewritten.carriedApproval : undefined;
 					if ("refusal" in rewritten) block = { kind: "block_tool", reason: rewritten.refusal, severity: "hard-block" };
 					else {
 						rewrittenArgs = rewritten.admitted.args ?? {};
@@ -904,11 +929,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 							// hooks judged and dispatch does not prepare it a second time.
 							call = rewritten.admitted;
 							decision = rewritten.decision;
+							if (carried !== undefined && options?.approval !== undefined)
+								options = { ...options, approval: { ...options.approval, carriedOver: carried } };
 							beforeEffects = [
 								...beforeEffects,
 								{
 									kind: "annotate_tool_result",
-									message: `${spec.name} input rewritten by extension ${rewrite.source}: ${rewrite.reason}`,
+									message: `${spec.name} input rewritten by extension ${rewrite.source}: ${rewrite.reason}${carried !== undefined && options?.approval !== undefined ? `; ${approvalGiver(options.approval.requestedBy)} carried over because the rewrite only narrows the approved call` : ""}`,
 									severity: "info",
 								},
 							];
@@ -1126,13 +1153,35 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		call: ClassifierCall,
 		rewrite: Extract<MiddlewareEffect, { kind: "rewrite_tool_input" }>,
 		options: ToolInvokeOptions | undefined,
-	): { admitted: ClassifierCall; decision: SafetyDecision } | { refusal: string } => {
+	): { admitted: ClassifierCall; decision: SafetyDecision; carriedApproval?: ApprovalCarry } | { refusal: string } => {
 		if (!Value.Check(spec.parameters, rewrite.args))
 			return { refusal: `extension ${rewrite.source} rewrote ${spec.name} input that does not match its schema` };
 		const next: ClassifierCall = { ...call, args: rewrite.args };
 		const admitted = prepareAdmissionCall(spec, next);
-		const outcome = admit(admitted, undefined, options);
-		if (outcome.kind === "execute") return { admitted, decision: outcome.decision };
+		// An operator-approved call keeps its approval only across a rewrite the
+		// tool proves narrows it (WX2), such as a desk confining each dispatched
+		// worker. The grant satisfies only the ask; every refusal still applies.
+		const approval = options?.approval;
+		const carried =
+			approval !== undefined && spec.rewriteNarrows?.(call.args ?? {}, admitted.args ?? {}) === true
+				? {
+						actionClass: approval.actionClass,
+						requestedBy: approval.requestedBy,
+						...(approval.issuer !== undefined ? { issuer: approval.issuer } : {}),
+					}
+				: undefined;
+		const outcome = admit(admitted, carried, options);
+		if (outcome.kind === "execute")
+			return carried === undefined
+				? { admitted, decision: outcome.decision }
+				: {
+						admitted,
+						decision: outcome.decision,
+						carriedApproval: {
+							extension: rewrite.source,
+							...approvedPlanHash(spec, call),
+						},
+					};
 		if (admitted.args !== next.args) disposeAdmissionArgs(spec, admitted.args ?? {});
 		const why =
 			outcome.kind === "park"
@@ -1141,6 +1190,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					? outcome.verdict.reason
 					: "is not admitted";
 		return { refusal: `extension ${rewrite.source} rewrote ${spec.name} input into a call that ${why}` };
+	};
+
+	/** The plan hash the approver was shown, read from the approved call's trusted plan view. */
+	const approvedPlanHash = (spec: ToolSpec, call: ClassifierCall): { approvedPlanHash?: string } => {
+		const hash = spec.describeDispatchPlan?.(call.args ?? {}).hash;
+		return hash !== undefined ? { approvedPlanHash: hash } : {};
 	};
 
 	/**
@@ -2057,6 +2112,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 									requestId: entry.meta.requestId,
 									requestedBy: grant.requestedBy,
 									actionClass: grant.actionClass,
+									...(grant.issuer !== undefined ? { issuer: grant.issuer } : {}),
 								},
 							};
 				// Seal the park before the body runs. Everything after this line is

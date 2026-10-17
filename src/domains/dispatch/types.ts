@@ -332,6 +332,15 @@ export interface RunPlanProvenance {
 	/** Registry-issued identity of the one-shot operator approval, when applicable. */
 	approvalRequestId?: string;
 	approvalRequestedBy?: string;
+	/**
+	 * Set when the approval carried over a before_tool rewrite (WX3): `hash`
+	 * above is the rewritten plan's, and this links it to the plan the approver saw.
+	 */
+	approvalCarry?: {
+		approvedPlanHash: string | null;
+		rewrittenPlanHash: string;
+		extension: string;
+	};
 	costCeilingUsd?: number;
 }
 

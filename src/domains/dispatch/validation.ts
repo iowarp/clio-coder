@@ -821,6 +821,19 @@ function isValidPlan(value: unknown): value is RunPlanProvenance {
 	) {
 		return false;
 	}
+	if (value.approvalCarry !== undefined) {
+		const carry = value.approvalCarry;
+		if (
+			!isPlainObject(carry) ||
+			(carry.approvedPlanHash !== null &&
+				(typeof carry.approvedPlanHash !== "string" || carry.approvedPlanHash.length === 0)) ||
+			typeof carry.rewrittenPlanHash !== "string" ||
+			carry.rewrittenPlanHash.length === 0 ||
+			typeof carry.extension !== "string" ||
+			carry.extension.length === 0
+		)
+			return false;
+	}
 	if (value.costCeilingUsd !== undefined && (typeof value.costCeilingUsd !== "number" || value.costCeilingUsd < 0)) {
 		return false;
 	}
