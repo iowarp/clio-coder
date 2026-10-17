@@ -141,16 +141,21 @@ To cut a release:
    successful manual qualification on the exact commit with unexpired artifacts
    is reused instead of rerunning its checks. Artifacts are retained for 30 days.
 3. Review the candidate receipt, qualification link, package digest, and test
-   count. The script requests publication through `release.yml` and prints the
-   run URL. **The owner approves the protected `release` environment in GitHub.**
-   Agents must leave this approval to the owner. Approval authorizes the whole
-   public closeout; no terminal npm login or manual publish is needed.
+   count. If npm lacks the version, the script shows the exact `npm publish`
+   command for the qualified tarball and, after the owner confirms, runs it in
+   the visible terminal so npm's two-factor prompt works. It waits until npm
+   serves the version with the candidate's integrity. Matching bytes already on
+   npm are reused. The script then requests publication through `release.yml`
+   and prints the run URL. **The owner approves the protected `release`
+   environment in GitHub.** Agents must leave the npm publish and this approval
+   to the owner. After the job succeeds, the script offers to forward the
+   `beta` and `dev` dist-tags that the job cannot write.
 4. After approval, the publisher downloads the existing artifact, verifies its
    checksums, exact successful source run, version, branch head, and main
-   ancestry. It does not install project dependencies, build, pack, or test.
-   npm trusted publishing mints a short-lived identity and supplies provenance.
-   Only after npm accepts the exact bytes does GitHub create the tag/release
-   with the versioned tarball and four installers. Stable releases become Latest.
+   ancestry. It does not install project dependencies, build, pack, test, or
+   publish to npm. It stops before any GitHub write unless npm already serves
+   the exact qualified bytes. GitHub then creates the tag/release with the
+   versioned tarball and four installers. Stable releases become Latest.
 5. The publisher fast-forwards `main`, commits the prepared site output to
    `gh-pages`, and lets GitHub's existing branch-based Pages deployment run.
    It verifies npm integrity and dist-tag, the GitHub tag/assets/Latest, main,
@@ -169,13 +174,14 @@ prerelease, and keep the development branch, stable `main`, and stable site.
 
 ### Owner configuration
 
-On npm, configure a GitHub Actions trusted publisher for `iowarp/clio-coder`,
-workflow filename `release.yml`, environment `release`. Enable direct npm
-publish. Separate dist-tag management permission is unnecessary: publication
-sets `latest` or `beta`. OIDC supports publishing an archive produced by a
-previous qualification run; it authenticates the publishing job, not the build.
-A rehearsal cannot prove npm's authorization or provenance without publishing
-a new version. Do not claim those are verified by `npm publish --dry-run`.
+On npm, a GitHub Actions trusted publisher is configured for
+`iowarp/clio-coder`, workflow filename `release.yml`, environment `release`.
+Its OIDC exchange currently returns 404, so CI neither publishes nor writes
+dist-tags. The owner publishes with npm two-factor authentication inside
+`pnpm run release`, and those versions carry no provenance. Dev snapshots are
+refused until trusted publishing works, because their bytes exist only inside
+CI. A rehearsal cannot prove npm's authorization without publishing a new
+version. Do not claim it is verified by `npm publish --dry-run`.
 
 On GitHub, the `release` environment needs the owner as required reviewer.
 Leave Prevent self-review unchecked if the owner also dispatches releases.
@@ -201,7 +207,11 @@ updates, and main deletion. If one ruleset mixes tag creation with immutability,
 split it so the App bypasses creation restrictions only. Likewise isolate a
 main pull-request requirement from structural protections before granting the
 App a release-promotion bypass. Preserve `ci (22)` and `ci (24)` as required
-checks; those results already passed on the source commit being promoted.
+checks. The release promotion does not satisfy them on main: the owner publishes
+the qualified tarball to npm inside `pnpm run release`, `release.yml` verifies
+that npm serves those exact bytes and that the manual qualification run passed
+`ci (22)` and `ci (24)` on the commit, and the App then fast-forwards main
+through its ruleset bypass.
 Never grant an App blanket bypass of published-tag immutability.
 
 Workflow changes can be committed and rehearsed on the version branch without
