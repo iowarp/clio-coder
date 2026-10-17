@@ -28,6 +28,14 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 
 ### Safety and limits
 
+- In the operator's own session, `yolo` relaxes routine approval asks for work outside the workspace, edits, scratch cleanup and commands judged safe by their targets. Damage-control confirmations, protected paths and the irreversible-action net still apply, and dispatched workers keep their existing ceilings.
+- Only user settings can set `safety.scratchRoots`, which adds scratch directories for `yolo` cleanup and script writes; project values are ignored. Config validation rejects relative paths, the filesystem root, the home directory and its ancestors, system trees outside conventional temp directories, and mount roots and parents under `/mnt`, `/media` and `/Volumes`. Runtime resolution also drops roots that cannot be resolved, resolve to those excluded paths, or contain the workspace.
+- Under the operator's `yolo`, Clio scans supported shell script files it can read within the scan's bounds, follows nested scripts and judges their lines against the safety rules. A blocked line blocks the script.
+- With `safety.sandbox` at `auto` or `required` and a backend available, those scripts run through bubblewrap on Linux; on macOS, Clio selects `/usr/bin/sandbox-exec` with a seatbelt profile after its availability probe succeeds.
+- The script sandbox policy permits writes to the workspace, effective scratch roots including the host's `/tmp`, the repository's Git directories, the XDG cache directory and `~/.npm`. It marks Git hooks, config, `commondir` and `.git` pointer files, Clio's own directories, the workspace's `.clio-coder`, and `.git` and `.clio-coder` inside scratch and cache roots as read-only. Existing `~/.npm/_npx` and the XDG cache's `pre-commit`, `node/corepack` and `uv` directories are also read-only; `~/.local` is not a writable cache root. Known credential paths and runtime sockets are masked.
+- Without a sandbox backend, `safety.sandbox: auto` leaves scripts unsandboxed under the static scan; `required` makes them ask for approval. With `off`, scripts use the static scan without a sandbox even when a backend is available.
+- `clio-coder doctor --deep` reports the operator's effective `yolo` rules, whether scripts run sandboxed and where they can write.
+- `clio-coder config inspect` shows effective `safety.limits` values.
 - `clio-coder run --read-only` without `--agent` is an enforced ceiling on the main agent, and only MCP servers the operator classes as read start under it. A call the ceiling refuses does not fail the run.
 - Every refusal says what refused it and puts its remedy on its own line, and an identical repeat in the same turn is refused without running.
 - `--allow-tools` and `--delegate-tools` limit an interactive or ACP session's tools. Every turn runs under them, and `/run`, `/delegate`, `/council` and `/fleet` carry them to every worker.
@@ -41,6 +49,7 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - Exact toolchain version probes such as `node --version`, `go version` and `python3 -V` run without an ask, so a fleet worker in deny mode is no longer ended by them.
 - A tool surface refusal names what narrowed the surface (`--allow-tools`, a named template's `allowed-tools`, `--delegate-tools`, a job's `allow` list, or a recipe or dispatch scope) and gives the remedy on its own line. Inside a restricted surface every name outside it gets the same refusal, which lists the admitted capabilities, so a run cannot probe which other tools exist. Only an unrestricted run answers that a capability does not exist.
 - The `--read-only` remedy tells the operator to rerun without the flag, and a run stopped by `--max-cost-usd` reports `budget_ceiling` without endpoint-failure wording.
+- When a worker's tool list exceeds the parent task's tool ceiling, the dispatch refusal names the source and remedy, including the option to use a narrower `tool_profile` or recipe.
 - A bounded tool result carries a retrieval hint only when output was actually omitted.
 - Once the loop guard or the soft tool budget turns tools off, turn-end reminders no longer ask for another tool call.
 
@@ -50,6 +59,8 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - Fleets resume from the TUI, ACP and the desktop app as well as `fleet run --resume`. Every surface validates the prior root against the plan and shows the replayed steps in the preview.
 - One cross-process lock per git checkout keeps two fleets from running in the same workspace. A refused CLI run exits 1, and a stale lock from another host is reclaimed once its holder stops refreshing it.
 - Receipts count only provider calls and record how each ended, and a worker's receipt records the MCP tools its permit attested.
+- Fleet verification counts cancelled check attempts.
+- Fleet verification keeps checks completed before a sibling's cancellation.
 - A native worker's model response is bounded: 600 seconds by default (`safety.limits.workerResponseSeconds`), and a round after a tools lockout or synthesis lock gets 120 seconds and at most 4096 output tokens, with thinking turned off where the route allows it. The deadline starts after a local model has loaded. A worker that reaches a bound fails with `worker_turn_timeout` or `worker_output_cap_exhausted` and is neither retried nor charged to the target's breaker.
 - Ctrl-C, SIGTERM and SIGHUP on `clio-coder fleet run` seal the journal as aborted and release the checkout lock before the run exits with 130, 143 or 129. A second Ctrl-C exits at once after writing a forced seal.
 - The approval preview shows the plan hash the journal records and labels the approval fingerprint separately. Preflight checks the standing delegation ceiling, the ledger tools of concurrent workers and shadow agents, so a plan that cannot run shows its refusal with no accept key and writes no journal. `playbook validate` refuses shadow agents too.
@@ -64,6 +75,7 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - `clio-coder fleet run` checks every step's route in preflight and refuses a playbook before any step runs when one hooked step's runtime cannot carry a blocking hook.
 - `clio-coder context wiki` and `clio-coder context init` run their workers under the command's own extension host. When that host fails to start and a blocking hook applies, they refuse before dispatching, and `context init` falls back to its heuristic bootstrap.
 - Hook landings report a read-only recipe's workers as read-only with no write roots, and prompt templates that name extension tools load without a warning.
+- A `before_tool` hook rewrite that only narrows a dispatch keeps the operator's approval. Widening grants, read scope, write roots, expected outputs or context, changing other approved input, or a rewrite Clio cannot prove to be a narrowing drops that approval.
 - Hook receipts reach disk shortly after each call instead of waiting for the next call or for exit.
 
 ### Memory
@@ -75,15 +87,26 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 
 ### Providers and sessions
 
+- `anthropic-max` lists models live through Anthropic's Models API with the subscription login.
+- `claude-sdk` lists models through the Agent SDK's `supportedModels()` and reuses a fresh cached list without starting Claude Code.
+- A typed model family name picks the newest dated match and says which model it chose.
+- The TUI and `/model` show a one-line notice when the cached list has a newer model in the configured model's family, using provider dates for both models.
+- The GUI reuses an untouched draft only in the window that created it.
+- `/resume` and the session picker refuse a session that is live in another terminal and name its pid. A session whose process is gone stays resumable.
+- A TUI started in a folder where another session is live prints one line saying so and says this terminal has its own session.
+- A chat turn whose OAuth login cannot be refreshed reports "OAuth credential could not be refreshed. Run clio-coder auth login <provider> again." instead of a missing API key.
 - gpt-oss models keep their reasoning on replayed tool turns and no longer send text, reasoning and tool calls in one turn.
 - Out-of-turn rounds ask for an explicit thinking level.
 - Live and resumed transcripts, copied views and Markdown and HTML exports attribute each assistant turn to its recorded provider and model, and exports show model changes where they happened.
 - `/btw` and `/draft` answer while a turn is running, over a snapshot of the history, without touching the turn. A tool call that is still running is reported to the side model as still running, and a side answer that is only tool-call markup shows a note instead. `/handoff` still refuses during a turn.
 - `/loop` and the `job` tool run a loop's first iteration when it is created, then every interval.
+- `/loop cancel` without an id cancels the sole active loop; with several active loops it reports that a job id is required and directs the operator to `/loop list`.
 - `/model <name>` resolves a bare model id only to targets that can run chat, prefers the active chat target, and names the competing targets when the name is ambiguous.
 - Ctrl-Z suspends the interactive terminal on Linux and macOS, and `fg` resumes it with a full redraw. The binding is `clio-coder.suspend`; Windows shows a notice instead.
 - Only the process that `/restart` started can claim the restarted session, so a second terminal opened in the same folder right after a restart starts its own session.
 - A refused or failed edit row reads "edit failed", the `/model` apply menu shows its full label, and the exit summary docs match the styles and rows the renderer prints.
+- Terminal gateway rows distinguish a failed call from a safety refusal and name the capability that was called.
+- The settings center explains `safety.limits.workerResponseSeconds` in seconds.
 - `clio-coder doctor` reports only running processes that belong to the home it checks.
 
 ### Documentation
