@@ -2,9 +2,9 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.6.3-rc.1 - 2026-10-17
 
-Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trust, lets an outside driver follow, resume and bound a fleet or headless run, and enforces tool ceilings that a headless run, an ACP client or a prompt template sets. Memory now keeps commands a task proved to work and offers them when a later session touches the same files. Extension api 2 runtimes run in every host and in dispatched workers, and gpt-oss models keep their tool turns intact.
+Clio Coder 0.6.3-rc.1 is the release candidate for 0.6.3, published on the `beta` channel. Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trust, lets an outside driver follow, resume and bound a fleet or headless run, and enforces tool ceilings that a headless run, an ACP client or a prompt template sets. In the operator's own session, `yolo` drops routine approval asks while damage control stays on, and the scripts it lets run execute inside the OS sandbox. Claude subscription and Agent SDK targets list their models live. Memory now keeps commands a task proved to work and offers them when a later session touches the same files. Extension api 2 runtimes run in every host and in dispatched workers, and gpt-oss models keep their tool turns intact.
 
 ### Upgrade notes
 
