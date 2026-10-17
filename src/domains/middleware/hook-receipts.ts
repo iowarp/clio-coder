@@ -2,8 +2,9 @@
  * Durable receipt log for user-defined middleware hooks. Every hook execution
  * emits a {@link HookReceipt}; this log keeps a bounded in-memory ring and
  * persists it atomically through safeResourceWrite. Writes are throttled so a
- * per-tool-call cadence never turns into per-call disk I/O; `flush()` forces a
- * final write at shutdown. `clio-coder config inspect` reads the persisted
+ * per-tool-call cadence never turns into per-call disk I/O; a receipt recorded
+ * inside the window gets one trailing write when it closes, and `flush()`
+ * forces a final write at shutdown. `clio-coder config inspect` reads the persisted
  * snapshot back with {@link readPersistedHookReceipts}, since it runs as its
  * own process and has no access to a running session's in-memory ring.
  */
@@ -43,6 +44,7 @@ export function createHookReceiptLog(options: HookReceiptLogOptions = {}): HookR
 	const ring: HookReceipt[] = capacity > 0 ? [...(options.initial ?? [])].slice(-capacity) : [];
 	let lastPersistAt = 0;
 	let dirty = false;
+	let trailing: ReturnType<typeof setTimeout> | undefined;
 
 	const persist = (): void => {
 		if (options.persistPath === undefined) return;
@@ -55,20 +57,40 @@ export function createHookReceiptLog(options: HookReceiptLogOptions = {}): HookR
 		}
 	};
 
+	const cancelTrailing = (): void => {
+		if (trailing === undefined) return;
+		clearTimeout(trailing);
+		trailing = undefined;
+	};
+
 	return {
 		record(receipt) {
 			ring.push(receipt);
 			while (ring.length > capacity) ring.shift();
 			dirty = true;
-			if (now() - lastPersistAt >= throttleMs) {
+			const elapsed = now() - lastPersistAt;
+			if (elapsed >= throttleMs) {
+				cancelTrailing();
 				lastPersistAt = now();
 				persist();
+				return;
 			}
+			if (options.persistPath === undefined || trailing !== undefined) return;
+			// Without a trailing write the last receipt of a burst stayed in
+			// memory until the next hooked call or exit, so a live session's
+			// snapshot lagged on disk. Unref'd so it never holds the process open.
+			trailing = setTimeout(() => {
+				trailing = undefined;
+				lastPersistAt = now();
+				if (dirty) persist();
+			}, throttleMs - elapsed);
+			trailing.unref?.();
 		},
 		list() {
 			return [...ring];
 		},
 		flush() {
+			cancelTrailing();
 			if (dirty) persist();
 		},
 	};
