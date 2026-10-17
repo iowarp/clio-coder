@@ -155,7 +155,7 @@ function discoveredModelsSource(
 	cachedModels: ReadonlyArray<string>,
 	desc: RuntimeDescriptor,
 ): "probe" | "cache" | "runtime" | "none" {
-	if (probe?.ok && probe.models !== undefined) return "probe";
+	if (probe?.ok && probe.models !== undefined) return probe.modelsSource ?? "probe";
 	if (preservePreviousProbe && previous?.discoveredModels && previous.discoveredModels.length > 0) {
 		return previous.discoveredModelsSource === "runtime" ? "runtime" : "cache";
 	}
@@ -176,6 +176,7 @@ function sameProbeIdentity(previous: TargetDescriptor, next: TargetDescriptor): 
 export interface ProbeMerge {
 	discoveredModels: string[];
 	discoveredModelLabels: Readonly<Record<string, string>>;
+	discoveredModelCreatedAt?: Readonly<Record<string, string>>;
 	discoveredModelsSource: "probe" | "cache" | "runtime" | "none";
 	discoveredModelStates: NonNullable<TargetStatus["discoveredModelStates"]> | null;
 	probeCapabilities: NonNullable<TargetStatus["probeCapabilities"]> | null;
@@ -200,6 +201,7 @@ export function mergeProbeResult(
 	previous: TargetStatus | undefined,
 	cachedModels: ReadonlyArray<string> = [],
 	cachedModelLabels: Readonly<Record<string, string>> = {},
+	cachedModelCreatedAt?: Readonly<Record<string, string>>,
 ): ProbeMerge {
 	const probeSucceeded = probe?.ok ?? false;
 	const preserveCatalog = previous !== undefined && sameProbeIdentity(previous.target, target);
@@ -294,6 +296,11 @@ export function mergeProbeResult(
 		probeModelCapabilities,
 		probeModelId,
 	};
+	const discoveredModelCreatedAt =
+		catalogProbe?.modelCreatedAt ??
+		(catalogProbe === null && preserveCatalog ? previous.discoveredModelCreatedAt : undefined) ??
+		(catalogProbe === null ? cachedModelCreatedAt : undefined);
+	if (discoveredModelCreatedAt !== undefined) merge.discoveredModelCreatedAt = discoveredModelCreatedAt;
 	if (probeNotes && probeNotes.length > 0) merge.probeNotes = probeNotes;
 	if (probeSurfaces && Object.keys(probeSurfaces).length > 0) merge.probeSurfaces = probeSurfaces;
 	return merge;
@@ -446,10 +453,19 @@ export function createProvidersBundle(
 		const availability = availabilityFor(desc, target, authStatusFor);
 		const cachedSnapshot = readTargetModelSnapshot(target);
 		const cachedModels = cachedSnapshot?.models ?? [];
-		const merge = mergeProbeResult(desc, target, probe, previous, cachedModels, cachedSnapshot?.modelLabels ?? {});
+		const merge = mergeProbeResult(
+			desc,
+			target,
+			probe,
+			previous,
+			cachedModels,
+			cachedSnapshot?.modelLabels ?? {},
+			cachedSnapshot?.modelCreatedAt,
+		);
 		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
-		const healthy = probe !== null ? probe.ok : null;
-		const unservedDefault = probe?.ok ? unservedDefaultModelReason(target, merge) : null;
+		const healthProbe = probe?.modelsSource === "cache" ? null : probe;
+		const healthy = healthProbe !== null ? healthProbe.ok : null;
+		const unservedDefault = healthProbe?.ok ? unservedDefaultModelReason(target, merge) : null;
 		// A failed probe is still failed health evidence. Separately, permit a
 		// configured HTTP inference attempt; the inference endpoint can differ.
 		const allowHttpInferenceAttempt =
@@ -460,13 +476,13 @@ export function createProvidersBundle(
 			probe?.failureKind !== "missing";
 		const catalogOnlyFailure = probe?.failureKind === "catalog-unavailable";
 		const health: TargetHealth =
-			probe === null
+			healthProbe === null
 				? (previous?.health ?? emptyHealth())
 				: {
 						status: healthy ? (unservedDefault === null ? "healthy" : "degraded") : catalogOnlyFailure ? "degraded" : "down",
 						lastCheckAt: new Date().toISOString(),
-						lastError: probe.error ?? unservedDefault,
-						latencyMs: probe.latencyMs ?? null,
+						lastError: healthProbe.error ?? unservedDefault,
+						latencyMs: healthProbe.latencyMs ?? null,
 					};
 		const available = availability.available && (probe === null || probe.ok || allowHttpInferenceAttempt);
 		const reason = probe !== null && !probe.ok ? (probe.error ?? "probe failed") : availability.reason;
@@ -487,6 +503,7 @@ export function createProvidersBundle(
 			discoveredModelStates: merge.discoveredModelStates,
 		};
 		if (merge.probeNotes && merge.probeNotes.length > 0) out.probeNotes = merge.probeNotes;
+		if (merge.discoveredModelCreatedAt !== undefined) out.discoveredModelCreatedAt = merge.discoveredModelCreatedAt;
 		if (merge.probeSurfaces) out.probeSurfaces = merge.probeSurfaces;
 		if (previous?.toolProbe) out.toolProbe = previous.toolProbe;
 		return out;
@@ -634,12 +651,16 @@ export function createProvidersBundle(
 		const status = buildStatus(current, desc, probeResult, previous);
 		if (toolProbe) status.toolProbe = toolProbe;
 		statuses.set(target.id, status);
-		if (probeResult.ok && probeResult.models !== undefined && probeResult.models.length > 0) {
-			recordTargetModelSnapshot(
-				target,
-				probeResult.models,
-				probeResult.modelLabels ? { modelLabels: probeResult.modelLabels } : {},
-			);
+		if (
+			probeResult.ok &&
+			probeResult.modelsSource !== "cache" &&
+			probeResult.models !== undefined &&
+			probeResult.models.length > 0
+		) {
+			recordTargetModelSnapshot(target, probeResult.models, {
+				...(probeResult.modelLabels ? { modelLabels: probeResult.modelLabels } : {}),
+				...(probeResult.modelCreatedAt ? { modelCreatedAt: probeResult.modelCreatedAt } : {}),
+			});
 		}
 		// Durable so the next process resolves this endpoint's real slot count
 		// instead of the conservative default. Fire and forget: the probe's answer

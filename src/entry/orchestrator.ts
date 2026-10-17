@@ -3209,9 +3209,40 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// reads the effective view — shared snapshot + session routing overlay — so
 	// another process writing settings.yaml can update defaults and the
 	// target catalog but never redirect this session's routing.
-	const sessionRouting = seedSessionRouting(
-		applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless),
-	);
+	const initialRoutingSettings = applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
+	if (options.headless?.model !== undefined && providers) {
+		// An explicit typed model resolves once, before the concrete session route is seeded (#416).
+		try {
+			await providers.probeAllLive();
+		} catch (err) {
+			bootStderr(
+				`Clio Coder: model refresh failed; resolving cached catalog: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		}
+		const selected = resolveModelReference(
+			options.headless.model,
+			options.headless.target === undefined
+				? providers
+				: { ...providers, list: () => providers.list().filter((status) => status.target.id === options.headless?.target) },
+			{
+				use: "chat",
+				...(initialRoutingSettings.chat.target ? { preferTarget: initialRoutingSettings.chat.target } : {}),
+			},
+		);
+		if (selected.ref) {
+			initialRoutingSettings.chat.target = selected.ref.target;
+			initialRoutingSettings.chat.model = selected.ref.model;
+			if (options.headless.thinking === undefined && selected.ref.thinkingLevel) {
+				initialRoutingSettings.chat.thinkingLevel = selected.ref.thinkingLevel;
+			}
+			if (selected.warning) bootStderr(`Clio Coder: ${selected.warning}\n`);
+		} else if (selected.error?.includes("not chat-eligible")) {
+			bootStderr(`Clio Coder: ${selected.error}\n`);
+			await termination.shutdown(2);
+			return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
+		}
+	}
+	const sessionRouting = seedSessionRouting(initialRoutingSettings);
 	// Non-routing settings a session changed "for this session only" via the
 	// /settings overlay. Layered under the routing overlay in the effective
 	// view, so the live session reflects them immediately while settings.yaml

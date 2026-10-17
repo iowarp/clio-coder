@@ -590,10 +590,15 @@ export async function resolveSupportedWireModels(
 		// lists models only through probeModels still gets its ids checked.
 		const probe = await runtimeProbe(runtime, target, authToken);
 		if (probe?.ok && probe.models && probe.models.length > 0) {
-			recordTargetModelSnapshot(target, probe.models, probe.modelLabels ? { modelLabels: probe.modelLabels } : {});
+			if (probe.modelsSource !== "cache") {
+				recordTargetModelSnapshot(target, probe.models, {
+					...(probe.modelLabels ? { modelLabels: probe.modelLabels } : {}),
+					...(probe.modelCreatedAt ? { modelCreatedAt: probe.modelCreatedAt } : {}),
+				});
+			}
 			return {
 				models: [...probe.models],
-				source: "probe",
+				source: probe.modelsSource ?? "probe",
 				modelStates: probe.modelStates,
 				...(probe.modelLabels ? { labels: probe.modelLabels } : {}),
 			};

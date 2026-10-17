@@ -95,6 +95,7 @@ export {
 	type LocalModelFamily,
 	normalizeModelIdForFamily,
 } from "./model-family.js";
+export { newerModelNotice } from "./model-recency.js";
 export {
 	type AppliedThinking,
 	type AppliedThinkingNoticeKind,

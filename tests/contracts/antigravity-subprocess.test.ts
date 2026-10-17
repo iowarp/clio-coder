@@ -25,7 +25,6 @@ import antigravityCodeRuntime, {
 	parseAntigravityModelCatalogDetails,
 	probeAntigravityModelCatalog,
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
-import anthropicMaxRuntime from "../../src/domains/providers/runtimes/cloud/anthropic-max.js";
 import deepseekRuntime from "../../src/domains/providers/runtimes/cloud/deepseek.js";
 import openaiCodexRuntime from "../../src/domains/providers/runtimes/cloud/openai-codex.js";
 import type { ProbeResult } from "../../src/domains/providers/types/runtime-descriptor.js";
@@ -380,7 +379,7 @@ describe("Antigravity external subprocess contract", () => {
 
 	it("never calls a catalog-backed runtime's list live", async () => {
 		isolated = await isolateClioEnv("clio-coder-catalog-backed-");
-		for (const runtime of [anthropicMaxRuntime, openaiCodexRuntime, deepseekRuntime]) {
+		for (const runtime of [openaiCodexRuntime, deepseekRuntime]) {
 			equal(runtimeListsModelsLive(runtime), false, `${runtime.id} has no live model listing`);
 			const target = { id: runtime.id, runtime: runtime.id };
 			// No live answer was ever cached for these, so a snapshot cannot outrank the catalog.

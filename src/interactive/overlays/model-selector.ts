@@ -19,6 +19,7 @@ import {
 	modelCandidatesForStatus,
 	modelIdsForStatus,
 	modelListNoteForStatus,
+	newerModelNotice,
 	resolveRuntimeTarget,
 	supportsAgentRoleTools,
 } from "../../domains/providers/index.js";
@@ -180,6 +181,7 @@ export interface ModelOverlaySummary {
 	cloudModels: number;
 	activeRef: string;
 	focusedModels?: number;
+	newerModelNotice?: string;
 }
 
 /** Enumerate target wire model ids with live discovery taking precedence when available. */
@@ -474,7 +476,13 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 			rows.push(row);
 		}
 	}
-	return { rows, summary: buildSummary(rows, list.length, activeRef) };
+	const summary = buildSummary(rows, list.length, activeRef);
+	const activeStatus = list.find((status) => status.target.id === activeTarget);
+	const notice = activeStatus
+		? newerModelNotice(activeTarget, activeModel, activeStatus.discoveredModels, activeStatus.discoveredModelCreatedAt)
+		: null;
+	if (notice !== null) summary.newerModelNotice = notice;
+	return { rows, summary };
 }
 
 interface ModelColumns {
@@ -731,6 +739,9 @@ function renderModelOverlayLines(input: {
 			width,
 		),
 	];
+	if (input.summary.newerModelNotice) {
+		lines.push(truncateToWidth(theme.fg("annotation", input.summary.newerModelNotice), width, GLYPH.ellipsis));
+	}
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
 	if (refreshLine)
 		lines.push(

@@ -16,6 +16,7 @@ export interface ModelRow {
 	runtimeId: string;
 	modelId: string;
 	label?: string;
+	createdAt?: string;
 	source: string;
 	caps: string;
 	contextWindow: number;
@@ -150,6 +151,7 @@ function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersC
 				runtimeId,
 				modelId,
 				...(candidate.label ? { label: candidate.label } : {}),
+				...(candidate.createdAt ? { createdAt: candidate.createdAt } : {}),
 				source: candidate.source,
 				state: candidate.loadState ?? "-",
 				...formatCapabilities(caps),

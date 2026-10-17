@@ -29,6 +29,8 @@ import {
 } from "@earendil-works/pi-ai";
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
+import type { ProbeContext } from "../domains/providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import {
 	completeEngineSimple,
 	engineStream,
@@ -41,6 +43,12 @@ import { deterministicSampling } from "./provider-payload.js";
 import type { EngineModel } from "./types.js";
 
 export { StringEnum };
+
+/** #416: keep optional Claude discovery behind the existing provider engine seam. */
+export async function listClaudeSdkModels(target: TargetDescriptor, ctx: ProbeContext) {
+	const listing = await import("./claude/sdk-models.js");
+	return listing.listClaudeSdkModels(target, ctx);
+}
 
 export const stream = engineStream;
 

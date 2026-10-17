@@ -1,6 +1,8 @@
+import { getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract } from "./contract.js";
 import { isOrchestratorEligibleRuntime } from "./eligibility.js";
-import { modelIdsForStatus } from "./model-discovery.js";
+import { modelCandidatesForStatus } from "./model-discovery.js";
+import { modelDateMs, modelFamilyForId } from "./model-recency.js";
 import type { ThinkingLevel } from "./types/capability-flags.js";
 import { VALID_THINKING_LEVELS } from "./types/capability-flags.js";
 
@@ -19,7 +21,7 @@ export interface ResolveModelResult {
 	ref: ResolvedModelRef | null;
 	/** Set when the input was non-empty but no candidate could match. */
 	error?: string;
-	/** Set when multiple candidates matched; the first is returned. */
+	/** Set when multiple candidates matched; explains which concrete id won. */
 	warning?: string;
 }
 
@@ -75,20 +77,27 @@ interface CandidateRef {
 	model: string;
 	full: string;
 	chatEligible: boolean;
+	dateMs: number | null;
 }
 
 function collectCandidates(providers: ProvidersContract): CandidateRef[] {
 	const out: CandidateRef[] = [];
 	const seen = new Set<string>();
 	for (const status of providers.list()) {
-		for (const model of modelIdsForStatus(status)) {
+		for (const candidate of modelCandidatesForStatus(status)) {
+			const model = candidate.id;
 			const key = `${status.target.id}/${model}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
+			// Pi catalogs without a release date retain their existing order (#416).
+			const catalog = getCatalogModelForRuntime(status.runtime?.id ?? status.target.runtime, model) as
+				| { releaseDate?: string; release_date?: string }
+				| undefined;
 			out.push({
 				target: status.target.id,
 				model,
 				full: key,
+				dateMs: modelDateMs(candidate.createdAt) ?? modelDateMs(catalog?.releaseDate ?? catalog?.release_date),
 				chatEligible:
 					!!status.runtime && isOrchestratorEligibleRuntime(status.runtime) && status.target.capabilities?.chat !== false,
 			});
@@ -129,7 +138,21 @@ function buildResult(
 	if (!first) {
 		return { ref: null, error: `no models match pattern "${pattern}"` };
 	}
-	const ref: ResolvedModelRef = { target: first.target, model: first.model };
+	// Preserve the active target and unrelated-family ordering when ranking dates (#416).
+	const family = modelFamilyForId(first.model);
+	const preferred = first.target === options.preferTarget ? options.preferTarget : undefined;
+	const familyMatches = candidates.filter(
+		(candidate) =>
+			(preferred === undefined || candidate.target === preferred) &&
+			family !== null &&
+			modelFamilyForId(candidate.model) === family,
+	);
+	const chosen = familyMatches.reduce(
+		(best, candidate) => (candidate.dateMs !== null && candidate.dateMs > (best.dateMs ?? -Infinity) ? candidate : best),
+		first,
+	);
+	const newest = familyMatches.length > 1 && chosen.dateMs !== null;
+	const ref: ResolvedModelRef = { target: chosen.target, model: chosen.model };
 	if (thinkingLevel) ref.thinkingLevel = thinkingLevel;
 	const result: ResolveModelResult = { ref };
 	if (candidates.length > 1) {
@@ -140,8 +163,9 @@ function buildResult(
 		const remaining = candidates.length > 3 ? ` and ${candidates.length - 3} more` : "";
 		result.warning =
 			options.use === "chat"
-				? `pattern "${pattern}" matched ${listed}${remaining}; using ${first.full}`
-				: `pattern "${pattern}" matched multiple models; using ${first.full}`;
+				? `pattern "${pattern}" matched ${listed}${remaining}; using ${chosen.full}`
+				: `pattern "${pattern}" matched multiple models; using ${chosen.full}`;
+		if (newest) result.warning += ` (newest of ${familyMatches.length} matches)`;
 	}
 	return result;
 }

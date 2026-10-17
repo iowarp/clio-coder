@@ -26,6 +26,7 @@ export interface TargetModelSnapshot {
 	url: string | null;
 	models: string[];
 	modelLabels?: Record<string, string>;
+	modelCreatedAt?: Record<string, string>;
 	observedAt: string;
 }
 
@@ -34,6 +35,7 @@ interface TargetModelCacheOptions {
 	nowMs?: number;
 	ttlMs?: number;
 	modelLabels?: Readonly<Record<string, string>>;
+	modelCreatedAt?: Readonly<Record<string, string>>;
 }
 
 function targetCacheKey(targetId: string): string {
@@ -94,6 +96,8 @@ function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	};
 	const modelLabels = normalizedLabels(models, row.modelLabels);
 	if (modelLabels !== undefined) snapshot.modelLabels = modelLabels;
+	const modelCreatedAt = normalizedLabels(models, row.modelCreatedAt);
+	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
 	return snapshot;
 }
 
@@ -123,7 +127,7 @@ export function readTargetModelSnapshot(
 export function recordTargetModelSnapshot(
 	target: Pick<TargetDescriptor, "id" | "runtime" | "url">,
 	models: ReadonlyArray<string>,
-	options: Pick<TargetModelCacheOptions, "cacheDir" | "nowMs" | "modelLabels"> = {},
+	options: Pick<TargetModelCacheOptions, "cacheDir" | "nowMs" | "modelLabels" | "modelCreatedAt"> = {},
 ): boolean {
 	if (target.id.length === 0 || target.runtime.length === 0) return false;
 	const snapshot: TargetModelSnapshot = {
@@ -136,6 +140,8 @@ export function recordTargetModelSnapshot(
 	};
 	const modelLabels = normalizedLabels(snapshot.models, options.modelLabels);
 	if (modelLabels !== undefined) snapshot.modelLabels = modelLabels;
+	const modelCreatedAt = normalizedLabels(snapshot.models, options.modelCreatedAt);
+	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
 	try {
 		safeResourceWrite(targetModelSnapshotPath(target.id, options.cacheDir), `${JSON.stringify(snapshot, null, 2)}\n`, {
 			encoding: "utf8",

@@ -4,6 +4,7 @@ import type { ProbeResult } from "../types/runtime-descriptor.js";
 
 export interface HttpProbeOptions {
 	url: string;
+	fetch?: typeof globalThis.fetch;
 	method?: "GET" | "HEAD" | "POST";
 	headers?: Record<string, string>;
 	body?: string;
@@ -65,7 +66,7 @@ async function runProbe<T>(opts: HttpProbeOptions, readJson: boolean): Promise<J
 	let latencyMs: number | undefined;
 	let parsingJson = false;
 	try {
-		const response = await fetch(opts.url, init);
+		const response = await (opts.fetch ?? fetch)(opts.url, init);
 		// Preserve the existing network latency measurement at response headers.
 		latencyMs = Math.round(performance.now() - started);
 		// HEAD 405 demonstrates reachability, but does not supply JSON data.

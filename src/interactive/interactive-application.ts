@@ -2051,6 +2051,28 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				void operatorExtensions.reload("startup");
 			});
 		if (frame === null) return;
+		// Read only the saved target snapshot after paint; never probe for upgrade advice (#416).
+		setImmediate(() => {
+			if (startupAbort.signal.aborted) return;
+			void Promise.all([
+				import("../domains/providers/model-recency.js"),
+				import("../domains/providers/target-model-cache.js"),
+			])
+				.then(([{ newerModelNotice }, { readTargetModelSnapshot }]) => {
+					if (startupAbort.signal.aborted) return;
+					const settings = deps.getSettings?.();
+					const model = settings?.chat.model;
+					const target = settings?.targets.find((entry) => entry.id === settings.chat.target);
+					if (!model || !target) return;
+					const snapshot = readTargetModelSnapshot(target);
+					if (!snapshot) return;
+					const notice = newerModelNotice(target.id, model, snapshot.models, snapshot.modelCreatedAt);
+					if (notice !== null) appendNotice("info", notice, busNoticeSink);
+				})
+				.catch(() => {
+					// Upgrade advice is optional when cached metadata cannot be read (#416).
+				});
+		});
 		// Docks are prepared hidden only now that the first frame is out: pane
 		// host traffic and a Yazi or cliamp boot never sit in front of the paint.
 		// A failure stays silent; the key that wants the dock finds it absent and

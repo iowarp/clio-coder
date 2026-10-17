@@ -8,6 +8,7 @@ export type ProviderModelSource = "configured" | "live" | "cache" | "catalog" | 
 export interface ProviderModelCandidate {
 	id: string;
 	label?: string;
+	createdAt?: string;
 	source: ProviderModelSource;
 	loadState?: string;
 	loadStateDetail?: string;
@@ -88,7 +89,10 @@ export function runtimeListsModelsLive(
 	runtime: Pick<RuntimeDescriptor, "kind" | "probe" | "probeModels" | "externalAgentLoop">,
 ): boolean {
 	if (runtime.externalAgentLoop?.modelCatalog === "live-authoritative") return true;
-	return runtime.kind === "http" && (typeof runtime.probe === "function" || typeof runtime.probeModels === "function");
+	return (
+		(runtime.kind === "http" || runtime.kind === "sdk") &&
+		(typeof runtime.probe === "function" || typeof runtime.probeModels === "function")
+	);
 }
 
 export type UnverifiedModelListOrigin = "cache" | "catalog" | "configured";
@@ -143,6 +147,7 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 		out.push({
 			id: trimmed,
 			...(status.discoveredModelLabels?.[trimmed] ? { label: status.discoveredModelLabels[trimmed] } : {}),
+			...(status.discoveredModelCreatedAt?.[trimmed] ? { createdAt: status.discoveredModelCreatedAt[trimmed] } : {}),
 			source,
 			...(state ? { loadState: state.state } : {}),
 			...(state?.detail ? { loadStateDetail: state.detail } : {}),

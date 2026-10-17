@@ -108,8 +108,12 @@ export interface ProbeResult {
 	authFailed?: boolean;
 	serverVersion?: string;
 	models?: string[];
+	/** #416: an SDK snapshot is usable inventory, without claiming a fresh provider answer. */
+	modelsSource?: "cache";
 	/** Human-readable labels keyed by the exact wire id returned in `models`. */
 	modelLabels?: Record<string, string>;
+	/** Provider-reported creation timestamps keyed by exact wire id (#416). */
+	modelCreatedAt?: Record<string, string>;
 	/** Stable cause class for setup UX; `error` remains the redacted human diagnostic. */
 	failureKind?: "missing" | "authentication" | "unsupported-feature" | "catalog-unavailable" | "cancelled" | "generic";
 	/** Probe-only per-model load state when the runtime exposes it. */
