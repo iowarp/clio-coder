@@ -635,11 +635,16 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	return count;
 }
 
-function prefixHeadlessFailure(chat: ChatLoop, message: string): string {
+export function prefixHeadlessFailure(
+	chat: Pick<ChatLoop, "lastRunSnapshot">,
+	message: string,
+	admissionRefused = false,
+): string {
+	if (admissionRefused || message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return message;
 	const snapshot = chat.lastRunSnapshot?.();
 	if (!snapshot) return message;
-	const url = snapshot.targetUrl ?? "endpoint unavailable";
-	return `target '${snapshot.targetId}' (${snapshot.runtimeId} ${url}): ${headlessRouteFailureText(message) ?? message}`;
+	const route = [snapshot.runtimeId, snapshot.targetUrl].filter(Boolean).join(" ");
+	return `target '${snapshot.targetId}' (${route}): ${headlessRouteFailureText(message) ?? message}`;
 }
 
 /**
@@ -1144,7 +1149,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		};
 		// Text mode printed the refusal's notice as it arrived; saying it twice
 		// reads as two failures.
-		stderrMessage = mode === "text" && result.admissionRefused ? null : prefixHeadlessFailure(chat, result.error);
+		stderrMessage = mode === "text" && result.admissionRefused ? null : prefixHeadlessFailure(chat, result.error, result.admissionRefused);
 	} else if (result.outputExhausted && !result.sawTerminatingToolResult) {
 		// The provider returned normally, but generation exhausted its budget.
 		// Earlier chatter and partial prose cannot turn that terminal cause into
