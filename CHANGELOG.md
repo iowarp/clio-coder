@@ -12,6 +12,8 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - With `CLIO_CODER_INTEROP_HOME` unset, Clio reads the operator's home for other agents' skills, prompts and inventory even when `CLIO_CODER_HOME` relocates Clio's own directories. A path names another home, and `CLIO_CODER_INTEROP_HOME=none` reads no foreign user roots, overrides an explicit agent home variable such as `CLAUDE_CONFIG_DIR` and turns off sibling quota credentials.
 - A fleet node that runs workers carrying tool hooks needs a build that reads worker spec version 9. Specs without hooks still go out as version 8, so a node one release behind keeps working for them. A node that cannot read the version is reported as build skew, and the dispatch fails over to another node.
 - Under any blocking tool hook, Clio refuses to dispatch to CLI runtimes and refuses ACP delegation, because neither can carry the hook.
+- A native fleet worker's model response now ends after 600 seconds by default, and a round after a tools lockout ends after 120 seconds. Raise `safety.limits.workerResponseSeconds` for a slow local model that writes long answers.
+- `/view` and the ACP artifact list no longer include the compiled system prompt. An ACP client that reads `system-prompt:current` gets `artifact_unknown`; the prompt manifest still shows the compiled fragments and their provenance.
 
 ### MCP
 
@@ -22,6 +24,7 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - MCP tools are classified through one trust-first classifier. Annotations serve as advisory action-class defaults for untouched user declarations, operator overrides win, `mcp list` shows per-tool classes and `mcp list --refresh` refreshes them.
 - Interrupting an in-flight MCP call sends `notifications/cancelled` and keeps a responsive server available. A trusted server that fails reconnects on the next gateway call, and a cancelled call is never replayed.
 - Repeated read-only idempotent polls spend the normal call budget instead of tripping the identical-argument loop guard.
+- Text `clio-coder mcp test` output names the network grant and its source, as `mcp list` does.
 
 ### Safety and limits
 
@@ -36,6 +39,10 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - Project extension and plugin trust pins package identities, so reinstalling identical content or disabling a package keeps consent, while a changed trust flag, capability envelope or plugin kind asks again. `config trust extensions` and `config trust plugins` list each package with its origin and trust, disabled ones included. An operator install approves only the records still carrying the content digest it wrote, so a record another writer replaced during the install stays unapproved.
 - A per-target `--api-key` override satisfies an OAuth target again.
 - Exact toolchain version probes such as `node --version`, `go version` and `python3 -V` run without an ask, so a fleet worker in deny mode is no longer ended by them.
+- A tool surface refusal names what narrowed the surface (`--allow-tools`, a named template's `allowed-tools`, `--delegate-tools`, a job's `allow` list, or a recipe or dispatch scope) and gives the remedy on its own line. Inside a restricted surface every name outside it gets the same refusal, which lists the admitted capabilities, so a run cannot probe which other tools exist. Only an unrestricted run answers that a capability does not exist.
+- The `--read-only` remedy tells the operator to rerun without the flag, and a run stopped by `--max-cost-usd` reports `budget_ceiling` without endpoint-failure wording.
+- A bounded tool result carries a retrieval hint only when output was actually omitted.
+- Once the loop guard or the soft tool budget turns tools off, turn-end reminders no longer ask for another tool call.
 
 ### Fleet
 
@@ -43,6 +50,11 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - Fleets resume from the TUI, ACP and the desktop app as well as `fleet run --resume`. Every surface validates the prior root against the plan and shows the replayed steps in the preview.
 - One cross-process lock per git checkout keeps two fleets from running in the same workspace. A refused CLI run exits 1, and a stale lock from another host is reclaimed once its holder stops refreshing it.
 - Receipts count only provider calls and record how each ended, and a worker's receipt records the MCP tools its permit attested.
+- A native worker's model response is bounded: 600 seconds by default (`safety.limits.workerResponseSeconds`), and a round after a tools lockout or synthesis lock gets 120 seconds and at most 4096 output tokens, with thinking turned off where the route allows it. The deadline starts after a local model has loaded. A worker that reaches a bound fails with `worker_turn_timeout` or `worker_output_cap_exhausted` and is neither retried nor charged to the target's breaker.
+- Ctrl-C, SIGTERM and SIGHUP on `clio-coder fleet run` seal the journal as aborted and release the checkout lock before the run exits with 130, 143 or 129. A second Ctrl-C exits at once after writing a forced seal.
+- The approval preview shows the plan hash the journal records and labels the approval fingerprint separately. Preflight checks the standing delegation ceiling, the ledger tools of concurrent workers and shadow agents, so a plan that cannot run shows its refusal with no accept key and writes no journal. `playbook validate` refuses shadow agents too.
+- Each step line prints once, on stdout, and `fleet events`, `fleet status`, `fleet view`, `trace` and the export commands exit quietly with status 141 when the reading end of their pipe closes.
+- `/view` shows a worker's recorded output and changed paths, with path text sanitized, and says changed paths were not recorded when the host observed none.
 
 ### Extensions
 
@@ -52,6 +64,7 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - `clio-coder fleet run` checks every step's route in preflight and refuses a playbook before any step runs when one hooked step's runtime cannot carry a blocking hook.
 - `clio-coder context wiki` and `clio-coder context init` run their workers under the command's own extension host. When that host fails to start and a blocking hook applies, they refuse before dispatching, and `context init` falls back to its heuristic bootstrap.
 - Hook landings report a read-only recipe's workers as read-only with no write roots, and prompt templates that name extension tools load without a warning.
+- Hook receipts reach disk shortly after each call instead of waiting for the next call or for exit.
 
 ### Memory
 
@@ -65,6 +78,17 @@ Clio Coder 0.6.3 lets fleet workers use MCP servers under explicit operator trus
 - gpt-oss models keep their reasoning on replayed tool turns and no longer send text, reasoning and tool calls in one turn.
 - Out-of-turn rounds ask for an explicit thinking level.
 - Live and resumed transcripts, copied views and Markdown and HTML exports attribute each assistant turn to its recorded provider and model, and exports show model changes where they happened.
+- `/btw` and `/draft` answer while a turn is running, over a snapshot of the history, without touching the turn. A tool call that is still running is reported to the side model as still running, and a side answer that is only tool-call markup shows a note instead. `/handoff` still refuses during a turn.
+- `/loop` and the `job` tool run a loop's first iteration when it is created, then every interval.
+- `/model <name>` resolves a bare model id only to targets that can run chat, prefers the active chat target, and names the competing targets when the name is ambiguous.
+- Ctrl-Z suspends the interactive terminal on Linux and macOS, and `fg` resumes it with a full redraw. The binding is `clio-coder.suspend`; Windows shows a notice instead.
+- Only the process that `/restart` started can claim the restarted session, so a second terminal opened in the same folder right after a restart starts its own session.
+- A refused or failed edit row reads "edit failed", the `/model` apply menu shows its full label, and the exit summary docs match the styles and rows the renderer prints.
+- `clio-coder doctor` reports only running processes that belong to the home it checks.
+
+### Documentation
+
+- The bundled guide and architecture pages were checked against the source and corrected, and their sections are titled and opened in the words operators use, so Clio's own docs search finds the answering section more often. In a checkout the docs search skips the generated wiki, as the npm package already does.
 
 ## 0.6.2 - 2026-10-09
 
