@@ -185,7 +185,13 @@ function buildResult(
 			options.use === "chat"
 				? `pattern "${pattern}" matched ${listed}${remaining}; using ${chosen.full}`
 				: `pattern "${pattern}" matched multiple models; using ${chosen.full}`;
-		if (newest) result.warning += ` (newest of ${familyMatches.length} matches)`;
+		// The listed matches and the ranked family are different sets; name the family so the counts never read as one (#416).
+		if (newest) {
+			result.warning +=
+				familyMatches.length === candidates.length
+					? " (newest by release date)"
+					: ` (newest of ${familyMatches.length} ${family}-family models${preferred !== undefined ? ` on ${preferred}` : ""})`;
+		}
 	}
 	return result;
 }
