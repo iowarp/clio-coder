@@ -70,7 +70,8 @@ integrity hashes, like any npm install.
 reads `HTTPS_PROXY`). Export them before running the installer:
 
 ```bash
-export https_proxy=http://proxy.example.org:3128 http_proxy=$https_proxy
+export https_proxy=http://proxy.example.org:3128
+export http_proxy="$https_proxy"
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
 ```
 

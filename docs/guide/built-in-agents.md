@@ -281,7 +281,7 @@ messages, in the order a worker reads them, each present only when it applies:
   limit, plus verification expectations for a verification-class recipe. Recipes with
   tier `none` get none. See
   [worker routing](../architecture/context-engine.md).
-- **Safety posture** (every run, including ACP delegation). A native worker reads that the permit in its instructions applies, the worker permission routing (`deny`, `fail`, or `escalate`), and a sandbox line. An ACP delegation reads one line naming the run's effective autonomy level with the same directive text the session prompt's safety section uses.
+- **Safety posture** (every run, including ACP delegation). A native worker reads that the permit in its instructions applies, the worker permission routing (`deny`, `fail`, `escalate` or `main`), and a sandbox line. An ACP delegation reads one line naming the run's effective autonomy level with the same directive text the session prompt's safety section uses.
 - **Read-only notice** for a read-only dispatch.
 - **Declared result requirements**: the `expected_outputs` and `verification` entries of a typed dispatch intent, labeled as requirements and never as evidence.
 - **Compete stance** for a compete candidate.

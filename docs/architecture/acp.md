@@ -18,6 +18,10 @@ graph LR
 
 ## Server command and transport
 
+### Use Clio Coder in an ACP editor
+
+To use Clio Coder in an editor over ACP, configure the editor's ACP agent entry to launch `clio-coder acp`. The editor exchanges JSON-RPC over stdio with this process. Add `--cwd /absolute/project/path` to pin the workspace, or let the editor's first session request select it. Authentication and permission requests use the client capabilities described below.
+
 ```bash
 clio-coder acp [--cwd PATH] [--permission-timeout MS]
 clio-coder acp auth login
@@ -56,7 +60,10 @@ Every Clio Coder extension is namespaced under `agentCapabilities._meta`, so a s
 | `clio-coder/session` | `{close: true, label}` | always; `label` reflects the session store |
 | `clio-coder/settings` | `{get_safe, patch_safe}` | always |
 | `clio-coder/targets` | `{list, probe}` | always |
-| `clio-coder/trust` | `{version: 1, meta, surfaces: ["settings", "hooks", "safety", "extensions", "plugins"], results: ["session/new", "session/load", "session/resume"]}` | always |
+| `clio-coder/trust` | `{version: 1, meta, surfaces: ["settings", "hooks", "safety", "extensions", "plugins"], refresh: "_clio-coder/session/trust", results: ["session/new", "session/load", "session/resume"]}` | always |
+| `clio-coder/ceiling` | `{version: 1, meta: "clio-coder/ceiling", fields: ["allowedTools", "delegatedTools", "delegation", "readOnly"]}` | the chat can enforce client ceilings |
+| `clio-coder/queue` | `{version: 1, edit: "_clio-coder/session/queue_edit", ops: ["remove", "restore", "move", "set_kind", "send_now"], notification: "_clio-coder/session/queue_changed"}` | queue editing is wired |
+| `clio-coder/shell` | `{version: 1, run: "_clio-coder/session/shell", timeoutMs: 300000}` | operator shell and branch/session support are wired |
 | `clio-coder/commands` | `{version: 1, list, invoke, promptTurns}` | a command host is wired |
 | `clio-coder/steering` | `{version: 1, main, dispatch, modes: ["next-slot", "end-of-turn"], interrupt: true, methods: {steer, queue, clear, interrupt, dispatch}}` | always; `main` and `dispatch` report which queues are wired |
 | `clio-coder/agent` | `{version: 1, meta: "clio-coder/agent"}` | always |
@@ -86,6 +93,7 @@ A client opts into optional behavior under `initialize.params.clientCapabilities
 | Key | Payload | Effect |
 | --- | --- | --- |
 | `clio-coder/events` | `{version: 1, kinds: [...]}` | Enables `_clio-coder/event` notifications for the recognized kinds. At most 16 kinds, each at most 64 UTF-8 bytes and free of C0 and DEL control characters. A malformed request refuses the whole opt-in; unknown kinds are ignored. |
+| `clio-coder/queue` | `{version: 1}` | Enables queue-change notifications containing the current entry list. |
 | `clio-coder/toolProgress` | `{version: 1}` | Enables non-terminal `tool_call_update` frames carrying a running tool's cumulative output. |
 | `clio-coder/interviews` | `{version: 1, request: "_clio-coder/interview/request", cancel?: "_clio-coder/interview/cancel"}` | Attended client: enables `ask_user` and harness cards. See [Attended clients](#attended-clients). |
 | `clio-coder/workerPermissions` | `{version: 1, withdraw: "_clio-coder/permission/withdraw"}` | Attended client: forwards dispatched workers' permission asks. |
@@ -121,6 +129,10 @@ Anything not listed returns `-32601` `method_not_found`. Methods answer after `i
 | `session/close` | client to server | Cancels an active prompt, waits for its writer to settle, and closes the durable session. Idempotent. |
 | `session/request_permission` | server to client | Asks the client to approve a gated tool call. |
 | `session/update` | server to client | Notification stream. See [Streaming updates](#streaming-updates-and-stop-reasons). |
+| `_clio-coder/session/trust` | client to server | Refreshes the bound session's ignored-project-surface report; grants no trust. |
+| `_clio-coder/session/queue_edit` | client to server | Edits or sends one queued entry by id. |
+| `_clio-coder/session/queue_changed` | server to client | Current queue entries after a change, for opted-in clients. |
+| `_clio-coder/session/shell` | client to server | Executes one operator shell line while idle and records a `bashExecution`. |
 | `_clio-coder/session/label` | client to server | Sets or clears a durable session name. Legal before an opener and during a prompt. |
 | `_clio-coder/settings/get_safe` | client to server | Reads the closed credential-free settings projection. |
 | `_clio-coder/settings/patch_safe` | client to server | Atomically validates, persists, and applies a flat patch over four settings. Refused during a prompt. |
@@ -174,6 +186,8 @@ JSON-RPC layer codes follow the pinned ACP v1 schema: `-32700` parse, `-32600` i
 | `not_initialized` | -32600 | Any method before a successful `initialize`. |
 | `already_initialized` | -32600 | A second `initialize` on the connection. |
 | `authentication_required` | -32000 | `logout` ended the authenticated state. |
+| `invalid_ceiling`, `ceiling_unsupported`, `ceiling_refused` | -32602 | Malformed ceiling, host cannot enforce it, or a command would exceed the applied ceiling. |
+| `shell_active` | -32602 | Another shell line or context command is running. |
 | `invalid_params` | -32602 | A missing required value, an unknown key, an out-of-set enum value, an exceeded bound, a C0 or DEL character in peer text, or any other shape violation. `reason` refines: `target-unknown` for an unconfigured target, and for `commands/invoke` one of `argv_too_long`, `argv_invalid`, `command_not_exposed`, `command_unavailable`, `subcommand_not_exposed`, `not_wired`, or `invalid_params` for a non-string `command`. |
 | `session_cwd_mismatch` | -32602 | A session request names a canonical directory other than the bound root. |
 | `session_limit` | -32602 | A second opener while a session is hosted. |
@@ -224,7 +238,7 @@ Every replay notification precedes the load response and carries `_meta["clio-co
 
 `_clio-coder/session/label` accepts `{sessionId, label}` with a label of 0 to 256 UTF-8 bytes free of C0 and DEL characters; empty clears it. It writes the session-wide name that `session/list` reads back as `title`, and a hosted session also emits a `session_info_update` with the new `title`. `session/delete` accepts `{sessionId}` and removes only a record whose `endedAt` is set; hosted or unended records fail `session_open`, and unknown or cross-workspace ids fail `session_unknown`. Both are legal during an unrelated prompt.
 
-`modes` offers `default` and `yolo`. `session/set_mode` takes `{sessionId, modeId}`, changes the hosted session's autonomy, emits `current_mode_update` and `config_option_update`, and returns `{}`. The same control is the `autonomy` config option (category `mode`). A `model` option (category `model`) appears when a model is selected, listing the target's configured and discovered models, and a `thinkingLevel` option (category `thought_level`) offers `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `session/set_config_option` takes `{sessionId, configId, value, type?}` where `type`, if present, must be `select`, and returns the full list. Model and thinking changes apply to the session route without saving a default. All three controls fail `prompt_active` during a prompt. A global autonomy patch changes the default for future sessions and never mutates a bound session.
+`modes` offers `default` and `yolo`. `session/set_mode` takes `{sessionId, modeId}`, changes the hosted session's autonomy, emits `current_mode_update` and `config_option_update`, and returns `{}`. The same control is the `autonomy` config option (category `mode`). A `model` option (category `model`) appears when a model is selected, listing the target's configured and discovered models, a `target` option (category `_target`) lists orchestrator-eligible configured targets when provider routing is wired, and `thinkingLevel` (category `thought_level`) offers only the selected model's resolved supported levels, with an empty list when unresolved. `session/set_config_option` takes `{sessionId, configId, value, type?}` where `type`, if present, must be `select`, and returns the full list. Model and thinking changes apply to the session route without saving a default. All route, thinking and mode controls fail `prompt_active` during a prompt. A global autonomy patch changes the default for future sessions and never mutates a bound session.
 
 ### Slash commands
 
@@ -233,6 +247,10 @@ The server sends `available_commands_update` when a session binds. The entries a
 A prompt that starts with `/name` for an advertised command, with no attached resources, runs that command instead of a model turn, and the result returns as an `agent_message_chunk`. Commands that inject a user turn (`share`, `oracle`, `skill`, `tasks`) are refused through `commands/invoke` while a prompt is active with `prompt_active` and reason `steer-instead`. `council` and `context recover` run as conversation turns and are refused through `commands/invoke` with `prompt_turn_required`. A command-shaped line that is neither an admitted command nor a loaded prompt template fails `unknown_command` or `command_unavailable` before it reaches the model, and `\/` sends the line as text. A loaded prompt template expands as in the terminal, and a display-only template answers without a turn.
 
 `_clio-coder/commands/list` accepts `{}` and returns the catalog `{version: 1, commands: [...]}` plus the loaded template names under `prompts` (at most 256). Each descriptor carries `name`, `summary`, `usage`, `group`, a grammar `args` of flags, positionals, and subcommands, and the flags `requiresSubcommand`, `streams`, `injectsUserTurn`, and `promptTurn` where they apply. `commands/invoke` accepts `{sessionId, command, argv}` and returns `{level, lines}`. A result holds at most 200 lines of at most 1 KiB each, with a trailing `…output truncated at 200 lines`. `argv` holds at most 32 elements of at most 4 KiB. Elements are joined with single spaces and never quoted, so a quote character, a control character, or whitespace in any element except the last is refused. The last element is taken verbatim as the rest positional.
+
+### Client capability ceilings
+
+The ACP server accepts `_meta["clio-coder/ceiling"]` on session openers and individual prompts, and on fork and handoff commit. Its closed fields are `allowedTools`, `delegatedTools`, `delegation: "allowed" | "forbidden"`, and `readOnly: true` ([types.ts](../../src/engine/acp/types.ts)). The session ceiling and a prompt's temporary ceiling only narrow the operator's launch limits. Responses echo the effective ceiling; `{}` means no limit applies. Tool execution, delegated tools and slash commands all honor the applied limits. A malformed ceiling fails `invalid_ceiling`; an unenforceable one fails `ceiling_unsupported`; a command outside the applied limits fails `ceiling_refused`. No ceiling grants authority.
 
 ### Prompt input
 
@@ -362,9 +380,17 @@ Asides run beside a turn in flight over a snapshot of its history and are never 
 
 `_clio-coder/session/steer` accepts `{sessionId, text, mode?}` with `mode` `next-slot` (the steering queue, the default) or `end-of-turn` (the follow-up queue). It returns `{accepted, queue, refusal?}`. A steer is refused, not accepted silently, when no prompt is active, when the prompt is cancelled, or when the run is not streaming. `interrupt` mode is not admitted because the terminal resubmits a stranded steer as a new prompt, and ACP binds a turn to its request. Steer text is at most 16 KiB and non-blank. `\n`, `\r`, and `\t` are content and every other C0 control is refused rather than stripped, so the model never sees text different from the client's copy.
 
-`_clio-coder/session/queue` returns `{steer, followUp}`, each at most 64 entries of at most 16 KiB. `queue_clear` drains both queues together, as Alt+Q does in the terminal, and returns `{restored}`; those texts become the client's to resend. `_clio-coder/session/interrupt` accepts `{sessionId, reason?}` (at most 256 bytes) and returns `{cancelled, refusal?}`. It cancels only: the outstanding `session/prompt` settles `cancelled` and the next prompt is the client's. It honors the refusal the terminal gives for an attached dispatch or a parked permission ask, and `session/cancel` remains the unconditional stop.
+`_clio-coder/session/queue` returns `{steer, followUp, entries?}`, with `entries` whenever the host supplies `chat.queueEntries`, even when the other queue-editing callbacks are absent, each at most 64 entries of at most 16 KiB. `queue_clear` drains both queues together, as Alt+Q does in the terminal, and returns `{restored}`; those texts become the client's to resend. `_clio-coder/session/interrupt` accepts `{sessionId, reason?}` (at most 256 bytes) and returns `{cancelled, refusal?}`. It cancels only: the outstanding `session/prompt` settles `cancelled` and the next prompt is the client's. It honors the refusal the terminal gives for an attached dispatch or a parked permission ask, and `session/cancel` remains the unconditional stop.
 
 `_clio-coder/dispatch/steer` accepts `{sessionId, runId, action: "guide" or "cancel", message?}` and returns `{accepted: true}` or `{accepted: false, reason}`. `reason` is one of `dispatch-unavailable`, `fleet-unavailable`, `run-not-active`, `cancel-failed`, `empty-message`, `steering-unsupported`, `no-input-channel`, `input-closed`, `run-terminating`, or `steer-failed`. `cancel` carries no message. Acceptance means the guidance is queued on the worker's stdin, never that it was delivered.
+
+### Queue editing and change notifications
+
+The ACP queue entry is `{id, kind, text, enqueuedAt, pinned}`, with `kind` `steer` or `follow-up`. `_clio-coder/session/queue_edit` takes `{sessionId, id, op}`. `move` additionally requires `delta: -1 | 1`; `set_kind` requires `kind`; other operations refuse those operands. Operations are `remove`, `restore`, `move`, `set_kind` and `send_now`. Every reply carries `applied` and the current `entries`; `restore` returns the removed entry's text for the client's editor. A missing id returns `stale-entry`, and an impossible move returns `at-edge`. `send_now` requires an active streaming prompt and uses the chat loop's interrupt path, with next-slot delivery when interruption is refused. The reply reports delivery/refusal facts. Clients opting into `clio-coder/queue` receive `_clio-coder/session/queue_changed` with `{sessionId, entries}` after enqueue, hand-over, edit and drain ([server.ts](../../src/engine/acp/server.ts)). Lists are capped at 64 entries.
+
+### Operator shell lines
+
+`_clio-coder/session/shell` takes `{sessionId, command, excludeFromContext?}` and runs the terminal's operator-shell path, shared through [operator-shell.ts](../../src/domains/session/operator-shell.ts). It requires an idle prompt and no other shell/context operation. A read-only ceiling or one withholding `bash` refuses the line before execution. The timeout is 300,000 ms; command text is bounded to 16 KiB. Tool-lifecycle frames carry `_meta["clio-coder/shell"]` instead of agent attribution. The result includes the durable `turnId`, exit/cancel/timeout facts, output byte count and a bounded 16 KiB output tail. `excludeFromContext` records the line while withholding it from model replay; a failure to label information flow also withholds output and reports `unlabeled`. Session cancel/close can abort the running line. This is an operator action outside model tool admission.
 
 ### Opt-in extension events
 
@@ -478,7 +504,9 @@ Per-message `_meta` keys, beyond the capability keys above. The pushed telemetry
 | --- | --- | --- |
 | `clio-coder/session` | opener, `switch_turn`, `fork`, and `handoff/commit` results | `{sessionId, target, model, autonomy, createdAt, resumed, replayed?}`; `replayFailed: true` on a fork whose replay failed. A `config_option_update` carries `{target}` only. |
 | `clio-coder/workspace` | opener results, `session_info_update` update | Workspace facts. |
-| `clio-coder/trust` | opener results | `{ignored}`. |
+| `clio-coder/trust` | opener and `session/trust` results | `{ignored}`. |
+| `clio-coder/ceiling` | opener and prompt results | Applied capability ceiling. |
+| `clio-coder/shell` | operator-shell updates | `{version: 1, excludeFromContext}`. |
 | `clio-coder/usage` | prompt result, `usage_update` update | Token and cost fields; the update adds `session` totals. |
 | `clio-coder/context` | `usage_update` update | The projected context ledger. |
 | `clio-coder/plan` | `plan` update and each entry | Real task status, board identity, and omitted counts. |
@@ -535,7 +563,7 @@ This outbound path is distinct from the hosted server's permission bridge. The h
 1. **Autonomy snapshotting.** Autonomy is snapshotted at `session/new`, `session/load`, or `session/resume`. A later global configuration change does not alter the bound remote session's security policy. Only an explicit idle `session/set_mode` or `session/set_config_option` changes its next prompt.
 2. **Metadata namespacing.** Clio Coder extensions travel only in namespaced `_meta` fields (`clio-coder/...`), so strict clients such as Zed's serde deserializers never meet an unmapped top-level key.
 3. **No external outcome overrides.** An external ACP process cannot self-assert a terminal outcome code. `worker_final_output_missing`, for one, is enforced at Clio Coder's trusted finalization seam.
-4. **Closed projections.** Settings, targets, board, tree, ledger, usage, extensions, artifacts, and fleet views are projections with fixed shapes and byte limits. Paths, provider text, credentials, and prompts stay host-side.
+4. **Closed projections.** Settings, targets, board, tree, ledger, usage, extensions, artifacts, and fleet views are projections with fixed shapes and byte limits. Each projection has its own disclosure contract. The safe settings/targets views omit credentials and provider text; workspace facts include the workspace path, and explicit artifact reads return their selected bodies. These are authenticated client reads, not a blanket path-free wire.
 
 ## Delegation peers in the transcript
 

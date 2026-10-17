@@ -318,6 +318,14 @@ bash(command="npm run build", timeout_ms=600000, output_policy="summary")
 bash(command="make artifact", output_policy="metadata-only")
 ```
 
+### Exact toolchain version probes
+
+Exact version probes such as `node --version`, `go version` and `python3 -V`
+are recognized commands that run without an approval ask, including in a worker
+with `fleet.permissions.mode: deny`. The recognition covers the fixed program
+and flag pairs in `versionProbePattern` in `src/domains/safety/policy-engine.ts`.
+It does not admit arbitrary arguments, interpreter code or package execution.
+
 ## run_script: stream a scientific processing step to disk
 
 Runs one workspace script through safe-exec, with stdout/stderr logs and a provenance manifest. Sources: [run-script.ts](../../src/tools/run-script.ts), [run-records.ts](../../src/core/run-records.ts), [safe-exec.ts](../../src/core/safe-exec.ts). It inherits Bash admission; an allowed interpreter is not a sandbox or policy bypass. Execute class; sequential.
@@ -688,7 +696,26 @@ gateway(op="call", capability="git", args={op: "commit", message: "fix: correct 
 
 OBSERVE retrieval of the working environment. Main sessions reach it through the gateway; workers may attach it directly. Source: [index.ts](../../src/tools/context/index.ts).
 
-Arguments are `scope` (`workspace`, `settings`, `skills`, `recall`, or `budget`), `name` and `include_tree` for skills, and `ref`, `path`, `offset`, and `limit` for recall. `query` can narrow recall discovery. In a main session, supply either `ref` or `path`: a path selects the newest evicted read whose marker is still visible, while a ref also retrieves historical results behind a summary. Omit both for bounded discovery. An unchanged successful reread records recall provenance while returning the current read body. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills in `default` and `yolo`; read-only runs cannot activate them, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
+Arguments are `scope` (`workspace`, `settings`, `skills`, `recall`, `budget`, or
+`semantic`), `name` and `include_tree` for skills, and `ref`, `path`, `offset`,
+and `limit` for recall. `query` can narrow recall discovery. In a main session,
+supply either `ref` or `path`: a path selects the newest evicted read whose marker
+is still visible, while a ref also retrieves historical results behind a summary.
+Omit both for bounded discovery. An unchanged successful reread records recall
+provenance while returning the current read body. Workspace returns the cached
+session git/project snapshot and requires a bound session. Skills list or activate
+installed skills in `default` and `yolo`; read-only runs cannot activate them, and
+recipe-bound workers can load only their declared skills. Recall retrieves evicted
+observations without changing the eviction marker. Workspace, settings, and
+skills use a 50KB cap.
+
+`context(scope="semantic", query="…")` searches the optional semantic index.
+`query` is required and at most 2000 characters; `limit` defaults to 5 and is
+bounded at 20. Optional filters are `kinds`, `run_id`, `media_type`, `after` and
+`before`. The feature defaults off (`context.semantic.enabled: false`); configure
+a qualified embedding route before use. Results locate originals that must be
+read before making claims. See [Semantic context](semantic-context.md) and
+`src/tools/context/surface.ts`.
 
 `context(scope="budget")` accepts only `scope` and retrieves the native main session's live request budget. Worker and external-agent registries without that session port report it unavailable.
 
@@ -1009,6 +1036,17 @@ A `reason` written as prose is filed under the closest category (`blocked` when 
 limitation(scope="CUDA kernels changed but no GPU is available here", reason="environment", paths=["src/kernels/solve.cu"])
 ```
 
+## memory_recall: search task and approved durable memory
+
+`gateway(op="call", capability="memory_recall", args={query:"…", limit:8})`
+searches this session's task-memory knowledge and procedural entries and the
+approved durable records eligible for the current repository, runtime and agent.
+`query` is required; `limit` defaults to 8, with a maximum of 20. This is a
+read-only orchestrator capability. It cannot save, propose or approve memory,
+and workers do not receive it. No matches returns
+`No task or approved durable memory matched the query.` Source:
+`src/tools/memory-recall.ts` and `src/domains/memory/recall.ts`.
+
 ## decide: record a design decision
 
 Appends the model's own design choice to the session decision board beside operator `ask_user` answers. Source: [decide.ts](../../src/tools/decide.ts). Read class; sequential, so two decisions in one batch cannot race the supersede lookup. The call succeeds only in a session with a decision board; a worker's call is refused.
@@ -1132,6 +1170,10 @@ A turn may make 3 consult calls. The tool changes nothing. It returns `answered:
 Declared and derived checks pass through the conservative action classifier and autonomy policy, and are admitted exactly as `bash` admits the same command. The policy engine resolves the call with the tool's own resolver, so the argv it scans, including any model `args`, is the argv that runs. A recognized test runner such as `python -m pytest` resolved through PATH runs in both modes. An unrecognized argv, such as `uv run python -m unittest discover -s tests` or an absolute interpreter path, asks in `default`, where a headless run denies it, and runs in `yolo`. Non-bare argv and project `requireConfirmation` entries also ask in `default` and run in `yolo`; damage-control rules still ask or block in both modes. Declaring a check does not bypass those gates. A TUI verify approval card names the resolved command beside the check id when resolution succeeds. Prepare the environment before the run and inspect actual verifier receipts before claiming edit-and-verify success.
 
 ## Bounded main-runner jobs
+
+### Repeat a task with /loop and the job tool
+
+To repeat a task, enter `/loop <every> <task>` in the terminal, or call the `job` capability through the gateway. `/loop list`, `/loop status`, `/loop pause`, `/loop resume` and `/loop stop` control recurring jobs. The job tool's `every_ms`, `count` and `timeout_ms` bound repeated work.
 
 A `job` with `runner: "main"` repeats its prompt on the main conversation lane. Prompt wording does not restrict capabilities. Set `allow` to an explicit list of capability names to enforce a tool boundary on every occurrence, including in YOLO:
 

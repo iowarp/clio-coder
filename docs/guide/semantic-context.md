@@ -1,6 +1,6 @@
 # Semantic context beta
 
-Clio can keep a local, project-scoped search index for code maps, wiki pages, approved memory, authorized evidence, recorded worker output, and folders you register as artifact inboxes. The index uses a separate embedding target. Search returns source paths and locations; Clio must inspect the original file, code, or receipt before making a claim.
+Clio Coder can keep a local, project-scoped search index for code maps, wiki pages, approved memory, authorized evidence, recorded worker output, and folders you register as artifact inboxes. The index uses a separate embedding target. Search returns source paths and locations; Clio must inspect the original file, code, or receipt before making a claim.
 
 The beta starts disabled. Semantic indexing makes no embedding request or source scan during ordinary startup until you configure it. Vector generations live in the XDG cache under `semantic/<project-hash>/<profile-identity>/`. Canonical code, memory, and evidence stay in their existing locations. Deleting the cache only removes derived data.
 
@@ -23,7 +23,7 @@ clio-coder semantic status
 clio-coder semantic search "Which run produced the delayed oscillation?" --limit 5
 ```
 
-`--qualify` checks fixed text canaries and sends small image, audio, and mixed requests for the modalities selected. It pins the resulting text canary in the profile. It checks request acceptance and vector shape, not scientific retrieval quality or the actual GGUF hash. Requalify after changing the serving build, model asset, projector, or preprocessing recipe. A different recipe gets a separate index namespace even when its vectors are also 768 dimensional. Matching GGUF and projector hashes alone do not establish vector compatibility across serving stacks: the Mini llama.cpp and Zbook Lemonade routes produced different canary fingerprints in sprint qualification, so keep their index generations separate.
+`--qualify` checks fixed text canaries and sends small image, audio, and mixed requests for the modalities selected. It pins the resulting text canary in the profile. It checks request acceptance and vector shape, not scientific retrieval quality or the actual GGUF hash. Requalify after changing the serving build, model asset, projector, or preprocessing recipe. A different recipe gets a separate index namespace even when its vectors are also 768 dimensional. Matching GGUF and projector hashes alone do not establish vector compatibility across serving stacks. The profile identity also includes pooling, normalization, prefixes, preprocessing version and the qualification fingerprint; keep different identities in separate index generations.
 
 Inbox registration previews file types and estimated work before saving the path. Project inboxes are visible only in that canonical project; `--scope user` registers a global inbox. Clio honors ignore files, refuses symlinks and credential-shaped sources, and applies the project's read policy. An inbox is never inferred from arbitrary nearby folders. `refresh` is an explicit bounded job; incomplete jobs retain the last complete generation and report pending or failed pieces. An unchanged refresh reuses vectors.
 
@@ -46,7 +46,7 @@ Supported ingestion in this beta is text/code, typed code map and wiki records, 
 ## Record dispatched work
 
 ```sh
-clio-coder run --agent scout --record "Check the experiment on the worker node"
+clio-coder run --agent coder --read-only --record "Check the experiment on the worker node"
 clio-coder tools install asciinema
 clio-coder fleet nodes tools install seven asciinema
 clio-coder fleet nodes tools install seven asciinema --yes

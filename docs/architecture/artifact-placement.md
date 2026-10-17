@@ -1,9 +1,10 @@
 # Artifact Placement
 
-Every file Clio Coder generates has one home, decided by who reads it. The rule that
-follows from that: **the repo working tree holds files a human asked for.**
-Anything Clio produced on its own initiative lands in the project-local
-`.clio-coder/` directory or under the XDG directories, never beside your source.
+Clio Coder assigns generated harness artifacts a home according to who reads them.
+The placement convention is that **the repo working tree holds files a human asked for.**
+The `artifact` tool defaults to the project-local `.clio-coder/` directory; other
+harness stores use the project-local or XDG paths listed below. This convention
+does not constrain every file an admitted `write`, `bash`, or script call can create.
 `context init` can add the recommended blanket ignore for `.clio-coder/`.
 
 This page is the contract. [artifact-paths.ts](../../src/core/artifact-paths.ts) is the code that
@@ -104,6 +105,7 @@ problem.
 | `route-decisions/observations.jsonl` | Shadow-mode route observations, rotated to `.1` past a size bound |
 | `evidence-index.json` | One row per built run bundle, a ring of 1,000 rows |
 | `memory/steps.jsonl` | Proactive-memory step log, rotated to `.1` past 1 MiB |
+| `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |
 | `usage/out-of-turn.jsonl` | Side-question, handoff, prewarm, background-memory, System One and failed-compaction usage |
 | `trace.sqlite` | Dispatch trace mirror |
 | `scratch/<sessionId>/` | Offloaded tool output and harness scratch |
@@ -157,8 +159,8 @@ authored files there, which the operator writes and may commit deliberately:
 
 `gateway(op="call", capability="artifact", args={kind: "plan"|"review"|"report", content: ...})` without a `path` writes to
 `.clio-coder/artifacts/` under the workspace root. Passing `path` writes exactly
-there instead, working tree included, because a path the user named is a file
-the user asked for. A path that escapes the workspace is refused.
+there instead, working tree included. The tool accepts the caller's explicit path; it does not establish that the operator requested that path.
+Normal tool admission still applies, and a path that escapes the workspace is refused.
 
 The default is a pure function of `kind`, and has to stay that way. The action
 classifier, the policy engine's write-root check, and the protected-artifacts

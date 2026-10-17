@@ -13,7 +13,8 @@ src/
 ├── domains/         # 28 feature-domain directories, loaded through manifests or imported as libraries
 ├── engine/          # Pi (pi-ai, pi-agent-core, pi-tui) boundary, runtime adapters, ACP, worker runtime
 ├── entry/           # orchestrator bootstrap wiring (bootOrchestrator)
-├── interactive/     # TUI panels, overlays, key routing, dashboard, slash commands
+├── interactive/     # TUI panels, overlays, key routing, dashboard
+├── session-control/ # surface-neutral chat loop, turn lifecycle, slash-command specifications
 ├── tools/           # built-in tool specs and registry admission boundary
 ├── utils/           # image and git support utilities
 └── worker/          # worker subprocess entry and runtime rehydration
@@ -274,7 +275,7 @@ The enforced import rules below are complemented by the maintained
 [Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
 each overlapping helper and the Clio Coder deltas that must survive an SDK upgrade.
 
-Seven rules apply. Rules 1, 3, 4, 5, and 7 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
+Nine rules apply. Rules 1, 3, 4, 5, 7, 8, and 9 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
 
 ### Rule 1: `@earendil-works/pi-*` imports stay in `src/engine/**`
 
@@ -302,17 +303,21 @@ Files under `src/tools/**` may never import `src/interactive/**` (neither value 
 
 ### Rule 5: One-way entry point composition (`chat-loop.ts` never imports `src/entry/**`)
 
-Turn modules and state machine files in the chat loop (`src/interactive/turn-*.ts`, `chat-loop.ts`) may never import `src/entry/**`. Composition flows in one direction only: the entry point composes the chat loop, never the reverse.
+Turn modules and state machine files in the chat loop (`src/session-control/turn-*.ts`, `src/session-control/chat-loop.ts`) may never import `src/entry/**`. Composition flows in one direction only: the entry point composes the chat loop, never the reverse.
 
 ### Rule 6: Stage 0 remains behind declared seams
 
-The instant shell's Stage 0 owner is `src/interactive/terminal-lease.ts`. Its static value-import closure is what a cold `clio-coder` start pays before it can draw anything. Value importers outside that computed closure and outside the `src/interactive/**` and `src/engine/**` trees may enter those two protected trees only through a module declared in `STAGE0_SEAMS` in `tests/boundaries/check-boundaries.ts`. Every `src/cli/**` import into the protected trees needs a declaration, type-only included. Each declaration carries a reason. A declared seam may not lead back into the Stage 0 closure unless the existing composition-root overlap is explicitly recorded in its `allowStage0OverlapFrom` list, and every such entry names `src/entry/orchestrator.ts`.
+The instant shell's Stage 0 owner is `src/interactive/terminal-lease.ts`. Its static value-import closure is what a cold `clio-coder` start pays before it can draw anything. Value importers outside that computed closure and outside the `src/interactive/**`, `src/session-control/**`, and `src/engine/**` trees may enter those protected trees only through a module declared in `STAGE0_SEAMS` in `tests/boundaries/check-boundaries.ts`. Every `src/cli/**` import into the protected trees needs a declaration, type-only included. Each declaration carries a reason. A declared seam may not lead back into the Stage 0 closure unless the existing composition-root overlap is explicitly recorded in its `allowStage0OverlapFrom` list, and each exception names its permitted composition-root importer.
 
 The rule exists because a second, disjoint reacher into a module in the closure makes esbuild split that module out of the chunk it shared with its neighbours. [instant-shell-import-graph.test.ts](../../tests/contracts/instant-shell-import-graph.test.ts) walks the built chunk that contains the Stage 0 owner and holds its static closure to 32 chunks, 1,400,000 total bytes, and 350,000 Clio Coder source bytes. That test fails only after a full build, so the lint-time rule is the early warning.
 
 ### Rule 7: `turn-control` is pure
 
 Files under `src/domains/turn-control/**` import no `src/interactive/**`, `src/engine/**`, `src/tools/**`, or `src/worker/**` module. They reach other domains only through that domain's `index.ts`. The rule holds for type-only imports too.
+
+### Rules 8 and 9: Session control and engine do not depend on terminal rendering
+
+Neither `src/session-control/**` nor `src/engine/**` may import `src/interactive/**`, including type-only imports. The TUI, headless main, and ACP server share the session-control contract; ACP reaches session behavior through that contract. Terminal rendering remains a consumer of session behavior. These are rules 8 and 9 in [check-boundaries.ts](../../tests/boundaries/check-boundaries.ts).
 
 ---
 
@@ -344,7 +349,7 @@ graph TD
     CLIO --> ORCH[entry/orchestrator.ts bootOrchestrator]
     ORCH --> DOMAINS[core/domain-loader.ts and domain modules]
     ORCH --> TUI[interactive/index.ts startInteractive]
-    TUI --> LOOP[interactive/chat-loop.ts]
+    TUI --> LOOP[session-control/chat-loop.ts]
     LOOP --> PROMPTS[prompts compiler]
     LOOP --> TOOLS[tool registry]
     LOOP --> ENGINE[engine runtime]
@@ -360,7 +365,7 @@ Core data paths:
 
 1. `src/cli/index.ts` loads only argument parsing and boot tracing statically. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY.
 2. `bootOrchestrator` initializes config, data, state, and cache directories through [init.ts](../../src/core/init.ts), then runs the domain loader described above. Each domain's `manifest.ts` dependency list sets its position. The dispatch domain's start recovers orphaned receipts, and session bind and the session prompt share workspace probes ([Cold-start work](#cold-start-work)).
-3. The chat loop resolves model/runtime state and visible tools for the selected target and request intent.
+3. The shared chat loop in `src/session-control/` resolves model/runtime state. `resolveSessionTools` in [agent-tools.ts](../../src/tools/agent-tools.ts) supplies the full resolved tool surface when the runtime supports tools, subject to explicit turn constraints. Task-ranked skills and capability advice enter reminder text; the task does not select a different session schema set.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
 5. Tool calls enter [registry.ts](../../src/tools/registry.ts), which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.
 6. Fleet dispatch writes run ledger entries and receipts, and spawns each worker as a subprocess. A local worker is `dist/worker/entry.js` ([entry.ts](../../src/worker/entry.ts)); SSH placement launches `clio-coder worker` on the remote install. The worker reads a `WorkerSpec` from stdin, rehydrates the runtime descriptor, runs the engine worker runtime ([worker-runtime.ts](../../src/engine/worker-runtime.ts)), and emits NDJSON events on stdout. Evidence and memory domains consume the receipts later.
@@ -441,4 +446,4 @@ pnpm run test
 pnpm run build
 ```
 
-Run the focused boundary check before editing `src/engine/**`, `src/worker/**`, or cross-domain imports. Run the full test/build gate before release-facing documentation or behavior changes.
+The source checks validate documentation links, source paths, prose conventions, types and import boundaries. `node --import tsx scripts/check-hygiene.ts` enforces the static hygiene invariants.

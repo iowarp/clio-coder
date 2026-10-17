@@ -2,7 +2,7 @@
 
 The [context continuity guide](../guide/context-continuity.md) explains operator recovery after a paused handoff.
 
-This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.
+This page describes the implemented Clio Coder interactive, headless and ACP session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.
 
 Source implementations: [session.ts](../../src/engine/session.ts) and `src/domains/session/`.
 
@@ -21,7 +21,7 @@ Sessions are persisted durably on disk under the platform state root (`clioState
   prompt-manifest.jsonl   # One record per compiled system prompt that changed
 ```
 
-- `<cwdHash>`: First 16 hexadecimal characters of SHA-256 of canonical workspace root path (`createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)`).
+- `<cwdHash>`: First 16 hexadecimal characters of SHA-256 of the absolute resolved working-directory path (`createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)`).
 - `<sessionId>`: UUIDv7 generated at session initialization.
 - `context-snapshots.jsonl` is written by `appendContextSnapshot` ([context-accounting.ts](../../src/domains/session/context-accounting.ts)) and described in [Context Engine](context-engine.md#token-accounting--ledger-snapshots). `prompt-manifest.jsonl` is written by [prompt-manifest.ts](../../src/domains/session/prompt-manifest.ts) and records prompt hashes, section token estimates, fragment versions and the thinking level, never prompt text.
 - Deleting a session removes the directory. `deleteSession` with `keepFiles` keeps `current.jsonl` and `tree.json` and renames `meta.json` to `meta.deleted.json`, which drops the session from listings. The open session cannot be deleted.
@@ -73,7 +73,7 @@ a refused candidate leaves the current session usable. Reopening a closed sessio
 
 ### Checkpoints
 
-`performCheckpoint` ([checkpoint.ts](../../src/domains/session/checkpoint.ts)) is a three-stage write: the ledger appends are `fsync`ed and `tree.json` is persisted through the writer, then `meta.json` is rewritten with `lastCheckpointAt` and `lastCheckpointReason`. Reasons in use are `shutdown` (session extension stop), `context-summary` (after a compaction summary lands) and `context-handoff` (continuity transaction barriers). Nothing is written once `clio uninstall` has removed the state root, so a late checkpoint cannot rebuild a deleted tree.
+`performCheckpoint` ([checkpoint.ts](../../src/domains/session/checkpoint.ts)) is a three-stage write: the ledger appends are `fsync`ed and `tree.json` is persisted through the writer, then `meta.json` is rewritten with `lastCheckpointAt` and `lastCheckpointReason`. Reasons in use are `shutdown` (session extension stop), `context-summary` (after a compaction summary lands) and `context-handoff` (continuity transaction barriers), and `restart` (before an interactive restart). Nothing is written once `clio-coder uninstall` has removed the state root, so a late checkpoint cannot rebuild a deleted tree.
 
 ### Recovery on open
 
@@ -236,7 +236,7 @@ When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming,
 | `clio-coder run --session <id>`, `clio-coder run --continue` | Headless resume. `--continue` takes the most recent session for the working directory. A session that cannot be resumed fails the run with exit code 2 instead of answering without its history. The two flags together, or either with `--agent`, are usage errors. Neither uses the picker filter. |
 | `clio-coder --resume`, `--continue`, `-r`, `-c` | Refused as unknown global options with exit code 2 (#191) by `src/cli/argv.ts`. The error names `/resume` inside the app. Sessions resume from inside the app, or through `run` for headless work. |
 
-On a clean interactive exit Clio Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`full`, `brief`, `off`; default `full`) sets its size, and `off` prints only the resume line. A session with no model turn prints nothing. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
+On a clean interactive exit Clio Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`) sets its detail. `auto` follows `interface.outputDetail`: compact selects brief, standard selects standard, and detailed selects report. Legacy `full` reads as standard. `off` prints only the resume line ([defaults.ts](../../src/core/defaults.ts)). A session with no model turn prints nothing. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
 
 When resuming a session via `/resume` or a headless `clio-coder run --session <id>` / `--continue`:
 1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.
@@ -245,13 +245,13 @@ When resuming a session via `/resume` or a headless `clio-coder run --session <i
    - `no-cwd`: `meta.cwd` is missing or empty.
    - `missing`: The directory no longer exists on disk.
    - `not-a-directory`: The path points to a non-directory file or broken symlink.
-4. The interactive layer displays the `cwd-fallback` overlay prompting the operator to choose a valid workspace directory.
+4. The TUI displays the `cwd-fallback` overlay to choose a valid directory. A headless caller cannot display that overlay and fails the resume instead.
 
 ### What a resume restores
 
 - **Transcript and model replay** follow the active leaf, which is `meta.pinnedLeafTurnId` when a `/tree` switch left one and the newest turn otherwise.
 - **Route.** The recorded target, model and thinking level come from the session metadata and the last `modelChange` and `thinkingLevelChange` rows ([resumed-route.ts](../../src/domains/session/resumed-route.ts)). They apply as a session-scoped override and are not saved to settings. A recorded target that is no longer configured keeps the current route and prints a notice. An explicit CLI route flag wins over the recorded route.
-- **Usage totals** for `/usage` and the footer are rebuilt from the active path of the ledger, so a resumed session shows its own numbers.
+- **Usage totals** for `/usage` and the footer are rebuilt from the active ledger path together with session-owned auxiliary calls and worker receipts loaded by observability reset, so a resumed session shows its own recorded numbers ([usage-reseed.ts](../../src/domains/session/usage-reseed.ts), [extension.ts](../../src/domains/observability/extension.ts)).
 - **Boards and fold.** Task board, decision board and the working-set fold are refolded from the ledger.
 - **Task-memory handoff offer.** Switching to a different session announces any task-memory handoff entries available from `.clio-coder/handoffs/` and tells the operator to run `/memory seed` to import them, see [Proactive memory](../guide/proactive-memory.md).
 
@@ -266,7 +266,7 @@ Clio Coder provides distinct lifecycle operations for managing conversation cont
 | Operation | Session ID & Ledger | History Lineage | Workspace (`cwd`) Behavior |
 | --- | --- | --- | --- |
 | **New session (`/new` or fresh launch)** | Mints a new UUIDv7 `<sessionId>` in `<stateDir>/sessions/<cwdHash>/<sessionId>/` with an empty `current.jsonl` containing only the session header. | Starts at turn 0 with a clean context window. Previous session turns, compactions, and memory working sets are not carried forward. Shared project tasks remain accessible on disk in `.clio-coder/user-tasks.json`. | Uses the active process working directory (`process.cwd()`). Computes a fresh `<cwdHash>` for the session directory. |
-| **Resumed session (`/resume <id>`, or `clio-coder run --session <id>` and `--continue` headless)** | Reopens the existing session directory and writer. Continues appending new turns directly to the existing `current.jsonl` ledger. | Reconstructs the exact message history, compaction summaries, task board snapshots (`taskLedger`), and decision board states along the active leaf path (`meta.pinnedLeafTurnId` or latest tip). | Probes recorded `meta.cwd` against the filesystem (`resolveSessionCwd`). If the recorded directory was moved or deleted, triggers the `cwd-fallback` interactive prompt before resuming. |
+| **Resumed session (`/resume <id>`, or `clio-coder run --session <id>` and `--continue` headless)** | Reopens the existing session directory and writer. Continues appending new turns directly to the existing `current.jsonl` ledger. | Reconstructs the exact message history, compaction summaries, task board snapshots (`taskLedger`), and decision board states along the active leaf path (`meta.pinnedLeafTurnId` or latest tip). | Probes recorded `meta.cwd` against the filesystem (`resolveSessionCwd`). If the recorded directory was moved or deleted, the TUI offers `cwd-fallback`; a headless resume fails. |
 | **Forked session (`/fork`)** | Mints a brand new UUIDv7 `<sessionId>` in a new session directory. Stamps `parentSession` and `parentTurnId` in the new session header. Leaves the parent ledger closed and immutable. | Copies the exact active path lineage up to `parentTurnId` from the parent ledger into the new session ledger, excluding later turns, abandoned sibling branches, and unanchored sidecars. Subsequent turns append only to the new ledger. | Inherits the parent session's `cwd`, `model`, and `target` settings. Operates in the same workspace directory without creating a duplicate disk workspace. |
 | **Handoff (`/handoff <goal>`)** | Mints a brand new session with a new ID. The previous session receives an immutable `handoffNote` entry and closes. | Replaces raw conversation turns with a single synthesized `handoffSeed` context message containing a reviewed distillation of settled decisions and validated read-ledger paths. Loaded skill activations are replayed so skills carry forward. | Operates in the current project workspace directory, carrying forward validated project context while shedding conversation token weight. |
 

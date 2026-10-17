@@ -4,7 +4,7 @@ System One is an experimental decision layer. A site names one object, a typed q
 
 ## Contract in one paragraph
 
-Every entry point returns `null` instead of throwing, and `null` always means the caller behaves exactly as it would if System One did not exist. A call that is unbound, over the engine's window, canceled, timed out, refused, unreadable, unfitted or denied by the information-flow check never blocks or changes a turn. The types are in [types.ts](../../src/domains/system-one/types.ts): `SiteDefinition`, `Answer`, `DecisionEngine`, `SystemOne`, `DecisionRecord`, `RouteRecord`, `OutcomeRecord` and `DecisionRecorder`.
+The `SystemOne.run` facade catches engine and routing failures and returns `null` when no usable verdict is available ([factory.ts](../../src/domains/system-one/factory.ts)). Automatic sites run detached and fall back when a reading is absent, late or unusable. Fitted cuts govern policy hints and acts; the explicit `consult` site can return distributions from an unfitted engine because its reader applies no policy cut ([consult.ts](../../src/domains/system-one/sites/consult.ts)). Engine implementations may reject internally; the facade isolates those errors from the caller's turn. The types are in [types.ts](../../src/domains/system-one/types.ts): `SiteDefinition`, `Answer`, `DecisionEngine`, `SystemOne`, `DecisionRecord`, `RouteRecord`, `OutcomeRecord` and `DecisionRecorder`.
 
 ## Questions and answers
 
@@ -40,6 +40,8 @@ One call carries one state and every question about it. The `systemone` engine s
 Two definitions can share an id and differ in `moment`. `toolCall` has `card` (the advisory on an open approval card) and `gate` (the detached yolo reading). `turn` has a second, chained definition for choosing a recipe inside a category. `relevance` has `clusters` for selecting catalog groups. Each moment trips its own breaker and keeps its own answered build, so a slow card never opens the gate's. A site that sets `requiredCut` is skipped on any route whose identity lacks that cut, before any request, and a call skipped for that reason on every route leaves no decision row.
 
 ## Engines
+
+Clio Coder's defaults bind no engines or sites: `systemOne.engines`, `systemOne.sites` and `systemOne.cuts` are empty, `record` is `false`, `retentionDays` is `30` and `maxMiB` is `64` ([defaults.ts](../../src/core/defaults.ts)). Configuring an engine alone starts no site calls.
 
 An engine implements `decide(request)` and rejects on transport failure, an unusable reply or abort. It does not own deadlines or fallback ([systemone.ts](../../src/domains/system-one/engines/systemone.ts) and [llm.ts](../../src/domains/system-one/engines/llm.ts)). `unsupported(task, question)` says, without any I/O, why the engine must not be asked a question.
 
@@ -119,7 +121,7 @@ Two readers get two artifacts from the same `DecisionRecord`. The recorder is in
 
 | Kind | Holds |
 | --- | --- |
-| `decision` | One call: the redacted state capped at 16 KiB with a `stateTruncated` flag, a digest of the unredacted state, a redaction count, question hashes, the answers, the policy outcome and the routes, rendered questions included. The row's `engineKind` names the engine kind because `kind` classifies the line |
+| `decision` | One call: the redacted state capped at 16 KiB with a `stateTruncated` flag, a digest of the serialized runner-redacted state before the dataset's additional scrub and bound, a redaction count, question hashes, the answers, the policy outcome and the routes, rendered questions included. The row's `engineKind` names the engine kind because `kind` classifies the line |
 | `spec` | One question spec per hash, written once per process and day file so decisions stay small |
 | `outcome` | What followed a decision, joined to it by `ref` at export |
 
@@ -160,7 +162,7 @@ A cut from one build says nothing about another build, another vendor, a differe
 
 ## Invariants
 
-- No System One failure reaches a turn. Every runner, factory and host entry point catches and returns `null`.
+- System One facade and host calls isolate engine failures from the turn. The `run` facade returns `null`; explicit callers can report that no answer was available.
 - The main model never falls back to interpreting the turn when the `turn` site is silent.
 - A verdict is advice. Only `consult` returns a distribution to the agent, and it never returns a chosen option.
 - Safety sites only tighten. A site cannot remove a confirmation, clear a deterministic flag or unblock a call. The gate and the result screen only record.

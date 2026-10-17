@@ -18,6 +18,10 @@ Clio Coder can reduce a long native session while preserving the assistant's exa
 
 The assistant must call `self_compact` alone. A batch containing it and another tool, or two self-compaction calls, is rejected before any valid sibling executes. The note should preserve the objective, decisions, useful evidence, relevant paths, unresolved questions, and next steps. It must be nonblank and no larger than 8,192 UTF-8 bytes. Clio Coder preserves the accepted text exactly and labels it as assistant-authored recall, rather than presenting it as an operator instruction.
 
+## When the context window fills up
+
+As the context window fills up, Clio Coder reduces older context to make room for the next request. Automatic compaction normally triggers at 80% of the effective window: working-set eviction runs first, then summarization if needed. Open `/context` to inspect the request budget, or use `/compact <what to keep>` for a directed summary. The automatic controls and failure pause are described below.
+
 ## Automatic compaction and its failure pause
 
 Automatic reduction runs before an operator message is submitted and at settled tool-batch boundaries before each continuation request. It fires when the next request crosses `context.compaction.threshold` (default 0.8) of the effective window and `context.compaction.auto` is `true` (default). A threshold of 0 never fires, and an unknown window never fires. Working-set eviction runs first. The summary runs when eviction frees too little or finds nothing evictable. See [Single-threshold compaction](../architecture/context-engine.md#single-threshold-compaction) for the order and the rearm band.

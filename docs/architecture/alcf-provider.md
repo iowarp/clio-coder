@@ -61,7 +61,7 @@ clio-coder models --target alcf-sophia
 | No token | `ALCF requires Globus auth; run clio-coder auth login alcf.` |
 | The catalog is unreachable | `ALCF endpoint catalog unreachable: ...`, with a prompt to log in again on a 401 |
 
-Live model availability depends on which gateway jobs are running. When the cluster reports no models the probe succeeds and notes that the gateway may have no running jobs. The runtime's static `knownModels` list (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `gpt-oss-120b`, `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` and `meta-llama/Llama-4-Scout-17B-16E-Instruct`) is only a fallback for offline resolution, and its first entry is the curated default model.
+Live model availability depends on which gateway jobs are running. When the cluster reports no models the probe succeeds and notes that the gateway may have no running jobs. The runtime's static `knownModels` list (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `gpt-oss-120b`, `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` and `meta-llama/Llama-4-Scout-17B-16E-Instruct`) is only a fallback for offline resolution, and does not declare a curated `defaultModel`. Configure may offer the first listed fallback, but live availability still comes from discovery.
 
 ## Model facts and cost
 

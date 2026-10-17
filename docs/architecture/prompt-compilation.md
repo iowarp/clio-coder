@@ -116,7 +116,7 @@ Other differences from the attended tier:
 - The capability map and usage notes leave out `artifact`, `clio_docs`, `clio_library`, `credential_present`, `decide`, `evidence` and `tasks` unless a schema is attached directly. Each stays reachable through `gateway(op="find")`.
 - The `ask_user` turn-ending contract never renders, because no operator can answer an interview.
 - No `Routes:` line appears in the runtime block, because the orchestrator passes route sources to attended sessions only.
-- The orchestrator does not register the first-turn skills reminder, which is a user-message hook. A headless run gets its skills rule from `operating.discovered-skills` alone (`src/entry/orchestrator.ts`).
+- The orchestrator registers task-ranked skills and capability advice for headless main turns as well as attended turns. The advice rides model-only reminder text in the message tail, alongside the system prompt's conditional skills guidance; it does not alter tool schemas ([skills-reminder.ts](../../src/domains/middleware/skills-reminder.ts)).
 - On Clio Coder's own repository the self-development note tells the run that `clio-coder-dev` and `clio-coder-test` are not loaded. See [Self-development skills](#self-development-skills).
 
 ## Worker prompt

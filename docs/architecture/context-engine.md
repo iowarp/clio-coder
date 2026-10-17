@@ -198,7 +198,7 @@ Project-level context is authored in Markdown and discovered hierarchically, fro
 
 ## Codemap and architecture wiki
 
-Clio Coder maintains two distinct repository knowledge layers:
+Clio Coder maintains a structural codemap and an explicitly generated architecture wiki. The `context map` command renders the codemap as standalone HTML ([context-map.ts](../../src/cli/context-map.ts)):
 
 ```
 Repository Source Code
@@ -206,7 +206,7 @@ Repository Source Code
        ├─► [context index / refresh] ──► .clio-coder/codemap.json (Model-Free Structural Index)
        │                                     │
        │                                     ├─► Fast code_nav Symbol Resolution
-       │                                     └─► [context map] ──► .clio-coder/artifacts/maps/<repo>.architecture.json
+       │                                     └─► [context map] ──► .clio-coder/artifacts/maps/<repo>.html
        │
        └─► [context wiki] ──────────► .clio-coder/wiki/**/*.md (Agent-Authored Architecture Wiki)
                                              │

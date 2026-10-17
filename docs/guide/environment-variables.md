@@ -97,7 +97,10 @@ All default off; enable with `1`.
 
 ### File-writing traces
 
-These two take a path, not `1`. Setting either to `1` writes a file named `1` in the working directory. Both are off when unset or empty, and both create parent directories.
+The render and memory traces are file sinks.
+These two take a path, not `1`. The observation trace also takes a path.
+Setting any of these to `1` writes a file named `1` in the working directory.
+All are off when unset or empty, and all create parent directories.
 
 | Variable | Contents | Controls |
 | --- | --- | --- |

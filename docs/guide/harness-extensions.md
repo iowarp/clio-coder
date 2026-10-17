@@ -4,7 +4,7 @@ The [component and middleware architecture](../architecture/middleware-and-compo
 
 An extension is Clio code that changes Clio Coder itself. It runs in its own process, declares everything it may do in a manifest, and needs the operator's review of that declaration before it installs or updates. An extension can observe the session, gate tool calls, serve model-callable tools, keep state, draw into the terminal, take over a workspace of the screen, and run interviews.
 
-A [plugin](plugins.md) is the other package kind. It is an Agent Plugin with a root `plugin.json` and carries content only: skills, agents, prompt templates and playbooks, with Clio's own content under the Clio namespace. A root `mcp.json` is preserved and reported, and Clio does not execute plugin MCP servers or plugin hooks. Installing a plugin never runs code. A plugin may carry scripts that a skill or playbook runs explicitly, and those stay ordinary files under normal tool safety. Plugins and extensions are separate packages with one manifest, one digest, one state file and one consent each. An extension root never holds a `plugin.json`; the diagnostic tells you to publish the plugin and the extension as two packages.
+A [plugin](plugins.md) is the other package kind. It is an Agent Plugin with a root `plugin.json` and carries content only: skills, agents, prompt templates and playbooks, with Clio's own content under the Clio namespace. A root `mcp.json` can declare stdio servers that launch only after explicit MCP trust; Clio does not execute plugin hooks. Installing a plugin never runs code. A plugin may carry scripts that a skill or playbook runs explicitly, and those stay ordinary files under normal tool safety. Plugins and extensions are separate packages with one manifest, one digest, one state file and one consent each. An extension root never holds a `plugin.json`; the diagnostic tells you to publish the plugin and the extension as two packages.
 
 An extension declares its capabilities in `clio-coder-extension.yaml`, `.yml`, or `.json`. Clio discovers and validates declarations without importing or executing package code.
 
@@ -45,19 +45,37 @@ A project package installs from the repository's own `.clio-coder/extensions/sta
 Until the surface is approved, every project copy is blocked. It contributes no tools, hooks, runtime or UI, and it neither shadows nor suppresses a user package with the same ID, so the user copy keeps loading even when the blocked project copy is disabled. A blocked copy stays visible. `--json` carries `trustBlocked: true` on every project copy, and an enabled, valid, compatible one reads `untrusted` in `extensions list` and carries the warning `project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions`. `extensions run` refuses it with `extension <id> has no eligible operator command '<command>'`.
 
 ```bash
-clio-coder config trust extensions                  # print the captured state file and its SHA-256 digest (read-only)
-clio-coder config trust extensions --hash <sha256>  # approve exactly those bytes
+clio-coder config trust extensions                  # review package identities (read-only)
+clio-coder config trust extensions --hash <sha256>  # approve the reviewed package identities
 clio-coder config trust extensions --revoke         # withdraw the approval
 ```
 
-Approval pins the exact bytes of `state.json`. The file records the content digest of every project package and the loaders reverify each tree against it, so one approval covers exactly the set of packages the operator reviewed. Any change to the file's bytes ends the approval: an install, a `--force` reinstall, an enable, a disable, a remove, or an edit. The surface then reads `changed` and every project package in the workspace stays unloaded until the new bytes are reviewed and approved. The command grammar and output are in [commands and modes](commands-and-modes.md).
+Approval records the reviewed package identities, including package ID, content
+digest, source, origin, trust flag and capability envelope. Reinstalling the same
+identity, disabling or removing a package preserves consent. A changed identity,
+even if only its source changes, or an enabled identity outside the approved set
+needs a new review. Legacy records that lack content
+pins still use approval of the exact state-file bytes. Loaders also reverify
+each installed tree against its recorded digest.
 
-A new approval takes effect at `/extensions reload` or the next start. A revoked or changed approval is treated like a disable: the next tool call fails with the disabled, removed, replaced or changed message, and a runtime loses authority once the change is observed.
+A new approval takes effect at `/extensions reload` or the next start. A revoked
+or changed approval withdraws runtime authority when observed. The next tool
+call reports that the extension was disabled, removed, replaced or changed.
 
-Two cases load project extensions without a `config trust` step:
+An operator install through `extensions install` or the Library can add approval
+when the workspace has no extension state or its existing state is trusted. Only
+records still carrying the content digest that install wrote are approved;
+a concurrent replacement stays unapproved. The direct CLI's success notice is:
 
-- **First install.** When the workspace has no `.clio-coder/extensions/state.json`, `clio-coder extensions install <path> --project` creates it and approves it in the same step, because the operator's own first install is the review. Plain output then adds `This is the workspace's first project extension install, so project extensions are approved for it. Later installs, disables and removes need clio-coder config trust extensions.` With `--json` the line is absent and the approval still applies. No other command self-approves extensions. A project-scope extension import from a share archive (`share import`, `/archive import`) never does, even for the workspace's first project extension.
-- **Task worktrees.** A task worktree that Clio created for a dispatched worker inherits its origin workspace's approval while its `state.json` is byte-identical to the origin's approved file. A hand-made `git worktree`, a worktree whose state differs, and a worktree whose origin approval is revoked or changed read `untrusted` or `changed` like any other workspace. The inheritance rules are in the [safety model](../architecture/safety-model.md).
+```text
+Project extensions were new or already approved here, so your install keeps them approved. Changes made outside your installs need clio-coder config trust extensions.
+```
+
+A share-archive import never approves extensions. A task worktree that Clio
+created can inherit its origin's approval when its enabled identities are
+covered, or when its state file is byte-identical to the approved origin.
+Hand-made worktrees do not inherit that approval. Source:
+`src/core/workspace-trust.ts` and `src/cli/extensions.ts`.
 
 ## Capability envelope
 
@@ -76,6 +94,13 @@ Bytes can change freely inside an approved envelope, which is what lets a dev fo
 ## Runtime api 2
 
 An api 2 runtime is a disposable Node child per extension. Clio starts it from a verified private copy of the package, talks to it over a bounded message protocol, and disposes it on reload. Nothing from the host crosses into it as a live object. The runtime never sees the conversation unless the manifest declares `access`, and what it draws is for the operator and never enters the model's context.
+
+API 2 hooks, runtime tools, observations and maintenance ticks run in terminal,
+headless `clio-coder run` and ACP hosts. The dispatching process also hosts
+extensions for `fleet run` and `run --agent`; native workers send their hooked
+tool calls back to that host. Extension runtimes do not start inside workers.
+Workspaces, skins and docks require the terminal. Without an interview channel,
+an interview cancels immediately with reason `headless`.
 
 ```yaml
 id: lab-guard
@@ -138,6 +163,29 @@ The entrypoint is a `.mjs`, `.ts` or `.mts` file inside the package. Clio never 
 | `config` | Up to 24 typed fields `{ key, type, default, description, options }`, delivered as `ctx.options` with defaults filled in. |
 
 A hook handler returns `effects` (and optionally UI), never a decision it can force past the safety policy. The effects are `block_tool`, `annotate_tool_result`, `inject_reminder`, `require_tool`, `lock_tools`, `notify_operator`, `protect_path`, `request_continuation`, `rewrite_tool_input` and, at `prompt_submit`, `rewrite_prompt` and `block_prompt`. An effect returned at a point that cannot apply it is refused at load. A rewritten tool input is validated against the tool's schema and classified again, so a hook can narrow or redirect a call and never widen its authority. A hook that misses its deadline or throws follows its declared `onTimeout` or `onError`, and a hook that misses three deadlines in a row is disabled for the rest of the generation. Declare `block` only for a real gate.
+
+### Tool hooks on dispatched workers
+
+Session `before_tool` and `after_tool` hooks follow native worker dispatches from
+the TUI, ACP, `fleet run` and `run --agent`. A missing hook answer uses the
+stricter of the hook's error and timeout policies. A blocking tool hook refuses
+CLI runtimes and ACP delegation because those transports cannot carry the hook.
+`fleet run` checks every step's route before running any step.
+
+Hook tool selectors can match an MCP family with a trailing `*`, for example
+`mcp_slurm__*`. With `tool-args` access, file landings include the resolved path
+after symlink resolution, and dispatch landings include the workers to start.
+A read-only recipe's workers have no write roots in those landings.
+
+A worker carrying these hooks needs WorkerSpec version 9. A hook-free spec uses
+version 8. An older node that rejects the spec version is classified as build
+skew and can fail over. Source: `src/worker/spec-contract.ts` and
+`src/domains/dispatch/extension.ts`.
+
+`clio-coder context wiki` and `context init` also host their own extensions.
+When that host cannot start and a blocking hook applies, dispatch is refused;
+`context init` can fall back to its heuristic generator. Source:
+`src/cli/wiki-generate.ts` and `src/cli/bootstrap-generate.ts`.
 
 ### Tools, commands and actions
 
@@ -308,7 +356,7 @@ clio-coder extensions disable <id> [--user|--project] [--json]
 clio-coder extensions remove <id> [--user|--project] [--json]
 ```
 
-`clio-coder ext` is an alias. `install` defaults to user scope. `enable`, `disable`, and `remove` act on the project copy when one exists and otherwise on the user copy; `--user` or `--project` selects exactly that copy. `list` hides shadowed entries unless `--all` is given, while disabled, untrusted, invalid, and incompatible packages stay visible. The state column reads `eligible`, `inactive`, `disabled`, `untrusted`, `shadowed:<scope>`, `incompatible`, or `invalid`. `untrusted` marks an enabled, valid, compatible project copy in a workspace whose project extensions are not approved. The first `install --project` into a workspace with no project extension state also approves it; see [Workspace trust for project extensions](#workspace-trust-for-project-extensions). `install` refuses an existing ID without `--force` and enables the installed package. `discover` inspects a path or a directory of packages without installing and exits 1 when any candidate is invalid. A bare `clio-coder extensions` or a usage error exits 2, and error diagnostics exit 1. Updating an installed extension from the Library is `clio-coder library update extension:<name>`, which reviews the envelope growth first.
+`clio-coder ext` is an alias. `install` defaults to user scope. `enable`, `disable`, and `remove` act on the project copy when one exists and otherwise on the user copy; `--user` or `--project` selects exactly that copy. `list` hides shadowed entries unless `--all` is given, while disabled, untrusted, invalid, and incompatible packages stay visible. The state column reads `eligible`, `inactive`, `disabled`, `untrusted`, `shadowed:<scope>`, `incompatible`, or `invalid`. `untrusted` marks an enabled, valid, compatible project copy in a workspace whose project extensions are not approved. An operator `install --project` into new or already trusted project state can approve the identities it writes; see [Workspace trust for project extensions](#workspace-trust-for-project-extensions). `install` refuses an existing ID without `--force` and enables the installed package. `discover` inspects a path or a directory of packages without installing and exits 1 when any candidate is invalid. A bare `clio-coder extensions` or a usage error exits 2, and error diagnostics exit 1. Updating an installed extension from the Library is `clio-coder library update extension:<name>`, which reviews the envelope growth first.
 
 Inside a session, `/extensions` opens the extension reference with each package's state, generation, failures, commands, current status and confinement. `/extensions reload` rebuilds the installed set (see below). `/extensions dev [folder]` loads a folder under development, `/extensions mute <id>` silences an extension for this session, and `/extensions unmute <id>` restores it. Dev and mute are terminal-only.
 
@@ -353,13 +401,23 @@ clio-coder extensions run lab-status dashboard
 clio-coder extensions run lab-status dashboard --json -- /path/to/local-record.json
 ```
 
-In a workspace with no project extension state, the first `install --project` also approves project extensions for it. Every later project install, enable, disable or remove changes the state file and needs `clio-coder config trust extensions` before the project packages load again.
+An operator `install --project` can approve the identities it wrote into new or
+already trusted project state. Disabling or removing an approved identity
+preserves consent. See [project extension trust](#workspace-trust-for-project-extensions).
 
 Inside an interactive session, invoke `/ext:lab-status:dashboard` or append a local JSON filename. Browse `/extensions` and use `/extensions reload` after a reviewed reinstall or enable. `/library reload` refreshes plugin resources independently and never loads runtime code.
 
 Canonical commands use `/ext:<extension-id>:<command>`. Existing extension IDs are preserved, including dots and underscores. Local command names start with a lowercase letter and contain lowercase letters, digits, underscores or hyphens (api 1 allows only underscores). There are no short aliases. Built-ins retain ownership; an existing prompt with the same canonical spelling remains a prompt and disables that extension command with a conflict diagnostic. This includes unavailable and display-only prompts. Completion and dispatch share that collision projection. Avoid `ext:` when authoring new prompt names. Unknown canonical commands error; escaped `\/ext:...` remains ordinary model text. The one exception is a paired extension's `replaces: prompt` command, which also answers `/<plugin>:<name>`.
 
-`extensions run` is the explicit headless operator path. It accepts only `--json` and the `--` argument separator, so `--user`, `--project`, `--force` and `--all` exit 2. It starts only the selected installed runtime, supplies `sessionId: null`, sends no synthetic session observation, prints one fallback or JSON result (`extensionId`, `command`, `generation`, `provenance`, `output`), then disposes the runtime. SIGINT and SIGTERM cancel it. A CLI invocation does not reload any other running session. Ordinary `clio-coder run`, ACP sessions and native workers do not start runtimes. They retain existing admitted command tools; a slash token is not permission to run an extension in a worker.
+`extensions run` is the headless operator path for invoking one extension command.
+It accepts only `--json` and the `--` argument separator, so `--user`, `--project`,
+`--force` and `--all` exit 2. It starts only the selected installed runtime,
+supplies `sessionId: null`, sends no synthetic session observation, prints one
+fallback or JSON result (`extensionId`, `command`, `generation`, `provenance`,
+`output`), then disposes the runtime. SIGINT and SIGTERM cancel it. A CLI invocation
+does not reload another running session. Ordinary `clio-coder run` and ACP host
+their own runtimes. Native workers use admitted tools and send hooked calls to
+the dispatching host; a slash token does not invoke an extension command there.
 
 Installation eligibility, extension snapshot and hook generation, runtime readiness and model tool schemas are separate facts:
 

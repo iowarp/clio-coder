@@ -1,7 +1,6 @@
 # Typed Dispatch Intent: Migration and Refusal Policy
 
-Typed dispatch intent is the structured declaration of what a dispatched worker
-may read, may write, is expected to produce, and must verify. When supplied, it provides structured scope instead of inferring scope from
+Typed dispatch intent declares a worker's context paths, write boundary, expected outputs and host verification requirements. Read roots select context and project rules; they do not grant extra filesystem read access. When supplied, it provides structured scope instead of inferring scope from
 optional `writeRoots` and path-like tokens in task and briefing prose.
 
 This page is the migration contract. It names every dispatch producer and every
@@ -186,7 +185,7 @@ inference path, whose malformed-path errors remain terminal.
 | **`clio-coder run --agent`** | [run.ts](../../src/cli/run.ts) | **None** | Legacy inference | Legacy inference errors only |
 | **`clio-coder context wiki`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, write only the wiki staging directory. It also sets the matching legacy `writeRoots` | Not applicable | All codes |
 | **`clio-coder context init`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, no write roots | Not applicable | All codes |
-| **Interactive slash commands, overlays, watchdog** | `src/interactive/` | **None** | Legacy inference | Legacy inference errors only |
+| **Session slash commands, overlays, watchdog** | `src/session-control/`, `src/interactive/` | **None** | Legacy inference | Legacy inference errors only |
 
 "All codes" means every terminal code in section 5 that can apply to the row's
 shape. "Legacy inference errors only" means the row cannot declare intent, so
@@ -203,8 +202,8 @@ only malformed or absolute prose-path inference can refuse it.
 | **Run Receipt** | `20` | `intent` inside the integrity digest, plus optional legacy `pathScope` | **Refused, never migrated.** A receipt below v20 is reported as retired: intact, but never read as evidence. |
 | **`ResolvedDispatchPlanArtifact`** | `3` | `intent` and `resolvedVerification` per task | **Refused, never migrated.** `resolvedDispatchPlanFromArgs` returns `null` for any version but 3, and a task whose `intent` fails `isDispatchIntent` invalidates the whole artifact. The call falls back to unresolved admission rather than executing a half-understood plan. |
 | **Dispatch plan approval text and hash** | Rendered, hashed | `intent_sha256` for a declared task; the full inferred scope table for a legacy task | Not persisted across versions. The hash binds the exact rendering an operator approved. |
-| **Worker Spec** | `8` | **No.** Carries the *resolved* `writeRoots`, not the declaration | Fail-closed preflight rejection. Deliberate: a worker receives an enforced boundary, never a statement of intent it could reinterpret. |
-| **Execution Plan** | `4` | **No.** Carries per-step `writes` | Preflight rejects unsupported plan versions. Intent is built from `writes` at request construction, so the plan hash is unchanged by this. |
+| **Worker Spec** | `8` without extension hooks; `9` with hooks | **No.** Carries the *resolved* `writeRoots`, not the declaration | Worker reads v8 and v9; v8 cannot carry hooks. Unsupported versions are refused. A worker receives an enforced boundary, never a statement of intent it could reinterpret. |
+| **Execution Plan** | `4` | **No.** Carries per-step `writes` | The compiler stamps v4; there is no execution-plan deserializer. Intent is built from `writes` at request construction, so this derivation does not change the plan hash. |
 | **Playbook** | `1..5` | **No.** v4+ carries per-step `writes:` | Reader refuses playbooks whose version features it does not support. A pre-v4 playbook declares nothing and stays on inference. |
 | **Fleet Run Record** | `1` | **No** | Resume refuses a changed plan hash. Adding intent to steps does not change the hash, so existing records stay resumable. |
 | **Durable Assignment Store** | `1` | **No** | Unsupported or unreadable store reads as empty. |

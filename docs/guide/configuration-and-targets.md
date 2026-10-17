@@ -17,6 +17,10 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 
 ## Directory locations
 
+### Where does settings.yaml live?
+
+User `settings.yaml` lives in the config directory; run `clio-coder paths --json` to find its location on this machine.
+
 `clio-coder paths --json` prints the resolved config, data, state, and cache directories. `CLIO_CODER_HOME` sets a shared root; `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, and `CLIO_CODER_CACHE_DIR` override individual roots. See the [environment reference](environment-variables.md) and [directory resolver](../../src/core/xdg.ts).
 
 User settings are stored at `<configDir>/settings.yaml`. Project layers are `.clio-coder/settings.yaml` and `.clio-coder/settings.local.yaml`. Later layers win: built-in defaults, then the user file, then the project file, then the local file, then CLI flags.
@@ -105,7 +109,7 @@ In the GUI, **Connections → Guided setup** runs the same connection wizard bef
 
 ## Settings inventory
 
-This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation is strict: a path absent from this inventory is rejected, including a retired version-1 path. `clio-coder upgrade` performs the one-time v1-to-v2 rename before configuration-domain load and keeps the original as the sibling `settings.yaml.v1.bak` backup.
+This inventory lists compiled defaults and selected optional settings in the version-2 schema. Validation is strict, but additional optional fields exist; see [optional keys](configuration-reference.md#optional-keys-with-no-default) and `src/core/config.ts` for the accepted schema. Retired paths are rejected or dropped as described below. `clio-coder upgrade` performs the one-time v1-to-v2 rename before configuration-domain load and keeps the original as the sibling `settings.yaml.v1.bak` backup.
 
 "When it applies" follows [`settingsChangeKind`](../../src/domains/config/classify.ts), whose three buckets the [configuration reference](configuration-reference.md#effect-timing) names hot reload, next turn and restart required. **Immediately** is hot reload: a running process observes the value without rebuilding runtime state. **Next turn** and **next dispatch** are the next-turn bucket, and current work finishes on the old value. **Next session** marks routing defaults copied into session-owned state at launch, which a later save does not push into a running session. **Restart** means process or pane-host setup must be rebuilt.
 
@@ -226,7 +230,7 @@ Configure `context.memory.target` and `context.memory.model` to give memory a de
 
 ### System One
 
-System One is experimental and off by default; its keys and sites may change between releases, and nothing waits on a decision engine's answer. `systemOne.engines` maps a name you choose to `{ kind, target, model?, mode?, profile? }`, where `kind` is `systemone` or `llm`, `target` is a `targets[].id`, `mode` applies only to `llm` and `profile` (the served model's capability profile, such as `julia-1`) only to `systemone`. `systemOne.sites` binds a site (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`, `steer`) to an engine name, or to `{ engine, timeoutMs?, tasks? }`, where `tasks` routes one of the site's decision tasks to another declared engine. A site with no entry is off. `systemOne.cuts` holds per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. The [System One guide](system-one.md) explains each key and which tier of engine suits which site, and `systemOne.sites.consult` needs a restart because the `consult` tool is registered at startup. `fleet.speculativeDispatch` is experimental too: it holds the worker a fitted `turn` reading predicts.
+System One is experimental and off by default; its keys and sites may change between releases, and automatic sites do not wait on a decision engine's answer. Explicit consult and draft judging can wait up to their deadlines. `systemOne.engines` maps a name you choose to `{ kind, target, model?, mode?, profile? }`, where `kind` is `systemone` or `llm`, `target` is a `targets[].id`, `mode` applies only to `llm` and `profile` (the served model's capability profile, such as `julia-1`) only to `systemone`. `systemOne.sites` binds a site (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`, `steer`) to an engine name, or to `{ engine, timeoutMs?, tasks? }`, where `tasks` routes one of the site's decision tasks to another declared engine. A site with no entry is off. `systemOne.cuts` holds per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. The [System One guide](system-one.md) explains each key and which tier of engine suits which site, and `systemOne.sites.consult` needs a restart because the `consult` tool is registered at startup. `fleet.speculativeDispatch` is experimental too: it holds the worker a fitted `turn` reading predicts.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
@@ -268,7 +272,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `interface.smoothStreaming` | `auto` | immediately |
 | `interface.exitSummary` | `auto` | immediately, at the next exit |
 | `interface.desktopNotifications` | `false` | next turn |
-| `interface.panes.enabled` | `off` | restart |
+| `interface.panes.enabled` | `embedded` | restart; bare Clio Coder can offer to open a pane host, while `auto` only joins one already running |
 | `interface.panes.notifications` | `failures` | immediately |
 | `interface.panes.layout` | `off` | restart |
 | `interface.panes.workers.ratio` | `0.34` | immediately on the next workers dock open |
@@ -305,6 +309,10 @@ Renamed version-1 paths and retired keys, including the version-2 keys `fleet.de
 
 ## Configure targets
 
+### What is a target?
+
+A target is a named connection to a model provider or server. It combines a runtime, endpoint and authentication with model defaults; a model ID alone does not describe that connection.
+
 In the TUI, open `/settings connections` (or `/settings targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
 Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
@@ -339,7 +347,7 @@ for the Sophia and Metis URLs and model IDs.
 | `clio-coder targets [--json] [--target <id>]` | List configured targets and status, or only one target. |
 | `clio-coder targets --probe` | Probe configured endpoints and refresh discovery. With `--target <id>` it probes only that target. |
 | `clio-coder targets add` | Run target setup. |
-| `clio-coder targets use <id>` | Set the chat target. Optional `--model`, `--orchestrator-model`, `--background-model`, `--fleet-target` and `--fleet-model` also set those routes. |
+| `clio-coder targets use <id>` | Without role flags, set chat and fleet to the target default or shared `--model`; preserve memory. With `--orchestrator-model`, `--background-model`, `--fleet-target` or `--fleet-model`, change only the named roles. `--model` supplies a fallback only for a selected role that needs one. See [command contracts](commands-and-modes.md#cli-commands). |
 | `clio-coder targets fleet [--json]` | Show the worker (fleet) routing. Alias `workers`. |
 | `clio-coder targets profile <subcommand>` | Use `list`, `set <name> <id> [--model] [--thinking]`, `remove <name> [--force]`, `rename`, `bind <agentId> <profileName>`, `unbind <agentId>`, or `bindings` for worker routes and agent bindings. Alias `worker`. |
 | `clio-coder targets remove <id>`, `rename <old> <new>`, `convert <id> --runtime <runtimeId>` | Maintain target entries. |
@@ -529,7 +537,24 @@ Model-family quirks belong to the local model catalog, not the target descriptor
 
 ## Model listing and refresh
 
+To refresh the models for a subscription or provider, run `clio-coder models --target <id>` without `--offline`. Live model discovery depends on the target's runtime; a fallback list is labeled as cached or catalog data.
+
 Use `clio-coder models [search] [--target <id>] [--json] [--offline]` to inspect configured, discovered, and catalog models. The optional positional filters rows by a search term, `--json` is available for scripts, `--offline` skips live probing and uses cached, configured and catalog hints, and `--target` limits the listing to one target. Live probing is the default. A target whose provider lists models live is asked; when it cannot be asked, the list is the cached list or the provider catalog with a note saying why. The model-list command is implemented in [`src/cli/models.ts`](../../src/cli/models.ts), and the discovery contract is in the [model catalog](../architecture/model-catalog.md).
+
+## gpt-oss tool turns and reasoning replay
+
+For a route resolved to the Harmony response parser, including gpt-oss,
+Clio preserves reasoning on replayed tool turns. When an assistant turn has
+reasoning, text and tool calls together, the outgoing request joins the text
+into the reasoning field and sends a single analysis with the tool calls.
+This avoids `Cannot pass both content and thinking in an assistant message with tool calls`
+from the gpt-oss chat template. The conversion applies to the request;
+the saved transcript keeps its original blocks. There is no operator setting
+for it (`src/engine/apis/openai-completions.ts`).
+
+## Thinking levels for out-of-turn model calls
+
+Clio supplies a thinking choice for model calls outside the main conversation instead of inferring one from whether the model supports reasoning. Memory retention requests `off`, independently of `chat.thinkingLevel` (whose default is `low`). Compaction also requests thinking off through the simple stream path. These choices bound auxiliary work without changing the session's saved thinking level. A model may still produce reasoning despite an off request; memory keeps text blocks from the response and accounts for reported usage. See [ai.ts](../../src/engine/ai.ts), the [memory caller](../../src/entry/orchestrator.ts) and [compaction](../../src/domains/session/compaction/compact.ts).
 
 ## Built-in runtimes
 
@@ -557,6 +582,10 @@ Hidden registrations stay resolvable by id: `llamacpp-anthropic`, `llamacpp-comp
 
 `auth login` also accepts `--api-key <value>`. Prefer `clio-coder configure --api-key-env <VAR>` (the target's `auth.apiKeyEnvVar`): Clio reads the variable when making a request and stores no key. Stored API keys and OAuth credentials live in `credentials.yaml` in the config directory with mode `0600`, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/index.ts).
 
+The global `clio-coder --api-key <key>` override also satisfies an OAuth
+target for that invocation. It is scoped to the active target and does not
+replace the saved login (`src/domains/providers/auth/storage.ts`).
+
 For one request, Clio resolves a credential in this order: the per-process API key override that `--api-key` installs for the active target; a stored credential for the target's provider id (an API key, or an OAuth login); then the environment, where the target's `auth.apiKeyEnvVar` or else the runtime's own variable is read first and the provider's known variables follow. The provider id is the target's `auth.oauthProfile` or `auth.apiKeyRef`, else the runtime's OAuth provider id, else the runtime id. A stored OAuth login is used as is while it is unexpired. Once its `expires` time passes, Clio refreshes it under the credential file lock and writes the new tokens back before using them. A refresh that fails falls back to a re-read of the store and uses the stored token only if it is still valid.
 
 Login depends on the runtime's auth method. An `api-key` runtime prompts for the key, or takes `--api-key`, and stores it in `credentials.yaml` with a plaintext warning. An `oauth` runtime prints its sign-in URL and waits for the browser callback; if the callback has not arrived after 10 seconds, a prompt appears for the verification code or redirect URL. The `alcf` Globus flow has no callback server and always ends with a pasted code. The `aws-sdk`, `claude-cli` and `none` methods do not support `auth login`: `bedrock` uses the AWS SDK's own credentials, `claude-code` and `claude-sdk` use the installed Claude CLI's login, `ollama` needs no credential, and the delegation CLIs keep their own login. `auth status` reports each of them.
@@ -568,6 +597,8 @@ OAuth credential storage and refresh stay Clio Coder's own. [`src/engine/oauth.t
 OAuth providers, supported worker runtimes, and external-agent delegation have different runtime roles. `openai-codex` and `anthropic-max` are HTTP chat runtimes behind a subscription login. `claude-code`, `claude-sdk` and the `*-cli` runtimes are worker-only and use the installed tool's own login. `auth status` shows which credential source answers for each. Use [Interop](interop.md) for detected coding-agent peers. Runtime descriptors in [`src/domains/providers/runtimes/`](../../src/domains/providers/runtimes/builtins.ts) define their auth method and whether they serve chat or dispatch.
 
 ## Troubleshooting checklist
+
+If your provider gives a 401 authentication error, check the target's credentials with `clio-coder auth status <target-or-runtime>`. Use `clio-coder auth login <target-or-runtime>` to sign in again, or correct the API-key environment variable named by the target. Then check reachability and the model list:
 
     clio-coder doctor --json
     clio-coder targets --probe

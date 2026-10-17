@@ -15,7 +15,7 @@ The bundled index makes complete packages available without installing them. An 
 
 `/skill <name>` for a skill that is not installed but has an index entry asks the operator whether to install it: "Install and run" (user scope), "Install for this project and run", or "Cancel". An accepted choice installs through the library installer, reloads resources, and runs the skill. A name with no installed or indexed skill reports that no local marketplace entry is available.
 
-The project-scope choice does not approve workspace trust, and neither does the marketplace question below. A skill installed into a project this way loads only while the project's `.clio-coder/plugins/state.json` is approved, which `clio-coder library install <ref> --project` does for the workspace's first project install and `clio-coder config trust plugins` does afterwards. See [workspace trust for project packages](resource-library.md#workspace-trust-for-project-packages).
+The project-scope choice does not approve workspace trust, and neither does the marketplace question below. A skill installed into a project this way loads only while the project's `.clio-coder/plugins/state.json` is approved, which an operator `clio-coder library install <ref> --project` can preserve for new or already trusted state. An unapproved identity needs `clio-coder config trust plugins`. See [workspace trust for project packages](resource-library.md#workspace-trust-for-project-packages).
 
 ## Operator ownership of installed skills
 

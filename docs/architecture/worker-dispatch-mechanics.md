@@ -26,7 +26,7 @@ When the orchestrator dispatches a task to a fleet agent (such as via the `dispa
 2. **Environment and Process Group:**
    The child inherits the orchestrator's environment plus `AI_AGENT=clio-coder`, which marks the process as agent-driven for developer tools. The entry also sets `CLIO_CODER_WORKER_RUN=1` for itself and every command its tools spawn, so a skill install can record that a worker performed it. It is spawned detached with piped `stdin`, `stdout`, and `stderr`, and leads its own process group so abort escalation reaches the descendants a runtime spawned. Workers are non-interactive: they never mount TUI elements.
 3. **Spec Injection & Attestation Handshake:**
-   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. The worker accepts only `specVersion` equal to `WORKER_SPEC_VERSION` (currently `8`); any other version is a fatal spec rejection and the process exits `2`. Before reaching a model, every worker announces its attestation on the structured stderr control lane (`@clio-control/1 ` prefix): protocol version (`WORKER_PROTOCOL_VERSION = 1`), spec version, process ID, process group ID (or null), host, settings fingerprint, worker-computed spec digest (`specDigest`), runtime ID, target ID, endpoint identity hash (`endpointIdentityHash`), wire model ID, effective tool signature, and bounded node resource facts (labels, CPU count, total memory, free memory, GPU count, VRAM, and resident models). The orchestrator compares each field against the approved plan and terminates a drifting peer with `SIGKILL` to its process group instead of running it. Bulk NDJSON on `stdout` is accepted only once that attestation verifies. Stdout and stderr are separate pipes with no ordering guarantee, so bulk frames that arrive first are held. If no announce arrives within 2 seconds of the first held frame, its process group is killed. A peer that times out or exits without announcing is treated as unattested and its held frames are discarded.
+   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. The worker reads `WORKER_SPEC_VERSIONS = [8, 9]`. The dispatcher emits v8 for hook-free specs and v9 when `extensionHooks` is present; v8 with hooks and any other version are refused with exit `2`. A version mismatch classifies as `node-version`, which can retry another node under the admitted failover policy. Before reaching a model, every worker announces its attestation on the structured stderr control lane (`@clio-control/1 ` prefix): protocol version (`WORKER_PROTOCOL_VERSION = 1`), spec version, process ID, process group ID (or null), host, settings fingerprint, worker-computed spec digest (`specDigest`), runtime ID, target ID, endpoint identity hash (`endpointIdentityHash`), wire model ID, effective tool signature, and bounded node resource facts (labels, CPU count, total memory, free memory, GPU count, VRAM, and resident models). The orchestrator compares each field against the approved plan and terminates a drifting peer with `SIGKILL` to its process group instead of running it. Bulk NDJSON on `stdout` is accepted only once that attestation verifies. Stdout and stderr are separate pipes with no ordering guarantee, so bulk frames that arrive first are held. If no announce arrives within 2 seconds of the first held frame, its process group is killed. A peer that times out or exits without announcing is treated as unattested and its held frames are discarded.
 
 ```mermaid
 sequenceDiagram
@@ -87,7 +87,7 @@ Clio Coder divides worker output into two isolated streams to protect control si
    Steer receipt is not a control frame. It is the bulk-lane `clio_coder_steer_received` event.
 
 ### 2.2 Worker Input (`stdin`)
-The worker entry mounts a custom stdin demultiplexer (`createWorkerStdinDemux`) that parses lines arriving after the initial `WorkerSpec`. Each line is capped at `WORKER_STDIN_FRAME_MAX_BYTES` (1 MiB), checked before parsing. The orchestrator side caps what it has queued toward a worker at `WORKER_STDIN_QUEUE_MAX_BYTES` (4 MiB). A write past either bound, or to a worker that has exited, fails as a typed channel failure, which classification routes to the node (`node-channel`). The demultiplexer processes three types of JSON messages:
+The worker entry mounts a custom stdin demultiplexer (`createWorkerStdinDemux`) that parses lines arriving after the initial `WorkerSpec`. Each line is capped at `WORKER_STDIN_FRAME_MAX_BYTES` (1 MiB), checked before parsing. The orchestrator side caps what it has queued toward a worker at `WORKER_STDIN_QUEUE_MAX_BYTES` (4 MiB). A write past either bound, or to a worker that has exited, fails as a typed channel failure, which classification routes to the node (`node-channel`), except a lost `hook_result` answer, which the hook's own failure policy handles without reclassifying the whole run as a channel failure. The worker stdin demultiplexer processes five types of JSON messages:
 1. **Steering Commands:**
    `{"type": "steer", "text": "guidance message", "sequence": 1}`
    The parent assigns `sequence`, a positive integer; a steer without one, or with blank text, is dropped. It instructs a live-input HTTP or SDK worker to alter course. Its runtime emits
@@ -101,6 +101,12 @@ The worker entry mounts a custom stdin demultiplexer (`createWorkerStdinDemux`) 
 3. **Ledger Deltas:**
    `{"type": "ledger_delta", "entries": [...]}`
    Pushes newly admitted agent ledger entries into the worker's local mirror, so a ledger read answers without a round trip. The orchestrator replays the board on subscription, and early batches are buffered in order.
+
+4. **Extension hook answers:**
+   `{"type":"hook_result","requestId":"hook-xxx","effects":[]}` resolves a held extension tool hook. The worker emits `clio_coder_hook_request` on stdout; the parent removes it from display/journal consumers, runs the session hook, and returns bounded effects. The worker starts no extension runtime. The contracts are in [protocol.ts](../../src/worker/protocol.ts) and [worker-extension-hooks.ts](../../src/engine/worker-extension-hooks.ts).
+
+5. **Admission verdict:**
+   `{"type":"admit","specDigest":"<sha256>"}` names the spec digest the orchestrator approved after accepting the worker announcement. Before starting the run, the worker checks it against the digest it attested. Only the first admission verdict counts; a missing, malformed or mismatched digest refuses admission.
 
 Any line that is not valid JSON matching these schemas is counted as dropped and does not crash the worker. At exit the worker reports the count on stderr. If stdin closes after the spec arrives, the dispatcher is gone (orchestrator exit, SSH channel drop): the worker emits `cancel_ack`, aborts the run, and force-exits with code `1` after a 5-second grace.
 
@@ -227,7 +233,7 @@ Failover modes are:
 - `approved`: candidates must be exact members of the operator-approved
   agent/target/model/node envelope.
 - `automatic`: typed failures may replace only implicated route parts. Node
-  channel failure excludes the node; target rate limiting excludes the target.
+  channel failure or build-version mismatch excludes the node; target rate limiting excludes the target.
 
 A request with an explicit `target` or `node` pin defaults to `none`. An
 unpinned request defaults to `automatic`. The model-facing `routing.failover`
@@ -238,25 +244,26 @@ infrastructure breakers.
 
 ### 5.1 Failure classification and retries
 
-`classifyFailure` in [failure-classification.ts](../../src/domains/dispatch/failure-classification.ts) maps a finished attempt to one of 14 failure classes. `decideRetry` then turns the class into a retry decision: whether to retry, which route parts to exclude, and a minimum delay. The classifier tests evidence in the order of the table below, and the first match wins.
+`classifyFailure` in [failure-classification.ts](../../src/domains/dispatch/failure-classification.ts) maps a finished attempt to one of 15 failure classes. `decideRetry` then turns the class into a retry decision: whether to retry, which route parts to exclude, and a minimum delay. The classifier tests evidence in the order of the table below, and the first match wins.
 
 | Order | Class | Evidence | Retry | Route parts excluded | Minimum delay |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `operator-cancel` | Operator abort or outcome `canceled`. | No | None | None |
 | 2 | `policy` | Admission, budget, scope or cooldown rejection, or outcome `denied_by_policy`. | No | None | None |
 | 3 | `permission` | Permission failure or worker exit code `3`. | No | None | None |
-| 4 | `deterministic-task` | A typed outcome code that retrying unchanged cannot heal: `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked`. Order 8 also assigns this class from diagnostic text. | No | None | None |
+| 4 | `deterministic-task` | A typed outcome code that retrying unchanged cannot heal: `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked`. Order 9 also assigns this class from diagnostic text. | No | None | None |
 | 5 | `model-quality` | The coordinator's quality or verification gate rejected an otherwise successful completion. | Yes | `agent`, `model`; the decision also carries typed authority to change agent | None |
-| 6 | `node-channel` | A typed control-channel failure, a reconciler stall kill, outcome `stalled` or `spawn_failed`, or process exit code `255` (SSH). | Yes | `node` | None |
-| 7 | `provider-refusal` | Outcome `failed` and the provider's content filter answered. The endpoint is healthy. | Yes | None | None |
-| 8 | `deterministic-task` | Diagnostic text (see below): a rejected response schema, a rejected WorkerSpec, an ACP model admission or HTTP 400 or 404 prompt verdict, a context overflow, or a provider 4xx. | No | None | None |
-| 9 | `target-auth` | Diagnostic matches `401`, `403`, `unauthorized`, `forbidden`, `invalid api key`, or `authentication`. | Yes | `target` | None |
-| 10 | `target-rate-limit` | Diagnostic matches `429`, `rate limit`, or `too many requests`. | Yes | `target` | 1 second |
-| 11 | `node-resource` | Diagnostic matches `vram`, `gpu`, `cuda`, `oom`, or `out of memory`. | Yes | `node` | None |
-| 12 | `capacity` | Diagnostic matches `capacity`, `overloaded`, or `queue full`. | Yes | `node` | None |
-| 13 | `target-transient` | Run timeout or outcome `timed_out`, or diagnostic matches `timeout`, `timed out`, `temporar`, `unavailable`, `500`, `502`, `503`, `504`, `internal server error`, `econnrefused`, `econnreset`, `fetch failed`, or `connection error`. | Yes | `target` | None |
-| 14 | `worker-runtime` | Outcome `failed` that no earlier test matched. | Yes | `runtime` | None |
-| 15 | `internal` | No more specific termination evidence. | Yes | None | None |
+| 6 | `node-version` | WorkerSpec version-skew diagnostic, including the released older wording. The request is valid but this node runs an incompatible build. | Yes | `node` | None |
+| 7 | `node-channel` | A typed control-channel failure, a reconciler stall kill, outcome `stalled` or `spawn_failed`, or process exit code `255` (SSH). | Yes | `node` | None |
+| 8 | `provider-refusal` | Outcome `failed` and the provider's content filter answered. The endpoint is healthy. | Yes | None | None |
+| 9 | `deterministic-task` | Diagnostic text (see below): a rejected response schema, a malformed WorkerSpec other than version skew, an ACP model admission or HTTP 400 or 404 prompt verdict, a context overflow, or a provider 4xx. | No | None | None |
+| 10 | `target-auth` | Diagnostic matches `401`, `403`, `unauthorized`, `forbidden`, `invalid api key`, or `authentication`. | Yes | `target` | None |
+| 11 | `target-rate-limit` | Diagnostic matches `429`, `rate limit`, or `too many requests`. | Yes | `target` | 1 second |
+| 12 | `node-resource` | Diagnostic matches `vram`, `gpu`, `cuda`, `oom`, or `out of memory`. | Yes | `node` | None |
+| 13 | `capacity` | Diagnostic matches `capacity`, `overloaded`, or `queue full`. | Yes | `node` | None |
+| 14 | `target-transient` | Run timeout or outcome `timed_out`, or diagnostic matches `timeout`, `timed out`, `temporar`, `unavailable`, `500`, `502`, `503`, `504`, `internal server error`, `econnrefused`, `econnreset`, `fetch failed`, or `connection error`. | Yes | `target` | None |
+| 15 | `worker-runtime` | Outcome `failed` that no earlier test matched. | Yes | `runtime` | None |
+| 16 | `internal` | No more specific termination evidence. | Yes | None | None |
 
 The diagnostic text is the lower-cased join of the worker's `stderrTail` (last 4096 bytes) and the worker's last provider error message. An ACP delegation passes the provider message in place of stderr, and so does a structured-handoff run, which writes nothing to stderr.
 

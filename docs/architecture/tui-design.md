@@ -32,7 +32,7 @@ Toggle styles with **Alt+O** (`Compact` → `Standard` → `Detailed` → `Compa
 | **Turn Receipt** | None | Outcome + duration | Outcome, duration, calls, tokens, cache, reasoning, prewarm |
 
 - **Preview Budgets**: Counted *after terminal wrapping*, including the `… N rows · /view` overflow hint. Short terminals scale a budget down to `max(2, floor((terminal rows - 8) / 2))` when that is smaller than the style's own limit (`previewBudget` in [preview.ts](../../src/interactive/renderers/preview.ts)).
-- **Worker Inspection**: Full unbounded output is inspectable via `/view transcript`.
+- **Worker Inspection**: Retained transcript and output artifacts are inspectable through `/view`; per-artifact readers apply their own bounds.
 - **Idle Pre-rendering**: Settled entries are pre-rendered into the two alternative styles during idle time, eliminating delay on Alt+O switching.
 
 ---
@@ -264,7 +264,7 @@ While the composer is empty its placeholder follows the mode: `A parked call is 
 
 ### 4.5 Exit Summary
 
-A clean interactive exit prints a branded session summary in the island frame, per `interface.exitSummary` (`full`, `brief`, `off`). Contents, timing and suppression are in [Exit summary](../guide/commands-and-modes.md#exit-summary).
+A clean interactive exit prints a branded session summary in the island frame, per `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`). `auto` follows output detail: compact gives brief, standard gives standard, and detailed gives report. Legacy `full` normalizes to standard ([defaults.ts](../../src/core/defaults.ts)). Contents, timing and suppression are in [Exit summary](../guide/commands-and-modes.md#exit-summary).
 
 ---
 
@@ -301,9 +301,9 @@ Clio cannot inspect how its replies render on the operator's screen. The surface
 
 - **`/settings`**: The settings center is one docked surface over `SETTINGS_AREAS` in [settings-areas.ts](../../src/core/settings-areas.ts): Recent & Pinned, Connections, Models & Inference, Chat, Agents & Delegation, Fleet, Context & Memory, Workspace & Files, Permissions & Limits, Appearance, Integrations, Advanced. Control names and explanations come from the shared core catalog; live profile and node entries and guided actions stay beside their owning controls. Connections offers **Add a target** and an Edit action for URL, runtime and default model; the docked target wizard drives them through `src/cli/configure-host.ts`, loaded only when setup starts. Save writes global target settings; Esc goes back, and Ctrl+C cancels setup without quitting Clio Coder. Browser sign-in stores credentials immediately. Existing explicit routing defaults remain in place. Route model pickers offer **Use connection default**; proactive memory offers **Chat route (no memory model set)**. The [settings walkthrough](../guide/configuration-and-targets.md) explains navigation and the TUI's session/project/global save scopes.
 - **`/config`**: Takes no arguments. It suspends the TUI, runs the full configure wizard on the plain terminal, then resumes, applies the saved routing change to the live session and prints the result as a notice. It refuses while a turn is running.
-- **`/view transcript`**: Inspect complete un-truncated output, tool payloads, and raw responses.
+- **`/view transcript`**: Inspect retained transcript entries and tool results through the artifact providers.
 - **`/usage`**: 5 tabs (Activity, Accounts, Session, Models, Workers) with consumption vs budget percentages. Activity opens first with a Monday-first workspace session heatmap of up to 182 days (fewer weeks on small terminals), working-tree changes loaded asynchronously, session consumption and the first reported plan window. Every tab scrolls within the dock.
-- **`/tasks`**: Interactive task board tracking parent/child subagent execution status.
+- **`/tasks`**: Session task board showing goals and subgoals, status, blockers, evidence and linked worker runs; the project operator inbox remains a separate store ([task-board.ts](../../src/domains/session/task-board.ts)).
 - **`/doctor`**: In-session diagnostic reports with severity-ordered findings.
 - **Key card**: On an empty composer, `?` opens a docked key card, `←` opens Fleet Runs and `↓` opens Tasks. The card is not modal, and the next key dismisses it and is consumed. With a draft, these keys keep their editing meaning.
 

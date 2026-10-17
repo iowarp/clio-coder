@@ -20,18 +20,22 @@ Clio Coder follows one exit code taxonomy across commands. A signal that ends an
 | **`1`** | **Worker information-flow refusal (`information_flow_blocked`)** | Restricted context cannot reach the requested destination under the source policy. The worker run ends with this deterministic outcome code; dispatch never retries or fails over. Review and approve the exact policy bytes when instructed, or start a new session after changing the rule or destination. |
 | **`2`** | **Syntax / Usage Error** | Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, an unknown target, an unknown agent recipe, a refused admission or capability request, or a data mutation SQL keyword passed to `clio-coder trace sql`. In lifecycle commands, also an unsafe directory layout, a flag conflict (`reset --all` with a level, `upgrade --restart` with `--json`), and `reset` or `uninstall` run without a terminal, `--force` or `--dry-run`. |
 | **`3`** | **Worker permission refusal (`permission_required`)** | The exit code of a dispatched native worker that was ended by the permission refusal limit or by `fleet.permissions.mode: fail`. It appears in the receipt as `exit=3`. `clio-coder run --agent` passes receipt exits 0, 2, 3 and 4 to the shell unchanged and maps every other receipt exit to `1`, so the command itself exits `3`. See [Worker permission refusals](#worker-permission-refusals-exit-3). |
-| **`4`** | **Session Cost Ceiling** | `clio-coder run`, with or without `--agent`, stopped because session priced spend reached the ceiling in `safety.limits.sessionCostUsd`. The message reads `budget_ceiling: session priced spend $<spent> reached the $<ceiling> ceiling; raise safety.limits.sessionCostUsd`. Unpriced usage is not counted. The code needs a positive ceiling: `safety.limits.sessionCostUsd: 0` means no session ceiling and never produces it. |
+| **`4`** | **Priced spend ceiling** | The session ceiling (`safety.limits.sessionCostUsd`, default 5 USD) or a main-agent `run --max-cost-usd <n>` cap was reached. A session stop reads `budget_ceiling: session priced spend $<spent> reached the $<ceiling> ceiling; raise safety.limits.sessionCostUsd`. A run-cap stop reads `budget_ceiling: this run's priced spend $<spent> reached its --max-cost-usd $<cap> cap`; amounts use four decimal places. Earlier spend in a continued session does not count against the run cap, but a lower configured session ceiling still holds. Unpriced usage is not counted. Setting `safety.limits.sessionCostUsd: 0` disables the session ceiling; an explicit run cap still holds. `--max-cost-usd` with `--agent` exits 2. |
 | **`124`** | **Run Timeout** | `clio-coder run --timeout <seconds>` elapsed. The run took the coordinated shutdown path a SIGTERM takes: the turn was aborted, a running bash tool's process group was signalled, and the receipt was sealed with outcome `timed_out` and run status `failed`, the status a dispatched worker's `timed_out` receipt seals with. The code matches `timeout(1)`. An external SIGTERM still exits 143 with outcome `canceled`. A timeout that fires during boot, before the turn starts, exits 124 with no receipt. `--timeout` applies to the main agent; with `--agent` it exits 2. |
 
 ---
 
 ## 2. The `--help` Standard
 
-Every subcommand in Clio Coder adheres to the strict `--help` convention:
+Subcommand help follows these conventions, with the headless JSON exception below:
 
 1. **Standard Output**: Usage instructions and options are printed exclusively to `stdout`.
 2. **Zero Exit**: The process exits with code `0`.
 3. **Zero Side Effects**: Running `clio-coder <subcommand> --help` executes no runtime setup, initiates no network probes, and mutates no state files.
+
+`clio-coder run --help --json` and `run --help --json-events <mode>` print help
+to stderr so stdout stays a machine stream. They still exit 0 without starting
+the run (`src/cli/run.ts`).
 
 ### Global vs Subcommand Flag Positioning
 

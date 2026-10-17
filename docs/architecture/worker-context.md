@@ -61,7 +61,7 @@ Non-isolated requests record context mode, parent session/leaf/workspace, snapsh
 
 The host persists the selected seed at `<stateDir>/context-seeds/<contentHash>.json`, using mode 0600 and durable writes. These are exact historical artifacts with the same sensitivity as session history; there is no automatic garbage collection. Native seeds are self-contained over the wire, including for remote workers. Their metadata and contents are validated before model use and are covered by the existing whole-spec attestation.
 
-The worker accepts only its own `WORKER_SPEC_VERSION` (currently **8**), so an older or newer worker exits `2` with a spec rejection instead of silently ignoring inherited history. Rebuild or update remote workers together with the orchestrator. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio Coder's native pressure/recall loop.
+The native worker reads spec versions **8 and 9** (`WORKER_SPEC_VERSIONS` in [spec-contract.ts](../../src/worker/spec-contract.ts)). The dispatcher emits v8 without `extensionHooks` and v9 when that field is present. A v8 spec carrying hooks is refused, as is any unsupported version; the worker exits `2` before model use. A v8 peer can serve hook-free dispatch, while attached session hooks require a v9-capable peer. ACP and other runtime adapters receive bounded splice text but do not implement native history forking or Clio Coder's native pressure/recall loop.
 
 No extra LLM request is needed for capture or selection. Optional splice budgeting uses additive size estimates and one final serialization, rather than serializing the growing packet for every candidate. Stable projections help repeated requests retain an unchanged prefix. Cache reuse depends on the worker system prompt, tool surface, model, and provider cache policy.
 
@@ -72,8 +72,8 @@ settings; it reads layered settings from disk for its own working directory
 (`startWorkerRun`, [worker-runtime.ts](../../src/engine/worker-runtime.ts)). An unsaved `/settings` or
 `/model` override in the parent session therefore does not reach it. Those
 resolved settings also govern the worker's observation caps, guardrails, and working-set
-eviction, not just its output cap. The dispatcher copies only the operator's configured
-model ids and a settings fingerprint onto the spec, so the worker protects the same resident
+eviction, not just its output cap. The dispatcher also carries the operator's configured
+model ids and a settings fingerprint on the spec, so the worker protects the same resident
 models and the orchestrator can refuse a peer admitted under other settings. External vendor runtimes, such as Claude CLI
 or Antigravity delegation, return before this native path and are not governed by
 the native request adapter at all.

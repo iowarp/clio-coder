@@ -2,6 +2,14 @@
 
 The [architecture overview](../architecture/architecture.md) explains the installed runtime and its entry points.
 
+## Install Clio Coder
+
+To install Clio Coder on Linux or macOS, run `curl -fsSL https://coder.iowarp.ai/install.sh | sh`.
+
+On Windows, run `irm https://coder.iowarp.ai/install.ps1 | iex` in PowerShell. Both installers bring a private Node runtime. For npm or source installs, see the methods below.
+
+## Installation methods
+
 Clio Coder installs with `scripts/install.sh` (or `scripts/install.ps1` on Windows), which brings a private Node.js runtime; from the npm registry as
 `@iowarp/clio-coder` using npm, pnpm, or Bun; or from a source checkout using the
 pinned pnpm workflow. The [README quick start](../../README.md#get-started) covers
@@ -179,8 +187,9 @@ parameter, no workspace parameter, no unofficial Node mirror and no forced Node 
 An `install.ps1` failure writes one `[install] error: <message>` line to stderr; an exception that is not an installer refusal also gets the `[install] error:` prefix and appends the failing script position. Run with `-File` or through `install.cmd`, the process then exits 1. Under `irm | iex` the script never calls `exit`, so the caller's PowerShell session stays open and the error line is the only signal.
 
 An exact `--version` or a `--package` records a version pin. A pinned install
-keeps its version across `upgrade`, plain reinstalls and background updates, and
-has background updates off. A new install that carries no pin, no `--no-auto-update` and no
+keeps its version across a bare `upgrade` and background updates, and has
+background updates off. Rerunning the installer without an exact version or
+local package follows the selected channel and clears the pin. A new install that carries no pin, no `--no-auto-update` and no
 `CLIO_CODER_AUTO_UPDATE=0` turns background updates on. A rerun without those
 inputs preserves the recorded choice.
 
@@ -210,12 +219,12 @@ set `CLIO_CODER_BACKGROUND_UPDATE` and `CLIO_CODER_BACKGROUND_CURRENT`; see the
 
 ### Lean install: the Claude Agent SDK
 
-`@anthropic-ai/claude-agent-sdk`, pinned to `0.3.186`, is not a dependency of the
+`@anthropic-ai/claude-agent-sdk`, pinned to `0.3.292`, is not a dependency of the
 published package. The build keeps it as a development dependency for types, and
 `tsup` leaves it external. Its platform package carries a proprietary binary of
 about 224 MB, and only the `claude-sdk` runtime uses it, so Clio Coder provisions
 it as a separate per-user component in
-`<data>/components/claude-agent-sdk/0.3.186/`, where `<data>` is the data root
+`<data>/components/claude-agent-sdk/0.3.292/`, where `<data>` is the data root
 `clio-coder paths` prints. Every install method works this way, and no
 package-manager flag changes it. The component sits outside every version's
 package root, so `upgrade` and background updates keep it. A Clio Coder version
@@ -246,7 +255,7 @@ When none resolves:
   `The Claude SDK runtime needs a separate component. Install it now?`
   The wizard and a dispatch offer **Install now** and **Not now**, and the line prompt
   takes yes or no; each defaults to declining. Accepting runs the Node that runs Clio
-  Coder with its paired npm, `npm install --prefix <staging> --save-exact --omit=dev --include=optional @anthropic-ai/claude-agent-sdk@0.3.186`,
+  Coder with its paired npm, `npm install --prefix <staging> --save-exact --omit=dev --include=optional @anthropic-ai/claude-agent-sdk@0.3.292`,
   in a staging directory beside the component with a 10 minute limit. Clio checks that
   the package exports `query` and renames the staging directory into place. The
   command inherits the environment, so `https_proxy`, `http_proxy`, `no_proxy`,
@@ -255,7 +264,7 @@ When none resolves:
   or a failure.
 - **Any other case.** A headless `clio-coder run --agent`, `clio-coder configure --runtime claude-sdk`
   with flags, and a declined offer have nobody to ask. The run or command fails with
-  `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk@0.3.186. Run: clio-coder tools install claude-sdk. This installs a separate component at <data>/components/claude-agent-sdk/0.3.186; it does not change Clio's installation.`
+  `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk@0.3.292. Run: clio-coder tools install claude-sdk. This installs a separate component at <data>/components/claude-agent-sdk/0.3.292; it does not change Clio's installation.`
   (error code `CLAUDE_AGENT_SDK_UNAVAILABLE`). When `CLIO_CODER_CLAUDE_SDK_DIR` is set
   and holds no SDK, the message names that prefix instead.
 
@@ -386,7 +395,7 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/playbooks/*.md`, `.clio-coder/playbooks/commands.yaml` | Overlay | Playbooks the fleet runs and their command registry. Adds to the builtin playbooks that ship in the package. A workspace that still has `.clio-coder/fleets/` is converted once, the first time Clio opens it. | Yes; builtin playbooks remain. | Kept |
 | `.clio-coder/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio-coder/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
 | `.clio-coder/skills/**` | Overlay | Loose project skills placed here by the operator, trusted as repository-local. Library installations use the managed package store below. | Yes; loose skills must be restored by the operator. | Kept, and named |
-| `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Installed plugin, skill, agent, prompt and playbook packages and their scoped state. `clio-coder library install skill:<name> --project` installs here. They load only while the state file is approved: the operator's first project install approves it, and later changes need `clio-coder config trust plugins` ([resource-library.md](resource-library.md)). The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
+| `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Installed plugin, skill, agent, prompt and playbook packages and their scoped state. `clio-coder library install skill:<name> --project` installs here. They load only while their package identities are approved. An operator install into new or trusted state can approve its written identities; identical reinstalls, disables and removals preserve consent ([resource-library.md](resource-library.md)). The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
 | `CLIO-CODER.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio-coder context init`. | Kept unless `--all` |
 | `.clio-coder/codemap.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio-coder context index`. | **Removed** |
 | `.clio-coder/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
@@ -394,7 +403,7 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/handoffs/` | Runtime state | Session handoff notes. | Yes. | **Removed** |
 | `.clio-coder/wiki/` | Runtime state | The generated Markdown wiki plus `meta.json`. The most expensive artifact here: one model dispatch per page. | Yes, but regenerating costs a full `clio-coder context wiki` run. | Kept, and named |
 | `.clio-coder/wiki-prev/` | Runtime state | Previous wiki, retained for rollback during generation. | Yes. | Kept, not named |
-| `.clio-coder/worktrees/` | Runtime state | Git worktrees for `compete` candidate groups. | Prefer `git worktree remove`; a plain delete leaves git metadata behind. | Kept, not named |
+| `.clio-coder/worktrees/` | Runtime state | Git worktrees for task branches and `compete` candidate groups; `fleet.worktrees.root` can place local task trees elsewhere. | Prefer `git worktree remove`; a plain delete leaves git metadata behind. | Kept, not named |
 
 `~/.config/clio-coder/runtimes/` holds third-party runtime plugins. It lives under the
 user configuration directory, not in any repository.
@@ -503,7 +512,7 @@ clio-coder configure --id claude-sub --runtime anthropic-max --model your-claude
 # Configure Claude Code SDK worker target
 clio-coder configure --id claude-sdk-worker --runtime claude-sdk --model your-claude-model --set-fleet-default
 
-clio-coder targets use claude-sub
+clio-coder targets use claude-sub --orchestrator-model your-claude-model
 clio-coder targets --probe
 clio-coder
 ```
@@ -566,12 +575,13 @@ runtime unless `--refresh-runtime` is given. It does not pass
 `--include-claude-sdk`, and an SDK component already provisioned stays in place; see
 [Lean install](#lean-install-the-claude-agent-sdk).
 
-A version pin stays in force. An install made with an exact `--version` (or
-`-Version`, or a local `--package`) records that pin, and `upgrade` or a plain
-reinstall keeps installing it; `--channel` alone does not clear it. Only an
-explicit channel spec through `--version` (`-Version`) releases a pin: run the
-installer with `--version latest`, `beta` or `dev`, and add
-`--auto-update` (`-AutoUpdate`) to turn background updates back on.
+A bare `upgrade` honors a version pin from an exact installer `--version` or a
+local `--package`. An explicit `clio-coder upgrade --channel latest|beta|dev`
+clears that pin and follows the selected channel. Rerunning the installer with
+no exact version or local package also follows its channel and clears the pin;
+`--version latest|beta|dev` is an explicit way to do so. Add `--auto-update`
+(`-AutoUpdate`) to turn background updates back on when they were disabled.
+Source: `src/cli/upgrade.ts` and `scripts/install.sh`.
 
 On a pinned install, `upgrade` prints `Pinned version: <X>` in place of the
 `Available version` and `Channel` lines, then
@@ -597,8 +607,7 @@ and `Background updates disabled until explicitly enabled`, then notes that sess
 already running keep the old version and that starting `clio-coder` in the project
 and typing `/resume` continues one on the restored version. A failed installer run exits 1 with
 `Rollback failed; the active version is unchanged`. A version pin moves to the
-restored version, so the next `upgrade` or installer run keeps the version you rolled
-back to instead of reinstalling the replaced one, and the second line then ends with
+restored version, so the next bare `upgrade` keeps that version, and the second line then ends with
 `; pinned <version>`. `--rollback` cannot combine with `--post-install`,
 `--refresh-runtime` or `--restart`. A 0.5.9 package installed by this installer has
 no managed lifecycle: update it by rerunning the installer, and roll it back with the
@@ -745,16 +754,26 @@ Bun installs never update in the background; their package manager owns updates.
 
 #### Current migration contract
 
-The source tree registers two migrations in execution order:
+The source tree registers five migrations in execution order
+(`src/domains/lifecycle/migrations/index.ts`):
 
 1. `2026-09-01-settings-v2`
 2. `2026-09-01-retire-panes-knobs`
+3. `2026-10-06-playbooks-and-packages`
+4. `2026-10-07-acp-adapters`
+5. `2026-10-07-claude-subscription`
+
+The package migration converts the playbook layout and repairs bundled package
+installations as described above. The adapter migration updates only the
+unchanged ACP recipes Clio previously offered. The subscription migration moves
+Clio's stored Anthropic OAuth login to `anthropic-max` and updates matching
+subscription targets; Anthropic API keys stay under `anthropic`.
 
 The naming migration `2026-09-01-clio-coder-naming` and the runtime-id
 migrations `2026-08-18-lmstudio-runtime-id` and `2026-09-18-ollama-runtime-id`
 no longer exist. A home that recorded these ids keeps them in the manifest,
-where they stay inert. No migration rewrites a released value, so old settings
-change as follows:
+where they stay inert. The following retired spellings are not rewritten by
+those removed migrations:
 
 - `lifecycle: clio-managed` becomes `clio-coder-managed`, and
   `toolGovernance: clio-policy` becomes `clio-coder-policy`. In the user

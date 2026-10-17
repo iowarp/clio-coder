@@ -4,7 +4,7 @@ System One is an experimental decision layer. Clio Coder asks a fast decision mo
 
 Experimental means that its sites, settings keys and shipped cuts may change between releases. Every surface that shows System One says so: the comment above `systemOne` in the settings file, the `/settings` rows, the GUI's settings group, doctor, the `systemone` CLI help and the approval-card advisory.
 
-It is off until you bind an engine to a site. With nothing bound, Clio Coder's behavior is unchanged. Nothing waits on a decision engine, fitted or not: turn start, tool admission, tool-result delivery, turn settlement and prompt composition never await an answer. Each call runs detached, and its answer is used only if it is already available when a reader looks; otherwise it is only recorded. Every failure of a bound engine (timeout, refusal, unusable reply) leaves the unbound behavior in place. The design contract is in [System One Architecture](../architecture/system-one.md).
+It is off until you bind an engine to a site. With nothing bound, Clio Coder's behavior is unchanged. Automatic sites never wait on a decision engine, fitted or not: turn start, tool admission, tool-result delivery, turn settlement and prompt composition never await an answer. The explicit `consult` tool and draft judging can wait up to their deadlines. Each automatic call runs detached, and its answer is used only if it is already available when a reader looks; otherwise it is only recorded. Every failure of a bound engine (timeout, refusal, unusable reply) leaves the unbound behavior in place. The design contract is in [System One Architecture](../architecture/system-one.md).
 
 ## The ladder
 
@@ -19,21 +19,16 @@ Decision engines come in four tiers. No tier turns on the next one.
 
 A tier 2 model costs no hosted API fee, but it still uses your hardware, and a detached call can compete with the chat model on a shared server. A decision model is small enough to run on a processor the chat model leaves idle, which is what [Placing engines](#placing-engines) is about.
 
-### Tier 2 placements, measured
+### Measure a tier 2 placement
 
-These are research measurements of one checkpoint, the Strands Decider 2B (`strands-decider-2B-hobson-v19`), on one Strix Halo laptop (Ryzen AI Max+ PRO 395, Radeon 8060S iGPU, XDNA2 NPU, 128 GB of unified memory) with Gemma-4-26B resident on the iGPU throughout. Decisions made while Gemma was generating were not measured. They come from a research harness outside this repository, and Clio Coder ships none of these servers and no command that reproduces them. The numbers describe that machine and those inputs. They are not a benchmark.
-
-| Placement | Server | Short state p50 | 1,000-token state p50 | Memory |
-| --- | --- | --- | --- | --- |
-| iGPU | PyTorch 2.9.1 with ROCm 7.2.1, bf16 | 128 to 138 ms | 515 to 523 ms | 4.66 GiB committed GPU memory at peak |
-| NPU | The FastFlowLM engine running the merged torso in Q4_K, with the pointer head on the CPU in numpy | 539 to 553 ms | 1,110 to 1,117 ms | 3.73 GiB working set |
-| CPU | PyTorch on the CPU cores of the same chip, float32 | 683 to 746 ms | 7.8 to 8.4 s | 7.62 GiB resident after load |
-
-Each row is one question (a yes/no, a three-way choice and a three-level score) after two warm-up calls, 20 samples per cell. The short state is 74 to 86 tokens with its question. On the NPU most of a short call is the engine's fixed prefill cost (prefill p50 467 to 484 ms), and the engine answers one question per prefill, so a request with six questions costs six prefills. Against the CPU PyTorch reference, the Q4_K NPU build picked the same top answer for 32 of 33 questions, with a largest probability difference per question of 0.037 at the median and 0.096 at worst.
-
-Through Clio Coder's `systemone` runtime to the iGPU service, a `turn` request with eight questions took 2,250 ms at p50, and every `turn` sample missed that site's 600 ms deadline, so leave `turn` unbound on these placements. The `consult`, `toolCall`, `toolResult` and `turnEnd` sites finished inside their deadlines on every sample.
-
-Each placement reports its own build (the iGPU service reports `...-pytorch2.9.1-rocm7.2.1-bf16`, the NPU server `...-merged-q4k-flm-xdna2`), and cuts are keyed by build. A cut fitted on one placement therefore never applies to another, which is right: Q4_K weights on the NPU do not produce the bf16 numbers.
+Clio Coder ships a client for `POST /v1/systemone`, not an inference server or
+an accelerator scheduler. Configure the server's device outside Clio Coder,
+then measure the whole site's request against its deadline. A short single
+question does not establish that a site's complete question batch will fit.
+`clio-coder doctor` measures passive reachability; the session's System One
+ledger records actual decision latency and outcome. Fit cuts for the exact
+answering build before enabling automatic hints or rankings. Source:
+`src/domains/system-one/runner.ts` and `src/domains/lifecycle/doctor.ts`.
 
 ## Quick start
 
@@ -105,16 +100,20 @@ Then run `clio-coder doctor` and read the `system one (experimental)` rows, or r
 
 Clio Coder does not schedule a decision engine and has no placement setting. The server you run owns its device; Clio sees a URL, a window, a profile and the build the server reports. Placement is therefore a choice you make when you start each server, and naming each target after its placement (`decider-npu`) is what makes the doctor rows read as a map of the machine.
 
-The rule is to put each model on a processor nothing else is using. A turn makes many closed decisions, each one a forward pass of a small model; the chat model makes the open-ended ones. Running both on one accelerator makes them queue behind each other, while a second accelerator that would otherwise sit idle runs the decisions for free.
+Use separate server targets when decision and chat workloads should have separate resources. Clio Coder does not establish processor availability or model fit from the URL, profile or target name.
 
 ### Placing engines on Strix Halo
 
-A Strix Halo machine has three processors on one package: the integrated GPU, the XDNA2 NPU and the CPU cores. All three read the same 128 GB pool, so placing a model moves no weights across a bus, and the budget is the sum of what is resident.
+The following is an example of three externally managed servers named for their
+intended devices. Clio Coder neither starts those servers nor verifies that
+the names match their device placement.
 
-- **iGPU: the chat model.** It needs the bandwidth and the large matrix units. Gemma-4-26B held about 27 GiB of committed GPU memory while the deciders above ran beside it.
-- **NPU: the decider.** It is idle while the iGPU generates. It runs the Strands Decider 2B at about half a second per question, so bind it to sites whose deadlines allow that: `toolResult` (1500 ms), `consult` (3000 ms), `turnEnd` and the approval-card advisory (5000 ms). Leave `turn` (600 ms) unbound on it. Two engine processes serialize on the NPU, so run one decision server there. The research server answers one question per prefill, so the six `turnEnd` questions took 3.6 to 5.0 s; nothing waits on `turnEnd`, so give that binding a longer `timeoutMs` rather than let a reading time out at the 5000 ms default.
-- **CPU: Julia-1, or nothing.** The CPU suits a small encoder such as Julia-1 (144M parameters, 550 MiB in float32), or the rules-only tier of [Proactive Memory](proactive-memory.md), which makes no model calls. The 2B decider on the CPU took 7.8 to 8.4 s at 1,000 tokens, past every site deadline. Julia-1 reads options of at most 48 tokens. When a `julia-1` engine is bound, Clio downloads Julia-1's tokenizer once from the model's repository (about 34 MB, pinned by revision and hash), stores it in its cache, and uses it to count the option tokens. Until that file is cached, or offline, Clio proves option length by bytes instead and abstains on most sites. With it cached, Julia-1 answers `turn`, `toolCall`, `turnEnd` and `consult`. Clio estimates a state at one token per four characters, so a `toolResult` state beyond roughly 3,400 characters exceeds a 1,024-token window and is skipped before sending. `clio-coder doctor` says which mode an engine is in.
-- **When latency matters more than isolation,** the decider on the iGPU is about four times faster than on the NPU for short states and twice as fast at 1,000 tokens, and it stayed resident beside Gemma-4-26B. It then shares the iGPU with the chat model, so a decision and a generation can wait for each other.
+Julia-1 limits options to 48 tokens. When a `julia-1` engine is bound, Clio
+fetches the pinned tokenizer from the model repository and caches it. Until it
+is available, Clio uses conservative byte bounds and can abstain. The
+`strands-decider` profile caps its window at 4096 tokens. Set each target's
+`capabilities.contextWindow` to the window the server actually serves. Source:
+`src/domains/system-one/profiles.ts` and `src/domains/system-one/julia-tokenizer.ts`.
 
 One configuration with all three placements:
 
@@ -161,11 +160,12 @@ systemOne:
 
 Bind any site to any engine; a site's `tasks` map can also send one of its tasks to an engine on another processor. An engine that does not answer leaves its sites behaving as if unbound, so a placement can be stopped without editing settings. `clio-coder doctor` shows one row per engine with its profile, window and round trip.
 
-The NPU numbers above come from a research harness that drives the FastFlowLM engine directly and serves `POST /v1/systemone`; it is not a product and no supported NPU server for decision models exists yet. Any server that puts a decision model on an NPU and speaks the wire is configured the same way: a `systemone` target, the window the checkpoint reads and the profile of the model.
-
 ### Other machines
 
-The same placement logic applies wherever a machine has an accelerator the chat model leaves idle: Apple's Neural Engine beside the GPU that serves the chat model, or a phone's NPU beside its CPU. Nothing in Clio Coder is specific to AMD; what is missing is a server that runs a decision model on that accelerator and answers `POST /v1/systemone`. Once one exists, it is a target with a URL, a window and a profile like any other.
+Any external server that implements the System One wire can be configured as a
+`systemone` target with a URL, serving window and matching capability profile.
+The target configuration provides no device-selection field; device support
+and provisioning belong to that server.
 
 ## What System One is not
 
@@ -200,7 +200,7 @@ The same placement logic applies wherever a machine has an accelerator the chat 
 
 `systemOne.record` turns the local training dataset on. `systemOne.retentionDays` and `systemOne.maxMiB` bound it and must be integers of at least 1. See [The training dataset](#the-training-dataset).
 
-The terminal `/settings` overlay lists the site bindings and the dataset keys under Advanced, Experimental. A site row binds the site to an engine already declared in the settings file and keeps the binding's `timeoutMs` and `tasks`; engines and cuts are edited in the file. The GUI shows only the dataset controls, in its "Decision engines (experimental)" group, with a line saying where the rest is set. A running session re-reads the block on every call, so an edited engine or binding applies to the next question without a restart. The defaults are in `src/core/defaults.ts`, validation is in `src/core/config.ts`, and effect timing is classified in `src/domains/config/classify.ts`.
+The terminal `/settings` overlay lists site bindings and dataset keys under Advanced → Experimental. A site row binds the site to an engine already declared in the settings file and keeps the binding's `timeoutMs` and `tasks`; engines and cuts are edited in the file. `clio-coder configure --settings` and the GUI group System One controls under Fleet → Decision engines (experimental). The GUI shows only the dataset controls, with a line saying where the rest is set. A running session re-reads the block on every call, so an edited engine or binding applies to the next question without a restart. The defaults are in `src/core/defaults.ts`, validation is in `src/core/config.ts`, and effect timing is classified in `src/domains/config/classify.ts`.
 
 ## Engines
 

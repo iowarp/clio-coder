@@ -20,7 +20,7 @@ A session that started without the pane layer has no music session at all. `/mus
 
 ## Installing cliamp
 
-The toolchain registry pins cliamp 1.63.2, with a minimum version of 1.63.2. The `/music` surfaces (`CLIAMP_CONFIG_DIR`, `--playlist`, and the `next`, `load` and `status --json` commands) were exercised on that release and on nothing older.
+The toolchain registry pins cliamp 1.63.2, with a minimum version of 1.63.2. Clio uses `CLIAMP_CONFIG_DIR`, `--playlist`, and the `next`, `load` and `status --json` commands; the toolchain rejects a cliamp version below that floor.
 
 | Route | Command |
 | --- | --- |
@@ -139,7 +139,7 @@ That is, the tool exists only when music could play at startup, so a session whe
 | --- | --- |
 | Parameter | `action`, one of `on`, `off`, `pause`, `next`, `status`. Station changes and showing or hiding the pane are not offered; they stay with the operator through `/music station`, `/music` and `Alt+A`. `on` reveals a hidden pane as part of playing, `next` opens the pane only when it is closed, and `pause` and `status` never open, show or hide it. |
 | Action class | `read`, on the orchestrate plane, executed sequentially so opening, revealing and closing never race the dock slot. It drives only the player in Clio Coder's music dock and touches no workspace, so it needs no approval. |
-| Surface | Direct, not behind the gateway. Results are capped at 2 KiB and a call is not retry-safe. |
+| Surface | Main sessions reach `music` through `gateway(op="call", capability="music", args={action:"status"})`. Its builtin placement is direct on other admitted surfaces. Results are capped at 2 KiB and a call is not retry-safe. |
 | Success | One line, the same text `/music` prints, for example `♫ cliamp Lofi (music pane opened)`, `music paused (cliamp Lofi)` or `music is off`. |
 | Failure | A tool error `music: <reason>` carrying the same reasons as `/music`. |
 

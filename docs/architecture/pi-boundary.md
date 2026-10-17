@@ -181,10 +181,11 @@ else, `src/interactive/**` included, reaches Pi through engine re-exports such a
 (`EngineModel`, `Api`, `Model`) from [types.ts](../../src/engine/types.ts) and [ai.ts](../../src/engine/ai.ts).
 
 [check-boundaries.ts](../../tests/boundaries/check-boundaries.ts) enforces this statically over the import
-graph as rule 1 of seven. The other six cover the worker's domain imports, domain
+graph as rule 1 of nine. The other rules cover the worker's domain imports, domain
 extension access, tools staying independent of `src/interactive/**`, the chat loop
-never importing `src/entry/**`, turn-control purity, and the Stage 0 closure
-(rule 6). [engine-lifecycle.test.ts](../../tests/contracts/engine-lifecycle.test.ts)
+in `src/session-control/` never importing `src/entry/**`, turn-control purity,
+the Stage 0 closure (rule 6), and the ban on both session-control and engine
+imports into terminal rendering (rules 8 and 9). [engine-lifecycle.test.ts](../../tests/contracts/engine-lifecycle.test.ts)
 covers agent-loop ordering, reset, tool-argument normalization, the keybinding
 table and alt-screen render seams; [tool-boundaries.test.ts](../../tests/contracts/tool-boundaries.test.ts)
 covers tool schema admission and execution isolation across runtimes.
@@ -199,7 +200,7 @@ walks the built chunks and holds that closure to 32 chunks, 1,400,000 total byte
 and 350,000 Clio Coder source bytes. It fails only after a full build, so rule 6 guards
 the cause statically: a second, disjoint reacher of a module inside the closure
 makes esbuild split the chunk the closure sits on. Any value importer outside the
-closure and the protected `src/interactive/**` and `src/engine/**` trees reaches
+closure and the protected `src/interactive/**`, `src/session-control/**` and `src/engine/**` trees reaches
 those trees only through a module declared in `STAGE0_SEAMS`, each with its
 architectural reason, and a seam may not lead back into Stage 0 unless a
 composition-root overlap is declared explicitly. Engine modules that the CLI,

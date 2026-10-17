@@ -35,7 +35,7 @@ The root schema permits exactly these keys, and any other key is a validation er
 | `keywords` | Optional array of strings. |
 | `extensions` | Optional map of namespaced objects. Clio Coder reads only the Clio namespace, `ai.iowarp.clio`. |
 
-A root `state.json` is rejected, and `plugin.json` must be a regular file at the package root. A root `mcp.json` is preserved and reported as a warning, because this Clio Coder version does not execute MCP servers.
+A root `state.json` is rejected, and `plugin.json` must be a regular file at the package root. A root `mcp.json` is preserved and reported as a warning. Its stdio servers become plugin-scope declarations after installation and enablement; none launches until the operator runs `clio-coder mcp trust <id>`. See [plugin MCP loading](plugins.md#how-plugin-resources-reach-a-session).
 
 ## The Clio namespace
 
@@ -142,7 +142,7 @@ clio-coder library inspect ./lab-research --json
 
 ## Host projections and runtime capabilities
 
-Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio Coder currently consumes portable skills and the Clio namespace; it preserves MCP files but does not execute MCP servers. Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host runs Clio Coder playbooks.
+Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio Coder consumes portable skills, the Clio namespace and explicitly trusted stdio declarations in a root `mcp.json`. Disabling, removing or changing the installed plugin withdraws those declarations; see [plugin MCP loading](plugins.md#how-plugin-resources-reach-a-session). Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host runs Clio Coder playbooks.
 
 The bundled `materio` plugin includes a Python exporter, `library/plugins/materio/assets/scripts/project_plugin.py`, for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.
 
@@ -176,5 +176,5 @@ Templates are reference models and are excluded from `library/registry.yaml`. Fo
 3. **Author resources**: Single-kind packages expose exactly one public resource file in their declared resource directory. Packages may carry explicitly invoked scripts (for example for offline evaluation or verification tasks); these are declared metadata and are strictly distinct from extensions, which run Clio code with hooks and runtime tools.
 4. **Validate**: Run `clio-coder library validate ./lab-research --json` to verify manifest schemas, resource payloads, reference syntax, and loadability.
 5. **Pin and check**: Maintainers run `pnpm run library:pin` and `pnpm run library:check` to refresh and verify full-tree distribution pins, which also refreshes the normalized skill evidence. The registry files and pin stages are described in [skills-marketplace.md](skills-marketplace.md#registry-and-pins).
-6. **Try in an isolated project**: Register locally with `clio-coder library register ./lab-research --project`. Registration writes identity, version, source, and full-tree SHA-256 into the scoped `library.yaml` without installing. Preview and install with `library install plugin:lab-research --project --dry-run`, then `library install plugin:lab-research --project`. In a project with no `.clio-coder/plugins/state.json`, that first install also approves the project's plugin state. Every later project install, update, enable, disable or remove changes the state file, and the project's packages stay unloaded until `clio-coder config trust plugins --hash <sha256>` approves the new bytes. Test invocation through `/skills`, `/run`, prompt slash commands, or `/fleet run <playbook>`.
-7. **Submit a focused fork PR**: Push your topic branch to your fork and submit a PR against `main`.
+6. **Try in an isolated project**: Register locally with `clio-coder library register ./lab-research --project`. Registration writes identity, version, source, and full-tree SHA-256 into the scoped `library.yaml` without installing. Preview and install with `library install plugin:lab-research --project --dry-run`, then `library install plugin:lab-research --project`. An operator install into new or already trusted project state can approve the identities it wrote. Identical reinstalls, disables and removals preserve consent; an unapproved identity needs `clio-coder config trust plugins`. See [project package trust](resource-library.md#workspace-trust-for-project-packages). Test invocation through `/skills`, `/run`, prompt slash commands, or `/fleet run <playbook>`.
+7. **Submit a focused fork PR**: Push your topic branch to your fork and submit a PR against the current development version branch.

@@ -163,10 +163,11 @@ hash -r
 clio-coder --version
 ```
 
-Use `pnpm run dev` for a watch build. Before handing back a change, run the
-focused test while iterating and `pnpm run ci` for the deterministic repository
-gate. Maintainers use `pnpm run ci:release` to add the distribution and package
-audit.
+Use `pnpm run dev` for a watch build. Choose the smallest development check
+that exercises the change, following the checkout handbook and the authorized
+task scope. `pnpm run ci` and `pnpm run ci:release` both invoke release-candidate
+qualification; reserve that broader work for an explicitly requested release
+or qualification task.
 
 ## Where Clio Coder finds these docs when it is running in someone else's project
 
@@ -176,7 +177,9 @@ in. The root is `CLIO_CODER_PACKAGE_ROOT` when that variable is set, and
 otherwise the nearest directory holding a `package.json` above the running code
 (`resolvePackageRoot()`, [package-root.ts](../src/core/package-root.ts)).
 
-**What is indexed.** `clio_docs` ([docs-engine.ts](../src/tools/context/docs-engine.ts))
+### What clio_docs indexes
+
+`clio_docs` ([docs-engine.ts](../src/tools/context/docs-engine.ts))
 walks `<package root>/docs` for every `.md` file in name order and skips only
 `docs/html`. It then adds the package root's `README.md`, `CHANGELOG.md` and
 `CLIO-CODER.md`, each only when it exists. In an installed package that is this
@@ -190,7 +193,9 @@ sections, one per heading, ranked by BM25 over headings and bodies with Clio Cod
 vocabulary aliases and phrase boosts. The index is deterministic and needs no
 network or embedding service.
 
-**What `docs/corpus.json` does.** It declares the product corpus: roots relative
+### What docs/corpus.json controls
+
+`docs/corpus.json` declares the product corpus: roots relative
 to `docs/` (this map, `architecture/`, `guide/`), the package-root files that
 also count, and the trees left out (`html/**` by retrieval, `wiki/**` by
 packaging). It ships in the package and the installed-package smoke test checks
@@ -198,7 +203,9 @@ that it exists. No retrieval, build or website code reads it. Adding or removing
 a page changes the corpus through the Markdown file alone, and editing
 `corpus.json` does not change what `clio_docs` returns.
 
-**Searching and then reading.** `gateway(op="call", capability="clio_docs", args={query: "…"})`
+### Search and read the installed documentation
+
+`gateway(op="call", capability="clio_docs", args={query: "…"})`
 returns up to five sections by default (`limit` up to twelve). Each hit carries a
 package-relative `file` such as `docs/architecture/safety-model.md`, its heading
 and line range, and `read.args`: the absolute `path`, `offset`, `limit` and
@@ -218,7 +225,9 @@ Do not duplicate the `docs/` segment, and do not resolve a citation against the
 workspace. Omitting `query` lists the corpus (file list, document and section
 counts) instead of searching it.
 
-**The public documentation.** Read the user guides at
+### Read documentation in a browser or offline
+
+Read the user guides at
 <https://coder.iowarp.ai/docs.html>. The browser application's Help entry links to
 that site and identifies the installed `docs/` directory. Use an editor to read
 those Markdown files offline, or ask Clio to retrieve them with `clio_docs`.
@@ -241,7 +250,8 @@ publication ownership.
 
 Use the [contributor guidance](../CONTRIBUTING.md) when updating these pages. In particular:
 
-- Verify commands against the built binary rather than copying an old example.
+- Ground commands in the current source. Exercise the built binary when the
+  task permits a safe, isolated check rather than copying an old example.
 - Use current, canonical settings paths; describe legacy names only in a
   clearly marked migration or historical section.
 - Separate deterministic contracts from model-dependent observations.

@@ -59,7 +59,7 @@ clears the registry's minimum version.
 
 | Program | Role | Pinned | Minimum on `PATH` |
 | --- | --- | --- | --- |
-| herdr | Pane host. | 0.8.2 | 0.7.5 |
+| herdr | Pane host. | 0.9.3 | 0.7.5 |
 | yazi | Files pane engine; the install also provides its `ya` helper. | 26.8.15 | 26.8.15 |
 | cliamp | Music pane. See [Music](music.md). | 1.63.2 | 1.63.2 |
 
@@ -129,6 +129,10 @@ connects, and a ping answered inside one second. The sockets tried, in order,
 are `HERDR_SOCKET_PATH`, `sessions/<HERDR_SESSION>/herdr.sock` and `herdr.sock`, the last two under herdr's config
 directory (`$XDG_CONFIG_HOME/herdr`, else `~/.config/herdr`).
 
+### A second terminal in the same folder attaches to the same session
+
+Opening Clio Coder in the same folder from a second terminal reattaches to that project's existing Herdr workspace when embedded workspaces are enabled. The launcher shares one pane-host session per project directory, so both terminals see the same running Clio session. To start an independent plain-terminal session, use `clio-coder --no-panes`. This reuse is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
+
 ## What doctor says
 
 `clio-coder doctor` never fails an install for missing panes; the rows are
@@ -137,7 +141,7 @@ rows. For example, with panes and the files pane enabled in a plain
 terminal and an outdated files engine, the diagnostics include:
 
 ```text
-OK   external tool herdr    PATH /home/you/.local/bin/herdr (0.8.2, pin 0.8.2)
+OK   external tool herdr    PATH /home/you/.local/bin/herdr (0.9.3, pin 0.9.3)
 WARN external tool yazi     PATH copy /home/you/.local/bin/yazi is 26.1.22, below the 26.8.15 floor, and nothing is vendored (install with `clio-coder tools install yazi`)
 INFO external tool croc     not found (install with `clio-coder tools install croc`)
 INFO external tool cliamp   not found (install with `clio-coder tools install cliamp`)
@@ -145,7 +149,7 @@ INFO files pane profile     /home/you/.cache/clio-coder/yazi/profile (missing); 
 WARN panes mode             none (panes.enabled=auto); HERDR_ENV is not 1, so Clio is not running inside a pane host
 WARN panes socket           no socket answered; tried /home/you/.config/herdr/herdr.sock
 WARN panes protocol         unknown; Clio's optional methods need protocol 17 or newer
-OK   panes binary           PATH /home/you/.local/bin/herdr (0.8.2, pin 0.8.2)
+OK   panes binary           PATH /home/you/.local/bin/herdr (0.9.3, pin 0.9.3)
 OK   panes layout           off
 OK   naming panes           no legacy Clio Coder pane ownership tokens or watch titles found
 OK   panes journal dir      /home/you/.local/state/clio-coder/runs is writable

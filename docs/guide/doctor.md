@@ -100,8 +100,9 @@ Other rows appear when they apply: `validation contract` (valid, absent, Markdow
 ## External tool rows
 
 Doctor reports one `external tool <id>` row for each pinned external program:
-`herdr` (the pane host), `yazi` (the files pane), `croc` (relay file transfer
-between machines) and `cliamp` (the terminal music player behind `/music`). The detail says
+`asciinema` (recording playback), `herdr` (the pane host), `yazi` (the files pane),
+`croc` (relay file transfer between machines) and `cliamp` (the terminal music
+player behind `/music`). The detail says
 where the tool resolves, with a `PATH` copy winning when it meets the pin's minimum version:
 
 | Detail | Meaning |

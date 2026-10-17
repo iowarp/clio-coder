@@ -83,7 +83,25 @@ Use in the TUI:
 
 Arguments follow Pi 1.0 semantics: bash-style quoting splits the text after the command into positional arguments, and the placeholders `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:N}`, and `${@:N:L}` expand in one pass. Bare `$ARGUMENTS` inserts the raw payload byte for byte. The placeholder contract is in [prompt-envelope-and-tools.md](../architecture/prompt-envelope-and-tools.md).
 
-Frontmatter fields are `description`, `argument-hint` (or `argumentHint`), and `display-only` (or `displayOnly`). Templates without frontmatter are accepted; Clio Coder derives a fallback description from the first non-empty line. Invalid frontmatter degrades to a warning rather than failing the whole load. A template whose package reference cannot resolve, or whose file cannot be read, still loads with an empty body and a reason, so invoking it reports the reason instead of "not a command".
+Frontmatter fields are `description`, `argument-hint` (or `argumentHint`),
+`display-only` (or `displayOnly`), `allowed-tools` and `delegated-tools`.
+Templates without frontmatter are accepted; Clio Coder derives a fallback
+description from the first non-empty line. Invalid frontmatter degrades to a
+warning rather than failing the whole load. A template whose package reference
+cannot resolve, or whose file cannot be read, still loads with an empty body
+and a reason, so invoking it reports the reason instead of "not a command".
+
+### Prompt template tool ceilings
+
+A template's `allowed-tools` narrows the expanded turn to the named
+capabilities, and `delegated-tools` narrows the tools its dispatched workers may
+hold. Both accept a comma-separated string or YAML list. Without
+`delegated-tools`, the template's own allowlist is also its delegation ceiling.
+Neither can widen session `--allow-tools` or `--delegate-tools` limits. Core
+names normalize to canonical spelling; MCP and extension capability names keep
+their qualified spelling. Imported prompts and skills retain their narrower
+translated tool lists. See `src/domains/resources/prompts/loader.ts` and
+`src/core/turn-constraints.ts`.
 
 ### Display-only templates
 
@@ -176,13 +194,22 @@ The interactive session and `clio-coder run` accept `--no-skills` to disable dis
 
 ### Agent Skills compatibility
 
-Clio Coder is local-first. Skills run from disk and no chat turn depends on network access. Because the compatibility roots above use the standard `SKILL.md` shape, skills installed by the Skills.sh CLI for other agents are usable directly:
+Clio Coder loads skills from disk. Compatibility roots discover the standard
+`SKILL.md` shape, including skills installed by the Skills.sh CLI for other
+agents:
 
 ```text
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly and emits no telemetry of its own. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are unavailable. Clio Coder's own package discovery and installation go through the library: bare names and `kind:name` references resolve through the library index, and local paths require a valid package containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed directly; remote package installation requires an index entry with version and full-tree SHA-256 pin.
+Loose compatibility skills stay discovery-only until explicitly adopted into
+Clio Coder and admitted by the foreign-resource trust gate. Clio does not call
+Skills.sh during startup or prompt assembly. Clio Coder's own package discovery
+and installation go through the library: bare names and `kind:name` references
+resolve through the library index, and local paths require a valid package
+containing a root `plugin.json`. Raw or unindexed GitHub URLs cannot be installed
+directly; remote package installation requires an index entry with version and
+full-tree SHA-256 pin.
 
 ### Prompt envelope and safety
 
@@ -250,7 +277,7 @@ clio-coder share import project.clio-coder-share.json --force
 
 `share import` also accepts `--user` or `--project` to force prompt, skill, and extension entries into one destination scope; otherwise each entry keeps its archived scope. Agent, playbook, and settings entries always import into the user config directory, and project context files into the working directory. Dry-run imports produce a plan and report conflicts without writing. Without `--force`, conflicting destination files block writes. With `--force`, conflicting files are overwritten, keeping a backup, and supported settings-fragment keys are merged into the current settings file. Every target path must stay inside its import root, including through symbolic links, or the whole import is refused before any write.
 
-Extension entries are grouped into complete packages, staged, strictly validated, and passed through the canonical extension installer. The plan shows each package's capability envelope, and the install applies only that envelope: the digest recorded with the install must match the envelope the plan showed. A successful import therefore records the installed content digest and the envelope digest before the package can contribute resources. Every imported entry leaves a bounded lifecycle receipt with the operation `share-import`, the archive as its source, and the content digest. A destination tree is skipped only when it already matches a verified install record; an unrecorded, drifted, or corrupt destination requires `--force`, which uses the same backup-preserving recovery contract as `extensions install --force`. Invalid archived packages fail preflight before destination writes. An import never approves workspace trust. When it writes `.clio-coder/extensions/state.json` at project scope, including the workspace's first such file, the project's extensions stay blocked until `clio-coder config trust extensions` approves the new bytes. Only `clio-coder extensions install <path> --project` approves a workspace's first project extension install (see [Extensions](harness-extensions.md)).
+Extension entries are grouped into complete packages, staged, strictly validated, and passed through the canonical extension installer. The plan shows each package's capability envelope, and the install applies only that envelope: the digest recorded with the install must match the envelope the plan showed. A successful import therefore records the installed content digest and the envelope digest before the package can contribute resources. Every imported entry leaves a bounded lifecycle receipt with the operation `share-import`, the archive as its source, and the content digest. A destination tree is skipped only when it already matches a verified install record; an unrecorded, drifted, or corrupt destination requires `--force`, which uses the same backup-preserving recovery contract as `extensions install --force`. Invalid archived packages fail preflight before destination writes. An import never approves workspace trust. When it writes `.clio-coder/extensions/state.json` at project scope, including the workspace's first such file, any unapproved imported package identity needs approval with `clio-coder config trust extensions`. An operator `clio-coder extensions install <path> --project` can approve the identities it writes into new or already trusted project state (see [Extensions](harness-extensions.md)).
 
 Archives accept `agent` and `playbook` file entry types alongside prompts and skills. Agent entries must pass the agent parser and policy checks. Playbook entries must pass the playbook parser before any write. An archive exported by an older Clio that says entry type `fleet` reads as a `playbook` entry; new archives write only `playbook`. Dry-run plans report both types by kind.
 

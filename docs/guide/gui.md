@@ -13,6 +13,10 @@ The graphical application is a browser interface to the same Clio Coder runtime 
 
 ## Starting the application
 
+### Start the GUI
+
+Start the GUI with `clio-coder gui --open` to open the graphical app. An existing app window is focused when available. For a persistent Linux login service, use `clio-coder gui background install --open`.
+
 ```text
 clio-coder gui [--path </app/path>] [--open | --no-open] [--foreground]
 clio-coder gui background install [--open] [--port <1-65535>]
@@ -192,7 +196,7 @@ The server binds `127.0.0.1` only; there is no host option.
 ### What the server does not expose
 
 - It never listens on a non-loopback address and has no flag to.
-- It runs no generic command. The CLI children it starts come from a closed table in `apps/clio-coder-gui/server/cli-commands.ts`: `agents --json`, `verifiers inspect --json`, `usage report --repo <workspace> --days 30 --json`, `evidence build --run <id>`, `fleet verify <id> --json`, `targets` list, probe, use and remove, `models --json --offline`, and `targets profile list|bindings --json`. Arguments are validated identifiers, never free text, and children are spawned without a shell.
+- It runs no generic command. The CLI children it starts come from a closed table in `apps/clio-coder-gui/server/cli-commands.ts`: `agents --json`, `verifiers inspect --json`, `usage report --repo <workspace> --days 30 --json`, `evidence build --run <id>`, `fleet verify <id> --json`, `targets` list, probe, use and remove, `auth logout <target>`, `models --json --offline`, and `targets profile list|bindings --json`. Arguments are validated identifiers, never free text, and children are spawned without a shell.
 - It makes no outbound network request of its own. Each server isolate replaces `fetch` with a function that throws. Only the pinned toolchain downloader keeps network access.
 - It serves no file outside the built client directory, resolved through `realpath`.
 - It does not serve documentation. The Help dialog links to the public site and names the installed `docs/` directory, and Clio Coder retrieves those pages with `clio_docs`.
@@ -323,7 +327,7 @@ A terminal fleet frame carries `_meta["clio-coder/receipt"]`, the compact facts 
 
 ### Untrusted project files
 
-Clio ignores project files on a surface the person has not approved by content hash. The surfaces are `settings`, `hooks`, `safety`, `extensions` and `plugins`. The session's start result lists each ignored file, and the application keeps a persistent disclosure above the transcript titled `Project files were ignored`. It says `Clio has not trusted these project files. Review them, then run the named command in this workspace and reopen the task.` Each row names the file, its surface and verdict (`untrusted` or `changed`), and the command the runtime supplied, `clio-coder config trust <surface>`. For `extensions` and `plugins` the file is the project's `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`, shown as an absolute path. The command is a read-only review; it prints the exact `--hash` form that approves the bytes it showed. The notice reflects trust when the session started or last resumed, so it stays until the task is reopened after the approval. See [Commands and Modes](commands-and-modes.md) for the trust commands.
+Clio ignores project surfaces the operator has not approved. Settings, hooks and safety use exact file bytes; extensions and plugins use installed package identities. The surfaces are `settings`, `hooks`, `safety`, `extensions` and `plugins`. The session's start result lists each ignored file, and the application keeps a persistent disclosure above the transcript titled `Project files were ignored`. It says `Clio has not trusted these project files. Review them, then run the named command in this workspace and reopen the task.` Each row names the file, its surface and verdict (`untrusted` or `changed`), and the command the runtime supplied, `clio-coder config trust <surface>`. For `extensions` and `plugins` the file is the project's `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`, shown as an absolute path. The command is a read-only review; it prints the exact `--hash` form that approves the reviewed surface. The notice reflects trust when the session started or last resumed, so it stays until the task is reopened after the approval. See [Commands and Modes](commands-and-modes.md) for the trust commands.
 
 ### Composer and slash palette
 

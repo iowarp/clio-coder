@@ -41,6 +41,10 @@ When the model runs a `clio-coder library` command through its shell, `install`,
 
 ## Browse and install
 
+### Install a plugin
+
+To install a plugin, find its name with `clio-coder library search <query> --kind plugin`, inspect it, then run `clio-coder library install plugin:<name>`. Add `--project` for a project copy; without a scope flag, install uses user scope. `/library` offers the same reviewed install flow in the terminal.
+
 ```bash
 clio-coder library list --json
 clio-coder library search research --kind skill
@@ -76,28 +80,40 @@ Content kinds install beneath `<configDir>/plugins/<name>/` at user scope or `<c
 
 ## Workspace trust for project packages
 
+### Why project plugins are blocked
+
+Project plugins are blocked until their package identities are approved for this workspace. Review with `clio-coder config trust plugins`, then approve the reviewed hash as shown below. Reinstalling a package does not bypass missing workspace trust.
+
 A project copy installs from the repository's own `.clio-coder/plugins/state.json`, so its digest check proves integrity and not consent. Project packages of every kind load only after the operator approves that file for the workspace, which is the `plugins` surface of workspace trust. User packages are unaffected.
 
 Until the surface is approved, every project copy is blocked. Its skills, prompts, agents and playbooks do not load, it does not satisfy another package's dependency, and it neither shadows nor suppresses a user copy of the same package, so the user copy keeps loading even when the blocked project copy is disabled. A blocked copy stays listed. `library list` reads an enabled one `invalid`, the installed-package state of a skill-providing package reads `requires trust`, and `library inspect` shows `trustBlocked: true` with the warning `project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins`.
 
 ```bash
-clio-coder config trust plugins                  # print the captured state file and its SHA-256 digest (read-only)
-clio-coder config trust plugins --hash <sha256>  # approve exactly those bytes
+clio-coder config trust plugins                  # review package identities (read-only)
+clio-coder config trust plugins --hash <sha256>  # approve the reviewed package identities
 clio-coder config trust plugins --revoke         # withdraw the approval
 ```
 
-Approval pins the exact bytes of `state.json`, which records the verified digest of every project package. Any change to those bytes ends the approval: a project install, update, enable, disable or remove, a `--force` reinstall, or an edit. The surface then reads `changed` and every project package in the workspace stays unloaded until the new bytes are reviewed and approved. `/library reload` applies a new approval to a running session. The command grammar and output are in [commands-and-modes.md](commands-and-modes.md), and the trust record is described in the [safety model](../architecture/safety-model.md).
+Approval records package identities, including package ID, content digest, source,
+origin, trust flag, capability envelope and plugin kind. Reinstalling the same
+identity, disabling or removing a package preserves consent. Enabling an
+unapproved identity or changing an identity, even if only its source changes,
+needs approval. Legacy unpinned records still depend on
+approval of exact state-file bytes. `/library reload` applies a new approval to
+a running session. The command grammar is in [commands and modes](commands-and-modes.md#project-trust).
 
-The operator's first project install approves itself. When the workspace has no `.clio-coder/plugins/state.json`, a project-scope install through `clio-coder library install <ref> --project`, the Library overlay (`/library install <ref> --project`, or `i` with the project scope selected) or the GUI's Library page creates that file and approves its bytes in the same step. Nothing is printed about the approval, and it applies only when at least one project-scope install step committed. These paths never approve:
+An operator project install through the CLI, Library overlay or GUI can approve
+the records it wrote when the workspace has no plugin state or its existing
+state is trusted. Each record must still carry the content digest the install
+wrote; a concurrent replacement stays unapproved. An import or `interop adopt`
+never approves workspace trust. A missing-skill install offer also does not
+approve it. A package introduced through those paths into an unapproved
+workspace stays blocked until `clio-coder config trust plugins` approves it.
 
-- `library import`, from the CLI or `/library import`.
-- `interop adopt`.
-- The install offers for a missing skill (`/skill <name>` and the marketplace question), which install through the skill installer.
-- Any project install, update, enable, disable or remove after the first, since each changes the state file.
-
-A package from one of those paths, installed into a project that has no plugin state, is blocked until `clio-coder config trust plugins` approves it.
-
-A task worktree that Clio Coder created for a dispatched worker inherits its origin workspace's approval while its `.clio-coder/plugins/state.json` is byte-identical to the origin's approved file. A hand-made `git worktree`, a worktree whose state differs, and a worktree whose origin approval is revoked or changed do not inherit. The inheritance rules are in the safety model.
+A task worktree that Clio Coder created can inherit its origin's approval when
+its enabled package identities are covered, or its state file is byte-identical
+to the approved origin. Hand-made worktrees do not inherit that approval.
+Source: `src/core/workspace-trust.ts`.
 
 ## Lifecycle
 
@@ -123,7 +139,7 @@ A foreign package (installed by `interop adopt` or `library import`) cannot be u
 
 The command prints the review and then asks `Import this plan? [y/N]` on a terminal. `--yes` approves without asking, and without a terminal or approval nothing is installed. A plan is blocked when requirements are unmet or the package ID already exists in that scope. Apply refuses when the source or the normalized content changed after review. The result reports publication, validation of the installed components, and the trust gate as separate facts: the package is installed with `trust: foreign` and an `import` origin, and the gate `integrations.projectResources.trustProjectImports` decides whether its skills and prompts load. Exit 0 requires a published, valid package with no diagnostics. In a session, `/library import <path-or-url>` opens the same review.
 
-An import never approves workspace trust, including the first import into a workspace. A `--project` import writes `.clio-coder/plugins/state.json`, and the imported package stays blocked until `clio-coder config trust plugins` approves the project's plugin state (see [Workspace trust for project packages](#workspace-trust-for-project-packages)). Both the trust gate above and that approval must pass before a project-scope import loads. A user-scope import needs only the trust gate. `--dry-run` writes nothing and, from a model shell, never asks for confirmation; a real model-run `import` asks like any other library mutation.
+An import never approves workspace trust, including the first import into a workspace. A `--project` import writes `.clio-coder/plugins/state.json`, and an unapproved imported identity stays blocked until `clio-coder config trust plugins` approves the project's package identities (see [Workspace trust for project packages](#workspace-trust-for-project-packages)). Both the trust gate above and that approval must pass before a project-scope import loads. A user-scope import needs only the trust gate. `--dry-run` writes nothing and, from a model shell, never asks for confirmation; a real model-run `import` asks like any other library mutation.
 
 ## One index format
 

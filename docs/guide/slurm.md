@@ -72,20 +72,30 @@ older names the same way, as listed below.
 
 ## How autonomy treats them
 
-An MCP server has a default action class (`read`, `execute`, or `unknown`),
-with optional `toolActionClasses` overrides for named tools. The server's own
-annotations never choose either. A user-scope declaration without an
-`actionClass` gets the class `unknown`, and `unknown` asks for one-shot approval
+An MCP server has a default action class (`read`, `execute`, `destructive` or `unknown`),
+with optional `toolActionClasses` overrides for named tools. Launch trust comes
+first. For a trusted user-scope server with no explicit class, a server's
+`readOnlyHint` or `destructiveHint` supplies an advisory default when no
+Clio-defined tool class applies. A read-only ceiling does not accept a server's
+read-only hint as authority. Only user declarations may set the server-wide
+`actionClass`; project and plugin declarations use the class recorded by operator
+trust as their default. Every declaration scope accepts operator-approved
+`toolActionClasses`; once launch trust is established, a per-tool entry overrides
+the trust-record class in every scope. The entries are covered by the declaration's
+trust digest, so changing them in a project or plugin declaration requires
+re-approval. `unknown` asks for one-shot approval
 in `default`, runs in `yolo`, and is denied on read-only dispatched runs.
+See [MCP configuration](configuration-reference.md).
 
-For a server declared with the id `slurm`, Clio Coder classifies tools by name
-before applying that default, unless `toolActionClasses` names the tool:
+For a trusted user-scope server declared with the id `slurm`, Clio Coder
+classifies tools by name before applying that default, unless
+`toolActionClasses` names the tool:
 
 | Tools | Class | Behavior |
 | --- | --- | --- |
 | `slurm_list`, `slurm_describe`, `slurm_cluster`, and the older `check_job_status`, `list_slurm_jobs`, `get_slurm_info`, `get_job_details`, `get_job_output`, `get_queue_info`, `get_node_info`, `get_allocation_status` | `read` | Run without asking at `default` and `yolo`. Polling a job costs no approval. |
 | `slurm_submit`, `slurm_cancel`, and the older `submit_slurm_job`, `cancel_slurm_job`, `submit_array_job`, `allocate_slurm_nodes`, `deallocate_slurm_nodes` | `execute` | Always ask the operator before they reach the scheduler, at every autonomy level including `yolo`. Approving resumes only that call. |
-| Any other tool name | the server's class | The `toolActionClasses` entry for the tool, else the declared or trusted class (`unknown` for a user declaration with none). |
+| Any other tool name | the server's class | The `toolActionClasses` entry for the tool, else the declared or trusted class, or an advisory annotation for an implicit user class. |
 
 The confirmation is attached to the tool name and does not depend on the class.
 A `toolActionClasses` override or `clio-coder mcp trust slurm --action-class read`
@@ -93,8 +103,8 @@ cannot make a submission or cancellation run unasked. A denied call never
 launches a job. In a headless `clio-coder run` the ask is denied, so a
 submission or cancellation never runs there. A read-only dispatched run denies
 both allocation tools outright and still allows the read tools. In a server
-with a different id none of this applies: every tool takes the `toolActionClasses`
-entry or the server's class.
+with a different id the Slurm name rules do not apply: tools use the normal
+MCP classifier described above.
 
 The server class matters for tool names Clio does not know. A project
 declaration can be trusted with another class:

@@ -2,7 +2,7 @@
 
 The [proactive memory guide](../guide/proactive-memory.md) explains when memory is offered and restored.
 
-Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, and audits. Forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local and evidence-linked, and a record reaches the prompt only after explicit approval. Proactive task memory is a separate tier that runs by default on session task banks, and its model-tier reminders only propose unapproved records. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
+Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, and audits. Forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local and evidence-linked, and only an approved record reaches prompt selection. Approval comes from the operator or the narrow repository-knowledge gate described below. Proactive task memory is a separate tier that runs by default on session task banks, and its model-tier reminders can propose durable records whose approval remains governed separately. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
 
 Source of truth: `src/domains/evidence/`, `src/domains/memory/`, `src/domains/evolution/`, [evidence.ts](../../src/cli/evidence.ts), [memory.ts](../../src/cli/memory.ts), and [evolve.ts](../../src/cli/evolve.ts).
 
@@ -416,7 +416,7 @@ The store is a JSON object `{ "version": 1, "records": [...] }` (`MEMORY_VERSION
 | `list` | Prints the record count, then per record: ID, status (`proposed`, `approved`, `rejected`), scope, confidence, evidence refs, key and lesson. |
 | `propose` | Builds one unapproved record from an evidence bundle and prints it with a `review:` hint. A repeated proposal for the same evidence and scope returns the existing record. |
 | `promote` | Builds unapproved records from a version 2 handoff snapshot. |
-| `approve <id>` | Sets `approved`, stamps `lastVerifiedAt` with the current time and clears `rejectedAt`. Approving an approved record refreshes `lastVerifiedAt`. |
+| `approve <id>` | Sets `approved`, stamps `lastVerifiedAt` with the current time and clears `rejectedAt`. It stamps `approval.by: operator` and clears regressions. Approving an approved record refreshes `lastVerifiedAt`. |
 | `reject <id>` | Clears `approved` and stamps `rejectedAt`. |
 | `prune --stale` | Deletes stale records and prints the count; see [Retention and pruning](#retention-and-pruning). |
 
@@ -448,9 +448,10 @@ stateDiagram-v2
     taskBank --> proposed: /memory selected-entry action
     taskBank --> proposed: model-tier reminder reaches the operator
     redactedHandoff --> proposed: promote --from-handoff
-    proposed --> approved: approve <id>
+    proposed --> approved: operator approve or eligible guardian gate
     proposed --> rejected: reject <id>
     approved --> rejected: reject <id>
+    approved --> proposed: contradiction after guardian approval
     rejected --> approved: approve <id>
     proposed --> pruned: prune --stale after 30 days
     rejected --> pruned: prune --stale after 30 days
@@ -467,11 +468,11 @@ Task-bank promotion is a reviewed export from transient execution memory. The
 `/memory` overlay offers repo and global proposal actions only on selected
 knowledge and procedural rows. Status remains private and cannot enter the
 promotion service. The first global action arms a warning, and the second
-action acknowledges the broader applicability. A successful action writes an
+action acknowledges the broader applicability. A successful overlay action writes an
 unapproved record and names the separate `memory approve` command required to
-make it injectable.
+make it eligible for injection.
 
-A model-tier reminder that reaches the operator also proposes the entries it cited, automatically, as repository-scoped unapproved records. Those cite `session:<sessionId>`; a record promoted from the overlay or a handoff cites `session-<sessionId>`, the ID shape of the session evidence bundle. See [Where what the tier writes ends up](../guide/proactive-memory.md#where-what-the-tier-writes-ends-up). The model tier runs on the active chat route unless `context.memory.target` and `context.memory.model` name a dedicated route, so these reminders and proposals need no extra configuration. `context.memory.enabled: false` stops them.
+A delivered model-tier reminder can propose its cited reusable entries as repository-scoped records. Plain one-line repeated-failure records are not reusable lessons; retained knowledge can also pass the evidence gate. Those cite `session:<sessionId>`; a record promoted from the overlay or a handoff cites `session-<sessionId>`, the ID shape of the session evidence bundle. See [Where what the tier writes ends up](../guide/proactive-memory.md#where-what-the-tier-writes-ends-up). The model tier runs on the active chat route unless `context.memory.target` and `context.memory.model` name a dedicated route, so these reminders and proposals need no extra configuration. `context.memory.enabled: false` stops them.
 
 The CLI consumes a version 2 `clio-coder-task-memory` handoff snapshot of at most
 1,000,000 bytes. Omitting `--entry` proposes every knowledge and procedural
@@ -484,7 +485,17 @@ source session or evidence provenance.
 Every promotion redacts secret-shaped values before `records.json` is written.
 The durable provenance block records the source kind, session, selected entry,
 entry class and timestamps, plus the replacement count and source field paths.
-Promotion never approves its own output.
+Explicit overlay and handoff promotion leave proposals unapproved. Automatic task-bank proposals can carry host-checked `held` evidence and pass the separate guardian gate described below.
+
+### Host-evidence approval for repository knowledge
+
+Clio Coder's durable-memory gate in [guardian-gate.ts](../../src/domains/memory/guardian-gate.ts) can approve repository-scoped `task-bank-entry` knowledge after one session records `held`, provided there is no contradiction or regression. Procedural proposals and global, runtime and agent scopes still require operator approval. Operator approvals and rejections, including legacy unstamped approvals, are never reversed by the gate. A later contradiction demotes a guardian-approved record, removes its approval stamp and records a regression.
+
+A new durable lesson earns a host-held observation only through [lesson-evidence.ts](../../src/domains/memory/lesson-evidence.ts): its text must quote the exact complete command that succeeded, or contain a source quote both visible in that path's successful read excerpt and still present in the current file. The entry must declare `durable: true`; model confidence or a path alone supplies no evidence. Source reads for that check are capped at 2 MiB. Delivery observations track whether a previously delivered lesson held or was contradicted. The gate input is bounded evidence of that observation, not proof of general correctness.
+
+### Session task-bank snapshots
+
+The active Clio Coder task bank is session-local, but [task-bank-store.ts](../../src/domains/memory/task-bank-store.ts) saves its version-1 snapshot at `<stateDir>/memory/banks/<sessionId>.json` when the session is parked and on the headless completion path. Only that same session can restore it on resume. The loader caps snapshots at 512 KiB; missing, oversized or invalid files yield an empty bank. Saving an empty bank removes an older snapshot, and best-effort pruning keeps the newest 64 by mtime. Resume consumes the snapshot before restoring it, and session navigation discards stale snapshots ([orchestrator.ts](../../src/entry/orchestrator.ts)). This is separate from approved durable lessons in `records.json` and explicit handoff exports.
 
 ### Explicit scope selection
 
@@ -511,7 +522,7 @@ own acknowledgement. No inference path widens an explicit choice.
 
 ## Prompt injection rules
 
-Approved memory reaches the main system prompt as a `# Memory` section that sits after the project-context section and before the runtime block (`SESSION_PROMPT_SECTION_ORDER` in `src/domains/prompts/compiler.ts`). The interactive session builds it through `createMemoryPromptReader` in `src/domains/memory/prompt-cache.ts`; `clio-coder run --agent` builds it once with `buildMemoryPromptSection()` and hands it to the worker as the `dispatch-memory` message.
+Approved memory reaches the main system prompt as a `# Memory` section that sits after the project-context section and before the runtime block (`SESSION_PROMPT_SECTION_ORDER` in `src/domains/prompts/compiler.ts`). Main sessions build it through `createMemoryPromptReader` in `src/domains/memory/prompt-cache.ts`; `clio-coder run --agent` builds it once with `buildMemoryPromptSection()` and hands it to the worker as the `dispatch-memory` message.
 
 Defaults:
 
@@ -527,14 +538,14 @@ Defaults:
 
 Rendered memory lines always cite record ID, scope, lesson, and evidence IDs, and may add `Applies when:` and `Avoid when:` lines. The prompt tells the model not to extrapolate beyond cited findings. A record that would push the section past the token budget or the item limit is skipped.
 
-Interactive main-agent sessions additionally admit `runtime` records for the exact
+Attended and headless main sessions additionally admit `runtime` records for the exact
 active runtime. `clio-coder run --agent` admits `runtime` records for the exact resolved
 runtime, only when the initial and every fallback route resolve to the same runtime,
 and `agent` records for the selected agent. Runtime and agent records use structured identity
 fields; `appliesWhen` text cannot grant either applicability. Missing,
 malformed, or different active identities exclude those records.
 
-The interactive reader rereads the store at each prepared operator turn, so an approval made in another terminal is visible at the next turn, and keeps the selection frozen for the continuations of that turn. A change of session or branch, data root, repository, or active target, runtime and model also forces a fresh read. A store that cannot be read, is larger than 16 MiB, or holds more than 500 records yields no memory section and revokes the cached one. The [System One](../guide/system-one.md) `relevance` site can reorder eligible records when more are eligible than the section admits; the ranking only reorders, never admits a record, and the first ranking a session applies stays pinned until the approved records or the session's authority change.
+The main-session reader rereads the store at each prepared operator turn, so an approval made in another terminal is visible at the next turn, and keeps the selection frozen for the continuations of that turn. A change of session or branch, data root, repository, or active target, runtime and model also forces a fresh read. A store that cannot be read, is larger than 16 MiB, or holds more than 500 records yields no memory section and revokes the cached one. The [System One](../guide/system-one.md) `relevance` site can reorder eligible records when more are eligible than the section admits; the ranking only reorders, never admits a record, and the first ranking a session applies stays pinned until the approved records or the session's authority change.
 
 ### Repository-scoped identity
 
@@ -585,7 +596,7 @@ Memory is meant to reduce repeated mistakes, not to become an unreviewed second 
 Capture conventions as source-grounded knowledge or procedural memory. Propose
 an existing bank entry through `/memory` with `p`, or promote a selected record
 from a version-2 handoff export. Promotion creates an unapproved proposal;
-operator approval admits it to scoped, bounded selection.
+approval admits it to scoped, bounded selection. Operator review and the narrow repository-knowledge gate are the two approval paths.
 
 Proposal and approval are separate operations. Approval persists the record;
 scoped selection and delivery occur at a prepared turn boundary. Delivery

@@ -22,7 +22,8 @@ for the attempt.
 
 ## Imports and dependency direction
 
-Direct subpath imports and domain-barrel imports are both permitted. The
-[boundary checker](../../tests/boundaries/check-boundaries.ts), run by
-`pnpm run lint`, constrains dependency direction. It does not require every
-cross-domain symbol to be re-exported from a barrel.
+Clio Coder's public cross-domain surface goes through the owning domain's `index.ts` barrel. The [boundary checker](../../tests/boundaries/check-boundaries.ts), run by
+`pnpm run lint`, forbids cross-domain `extension.ts` imports, including types.
+It permits other subpath imports in most domains; the pure `turn-control` domain
+may reach another domain only through its `index.ts`. The checker's permission
+for a subpath does not make another domain's lifecycle extension a public API.

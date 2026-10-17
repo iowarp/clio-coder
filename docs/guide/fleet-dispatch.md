@@ -123,6 +123,30 @@ their envelope is classified `external-one-shot`: Clio Coder enforces one launch
 deadline, an output cap, cancellation and result-contract validation, and records the
 per-tool numbers as unobserved and not enforced.
 
+## MCP tools in native workers
+
+A recipe can request exact `mcp_<serverId>__<tool>` capability names in its tool
+lists. Native dispatch resolves each declaration and action class before launch,
+refuses an untrusted or stale server by name, and seals the server digest and
+tool names in the worker permit. The worker launches only the matching declared
+server, under its sandbox and at the task worktree root for a project server.
+Its receipt records the attested MCP tools. CLI runtimes and ACP peers do not
+gain Clio Coder's MCP gateway through this mechanism.
+
+Grant worker-server networking with `network: true` in an operator-owned user
+declaration, or `clio-coder mcp trust <id> --network` for a project or plugin
+server. The default is no per-server grant. A grant affects that server's
+process; worker shells and other servers keep the run's network policy. On
+Linux it opens the host network namespace, including internet, localhost and
+abstract Unix sockets. Credential masking covers known paths, so other readable
+home secrets can leave through a granted server.
+
+The grant is withheld when a worker write root overlaps the server's launch
+cwd, an entry file's directory, or a project server's project root. Read-only
+workers retain it. Admission and the dispatch result name each withheld grant
+and its reason. See [MCP trust](configuration-reference.md#local-stdio-mcp-configuration-and-trust),
+`src/domains/dispatch/worker-mcp.ts` and `src/domains/safety/worker-permit.ts`.
+
 ## Worker routing: profiles, agent bindings, and per-call pins
 
 A worker's target, model and thinking level resolve in this order
@@ -183,8 +207,9 @@ surface is trusted (`clio-coder config trust settings`); an untrusted or changed
 surface is ignored with a notice. A project save from `/settings` writes
 `.clio-coder/settings.local.yaml` and needs that trust; rosters are edited there as a raw
 collection (Advanced, Raw collections), while profiles and agent routes have guided rows. An agent write to either file asks the operator
-at every autonomy level, and `configure_clio` asks the operator before saving
-`fleet.default`, `fleet.profiles`, `fleet.agentProfiles`, `fleet.rosters` or `fleet.adaptiveRouting` even in `yolo`
+at every autonomy level. `configure_clio` supports `fleet.default`,
+`fleet.profiles` and `fleet.agentProfiles` and asks before saving those routes.
+It does not accept `fleet.rosters` or `fleet.adaptiveRouting`
 ([routing-settings.ts](../../src/domains/safety/routing-settings.ts)).
 
 A one-off target or model is never a settings edit. The coordinator pins it with
@@ -507,6 +532,10 @@ its first execute refusal. Each denial reads as the tool, the command clipped to
 
 ### Failure classification and retries
 
+#### Provider 401, 403, 408 and 429 errors and retries
+
+When a dispatched worker's provider returns 429, Clio retries on another target after at least one second if the attempt is eligible for retry. A 401 or 403 also retries on another target; a 408 is transient. This is worker retry policy, and an attempt that changed state or cannot prove the checkout unchanged does not retry automatically.
+
 `classifyFailure` ([failure-classification.ts](../../src/domains/dispatch/failure-classification.ts)) sorts every terminal failure into a class that
 decides whether the assignment retries and which route part the retry excludes.
 The native worker reports the last provider HTTP status on stderr, and a provider
@@ -597,8 +626,9 @@ A singular writer or an item in `tasks` may declare `worktree: true` and
 protected artifacts into that checkout, and runs declared host verification
 there. The approved execution snapshot renders both fields and freezes the
 parent checkout as the merge destination. The host commits the task worktree
-when the worker finishes. A worker in a task worktree is told to edit and
-report even when its task says "and commit", and `expected_outputs` must be
+when the worker finishes. A worker in an attested task worktree can also use
+typed `git add` and `git commit` on its task branch when its permit admits those
+operations. `expected_outputs` must be
 repository-relative file paths, so `.` is refused at admission, as is an action such as `commit` that lies outside the declared `write_roots`.
 Admission also refuses a non-git checkout, a repository with no commits
 (`worktree_unborn_head`), a read-only agent, compete mode, and an explicit cwd
@@ -1128,6 +1158,36 @@ Run resumption is separate from `clio-coder fleet resume`, which reopens dispatc
 
 The current playbook must compile to the same plan hash. A mismatch refuses before execution and prints the changed positions in the ordered step list. The prior run must belong to the same playbook name, and the variables must exactly match the original run. A different value, an added value, or an omitted value is refused even when the resulting task text would otherwise be similar. An unknown run id is refused as not found in the durable fleet ledger.
 
+### Resume a fleet from the TUI, ACP or desktop
+
+Use `/fleet run --resume <rootId> [--var key=value] <playbook>` in the TUI.
+ACP and the desktop fleet preview also accept a resume root. Every surface
+validates the prior root against the current plan and shows replayed steps in
+the preview. The prior workspace, playbook and variable values must match;
+an active prior run cannot be resumed. Source: `src/domains/dispatch/fleet-run-preview.ts`
+and `src/domains/dispatch/fleet-run.ts`.
+
+### Follow a fleet event journal
+
+`clio-coder fleet events <rootId> [--follow] [--json] [--all]` reads a fleet's
+hash-chained journal. Without `--follow`, it prints the records available now.
+`--json` writes the stored NDJSON lines verbatim; `--follow` reads appended
+records until `fleet_sealed`. Other-project roots require `--all`. Each settled
+step writes a verifiable manifest checkpoint. This journal belongs to the
+whole fleet; individual worker transcripts use `fleet view`. Source:
+`src/cli/fleet-events.ts` and `src/domains/dispatch/fleet-event-journal.ts`.
+
+### Why a second fleet run is refused
+
+Every fleet executor takes one cross-process lock for its Git checkout before
+dispatching. Subdirectories share the checkout lock; linked worktrees have
+their own. The lock lives under `<stateDir>/fleet-locks/`. A live holder refuses
+the second run with `this run was refused and nothing was dispatched` in the
+message; the CLI exits 1. Dead local owners are reclaimed. A lock from another
+host is reclaimed after 150 seconds without a refresh; holders refresh every
+30 seconds. The lock is scoped to one user's state directory. Source:
+`src/domains/dispatch/fleet-workspace-lock.ts`.
+
 #### Converting an older installation
 
 Clio reads no `fleets/` directory and accepts no alias. Before 0.6.2 the same files were called fleet contracts and lived under `fleets/`. `clio-coder upgrade` runs a dated migration for the user home that merges `<configDir>/fleets` into `<configDir>/playbooks` without overwriting. A name present in both places stays in the old directory, which is then moved aside with a dated suffix. A workspace's `.clio-coder/` converts the first time Clio opens it, with one notice that lists what changed and what still needs the operator. A third-party plugin that still declares `resources.fleets`, the `fleet` kind or a `fleet:` requirement stays installed but does not load. The report names the fix, which is for its author to rename `resources.fleets` to `resources.playbooks`, its `fleets` directory to `playbooks`, and fleet kinds and requirements to `playbook`. Nothing in the conversion deletes operator data.
@@ -1185,7 +1245,7 @@ A fleet step settles on the final attempt of its retry chain: a step that fails 
 
 Deterministic code steps (`kind: code`) execute known commands directly as subprocesses rather than calling an agent model.
 - Registry binding: The `command` property must reference a command ID declared in `.clio-coder/playbooks/commands.yaml`. Invocation strings are never generated from model output.
-- Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`PLAYBOOK_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MiB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8,000-byte excerpt), no stdin pipe, no permission prompt, and no shell interpreter.
+- Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`PLAYBOOK_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MiB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8,000-byte excerpt), no stdin pipe and no shell interpreter. Host checks still pass through the session test-runner consent gate when an attended session has not approved test runners.
 - Missing registry diagnostic: If a playbook declares code steps but `.clio-coder/playbooks/commands.yaml` is missing in the repository, `clio-coder playbook list` reports the playbook state as `setup` and provides the remedy: ``needs .clio-coder/playbooks/commands.yaml declaring <id>; declare each id there under `commands:` with an `argv` list; see bundled `docs/guide/fleet-dispatch.md` for the schema``.
 - Commit message sources: A code step with `commitFrom` populates its `commitMessage` placeholder from the output of preceding agent steps.
 - Cost and route: Code steps run no model. Their cost is recorded as `known_free`, an observed zero, and they produce a code-step record rather than a receipt, route decision, or quality label.
@@ -1439,6 +1499,12 @@ reconciled to `failed` at the next startup rather than inheriting a green
 step's success.
 
 ## Receipts
+
+### Inspect worker receipts
+
+Inspect worker receipts with `clio-coder fleet view <runId> --json`, or open the dispatch runs and receipts in `/view`. A receipt records the worker's outcome, route, costs and evidence; `/view verify <runId>` checks its integrity. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger and available transcript.
+
+### Receipt integrity and fields
 
 Receipts carry exactly one current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 20`), whose unkeyed digest covers the complete receipt and reconstructible ledger provenance surface. There is no historical evidence reader: a lower version is reported as retired, is not migrated, and is never read as evidence; a malformed or future version is invalid. The fleet provenance fields covered by the digest
 include:
@@ -1799,6 +1865,10 @@ A receipt that fails verification prints `RECEIPT INTEGRITY FAILED` and its reas
 Calls over the `openai-codex-responses`, `openai-responses` and `azure-openai-responses` APIs read `response.model` from the provider's lifecycle events ([responses-model-id.ts](../../src/engine/apis/responses-model-id.ts)). A response that names a model records `responseModelIdObservation: reported` with that id, a response object without one records `not-reported`, and a call that produced no response object records `not-observed`. The observation is stored per call in session usage and in the receipt's `upstreamResponses`.
 
 `fleet view <runId> --json` prints one JSON object: `runId`, `agentId`, `model`, `target`, `node`, `phase`, `startedAt`, `elapsedMs`, `task`, the bounded `transcript` and `transcriptTruncated`, `journalPresent` and `journalPath`, `evidence`, `receiptPath`, `outcome`, `outcomeDetail`, `terminal`, `journalUnavailableReason` and `agentLedgerBoard` when they apply, and the full `receipt` only when it verified against its ledger row. The snapshot has no `settled` field. The label derives from the receipt's outcome fields.
+
+### Provider call counts and stop reasons in receipts
+
+A dispatch receipt's `apiCalls` counts provider calls, excluding synthetic assistant steering entries. Its `upstreamResponses` records per-call observations. When the runtime reports them, `stopReason` is `stop`, `length`, `toolUse`, `error` or `aborted`, and `errorMessage` preserves the engine error for `error` or `aborted`, clipped to 512 characters. Older receipts and runtimes without those observations omit the fields. A Claude SDK aggregate usage row is not an extra provider call when per-call rows exist. See [types.ts](../../src/domains/dispatch/types.ts).
 
 ## Route observer
 

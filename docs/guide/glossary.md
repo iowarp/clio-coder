@@ -43,7 +43,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `GateDecisionArtifact` in [gate-decisions.ts](../../src/domains/dispatch/gate-decisions.ts).
 
 ### 10. Recipe
-- **Definition**: A versioned Markdown document declaring an agent's static persona, tool profile, execution capability class, cost ceilings, and result contracts. Recipe is the code name of an agent definition. User-facing text says agent, and never uses recipe as a word for skills, prompts, agents and playbooks together; the word for that set is component.
+- **Definition**: A versioned Markdown document declaring an agent's static persona, required and optional tools, capability class, tool-call budget and result contract. Recipe is the code name of an agent definition. User-facing text says agent, and never uses recipe as a word for skills, prompts, agents and playbooks together; the word for that set is component.
 - **Owning Type**: `AgentRecipe` in [recipe-schema.ts](../../src/domains/agents/recipe-schema.ts).
 
 ### 11. Worker
@@ -107,7 +107,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `PathPolicyKind` in [path-policy.ts](../../src/domains/safety/path-policy.ts).
 
 ### 26. Foreign Prompt Root
-- **Definition**: An external prompt directory owned by another coding agent (such as `.claude/commands` or `.codex/prompts`) from which Clio loads prompt templates.
+- **Definition**: An external prompt directory owned by another coding agent (such as `.claude/commands` or `.codex/prompts`) that Clio Coder inventories for explicit adoption. Loose compatibility prompts cannot expand, and imported copies require the foreign-resource trust gate.
 - **Owning Type**: `PromptTemplateRoot` in [loader.ts](../../src/domains/resources/prompts/loader.ts).
 
 ### 27. Compat Root
@@ -131,7 +131,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `RunEnvelope` in [types.ts](../../src/domains/dispatch/types.ts), persisted by [state.ts](../../src/domains/dispatch/state.ts).
 
 ### 32. Agent Ledger
-- **Definition**: The append-only progress log a worker writes for itself through the `ledger` tool, mirrored to the orchestrator over the control lane and persisted in `agent-ledgers.json`. Live subscribers are tracked in memory by the ledger hub.
+- **Definition**: The shared, append-only coordination board for concurrent workers in one dispatch. Workers submit typed claims, findings, reviews and messages through `ledger`; the orchestrator stamps identity, writes the entries and mirrors them to participants. It persists in `agent-ledgers.json`. The main agent can also participate in its owned boards.
 - **Owning Type**: `AgentLedgerEntry` in [protocol.ts](../../src/worker/protocol.ts), stored by [agent-ledger-store.ts](../../src/domains/dispatch/agent-ledger-store.ts).
 
 ### 33. Session Ledger
@@ -207,7 +207,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 51. System One
-- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio Coder's policy reads the probabilities to add a hint, an extra confirmation, a banner, a ranking or a prewarm. It never answers the operator and never removes friction. The shipped fitted cuts are built for one hosted engine build, and Laya is the diffusion-model engine planned for the same wire. System One is experimental. Configured under `systemOne`; see [System One](system-one.md).
+- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio Coder's policy reads the probabilities to add hints, rankings, advice or worker prewarm. Safety-oriented readings only record in this release. It never answers the operator and never removes friction. The shipped fitted cuts are built for one hosted engine build, and Laya is a supported local decision-model profile on the same System One wire. System One is experimental. Configured under `systemOne`; see [System One](system-one.md).
 - **Owning Type**: `SystemOne` in [types.ts](../../src/domains/system-one/types.ts); built by `createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts).
 
 ### 52. Decision Site

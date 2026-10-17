@@ -22,8 +22,8 @@ are selected explicitly; Clio does not silently switch agents or modes.
 
 | Peer | ACP connection | Headless target runtime | Pane ID |
 | --- | --- | --- | --- |
-| Claude Code | `npx -y @zed-industries/claude-code-acp@0.16.2` | `claude-code` | `claude-code` |
-| Codex | `npx -y @agentclientprotocol/codex-acp@1.10.0` | `codex-cli` | `codex` |
+| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@0.86.0` | `claude-code` | `claude-code` |
+| Codex | `npx -y @agentclientprotocol/codex-acp@2.1.1` | `codex-cli` | `codex` |
 | OpenCode | Native `opencode acp --cwd .` | `opencode-cli` | `opencode` |
 | Antigravity CLI | No verified ACP recipe | `antigravity-code` | `antigravity` |
 | Pi CLI | No verified ACP recipe | `pi-cli` | `pi` |
@@ -145,10 +145,10 @@ and it is separate from the `claude-code` runtime above, which spawns
 `claude -p`. Neither the `claude-code` runtime nor the ACP bridge loads the SDK
 package from Clio Coder's package root.
 
-The Claude Agent SDK package (`@anthropic-ai/claude-agent-sdk`, pinned 0.3.186,
+The Claude Agent SDK package (`@anthropic-ai/claude-agent-sdk`, pinned 0.3.292,
 about 224 MB) is not a dependency of Clio Coder's package. Every install method
 provisions it as a separate per-user component in
-`<data>/components/claude-agent-sdk/0.3.186/`: the installers do it only when
+`<data>/components/claude-agent-sdk/0.3.292/`: the installers do it only when
 `--include-claude-sdk` (`-IncludeClaudeSdk` on Windows) is passed, and
 `clio-coder tools install claude-sdk` does it at any time. Boot, `doctor`, and
 every other runtime work without it, because the module loads only when a
@@ -206,8 +206,8 @@ The marketplace publishes 35 entries: the 34 curated skill packages and the
 Nothing is converted and no component body is duplicated. The packages carry their
 portable Agent Plugins `plugin.json`, which Claude Code does not read; the
 marketplace entry supplies the name, description, version, category and license
-it shows. `claude plugin validate . --strict` passes on the generated file, so no
-entry needs `strict: false` and no package needs a second `.claude-plugin/plugin.json`.
+it shows. The generated entries use the marketplace format without `strict: false`;
+packages need no second `.claude-plugin/plugin.json`.
 
 Materio's Clio Coder-native agents, prompts and playbooks sit at declared resource paths
 that no peer host scans. They travel with the installed bytes and are never
@@ -284,6 +284,12 @@ A cache directory establishes available content; installation and activation
 remain unknown unless a host's installation registry establishes them.
 Malformed, unreadable, symbolic-link, oversized, or unsupported configurations
 produce an unknown inventory diagnostic instead of an invented zero.
+
+With `CLIO_CODER_INTEROP_HOME` unset, foreign user roots resolve from the
+operator's home even when `CLIO_CODER_HOME` relocates Clio Coder. A path selects
+another home; `CLIO_CODER_INTEROP_HOME=none` disables foreign user roots and
+sibling quota credentials, including roots named by agent-specific home
+variables. Project roots are unaffected (`src/core/xdg.ts`).
 
 The scanner reads these configuration layouts, honoring the named host home
 variable when present. An explicit fixture home ignores process host overrides.

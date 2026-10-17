@@ -6,7 +6,7 @@ This page is a map to the implemented configuration surface. Source defines the 
 
 ## Settings keys
 
-The visible settings hierarchy is shared by `clio-coder configure --settings` and TUI `/settings`: **Connections → Chat → Fleet → Context & Memory → Permissions & Limits → Appearance → Integrations → Advanced**. Names describe what the settings change; YAML paths remain the version-2 schema below. For example, Connections manages `targets`, Appearance manages `interface.*`, and Permissions & Limits includes `fleet.permissions.*` and external-agent tool governance. See the [Settings Center walkthrough](configuration-and-targets.md#settings-center) for navigation, model inheritance, and save scopes.
+`clio-coder configure --settings` and GUI Settings use eight sections: **Connections → Chat → Fleet → Context & Memory → Permissions & Limits → Appearance → Integrations → Advanced**. TUI `/settings` uses twelve areas, including Recent & Pinned, Models & Inference, Agents & Delegation, and Workspace & Files. Names describe what the settings change; YAML paths remain the version-2 schema below. For example, Connections manages `targets`, Appearance manages `interface.*`, and Permissions & Limits includes `fleet.permissions.*` and external-agent tool governance. See the [Settings Center walkthrough](configuration-and-targets.md#settings-center) for navigation, model inheritance, and save scopes.
 
 Section names and ownership come from [`settings-navigation.ts`](../../src/core/settings-navigation.ts). Control labels, descriptions, and ordering come from [`settings-controls.ts`](../../src/core/settings-controls.ts). UI adapters should consume these catalogs instead of deriving headings from schema roots or maintaining a separate list of names.
 
@@ -107,7 +107,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.memory.timeoutMs` | `60000` | Integer at least 1. Wait for the memory model. | next turn |
 | `context.memory.observations.enabled` | `false` | Boolean. Prepares source-linked observation notes in the background that a later compaction may use in place of the history they cover. Needs `context.memory.enabled`. | next turn |
 | `context.semantic.enabled` | `false` | Boolean. Exposes the optional semantic search capability after model pins are configured. | next turn |
-| `context.semantic.target` | `null` | Qualified embedding target id; accepts the llama.cpp embedding or LiteLLM runtime. | next semantic request |
+| `context.semantic.target` | `null` | Qualified embedding target id; accepts the llama.cpp embedding or LiteLLM runtime. | next turn |
 | `context.semantic.model` | `null` | Exact embedding wire model id. | next semantic request |
 | `context.semantic.assetIdentity` | `null` | GGUF SHA-256 or an explicitly unverified operator asset label. | next semantic request |
 | `context.semantic.projectorIdentity` | `null` | Multimodal projector SHA-256 or operator label. | next semantic request |
@@ -173,7 +173,7 @@ These schema keys are absent from `DEFAULT_SETTINGS` because an unset value sele
 
 | Key | Accepted values and meaning | Effect |
 | --- | --- | --- |
-| `fleet.default.node` | `local` or a `fleet.nodes[].id`. Where workers run unless their profile says otherwise. Profiles accept the same `node` field. | next turn |
+| `fleet.default.node` | `local` or a `fleet.nodes[].id`. Accepted and displayed as Default worker location, but placement does not read it. Use `fleet.defaultNode` or `fleet.profiles.<name>.node` to select a node. | next turn |
 | `context.compaction.model` | Model pattern for a dedicated summarizer; unset uses the chat model. An explicit pattern must resolve uniquely or compaction fails visibly. | next turn |
 | `context.compaction.systemPrompt` | Path to a nonempty UTF-8 prompt file of at most 65,536 bytes, resolved relative to the session workspace at compaction time; unset uses the built-in instructions. | next turn |
 | `safety.review.target` | Target id for the reviewer; unset uses the chat target. An id that is not in `targets` is an error. | hot reload |
@@ -387,7 +387,15 @@ User-level model profile overrides live at `<configDir>/model-profiles.yaml`, no
 
 ## Local stdio MCP configuration and trust
 
+### Add an MCP server
+
+To add an MCP server, put its launch declaration in user `<config>/mcp.yaml` or project `.clio-coder/mcp.yaml`, then inspect it with `clio-coder mcp list` and test it with `clio-coder mcp test <id>`. A project or plugin server needs operator trust before it launches.
+
 User MCP declarations are stored at `<config>/mcp.yaml`; project declarations are stored at `.clio-coder/mcp.yaml`. The declaration contract is implemented in [`src/domains/gateway/mcp/config.ts`](../../src/domains/gateway/mcp/config.ts). A server entry accepts `id`, `command`, `args`, `cwd`, `env`, `timeoutMs`, `actionClass`, `toolActionClasses` and `network`; `toolActionClasses` maps individual tool names to `read`, `execute`, `destructive` or `unknown` and overrides the server class for those tools. `network` takes effect only in a user declaration.
+
+### Why is my MCP server untrusted?
+
+An MCP server becomes untrusted when you change its args or other digest-bound fields: the existing trust record is stale. Review the changed declaration, then run `clio-coder mcp trust <id>` to approve it again.
 
 | Declaration | Launch rule |
 | --- | --- |
@@ -401,9 +409,9 @@ User MCP declarations are stored at `<config>/mcp.yaml`; project declarations ar
 | Older builds | A Clio build without the network grant or entry binding that shares this config directory drops a record's `network` and `entryScriptHashes` fields whenever it rewrites `mcp-trust.json`, reads every record whose digest binds entry files as stale, and rejects a user `mcp.yaml` that sets `network` as an unknown field. |
 | Trust boundary | Trust enables launch; it is not operating-system isolation. Annotations never authorize launching an untrusted server. Calls still pass through turn scope, tool policy and autonomy. |
 
-Only user declarations may set `actionClass`; project declarations receive their class from the explicit trust record. Classify the entire server by its most powerful tool, since the declaration applies to every tool it exposes. For example, a locally installed literature-search server whose tools only query or transform citation metadata can use `actionClass: read` to work in `yolo` without a headless approval dead end.
+Only user declarations may set the server-wide `actionClass`; project and plugin declarations receive their default class from the explicit trust record. Every declaration scope accepts operator-approved `toolActionClasses` for individual tools. Once launch trust is established, a per-tool entry overrides the trust-record class in every scope. These entries are covered by the declaration's trust digest, so changing them in a project or plugin declaration requires re-approval. Set a server-wide class for the most powerful tool it exposes, or use per-tool entries. A reviewed read-only literature-search server can use `actionClass: read` to run in a headless session. Under `run --read-only`, the server's own `readOnlyHint` does not authorize a call; the read class must come from Clio's built-in classification or the operator.
 
-`clio-coder mcp list` includes recorded per-tool action classes. Use `clio-coder mcp list --refresh` to connect trusted servers, read their current annotations and update the catalogs. Cached hints are advisory and are combined with the current operator declarations when listed. Project trust records remain authoritative, including an `unknown` class.
+`clio-coder mcp list` includes recorded per-tool action classes. Use `clio-coder mcp list --refresh` to connect trusted servers, read their current annotations and update the catalogs. Cached hints are advisory and are combined with the current operator declarations when listed. When no per-tool override applies, project trust records remain authoritative, including an `unknown` class.
 
 Interrupting an MCP call sends `notifications/cancelled` with its request id. Clio checks responsiveness with a bounded `ping`, retains responsive connections, and tears down unresponsive connections. The next gateway call lazily reconnects the same trusted declaration after cleanup. Clio never automatically replays the cancelled call. Read-only, idempotent tools may repeat identical polling arguments within the turn's tool-call budget.
 
@@ -473,5 +481,5 @@ Run `clio-coder context <subcommand> --help` for the installed usage. The subcom
 | `context.path` | task | scope=recall: the newest evicted read of this file. |
 | `context.query` | task | scope=settings: path, section alias, or search terms; scope=recall discovery: path, tool, or ref terms; scope=skills: narrow the list; omit to list. |
 | `context.ref` | task | scope=recall: ref of the evicted item, as named in its marker. |
-| `context.scope` | policy | workspace, settings, skills, recall, or budget. `budget` inspects the live request budget and accepts no other argument. |
+| `context.scope` | policy | workspace, settings, skills, recall, budget, or semantic. `budget` inspects the live request budget and accepts no other argument. `semantic` requires `query` and configured semantic search; see [semantic context](semantic-context.md). |
 | `context.offset` | policy | Zero-based settings, recall discovery or skills offset; follow nextOffset. |

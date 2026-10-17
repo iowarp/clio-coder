@@ -57,7 +57,7 @@ Dispatch runs and interactive session turns share the `runs` table, distinguishe
 - A session turn has `run_id` `session:<userTurnId>`, `source` `session`, the sentinel `assignment_id = "session"`, and a phase of `kind` `session`. It has no receipt and no worker process. [turn-persistence.ts](../../src/session-control/turn-persistence.ts) opens the pair at the user row, appends `message` and `tool_call` events, and closes it at the final assistant row with the turn's folded usage.
 - A phase carries timing, status, itemized token spend, total dollar spend, and context occupancy (`context_tokens`, `context_window`).
 
-A missing historical value is `NULL`, never zero. `total_cost_usd` is also `NULL` when the run's cost provenance is `unknown`, and a session turn's cost is `NULL` once any call in the turn was priced `unknown`. See [Cost and Pricing](observability.md#cost-and-pricing).
+A missing historical value is `NULL`, never zero. `total_cost_usd` is also `NULL` when the run's cost provenance is `unknown`, and a session turn with unknown pricing has `NULL` cost when it has no known amount. A turn with both known and unknown cost retains its known subtotal; that number does not prove complete cost ([turn-persistence.ts](../../src/session-control/turn-persistence.ts)). See [Cost and Pricing](observability.md#cost-and-pricing).
 
 ### Events
 

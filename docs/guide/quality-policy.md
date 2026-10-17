@@ -33,6 +33,12 @@ Clio does not generate or modify this file automatically. If `.clio-coder/`
 is ignored, explicitly include the policy in version control using your
 repository's chosen ignore exceptions or a force-add of this one file.
 
+## Why does Clio ask before running tests?
+
+At `default` autonomy in an attended TUI or ACP session, the main agent's first recognized test-runner command asks for session consent. The approval explains: `This test command runs repository code, whoever wrote it: this session, an earlier one, a worker or a checkout. Approve once to allow test runners for the rest of this session.` Approval covers later test runners in that session; denial leaves the next test runner asking again. Replacing or closing the session resets consent.
+
+This consent applies through `bash`, `verify` and host-owned verification jobs. A trusted project safety rule allowing the exact command already supplies authority. A headless main-agent `clio-coder run` keeps the recognized test-runner allowance without a consent prompt; worker admission is unchanged. A quality policy names required checks but supplies no execution approval. See [session-code-consent.ts](../../src/domains/safety/session-code-consent.ts).
+
 ## Rules and inputs
 
 `paths` selects the mutations that activate a rule. Patterns are relative to

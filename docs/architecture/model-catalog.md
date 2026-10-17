@@ -2,7 +2,7 @@
 
 The [configuration guide](../guide/configuration-and-targets.md) explains model and target selection.
 
-Clio Coder treats a selectable model as the intersection of these sources:
+Clio Coder combines inventory and metadata from these sources; their roles and precedence differ:
 
 1. **Configured targets** in `settings.yaml` (`targets[]`, `defaultModel`, and optional `wireModels`).
 2. **Live runtime probes** (`probe()` / `probeModels()`), which discover models that appeared after Clio started.
@@ -47,7 +47,7 @@ A catalog-ordered list recommends nothing. `preferredModelFor` returns the runti
 
 Sealed receipts record a run's target, runtime, wire model, thinking level, and usage. Profiles describe what a model is; live probes and server configuration establish what a deployment serves. A profile cannot set `contextWindow`, `maxTokens`, `reasoningLevels`, `thinkingControlRuntime` or `parallelSlots`, and its `claims.modelMaxContext` is never a serving window. A shared KV pool is not an independent full context allocation for each slot.
 
-Precedence among a live report, a target's `capabilities`, a profile and the runtime default is the table in [model profiles](../guide/configuration-and-targets.md#model-profiles). In short: a live yes or no decides `tools`, `vision` and `reasoning`; a live limit is the ceiling for the serving window and output cap; every other flag is descriptive, so the profile outranks the server's flag list and a target's `capabilities` outranks the profile. The effective serving window comes from live probe data, an explicit target override, or for a cloud route with no window endpoint the Pi catalog estimate. A runtime descriptor's own context number is a placeholder that resolution never promotes to a serving limit, so an unreported window stays unknown.
+Precedence among a live report, a target's `capabilities`, a profile and the runtime default is the table in [model profiles](../guide/configuration-and-targets.md#model-profiles). A live yes or no decides `tools`, `vision` and `reasoning`; a live limit is the ceiling for the serving window and output cap; every other flag is descriptive, so the profile outranks the server's flag list and a target's `capabilities` outranks the profile. The effective serving window comes from live probe data, an explicit target override, or for a cloud route with no window endpoint the Pi catalog estimate. A runtime descriptor's own context number is a placeholder that resolution never promotes to a serving limit, so an unreported window stays unknown.
 
 The sampling catalog contributes to a model only through two paths. A profile hit takes its sampling presets from the catalog entry whose `family` equals the profile `id`. A model with no profile keeps its catalog entry's non-thinking quirks, but the entry's `capabilities` and thinking block are dropped. A catalog entry's capability flags, windows and thinking mechanism therefore have no effect. The Llama 4 entries in `cloud-models/alcf.yaml` have no profile and contribute nothing.
 
@@ -221,9 +221,8 @@ Interactive `/model` search applies fuzzy matching across provider-qualified sea
 
 ## Promotion path
 
-1. Capture raw field notes in docs or a lab notebook.
+1. Capture raw probes and field notes in an operator-selected lab notebook or scratch location. Product docs hold curated behavior, not raw logs.
 2. Add or update an entry in `<configDir>/model-profiles.yaml` with capabilities, thinking behavior and a recommended output budget, and add a catalog overlay for sampling when the model needs a preset.
-3. Add focused unit/integration coverage when behavior changes engine routing.
-4. Refresh `/model` with `R` and verify the selected row reports the expected source and capabilities.
-5. Promote the cleaned profile into the packaged `models/profiles.yaml` only when the model family is ready to bless for Clio Coder users.
-6. Promote the cleaned field note into a cookbook, guideline, or community blog post.
+3. Refresh `/model` with `R` and verify the selected row reports the expected source and capabilities.
+4. Promote the cleaned profile into the packaged `models/profiles.yaml` only when the model family is ready to bless for Clio Coder users.
+5. Promote the cleaned field note into a cookbook, guideline, or community blog post.

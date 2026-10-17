@@ -21,12 +21,12 @@ Source of truth:
 
 Every model runtime (e.g., Local Native, Cloud HTTP, Subprocess) implements the `RuntimeDescriptor` interface defined in [runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts). The registry rejects a descriptor that lacks a non-empty `id` and `displayName`, a `kind` of `http`, `sdk` or `subprocess`, an `apiFamily`, an `auth` from the list below, a `defaultCapabilities` object or a `synthesizeModel` function, and rejects a `probe`, `probeModels`, `complete`, `infill`, `embed` or `rerank` that is present but not a function. An `id` or alias that is already registered is a conflict.
 
-Three descriptor fields carry behavior beyond the template. `tier` decides how a target's cost is labeled: a `local-native` runtime prices as free and a `protocol` runtime never does, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes. `enforcement` declares what Clio Coder can guarantee for a worker on a runtime that is not `http`; a non-HTTP runtime that declares nothing is treated as unmediated and refused write-capable work unless the operator sets `trustedUnmediated`. `gatewayUrl` marks a remote gateway whose URL the operator must supply, so configure offers no localhost default.
+Three descriptor fields carry behavior beyond the template. `tier` contributes a pricing fallback: after explicit target pricing, a `local-native` runtime defaults to `known_free`; a `protocol` runtime does not receive that fallback, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes. `enforcement` declares what Clio Coder can guarantee for a worker on a runtime that is not `http`; a non-HTTP runtime that declares nothing is treated as unmediated and refused write-capable work unless the operator sets `trustedUnmediated`. `gatewayUrl` marks a remote gateway whose URL the operator must supply, so configure offers no localhost default.
 
-Here is a template for a new runtime plugin:
+For an in-tree adapter alongside `src/domains/providers/runtimes/local-native/vllm.ts`, use erased engine types. Only `src/engine/**` imports Pi packages, including type-only imports ([check-boundaries.ts](../../tests/boundaries/check-boundaries.ts)). The descriptor skeleton is:
 
 ```typescript
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "../../../../engine/types.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";

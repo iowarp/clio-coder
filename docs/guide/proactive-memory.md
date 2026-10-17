@@ -22,6 +22,12 @@ and handoff seeding.
 
 ## Inspect or configure memory
 
+### Turn memory off
+
+To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls and reminders, along with handoff offers and seeding. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
+
+### Inspect the memory bank
+
 | You want to… | Use |
 | --- | --- |
 | Inspect the bank and recent memory steps | `/memory` |
@@ -92,9 +98,63 @@ or a labeled prompt section, never a tool or a permission.
 | Post-compaction restoration | After a durable continuity or summary commit is installed | Status (when no handoff note or summary already carries current state), knowledge and procedural entries, labeled unverified | `src/domains/memory/restoration.ts`, `src/session-control/turn-context.ts` |
 | Approved durable memory | Every prepared operator turn, as part of the compiled system prompt | A `# Memory` section of at most 5 approved records within 400 estimated tokens | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |
 
-A background model never writes to the system prompt. The unreviewed bank can
-reach the durable section only through a reviewed proposal that an operator
-approves.
+A background model never writes directly to the system prompt. Durable records
+must pass operator approval or the repository-lesson evidence gate described
+below before prompt selection can include them.
+
+## Keep working commands from completed tasks
+
+With `context.memory.enabled: true` (the default), completed-task retention
+extracts reusable lessons from the session's own receipts. The host also keeps
+commands the evidence proves, regardless of whether the lesson model proposes
+them. A command qualifies when the same program on the same repository file
+failed earlier and then succeeded, or when the session read the named file,
+the file contains every passed option and environment assignment, and the
+command succeeded. Shell chains and substitutions do not qualify because their
+exit status cannot prove which part worked. Source:
+`src/domains/memory/recipes.ts` and `src/domains/memory/completion-retention.ts`.
+
+Retention records its bounded progress under `<stateDir>/memory/retention/`.
+A process that finds an unsettled retention can recover the completed task from
+that session's ledger. A dead extraction owner becomes pending; saved candidates
+are revalidated before retention continues. This uses the existing memory route,
+deadline and evidence gate rather than making the bank durable. Source:
+`src/domains/memory/runtime.ts`.
+
+## When a repository lesson becomes approved
+
+Repository-scoped knowledge produced from a task-bank entry can receive
+guardian approval after one session records that the lesson held, with no
+contradiction or recorded regression. Procedural proposals still wait for an
+operator. Global, runtime and agent scopes also require operator approval.
+The guardian never reverses an operator approval or rejection. A later
+contradiction demotes a guardian-approved lesson. The `held` observation is an
+evidence-gate input, not proof of a general claim. Source:
+`src/domains/memory/guardian-gate.ts`.
+
+## Offer a lesson beside the action it concerns
+
+An eligible approved lesson can appear at the session's first workspace change,
+when a read, edit or command touches a file the lesson names, when verification
+finds no declared check, or when a failed command uses the same program and file
+as a kept working command. A lesson appears at most once per session and is
+omitted once its quoted command has already succeeded there. The reminder is
+advice and never grants permission to execute the command. Source:
+`src/domains/memory/intervention.ts`.
+
+`/memory` opens on **Lessons**: the reusable lessons eligible for this session,
+what each concerns, whether the main prompt carries it, its evidence and its
+track record. Task memory, review candidates and diagnostics occupy separate
+tabs. Opening the view does not activate memory (`src/interactive/memory-overlay.ts`).
+
+## Prepare observation notes for compaction
+
+`context.memory.observations.enabled` defaults to `false`. Turning it on while
+`context.memory.enabled` is on lets background memory prepare source-linked
+notes that the existing compactor can use in place of the history they cover.
+These continuity notes are separate from reusable lessons and preserve source
+references; they do not approve a durable record. Source:
+`src/domains/memory/observations.ts` and `src/domains/memory/runtime.ts`.
 
 ## Paper mapping and Clio Coder constraints
 
@@ -164,6 +224,7 @@ All keys live under `context.memory` in `settings.yaml` (`src/core/defaults.ts`,
 | Key | Default | Minimum | Effect |
 | --- | --- | --- | --- |
 | `context.memory.enabled` | `true` | | Enables observation, task bank writes, and reminder injection. `false` is the kill switch for the whole plane. |
+| `context.memory.observations.enabled` | `false` | | Prepare source-linked continuity notes for compaction while memory is enabled. |
 | `context.memory.target` | `null` | | Target for a dedicated background model route. A value that names no configured target resets to `null`. With `target` and `model` both unset, the model tier runs on the active chat route. |
 | `context.memory.model` | `null` | | Wire model on that target. Cleared when `target` is unset; defaults to the target's `defaultModel` when `target` is set and `model` is not. |
 | `context.memory.cadenceToolCalls` | `10` | `2` | Minimum completed-tool interval between background interventions. |
@@ -452,8 +513,8 @@ model set)` and the target and model in use, and the route line in the system
 prompt reads `memory =chat (no memory model set)`. Set `context.memory.enabled:
 false` for no memory model calls at all.
 
-`/memory` shows the current tier, last decision, approved durable lessons, the
-live bank, and a bounded history of the last twenty memory steps with their
+`/memory` opens on eligible lessons and also shows the current tier, last
+decision, live bank, and a bounded history of the last twenty memory steps with their
 trigger, decision, write count, cited-entry count, tier, and latency. That
 history is the only place a capture, a gate, or a timeout becomes visible, since
 those outcomes produce no transcript entry by design and only an actual injection
@@ -535,12 +596,12 @@ reaches the operator, the entries it cited are also proposed into the durable st
 `<dataDir>/memory/records.json`, unapproved, scoped to the repository the session
 is working in, with provenance naming the session and the source entry. The record
 cites `session:<sessionId>` as its evidence reference and starts at confidence
-`0.6`. That is the one automatic writer of that file; everything else about it is
-unchanged (`src/domains/memory/task-bank-promotion.ts`).
+`0.6`. Completed-task retention also writes evidence-backed candidates through
+this store bridge (`src/domains/memory/task-bank-promotion.ts`).
 
-`/memory` and `clio-coder memory list` show the proposal, and
-`clio-coder memory approve <id>` is still a separate operator action, so nothing
-the background plane produced reaches a system prompt without review. A step with
+`/memory` and `clio-coder memory list` show the proposal.
+`clio-coder memory approve <id>` is an operator action; eligible repository
+knowledge can also pass the guardian gate described above. A step with
 no session, or one running outside a canonical repository, proposes nothing:
 global scope broadens applicability to every future session and is not a claim a
 background step may make on the operator's behalf. An unapproved proposal that is
