@@ -10,7 +10,7 @@
 		"build": "vite build",
 		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json && pnpm run check:brand",
 		"lint": "biome check .",
-		"test": "node --import tsx --import ./tests/harness/no-network.ts --test --test-concurrency=2 tests/*.test.ts tests/*.test.tsx",
+		"test": "node ../../scripts/ci-tests.mjs gui",
 		"openapi": "node --import tsx scripts/openapi.ts && biome format --write contracts/openapi.json",
 		"verify": "pnpm run typecheck && pnpm run lint && pnpm run test:full && pnpm run build && pnpm run smoke:browser",
 		"test:acp-real": "node --import tsx --test tests/real/acp.test.ts",
@@ -18,7 +18,7 @@
 		"visual": "node --import tsx scripts/visual-review.ts",
 		"perf": "node --import tsx scripts/perf-workload.ts",
 		"test:pwa": "node --import tsx --test tests/real/background-pwa.test.ts",
-		"test:full": "pnpm run test",
+		"test:full": "node --import tsx --import ./tests/harness/no-network.ts --test --test-concurrency=2 tests/*.test.ts tests/*.test.tsx",
 		"check:brand": "node scripts/sync-brand.mjs --check && node scripts/check-contrast.mjs"
 	},
 	"dependencies": {

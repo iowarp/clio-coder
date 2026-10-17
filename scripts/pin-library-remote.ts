@@ -4,7 +4,7 @@
  * `pnpm library:pin` only ever scans local directories for its rows; without
  * this module a remote row would be silently dropped on the next pin run.
  *
- * A blessed remote row is always re-fetched and re-verified against its own
+ * During explicit library pinning, a remote row is re-fetched and verified against its own
  * content, so the pinned `sha256` reflects an actually-fetched tree rather
  * than a hand-typed digest. A failed fetch (offline, missing tag, missing
  * subdirectory) never fails the pin run and never drops the row: the

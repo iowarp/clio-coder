@@ -39,7 +39,7 @@ export function incompleteInstallationAdvice(err: unknown): string | null {
 	try {
 		const disk = JSON.parse(readFileSync(join(outputDir, "build.json"), "utf8"));
 		if (runningBuildId && disk.id && disk.id !== runningBuildId)
-			return `${message}\nThis running Clio loaded a build that has since been replaced. Finish active work and restart it: clio-coder. Run clio-coder doctor to identify other stale processes.`;
+			return `${message}\nThis running Clio loaded a build that has since been replaced. Finish active work and restart the process that reported this error. For a background GUI server, run clio-coder gui background restart --if-idle from a separate terminal, then reload the app. For a private or foreground GUI server, stop it and relaunch the original GUI command. Rebuilding does not update modules already loaded by a running process. Run clio-coder doctor to identify other stale processes.`;
 	} catch {
 		// Older and interrupted builds have no completion record; use the repair advice below.
 	}

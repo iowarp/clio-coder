@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="96" height="96" />
+  <img src="../assets/clio-mark-gui.webp" alt="Clio Coder logo" width="96" height="96" />
 </p>
 
 # Clio Coder documentation

@@ -3,6 +3,8 @@
 `assets/` contains the canonical brand artwork and product captures.
 [`media-manifest.json`](media-manifest.json) records source paths, hashes,
 dimensions, descriptions, and delivery copies for the website and browser app.
+The retained brand sources are the banner, GUI mark, and application icons.
+Retired avatar and logo-size masters are no longer required package resources.
 
 ## Product captures
 

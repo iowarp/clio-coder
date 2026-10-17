@@ -196,13 +196,11 @@ async function main() {
 			"Open the run above and approve the protected release environment as the owner. Agents must leave that decision to you.",
 		);
 		await watch(publication);
-		// The job's dist-tag writes fail the same way its publish did.
+		// The owner forwards npm tags after GitHub publication.
 		const tags = forwardedTags(await registryTags(candidate.name), candidate.version, plan.channel);
 		if (tags.length) {
 			const commands = tags.map((tag) => ["dist-tag", "add", plan.package, tag]);
-			await ask(
-				`Forward the npm tags release.yml could not write:\n${commands.map((args) => `  npm ${args.join(" ")}`).join("\n")}`,
-			);
+			await ask(`Forward the npm tags as the owner:\n${commands.map((args) => `  npm ${args.join(" ")}`).join("\n")}`);
 			for (const args of commands) foreground("npm", args);
 		}
 		await ask(

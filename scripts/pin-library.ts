@@ -187,10 +187,8 @@ const localEntries: RegistryRow[] = validatedPackages.map(({ directory, expected
 });
 
 // ---------------------------------------------------------------------------
-// 3b. Refresh blessed remote packages (GitHub-hosted rows already pinned in
-// the committed registry.yaml). Their content is never scanned from a local
-// directory, so they are read back from the previous pin, always re-fetched
-// to verify the digest, and only left unchanged when the fetch itself fails.
+// 3b. Preserve committed remote pins during local checks. Only an explicit
+// library:pin refreshes remote package content.
 // ---------------------------------------------------------------------------
 const previousRemoteRows = readBlessedRemoteRows(destination);
 
@@ -199,6 +197,10 @@ const remoteEntries: RegistryRow[] = previousRemoteRows.map((row) => {
 	// A collision with a local package name is always an error: it does not
 	// depend on whether the remote fetch itself succeeds.
 	if (names.has(row.name)) throw new Error(`duplicate library package identity: ${row.name}`);
+	if (checkMode) {
+		names.add(row.name);
+		return row;
+	}
 	const { row: refreshedRow, refreshed, warning } = refreshBlessedRemoteRow(row);
 	if (!refreshed) retainedRemotePins++;
 	if (warning) process.stderr.write(`library:pin warning: ${warning}\n`);

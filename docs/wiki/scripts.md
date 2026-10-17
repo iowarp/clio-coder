@@ -1,6 +1,6 @@
 ---
 title: "Scripts"
-summary: "Checkout-only tooling under scripts/: the drift/lint gate, the library and skill pinning pipeline, the release qualification gate, the Pi API surface diff, and the two operator-run benches."
+summary: "Checkout-only tooling under scripts/: the drift/lint gate, the library and skill pinning pipeline, the release qualification gate, the Pi API surface diff, and the operator-run System One calibration tool."
 sources:
   - "scripts/check-hygiene.ts"
   - "scripts/pin-skills.ts"
@@ -10,7 +10,6 @@ sources:
   - "scripts/release-candidate.mjs"
   - "scripts/pi-surface-diff.ts"
   - "scripts/decision-probe.ts"
-  - "scripts/configuration-reference.ts"
   - "scripts/release-version-policy.mjs"
   - "scripts/release-manifest.json"
 symbols:
@@ -23,7 +22,6 @@ symbols:
   - "buildPiSurfaceSnapshot"
   - "comparePiSurfaceSnapshots"
 tests:
-  - "tests/contracts/configuration-reference.test.ts"
   - "tests/contracts/release-boundary.test.ts"
   - "tests/extended/library-portability.test.ts"
   - "tests/extended/pin-library-remote.test.ts"
@@ -37,22 +35,10 @@ validate:
 
 # Scripts
 
-`scripts/` holds the repository's checkout-only tooling: static drift checks,
-catalog generators, the release qualification gate, and two operator-run
-benches. Everything here operates on a source checkout, and none of it ships
-in the npm package. The hygiene gate `checkPackaging` in
-`scripts/check-hygiene.ts` asserts `patches/`, `scripts/`, and `tests/` are
-checkout-only against the `package.json` `files` allowlist, and the release
-gate `scripts/check-release.mjs` forbids any file under `scripts/` inside the
-packed tarball ("repo scripts operate on a source checkout only").
-
-Scripts never copy validation logic from `src/`; they import it.
-`check-hygiene.ts` takes `DEFAULT_SETTINGS` and `resolvePackageRoot` from
-`src/core/defaults.ts` and `src/core/package-root.ts`, `pin-skills.ts` takes
-`ALL_TOOL_NAMES` from `src/core/tool-names.ts` and `normalizedSkillHash` from
-`src/domains/resources/skills/content-hash.ts`, and `pin-library.ts` takes
-`validateLibraryPackage` from
-`src/domains/resources/library-validation.ts`.
+`scripts/` holds build, validation, catalog, installation and release tooling.
+Most files operate on a source checkout. The four runtime installer files in
+`scripts/release-manifest.json` also ship in the npm package; the packaging
+checks reject other repository scripts on the publish path.
 
 ## How each entry point is registered
 
@@ -77,43 +63,30 @@ gate `prepublishOnly` ultimately protects.
 
 ## The hygiene gate: `check-hygiene.ts`
 
-`scripts/check-hygiene.ts` is the drift gate. It runs twenty named checks in
-one process and exits 1 if any collected an error. The ordered list lives in
-the `checks` array near the bottom of the file:
+`scripts/check-hygiene.ts` runs source and package checks in one process and
+exits 1 if any collected an error. The `checks` array near the bottom names
+the active checks:
 
 ```
 documentation-links, product-namespace, case-portable-paths, export-hygiene,
 boundaries, ci-scripts, library-pin, defaults-yaml, settings-inventory,
-environment-variable-inventory, configuration-reference, theme-discipline,
-readme-install-block, readme-shape, packaging, gitignored-reference,
-prompts, docs-source, pi-surface, tool-contract-coverage
+environment-variable-inventory, theme-discipline, readme-install-block,
+packaging, gitignored-reference, tracked-ignored, prompts, docs-source
 ```
 
-Errors accumulate through `fail(rule, message)`; the run reports
-`check-hygiene: N drift condition(s) found` and exits 1, or
-`check-hygiene: ok (20 checks, <ms>)` otherwise. `CHECK_HYGIENE_PROFILE=1`
-prints per-check timing.
+`CHECK_HYGIENE_PROFILE=1` prints per-check timing. Boundaries are checked
+against the actual source tree; routine lint does not create synthetic
+boundary projects or enforce test filenames and README editorial structure.
 
-Two of the checks are delegated calls rather than inline logic, which makes
-`check-hygiene.ts` the composition root for the other scripts:
+`checkLibraryPin` runs `scripts/pin-library.ts --check`. It checks local content
+and generated projections while preserving committed remote pins without a
+network refresh. Explicit `library:pin` performs remote refreshes.
 
-- `checkLibraryPin` spawns `node --import tsx scripts/pin-library.ts --check`
-  and fails on a nonzero exit, folding the library pin into the lint gate.
-- `checkPiSurface` runs `scripts/pi-surface-diff.ts` (without `--write`)
-  against the committed `docs/pi-surface.json` and fails when the consumed Pi
-  declaration graph changed or an imported symbol disappeared.
-
-The `packaging` check reads `scripts/release-manifest.json` and holds the
-`package.json` `files` allowlist against it, then scans `src/` for
-`resolvePackageRoot()` joins and verifies each resolved literal path is
-shipped. The `readme-install-block` check extracts the default bin dir and the
-`export PATH` line directly from `scripts/install-local.sh` and asserts the
-README's Install block matches; it also runs two concurrent dry runs of
-`install-local.sh --dry-run --skip-deps --no-build` with a stub `clio-coder`
-earlier on `PATH` to prove the installer warns about shadowing. The
-`readme-shape` check pins the README's section list to `README_SECTIONS` and
-requires the Install clone to pin `--branch v<version>`, where the version
-comes from `readmeInstallVersion` in `scripts/release-version-policy.mjs`.
+The `packaging` check compares `scripts/release-manifest.json` with the
+`package.json` allowlist and paths resolved by production code. The
+`readme-install-block` check verifies the documented installation commands,
+release pin and source-installer shadowing advice. Pi declaration comparison
+is a separate dependency-maintenance command, described below.
 
 ## Library pinning pipeline
 
@@ -213,23 +186,12 @@ declaration hash (`signatureHash`), and `comparePiSurfaceSnapshots` compares
 the baseline `docs/pi-surface.json` to the installed surface, failing only
 when an imported export was removed or changed signature and reporting new
 exports as info. `--write` regenerates the snapshot; comparison without
-`--write` is what `lint` runs. The three packages are pinned exactly and move
+`--write` is run explicitly with `pnpm pi:surface-diff` during dependency maintenance. The three packages are pinned exactly and move
 together (`@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`,
 `@earendil-works/pi-tui`), per the Pi SDK dependency section of the repository
 handbook.
 
-## The operator-run benches
-
-Two scripts are explicitly operator-run and are never part of CI:
-
-The maintainer’s local boot benchmark measures boot interactivity. It launches
-`dist/cli/index.js` in a real pseudo-terminal (via `node-pty`) against an
-isolated home and a local stub HTTP target, starts typing the moment the
-Stage 0 editor paints, and times each keystroke's echo. It reports Stage 0
-commit, Stage 1 hydration, the longest input block, and first/max echo
-latency. `prepareHome` writes a scratch settings.yaml
-with an `lmstudio` runtime target and runs the CLI's `upgrade` command once to
-migrate settings and fill the compile cache; that first boot is not reported.
+## Operator-run System One calibration
 
 `scripts/decision-probe.ts` scores a System One site's wording against its labeled
 fixture under `tests/fixtures/decision-cases/`, live. It **calls the named engine**
@@ -241,16 +203,7 @@ a cut belongs to one build. The usage comment marks it "never part of CI."
 
 ## Focused tests
 
-`tests/contracts/configuration-reference.test.ts` (CI) exercises
-`configurationReferenceMembership` against the live `DEFAULT_SETTINGS` schema.
-It asserts real paths resolve as supported (`context.compaction.model`,
-`fleet.profiles.<key>.node`, `targets[].auth.headers.<key>`,
-`fleet.rosters.<key>.members[].model`) and stale/optional paths resolve as
-unsupported (`chat.obsoleteOption`, `targets[].capabilities.obsoleteOption`,
-`chat[].model`). The test deliberately avoids repository fixtures because the
-checker reads the typed schema once.
-
-`tests/contracts/release-boundary.test.ts` (CI) covers two script helpers:
+`tests/contracts/release-boundary.test.ts` (manual) covers two script helpers:
 `shippedAdvisoryFindings` from `scripts/release-audit.mjs` and
 `releaseVersionErrors` / `readmeInstallVersion` from
 `scripts/release-version-policy.mjs`. It asserts a clean `pnpm audit` report
@@ -281,16 +234,15 @@ identity-mismatch or invalid tree preserves the pinned row with a warning, a
 network failure preserves the row unchanged with a warning, and cleanup runs
 on both success and failure.
 
-Note the CI distinction: `tests/contracts/*` runs in routine CI, while
-`tests/extended/*` runs only under `pnpm run test:full`, so the extended
-library tests do not gate routine pull requests.
+The compact selection in `scripts/ci-tests.mjs` determines routine behavior
+checks. The broader contract and extended suites remain explicit investigation
+commands; directory membership alone does not make a test a default gate.
 
 ## Extension seams
 
 - **Add a hygiene check**: append a `[name, fn]` pair to the `checks` array at
   the bottom of `scripts/check-hygiene.ts` and implement the function in the
-  same file using `fail(rule, message)`. The check must stay fast because the
-  CI `checks` job has a 4-minute budget including lint.
+  same file using `fail(rule, message)`. Keep the check focused on a concrete source or distribution defect.
 - **Add a library kind**: extend `KIND_DIRS` in `scripts/pin-library.ts` to add
   another `library/<dir>` scanned for `plugin.json`, matching the expected
   `clio.kind` on the manifest.
@@ -307,14 +259,12 @@ library tests do not gate routine pull requests.
 
 ## Things to watch when editing
 
-- **scripts/ never ships.** Both the `packaging` check in
-  `scripts/check-hygiene.ts` and `FORBIDDEN` in `scripts/check-release.mjs`
-  assert this. Adding a `scripts/` path to the `package.json` `files` allowlist
-  or to `release-manifest.json` will fail these gates.
+- **Only runtime installers ship from scripts/.** The four installer files
+  named in `scripts/release-manifest.json` are allowed; other repository tools
+  remain checkout-only.
 - **No model calls in the lint gate.** `check-hygiene.ts` must stay free of
-  model requests and real user installations; the local boot benchmark and
-  `decision-probe.ts` are operator-run tools that exercise real
-  runtimes, and they are invoked only by hand, never by CI.
+  model requests and real user installations. `decision-probe.ts` exercises
+  real runtimes only in an explicitly requested operator run.
 - **Generated catalogs are committed.** `library/registry.yaml`,
   `library/skills/registry.yaml`, `library/skills/skill-marketplace.json`, and
   `.claude-plugin/marketplace.json` are checked into the tree and must be

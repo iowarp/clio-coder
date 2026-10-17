@@ -304,7 +304,9 @@ async function pinCurrentLaunch(
 ): Promise<Installed> {
 	const proposed = await newBackgroundConfig(state.config.port, launch, state.config.desktopPrefix);
 	if (!(await sameInstallation(state.config.packageRoot, proposed.packageRoot)))
-		throw new Error("Background setup belongs to another installation and its launch paths were left unchanged.");
+		throw new Error(
+			"Background setup belongs to another installation and its launch paths were left unchanged. Finish active work, then run: clio-coder gui background install --handover",
+		);
 	if (sameLaunch(state.config.launch, proposed.launch)) return state;
 	await serviceState(state.files, control);
 	const hasDesktop = await desktopOwned(state.config, directory);

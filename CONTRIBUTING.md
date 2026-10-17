@@ -28,9 +28,9 @@ pnpm run ci
 | --- | --- |
 | `pnpm run test:file -- tests/contracts/<test>.test.ts` | Run a focused source regression with the isolated state harness. |
 | `pnpm run typecheck` | Check TypeScript across source and tests. |
-| `pnpm run lint` | Check formatting, architecture boundaries, Pi surface, and hygiene invariants. |
+| `pnpm run lint` | Check formatting, source boundaries, local catalog pins and package hygiene. |
 | `pnpm run check:gui` | Check GUI browser/server TypeScript and lint rules. |
-| `pnpm run test` | Selected user-visible contracts and boot smokes. |
+| `pnpm run test` | Compact source-based behavior checks; no build required. |
 | `pnpm run ci` | Local candidate qualification, reused for the same clean commit. |
 | `pnpm run test:full` | Full root test investigation, including extended regressions. |
 | `pnpm run ci:release` | Same local qualification as `ci`; full investigation remains manual. |
@@ -84,7 +84,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Branches and Releases
 
-Development happens on the public version branch, currently `v062`. Keep local
+Development happens on the version branch, currently `v064`. Keep local
 and remote version branches synchronized with ordinary pushes. `main` moves
 only by fast-forward when a stable release completes. Published tags and npm
 versions are immutable. The completed stable release deletes its version branch;
@@ -108,10 +108,10 @@ checks source, builds and packs once, tests selected root/GUI behavior and the
 installed package, and boots that same archive on Node 24. Its immutable
 `candidate-<sha>` artifact includes the versioned npm tarball, SHA-256 receipt,
 four installers extracted from that archive, release notes, and a prepared
-website. `results-<sha>` records actual test counts. The default budget is 2000
-tests including runtime/platform boots. `pnpm run test:list` lists every selected
-file and every contract/GUI file reserved for full investigation. No test files
-are deleted. `test:full`, `test:gui:full`, and maintenance checks stay manual.
+website. `results-<sha>` records actual test counts. The development defaults select 20 root and six GUI files; package and runtime
+checks remain part of explicit qualification. `pnpm run test:list` lists every selected
+file and every contract/GUI file reserved for full investigation. Redundant
+prose and appearance-specific tests are retired with maintainer approval. `test:full`, `test:gui:full`, and maintenance checks stay manual.
 
 Run the interactive command in a visible terminal:
 
@@ -224,16 +224,18 @@ The README is the GitHub and npm landing page. Keep installation, capabilities,
 interface captures, model choices, and references easy to scan. Details belong
 in the guides; command-heavy material and agent orientation use foldable blocks.
 
-- Sections: Get started, Interfaces, Capabilities, Models, Execution policy,
-  Documentation, Contribute, Acknowledgements.
-- Show the terminal boot, browser overview, and browser conversation captures
-  from `assets/screenshots/`. Image URLs are absolute HTTPS URLs so npm can render them.
+- Sections: Get started, See Clio in action, Why Clio Coder, Capabilities,
+  Interfaces, Models, Control and inspect the work, Extend Clio, Documentation,
+  Contribute and get help, Acknowledgements.
+- Lead with a real task and recorded checks. Retain terminal and desktop captures
+  in a collapsible gallery, label older layouts, and use absolute HTTPS image
+  URLs so npm can render them.
 - Keep the release-tag source installation under Get started, including launcher
   path verification. Release chronology belongs in `CHANGELOG.md`.
 - Keep a collapsed **For agents** block under Documentation with source and
   installed-documentation lookup guidance.
-- Update this layout contract and `README_SECTIONS` in `scripts/check-hygiene.ts`
-  together when changing the landing page structure.
+- Update this layout contract when changing the landing page structure.
+  Routine hygiene checks installation correctness and links, not editorial layout.
 
 
 ## Library & Skills

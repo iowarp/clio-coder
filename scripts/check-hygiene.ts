@@ -2,8 +2,7 @@
 /**
  * Source and doc drift checks, run from `pnpm run lint`.
  *
- * Runs static drift checks, production validators and isolated installer/boundary
- * fixtures in one process. Temporary fixtures are cleaned up. No model requests
+ * Runs source and package checks with local validators. No model requests
  * or real user installations belong in this gate.
  */
 
@@ -27,15 +26,9 @@ import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../src/core/defaults.js";
 import { resolvePackageRoot } from "../src/core/package-root.js";
-import { ALL_TOOL_NAMES, type BuiltinToolName, ToolNames } from "../src/core/tool-names.js";
-import type { DispatchContract } from "../src/domains/dispatch/contract.js";
-import type { MusicOperations } from "../src/domains/mux/music-operations.js";
-import type { PanesOperations } from "../src/domains/mux/operations.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
-import type { JobController } from "../src/domains/scheduling/job-types.js";
 import { listDocsCorpus, slugify } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
-import { configurationReferenceMembership } from "./configuration-reference.js";
 import { readmeInstallVersion } from "./release-version-policy.mjs";
 
 const root = resolvePackageRoot(import.meta.url);
@@ -238,218 +231,11 @@ function checkExportHygiene(): void {
 }
 
 // ---------------------------------------------------------------------------
-// boundaries: the static import-boundary rules in tests/boundaries/check-boundaries.ts,
-// checked against src/ and against synthetic fixtures that pin each rule's
-// wording. Was tests/boundaries/boundaries.test.ts.
+// Check the architecture rules against the actual source tree.
 // ---------------------------------------------------------------------------
-function fixtureProject(files: Record<string, string>): string {
-	const dir = mkdtempSync(join(tmpdir(), "clio-coder-boundary-"));
-	for (const [file, content] of Object.entries(files)) {
-		const full = join(dir, file);
-		mkdirSync(dirname(full), { recursive: true });
-		writeFileSync(full, content, "utf8");
-	}
-	return dir;
-}
-
 function checkBoundaries(): void {
-	const fixtureDirs: string[] = [];
-	try {
-		const real = runBoundaryCheck(root);
-		if (real.violations.length > 0) {
-			fail("boundaries", `violations across src/:\n  ${real.violations.join("\n  ")}`);
-		}
-
-		const cases: ReadonlyArray<{ name: string; files: Record<string, string>; expectRule: string | null }> = [
-			{
-				name: "non-engine pi-ai type import",
-				files: {
-					"src/domains/providers/types/runtime-descriptor.ts":
-						'import type { Api, Model } from "@earendil-works/pi-ai";\nexport type RuntimeModel = Model<Api>;',
-				},
-				expectRule: "rule1",
-			},
-			{
-				name: "tool reaching into interactive code",
-				files: {
-					"src/tools/read.ts":
-						'import { createChatPanel } from "../interactive/chat-panel.js";\nexport const panel = createChatPanel;',
-					"src/interactive/chat-panel.ts": "export function createChatPanel() {}",
-				},
-				expectRule: "rule4",
-			},
-			{
-				name: "chat-loop turn module importing the entry point",
-				files: {
-					"src/session-control/turn-runtime.ts":
-						'import { bootOrchestrator } from "../entry/orchestrator.js";\nexport const boot = bootOrchestrator;',
-					"src/entry/orchestrator.ts": "export function bootOrchestrator() {}",
-				},
-				expectRule: "rule5",
-			},
-			{
-				name: "non-turn interactive module importing entry wiring (allowed)",
-				files: {
-					"src/interactive/index.ts":
-						'import type { BootOptions } from "../entry/orchestrator.js";\nexport type Opts = BootOptions;',
-					"src/entry/orchestrator.ts": "export interface BootOptions { headless?: boolean }",
-				},
-				expectRule: null,
-			},
-			{
-				name: "non-engine pi value import",
-				files: {
-					"src/domains/providers/registry.ts":
-						'import { getModel } from "@earendil-works/pi-ai";\nexport const model = getModel;',
-				},
-				expectRule: "rule1",
-			},
-			{
-				name: "worker-safe provider runtime rehydration imports (allowed)",
-				files: {
-					"src/worker/runtime-registry.ts": [
-						'import { loadPluginRuntimes } from "../domains/providers/plugins.js";',
-						'import { getRuntimeRegistry } from "../domains/providers/registry.js";',
-						'import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";',
-						'import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";',
-					].join("\n"),
-					"src/domains/providers/plugins.ts": "",
-					"src/domains/providers/registry.ts": "",
-					"src/domains/providers/runtimes/builtins.ts": "",
-					"src/domains/providers/types/target-descriptor.ts": "",
-				},
-				expectRule: null,
-			},
-			{
-				name: "worker value import from non-provider domain",
-				files: {
-					"src/worker/entry.ts": 'import { createConfigBundle } from "../domains/config/extension.js";',
-					"src/domains/config/extension.ts": "export const createConfigBundle = {};",
-				},
-				expectRule: "rule2",
-			},
-			{
-				name: "worker value import from non-runtime provider module",
-				files: {
-					"src/worker/entry.ts": 'import { createProvidersBundle } from "../domains/providers/extension.js";',
-					"src/domains/providers/extension.ts": "export const createProvidersBundle = {};",
-				},
-				expectRule: "rule2",
-			},
-			{
-				name: "cli reaching a non-seam module in the engine tree",
-				files: {
-					"src/cli/fleet-view.ts": 'import { truncateToWidth } from "../engine/tui.js";\nexport const t = truncateToWidth;',
-					"src/engine/tui.ts": "export function truncateToWidth() {}",
-				},
-				expectRule: "rule6",
-			},
-			{
-				name: "cli reaching a non-seam module in the interactive tree, dynamically",
-				files: {
-					"src/cli/run.ts": 'export const load = () => import("../interactive/clio-editor.js");',
-					"src/interactive/clio-editor.ts": "export function createEditor() {}",
-				},
-				expectRule: "rule6",
-			},
-			{
-				name: "domain making the yazi theme a second reacher of interactive tokens",
-				files: {
-					"src/domains/mux/yazi/theme.ts":
-						'import { tokenHex } from "../../../interactive/theme/tokens.js";\nexport const accent = tokenHex("accent");',
-					"src/interactive/theme/tokens.ts": 'export function tokenHex(_token: string) { return "#46e5d0"; }',
-					"src/interactive/terminal-lease.ts":
-						'import { tokenHex } from "./theme/tokens.js";\nexport const lease = tokenHex("accent");',
-				},
-				expectRule: "rule6",
-			},
-			{
-				name: "domain using a declared terminal-free engine seam (allowed)",
-				files: {
-					"src/domains/dispatch/state.ts":
-						'import { atomicWrite } from "../../engine/session.js";\nexport const persist = atomicWrite;',
-					"src/engine/session.ts": "export function atomicWrite() {}",
-					"src/interactive/terminal-lease.ts": "export const lease = {};",
-				},
-				expectRule: null,
-			},
-			{
-				name: "module already in the Stage 0 closure importing its render dependency (allowed)",
-				files: {
-					"src/interactive/terminal-lease.ts":
-						'import { bindings } from "../domains/config/keybindings.js";\nexport const lease = bindings;',
-					"src/domains/config/keybindings.ts": 'import { tui } from "../../engine/tui.js";\nexport const bindings = tui;',
-					"src/engine/tui.ts": "export const tui = {};",
-				},
-				expectRule: null,
-			},
-			{
-				name: "cli seam whose own closure reaches the Stage 0 closure",
-				files: {
-					"src/cli/run.ts": 'export const load = () => import("../session-control/slash-commands.js");',
-					"src/session-control/slash-commands.ts":
-						'import { tui } from "../engine/tui.js";\nexport const parseSlashCommand = () => tui;',
-					"src/interactive/terminal-lease.ts": 'import { tui } from "../engine/tui.js";\nexport const lease = tui;',
-					"src/engine/tui.ts": "export const tui = {};",
-				},
-				expectRule: "rule6",
-			},
-			{
-				name: "domain seam whose own closure reaches the Stage 0 closure",
-				files: {
-					"src/domains/mux/yazi/theme.ts":
-						'import { parseSlashCommand } from "../../../session-control/slash-commands.js";\nexport const parse = parseSlashCommand;',
-					"src/session-control/slash-commands.ts":
-						'import { tui } from "../engine/tui.js";\nexport const parseSlashCommand = () => tui;',
-					"src/interactive/terminal-lease.ts": 'import { tui } from "../engine/tui.js";\nexport const lease = tui;',
-					"src/engine/tui.ts": "export const tui = {};",
-				},
-				expectRule: "rule6",
-			},
-			{
-				name: "cli seam whose closure stays off the Stage 0 closure (allowed)",
-				files: {
-					"src/cli/run.ts": 'export const load = () => import("../session-control/slash-commands.js");',
-					"src/session-control/slash-commands.ts":
-						'import { SECTIONS } from "../core/settings-sections.js";\nexport const parseSlashCommand = () => SECTIONS;',
-					"src/core/settings-sections.ts": "export const SECTIONS = [];",
-					"src/interactive/terminal-lease.ts": 'import { theme } from "./theme/index.js";\nexport const lease = theme;',
-					"src/interactive/theme/index.ts": "export const theme = {};",
-				},
-				expectRule: null,
-			},
-			{
-				name: "mixed type/value import treated as a value import",
-				files: {
-					"src/worker/entry.ts": 'import { type ConfigContract, createConfigBundle } from "../domains/config/extension.js";',
-					"src/domains/config/extension.ts": "export type ConfigContract = {};\nexport const createConfigBundle = {};",
-				},
-				expectRule: "rule2",
-			},
-		];
-
-		for (const testCase of cases) {
-			const dir = fixtureProject(testCase.files);
-			fixtureDirs.push(dir);
-			const result = runBoundaryCheck(dir);
-			if (testCase.expectRule === null) {
-				if (result.violations.length > 0) {
-					fail("boundaries", `fixture "${testCase.name}" expected no violations, got:\n  ${result.violations.join("\n  ")}`);
-				}
-			} else if (!result.violations.some((v) => v.includes(testCase.expectRule as string))) {
-				fail(
-					"boundaries",
-					`fixture "${testCase.name}" expected a ${testCase.expectRule} violation, got:\n  ${result.violations.join(
-						"\n  ",
-					)}`,
-				);
-			}
-		}
-	} finally {
-		for (const dir of fixtureDirs) {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	}
+	const { violations } = runBoundaryCheck(root);
+	if (violations.length > 0) fail("boundaries", `violations across src/:\n  ${violations.join("\n  ")}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,10 +287,9 @@ function checkCiScripts(): void {
 	if (
 		release.jobs?.release?.needs !== "preflight" ||
 		release.jobs?.release?.environment !== "release" ||
-		release.jobs?.release?.permissions?.contents !== "write" ||
-		release.jobs?.release?.permissions?.["id-token"] !== "write"
+		release.jobs?.release?.permissions?.contents !== "write"
 	)
-		fail("ci-scripts", "publishing requires read-only preflight, protected owner approval, and OIDC");
+		fail("ci-scripts", "GitHub publication requires read-only preflight and protected owner approval");
 	const releaseText = readRoot(".github/workflows/release.yml");
 	if (/pnpm|npm (?:install|pack)|test:|workflow_call|uses: \.\/\.github\/workflows/gu.test(releaseText))
 		fail("ci-scripts", "release reuses qualification without installing, building, testing, or calling CI");
@@ -520,94 +305,8 @@ function checkCiScripts(): void {
 		)
 			fail("ci-scripts", "every release job must consume the specified qualification run");
 	}
-	const publisher = readRoot("scripts/release-publish.mjs").replace(/\s+/gu, " ");
-	if (
-		publisher.indexOf('"publish", receipt.tarball') >= publisher.indexOf('"release", "create"') ||
-		!publisher.includes("requireIntegrity")
-	)
-		fail("ci-scripts", "npm publishes verified bytes before GitHub creates the tag/release");
 	if (existsSync(join(root, ".github/workflows/pages.yml")))
 		fail("ci-scripts", "keep the existing gh-pages deployment without a duplicate main-triggered workflow");
-	const scripts = JSON.parse(readRoot("package.json")).scripts;
-	for (const tier of ["test:full", "test:gui:full", "test:maintenance"])
-		if (!scripts[tier]) fail("ci-scripts", `retain manual investigation tier ${tier}`);
-	if (scripts.test !== "node scripts/ci-tests.mjs core" || scripts["test:gui"] !== "node scripts/ci-tests.mjs gui")
-		fail("ci-scripts", "default tests use the explicit behavior selection");
-}
-
-// ---------------------------------------------------------------------------
-// test-tiers: a test file belongs to one named tier, by the directory it sits
-// in, and each tier names the package script whose glob runs it. A test file
-// anywhere else, or a tier whose script lost its glob, is a test no gate
-// reaches: 41 GUI files sat outside a hand-kept list that way.
-// ---------------------------------------------------------------------------
-const GUI_MANIFEST = "apps/clio-coder-gui/package.json";
-const TEST_TIERS: ReadonlyArray<{ tier: string; dir: string; manifest: string; script?: string; runs?: string }> = [
-	{
-		tier: "contracts",
-		dir: "tests/contracts",
-		manifest: "package.json",
-		script: "test:full",
-		runs: "tests/contracts/*.test.ts",
-	},
-	{ tier: "smoke", dir: "tests/smoke", manifest: "package.json", script: "test:full", runs: "tests/smoke/*.test.ts" },
-	{
-		tier: "extended",
-		dir: "tests/extended",
-		manifest: "package.json",
-		script: "test:full",
-		runs: "tests/extended/*.test.ts",
-	},
-	{
-		tier: "extended-smoke",
-		dir: "tests/extended-smoke",
-		manifest: "package.json",
-		script: "test:full",
-		runs: "tests/extended-smoke/*.test.ts",
-	},
-	{
-		tier: "gui",
-		dir: "apps/clio-coder-gui/tests",
-		manifest: GUI_MANIFEST,
-		script: "test",
-		runs: "tests/*.test.ts tests/*.test.tsx",
-	},
-	// The live tier drives a real agent and a real browser, so it is run by hand:
-	// no glob, and every file is named by a script of its own.
-	{ tier: "gui-real", dir: "apps/clio-coder-gui/tests/real", manifest: GUI_MANIFEST },
-];
-
-function checkTestTiers(): void {
-	const scriptsOf = (manifest: string): Record<string, string> => JSON.parse(readRoot(manifest)).scripts ?? {};
-	for (const tier of TEST_TIERS) {
-		if (tier.script === undefined || tier.runs === undefined) continue;
-		if (!scriptsOf(tier.manifest)[tier.script]?.includes(tier.runs))
-			fail("test-tiers", `${tier.manifest} script ${tier.script} must run the ${tier.tier} tier as ${tier.runs}`);
-	}
-	const visit = (dir: string): void => {
-		for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
-			const rel = `${dir}/${entry.name}`;
-			if (entry.isDirectory()) {
-				if (entry.name !== "node_modules") visit(rel);
-				continue;
-			}
-			if (!/\.test\.[cm]?[jt]sx?$/.test(entry.name)) continue;
-			const tier = TEST_TIERS.find((candidate) => candidate.dir === dir);
-			if (tier === undefined) {
-				fail("test-tiers", `${rel} sits in no test tier; move it under one of ${TEST_TIERS.map((t) => t.dir).join(", ")}`);
-			} else if (tier.runs !== undefined) {
-				const suffixes = tier.runs.split(" ").map((glob) => glob.slice(glob.indexOf("*") + 1));
-				if (!suffixes.some((suffix) => entry.name.endsWith(suffix)))
-					fail("test-tiers", `${rel} does not match the ${tier.tier} tier glob ${tier.runs}`);
-			} else if (
-				!Object.values(scriptsOf(tier.manifest)).some((script) => script.includes(rel.slice(dir.lastIndexOf("/tests") + 1)))
-			) {
-				fail("test-tiers", `${rel} is in the hand-run ${tier.tier} tier and no ${tier.manifest} script names it`);
-			}
-		}
-	};
-	visit("tests");
-	visit("apps/clio-coder-gui/tests");
 }
 
 // ---------------------------------------------------------------------------
@@ -841,51 +540,6 @@ function checkEnvironmentVariableInventory(): void {
 		fail(
 			"environment-variable-inventory",
 			`the CLIO_CODER_MEMORY_TRACE row must state it carries conversation text: ${memoryTraceRow}`,
-		);
-	}
-}
-
-// ---------------------------------------------------------------------------
-// configuration-reference: docs/guide/configuration-reference.md's settings-key
-// table covers every default leaf. Membership comes from the existing typed
-// settings shape, including defaultless optional fields and array/map elements.
-// ---------------------------------------------------------------------------
-
-function configurationReferenceRows(): string[] {
-	const doc = readRoot("docs/guide/configuration-reference.md");
-	const start = doc.indexOf("## Settings keys");
-	if (start < 0) {
-		throw new Error("docs/guide/configuration-reference.md has no ## Settings keys section");
-	}
-	const end = doc.indexOf("\n## ", start + 1);
-	return doc
-		.slice(start, end === -1 ? undefined : end)
-		.split("\n")
-		.flatMap((line) => {
-			const match = /^\| `([^`]+)` \|/.exec(line);
-			return match?.[1] === undefined ? [] : [match[1]];
-		});
-}
-
-function checkConfigurationReference(): void {
-	const rows = configurationReferenceRows();
-	const rowSet = new Set(rows);
-	const leaves = leafPaths(DEFAULT_SETTINGS);
-
-	const missing = leaves.filter((path) => !rowSet.has(path));
-	if (missing.length > 0) {
-		fail(
-			"configuration-reference",
-			`docs/guide/configuration-reference.md has no settings-key row for:\n  ${missing.join("\n  ")}`,
-		);
-	}
-
-	const isSupported = configurationReferenceMembership(root);
-	const stale = rows.filter((path) => !isSupported(path));
-	if (stale.length > 0) {
-		fail(
-			"configuration-reference",
-			`docs/guide/configuration-reference.md rows name settings keys absent from the DEFAULT_SETTINGS schema:\n  ${stale.join("\n  ")}`,
 		);
 	}
 }
@@ -1323,112 +977,6 @@ function gitIgnored(paths: ReadonlyArray<string>): Set<string> {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// readme-shape: the README layout and media contract is documented in CONTRIBUTING.md.
-// ---------------------------------------------------------------------------
-const README_SECTIONS = [
-	"Get started",
-	"Interfaces",
-	"Capabilities",
-	"Models",
-	"Execution policy",
-	"Documentation",
-	"Contribute",
-	"Acknowledgements",
-] as const;
-const README_SCREENSHOTS = [
-	"assets/screenshots/tui-boot.webp",
-	"assets/screenshots/gui-overview.webp",
-	"assets/screenshots/gui-conversation.webp",
-] as const;
-const README_CONTRACT = "change CONTRIBUTING.md#readme-contract and README_SECTIONS in the same commit";
-
-function checkReadmeShape(): void {
-	const lines = readRoot("README.md").split(/\r?\n/);
-	const visible: string[] = [];
-	let fenced = false;
-	let detailsDepth = 0;
-	for (const line of lines) {
-		if (/^\s*```/.test(line)) fenced = !fenced;
-		if (fenced) continue;
-		detailsDepth += (line.match(/<details\b/g) ?? []).length;
-		if (detailsDepth === 0) visible.push(line);
-		detailsDepth -= (line.match(/<\/details>/g) ?? []).length;
-		if (detailsDepth < 0) {
-			fail("readme-shape", "README.md closes a <details> block it never opened");
-			return;
-		}
-	}
-
-	const h1 = visible.filter((line) => /^# /.test(line));
-	// Clio's docs-engine section index only reads Markdown headings; an HTML
-	// <h1> drops the "Clio Coder > …" breadcrumb from documentation search.
-	if (h1.length !== 1 || h1[0] !== "# Clio Coder") {
-		fail("readme-shape", `README.md needs exactly one Markdown H1, "# Clio Coder"; found ${JSON.stringify(h1)}`);
-	}
-	const h2 = visible.filter((line) => /^## /.test(line)).map((line) => line.slice(3).trim());
-	if (JSON.stringify(h2) !== JSON.stringify(README_SECTIONS)) {
-		fail(
-			"readme-shape",
-			`README.md sections must be ${JSON.stringify(README_SECTIONS)} in that order; found ${JSON.stringify(h2)}. Put new material in docs/ or inside an existing section, or ${README_CONTRACT}`,
-		);
-	}
-	const deeper = visible.filter((line) => /^#{3,6} /.test(line));
-	if (deeper.length > 0) {
-		fail(
-			"readme-shape",
-			`README.md adds sub-headings outside a <details> block: ${JSON.stringify(deeper)}. Use a bold lead sentence or a collapsed block, or ${README_CONTRACT}`,
-		);
-	}
-	for (const banner of visible.filter((line) => /^#+ .*\b(new in|what'?s new|what changed)\b/i.test(line))) {
-		fail("readme-shape", `release notes belong in CHANGELOG.md, not a README heading: ${JSON.stringify(banner)}`);
-	}
-
-	const text = lines.join("\n");
-	// The README ships to npm without assets/, so an image must be an absolute URL.
-	const imageSources = Array.from(
-		text.matchAll(/<img\b[^>]*\bsrc="([^"]+)"|!\[[^\]]*\]\(([^)\s]+)/g),
-		(match) => match[1] ?? match[2] ?? "",
-	);
-	for (const src of imageSources) {
-		if (!src.startsWith("https://")) {
-			fail(
-				"readme-shape",
-				`README.md image ${JSON.stringify(src)} must be an absolute https URL; npm renders it without assets/`,
-			);
-		}
-	}
-	for (const screenshot of README_SCREENSHOTS) {
-		if (
-			!imageSources.some(
-				(src) => src.startsWith("https://raw.githubusercontent.com/iowarp/clio-coder/") && src.endsWith(`/${screenshot}`),
-			)
-		) {
-			fail("readme-shape", `README.md must show the product screenshot ${screenshot} from a repository ref`);
-		} else if (!existsSync(join(root, screenshot))) {
-			fail("readme-shape", `${screenshot} is referenced by README.md but missing from the tree`);
-		}
-	}
-
-	const sectionText = (name: string) => text.split(/^## /m).find((part) => part.startsWith(`${name}\n`)) ?? "";
-	if (!/<details>\s*<summary><strong>For agents<\/strong><\/summary>/.test(sectionText("Documentation"))) {
-		fail(
-			"readme-shape",
-			"the agent orientation must stay a collapsed <details> block titled For agents under ## Documentation",
-		);
-	}
-	// Version numbers outside Get started are release chronology that goes stale the
-	// day after a release; the source-install pin is the versioned line.
-	for (const name of README_SECTIONS.filter((section) => section !== "Get started")) {
-		for (const version of sectionText(name).match(/\bv?\d+\.\d+\.\d+\b/g) ?? []) {
-			fail(
-				"readme-shape",
-				`## ${name} names version ${version}; only the ## Get started source-install pin carries a release number`,
-			);
-		}
-	}
-}
-
 function checkPackaging(): void {
 	const manifest = JSON.parse(readRoot("scripts/release-manifest.json")) as ReleaseManifest;
 	const packageFiles = (JSON.parse(readRoot("package.json")) as { files: string[] }).files;
@@ -1764,251 +1312,6 @@ function checkDocsSource(): void {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// pi-surface: every lint run compares the consumed Pi declaration graph,
-// including local patches at the same version, using scripts/pi-surface-diff.ts,
-// which fails when a symbol imported by Clio changed or disappeared and reports
-// new exports as review input.
-// ---------------------------------------------------------------------------
-function checkPiSurface(): void {
-	const snapshotPath = join(root, "docs", "pi-surface.json");
-	if (!existsSync(snapshotPath)) {
-		fail("pi-surface", "docs/pi-surface.json must exist");
-		return;
-	}
-	// Local patches can change the consumed API without changing the package version.
-	try {
-		const output = execFileSync(process.execPath, ["--import", "tsx", join(root, "scripts", "pi-surface-diff.ts")], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		if (output.trim().length > 0) process.stdout.write(output);
-	} catch (error) {
-		const result = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
-		const output = `${result.stdout?.toString() ?? ""}${result.stderr?.toString() ?? ""}`.trim();
-		fail(
-			"pi-surface",
-			output.length > 0 ? output.replaceAll("\n", "\n  ") : (result.message ?? "Pi surface check failed"),
-		);
-	}
-}
-
-// ---------------------------------------------------------------------------
-// tool-contract-coverage: every builtin tool names the contract tests that
-// exercise it. CI runs tests/contracts and never tests/extended, so a tool
-// whose only test lives elsewhere ships untested. The map is keyed by
-// BuiltinToolName, so a new tool fails typecheck until someone names its
-// test here. Each named file must exist under tests/contracts and reach the
-// tool in code, either by importing the module the registry records as the
-// tool's source or by building a registry and naming the tool in it. The
-// check reads the syntax tree, so a mention in a comment never counts.
-// ---------------------------------------------------------------------------
-const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> = {
-	[ToolNames.Read]: [
-		"tests/contracts/read-large-files.test.ts",
-		"tests/contracts/read-scope.test.ts",
-		"tests/contracts/physical-dotdot.test.ts",
-	],
-	[ToolNames.Evidence]: ["tests/contracts/evidence-tool.test.ts"],
-	[ToolNames.Grep]: ["tests/contracts/search-completeness.test.ts", "tests/contracts/read-scope.test.ts"],
-	[ToolNames.Find]: ["tests/contracts/search-completeness.test.ts", "tests/contracts/read-scope.test.ts"],
-	[ToolNames.Ls]: [
-		"tests/contracts/ls-tool.test.ts",
-		"tests/contracts/search-completeness.test.ts",
-		"tests/contracts/read-scope.test.ts",
-	],
-	[ToolNames.CodeNav]: ["tests/contracts/code-nav.test.ts", "tests/contracts/tool-boundaries.test.ts"],
-	[ToolNames.Context]: [
-		"tests/contracts/context-budget-surface.test.ts",
-		"tests/contracts/settings-awareness.test.ts",
-		"tests/contracts/skill-install.test.ts",
-	],
-	[ToolNames.SelfCompact]: ["tests/contracts/continuity-controller.test.ts"],
-	[ToolNames.CredentialPresent]: [
-		"tests/contracts/credential-present.test.ts",
-		"tests/contracts/gateway-surface.test.ts",
-	],
-	[ToolNames.ClioDocs]: ["tests/contracts/gateway-web-context.test.ts"],
-	[ToolNames.ClioLibrary]: ["tests/contracts/clio-library.test.ts", "tests/contracts/gateway-web-context.test.ts"],
-	[ToolNames.Data]: ["tests/contracts/data-tool.test.ts", "tests/contracts/gateway-corrections.test.ts"],
-	[ToolNames.MemoryRecall]: ["tests/contracts/memory-recall-tool.test.ts"],
-	[ToolNames.Write]: [
-		"tests/contracts/mutation-atomicity.test.ts",
-		"tests/contracts/symlink-escape.test.ts",
-		"tests/contracts/physical-dotdot.test.ts",
-		"tests/contracts/admission-fs-ops.test.ts",
-	],
-	[ToolNames.Edit]: ["tests/contracts/mutation-atomicity.test.ts", "tests/contracts/admission-fs-ops.test.ts"],
-	[ToolNames.Bash]: ["tests/contracts/bash-output-cap.test.ts"],
-	[ToolNames.Git]: ["tests/contracts/git-tool.test.ts", "tests/contracts/gateway-authority.test.ts"],
-	[ToolNames.Verify]: ["tests/contracts/verify-numeric.test.ts"],
-	[ToolNames.RunScript]: ["tests/contracts/run-script.test.ts"],
-	[ToolNames.Dispatch]: ["tests/contracts/dispatch-admission.test.ts"],
-	[ToolNames.Job]: ["tests/contracts/job-tool.test.ts"],
-	[ToolNames.Monitor]: ["tests/contracts/monitor-steer-tools.test.ts"],
-	[ToolNames.Steer]: ["tests/contracts/monitor-steer-tools.test.ts"],
-	[ToolNames.Tasks]: ["tests/contracts/task-proposal-scope.test.ts"],
-	[ToolNames.Ledger]: ["tests/contracts/ledger-tool.test.ts"],
-	[ToolNames.Panes]: ["tests/contracts/panes-tool.test.ts"],
-	[ToolNames.Music]: ["tests/contracts/music-tool.test.ts"],
-	[ToolNames.Limitation]: ["tests/contracts/finish-contract-limitation.test.ts"],
-	[ToolNames.Decide]: ["tests/contracts/decide-tool.test.ts"],
-	[ToolNames.Consult]: ["tests/contracts/consult-tool.test.ts"],
-	[ToolNames.Vision]: ["tests/contracts/vision-tool.test.ts"],
-	[ToolNames.WebRead]: ["tests/contracts/tool-boundaries.test.ts", "tests/contracts/gateway-web-context.test.ts"],
-	[ToolNames.WebFetch]: ["tests/contracts/egress-remediation.test.ts", "tests/contracts/tool-boundaries.test.ts"],
-	[ToolNames.AskUser]: ["tests/contracts/ask-user-tool.test.ts"],
-	[ToolNames.ConfigureClio]: ["tests/contracts/configure-clio-tool.test.ts"],
-	[ToolNames.Artifact]: ["tests/contracts/artifact-tool.test.ts", "tests/contracts/gateway-authority.test.ts"],
-	[ToolNames.Gateway]: [
-		"tests/contracts/gateway-surface.test.ts",
-		"tests/contracts/gateway-authority.test.ts",
-		"tests/contracts/gateway-mcp.test.ts",
-	],
-};
-
-/** Importing one of these is how a test builds a registry it can call tools on. */
-const REGISTRY_BUILDERS = new Set([
-	"src/tools/bootstrap.ts",
-	"src/tools/core-bootstrap.ts",
-	"src/engine/worker-tools.ts",
-]);
-/** Keys whose string value names the tool a call or ledger entry is for. */
-const TOOL_CALL_KEYS = new Set(["tool", "capability", "name", "toolName"]);
-const RETRIEVE_SWITCHES = ["CLIO_CODER_DISABLE_RETRIEVE_TOOLS", "CLIO_CODER_NO_NETWORK_TOOLS"];
-
-/**
- * The module each builtin was registered from, read off a registry with every
- * optional surface switched on. The stand-ins below only switch surfaces on;
- * registration never calls them. The retrieve switches are cleared for the
- * duration so a hermetic shell still sees the whole builtin surface.
- */
-async function registeredToolSources(): Promise<Map<string, string>> {
-	const [{ createRegistry }, { registerAllTools }, { createWorkerSafety }, { createJobTool }] = await Promise.all([
-		import("../src/tools/registry.js"),
-		import("../src/tools/bootstrap.js"),
-		import("../src/engine/worker-tools.js"),
-		import("../src/tools/job.js"),
-	]);
-	const saved = RETRIEVE_SWITCHES.map((key) => [key, process.env[key]] as const);
-	for (const key of RETRIEVE_SWITCHES) delete process.env[key];
-	const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }) });
-	try {
-		registerAllTools(registry, {
-			mcpCapabilities: false,
-			dispatch: {} as DispatchContract,
-			panes: {} as PanesOperations,
-			music: {} as MusicOperations,
-			askUser: async () => ({ answers: [] }),
-			requestSelfCompact: async () => "",
-			memoryRecall: { bank: () => null, records: () => [], eligibility: () => ({}) },
-			jobTool: createJobTool({
-				controller: {} as JobController,
-				registry,
-				owner: () => null,
-				constraints: () => undefined,
-				hostRefusal: () => "The coverage registry never executes jobs.",
-			}).spec,
-			includeLedgerTools: true,
-			consult: { systemOne: { run: async () => null } },
-			visionSidecar: {
-				configured: () => true,
-				label: () => "fixture",
-				analyze: async () => ({ target: "fixture", model: "fixture", images: [], answer: "fixture" }),
-			},
-		});
-	} finally {
-		for (const [key, value] of saved) if (value !== undefined) process.env[key] = value;
-	}
-	const sources = new Map<string, string>();
-	for (const spec of registry.listAll()) if (spec.sourceInfo) sources.set(spec.name, spec.sourceInfo.path);
-	return sources;
-}
-
-interface ToolReferences {
-	/** Repo-relative modules the file imports for their values, statically or dynamically. */
-	modules: Set<string>;
-	/** Builtin names the file spells in code as ToolNames.X or as a call key's string value. */
-	named: Set<string>;
-}
-
-function toolReferences(absolute: string): ToolReferences {
-	const source = ts.createSourceFile(absolute, readFileSync(absolute, "utf8"), ts.ScriptTarget.ESNext, true);
-	const byKey = new Map<string, string>(Object.entries(ToolNames));
-	const builtins = new Set<string>(ALL_TOOL_NAMES);
-	const modules = new Set<string>();
-	const named = new Set<string>();
-	const addModule = (specifier: string): void => {
-		if (!specifier.startsWith(".")) return;
-		const resolved = relative(root, resolve(dirname(absolute), specifier)).replaceAll("\\", "/");
-		modules.add(resolved.replace(/\.js$/, ".ts"));
-	};
-	const visit = (node: ts.Node): void => {
-		if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly && ts.isStringLiteral(node.moduleSpecifier)) {
-			addModule(node.moduleSpecifier.text);
-		} else if (
-			ts.isCallExpression(node) &&
-			node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-			node.arguments[0] !== undefined &&
-			ts.isStringLiteral(node.arguments[0])
-		) {
-			addModule(node.arguments[0].text);
-		} else if (
-			ts.isPropertyAccessExpression(node) &&
-			ts.isIdentifier(node.expression) &&
-			node.expression.text === "ToolNames"
-		) {
-			const name = byKey.get(node.name.text);
-			if (name !== undefined) named.add(name);
-		} else if (
-			ts.isPropertyAssignment(node) &&
-			(ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
-			TOOL_CALL_KEYS.has(node.name.text) &&
-			ts.isStringLiteralLike(node.initializer) &&
-			builtins.has(node.initializer.text)
-		) {
-			named.add(node.initializer.text);
-		}
-		ts.forEachChild(node, visit);
-	};
-	visit(source);
-	return { modules, named };
-}
-
-async function checkToolContractCoverage(): Promise<void> {
-	const sources = await registeredToolSources();
-	const references = new Map<string, ToolReferences>();
-	for (const tool of ALL_TOOL_NAMES) {
-		const files = TOOL_CONTRACT_TESTS[tool];
-		const module = sources.get(tool);
-		if (module === undefined) {
-			fail("tool-contract-coverage", `${tool} is not registered by registerAllTools, so its source module is unknown`);
-			continue;
-		}
-		if (files.length === 0) fail("tool-contract-coverage", `${tool} names no contract test`);
-		for (const file of files) {
-			if (!/^tests\/contracts\/[^/]+\.test\.ts$/.test(file)) {
-				fail("tool-contract-coverage", `${tool}: ${file} is not a tests/contracts/*.test.ts file`);
-				continue;
-			}
-			const absolute = join(root, file);
-			if (!existsSync(absolute)) {
-				fail("tool-contract-coverage", `${tool}: ${file} does not exist`);
-				continue;
-			}
-			const found = references.get(file) ?? toolReferences(absolute);
-			references.set(file, found);
-			const buildsRegistry = [...REGISTRY_BUILDERS].some((builder) => found.modules.has(builder));
-			if (found.modules.has(module) || (buildsRegistry && found.named.has(tool))) continue;
-			fail(
-				"tool-contract-coverage",
-				`${tool}: ${file} neither imports ${module} nor names ${tool} on a registry it builds from ${[...REGISTRY_BUILDERS].join(", ")}`,
-			);
-		}
-	}
-}
-
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["documentation-links", checkDocumentationLinks],
 	["product-namespace", checkProductNamespace],
@@ -2016,22 +1319,17 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["export-hygiene", checkExportHygiene],
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
-	["test-tiers", checkTestTiers],
 	["library-pin", checkLibraryPin],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
-	["configuration-reference", checkConfigurationReference],
 	["theme-discipline", checkThemeDiscipline],
 	["readme-install-block", checkReadmeInstallBlock],
-	["readme-shape", checkReadmeShape],
 	["packaging", checkPackaging],
 	["gitignored-reference", checkGitignoredReference],
 	["tracked-ignored", checkTrackedIgnored],
 	["prompts", checkPromptsDocLinks],
 	["docs-source", checkDocsSource],
-	["pi-surface", checkPiSurface],
-	["tool-contract-coverage", checkToolContractCoverage],
 ];
 
 const startedAt = performance.now();

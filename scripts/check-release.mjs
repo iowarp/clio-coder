@@ -58,17 +58,8 @@ if (values.tarball || values.report) {
 const SHEBANG = "#!/usr/bin/env node";
 const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 
-// The installers ship: `clio-coder upgrade` re-runs the installed copy for an
-// install.sh or install.ps1 installation (src/domains/lifecycle/install-method.ts),
-// install.cmd bootstraps install.ps1 from cmd.exe, and both installers call the
-// installed native-install.cjs. Keep in step with the `scripts/` entries of the
-// package.json `files` allowlist.
-const SHIPPED_SCRIPTS = new Set([
-	"scripts/install.sh",
-	"scripts/install.ps1",
-	"scripts/install.cmd",
-	"scripts/native-install.cjs",
-]);
+const manifest = JSON.parse(readFileSync(join(root, "scripts", "release-manifest.json"), "utf8"));
+const SHIPPED_SCRIPTS = new Set(manifest.requiredFiles.filter((file) => file.startsWith("scripts/")));
 
 // Size budgets are tripwires against packaging defects such as leaked
 // node_modules or doubled dist. Per-class ceilings follow the package measured
@@ -117,7 +108,7 @@ const SIZE_BUDGETS = [
 		match: (path) =>
 			!path.includes("/") ||
 			["library/", "examples/", "models/"].some((prefix) => path.startsWith(prefix)) ||
-			[".claude-plugin/marketplace.json", "assets/clio-coder-logo-128.webp", "bin/clio-coder.cjs"].includes(path) ||
+			[".claude-plugin/marketplace.json", "bin/clio-coder.cjs"].includes(path) ||
 			SHIPPED_SCRIPTS.has(path),
 		maxBytes: 2_000_000,
 	},
@@ -158,7 +149,6 @@ const FORBIDDEN = [
 // the resource trees it loads by directory scan. Shared with the packaging
 // contract test, which holds this list against the package.json `files`
 // allowlist so the gate cannot outlive what the allowlist actually ships.
-const manifest = JSON.parse(readFileSync(join(root, "scripts", "release-manifest.json"), "utf8"));
 const REQUIRED_FILES = manifest.requiredFiles;
 const REQUIRED_PREFIXES = manifest.requiredPrefixes;
 

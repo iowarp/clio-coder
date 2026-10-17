@@ -28,6 +28,7 @@
 set -eu
 
 PACKAGE="@iowarp/clio-coder"
+PACKAGE_MIN="0.6.0"
 # Mirrors package.json engines.node; tests/contracts/install-script.test.ts
 # keeps the two in sync. A requested Node older than this is refused.
 NODE_MIN="22.19.0"
@@ -50,7 +51,7 @@ usage() {
 	cat <<'USAGE'
 Usage: install.sh [options]
 
-Install Clio Coder with a private Node.js runtime. No root, no system Node.
+Install Clio Coder 0.6.0 or newer with a private Node.js runtime. No root, no system Node.
 
 Options:
   --version <spec>      Clio Coder version: an exact version such as 0.6.0 or a
@@ -160,6 +161,10 @@ version_ge() {
 	}'
 }
 
+require_supported_version() {
+	version_ge "${1%%-*}" "$PACKAGE_MIN" || fail "Clio Coder $1 is unsupported; this installer requires $PACKAGE_MIN or newer. The active installation was left unchanged."
+}
+
 single_line() {
 	[ "$(printf '%s\n' "$1" | wc -l | tr -d ' ')" = 1 ]
 }
@@ -173,6 +178,7 @@ validate_version() {
 		v[0-9]*) spec="${spec#v}" ;;
 	esac
 	if single_line "$spec" && printf '%s\n' "$spec" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+		require_supported_version "$spec"
 		printf '%s\n' "$spec"
 		return 0
 	fi
@@ -462,26 +468,6 @@ manifest_field() {
 	sed -n "s/^[[:space:]]*\"$1\": *\"\\([^\"]*\\)\".*/\\1/p" "$install_root/install.json" | head -n 1
 }
 
-# write_manifest <node> <nodeVersion> <nodeBuild> <current> <previous>
-write_manifest() {
-	tmp="$install_root/.install.json.$$"
-	cat >"$tmp" <<JSON
-{
-	"schema": 1,
-	"kind": "$MANIFEST_KIND",
-	"node": "$1",
-	"nodeVersion": "$2",
-	"nodeBuild": "$3",
-	"current": "$4",
-	"previous": "$5",
-	"launcher": "$launcher",
-	"channel": "$channel",
-	"installedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-JSON
-	mv -f "$tmp" "$install_root/install.json"
-}
-
 launcher_is_ours() {
 	[ -f "$launcher" ] && [ ! -L "$launcher" ] && grep -q "^$LAUNCHER_MARK" "$launcher" 2>/dev/null
 }
@@ -519,23 +505,6 @@ check_existing_launcher() {
 	[ "$force" = 1 ] || fail "refusing to overwrite $launcher, which this installer did not write; move it aside, choose another --bin-dir, or rerun with --force"
 	warn "replacing $launcher (--force)"
 }
-
-# Stage the launcher next to its final name, then rename it over the old one,
-# so a concurrent `clio-coder` never reads half a file.
-write_launcher() {
-	mkdir -p "$bin_dir" || fail "could not create $bin_dir"
-	tmp="$bin_dir/.clio-coder.$$"
-	cat >"$tmp" <<LAUNCHER
-#!/bin/sh
-$LAUNCHER_MARK
-# Written by Clio Coder's install.sh and rewritten by \`clio-coder upgrade\`.
-# Remove it with \`clio-coder uninstall --remove-binary\`. Manifest: $install_root/install.json
-exec "$1" "$2" "\$@"
-LAUNCHER
-	chmod 755 "$tmp"
-	mv -f "$tmp" "$launcher"
-}
-
 
 path_contains_dir() {
 	case ":${PATH:-}:" in
@@ -682,17 +651,10 @@ do_rollback() {
 	node_path="$(manifest_field node)"
 	current="$(manifest_field current)"
 	helper="$current/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"
-	if [ ! -f "$helper" ]; then
-		previous="$(manifest_field previous)"
-		[ -n "$previous" ] && [ -f "$previous/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js" ] || fail "no complete previous install"
-		if [ "$dry_run" = 1 ]; then log "would point $launcher at $previous"; return 0; fi
-		acquire_install_lock
-		"$node_path" "$previous/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js" --version </dev/null || fail "previous install does not run"
-		write_launcher "$node_path" "$previous/lib/node_modules/@iowarp/clio-coder/dist/cli/index.js"
-		write_manifest "$node_path" "$(manifest_field nodeVersion)" "$(manifest_field nodeBuild)" "$previous" "$current"
-		ok "legacy rollback complete"
-		return 0
-	fi
+	[ -f "$helper" ] || fail "rollback requires a Clio Coder $PACKAGE_MIN or newer managed installation"
+	previous="$(manifest_field previous)"
+	previous_version="$("$node_path" -e 'process.stdout.write(require(process.argv[1]).version)' "$previous/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)" || fail "no complete previous install"
+	require_supported_version "$previous_version"
 	if [ "$dry_run" = 1 ]; then log "would roll back $install_root"; return 0; fi
 	acquire_install_lock
 	"$node_path" "$helper" rollback "$install_root" </dev/null
@@ -904,14 +866,12 @@ const tracks=channel==="dev"?["dev","beta","latest"]:channel==="beta"?["beta","l
 const versions=tracks.map(tag=>tags[tag]).filter(v=>semver.valid(v));
 if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rcompare)[0]);
 ' "$runtime_dir/lib/node_modules/npm" "$work/dist-tags.json" "$version")" || fail "no published version on $channel or its stable fallback"
+				require_supported_version "$resolved"
 				spec="$PACKAGE@$resolved"
 				log "resolved $channel to $resolved"
 				;;
 		esac
 	fi
-	# All versions remain available to sessions that still lazily import their old code.
-	previous="$(manifest_field current)"
-	{ [ -n "$previous" ] && [ -d "$previous" ]; } || previous=""
 	# Active sessions may still lazily read any prior package or runtime.
 	staging="$install_root/versions/.staging.$$"
 	rm -rf "$staging"
@@ -930,6 +890,7 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 	pkg_dir="$staging/lib/node_modules/@iowarp/clio-coder"
 	installed_version="$("$node_bin" -e 'const p=require(process.argv[1]);if(p.name!=="@iowarp/clio-coder")process.exit(1);process.stdout.write(p.version)' "$pkg_dir/package.json" 2>/dev/null)" ||
 		fail "npm finished, but $pkg_dir is not an @iowarp/clio-coder package"
+	require_supported_version "$installed_version"
 	final_prefix="$install_root/versions/$installed_version"
 	if [ -e "$final_prefix" ]; then final_prefix="$final_prefix-$(date -u +%Y%m%d%H%M%S)-$$"; fi
 	mv "$staging" "$final_prefix"
@@ -941,28 +902,20 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 	ok "installed $PACKAGE $installed_version"
 
 	helper="$final_prefix/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"
-	if version_ge "${installed_version%%-*}" "0.6.0"; then
-		[ -f "$helper" ] || fail "candidate has no managed lifecycle helper; previous install remains active. Run: clio-coder doctor --fix"
-		pin=""
-		case "$version_spec" in [0-9]* | v[0-9]*) pin="$installed_version" ;; esac
-		if [ -n "$package_file" ]; then pin="$installed_version"; fi
-		"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null || {
-			: >"$final_prefix/$FAILED_CANDIDATE_MARK"
-			# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
-			fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"
-		}
-	else
-		"$node_bin" "$entry" --version </dev/null || fail "candidate does not run; previous install remains active. Run: clio-coder doctor --fix"
-		if [ -d "$install_root/launchers" ]; then fail "refusing to replace a lifecycle-capable install with a legacy package; use rollback"; fi
-		write_launcher "$node_bin" "$entry"
-		write_manifest "$node_bin" "$node_version" "$node_build" "$final_prefix" "$previous"
-		warn "Installed legacy $installed_version. Managed CLI upgrade/uninstall and background updates require 0.6.0; update by rerunning this installer. Automatic post-install was skipped; run doctor --fix explicitly for diagnostics."
-	fi
-	if [ "$post_install" = 1 ] && version_ge "${installed_version%%-*}" "0.6.0"; then
+	[ -f "$helper" ] || fail "candidate has no managed lifecycle helper; previous install remains active. Run: clio-coder doctor --fix"
+	pin=""
+	case "$version_spec" in [0-9]* | v[0-9]*) pin="$installed_version" ;; esac
+	if [ -n "$package_file" ]; then pin="$installed_version"; fi
+	"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null || {
+		: >"$final_prefix/$FAILED_CANDIDATE_MARK"
+		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
+		fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"
+	}
+	if [ "$post_install" = 1 ]; then
 		"$node_bin" "$entry" upgrade --post-install </dev/null || fail "package is installed, but local migrations/initialization need attention; run: $launcher upgrade --post-install. Previous binary remains available via --rollback."
 	fi
 	if version_ge "${installed_version%%-*}" "0.6.2"; then provision_workspace; fi
-	if version_ge "${installed_version%%-*}" "0.6.0"; then offer_gui; fi
+	offer_gui
 	report_path
 	warn_about_shadowing_clio
 	print_next_steps

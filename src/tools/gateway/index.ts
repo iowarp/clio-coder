@@ -154,7 +154,7 @@ export interface GatewayToolDeps {
 }
 
 const DESCRIPTION =
-	'Discover registered builtin, extension and MCP capabilities. op="find" searches; op="describe" returns a schema; op="call" executes with args under its own admission; op="chain" runs tool steps. For chain syntax: op="describe", capability="gateway". Gateway operations are not chain capabilities. Discovery grants no authority.';
+	'Discover registered builtin, extension and MCP capabilities. op="find" searches; op="describe" returns a schema; op="call" executes with args under its own admission; op="chain" runs tool steps. Put capability at the top level and its parameters inside args. After an argument error, describe the capability before retrying. For chain syntax: op="describe", capability="gateway". Gateway operations are not chain capabilities. Discovery grants no authority.';
 
 export const gatewayToolSurface = {
 	name: ToolNames.Gateway,
@@ -172,7 +172,7 @@ export const gatewayToolSurface = {
 		refresh: Type.Optional(Type.Boolean({ description: "find: list that server live." })),
 		args: Type.Optional(
 			Type.Record(Type.String(), Type.Unknown(), {
-				description: "call: the capability's arguments.",
+				description: "call: the capability's arguments matching its described schema; nest them here.",
 			}),
 		),
 		steps: Type.Optional(
@@ -702,7 +702,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		options: ToolInvokeOptions | undefined,
 	): Promise<ToolResult> => {
 		const name = typeof args.capability === "string" ? args.capability.trim() : "";
-		if (name.length === 0) return { kind: "error", message: 'gateway: op="describe" requires capability' };
+		if (name.length === 0)
+			return {
+				kind: "error",
+				message: 'gateway: op="describe" requires a top-level capability name. Use gateway(op="find") to discover it.',
+			};
 		const allowed = allowedSet(options);
 		// The admitted wrapper can describe its own transport syntax even when
 		// scope named only an inner capability. This grants no child admission.

@@ -90,7 +90,6 @@ test("publication waits for owner approval and reuses a specified qualification 
 	strictEqual(Object.keys(workflow.on).join(), "workflow_dispatch");
 	strictEqual(workflow.jobs.release.environment, "release");
 	strictEqual(workflow.jobs.release.needs, "preflight");
-	strictEqual(workflow.jobs.release.permissions["id-token"], "write");
 	for (const job of Object.values(workflow.jobs) as Array<{
 		steps: Array<{ run?: string; uses?: string; with?: Record<string, unknown> }>;
 	}>) {

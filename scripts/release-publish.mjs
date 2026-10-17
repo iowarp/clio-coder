@@ -164,63 +164,6 @@ export async function registryTags(name) {
 	return response.json();
 }
 
-/** npm publish keeps its exchanged credential in that subprocess's memory.
- * Tag forwarding needs its own package-scoped exchange in the same trusted job;
- * no stored npm token or auth file is introduced.
- */
-async function tryForwardPublishedTags(receipt, tags) {
-	if (tags.length === 0) return;
-	const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-	const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-	if (!requestUrl || !requestToken)
-		throw new Error("Tag forwarding requires the release job's id-token: write permission.");
-	const url = new URL(requestUrl);
-	url.searchParams.set("audience", "npm:registry.npmjs.org");
-	const identityResponse = await fetch(url, {
-		headers: { Authorization: `Bearer ${requestToken}` },
-		signal: AbortSignal.timeout(30_000),
-	});
-	if (!identityResponse.ok) throw new Error(`GitHub OIDC request returned HTTP ${identityResponse.status}`);
-	const identity = await identityResponse.json();
-	if (typeof identity.value !== "string") throw new Error("GitHub OIDC response has no identity token.");
-	const exchangedResponse = await fetch(
-		`https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(receipt.name)}`,
-		{
-			method: "POST",
-			headers: { Authorization: `Bearer ${identity.value}` },
-			signal: AbortSignal.timeout(30_000),
-		},
-	);
-	if (!exchangedResponse.ok) throw new Error(`npm trusted-publisher exchange returned HTTP ${exchangedResponse.status}`);
-	const exchanged = await exchangedResponse.json();
-	if (typeof exchanged.token !== "string") throw new Error("npm trusted-publisher exchange has no package credential.");
-	for (const tag of tags) {
-		const response = await fetch(
-			`https://registry.npmjs.org/-/package/${encodeURIComponent(receipt.name)}/dist-tags/${tag}`,
-			{
-				method: "PUT",
-				headers: { Authorization: `Bearer ${exchanged.token}`, "Content-Type": "application/json" },
-				body: JSON.stringify(receipt.version),
-				signal: AbortSignal.timeout(30_000),
-			},
-		);
-		if (!response.ok) throw new Error(`npm ${tag} forwarding returned HTTP ${response.status}`);
-	}
-}
-
-/** Trusted publishing may authorize publication without authorizing dist-tag writes. */
-async function forwardPublishedTags(receipt, plan) {
-	let tags = [];
-	try {
-		tags = forwardedTags(await registryTags(receipt.name), receipt.version, plan.channel);
-		await tryForwardPublishedTags(receipt, tags);
-	} catch (error) {
-		console.warn(`Automatic tag forwarding failed; the release is complete: ${error.message}`);
-		if (tags.length === 0) console.warn(`Inspect existing tags: npm dist-tag ls ${receipt.name}`);
-		for (const tag of tags) console.warn(`Maintainer: npm dist-tag add ${receipt.name}@${receipt.version} ${tag}`);
-	}
-}
-
 export function api(path, method = "GET", body) {
 	return JSON.parse(
 		run("gh", ["api", path, "--method", method, ...(body === undefined ? [] : ["--input", "-"])], {
@@ -550,7 +493,6 @@ export async function publish(directory, commit, runId, branch) {
 		// development commit is preserved instead of being deleted with the branch.
 		run("git", ["push", `--force-with-lease=refs/heads/${branch}:${commit}`, "origin", `:refs/heads/${branch}`]);
 	} else await verifyPublic(receipt, plan);
-	await forwardPublishedTags(receipt, plan);
 	console.log(`RELEASE_COMPLETE ${receipt.version} ${commit}`);
 }
 

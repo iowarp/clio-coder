@@ -73,10 +73,14 @@ describe("contracts/install-script", () => {
 		match(r.stdout, /dry run complete/u);
 		ok(!r.created, "a dry run creates nothing under HOME");
 	});
-	it("preserves the public UNIX version selection and accepts explicit background opt-out", () => {
-		const r = run(["--dry-run", "--version", "0.5.9", "--no-auto-update", "--no-modify-path"]);
+	it("accepts background opt-out and refuses pre-0.6.0 installs without writes", () => {
+		const r = run(["--dry-run", "--version", "0.6.0", "--no-auto-update", "--no-modify-path"]);
 		strictEqual(r.code, 0, r.stderr);
-		match(r.stdout, /@iowarp\/clio-coder@0\.5\.9/u);
+		match(r.stdout, /@iowarp\/clio-coder@0\.6\.0/u);
+		const old = run(["--dry-run", "--version", "0.5.9"]);
+		strictEqual(old.code, 1);
+		match(old.stderr, /requires 0\.6\.0 or newer/u);
+		ok(!old.created);
 		ok(!r.created);
 	});
 

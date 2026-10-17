@@ -1,12 +1,10 @@
 import { formatFooterTokens } from "../core/display-units.js";
 import type { JobRecord } from "../core/job-types.js";
-import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { Text } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
-import { formatReasoningChip } from "./status/reasoning.js";
 import { clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
 
 /** Shared footer projection of live and failed worker states. */
@@ -20,39 +18,6 @@ export const ACTIVE_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Se
 export const FAILED_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Set(["failed", "aborted", "dead"]);
 
 export { formatFooterTokens };
-
-/**
- * Build the token-counter footer segment. Returns `null` when no usage has
- * landed yet so the footer stays uncluttered at session start. Cache-read
- * tokens are omitted here to keep the line scannable; reasoning tokens are
- * shown only when the provider exposes them. The `/usage` overlay exposes the
- * full breakdown.
- */
-export function tokensSegment(usage: UsageBreakdown | null | undefined): string | null {
-	if (!usage) return null;
-	const input = Math.max(0, usage.input ?? 0);
-	const output = Math.max(0, usage.output ?? 0);
-	const reasoning = Math.max(0, usage.reasoningTokens ?? 0);
-	const total = Math.max(0, usage.totalTokens ?? input + output);
-	if (input + output + reasoning + total === 0 && !usage.missingTokenCalls) return null;
-	// Session totals are summed from provider usage payloads, so the chip carries
-	// no `≈`. It is built by the same formatter every other reasoning surface
-	// uses rather than by a fourth copy of the marker rule.
-	const reasoningChip = formatReasoningChip({ tokens: reasoning, provenance: "provider" }, formatFooterTokens);
-	const reasoningPart = reasoningChip === null ? "" : ` ${reasoningChip}`;
-	const totalPart =
-		total > 0 || usage.missingTokenCalls
-			? ` Σ${formatFooterTokens(total)}${usage.missingTokenCalls ? ` +? (${usage.missingTokenCalls} call${usage.missingTokenCalls === 1 ? "" : "s"})` : ""}`
-			: "";
-	return `${GLYPH.up} ${formatFooterTokens(input)} ${GLYPH.down} ${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
-}
-
-export function throughputSegment(metric: TokenThroughputSnapshot | null | undefined): string | null {
-	const tps = metric?.tokensPerSecond;
-	if (typeof tps !== "number" || !Number.isFinite(tps) || tps <= 0) return null;
-	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
-	return `${GLYPH.speed}${metric?.estimated ? "≈" : ""}${rounded} Tk/s`;
-}
 
 function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {
 	active: number;

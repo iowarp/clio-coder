@@ -1,43 +1,38 @@
 # Repository tooling
 
-These files belong to a source checkout, not the npm package. Runtime behavior
-belongs in `src/`; scripts call its validators and indexer instead of copying them.
-Use Node >=22.19 and the pnpm version pinned in `package.json`.
+These tools build the checkout, check source and package contents, maintain
+catalogs, install Clio, and qualify or publish a release. The four installers
+named in `release-manifest.json` also ship in the npm package.
 
-| Entry point | Purpose | Writes / external access | Gate |
-| --- | --- | --- | --- |
-| `pnpm build`, `pnpm dev` | `build.ts` wraps tsup; `build-codewiki-asset.ts` uses the production indexer and npm file list | Build output in `dist/`; no model calls | CI build |
-| `pnpm lint` | `check-hygiene.ts`: source boundaries, documentation/configuration consistency, library validation, packaging and Pi API checks | Temporary fixtures and installer dry runs; no model calls | Routine CI |
-| `pnpm library:pin` / `library:check` | `pin-library.ts`, `pin-skills.ts`, `generate-library-marketplace.ts`: validate packages and generate catalogs | Pin rewrites versioned catalogs; check only reads | Check included in lint |
-| `pnpm skills:pin` / `skills:check` | Skill-only authoring commands; use library:pin to refresh the complete catalog after changes | Same as above | Via library check |
-| `pnpm pi:surface-diff` / `pi:surface-snapshot` | Compare / deliberately refresh the consumed dependency API snapshot | Snapshot writes `docs/pi-surface.json` | Comparison included in lint, including same-version patches |
-| `pnpm test:maintenance` | Focused keyboard routing and draft contracts | Isolated deterministic fixtures; no model calls | Routine CI |
-| `pnpm test:package` | Installed tarball and native call timing contracts | Scratch installs from an absolute `CLIO_CODER_RELEASE_TARBALL`; no model calls | Hosted CI on pushes and pull requests; release qualification |
-| `pnpm ci:release` | `release-candidate.mjs`: clean committed source, CI, package audit, installed-package checks, exact tarball qualification | npm registry audit; scratch installs; receipt and tarball in user cache | Release qualification |
-| `pnpm release:readiness` / `pnpm release:readiness -- --release` | Check package/README/site versions, docs provenance, tracked media, and an isolated website build; immutable mode also requires dated release state | Read-only; temporary website output | Release preparation |
-| `pnpm release:preflight` | Check source, Node version, age and package digest against the qualified artifact | Temporary tarball; no rebuild | Publication |
-| `python3 scripts/media-assets.py --check` / `--sync` | Check media hashes/dimensions and synchronize manifest-declared website/GUI delivery copies | Check is read-only; sync writes only declared copies | Website/media preparation |
-| `node site/render-cards.mjs` | Render four social cards at declared dimensions after fonts load and record source/export hashes | Writes PNG exports and `assets/media-manifest.json`; no network | Website/media preparation |
-| `node scripts/check-release.mjs` | Package contents, budgets, versions, recipe contracts and dependency advisories | npm pack dry run and registry audit | Called by qualification |
-| `bash scripts/install.sh --dry-run` | Preview public npm installer | Actual install accesses npm and selected prefix; dry run previews | Installer contract checks in routine CI |
-| `pnpm install:local --dry-run` | Preview checkout installation | Actual install can sync dependencies, build, replace launcher symlink and run doctor repair | Dry-run/launcher checks in lint |
-| `node --import tsx scripts/decision-probe.ts <fixture> --engine <name>` | Score a System One site's wording against its labeled fixture under `tests/fixtures/decision-cases/` (`turn`, `turn-end`, `tool-calls`, `tool-results`, `capabilities`); reports agree, abstain, wrong and confident-wrong per key, the positive and negative ranges per run, and a suggested cut with its margins; `--cases` also writes each call's values to stderr; `--kind`, `--target` and `--model` build an engine that `systemOne.engines` lacks | **Calls the named engine**; the engine and its site binding exist in memory only, and nothing is written to settings | Explicit operator run only |
+| Command | Purpose and effects |
+| --- | --- |
+| `pnpm build` / `pnpm dev` | Build the application and its codemap; dev watches source changes. |
+| `pnpm lint` | Check formatting, source boundaries, local catalog pins, resource paths and configuration consistency. No remote package refresh. |
+| `pnpm test` / `pnpm test:gui` | Run the compact source-based behavior selections in `ci-tests.mjs`. |
+| `pnpm test:file -- <path>` | Run a focused root test with isolated Clio state. |
+| `pnpm test:full` / `pnpm test:gui:full` | Run historical investigation suites explicitly. Root full tests require a current build. |
+| `pnpm test:package` | Exercise the installed package explicitly. |
+| `pnpm library:check` / `pnpm skills:check` | Verify local catalog content and generated projections against committed pins. |
+| `pnpm library:pin` / `pnpm skills:pin` | Refresh generated catalogs. Library pinning also fetches blessed remote packages. |
+| `pnpm pi:surface-diff` / `pnpm pi:surface-snapshot` | Review consumed Pi declarations or refresh their snapshot during dependency maintenance. |
+| `pnpm herdr:pin` | Fetch and verify the selected Herdr release and its schema. |
+| `pnpm hooks:install` | Install guards against committing ignored files. |
+| `pnpm install:local --dry-run` | Preview checkout installation. Actual installation can build, replace the launcher and run local repair. |
+| `sh scripts/install.sh --dry-run` | Preview the Unix managed installer, which accepts Clio 0.6.0 or newer. Actual installation downloads and activates a package. |
+| `pnpm release:readiness` | Check public versions, documentation provenance, media and an isolated website build. |
+| `pnpm ci` / `pnpm ci:release` | Qualify one candidate package and website artifact; reuse qualification for the same clean commit. |
+| `pnpm release:rehearse` | Exercise qualification/publication checks without publishing a package or release. Uses a temporary remote branch with explicit interactive approval. |
+| `pnpm release` | Qualify, publish npm as the owner, request protected GitHub publication, then offer owner dist-tag forwarding and local cleanup. |
+| `node --import tsx scripts/decision-probe.ts <fixture> --engine <name>` | Calibrate a System One binding against labeled fixtures. Calls the selected engine; reports results to stdout/stderr without changing settings. Explicit operator use only. |
 
-Hosted CI runs the source checks and three shards of the core tests in parallel.
-The `ci (22)` status combines those results with Windows subprocess tests and a six-minute installed-package job that builds, packs into a temporary directory, and runs `pnpm run test:package` with an absolute tarball path; the
-separate `ci (24)` status covers the newer Node runtime. A tag release calls that
-same CI workflow, then rebuilds and audits the exact tarball before publishing
-it. The local `pnpm ci:release` command still runs the complete gate and records
-a receipt for `release:preflight`.
+CI consumes one prepared artifact for the required `ci (22)` and `ci (24)`
+checks. The release workflow verifies that npm already serves those exact bytes
+before creating the GitHub tag/release and promoting stable public surfaces.
+Npm publication and dist-tag writes remain in the owner's interactive command
+while trusted publishing is unavailable. Dev snapshots remain disabled.
 
-`configuration-reference.ts`, `release-audit.mjs`, `release-version-policy.mjs`,
-their declaration files and `release-manifest.json` support these entry points.
-They are not separate command frameworks.
-
-## Adding tooling
-
-A retained utility needs an entry point, a caller or documented workflow, and a
-clear output location. Put transient probes and reports in ignored `tmp/` or an
-OS temporary directory. Never commit run outputs here. Generated catalogs stay
-versioned only with a deterministic generator and a drift check. All TypeScript
-scripts are included explicitly in `pnpm typecheck`.
+Keep disposable output in a uniquely owned directory under
+`/home/akougkas/clio-gym/tmp/`, `scratch/`, or `install-tests/`, and set `TMPDIR`
+before running commands that create temporary files. Never use system `/tmp`
+or commit run output under `scripts/`. Retired local benchmark and smoke scripts
+remain recoverable from Git history.
