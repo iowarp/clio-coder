@@ -2,6 +2,7 @@ import type { ContextOperation } from "../../core/context-operation.js";
 import { wrapTextWithAnsi } from "../../engine/tui.js";
 import {
 	CONTEXT_KIND_TITLES,
+	compactionQualifier,
 	factRow,
 	outcomeTone,
 	outcomeWord,
@@ -24,7 +25,7 @@ export function renderContextOperationResult(operation: ContextOperation, width:
 	// An operator command is its own reason. An automatic run names why it ran.
 	const reason = operation.origin === "automatic" ? ` · ${plain(operation.reason)}` : "";
 	const state = outcome === "completed" ? "" : ` · ${outcomeWord(outcome)}`;
-	const title = `${theme.fg(tone, glyph)} ${theme.fg("contextAction", CONTEXT_KIND_TITLES[operation.kind])}${theme.fg("annotation", `${reason}${state}`)}`;
+	const title = `${theme.fg(tone, glyph)} ${theme.fg("contextAction", CONTEXT_KIND_TITLES[operation.kind])}${theme.fg("annotation", `${reason}${compactionQualifier(operation)}${state}`)}`;
 
 	const room = Math.max(1, width - 4);
 	const body: string[] = [];

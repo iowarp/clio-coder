@@ -184,6 +184,9 @@ test("tool-batch cadence starts one detached step and delivers completed memory 
 				toolCallId: String(i),
 				metadata: { resultKind: "ok" },
 			});
+		// A cadence step that cites only facts still in context is refused on
+		// purpose (no_lost_context); a loop signal gives the step a deterministic trigger.
+		memory.signalLoop();
 		state.lastTurnId = "batch-1";
 		strictEqual(await turn.prepareToolContinuation(runtime), false, "must return while completion is unresolved");
 		strictEqual(calls, 1);

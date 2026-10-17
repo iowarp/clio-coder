@@ -267,6 +267,8 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 			await registration.whenIdle();
 			assert.equal(bank.snapshot().knowledge.length, 1);
 			assert.equal(reminders.length, 1);
+			assert.equal(proposals.length, 0, "a produced reminder is not yet delivered");
+			registration.acknowledgeSubmission([`<system-reminder>\n${required(reminders[0])}\n</system-reminder>`]);
 			assert.equal(required(proposals[0]).sessionId, successor);
 			assert.equal(rows.length, 2);
 			assert.deepEqual(live, [10]);

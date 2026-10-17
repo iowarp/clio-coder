@@ -4,7 +4,7 @@ import type { ClioSettings } from "../../core/config.js";
 import type { ImageContent } from "../../engine/types.js";
 import { targetRequiresAuth } from "./auth/index.js";
 import type { ProvidersContract } from "./contract.js";
-import { canonicalEndpointKey, registerForegroundStream } from "./endpoint-capacity.js";
+import { modelEndpointKey, registerForegroundStream } from "./endpoint-capacity.js";
 import { resolveRuntimeTarget } from "./runtime-resolution.js";
 
 export interface VisionBinding {
@@ -241,7 +241,7 @@ export function createVisionSidecar(input: {
 				url: route.target.url,
 				...(credential?.apiKey ? { apiKey: credential.apiKey } : {}),
 			};
-			const endpoint = canonicalEndpointKey(route.target);
+			const endpoint = modelEndpointKey(route.target, route.wireModelId);
 			const release = endpoint ? registerForegroundStream(endpoint) : () => {};
 			try {
 				return await analyzeVision(binding, images, question, {

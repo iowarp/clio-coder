@@ -44,7 +44,8 @@ import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
 import type { HistoryReviewSlice, HistoryReviewSource } from "./history-review.js";
 import type { MemoryInterventionRegistration, MemoryStepLaunchOutcome } from "./intervention.js";
 import { lessonEvidence } from "./lesson-evidence.js";
-import { provenRecipes } from "./recipes.js";
+import type { HistoryFiling } from "./lesson-feedback.js";
+import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryPolicyResult, TaskMemoryStepUsage } from "./task-memory-policy.js";
@@ -118,14 +119,19 @@ export interface MemoryGuardianDeps {
 	settings(): { maxTokens: number; timeoutMs: number };
 	/** Current checkout a source-cited lesson's quote is verified against. */
 	workspaceRoot(): string;
-	getKeptLessons(): ReadonlyArray<{ id: string; text: string }>;
-	/** Lessons from one history excerpt, with the session that produced them. */
+	getKeptLessons(): ReadonlyArray<{ id: string; text: string; evidenceRefs?: readonly string[] }>;
+	/**
+	 * Lessons from one history excerpt, with the session that produced them.
+	 * The excerpt's cursor advances only after this settles as filed or saved
+	 * for replay; `failed` leaves the excerpt unreviewed. A callback that
+	 * returns nothing has taken the lessons over itself.
+	 */
 	onHistoryLessons(input: {
 		sessionId: string;
 		root: string;
 		grounded: ReadonlyArray<TaskMemoryEntry>;
 		ungrounded: ReadonlyArray<TaskMemoryEntry>;
-	}): void;
+	}): Promise<HistoryFiling | undefined> | HistoryFiling | undefined;
 	captureStepUsage?: () => (usage: TaskMemoryStepUsage, isCurrent: boolean) => void;
 	telemetry?: TaskMemoryTelemetrySink;
 	onStateChange(state: MemoryGuardianState): void;
@@ -340,6 +346,9 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		stepGeneration: number,
 	): Promise<MemoryStepLaunchOutcome> {
 		const isCurrent = () => !disposed && stepGeneration === generation;
+		// The cursor belongs to the source that produced the slice, even if a
+		// scope change rebuilds the guardian's source while lessons are filed.
+		const owner = source;
 		let client: TaskMemoryModelClient | null;
 		try {
 			client = deps.client.getModelClient();
@@ -359,6 +368,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				onStepUsage: (usage) => usageSink?.(usage, isCurrent()),
 				task: "Review an earlier session in this repository for lessons a future session needs.",
 				trajectory: [],
+				workspaceRoot: slice.root,
 				deterministicTrigger: false,
 				maxTokens: live.maxTokens,
 				modelMaxTokens: deps.client.getModelMaxTokens(live.maxTokens),
@@ -366,7 +376,11 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				pass: {
 					systemPrompt: MEMORY_HISTORY_REVIEW_SYSTEM_PROMPT,
 					trajectoryText: slice.text,
-					keptLessons: safeKeptLessons(),
+					// The same bounded subset the other passes see: every approved lesson
+					// would grow this prompt with the store, past the memory route's window.
+					keptLessons: safeKeptLessons()
+						.slice(0, 10)
+						.map(({ id, text }) => ({ id, text })),
 					trajectoryMaxChars: depth.maxChars,
 				},
 			}).then((result) => {
@@ -396,9 +410,8 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			return historyUnanswered >= HISTORY_UNANSWERED_LIMIT ? "unavailable" : "ran";
 		}
 		historyUnanswered = 0;
-		// The excerpt was answered, whatever the answer chose to keep: it is reviewed.
-		source?.commit(slice);
 		// Recipes the excerpt's own receipts prove join whatever the model kept; its silence does not drop them.
+		const kept = safeKeptLessons();
 		for (const recipe of provenRecipes(
 			{ commandRuns: slice.commandRuns ?? [], observedReads: slice.observedReads },
 			slice.root,
@@ -406,7 +419,8 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			if (
 				!bank
 					.snapshot()
-					.knowledge.some((entry) => entry.durable === true && entry.content.includes(`\`${recipe.command}\``))
+					.knowledge.some((entry) => entry.durable === true && entry.content.includes(`\`${recipe.command}\``)) &&
+				!recipeAlreadyClaimed(recipe, kept)
 			)
 				bank.saveKnowledge(recipe.content, { durable: true, evidenceCommand: recipe.command });
 		const lessons = bank.snapshot().knowledge.filter((entry) => entry.durable === true);
@@ -421,12 +435,22 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		);
 		const ungrounded = lessons.filter((entry) => !grounded.includes(entry));
 		if (lessons.length > 0) {
+			// The excerpt counts as reviewed only once what it taught is durable:
+			// filed in the store, or saved as candidates the owner replays. A
+			// cursor advanced before that lost the lessons to any store failure.
+			let filing: HistoryFiling = "failed";
 			try {
-				deps.onHistoryLessons({ sessionId: slice.sessionId, root: slice.root, grounded, ungrounded });
+				filing =
+					(await deps.onHistoryLessons({ sessionId: slice.sessionId, root: slice.root, grounded, ungrounded })) ?? "filed";
 			} catch {
-				// The store's failure is the composition root's to report.
+				filing = "failed";
 			}
+			// Neither: keep the excerpt and park until the next turn or settings
+			// change, so a broken store never turns into a re-extraction loop.
+			if (filing === "failed") return "skipped";
 		}
+		// The excerpt was answered, and an empty answer is a valid review.
+		owner?.commit(slice);
 		return "ran";
 	}
 
@@ -456,7 +480,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		}
 	}
 
-	function safeKeptLessons(): ReadonlyArray<{ id: string; text: string }> {
+	function safeKeptLessons(): ReadonlyArray<{ id: string; text: string; evidenceRefs?: readonly string[] }> {
 		try {
 			return deps.getKeptLessons();
 		} catch {

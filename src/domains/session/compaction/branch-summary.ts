@@ -13,6 +13,13 @@
 
 import { displayToolCall, gatewayChainPlan, isGatewayChain } from "../../../tools/gateway-display.js";
 import type { MessageEntry, SessionEntry } from "../entries.js";
+import {
+	contentBlocks,
+	messageText,
+	payloadObject,
+	toolCallArguments,
+	toolResultValue,
+} from "../message-projection.js";
 
 /** Tool-result bodies are truncated to this char count inside summaries. */
 export const TOOL_RESULT_MAX_CHARS = 2000;
@@ -29,10 +36,6 @@ function truncate(text: string, max: number): string {
 	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters truncated]`;
 }
 
-function payloadObject(payload: unknown): Record<string, unknown> | null {
-	return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
-}
-
 function stringifyPreview(value: unknown): string {
 	if (value === undefined || value === null) return "";
 	if (typeof value === "string") return value;
@@ -43,33 +46,8 @@ function stringifyPreview(value: unknown): string {
 	}
 }
 
-function contentBlocks(payload: unknown): ReadonlyArray<Record<string, unknown>> {
-	const content = payloadObject(payload)?.content;
-	if (!Array.isArray(content)) return [];
-	return content.filter((block): block is Record<string, unknown> => !!block && typeof block === "object");
-}
-
-/**
- * Flatten a MessageEntry payload into plain text. Accepts three payload
- * shapes in use today:
- *   - `string` (raw text line, defensive; chat-loop writes objects today)
- *   - `{ text: string }` (chat-loop user/assistant writes)
- *   - `{ content: [{ type: "text", text }...] }` (future rich payloads)
- * Returns "" for unrecognized shapes so the serializer silently drops them
- * rather than embedding JSON noise in the summary prompt.
- */
-function messageText(entry: MessageEntry): string {
-	const payload = entry.payload;
-	if (typeof payload === "string") return payload;
-	if (!payload || typeof payload !== "object") return "";
-	const p = payload as Record<string, unknown>;
-	if (typeof p.text === "string") return p.text;
-	const parts = contentBlocks(payload)
-		.filter((block) => block.type === "text" && typeof block.text === "string")
-		.map((block) => block.text as string);
-	if (parts.length > 0) return parts.join("\n");
-	return "";
-}
+// Payload shapes are read through `message-projection.ts`, the one reader the
+// observation source shares: a string, `{ text }`, or `{ content: [...] }`.
 
 function assistantThinkingText(entry: MessageEntry): string {
 	const payload = entry.payload;
@@ -95,7 +73,7 @@ function toolCallText(entry: MessageEntry): string {
 	const obj = payloadObject(entry.payload);
 	if (!obj) return messageText(entry);
 	const name = typeof obj.name === "string" ? obj.name : typeof obj.toolName === "string" ? obj.toolName : "tool";
-	const args = obj.args ?? obj.arguments ?? obj.input;
+	const args = toolCallArguments(obj);
 	if (args !== undefined) return displayCallText(name, args);
 	return messageText(entry) || name;
 }
@@ -116,7 +94,7 @@ function displayCallText(name: string, args: unknown): string {
 
 function toolResultText(entry: MessageEntry): string {
 	const obj = payloadObject(entry.payload);
-	const result = obj?.result ?? obj?.output ?? obj?.out ?? obj?.content;
+	const result = obj === null ? undefined : toolResultValue(obj);
 	if (Array.isArray(payloadObject(result)?.content)) {
 		const parts = contentBlocks(result)
 			.filter((block) => block.type === "text" && typeof block.text === "string")

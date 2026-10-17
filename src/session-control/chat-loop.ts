@@ -86,8 +86,8 @@ import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import {
 	acceptsImageInput,
-	canonicalEndpointKey,
 	modelCandidatesForStatus,
+	modelEndpointKey,
 	registerForegroundStream,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
@@ -1855,7 +1855,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * background-memory tier has to read that endpoint as busy (#229).
 	 */
 	const withEndpointSlot = async <T>(runtime: AgentRuntime, round: () => Promise<T>): Promise<T> => {
-		const endpointKey = canonicalEndpointKey(runtime.runtimeResolution.target);
+		const endpointKey = modelEndpointKey(runtime.runtimeResolution.target, runtime.wireModelId);
 		const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
 		try {
 			return await round();
@@ -2250,7 +2250,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// The queued texts carry whatever the operator inlined into them, so the
 			// round is admitted under the session's flow restrictions like any side round.
 			if ((deps.admitRuntimeFlow?.(destination) ?? null) !== null) return;
-			const endpointKey = canonicalEndpointKey(resolved.target);
+			const endpointKey = modelEndpointKey(resolved.target, resolved.wireModelId);
 			const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
 			const origin = deps.session?.current() ?? null;
 			let result: SideQuestionResult;
@@ -2980,7 +2980,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 				// 7. Run the prompt, then route the settled state through recovery.
 				state.streaming = true;
-				const endpointKey = canonicalEndpointKey(agentRuntime.runtimeResolution.target);
+				const endpointKey = modelEndpointKey(agentRuntime.runtimeResolution.target, agentRuntime.wireModelId);
 				const releaseForeground = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
 				try {
 					options.onAdmitted?.();

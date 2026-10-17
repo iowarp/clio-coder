@@ -40,8 +40,57 @@ export function canonicalEndpointKey(value: TargetDescriptor | string): string |
 	return canonicalEndpointUrl(typeof value === "string" ? value : value.url);
 }
 
+/**
+ * Gateways that route every model to its own backend deployment. Behind one of
+ * these the scheduler that owns a request's slot is that model's backend, not
+ * the gateway URL: live, the main agent streaming qwopus (dynamo) through the
+ * same `litellm` target marked memory's ornith (mini) busy and dropped 12 of
+ * its steps per run. A generic protocol endpoint (`openai-compat`) is often a
+ * single local server that answers any model name, so it keeps one key.
+ */
+const MODEL_ROUTED_GATEWAY_RUNTIMES: ReadonlySet<string> = new Set(["litellm", "openrouter"]);
+const MODEL_KEY_SEPARATOR = "#model=";
+
+/**
+ * Slot identity of one model's requests on a target: the endpoint key, with
+ * the model appended behind a model-routed gateway. Every stream counted
+ * under a model key also counts under its gateway key (`countStream`), so a
+ * reader keyed by the gateway URL, dispatch admission included, sees the same
+ * totals it always did.
+ */
+export function modelEndpointKey(target: TargetDescriptor, wireModelId: string | null | undefined): string | null {
+	const key = canonicalEndpointKey(target);
+	if (key === null || !wireModelId || !MODEL_ROUTED_GATEWAY_RUNTIMES.has(target.runtime)) return key;
+	return `${key}${MODEL_KEY_SEPARATOR}${encodeURIComponent(wireModelId)}`;
+}
+
+/**
+ * Occupancy one key competes with in `usage` (an `endpointCapacityUsage` or
+ * local stream map). A model key counts its own streams plus any counted on
+ * its gateway without a model: a request the host could not attribute may be
+ * on this very model, so it still blocks optional work. Any other key reads
+ * its own count, exactly as before.
+ */
+export function modelStreamUsage(usage: Readonly<Record<string, number>>, endpointKey: string): number {
+	const gateway = gatewayEndpointKey(endpointKey);
+	if (gateway === endpointKey) return usage[endpointKey] ?? 0;
+	const prefix = `${gateway}${MODEL_KEY_SEPARATOR}`;
+	let attributed = 0;
+	for (const [key, count] of Object.entries(usage)) if (key.startsWith(prefix)) attributed += count;
+	return (usage[endpointKey] ?? 0) + Math.max(0, (usage[gateway] ?? 0) - attributed);
+}
+
+/** The endpoint key a model key belongs to; any other key is its own. Canonical URLs never carry a fragment. */
+export function gatewayEndpointKey(endpointKey: string): string {
+	const index = endpointKey.indexOf(MODEL_KEY_SEPARATOR);
+	return index < 0 ? endpointKey : endpointKey.slice(0, index);
+}
+
 /** Compact operator-facing identity. A non-root base path remains visible. */
 export function endpointLabel(endpointKey: string): string {
+	const index = endpointKey.indexOf(MODEL_KEY_SEPARATOR);
+	if (index >= 0)
+		return `${endpointLabel(endpointKey.slice(0, index))} ${decodeURIComponent(endpointKey.slice(index + MODEL_KEY_SEPARATOR.length))}`;
 	try {
 		const url = new URL(endpointKey);
 		return `${url.host}${url.pathname === "/" ? "" : url.pathname}`;
@@ -219,7 +268,14 @@ const foregroundStreams = new Map<string, number>();
  */
 export function registerForegroundStream(endpointKey: string): () => void {
 	const release = countStream(endpointKey);
-	preemptBackgroundStreams(endpointKey);
+	const gateway = gatewayEndpointKey(endpointKey);
+	// A hold admitted against the whole gateway yields to any of its models; a
+	// stream with no model on a gateway may be on any model behind it.
+	const affected =
+		gateway === endpointKey
+			? [endpointKey, ...[...backgroundStreams.keys()].filter((key) => gatewayEndpointKey(key) === endpointKey)]
+			: [endpointKey, gateway];
+	for (const key of new Set(affected)) preemptBackgroundStreams(key);
 	return release;
 }
 
@@ -283,7 +339,7 @@ export function registerBackgroundStream(
 function preemptBackgroundStreams(endpointKey: string): void {
 	const holders = backgroundStreams.get(endpointKey);
 	if (holders === undefined) return;
-	const used = foregroundStreams.get(endpointKey) ?? 0;
+	const used = modelStreamUsage(Object.fromEntries(foregroundStreams), endpointKey);
 	let yielded = 0;
 	for (let index = holders.length - 1; index >= 0; index -= 1) {
 		const holder = holders[index];
@@ -303,13 +359,17 @@ function preemptBackgroundStreams(endpointKey: string): void {
 }
 
 function countStream(endpointKey: string): () => void {
-	foregroundStreams.set(endpointKey, (foregroundStreams.get(endpointKey) ?? 0) + 1);
+	const gateway = gatewayEndpointKey(endpointKey);
+	const keys = gateway === endpointKey ? [endpointKey] : [endpointKey, gateway];
+	for (const key of keys) foregroundStreams.set(key, (foregroundStreams.get(key) ?? 0) + 1);
 	let held = true;
 	return () => {
 		if (!held) return;
 		held = false;
-		const next = (foregroundStreams.get(endpointKey) ?? 1) - 1;
-		if (next <= 0) foregroundStreams.delete(endpointKey);
-		else foregroundStreams.set(endpointKey, next);
+		for (const key of keys) {
+			const next = (foregroundStreams.get(key) ?? 1) - 1;
+			if (next <= 0) foregroundStreams.delete(key);
+			else foregroundStreams.set(key, next);
+		}
 	};
 }

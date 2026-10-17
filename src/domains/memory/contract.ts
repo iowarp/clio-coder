@@ -14,6 +14,8 @@ export interface ObservationSourceUnit {
 	readonly toolCallIds: readonly string[];
 	readonly successfulResultRefs: readonly string[];
 	readonly complete: boolean;
+	/** Estimated tokens of the unit's ordinary compaction representation; an observation must beat it. */
+	readonly ordinaryTokens?: number;
 }
 
 export interface ObservationSource extends MemoryCommitScope {
@@ -64,7 +66,14 @@ export interface MemoryCompactionOffer {
 	readonly text: string;
 	readonly receipt: MemoryConsumptionReceipt;
 	readonly isCurrent: () => boolean;
-	readonly onUse?: () => void;
+	/** The compactor chose this offer; the request sizes it priced the choice on. */
+	readonly onUse?: (use: MemoryOfferUse) => void;
+}
+
+/** Estimated summarizer input with the ordinary slice and with the offer substituted (SPEC R15). */
+export interface MemoryOfferUse {
+	readonly originalInputTokens: number;
+	readonly substitutedInputTokens: number;
 }
 
 export interface MemoryOfferInput {

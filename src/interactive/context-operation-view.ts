@@ -63,6 +63,17 @@ export function showsContextResult(operation: ContextOperation): boolean {
 	return true;
 }
 
+/**
+ * Qualifier for a settled compaction card. The summarizer is the only stage
+ * that records a summarized fact, so a completed compaction without one only
+ * evicted or masked tool output, which stays recallable. Live, a 43 ms
+ * eviction pass read exactly like a 17 s summarizer checkpoint.
+ */
+export function compactionQualifier(operation: Pick<ContextOperation, "kind" | "outcome" | "facts">): string {
+	if (operation.kind !== "compaction" || operation.outcome !== "completed") return "";
+	return (operation.facts ?? []).some((fact) => fact.kind === "summarized") ? "" : " · no summary";
+}
+
 const UNIT_NAMES: Record<ContextOperationFact["unit"], readonly [string, string]> = {
 	paths: ["path", "paths"],
 	"source-files": ["source file", "source files"],

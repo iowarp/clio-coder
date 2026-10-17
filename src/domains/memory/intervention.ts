@@ -18,6 +18,7 @@ import { redactSecretString } from "../safety/redaction.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
+import { sameCommand, simpleInvocation, succeededCommandForms, successfulShellReceipt } from "./command-evidence.js";
 import {
 	type MemoryCommitScope,
 	MemoryCommitState,
@@ -27,7 +28,8 @@ import {
 	type SuccessfulMemoryContextCommit,
 } from "./commit-state.js";
 import type { MemoryObservationCommands } from "./contract.js";
-import { lessonEvidence, lessonSubject, recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
+import { lessonEvidence, readInsideRoot, recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
+import { asKeptLesson, type KeptLesson, renderKeptLesson } from "./lesson-projection.js";
 import { sharesInvocationTarget } from "./recipes.js";
 import type { MemoryRestorationInput } from "./restoration.js";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank, type TaskMemoryEntry } from "./task-bank.js";
@@ -60,14 +62,7 @@ export const MEMORY_INTERVENTION_DEFAULT_EVERY_N_TOOLS = 10;
 export const MEMORY_INTERVENTION_TIMEOUT_BACKOFF_THRESHOLD = 2;
 
 export const MEMORY_INTERVENTION_ACTIVITY_LIMIT = 20;
-/**
- * Tool steps a delivered reminder must survive without its failures returning
- * before it counts as held. Held is the absence of a recurrence over that
- * window, never proof the lesson is true, which is why a delivery stays
- * watched afterwards and can still be contradicted.
- */
-export const MEMORY_DELIVERY_HELD_MIN_STEPS = 3;
-/** Recurrences of a failure that was open at delivery before the reminder counts as contradicted. */
+/** Recurrences after submission of a failure the reminder was about before it counts as contradicted. */
 export const MEMORY_DELIVERY_CONTRADICTED_RECURRENCES = 2;
 const MEMORY_DELIVERY_WATCH_LIMIT = 16;
 
@@ -85,6 +80,41 @@ export interface MemoryDeliveryOutcome {
 	 */
 	entries: ReadonlyArray<{ id: string; content: string }>;
 	kind: "held" | "contradicted";
+}
+
+/**
+ * One reminder memory produced for the action agent, bound to what it cites
+ * and why it was produced. Producing or buffering it proves nothing: delivery
+ * accounting, deduplication and outcome watches start only when the host
+ * reports that `content` entered an admitted request (`acknowledgeSubmission`).
+ * Submission proves inclusion, never that the agent followed it.
+ */
+export interface MemoryInterventionOffer {
+	readonly id: string;
+	readonly kind: "corrective" | "knowledge" | "durable_lesson";
+	readonly tier: "rules" | "llm";
+	/** Exact text that must appear in the admitted request. */
+	readonly content: string;
+	/** Bank entries or durable records cited, each with the content revision the text was written from. */
+	readonly cited: ReadonlyArray<{ readonly id: string; readonly revision: string }>;
+	readonly trigger: {
+		readonly reasons: ReadonlyArray<string>;
+		/** Tool step at production. */
+		readonly step: number;
+		/** Failure episodes open when the reminder was produced; a corrective one is stale once all are resolved. */
+		readonly failures: ReadonlyArray<{
+			readonly fingerprint: string;
+			readonly firstStep: number;
+			/** The procedural entry that records the episode. */
+			readonly entryId: string;
+		}>;
+	};
+	/** Durable lessons with their applicability and provenance, as rendered. */
+	readonly lessons: ReadonlyArray<
+		Pick<KeptLesson, "id" | "revision" | "appliesWhen" | "avoidWhen" | "approval" | "evidenceRefs">
+	>;
+	/** Workspace the reminder's paths and evidence were checked against. */
+	readonly workspaceRoot: string;
 }
 
 export type MemoryInterventionTriggerReason =
@@ -187,6 +217,13 @@ export interface MemoryKnowledgeReview {
 }
 
 const TURN_LOG_LIMIT = 40;
+/** Produced reminders awaiting submission; the oldest is released first. */
+const PENDING_OFFER_LIMIT = 32;
+/** Requests a produced reminder may miss before it is treated as dropped and released. */
+const OFFER_MISSED_SUBMISSION_LIMIT = 3;
+/** Kept lessons the turn-end pass is shown so it does not rewrite them. */
+const KEPT_LESSONS_FOR_PASS = 10;
+const SUBMITTED_CONTENT_LIMIT = 128;
 const TURN_LOG_CALL_MAX_CHARS = 300;
 const VERIFIED_COMMAND_LIMIT = 256;
 const TURN_LOG_READ_EXCERPT_CHARS = 240;
@@ -213,13 +250,16 @@ const UNANSWERED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
 ]);
 
 interface DeliveryWatch {
-	entries: Array<{ id: string; content: string }>;
+	entries: Array<{ id: string; content: string; entry: TaskMemoryEntry }>;
+	/** Tool step at submission; only evidence after it speaks for the reminder. */
 	step: number;
-	/** Operations that were failing in the window the reminder was written from. */
+	/** Failure episodes the reminder was written about that were still open when it was submitted. */
 	fingerprints: Set<string>;
 	recurrences: number;
-	/** Held was already reported; only a later contradiction is still news. */
-	heldReported: boolean;
+	/** Entries whose own evidence a later receipt satisfied. */
+	supported: Set<string>;
+	/** Entries already reported held; only a later contradiction is still news. */
+	heldReported: Set<string>;
 }
 
 interface FailedAttempt {
@@ -258,10 +298,11 @@ export interface MemoryInterventionDeps {
 	/** Capture immutable accounting ownership at launch, before awaiting inference. */
 	captureStepUsage?: () => (usage: TaskMemoryStepUsage, isCurrent: boolean) => void;
 	/**
-	 * Bank entries an llm-tier reminder cited when it reached the operator. The
-	 * composition root proposes them into the durable memory store, which is what
-	 * connects the session bank to the records `/memory` and `clio-coder memory`
-	 * read. Best effort and content-bearing, exactly like `onEnvelope`.
+	 * Bank entries an llm-tier reminder cited, once the host reported the
+	 * reminder inside an admitted request. The owner proposes them into the
+	 * durable memory store, which is what connects the session bank to the
+	 * records `/memory` and `clio-coder memory` read. Best effort and
+	 * content-bearing, exactly like `onEnvelope`.
 	 */
 	onInjectedEntries?: (entries: ReadonlyArray<TaskMemoryEntry>) => void;
 	/**
@@ -286,8 +327,12 @@ export interface MemoryInterventionDeps {
 	 * second look, so it is handed over to be filed as pending instead of being
 	 * cleared with the bank.
 	 */
-	/** Approved lessons for the active repository, shown to the turn-end pass so it does not rewrite them. */
-	getKeptLessons?: () => ReadonlyArray<{ id: string; text: string }>;
+	/**
+	 * Approved lessons for the active workspace's repository, with conditions and
+	 * provenance. Action reminders select from all of them before any item limit;
+	 * the turn-end pass is shown a bounded subset so it does not rewrite them.
+	 */
+	getKeptLessons?: () => ReadonlyArray<{ id: string; text: string } & Partial<KeptLesson>>;
 	/** Kept lessons the turn-end pass deleted because the turn showed them wrong. */
 	onKeptLessonsRetired?: (memoryIds: ReadonlyArray<string>) => void;
 	onScopeEnd?: (scope: { sessionId: string | undefined; lessons: ReadonlyArray<TaskMemoryEntry> }) => void;
@@ -321,9 +366,10 @@ export interface MemoryInterventionDeps {
 	/** Checkout source evidence is verified against; defaults to the process workspace. */
 	workspaceRoot?: () => string;
 	/**
-	 * Approved lessons this session surfaced at its first workspace change
-	 * (`delivered`), and those whose quoted command it then ran successfully
-	 * (`held`). Ids only; the composition root records them on the durable records.
+	 * Approved lessons whose reminder entered an admitted request (`delivered`),
+	 * and those whose recommended command this session then ran successfully,
+	 * exactly, after that submission (`held`). Ids only; the owner records them
+	 * on the durable records.
 	 */
 	onDurableLessonOutcomes?: (input: {
 		sessionId: string | undefined;
@@ -344,6 +390,8 @@ export interface MemoryPromptedStepInput {
 
 export interface MemoryPromptedStepResult extends TaskMemoryPolicyResult {
 	effects: ReadonlyArray<MiddlewareEffect>;
+	/** The offer the reminder was produced as; its validity is rechecked until submission. */
+	offer?: MemoryInterventionOffer;
 }
 
 export interface MemoryInterventionRegistration extends MiddlewareHookRegistration {
@@ -356,7 +404,21 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 		maxTokens: number,
 	): MemoryRestorationOffer | null;
 	acknowledgeRestoration(offer: MemoryRestorationOffer): boolean;
-	isContentCurrent(): () => boolean;
+	/**
+	 * Content authority for buffered memory text. Given the text, the guard also
+	 * revalidates that offer's cited revisions and triggering failures, so a
+	 * correction whose failure resolved while it waited is never submitted.
+	 */
+	isContentCurrent(content?: string): () => boolean;
+	/**
+	 * The host framed these texts (reminder blocks, tool-result notes) in a
+	 * request it admitted and submitted. Offers whose exact content appears
+	 * start delivery accounting now; the rest stay pending until they are
+	 * submitted or go stale.
+	 */
+	acknowledgeSubmission(texts: ReadonlyArray<string>): ReadonlyArray<MemoryInterventionOffer>;
+	/** Produced reminders are waiting for a submission receipt. */
+	hasPendingOffers(): boolean;
 	/** Invalidate pending content and discard all transient session/branch state. */
 	reset(): void;
 	/** Invalidate immediately without waiting for the model; refuse further work. */
@@ -381,6 +443,13 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	 */
 	pendingWork(): boolean;
 	/**
+	 * A boundary already raised triggers (a finished turn, a cadence step, one
+	 * that yielded to occupancy) that a step can serve now: the model tier is
+	 * neither parked unavailable nor refused by the budget. Idle-only lesson
+	 * work does not count.
+	 */
+	owesBoundaryStep(): boolean;
+	/**
 	 * Run pending work between turns: yielded triggers first, otherwise a lesson
 	 * pass over completed activity the turn-end pass did not cover. Detached
 	 * from any visible turn; the idle guardian decides when to call it.
@@ -403,16 +472,18 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let commitState: MemoryCommitState | null = null;
 	let commitScope: MemoryCommitScope | null = null;
 	let commitBridgeEnabled = false;
-	const captureContentGuard = (): (() => boolean) => {
+	const captureContentGuard = (content?: string): (() => boolean) => {
 		const capturedGeneration = generation;
 		const owner = commitState;
 		const scope = commitScope;
 		const stamp = owner?.capture();
+		const offer = content === undefined ? undefined : offerForContent(content);
 		return () =>
 			!disposed &&
 			generation === capturedGeneration &&
 			commitState === owner &&
-			(!owner || (!!stamp && !!scope && owner.isCurrent(stamp, scope)));
+			(!owner || (!!stamp && !!scope && owner.isCurrent(stamp, scope))) &&
+			(offer === undefined || offerCurrent(offer));
 	};
 	let generationController = new AbortController();
 	let observedSessionId: string | undefined;
@@ -496,8 +567,30 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let durableLessonsChecked = false;
 	/** Surfaced lesson id to the commands it quotes, until one of them succeeds in this session. */
 	const durableWatch = new Map<string, ReadonlyArray<string>>();
-	/** Approved lessons already shown this session, by either trigger. */
+	/** Approved lessons whose reminder this session submitted, by any trigger. */
 	const deliveredLessons = new Set<string>();
+	/** Approved lessons with a produced reminder not yet submitted; not offered again meanwhile. */
+	const offeredLessons = new Set<string>();
+	/** Produced reminders awaiting the host's submission receipt, oldest first. */
+	const pendingOffers = new Map<string, PendingOffer>();
+	/** Exact contents already submitted this scope; the same text is never offered again. */
+	const submittedContents = new Set<string>();
+	let offerSequence = 0;
+
+	interface PendingOffer {
+		readonly offer: MemoryInterventionOffer;
+		readonly generation: number;
+		/** Delivery accounting the submission receipt starts, given the offer as registered. */
+		readonly onSubmitted: (offer: MemoryInterventionOffer) => void;
+		/**
+		 * Requests submitted without this text since it was produced. A reminder
+		 * rides the next request (an annotation) or the one after the next flush
+		 * (a deferred reminder); one that misses more was dropped before it
+		 * reached the model, and holding it would keep its lessons from being
+		 * offered again for the rest of the session.
+		 */
+		missedSubmissions: number;
+	}
 
 	return {
 		captureMemoryAuthority: () =>
@@ -536,6 +629,28 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			return true;
 		},
 		isContentCurrent: captureContentGuard,
+		hasPendingOffers: () => !disposed && pendingOffers.size > 0,
+		acknowledgeSubmission(texts) {
+			if (disposed || pendingOffers.size === 0) return [];
+			const acknowledged: MemoryInterventionOffer[] = [];
+			for (const [id, pending] of [...pendingOffers]) {
+				if (!texts.some((text) => text.includes(pending.offer.content))) {
+					pending.missedSubmissions += 1;
+					if (pending.missedSubmissions >= OFFER_MISSED_SUBMISSION_LIMIT) releaseOffer(id);
+					continue;
+				}
+				pendingOffers.delete(id);
+				if (pending.generation !== generation) continue;
+				rememberSubmittedContent(pending.offer.content);
+				try {
+					pending.onSubmitted(pending.offer);
+				} catch {
+					// Delivery bookkeeping never fails the request that carried the reminder.
+				}
+				acknowledged.push(pending.offer);
+			}
+			return acknowledged;
+		},
 		reset,
 		dispose(): void {
 			disposed = true;
@@ -696,6 +811,17 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			if (disposed || !settings().enabled) return false;
 			return pendingTriggers.size > 0 || idleLessonWorth();
 		},
+		owesBoundaryStep(): boolean {
+			return (
+				!disposed &&
+				settings().enabled &&
+				deps.deliversDeferredReminders !== false &&
+				!promptedStepInFlight &&
+				!lastLaunchUnavailable &&
+				!lastLaunchSkipped &&
+				pendingTriggers.size > 0
+			);
+		},
 		async runIdleStep(): Promise<MemoryStepLaunchOutcome> {
 			if (disposed || !settings().enabled || promptedStepInFlight) return "none";
 			if (deps.deliversDeferredReminders === false) return "none";
@@ -718,6 +844,131 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		stepInFlight: () => promptedStepInFlight,
 		whenIdle: () => outstandingStep,
 	};
+
+	/**
+	 * Register a produced reminder. Returns null when the same text was already
+	 * submitted in this scope: the agent has it in context, and a second copy
+	 * would also make the submission receipt ambiguous.
+	 */
+	function produceOffer(
+		spec: Omit<MemoryInterventionOffer, "id" | "workspaceRoot"> & { workspaceRoot?: string },
+		onSubmitted: (offer: MemoryInterventionOffer) => void,
+	): MemoryInterventionOffer | null {
+		const content = spec.content.trim();
+		if (content.length === 0 || submittedContents.has(content)) return null;
+		for (const pending of pendingOffers.values())
+			if (pending.offer.content === content && pending.generation === generation) return pending.offer;
+		const offer: MemoryInterventionOffer = Object.freeze({
+			...spec,
+			id: `mo-${(++offerSequence).toString(36)}`,
+			content,
+			workspaceRoot: spec.workspaceRoot ?? workspaceRoot(),
+		});
+		pendingOffers.set(offer.id, { offer, generation, onSubmitted, missedSubmissions: 0 });
+		while (pendingOffers.size > PENDING_OFFER_LIMIT) {
+			const [oldest] = pendingOffers.keys();
+			if (oldest === undefined) break;
+			releaseOffer(oldest);
+		}
+		return offer;
+	}
+
+	function releaseOffer(id: string): void {
+		const pending = pendingOffers.get(id);
+		pendingOffers.delete(id);
+		for (const lesson of pending?.offer.lessons ?? []) offeredLessons.delete(lesson.id);
+		// The first-change surfacing never reached the model; leaving the check
+		// spent would hide those lessons for the rest of the session.
+		if (pending?.offer.trigger.reasons.includes("durable_lesson")) durableLessonsChecked = false;
+	}
+
+	function rememberSubmittedContent(content: string): void {
+		submittedContents.add(content);
+		if (submittedContents.size > SUBMITTED_CONTENT_LIMIT)
+			submittedContents.delete(submittedContents.values().next().value ?? content);
+	}
+
+	function offerForContent(content: string): MemoryInterventionOffer | undefined {
+		const text = content.trim();
+		for (const pending of pendingOffers.values()) if (text.includes(pending.offer.content)) return pending.offer;
+		return undefined;
+	}
+
+	/**
+	 * Revalidate the facts a reminder was produced from, at enqueue and again at
+	 * submission. A cited entry deleted or rewritten (other than a still-open
+	 * failure counting its repeat), a durable lesson no longer approved as
+	 * written, or a correction whose failure episodes all resolved makes it
+	 * stale. Unrelated activity in between changes none of these.
+	 */
+	function offerCurrent(offer: MemoryInterventionOffer): boolean {
+		const pending = pendingOffers.get(offer.id);
+		if (disposed || (pending !== undefined && pending.generation !== generation)) return false;
+		if (offer.kind === "durable_lesson") {
+			const live = new Map(keptLessons().map((lesson) => [lesson.id, lesson.revision]));
+			return offer.lessons.every((lesson) => live.get(lesson.id) === lesson.revision);
+		}
+		const snapshot = deps.bank.snapshot();
+		// The post-compaction restoration cites the status line too; leaving it
+		// out would make that reminder stale the moment it was produced.
+		const entries = new Map(
+			[...(snapshot.status === null ? [] : [snapshot.status]), ...snapshot.knowledge, ...snapshot.procedural].map(
+				(entry) => [entry.id, entry],
+			),
+		);
+		for (const cited of offer.cited) {
+			const entry = entries.get(cited.id);
+			if (entry === undefined || !citedStillHolds(offer, cited, entry)) return false;
+		}
+		if (offer.trigger.failures.length === 0) return true;
+		const open = offer.trigger.failures.filter(
+			(episode) => failures.get(episode.fingerprint)?.firstStep === episode.firstStep,
+		);
+		// A correction about failures that all resolved is stale; one cited
+		// failure resolving also makes the text claim something no longer true.
+		if (offer.kind === "corrective") return open.length > 0;
+		const citedEpisodes = offer.trigger.failures.filter((episode) =>
+			offer.cited.some((cited) => cited.id === episode.entryId),
+		);
+		return citedEpisodes.every((episode) => open.includes(episode));
+	}
+
+	/**
+	 * A cited entry still says what the reminder was written from. A repeat of
+	 * a still-open failure rewrites its procedural entry only to count the
+	 * attempt and keep the latest error, which leaves a correction about that
+	 * episode true; without this, the agent repeating the failure would be the
+	 * very thing that dropped the correction.
+	 */
+	function citedStillHolds(
+		offer: MemoryInterventionOffer,
+		cited: MemoryInterventionOffer["cited"][number],
+		entry: TaskMemoryEntry,
+	): boolean {
+		if (entryRevision(entry) === cited.revision) return true;
+		return offer.trigger.failures.some(
+			(episode) => episode.entryId === cited.id && failures.get(episode.fingerprint)?.firstStep === episode.firstStep,
+		);
+	}
+
+	/** Failure episodes still open, as the reminder about to be produced sees them. */
+	function openFailureEpisodes(
+		fingerprints?: ReadonlySet<string>,
+	): Array<{ fingerprint: string; firstStep: number; entryId: string }> {
+		return [...failures]
+			.filter(([fingerprint]) => fingerprints === undefined || fingerprints.has(fingerprint))
+			.map(([fingerprint, failure]) => ({ fingerprint, firstStep: failure.firstStep, entryId: failure.entryId }));
+	}
+
+	function keptLessons(): ReadonlyArray<KeptLesson> {
+		if (!settings().enabled) return [];
+		try {
+			return (deps.getKeptLessons?.() ?? []).map(asKeptLesson);
+		} catch {
+			// An unreadable store surfaces nothing; the session continues without it.
+			return [];
+		}
+	}
 
 	/**
 	 * Start one detached step for every pending trigger. A step that yielded to
@@ -794,9 +1045,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				// background route resolves to null. Preserve the operator-visible
 				// injected outcome instead of overwriting it with that no-client silence.
 				if (rulesAlreadySpoke && result.decision === "silent") lastDecision = "injected";
-				if (result.reminder === null) return;
-				lastInjectedMessage = result.reminder;
-				deps.onDeferredReminder?.(result.reminder, contentCurrent);
+				const offer = result.offer;
+				if (result.reminder === null || offer === undefined) return;
+				deps.onDeferredReminder?.(offer.content, () => contentCurrent() && offerCurrent(offer));
 			})
 			.catch(() => {
 				// runPromptedStep already resolves failures to silence; this only
@@ -865,6 +1116,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		// Retain completed bank entries, but revoke pending content and delivery
 		// authority. Late provider usage still belongs to its captured origin.
 		generation += 1;
+		pendingOffers.clear();
+		offeredLessons.clear();
 		commitState?.cancel(generation);
 		deps.onContentCancelled?.();
 		generationController.abort();
@@ -882,6 +1135,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	function reset(): void {
+		pendingOffers.clear();
+		submittedContents.clear();
+		offeredLessons.clear();
 		try {
 			const lessons = deps.bank.snapshot().knowledge.filter((entry) => entry.durable === true);
 			if (lessons.length > 0) deps.onScopeEnd?.({ sessionId: observedSessionId, lessons });
@@ -967,6 +1223,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const stepGeneration = generation;
 		const isCurrent = captureContentGuard();
 		const isUsageCurrent = () => !disposed && stepGeneration === generation;
+		// The workspace and the failure episodes this step is reasoning about are
+		// captured with its authority: paths are checked against the session's
+		// workspace, never the process directory, and a correction is bound to
+		// the episodes that were open when it was asked for.
+		const launchRoot = workspaceRoot();
+		const launchFailures = openFailureEpisodes(
+			new Set(trajectory.filter((step) => step.outcome === "error").map((step) => step.operationFingerprint)),
+		);
 		const usageSink = deps.captureStepUsage?.();
 		if (disposed || !live.enabled) {
 			const result = silent("no_client");
@@ -1018,6 +1282,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							},
 							task: input.task?.trim() || currentTask,
 							trajectory: [...trajectory],
+							workspaceRoot: launchRoot,
 							deterministicTrigger: input.deterministicTrigger,
 							maxTokens: live.maxTokens,
 							modelMaxTokens: positiveInteger(deps.getModelMaxTokens?.(live.maxTokens), live.maxTokens),
@@ -1110,8 +1375,35 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (YIELDED_REASONS.has(promptedResult.reason) || budgetSkipped(promptedResult.reason)) telemetryDecision = "dropped";
 		if (tier === "llm" && promptedResult.decision === "timeout") consecutiveLlmTimeouts += 1;
 		else if (tier === "llm" && telemetryDecision !== "dropped") consecutiveLlmTimeouts = 0;
+		let offer: MemoryInterventionOffer | undefined;
+		if (promptedResult.decision === "injected" && promptedResult.reminder !== null) {
+			const cited = citedEntries(promptedResult.reminder);
+			const produced = produceOffer(
+				{
+					kind:
+						input.deterministicTrigger || cited.some((entry) => entry.kind === "procedural") ? "corrective" : "knowledge",
+					tier: "llm",
+					content: promptedResult.reminder,
+					cited: cited.map((entry) => ({ id: entry.id, revision: entryRevision(entry) })),
+					trigger: { reasons: triggers, step: toolStep, failures: launchFailures },
+					lessons: [],
+					workspaceRoot: launchRoot,
+				},
+				startDeliveryWatch,
+			);
+			if (produced === null) {
+				promptedResult = { ...promptedResult, decision: "silent", reason: "duplicate_reminder", reminder: null };
+			} else if (!offerCurrent(produced)) {
+				// Evidence moved while the model was answering: the failure it was
+				// asked about resolved, or a fact it cites was rewritten.
+				releaseOffer(produced.id);
+				promptedResult = { ...promptedResult, decision: "gated", reason: "resolved_failure", reminder: null };
+			} else {
+				offer = produced;
+				lastInjectedMessage = produced.content;
+			}
+		}
 		lastDecision = promptedResult.decision;
-		if (promptedResult.decision === "injected") reportInjectedEntries(promptedResult.reminder);
 		// Exactly the entries the answered call's prompt was rendered from. An
 		// entry cut for budget was never put in front of the model, so its silence
 		// about it says nothing.
@@ -1145,13 +1437,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		);
 		return {
 			...promptedResult,
+			...(offer === undefined ? {} : { offer }),
 			effects:
-				promptedResult.reminder === null
+				offer === undefined
 					? NO_EFFECTS
 					: [
 							{
 								kind: "inject_reminder",
-								message: promptedResult.reminder,
+								message: offer.content,
 								severity: "advisory",
 								source: "memory",
 								audience: "model",
@@ -1232,43 +1525,48 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	/**
-	 * Hand the cited entries to the durable store.
+	 * Start delivery accounting for a reminder the host submitted: the cited
+	 * entries' injection counts, and for the model tier the durable proposal and
+	 * an outcome watch.
 	 *
-	 * Only the model tier reports here. A rules-tier reminder cites an entry this
+	 * Only the model tier proposes. A rules-tier reminder cites an entry this
 	 * middleware wrote itself out of one repeated tool failure, and proposing
 	 * every one of those as a durable lesson would fill the operator's review
-	 * queue with rows nobody asked for. The model tier's entries are the ones the
-	 * background plane produced, which is what #229 asks to be reviewable.
+	 * queue with rows nobody asked for (#229).
 	 */
-	function reportInjectedEntries(reminder: string | null): void {
-		if (deps.onInjectedEntries === undefined) return;
-		const entries = citedEntries(reminder);
-		if (entries.length === 0) return;
+	function startDeliveryWatch(offer: MemoryInterventionOffer): void {
+		const snapshot = deps.bank.snapshot();
+		const entries = [...snapshot.knowledge, ...snapshot.procedural].filter((entry) =>
+			offer.cited.some((cited) => cited.id === entry.id && citedStillHolds(offer, cited, entry)),
+		);
+		if (entries.length > 0) deps.bank.recordInjection(entries.map((entry) => entry.id));
+		if (offer.tier !== "llm" || entries.length === 0 || deps.onInjectedEntries === undefined) return;
 		try {
 			deps.onInjectedEntries(entries);
 		} catch {
-			// A failing store is the composition root's problem to report, never a
-			// reason to fail the step that produced the reminder.
+			// A failing store is the owner's problem to report, never a reason to
+			// fail the request that carried the reminder.
 			return;
 		}
 		deliveries.push({
-			entries: entries.map((entry) => ({ id: entry.id, content: entry.content })),
+			entries: entries.map((entry) => ({ id: entry.id, content: entry.content, entry })),
 			step: toolStep,
 			fingerprints: new Set(
-				trajectory.filter((step) => step.outcome === "error").map((step) => step.operationFingerprint),
+				offer.trigger.failures
+					.filter((episode) => failures.get(episode.fingerprint)?.firstStep === episode.firstStep)
+					.map((episode) => episode.fingerprint),
 			),
 			recurrences: 0,
-			heldReported: false,
+			supported: new Set(),
+			heldReported: new Set(),
 		});
 		if (deliveries.length > MEMORY_DELIVERY_WATCH_LIMIT) deliveries.shift();
 	}
 
 	function keptLessonsForPass(): ReadonlyArray<{ id: string; text: string }> {
-		try {
-			return deps.getKeptLessons?.() ?? [];
-		} catch {
-			return [];
-		}
+		return keptLessons()
+			.slice(0, KEPT_LESSONS_FOR_PASS)
+			.map((lesson) => ({ id: lesson.id, text: lesson.text }));
 	}
 
 	function reviewKnowledge(before: ReadonlyArray<TaskMemoryEntry>): void {
@@ -1296,32 +1594,33 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 
 	/**
 	 * Report deliveries whose outcome is decided. A reminder is contradicted when
-	 * a failure it was written about keeps recurring, and held once the session
-	 * moved on without one. A held delivery stays in the bounded watch list, so
-	 * the same failure returning later in the session still contradicts it; an
-	 * undecided one is dropped at scope end rather than guessed at.
+	 * a failure it was written about keeps recurring after it was submitted. An
+	 * entry holds only when a later receipt satisfies that entry's own evidence:
+	 * its exact command succeeded, or a read showed its quoted source. Quiet
+	 * steps and unrelated successes decide nothing. A held entry stays watched,
+	 * so the same failure returning later still contradicts it; an undecided
+	 * delivery is dropped at scope end rather than guessed at.
 	 */
 	function settleDeliveries(final: boolean): void {
 		const outcomes: MemoryDeliveryOutcome[] = [];
+		const bank = new Map(deps.bank.snapshot().knowledge.map((entry) => [entry.id, entry]));
 		for (let index = deliveries.length - 1; index >= 0; index -= 1) {
 			const watch = deliveries[index];
 			if (watch === undefined) continue;
 			if (watch.recurrences >= MEMORY_DELIVERY_CONTRADICTED_RECURRENCES) {
 				deliveries.splice(index, 1);
-				outcomes.push({ entries: watch.entries, kind: "contradicted" });
-			} else if (
-				!watch.heldReported &&
-				watch.recurrences === 0 &&
-				toolStep - watch.step >= MEMORY_DELIVERY_HELD_MIN_STEPS
-			) {
-				watch.heldReported = true;
-				const bank = deps.bank.snapshot().knowledge;
-				const grounded = watch.entries.filter((delivered) => {
-					const entry = bank.find((candidate) => candidate.id === delivered.id);
-					return entry !== undefined && entry.content === delivered.content && lessonIsGrounded(entry);
-				});
-				if (grounded.length > 0) outcomes.push({ entries: grounded, kind: "held" });
+				outcomes.push({ entries: watch.entries.map(({ id, content }) => ({ id, content })), kind: "contradicted" });
+				continue;
 			}
+			const held = watch.entries.filter(
+				(delivered) =>
+					watch.recurrences === 0 &&
+					watch.supported.has(delivered.id) &&
+					!watch.heldReported.has(delivered.id) &&
+					bank.get(delivered.id)?.content === delivered.content,
+			);
+			for (const delivered of held) watch.heldReported.add(delivered.id);
+			if (held.length > 0) outcomes.push({ entries: held.map(({ id, content }) => ({ id, content })), kind: "held" });
 		}
 		if (final) deliveries.length = 0;
 		if (outcomes.length === 0 && !final) return;
@@ -1330,6 +1629,33 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		} catch {
 			// Same contract as onInjectedEntries: the store's failure is not the session's.
 		}
+	}
+
+	/** A successful simple shell receipt satisfies a delivered lesson whose evidence is that exact command. */
+	function noteCommandEvidence(command: string): void {
+		if (simpleInvocation(command) === null) return;
+		for (const watch of deliveries)
+			for (const delivered of watch.entries)
+				if (
+					delivered.entry.durable === true &&
+					delivered.entry.evidenceCommand !== undefined &&
+					sameCommand(delivered.entry.evidenceCommand, command)
+				)
+					watch.supported.add(delivered.id);
+	}
+
+	/** A successful read that showed a delivered lesson's quoted source, which the checkout still holds. */
+	function noteReadEvidence(path: string, excerpt: string, root: string): void {
+		const shown = collapseWhitespace(excerpt);
+		for (const watch of deliveries)
+			for (const delivered of watch.entries) {
+				const source = delivered.entry.evidenceSource;
+				if (delivered.entry.durable !== true || source === undefined) continue;
+				const quote = collapseWhitespace(source.quote);
+				if (quote.length === 0 || repositoryRelativePath(source.path, [root]) !== path || !shown.includes(quote)) continue;
+				const current = readInsideRoot(root, path);
+				if (current !== null && collapseWhitespace(current).includes(quote)) watch.supported.add(delivered.id);
+			}
 	}
 
 	function observeBeforeTool(input: MiddlewareHookInput): void {
@@ -1373,26 +1699,21 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		// success receipt does: its name, an ok result, and a zero exit it reported.
 		const command =
 			prepared.toolName === ToolNames.Bash && typeof input.toolArgs?.command === "string" ? input.toolArgs.command : null;
-		if (
-			command !== null &&
-			input.metadata?.resultKind === "ok" &&
-			input.toolResultDetails?.outcome === "success" &&
-			input.toolResultDetails?.exitCode === 0
-		) {
-			// The complete command and nothing derived from it. Splitting a chain
-			// into its parts needs a shell parser to be right: `echo 'a && npm test'`
-			// and `true # && npm test` both succeed without running `npm test`.
-			rememberSucceededCommand(command);
-		}
+		if (command !== null && successfulShellReceipt(input.metadata?.resultKind === "ok", input.toolResultDetails))
+			rememberSucceededCommand(command, input.toolArgs?.cwd);
+		const root = workspaceRoot();
 		const readPath =
 			prepared.toolName === ToolNames.Read && outcome === "ok" && typeof input.toolArgs?.path === "string"
-				? repositoryRelativePath(input.toolArgs.path, [workspaceRoot()])
+				? repositoryRelativePath(input.toolArgs.path, [root])
 				: null;
 		// A successful read carries a bounded excerpt of what it returned, so the
 		// lesson pass can quote the source a fact came from. The excerpt is also
 		// the only text that read can later vouch for.
 		const readExcerpt = readPath === null ? "" : shortText(digest.text, TURN_LOG_READ_EXCERPT_CHARS);
-		if (readPath !== null) recordObservedRead(observedReads, readPath, readExcerpt);
+		if (readPath !== null) {
+			recordObservedRead(observedReads, readPath, readExcerpt);
+			noteReadEvidence(readPath, readExcerpt, root);
+		}
 		const excerpt = outcome === "error" ? ` => ${shortText(digest.text, 160)}` : readExcerpt ? ` => ${readExcerpt}` : "";
 		turnLog.push(
 			`${toolStep}. ${outcome === "ok" ? "ok" : "FAILED"}: ${shortText(command ?? prepared.callDescription, TURN_LOG_CALL_MAX_CHARS)}${excerpt}`,
@@ -1421,7 +1742,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			const touched = surfaceForSubject(prepared.toolName, input.toolArgs);
 			if (touched.length > 0) return touched;
 			return WORKSPACE_CHANGING_CLASSES.has(String(input.metadata?.actionClass)) && !documentationChange(input.toolArgs)
-				? surfaceDurableLessons()
+				? surfaceDurableLessons(input.toolArgs)
 				: NO_EFFECTS;
 		}
 		rememberFailure(step);
@@ -1429,12 +1750,21 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		return recipe.length > 0 ? recipe : annotateRepeatedFailure(step);
 	}
 
-	function rememberSucceededCommand(command: string): void {
-		succeededCommands.add(command);
-		if (succeededCommands.size > VERIFIED_COMMAND_LIMIT) {
-			succeededCommands.delete(succeededCommands.values().next().value ?? command);
+	/**
+	 * The complete command, and each simple command of a pure `&&` chain run
+	 * from the workspace root: exit 0 proves every segment finished with exit
+	 * 0. Nothing else is derived; `echo 'a && npm test'` and `true # && npm
+	 * test` both succeed without running `npm test`.
+	 */
+	function rememberSucceededCommand(command: string, cwd: unknown): void {
+		for (const form of succeededCommandForms(command, workspaceRoot(), typeof cwd === "string" ? cwd : undefined)) {
+			succeededCommands.add(form);
+			if (succeededCommands.size > VERIFIED_COMMAND_LIMIT) {
+				succeededCommands.delete(succeededCommands.values().next().value ?? form);
+			}
+			noteCommandEvidence(form);
+			settleDurableLessons(form);
 		}
-		settleDurableLessons(command);
 	}
 
 	/**
@@ -1444,28 +1774,30 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * Dynamo session still rediscovered the validator its approved lesson named,
 	 * step for step: the decision about how to validate is made right after an
 	 * edit, far from the system prompt. So the first workspace change of a
-	 * session surfaces, once, the approved repository lessons that quote a
-	 * command this session has not yet run successfully. That is the whole
-	 * criterion: no model call, no cadence, no relevance guess.
+	 * session surfaces, once, the approved repository lessons whose recommended
+	 * command this session has not yet run successfully, those about the
+	 * changed file first. No model call, no cadence.
 	 */
-	function surfaceDurableLessons(): ReadonlyArray<MiddlewareEffect> {
+	function surfaceDurableLessons(args: Readonly<Record<string, unknown>> | undefined): ReadonlyArray<MiddlewareEffect> {
 		if (durableLessonsChecked || !settings().enabled) return NO_EFFECTS;
 		durableLessonsChecked = true;
-		return deliverDurableLessons(
-			"durable_lesson",
-			keptCommandLessons().filter((lesson) => !lesson.commands.some(commandSucceeded)),
-		);
+		const changed = new Set(touchedPaths(ToolNames.Write, args));
+		const pending = commandLessons().filter((lesson) => !lesson.commands.recommended.some(commandSucceeded));
+		return deliverDurableLessons("durable_lesson", [
+			...pending.filter((lesson) => lesson.paths.some((path) => changed.has(path))),
+			...pending.filter((lesson) => !lesson.paths.some((path) => changed.has(path))),
+		]);
 	}
 
 	/**
 	 * Clio's own verification route reported no declared or derivable check: the
-	 * session is asking how this repository validates. Approved lessons quoting a
-	 * command it has not yet run successfully are that answer.
+	 * session is asking how this repository validates. Approved lessons whose
+	 * recommended command it has not yet run successfully are that answer.
 	 */
 	function surfaceForVerificationGap(): ReadonlyArray<MiddlewareEffect> {
 		return deliverDurableLessons(
 			"durable_lesson_verify",
-			keptCommandLessons().filter((lesson) => !lesson.commands.some(commandSucceeded)),
+			commandLessons().filter((lesson) => !lesson.commands.recommended.some(commandSucceeded)),
 		);
 	}
 
@@ -1477,51 +1809,52 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		toolName: string,
 		args: Readonly<Record<string, unknown>> | undefined,
 	): ReadonlyArray<MiddlewareEffect> {
-		const root = workspaceRoot();
-		const named =
-			typeof args?.path === "string"
-				? [args.path]
-				: toolName === ToolNames.Bash && typeof args?.command === "string"
-					? args.command.split(/\s+/u)
-					: [];
-		const touched = new Set(named.flatMap((token) => repositoryRelativePath(token, [root]) ?? []));
+		const touched = new Set(touchedPaths(toolName, args));
 		if (touched.size === 0) return NO_EFFECTS;
 		return deliverDurableLessons(
 			"durable_lesson_subject",
-			// A lesson whose command this session already ran successfully has nothing left to say.
-			keptCommandLessons(true).filter(
-				(lesson) => lesson.paths.some((path) => touched.has(path)) && !lesson.commands.some(commandSucceeded),
+			// A lesson whose recommended command already succeeded here has nothing left to say.
+			keptLessons().filter(
+				(lesson) => lesson.paths.some((path) => touched.has(path)) && !lesson.commands.recommended.some(commandSucceeded),
 			),
 		);
 	}
 
-	/** Approved repository lessons with what their text names; an unreadable store yields none. */
-	function keptCommandLessons(
-		withPaths = false,
-	): Array<{ id: string; text: string; commands: ReadonlyArray<string>; paths: ReadonlyArray<string> }> {
-		if (!settings().enabled) return [];
-		try {
-			return (deps.getKeptLessons?.() ?? [])
-				.map((lesson) => ({ ...lesson, ...lessonSubject(lesson.text) }))
-				.filter((lesson) => (withPaths ? lesson.paths.length > 0 : lesson.commands.length > 0));
-		} catch {
-			// An unreadable store surfaces nothing; the session continues without it.
-			return [];
-		}
+	function touchedPaths(toolName: string, args: Readonly<Record<string, unknown>> | undefined): string[] {
+		const root = workspaceRoot();
+		const named =
+			typeof args?.path === "string"
+				? [args.path]
+				: typeof args?.file_path === "string"
+					? [args.file_path]
+					: toolName === ToolNames.Bash && typeof args?.command === "string"
+						? args.command.split(/\s+/u)
+						: [];
+		return named.flatMap((token) => repositoryRelativePath(token, [root]) ?? []);
+	}
+
+	/** Approved repository lessons that recommend at least one command. */
+	function commandLessons(): KeptLesson[] {
+		return keptLessons().filter((lesson) => lesson.commands.recommended.length > 0);
 	}
 
 	/**
-	 * A failed command whose program and repository file match a command an
-	 * approved lesson quotes: the session is on the trap that lesson's recipe
-	 * fixes. It rides back on the failed result, whatever the task asked for and
-	 * whether or not the session changed a file first.
+	 * A failed command that runs the same repository file through the same
+	 * program as a command an approved lesson recommends, or that is exactly a
+	 * failed example the lesson quotes: the session is on the trap that lesson's
+	 * recipe fixes. It rides back on the failed result.
 	 */
 	function surfaceRecipeForFailure(command: string): ReadonlyArray<MiddlewareEffect> {
 		const root = workspaceRoot();
 		return deliverDurableLessons(
 			"durable_lesson_variant",
-			keptCommandLessons().filter((lesson) =>
-				lesson.commands.some((quoted) => quoted !== command && sharesInvocationTarget(command, quoted, root)),
+			keptLessons().filter(
+				(lesson) =>
+					lesson.commands.recommended.some(
+						(quoted) => !sameCommand(quoted, command) && sharesInvocationTarget(command, quoted, root),
+					) ||
+					(lesson.commands.recommended.length > 0 &&
+						lesson.commands.examples.some((quoted) => sameCommand(quoted, command))),
 			),
 		);
 	}
@@ -1529,50 +1862,78 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	/**
 	 * Whole lessons, each at most once per session, while they fit the memory
 	 * reminder budget the operator configured; nothing is cut mid-lesson.
+	 * Relevance was decided by the caller over every eligible lesson, so the
+	 * budget only bounds what is shown. Delivery is recorded when the host
+	 * submits the annotation, not here.
 	 */
 	function deliverDurableLessons(
 		trigger: "durable_lesson" | "durable_lesson_variant" | "durable_lesson_verify" | "durable_lesson_subject",
-		candidates: ReadonlyArray<{ id: string; text: string; commands: ReadonlyArray<string> }>,
+		candidates: ReadonlyArray<KeptLesson>,
 	): ReadonlyArray<MiddlewareEffect> {
 		const budget = settings().maxTokens * 4;
-		const chosen: (typeof candidates)[number][] = [];
+		const chosen: KeptLesson[] = [];
 		let lines: string[] = [];
 		for (const lesson of candidates) {
-			if (deliveredLessons.has(lesson.id)) continue;
-			const next = [...lines, `Memory: [${lesson.id}] ${lesson.text}`];
+			if (deliveredLessons.has(lesson.id) || offeredLessons.has(lesson.id)) continue;
+			const next = [...lines, renderKeptLesson(lesson)];
 			if (next.join("\n").length > budget) continue;
 			lines = next;
 			chosen.push(lesson);
 		}
 		if (chosen.length === 0) return NO_EFFECTS;
-		for (const lesson of chosen) {
-			deliveredLessons.add(lesson.id);
-			durableWatch.set(lesson.id, lesson.commands);
-		}
+		const offer = produceOffer(
+			{
+				kind: "durable_lesson",
+				tier: "rules",
+				content: lines.join("\n"),
+				cited: chosen.map((lesson) => ({ id: lesson.id, revision: lesson.revision })),
+				trigger: { reasons: [trigger], step: toolStep, failures: [] },
+				lessons: chosen.map(({ id, revision, appliesWhen, avoidWhen, approval, evidenceRefs }) => ({
+					id,
+					revision,
+					appliesWhen,
+					avoidWhen,
+					approval,
+					evidenceRefs,
+				})),
+			},
+			() => {
+				for (const lesson of chosen) {
+					offeredLessons.delete(lesson.id);
+					deliveredLessons.add(lesson.id);
+					durableWatch.set(lesson.id, lesson.commands.recommended);
+				}
+				reportDurableLessons(
+					chosen.map((lesson) => lesson.id),
+					[],
+				);
+			},
+		);
+		if (offer === null) return NO_EFFECTS;
+		for (const lesson of chosen) offeredLessons.add(lesson.id);
 		lastDecision = "injected";
 		emitTelemetry([trigger], "rules", "injected", "intervened", chosen.length, 0, 0, process.hrtime.bigint());
-		reportDurableLessons(
-			chosen.map((lesson) => lesson.id),
-			[],
-		);
-		return [{ kind: "annotate_tool_result", message: lines.join("\n"), severity: "info" }];
+		return [{ kind: "annotate_tool_result", message: offer.content, severity: "info" }];
 	}
 
-	/** A surfaced lesson holds in this session once a command it quotes succeeds; failures prove nothing about it. */
+	/**
+	 * A submitted lesson holds in this session once its recommended command
+	 * succeeds exactly, as one simple invocation. Failures, other commands that
+	 * merely mention it, and its quoted failed examples prove nothing about it.
+	 */
 	function settleDurableLessons(command: string): void {
-		if (durableWatch.size === 0) return;
-		const ran = collapseWhitespace(command);
+		if (durableWatch.size === 0 || simpleInvocation(command) === null) return;
 		const held = [...durableWatch]
-			.filter(([, commands]) => commands.some((quoted) => ran.includes(collapseWhitespace(quoted))))
+			.filter(([, commands]) => commands.some((quoted) => sameCommand(quoted, command)))
 			.map(([id]) => id);
 		if (held.length === 0) return;
 		for (const id of held) durableWatch.delete(id);
 		reportDurableLessons([], held);
 	}
 
+	/** This session already ran exactly that command successfully. */
 	function commandSucceeded(quoted: string): boolean {
-		const wanted = collapseWhitespace(quoted);
-		for (const command of succeededCommands) if (collapseWhitespace(command).includes(wanted)) return true;
+		for (const command of succeededCommands) if (sameCommand(command, quoted)) return true;
 		return false;
 	}
 
@@ -1600,8 +1961,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			const label = `${toolStep}.${child.id}`;
 			if (child.capability === ToolNames.Bash && typeof child.args.command === "string") {
 				shellStepsSinceLessonPass += 1;
-				const succeeded = settled && details.outcome === "success" && details.exitCode === 0;
-				if (succeeded) rememberSucceededCommand(child.args.command);
+				// The same receipt rule a direct shell call meets.
+				const succeeded = successfulShellReceipt(settled, details);
+				if (succeeded) rememberSucceededCommand(child.args.command, child.args.cwd);
 				turnLog.push(`${label} ${succeeded ? "ok" : "FAILED"}: ${shortText(child.args.command, TURN_LOG_CALL_MAX_CHARS)}`);
 				continue;
 			}
@@ -1611,7 +1973,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					: null;
 			const excerpt =
 				path === null ? "" : shortText(redactSecretString(chainChildText(child.result)), TURN_LOG_READ_EXCERPT_CHARS);
-			if (path !== null) recordObservedRead(observedReads, path, excerpt);
+			if (path !== null) {
+				recordObservedRead(observedReads, path, excerpt);
+				noteReadEvidence(path, excerpt, workspaceRoot());
+			}
 			turnLog.push(
 				`${label} ${settled ? "ok" : "FAILED"}: ${shortText(`${child.capability}${path === null ? "" : ` ${path}`}`, TURN_LOG_CALL_MAX_CHARS)}${excerpt ? ` => ${excerpt}` : ""}`,
 			);
@@ -1642,19 +2007,20 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		).length;
 		if (occurrences < 2) return NO_EFFECTS;
 		const message = boundedReminder(
-			`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}. Change the approach rather than repeating it.`,
+			`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest} (${failure.attempts} failed attempts). Change the approach rather than repeating it.`,
 			settings().maxTokens,
 		);
 		if (message.length === 0) return NO_EFFECTS;
+		const offer = correctiveOffer(failure, step.operationFingerprint, message, "repeated_failure");
+		if (offer === null) return NO_EFFECTS;
 		annotatedThisTurn.add(step.operationFingerprint);
 		// Claim the turn-end channel too, so one repeated failure is surfaced once.
 		lastInjectedOperationFingerprint = step.operationFingerprint;
 		lastDecision = "injected";
 		rulesInjectedSincePromptedStep = true;
 		annotatedSinceTurnEnd = true;
-		deps.bank.recordInjection([failure.entryId]);
 		emitTelemetry(["repeated_failure"], "rules", "injected", "intervened", 1, 0, 0, process.hrtime.bigint());
-		return [{ kind: "annotate_tool_result", message, severity: "warn" }];
+		return [{ kind: "annotate_tool_result", message: offer.content, severity: "warn" }];
 	}
 
 	function rememberFailure(step: TrajectoryStep): void {
@@ -1714,16 +2080,19 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				).length;
 				if (occurrences < 2) continue;
 				const message = boundedReminder(
-					`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}.`,
+					`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest} (${failure.attempts} failed attempts).`,
 					settings().maxTokens,
 				);
 				if (message.length === 0) return NO_EFFECTS;
+				const offer = correctiveOffer(failure, step.operationFingerprint, message, "turn_end");
+				if (offer === null) return NO_EFFECTS;
 				lastInjectedOperationFingerprint = step.operationFingerprint;
-				lastInjectedMessage = message;
+				lastInjectedMessage = offer.content;
 				lastDecision = "injected";
 				rulesInjectedSincePromptedStep = true;
-				deps.bank.recordInjection([failure.entryId]);
-				return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory", audience: "model" }];
+				return [
+					{ kind: "inject_reminder", message: offer.content, severity: "advisory", source: "memory", audience: "model" },
+				];
 			}
 			lastDecision = "silent";
 			return NO_EFFECTS;
@@ -1748,11 +2117,55 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			lastDecision = "silent";
 			return NO_EFFECTS;
 		}
-		const citedIds = [...message.matchAll(/\[([^\]]+)\]/gu)].map((match) => match[1]).filter((id) => id !== undefined);
-		deps.bank.recordInjection(citedIds);
-		lastInjectedMessage = message;
+		const snapshot = deps.bank.snapshot();
+		const cited = [snapshot.status, ...snapshot.knowledge, ...snapshot.procedural].filter(
+			(entry): entry is TaskMemoryEntry => entry !== null && message.includes(`[${entry.id}]`),
+		);
+		const offer = produceOffer(
+			{
+				kind: "knowledge",
+				tier: "rules",
+				content: message,
+				cited: cited.map((entry) => ({ id: entry.id, revision: entryRevision(entry) })),
+				trigger: { reasons: ["post_compaction"], step: toolStep, failures: [] },
+				lessons: [],
+			},
+			startDeliveryWatch,
+		);
+		if (offer === null) {
+			lastDecision = "silent";
+			return NO_EFFECTS;
+		}
+		lastInjectedMessage = offer.content;
 		lastDecision = "injected";
-		return [{ kind: "inject_reminder", message, severity: "advisory", source: "memory", audience: "model" }];
+		return [
+			{ kind: "inject_reminder", message: offer.content, severity: "advisory", source: "memory", audience: "model" },
+		];
+	}
+
+	/** A rules-tier correction bound to the one failure episode it describes. */
+	function correctiveOffer(
+		failure: FailedAttempt,
+		fingerprint: string,
+		message: string,
+		reason: string,
+	): MemoryInterventionOffer | null {
+		const entry = deps.bank.snapshot().procedural.find((candidate) => candidate.id === failure.entryId);
+		return produceOffer(
+			{
+				kind: "corrective",
+				tier: "rules",
+				content: message,
+				cited: entry === undefined ? [] : [{ id: entry.id, revision: entryRevision(entry) }],
+				trigger: {
+					reasons: [reason],
+					step: toolStep,
+					failures: [{ fingerprint, firstStep: failure.firstStep, entryId: failure.entryId }],
+				},
+				lessons: [],
+			},
+			startDeliveryWatch,
+		);
 	}
 }
 
@@ -1868,6 +2281,11 @@ function verificationGap(details: unknown): boolean {
 function documentationChange(args: Readonly<Record<string, unknown>> | undefined): boolean {
 	const path = typeof args?.path === "string" ? args.path : typeof args?.file_path === "string" ? args.file_path : null;
 	return path !== null && /\.(?:md|mdx|markdown|txt|rst|adoc)$/iu.test(path);
+}
+
+/** The content revision a reminder cites; a rewrite under the same id is a different fact. */
+function entryRevision(entry: Pick<TaskMemoryEntry, "content">): string {
+	return createHash("sha256").update(entry.content).digest("hex").slice(0, 16);
 }
 
 function collapseWhitespace(value: string): string {

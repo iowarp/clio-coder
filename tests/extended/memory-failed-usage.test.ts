@@ -219,6 +219,8 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				const usable = ending === "stop" && !switched;
 				assert.equal(bank.snapshot().knowledge.length, usable ? 1 : 0);
 				assert.equal(reminders.length, usable ? 1 : 0);
+				assert.equal(proposals.length, 0, "a produced reminder is not yet delivered");
+				if (usable) registration.acknowledgeSubmission([`<system-reminder>\n${reminders[0]}\n</system-reminder>`]);
 				assert.equal(proposals.length, usable ? 1 : 0);
 				assert.equal(faux.state.callCount, 1);
 			} finally {

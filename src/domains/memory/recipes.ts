@@ -17,12 +17,16 @@
  *   file's text contains every option and environment assignment the command
  *   passes, at least one of them.
  *
- * Only a single invocation qualifies: no `&&`, `||`, `;`, pipe, or command
- * substitution, because a chain's exit status does not say which part worked.
+ * Only one simple invocation qualifies (`simpleInvocation`): no chain, pipe,
+ * substitution, comment or background launch, because such a command's exit
+ * status does not say which part worked or whether the program finished. The
+ * repository file has to be what the command executes, not text it mentions,
+ * and a help or version call teaches nothing about running the file.
  */
 
+import { commandChain, commandEvidenceRef, diagnosticInvocation, simpleInvocation } from "./command-evidence.js";
 import type { CommandRun, CompletedLessonSource } from "./history-review.js";
-import { readInsideRoot, repositoryRelativePath } from "./lesson-evidence.js";
+import { type ExecutedFile, executedFile, readInsideRoot } from "./lesson-evidence.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
 
 export type RecipeRule = "trap_fix" | "read_run";
@@ -34,14 +38,6 @@ export interface ProvenRecipe {
 	readonly content: string;
 }
 
-interface Invocation {
-	readonly program: string;
-	/** Repository-relative paths of existing files the command names. */
-	readonly files: readonly string[];
-	/** Every other argument and environment assignment, in order. */
-	readonly options: readonly string[];
-}
-
 export function provenRecipes(
 	source: Pick<CompletedLessonSource, "commandRuns" | "observedReads">,
 	root: string,
@@ -50,111 +46,105 @@ export function provenRecipes(
 	const runs = source.commandRuns;
 	runs.forEach((run, index) => {
 		if (!run.ok || recipes.has(run.command)) return;
-		const invocation = parseInvocation(run.command, root);
-		if (invocation === null || invocation.files.length === 0) return;
-		const file = invocation.files[0] ?? "";
-		const trap = latestTrap(runs.slice(0, index), invocation, root);
+		const executed = executedInvocation(run.command, root);
+		if (executed === null) return;
+		const trap = latestTrap(runs.slice(0, index), executed, root);
 		if (trap !== null) {
 			recipes.set(run.command, {
 				command: run.command,
 				rule: "trap_fix",
-				content: bounded(`Run ${file} as \`${run.command}\`; \`${trap.command}\` failed first: ${trap.diagnostic}`),
+				content: bounded(
+					`Run ${executed.file} as \`${run.command}\`; \`${trap.command}\` failed first: ${trap.diagnostic}`,
+				),
 			});
 			return;
 		}
-		const named = readRunFile(invocation, source, root);
-		if (named !== null)
+		if (readRunFile(executed, source, root))
 			recipes.set(run.command, {
 				command: run.command,
 				rule: "read_run",
 				content: bounded(
-					`Run ${named} as \`${run.command}\`; ${named} itself names the options ${invocation.options.map((option) => `\`${option}\``).join(" ")}.`,
+					`Run ${executed.file} as \`${run.command}\`; ${executed.file} itself names the options ${executed.options.map((option) => `\`${option}\``).join(" ")}.`,
 				),
 			});
 	});
 	return [...recipes.values()];
 }
 
-/** Both commands run the same program on at least one of the same repository files. */
-export function sharesInvocationTarget(command: string, other: string, root: string): boolean {
-	const left = parseInvocation(command, root);
-	const right = parseInvocation(other, root);
-	return (
-		left !== null &&
-		right !== null &&
-		left.program === right.program &&
-		left.files.some((file) => right.files.includes(file))
+/**
+ * A host recipe claims only that its command works here. When another kept
+ * claim already carries that command as evidence in different wording, the
+ * template adds a second record saying less, so it is not filed; the same
+ * template text still is, which is how a later session re-verifies it.
+ */
+export function recipeAlreadyClaimed(
+	recipe: ProvenRecipe,
+	kept: ReadonlyArray<{ text: string; evidenceRefs?: readonly string[] }>,
+): boolean {
+	const ref = commandEvidenceRef(recipe.command);
+	const text = recipe.content.replace(/\s+/gu, " ").trim();
+	return kept.some(
+		(lesson) => lesson.evidenceRefs?.includes(ref) === true && lesson.text.replace(/\s+/gu, " ").trim() !== text,
 	);
 }
 
-/** The last failed run of the same program on one of the same files, other than the command itself. */
-function latestTrap(earlier: readonly CommandRun[], invocation: Invocation, root: string): CommandRun | null {
+/**
+ * The failed command (or, for a pure `&&` chain, any of its segments)
+ * executes the same repository file through the same program as a recommended
+ * command. This selects advice to show, never evidence, so a chain whose
+ * failing segment is unknown may still match on one of them.
+ */
+export function sharesInvocationTarget(command: string, other: string, root: string): boolean {
+	const right = executedInvocation(other, root, false);
+	if (right === null) return false;
+	const candidates = [command, ...(commandChain(command)?.segments.map((segment) => segment.text) ?? [])];
+	return candidates.some((candidate) => {
+		const left = executedInvocation(candidate, root, false);
+		return left !== null && left.program === right.program && left.file === right.file;
+	});
+}
+
+/**
+ * The file a simple, non-diagnostic invocation executes. A failed trap may be
+ * a help call too: `--help` failing still says nothing about the run that
+ * worked, so diagnostics are refused on both sides unless the caller only
+ * compares targets.
+ */
+function executedInvocation(command: string, root: string, refuseDiagnostic = true): ExecutedFile | null {
+	const invocation = simpleInvocation(command);
+	if (invocation === null || (refuseDiagnostic && diagnosticInvocation(invocation))) return null;
+	return executedFile(invocation, root);
+}
+
+/** The last failed run of the same program on the same file, other than the command itself. */
+function latestTrap(earlier: readonly CommandRun[], executed: ExecutedFile, root: string): CommandRun | null {
 	for (let index = earlier.length - 1; index >= 0; index--) {
 		const run = earlier[index];
 		if (run === undefined || run.ok) continue;
-		const failed = parseInvocation(run.command, root, { requireFiles: false });
-		if (
-			failed !== null &&
-			failed.program === invocation.program &&
-			failed.files.some((file) => invocation.files.includes(file))
-		)
-			return run;
+		const failed = executedInvocation(run.command, root);
+		if (failed !== null && failed.program === executed.program && failed.file === executed.file) return run;
 	}
 	return null;
 }
 
-/** A file the task read that names the command and contains all of its options. */
+/** The executed file was read by the task and its text contains every option the command passes. */
 function readRunFile(
-	invocation: Invocation,
+	executed: ExecutedFile,
 	source: Pick<CompletedLessonSource, "observedReads">,
 	root: string,
-): string | null {
-	const options = invocation.options.filter((option) => !REDIRECTION.test(option));
-	if (!options.some((option) => option.startsWith("-") || ENV_ASSIGNMENT.test(option))) return null;
-	for (const file of invocation.files) {
-		if (!source.observedReads.has(file)) continue;
-		const text = readInsideRoot(root, file);
-		if (text === null) continue;
-		const present = options.every((option) => {
-			const assignment = ENV_ASSIGNMENT.exec(option);
-			return assignment ? text.includes(assignment[1] ?? "") && text.includes(assignment[2] ?? "") : text.includes(option);
-		});
-		if (present) return file;
-	}
-	return null;
+): boolean {
+	const options = executed.options;
+	if (!options.some((option) => option.startsWith("-") || ENV_ASSIGNMENT.test(option))) return false;
+	if (!source.observedReads.has(executed.file)) return false;
+	const text = readInsideRoot(root, executed.file);
+	if (text === null) return false;
+	return options.every((option) => {
+		const assignment = ENV_ASSIGNMENT.exec(option);
+		return assignment ? text.includes(assignment[1] ?? "") && text.includes(assignment[2] ?? "") : text.includes(option);
+	});
 }
 
 const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.+)$/u;
-const REDIRECTION = /^\d?>>?(?:&\d|\/dev\/null)?$|^\d?>&\d$/u;
-const CONTROL = /&&|\|\||[;|`]|\$\(/u;
-
-function parseInvocation(command: string, root: string, options = { requireFiles: true }): Invocation | null {
-	if (CONTROL.test(command) || /[\r\n]/u.test(command)) return null;
-	const tokens = [...command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/gu)].map(
-		(match) => match[1] ?? match[2] ?? match[3] ?? "",
-	);
-	const env: string[] = [];
-	while (tokens.length > 0 && ENV_ASSIGNMENT.test(tokens[0] ?? "")) env.push(tokens.shift() ?? "");
-	const program = tokens.shift();
-	if (program === undefined) return null;
-	const files: string[] = [];
-	const rest: string[] = [...env];
-	const programFile = repositoryFile(program, root);
-	if (programFile !== null) files.push(programFile);
-	for (const token of tokens) {
-		const file = token.startsWith("-") ? null : repositoryFile(token, root);
-		if (file !== null) files.push(file);
-		else rest.push(token);
-	}
-	if (options.requireFiles && files.length === 0) return null;
-	return { program: programFile ?? program, files, options: rest };
-}
-
-/** The repository-relative path of an existing file inside the checkout, or null. */
-function repositoryFile(token: string, root: string): string | null {
-	const path = repositoryRelativePath(token, [root]);
-	return path !== null && readInsideRoot(root, path) !== null ? path : null;
-}
 
 function bounded(text: string): string {
 	const normalized = text.replace(/\s+/gu, " ").trim();

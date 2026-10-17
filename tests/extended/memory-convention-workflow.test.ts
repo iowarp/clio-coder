@@ -71,5 +71,5 @@ test("source citations do not replace bank-entry citations for spontaneous remin
 	strictEqual((await runTaskMemoryPolicy(bank, reply, input)).reason, "no_lost_context");
 	const cited = await runTaskMemoryPolicy(bank, reply, { ...input, contextLostAt: new Date().toISOString() });
 	strictEqual(cited.reason, "intervened");
-	strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 1);
+	strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 0, "counted when the host submits it, not here");
 });
