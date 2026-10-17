@@ -90,6 +90,7 @@ export class FleetWorkspaceLockUnavailableError extends Error {
 }
 
 export interface FleetWorkspaceLease {
+	releaseSync(): void;
 	release(): Promise<void>;
 }
 
@@ -321,6 +322,15 @@ export async function acquireFleetWorkspaceLock(
 	const refresh = setInterval(() => refreshOwnRecord(path, record.rootId, token), FLEET_LOCK_REFRESH_MS);
 	refresh.unref();
 	return {
+		releaseSync: () => {
+			clearInterval(refresh);
+			try {
+				removeOwnRecord(path, record.rootId);
+			} finally {
+				liveLeases.delete(path);
+				failedReleases.delete(path);
+			}
+		},
 		release: async () => {
 			clearInterval(refresh);
 			liveLeases.delete(path);

@@ -23,6 +23,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { resolveGuardrail } from "../../core/guardrails.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
@@ -122,6 +123,12 @@ export function readFleetRun(runId: string): FleetRunRecord | null {
 export async function writeFleetRun(record: FleetRunRecord): Promise<string> {
 	const text = `${JSON.stringify(record, null, 2)}\n`;
 	await atomicWrite(fleetRunPath(record.id), text);
+	return text;
+}
+
+export function writeFleetRunSync(record: FleetRunRecord): string {
+	const text = `${JSON.stringify(record, null, 2)}\n`;
+	safeResourceWrite(fleetRunPath(record.id), text, { mode: 0o600 });
 	return text;
 }
 

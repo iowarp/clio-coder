@@ -128,6 +128,7 @@ class TerminationCoordinator {
 	private readonly pendingNotices: string[] = [];
 	private signalHandler: ((signal: NodeJS.Signals) => void) | null = null;
 	private exitHandoff: (() => Promise<number>) | undefined;
+	private readonly forceExitHooks = new Set<() => void>();
 
 	getPhase(): TerminationPhase {
 		return this.phase;
@@ -153,6 +154,13 @@ class TerminationCoordinator {
 			if (index !== -1) this.terminateHooks.splice(index, 1);
 		};
 	}
+	onForceExit(hook: () => void): () => void {
+		this.forceExitHooks.add(hook);
+		return () => {
+			this.forceExitHooks.delete(hook);
+		};
+	}
+
 	onPersist(hook: Hook, options?: { timeoutMs: number }): void {
 		this.persistHooks.push(registeredHook(hook, options));
 	}
@@ -262,11 +270,21 @@ class TerminationCoordinator {
 	installSignalHandlers(): void {
 		if (this.signalHandler) return;
 		const handler = (signal: NodeJS.Signals): void => {
+			if (this.started) {
+				for (const hook of this.forceExitHooks) {
+					try {
+						hook();
+					} catch {
+						/* Forced exit must proceed even when emergency persistence fails. */
+					}
+				}
+				process.exit(SIGNAL_EXIT_CODES[signal] ?? 143);
+			}
 			this.notice(`Clio Coder: received ${signal}, shutting down...`);
 			void this.shutdown(SIGNAL_EXIT_CODES[signal] ?? 143);
 		};
 		this.signalHandler = handler;
-		process.once("SIGINT", handler);
+		process.on("SIGINT", handler);
 		process.once("SIGTERM", handler);
 		process.once("SIGHUP", handler);
 	}
@@ -311,7 +329,7 @@ class TerminationCoordinator {
 		return () => {
 			if (restored) return;
 			restored = true;
-			process.once("SIGINT", handler);
+			process.on("SIGINT", handler);
 		};
 	}
 }

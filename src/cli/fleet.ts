@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import {
@@ -85,6 +86,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { parsePlaybookVars } from "./playbook-vars.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
@@ -458,87 +460,102 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		resume = { record, replayed: planned.replayed };
 	}
 
+	let dispatchDrain: Promise<void> | undefined;
+	const beginDispatchDrain = (): Promise<void> => (dispatchDrain ??= dispatch.drain());
 	let outcome: FleetRunOutcome;
+	let runSignal: AbortSignal | undefined;
 	try {
-		outcome = await executeFleetRun({
-			plan,
-			playbookName: playbook.name,
-			commands,
-			workspaceRoot: process.cwd(),
-			fleetRootId,
-			dispatch,
-			agents: { getSpec: (agentId) => agents.getSpec(agentId) },
-			attributionEnabled: config?.get().integrations.git.commitAttribution ?? true,
-			vars,
-			...(resume !== undefined ? { resume } : {}),
-			onStarted() {
-				process.stderr.write(
-					`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
-				);
+		outcome = await runFleetWithShutdown(
+			(signal, registerEmergencySeal) => {
+				runSignal = signal;
+				return executeFleetRun({
+						registerEmergencySeal,
+						plan,
+						signal,
+						playbookName: playbook.name,
+						commands,
+						workspaceRoot: process.cwd(),
+						fleetRootId,
+						dispatch,
+						agents: { getSpec: (agentId) => agents.getSpec(agentId) },
+						attributionEnabled: config?.get().integrations.git.commitAttribution ?? true,
+						vars,
+						...(resume !== undefined ? { resume } : {}),
+						onStarted() {
+							process.stderr.write(
+								`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
+							);
+						},
+						onStepSettled(step) {
+							if (step.replayed === true && step.result !== undefined) {
+								if (json) {
+									process.stdout.write(
+										`${JSON.stringify({
+											stepId: step.stepId,
+											status: "replayed",
+											receipt: {
+												runId: step.result.terminalRunId,
+												digest: step.result.receiptDigest,
+											},
+										})}\n`,
+									);
+								} else {
+									process.stdout.write(
+										`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
+									);
+								}
+								return;
+							}
+							if (step.receipt !== undefined) {
+								if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
+								else {
+									process.stdout.write(
+										`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,
+									);
+								}
+								return;
+							}
+							if (step.codeStep !== undefined) {
+								if (json) {
+									process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
+								} else {
+									process.stdout.write(
+										`step ${step.stepId} code:${step.commandId}: ${
+											step.succeeded ? "passed" : "failed"
+										} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
+									);
+								}
+							}
+						},
+						onNotice(text, kind) {
+							// A notice without a kind (a failed workspace lock release) goes to stderr like a write boundary.
+							if (kind === "gate") {
+								if (!json) process.stdout.write(`${text}\n`);
+							} else process.stderr.write(`${text}\n`);
+						},
+				});
 			},
-			onStepSettled(step) {
-				if (step.replayed === true && step.result !== undefined) {
-					if (json) {
-						process.stdout.write(
-							`${JSON.stringify({
-								stepId: step.stepId,
-								status: "replayed",
-								receipt: {
-									runId: step.result.terminalRunId,
-									digest: step.result.receiptDigest,
-								},
-							})}\n`,
-						);
-					} else {
-						process.stdout.write(
-							`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
-						);
-					}
-					return;
-				}
-				if (step.receipt !== undefined) {
-					if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
-					else {
-						process.stdout.write(
-							`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,
-						);
-					}
-					return;
-				}
-				if (step.codeStep !== undefined) {
-					if (json) {
-						process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
-					} else {
-						process.stdout.write(
-							`step ${step.stepId} code:${step.commandId}: ${
-								step.succeeded ? "passed" : "failed"
-							} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
-						);
-					}
-				}
+			async () => {
+				await beginDispatchDrain();
+				await workerHooks.drain();
+				await workerHooks.dispose();
+				await loaded.stop();
 			},
-			onNotice(text, kind) {
-				// A notice without a kind (a failed workspace lock release) goes to stderr like a write boundary.
-				if (kind === "gate") {
-					if (!json) process.stdout.write(`${text}\n`);
-				} else process.stderr.write(`${text}\n`);
+			dispatch.drainAllowanceMs?.(),
+			undefined,
+			{
+				beginDrain: beginDispatchDrain,
+				cleanupAllowanceMs: (loaded.loaded.length + 1) * resolveShutdownHookBudgetMs(),
 			},
-		});
+		);
 	} catch (err) {
-		await dispatch.drain();
-		await workerHooks.drain();
-		await workerHooks.dispose();
-		await loaded.stop();
+		if (runSignal?.aborted && err === runSignal.reason) return getTerminationCoordinator().getExitCode();
 		// A busy or unjudgeable workspace lock refuses this run; it is not a usage error, so it exits 1 like the other refusals.
 		if (err instanceof FleetWorkspaceBusyError || err instanceof FleetWorkspaceLockUnavailableError) {
 			return refuse(err.message);
 		}
 		return fail(err instanceof Error ? err.message : String(err));
 	}
-	await dispatch.drain();
-	await workerHooks.drain();
-	await workerHooks.dispose();
-	await loaded.stop();
 
 	if (json) {
 		process.stdout.write(

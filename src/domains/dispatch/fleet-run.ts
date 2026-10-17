@@ -61,7 +61,7 @@ import {
 } from "./gate-decisions.js";
 import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
-import { type FleetRunRecord, writeFleetRun } from "./state.js";
+import { type FleetRunRecord, writeFleetRun, writeFleetRunSync } from "./state.js";
 import type { RunReceipt } from "./types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "./workspace-checkpoint.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
@@ -258,6 +258,7 @@ export interface ExecuteFleetRunInput {
 	turnConstraints?: TurnConstraints;
 	/** Fires once the workspace lock is held, so a refused run never announces its minted root. */
 	onStarted?: () => void;
+	registerEmergencySeal?: (seal: () => void) => () => void;
 	onStepDispatched?: (event: FleetRunStepEvent) => void;
 	onStepSettled?: (outcome: FleetRunStepOutcome) => void;
 	/** Operator-facing lines the caller renders wherever it shows the run. */
@@ -333,9 +334,24 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	// Taken before the root claims its verdict or writes a record, so a refused
 	// run leaves no durable trace and its minted id never reads as a real root.
 	const lease = await acquireFleetWorkspaceLock({ workspaceRoot: input.workspaceRoot, rootId: input.fleetRootId });
+	let emergencySeal = (): void => {};
+	const unregisterEmergency = input.registerEmergencySeal?.(() => {
+		try {
+			emergencySeal();
+		} catch {
+			/* Forced shutdown persistence is best effort. */
+		}
+		try {
+			lease.releaseSync();
+		} catch {
+			/* A dead owner can be reclaimed on the next run. */
+		}
+	});
 	try {
 		input.onStarted?.();
-		return await runFleetHoldingWorkspace(input);
+		return await runFleetHoldingWorkspace(input, (seal) => {
+			emergencySeal = seal;
+		});
 	} finally {
 		await lease.release().catch((error: unknown) => {
 			// The record names this live process, so other processes are refused
@@ -344,10 +360,14 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			const message = error instanceof Error ? error.message : String(error);
 			input.onNotice?.(`could not release the workspace fleet lock: ${message}`);
 		});
+		unregisterEmergency?.();
 	}
 }
 
-async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<FleetRunOutcome> {
+async function runFleetHoldingWorkspace(
+	input: ExecuteFleetRunInput,
+	setEmergencySeal: (seal: () => void) => void,
+): Promise<FleetRunOutcome> {
 	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
 	const decisionRefs = activeDecisionRefs(input.getDecisionBoard?.() ?? []);
 	let livePlan = input.plan;
@@ -378,8 +398,10 @@ async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<Fl
 	await claimAssignmentVerdict(fleetRootId, "fleet");
 	// The digest of the last root record bytes this run wrote, which the final
 	// journal line names.
+	let sealed = false;
 	let manifestDigest = fleetManifestDigest(await writeFleetRun(fleetRunRecord));
 	const writeManifest = async (): Promise<string> => {
+		if (sealed) return manifestDigest;
 		const digest = fleetManifestDigest(await writeFleetRun(fleetRunRecord));
 		manifestDigest = digest;
 		return digest;
@@ -399,19 +421,33 @@ async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<Fl
 		}
 		input.onStepDispatched?.(event);
 	};
-	const sealEvents = (outcome: "succeeded" | "failed" | "aborted"): void =>
+	const sealEvents = (outcome: "succeeded" | "failed" | "aborted", forced = false): void => {
+		if (sealed) return;
+		sealed = true;
 		events.append({
 			type: "fleet_sealed",
 			outcome,
 			endedAt: fleetRunRecord.endedAt ?? new Date().toISOString(),
 			stepCount: fleetRunRecord.steps.length,
 			manifestDigest,
+			...(forced ? { forced: true } : {}),
 		});
+	};
+	setEmergencySeal(() => {
+		if (sealed) return;
+		try {
+			fleetRunRecord.endedAt = new Date().toISOString();
+			manifestDigest = fleetManifestDigest(writeFleetRunSync(fleetRunRecord));
+		} finally {
+			sealEvents("aborted", true);
+		}
+	});
 	/**
 	 * Stamp the run's end and write the final record. A write that throws puts
 	 * `endedAt` back, so the seal never names an end that no record on disk carries.
 	 */
 	const writeEndedManifest = async (): Promise<void> => {
+		if (sealed) return;
 		fleetRunRecord.endedAt = new Date().toISOString();
 		try {
 			await writeManifest();
@@ -816,7 +852,7 @@ async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<Fl
 					request.briefing = buildDelegationProposalBriefing(proposals);
 				}
 				signal?.throwIfAborted();
-				const handle = await dispatch.dispatch(request);
+				const handle = await dispatch.dispatch(request, undefined, signal ? { signal } : undefined);
 				const waveIndex = fleetPlanWaveIndex(livePlan, step.id);
 				stepDispatched({
 					stepId: step.id,
@@ -1184,7 +1220,11 @@ async function runFleetHoldingWorkspace(input: ExecuteFleetRunInput): Promise<Fl
 	const succeededStepCount = required.filter((step) => result.results.get(step.id)?.succeeded === true).length;
 	// A step a stop policy left unrun is counted but never succeeded, so a run
 	// that halted early can never reach the required count.
-	const cleanRun = failedLoops.length === 0 && result.skipped.length === 0 && succeededStepCount === required.length;
+	const cleanRun =
+		input.signal?.aborted !== true &&
+		failedLoops.length === 0 &&
+		result.skipped.length === 0 &&
+		succeededStepCount === required.length;
 	let recordWritten = false;
 	try {
 		await writeEndedManifest();

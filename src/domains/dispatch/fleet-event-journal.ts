@@ -88,6 +88,7 @@ export type FleetEventBody =
 			type: "fleet_sealed";
 			/** The run's own verdict: succeeded only when every required step succeeded and every loop converged. */
 			outcome: "succeeded" | "failed" | "aborted";
+			forced?: boolean;
 			endedAt: string;
 			stepCount: number;
 			manifestDigest: string;
