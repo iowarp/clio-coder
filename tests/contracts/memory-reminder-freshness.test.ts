@@ -41,7 +41,7 @@ test("memory delivery validates workspace file references after applying bank op
 		strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 0);
 		const present = await runTaskMemoryPolicy(bank, complete(".clio-coder/handoffs/current.md"), input);
 		strictEqual(present.reason, "intervened");
-		strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 1);
+		strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 0, "counted when the host submits it, not here");
 		const source = await runTaskMemoryPolicy(bank, complete("src/features.py"), input);
 		strictEqual(source.reason, "invalid_path");
 	} finally {
@@ -116,7 +116,7 @@ test("a cited failed attempt stays silent after the same operation succeeds", as
 		},
 	);
 	strictEqual(repeated.reason, "intervened");
-	strictEqual(bank.snapshot().procedural[0]?.injectionCount, 1);
+	strictEqual(bank.snapshot().procedural[0]?.injectionCount, 0, "counted when the host submits it, not here");
 });
 
 for (const probe of [false, true]) {

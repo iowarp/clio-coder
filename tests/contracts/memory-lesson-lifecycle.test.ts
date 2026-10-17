@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,8 +42,11 @@ test("an approved command lesson surfaces once at the first non-documentation ed
 		deepStrictEqual(after("edit", { path: "README.md" }), [], "a prose-only edit is not what the command exercises");
 		const surfaced = after("edit", { path: "src/rates.mjs" });
 		strictEqual(surfaced[0]?.kind, "annotate_tool_result");
-		match(surfaced[0]?.kind === "annotate_tool_result" ? surfaced[0].message : "", /^Memory: \[mem-recipe\]/u);
+		const message = surfaced[0]?.kind === "annotate_tool_result" ? surfaced[0].message : "";
+		match(message, /^Memory: \[mem-recipe\]/u);
 		deepStrictEqual(after("edit", { path: "src/other.mjs" }), [], "one surfacing per session");
+		deepStrictEqual(delivered, [], "producing the annotation is not delivering it");
+		memory.acknowledgeSubmission([`[middleware:info] ${message}`]);
 		after("bash", { command: COMMAND }, { toolResultDetails: { outcome: "success", exitCode: 0 } });
 		deepStrictEqual(delivered, ["mem-recipe"]);
 		deepStrictEqual(held, ["mem-recipe"]);
@@ -77,7 +80,10 @@ test("a failing variant of a remembered recipe gets the recipe on its failed res
 		deepStrictEqual(failed("node scripts/other.mjs", "1"), [], "another file is not this recipe's trap");
 		const effects = failed("node scripts/check.mjs", "2");
 		strictEqual(effects[0]?.kind, "annotate_tool_result");
-		match(effects[0]?.kind === "annotate_tool_result" ? effects[0].message : "", /\[mem-recipe\]/u);
+		const message = effects[0]?.kind === "annotate_tool_result" ? effects[0].message : "";
+		match(message, /\[mem-recipe\]/u);
+		deepStrictEqual(delivered, [], "delivery waits for the submitted request");
+		memory.acknowledgeSubmission([`[middleware:info] ${message}`]);
 		deepStrictEqual(delivered, ["mem-recipe"]);
 	} finally {
 		memory.dispose();
@@ -284,32 +290,45 @@ test("an operation list missing only its closing bracket is repaired, and nothin
 	strictEqual(broken.decision, "malformed");
 });
 
-test("a reworded command lesson joins the record quoting the same command, and one session holds it once", async () => {
+test("lessons quoting the same command stay separate claims, and one session holds each once", async () => {
 	const root = mkdtempSync(join(tmpdir(), "memory-same-command-"));
 	const dataDir = join(root, "data");
 	const cwd = join(root, "project");
 	mkdirSync(cwd, { recursive: true });
 	const entry = (content: string) =>
 		new TaskMemoryBank().saveKnowledge(content, { durable: true, evidenceCommand: COMMAND });
+	const native = `Run \`${COMMAND}\` only with the native backend installed.`;
 	try {
 		const first = await proposeInjectedTaskMemory(dataDir, {
 			sessionId: "s1",
 			cwd,
-			entries: [entry(`Run \`${COMMAND}\` to validate.`)],
+			entries: [entry(native)],
 			observation: "held",
 		});
-		const again = await proposeInjectedTaskMemory(dataDir, {
+		const mock = await proposeInjectedTaskMemory(dataDir, {
+			sessionId: "s2",
+			cwd,
+			entries: [entry(`Run \`${COMMAND}\` only with the mock backend.`)],
+			observation: "held",
+		});
+		const repeat = await proposeInjectedTaskMemory(dataDir, {
 			sessionId: "s1",
 			cwd,
-			entries: [entry(`Validation needs the native mode: \`${COMMAND}\`.`)],
+			entries: [entry(native)],
 			observation: "held",
 		});
 		const id = first.records[0]?.id;
 		ok(id);
-		strictEqual(again.records[0]?.id, id);
+		strictEqual(repeat.records[0]?.id, id, "the same claim from the same session is the same record");
+		notStrictEqual(mock.records[0]?.id, id, "a shared command never merges different prerequisites");
 		const stored = JSON.parse(readFileSync(join(dataDir, "memory", "records.json"), "utf8")).records;
-		strictEqual(stored.length, 1);
-		strictEqual(stored[0].observations.length, 1, "a repeat from the same session adds no second verdict");
+		strictEqual(stored.length, 2);
+		const nativeRecord = stored.find((record: { id: string }) => record.id === id);
+		strictEqual(nativeRecord.observations.length, 1, "a repeat from the same session adds no second verdict");
+		strictEqual(nativeRecord.observations[0].sessionId, "s1", "the mock session's evidence stays with its own claim");
+		ok(
+			stored.every((record: { evidenceRefs: string[] }) => record.evidenceRefs.some((ref) => ref.startsWith("command:"))),
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
