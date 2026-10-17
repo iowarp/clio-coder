@@ -1,7 +1,7 @@
 import type { JobOwner, JobRunner } from "../core/job-types.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
-import { snapshotTurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
+import { snapshotTurnConstraints, toolSurfaceSources, turnAllowsTool } from "../core/turn-constraints.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
 import { evaluateAdmission } from "../domains/safety/admission.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -56,8 +56,16 @@ function jobTurnConstraints(
 					: {}),
 		...([stored.delegation, current.delegation].includes("forbidden") ? { delegation: "forbidden" as const } : {}),
 		...([stored.skills, current.skills].includes("disabled") ? { skills: "disabled" as const } : {}),
-		...(allowedTools === undefined ? {} : { allowedTools }),
-		...(delegatedTools === undefined ? {} : { delegatedTools }),
+		// Both scopes narrow the job, so both keep their sources for refusals.
+		...(allowedTools === undefined
+			? {}
+			: { allowedTools, toolSurfaceSources: [...toolSurfaceSources(stored), ...toolSurfaceSources(current)] }),
+		...(delegatedTools === undefined
+			? {}
+			: {
+					delegatedTools,
+					delegatedToolSurfaceSources: [...toolSurfaceSources(stored, true), ...toolSurfaceSources(current, true)],
+				}),
 	});
 }
 

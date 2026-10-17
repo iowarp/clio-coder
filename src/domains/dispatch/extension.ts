@@ -71,6 +71,7 @@ import {
 } from "../../core/tool-names.js";
 import {
 	snapshotTurnConstraints,
+	toolSurfaceSources,
 	turnAllowsTool,
 	turnDelegatesTool,
 	workerTurnConstraints,
@@ -3031,7 +3032,22 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	if (input.authProfile) spec.authProfile = input.authProfile;
 	if (input.credentialExpiresAt !== undefined) spec.credentialExpiresAt = input.credentialExpiresAt;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
-	if (input.req.turnConstraints !== undefined) spec.turnConstraints = workerTurnConstraints(input.req.turnConstraints);
+	const inherited = input.req.turnConstraints === undefined ? {} : workerTurnConstraints(input.req.turnConstraints);
+	spec.turnConstraints = {
+		...inherited,
+		toolSurfaceSources: [
+			...toolSurfaceSources(inherited),
+			...(input.recipe
+				? [
+						{
+							tools: input.recipe.tools,
+							source: `agent recipe "${input.req.agentId}"`,
+							remedy: `Ask the operator to widen tools in agent recipe "${input.req.agentId}", then redispatch.`,
+						},
+					]
+				: []),
+		],
+	};
 	if (input.extensionHooks !== undefined && input.extensionHooks.length > 0 && input.target.runtime.kind === "http")
 		spec.extensionHooks = input.extensionHooks.map((hook) => ({
 			...hook,

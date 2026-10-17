@@ -182,7 +182,7 @@ describe("gateway surface placement", () => {
 		ok(direct.result.message.includes("direct tool"), direct.result.message);
 		const unknown = await registry.invoke({ tool: ToolNames.Gateway, args: { op: "call", capability: "no_such_tool" } });
 		if (unknown.kind !== "ok" || unknown.result.kind !== "error") throw new Error(JSON.stringify(unknown));
-		ok(unknown.result.message.includes("unknown capability"), unknown.result.message);
+		ok(unknown.result.message.includes("no such capability"), unknown.result.message);
 	});
 
 	it("normalizes weak-model argument shapes for the gateway call", async () => {

@@ -2,7 +2,12 @@ import { Type } from "typebox";
 import type { JobCreateInput, JobOwner, JobRecord, JobRunner } from "../core/job-types.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
-import { snapshotTurnConstraints, turnAllowsTool, turnDelegatesTool } from "../core/turn-constraints.js";
+import {
+	snapshotTurnConstraints,
+	toolSurfaceSources,
+	turnAllowsTool,
+	turnDelegatesTool,
+} from "../core/turn-constraints.js";
 import { normalizeJobSpec } from "../domains/scheduling/index.js";
 import type { JobController, JobExecutionContext, JobRunResult } from "../domains/scheduling/job-types.js";
 import { StringEnum } from "../engine/ai.js";
@@ -146,14 +151,23 @@ export function createJobTool(deps: JobToolDeps): {
 			if (args.allow !== undefined && runner.kind !== "main") throw new Error("job: allow applies only to runner=main.");
 			const requested =
 				args.allow === undefined ? undefined : snapshotTurnConstraints({ allowedTools: args.allow as string[] });
+			// The job's allow list is its own narrowing source, so a refusal inside the
+			// job names it instead of falling back to dispatch wording.
+			const jobSource = {
+				tools: requested?.allowedTools ?? [],
+				source: "this job's allow list",
+				remedy: "Recreate the job with a wider allow list.",
+			};
 			const constraints =
 				requested === undefined
 					? inherited
 					: snapshotTurnConstraints({
 							...inherited,
 							allowedTools: (requested.allowedTools ?? []).filter((name) => turnAllowsTool(inherited, name)),
+							toolSurfaceSources: [...toolSurfaceSources(inherited), jobSource],
 							// A job cannot dispatch wider workers through a narrow parent set.
 							delegatedTools: (requested.allowedTools ?? []).filter((name) => turnDelegatesTool(inherited, name)),
+							delegatedToolSurfaceSources: [...toolSurfaceSources(inherited, true), jobSource],
 						});
 			const input: JobCreateInput = {
 				intervalMs: args.every_ms,

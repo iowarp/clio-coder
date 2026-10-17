@@ -1,6 +1,63 @@
 import { COORDINATOR_DIRECT_TOOLS, toolPlacement } from "../tools/surface.js";
 import { ToolNames } from "./tool-names.js";
 
+export interface ToolSurfaceSource {
+	readonly tools: readonly string[];
+	readonly source: string;
+	readonly remedy: string;
+}
+
+export function templateToolConstraints(template: {
+	name: string;
+	allowedTools?: readonly string[];
+	delegatedTools?: readonly string[];
+}): TurnConstraints {
+	const limit = (tools: readonly string[], field: string): ToolSurfaceSource[] => [
+		{
+			tools,
+			source: `prompt template "${template.name}" ${field}`,
+			remedy: `Ask the operator to widen ${field} in prompt template "${template.name}", then resubmit.`,
+		},
+	];
+	return {
+		...(template.allowedTools === undefined
+			? {}
+			: {
+					allowedTools: template.allowedTools,
+					toolSurfaceSources: limit(template.allowedTools, "allowed-tools"),
+				}),
+		...(template.delegatedTools === undefined
+			? {}
+			: {
+					delegatedTools: template.delegatedTools,
+					delegatedToolSurfaceSources: limit(template.delegatedTools, "delegated-tools"),
+				}),
+	};
+}
+
+export function toolSurfaceSources(
+	constraints: TurnConstraints | undefined,
+	delegated = false,
+): readonly ToolSurfaceSource[] {
+	const tools = delegated ? (constraints?.delegatedTools ?? constraints?.allowedTools) : constraints?.allowedTools;
+	const sources =
+		delegated && constraints?.delegatedTools !== undefined
+			? constraints.delegatedToolSurfaceSources
+			: constraints?.toolSurfaceSources;
+	return (
+		sources ??
+		(tools === undefined
+			? []
+			: [
+					{
+						tools,
+						source: "explicit task scope",
+						remedy: "Ask the submitting operator to widen the task's tool scope, then resubmit.",
+					},
+				])
+	);
+}
+
 /**
  * Explicit host-supplied scope for one submitted task and its continuations.
  * Never derived from model arguments or guessed from natural-language text.
@@ -10,6 +67,8 @@ export interface TurnConstraints {
 	readonly mode?: "answer" | "proposal" | "change";
 	readonly delegation?: "allowed" | "forbidden";
 	readonly allowedTools?: readonly string[];
+	readonly toolSurfaceSources?: readonly ToolSurfaceSource[];
+	readonly delegatedToolSurfaceSources?: readonly ToolSurfaceSource[];
 	/**
 	 * Delegation ceiling: the tools a dispatched worker may hold, separate from
 	 * the parent's own `allowedTools`. Without it a dispatch-only coordinator had
@@ -38,11 +97,19 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		(value.skills !== undefined && !["allowed", "disabled"].includes(value.skills)) ||
 		(value.readOnly !== undefined && value.readOnly !== true) ||
 		!isToolNameList(value.allowedTools) ||
-		!isToolNameList(value.delegatedTools)
+		!isToolNameList(value.delegatedTools) ||
+		!isSurfaceSources(value.toolSurfaceSources) ||
+		!isSurfaceSources(value.delegatedToolSurfaceSources)
 	) {
 		throw new Error("Invalid explicit turn constraints");
 	}
 	return Object.freeze({
+		...(value.toolSurfaceSources === undefined
+			? {}
+			: { toolSurfaceSources: snapshotSurfaceSources(value.toolSurfaceSources) }),
+		...(value.delegatedToolSurfaceSources === undefined
+			? {}
+			: { delegatedToolSurfaceSources: snapshotSurfaceSources(value.delegatedToolSurfaceSources) }),
 		...(value.mode === undefined ? {} : { mode: value.mode }),
 		...(value.delegation === undefined ? {} : { delegation: value.delegation }),
 		...(value.skills === undefined ? {} : { skills: value.skills }),
@@ -101,9 +168,48 @@ export function narrowTurnConstraints(
 		...(delegation === undefined ? {} : { delegation }),
 		...(skills === undefined ? {} : { skills }),
 		...(readOnly ? { readOnly: true as const } : {}),
-		...(allowedTools === undefined ? {} : { allowedTools }),
-		...(delegatedTools === undefined ? {} : { delegatedTools }),
+		...(allowedTools === undefined
+			? {}
+			: {
+					allowedTools,
+					...(session.toolSurfaceSources || turn.toolSurfaceSources
+						? { toolSurfaceSources: [...toolSurfaceSources(session), ...toolSurfaceSources(turn)] }
+						: {}),
+				}),
+		...(delegatedTools === undefined
+			? {}
+			: {
+					delegatedTools,
+					...(session.toolSurfaceSources ||
+					turn.toolSurfaceSources ||
+					session.delegatedToolSurfaceSources ||
+					turn.delegatedToolSurfaceSources
+						? { delegatedToolSurfaceSources: [...toolSurfaceSources(session, true), ...toolSurfaceSources(turn, true)] }
+						: {}),
+				}),
 	};
+}
+
+function isSurfaceSources(value: unknown): boolean {
+	return (
+		value === undefined ||
+		(Array.isArray(value) &&
+			value.every(
+				(entry) =>
+					entry !== null &&
+					typeof entry === "object" &&
+					typeof entry.source === "string" &&
+					typeof entry.remedy === "string" &&
+					// Source tools only attribute a refusal and never admit anything, so they
+					// take a recipe's tool list verbatim instead of the strict name rule.
+					Array.isArray(entry.tools) &&
+					entry.tools.every((name: unknown) => typeof name === "string"),
+			))
+	);
+}
+
+function snapshotSurfaceSources(sources: readonly ToolSurfaceSource[]): readonly ToolSurfaceSource[] {
+	return Object.freeze(sources.map((entry) => Object.freeze({ ...entry, tools: Object.freeze([...entry.tools]) })));
 }
 
 function isToolNameList(value: unknown): boolean {
@@ -130,8 +236,13 @@ export function turnDelegatesTool(constraints: TurnConstraints | undefined, capa
  * ceiling rather than the parent's wider one.
  */
 export function workerTurnConstraints(constraints: TurnConstraints): TurnConstraints {
-	const { delegatedTools, ...rest } = constraints;
-	return Object.freeze({ ...rest, ...(delegatedTools === undefined ? {} : { allowedTools: delegatedTools }) });
+	const { delegatedTools, delegatedToolSurfaceSources: _delegatedSources, ...rest } = constraints;
+	return Object.freeze({
+		...rest,
+		...(delegatedTools === undefined
+			? {}
+			: { allowedTools: delegatedTools, toolSurfaceSources: toolSurfaceSources(constraints, true) }),
+	});
 }
 
 function listAllowsTool(allowed: readonly string[] | undefined, capability: string): boolean {

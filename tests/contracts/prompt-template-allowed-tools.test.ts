@@ -28,7 +28,7 @@ test("a template's allowed-tools become the expanded turn's constraint and only 
 
 		const scoped = await expandSubmitText("/review src", resources, root);
 		assert.equal(scoped.text, "Review src");
-		assert.deepEqual(scoped.constraints, { allowedTools: ["read", "grep", "write"] });
+		assert.deepEqual(scoped.constraints?.allowedTools, ["read", "grep", "write"]);
 		assert.deepEqual(narrowTurnConstraints({ allowedTools: ["read", "bash"] }, scoped.constraints)?.allowedTools, [
 			"read",
 		]);

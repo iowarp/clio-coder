@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { discoveryScore } from "../../core/harness-discovery.js";
 import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
+import { toolSurfaceSources } from "../../core/turn-constraints.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import type { RelevanceRanker } from "../../domains/system-one/rank.js";
 import { StringEnum, validateEngineToolArguments } from "../../engine/ai.js";
@@ -280,6 +281,24 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		return { ...rest, ...(admitted !== undefined ? { tools: admitted } : {}) };
 	};
 
+	const unknownCapabilityMessage = (name: string, options: ToolInvokeOptions | undefined): string => {
+		const allowed = allowedSet(options);
+		if (allowed !== null)
+			return `gateway: no such capability "${name}"; admitted capabilities: ${[...allowed].sort().join(", ") || "(none)"}. Use these exact names; gateway(op="find") lists their descriptions.`;
+		const registered = registry
+			.listAll()
+			.map((spec) => spec.name)
+			.sort();
+		const mcp = deps.mcp
+			? ' MCP server tools load on first call and are missing until then; gateway(op="find", server="<id>") lists them.'
+			: "";
+		return `gateway: no such capability "${name}"; registered tools: ${registered.join(", ") || "(none)"}. Use these exact names; gateway(op="find") lists their descriptions.${mcp}`;
+	};
+
+	const unknownCapability = (name: string): boolean =>
+		registry.get(name as ToolName) === undefined &&
+		(!isMcpToolName(name) || deps.mcp === undefined || deps.mcp.ownerIdOf(name) === null);
+
 	const directCallGuidance = (name: string): string =>
 		`"${name}" is a direct tool with an attached schema; call it directly, not through the gateway`;
 
@@ -298,7 +317,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (spec === undefined) {
 			return {
 				spec: null,
-				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
+				message: unknownCapabilityMessage(name, options),
 			};
 		}
 		if (!allowDirect && surfaceSpecPlacement(spec, allowedSet(options)) === "direct") {
@@ -310,9 +329,23 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		return { spec };
 	};
 
-	const outsideSurface = (name: string, allowed: ReadonlySet<string>): ToolResult => ({
+	const surfaceRefusal = (
+		options: ToolInvokeOptions | undefined,
+		admits: (tools: readonly string[]) => boolean,
+	): string => {
+		const sources = toolSurfaceSources(options?.turnConstraints).filter((entry) => !admits(entry.tools));
+		if (sources.length === 0)
+			return "Refused by: dispatch tool scope.\nRemedy: Ask the operator to widen this dispatch's tool scope, then redispatch.";
+		return `Refused by: ${[...new Set(sources.map((entry) => entry.source))].join("; ")}.\nRemedy: ${[...new Set(sources.map((entry) => entry.remedy))].join(" ")}`;
+	};
+
+	const outsideSurface = (
+		name: string,
+		allowed: ReadonlySet<string>,
+		options: ToolInvokeOptions | undefined,
+	): ToolResult => ({
 		kind: "error",
-		message: `gateway: capability "${name}" is not on this run's admitted tool surface (${[...allowed].sort().join(", ")}); the recipe or explicit task scope excludes it`,
+		message: `gateway: capability "${name}" is not on this run's admitted tool surface; admitted capabilities: ${[...allowed].sort().join(", ") || "(none)"}. Use one of these exact names.\n${surfaceRefusal(options, (tools) => tools.includes(name))}`,
 	});
 
 	/**
@@ -380,7 +413,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				const admitted = declared.filter((id) => admitsServer(id, allowed)).sort();
 				return {
 					kind: "error",
-					message: `gateway: MCP server "${server}" is not on this run's admitted tool surface; the recipe or explicit task scope names none of its capabilities${admitted.length > 0 ? ` (admitted servers: ${admitted.join(", ")})` : ""}`,
+					message: `gateway: MCP server "${server}" is not on this run's admitted tool surface; none of its capabilities are admitted${admitted.length > 0 ? ` (admitted servers: ${admitted.join(", ")})` : ""}.\n${surfaceRefusal(options, (tools) => tools.some((name) => deps.mcp?.ownerIdOf(name) === server))}`,
 				};
 			}
 			if (!declared.includes(server)) {
@@ -672,7 +705,10 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		const allowed = allowedSet(options);
 		// The admitted wrapper can describe its own transport syntax even when
 		// scope named only an inner capability. This grants no child admission.
-		if (allowed !== null && !allowed.has(name) && name !== ToolNames.Gateway) return outsideSurface(name, allowed);
+		if (allowed !== null && !allowed.has(name) && name !== ToolNames.Gateway)
+			return outsideSurface(name, allowed, options);
+		if (allowed === null && unknownCapability(name))
+			return { kind: "error", message: unknownCapabilityMessage(name, options) };
 		let spec = registry.get(name as ToolName);
 		if (spec === undefined && isMcpToolName(name) && deps.mcp) {
 			// A restricted surface cannot refresh a catalog (runFind refuses it), so
@@ -688,7 +724,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (spec === undefined) {
 			return {
 				kind: "error",
-				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
+				message: unknownCapabilityMessage(name, options),
 			};
 		}
 		const direct = surfaceSpecPlacement(spec, allowed) === "direct";
@@ -783,7 +819,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			return { kind: "error", message: `gateway: op="call" requires capability; ${envelopeHint(args)}` };
 		}
 		const allowed = allowedSet(options);
-		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed);
+		// A restricted run gets one refusal for every name off its surface, so it
+		// cannot probe which registered tools or declared MCP servers exist.
+		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed, options);
+		if (allowed === null && unknownCapability(name))
+			return { kind: "error", message: unknownCapabilityMessage(name, options) };
 		const resolved = await resolveCapability(name, options, allowDirect);
 		if (resolved.spec === null) return { kind: "error", message: resolved.message };
 		const spec = resolved.spec;

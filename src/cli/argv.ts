@@ -8,7 +8,8 @@
  */
 
 import chalk from "chalk";
-import { parseToolLimitList, type SessionToolLimits } from "../core/tool-limit-flags.js";
+import type { SessionToolLimits } from "../core/tool-limit-flags.js";
+import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export function printError(message: string, detail?: string): void {
@@ -231,7 +232,7 @@ export function extractGlobalFlags(
 					...(panes === undefined ? {} : { panes }),
 				};
 			}
-			toolLimits = { ...toolLimits, ...(arg === "--allow-tools" ? { allowedTools: names } : { delegatedTools: names }) };
+			toolLimits = { ...toolLimits, ...toolLimitConstraints(arg, names) };
 			i += 1;
 			continue;
 		}

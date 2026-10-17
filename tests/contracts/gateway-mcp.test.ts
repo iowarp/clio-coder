@@ -1017,7 +1017,7 @@ describe("gateway MCP capabilities", () => {
 			restricted,
 		);
 		ok(refused.kind === "ok" && refused.result.kind === "error", JSON.stringify(refused));
-		ok(refused.result.message.includes("names none of its capabilities"), refused.result.message);
+		ok(refused.result.message.includes("none of its capabilities are admitted"), refused.result.message);
 		strictEqual(existsSync(scene.markerPath), false, "a restricted run cannot launch a server it was not given");
 		// An undeclared id reads exactly like a declared one outside the surface,
 		// and neither names a server the surface does not admit.

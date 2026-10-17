@@ -59,10 +59,9 @@ function limitedChatLoop(sessionToolLimits: SessionToolLimits) {
 }
 
 test("an interactive or ACP session's tool limits bound every turn, before and after a scoped one", async () => {
-	assert.deepEqual(extractGlobalFlags(["--allow-tools", "read,write", "--delegate-tools", "none"]).toolLimits, {
-		allowedTools: ["read", "write"],
-		delegatedTools: [],
-	});
+	const parsed = extractGlobalFlags(["--allow-tools", "read,write", "--delegate-tools", "none"]).toolLimits;
+	assert.deepEqual(parsed?.allowedTools, ["read", "write"]);
+	assert.deepEqual(parsed?.delegatedTools, []);
 	const loop = limitedChatLoop({ allowedTools: ["read", "write"], delegatedTools: [] });
 	try {
 		// A prewarmed runtime builds its tool surface from these before any turn.
@@ -106,7 +105,7 @@ test("a TUI /delegate under --delegate-tools read dispatches a worker limited to
 		await new Promise((resolve) => setImmediate(resolve));
 		const request = dispatched.at(0);
 		assert.ok(request, "/delegate dispatched nothing");
-		assert.deepEqual(request.turnConstraints, { delegatedTools: ["read"] });
+		assert.deepEqual(request.turnConstraints, toolLimits);
 		assert.equal(turnDelegatesTool(request.turnConstraints, "read"), true);
 		assert.equal(turnDelegatesTool(request.turnConstraints, "write"), false);
 		assert.equal(turnDelegatesTool(request.turnConstraints, "bash"), false);

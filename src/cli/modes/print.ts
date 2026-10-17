@@ -1149,7 +1149,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		};
 		// Text mode printed the refusal's notice as it arrived; saying it twice
 		// reads as two failures.
-		stderrMessage = mode === "text" && result.admissionRefused ? null : prefixHeadlessFailure(chat, result.error, result.admissionRefused);
+		stderrMessage =
+			mode === "text" && result.admissionRefused
+				? null
+				: prefixHeadlessFailure(chat, result.error, result.admissionRefused);
 	} else if (result.outputExhausted && !result.sawTerminatingToolResult) {
 		// The provider returned normally, but generation exhausted its budget.
 		// Earlier chatter and partial prose cannot turn that terminal cause into

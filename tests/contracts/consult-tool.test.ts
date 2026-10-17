@@ -111,7 +111,7 @@ describe("contracts/consult tool", () => {
 		strictEqual(gatewayPromptHint(false), GATEWAY_HINT_BEFORE_CONSULT);
 		const listing = (await gateway(unbound, { op: "find" })).text;
 		ok(!findNames(listing).includes(ToolNames.Consult));
-		match((await gateway(unbound, { op: "describe", capability: "consult" })).text, /unknown capability "consult"/);
+		match((await gateway(unbound, { op: "describe", capability: "consult" })).text, /no such capability "consult"/);
 
 		// Binding adds exactly one entry and one phrase, and nothing else moves.
 		const bound = sessionRegistry(workspace, { systemOne: fakeSystemOne().systemOne, cwd: () => workspace });

@@ -11,6 +11,7 @@ import { expandInlineFileReferencesAsync } from "../../core/file-references.js";
 import { PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
+import { templateToolConstraints } from "../../core/turn-constraints.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ResourcesContract } from "./contract.js";
 
@@ -102,10 +103,11 @@ export async function expandSubmitText(
 		...(display ? { display } : {}),
 		...(allowedTools || delegatedTools
 			? {
-					constraints: {
+					constraints: templateToolConstraints({
+						name: promptExpansion?.expanded ? promptExpansion.template.name : "",
 						...(allowedTools ? { allowedTools } : {}),
 						...(delegatedTools ? { delegatedTools } : {}),
-					},
+					}),
 				}
 			: {}),
 	};

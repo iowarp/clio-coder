@@ -1,8 +1,9 @@
+import type { ToolSurfaceSource } from "./turn-constraints.js";
+
 /**
  * One `--allow-tools`/`--delegate-tools` value: comma-separated capability
  * names, or `none` for no tools. Every entry surface (`run`, the interactive
- * session, `acp`) reads the flag through this, so the three agree. It imports
- * nothing, because the startup flag parser (`src/cli/argv.ts`) reads it before
+ * session, `acp`) reads the flag through this, so the three agree. It has no runtime imports, because the startup flag parser (`src/cli/argv.ts`) reads it before
  * any command graph loads.
  */
 export function parseToolLimitList(flag: string, value: string): readonly string[] | { error: string } {
@@ -24,5 +25,23 @@ export function isToolLimitName(name: string): boolean {
 /** The session-wide tool limits an interactive or ACP session was started with. */
 export interface SessionToolLimits {
 	allowedTools?: readonly string[];
+	toolSurfaceSources?: readonly ToolSurfaceSource[];
+	delegatedToolSurfaceSources?: readonly ToolSurfaceSource[];
 	delegatedTools?: readonly string[];
+}
+
+export function toolLimitConstraints(
+	flag: "--allow-tools" | "--delegate-tools",
+	tools: readonly string[],
+): SessionToolLimits {
+	const sources: ToolSurfaceSource[] = [
+		{
+			tools,
+			source: flag,
+			remedy: `Restart the session with a wider ${flag} list, then resubmit.`,
+		},
+	];
+	return flag === "--allow-tools"
+		? { allowedTools: tools, toolSurfaceSources: sources }
+		: { delegatedTools: tools, delegatedToolSurfaceSources: sources };
 }

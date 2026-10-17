@@ -63,7 +63,12 @@ import {
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../core/skill-activation.js";
-import { narrowTurnConstraints, snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
+import {
+	narrowTurnConstraints,
+	snapshotTurnConstraints,
+	type TurnConstraints,
+	toolSurfaceSources,
+} from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -3408,7 +3413,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						evaluateSkillToolSurface(policy, name) === null &&
 						(constraints?.allowedTools === undefined || constraints.allowedTools.includes(name)),
 				);
-			return snapshotTurnConstraints({ ...constraints, allowedTools });
+			// The skill surface narrows the job, so a refusal must name it rather than
+			// blame a wider scope that still admits the tool.
+			return snapshotTurnConstraints({
+				...constraints,
+				allowedTools,
+				toolSurfaceSources: [
+					...toolSurfaceSources(constraints),
+					{
+						tools: allowedTools,
+						source: `active skill tool surface (${skillSurfaceNames(policy).join(", ")})`,
+						remedy: "Unload the narrowing skill or widen its allowed-tools, then recreate the job.",
+					},
+				],
+			});
 		},
 		contextLedger: () => context.contextLedger(),
 		liveBudget: () => context.liveBudget(),

@@ -56,7 +56,7 @@ import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
-import { narrowTurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
+import { narrowTurnConstraints, templateToolConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
@@ -5390,12 +5390,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const template = promptExpansion?.expanded ? promptExpansion.template : undefined;
 			const constraints = narrowTurnConstraints(
 				options.headless.constraints,
-				template?.allowedTools || template?.delegatedTools
-					? {
-							...(template.allowedTools ? { allowedTools: template.allowedTools } : {}),
-							...(template.delegatedTools ? { delegatedTools: template.delegatedTools } : {}),
-						}
-					: undefined,
+				template?.allowedTools || template?.delegatedTools ? templateToolConstraints(template) : undefined,
 			);
 			const images = [...(options.headless.images ?? []), ...fileExpansion.images];
 			const workingContextPaths = [...(options.headless.workingContextPaths ?? []), ...fileExpansion.referencedPaths];

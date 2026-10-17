@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import type { JobCreateInput, JobOwner, JobRecord } from "../../src/core/job-types.js";
+import { toolLimitConstraints } from "../../src/core/tool-limit-flags.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
 import { createJobController } from "../../src/domains/scheduling/job-controller.js";
@@ -528,6 +529,15 @@ describe("job ownership, scheduling and execution settlement", () => {
 	});
 	it("enforces a main job allowlist on every YOLO occurrence and audits denials", async () => {
 		const allowed = ["mcp_zulipchat-grc__poll_agent_events", "mcp_zulipchat-grc__send_message"];
+		// The session flag admits every fixture, so only the job's allow list can refuse.
+		const sessionLimits = toolLimitConstraints("--allow-tools", [
+			ToolNames.Bash,
+			ToolNames.Gateway,
+			ToolNames.Job,
+			ToolNames.Read,
+			...allowed,
+			"mcp_zulipchat-grc__other",
+		]);
 		const safety = createWorkerSafety({ cwd: scratch.dir });
 		const audits: ToolCallAuditInput[] = [];
 		safety.audit.recordToolCall = (row) => audits.push(row);
@@ -565,7 +575,8 @@ describe("job ownership, scheduling and execution settlement", () => {
 					{ tool: ToolNames.Gateway, args: { op: "call", capability: ToolNames.Read, args: {} } },
 					{ turnConstraints: request.constraints, turnId: request.executionId },
 				);
-				ok(wrappedDenial.kind !== "ok" || wrappedDenial.result.kind === "error");
+				ok(wrappedDenial.kind === "ok" && wrappedDenial.result.kind === "error");
+				match(wrappedDenial.result.message, /Refused by: this job's allow list\.\n/u);
 				for (const capability of allowed) {
 					const admitted = await registry.invoke(
 						{ tool: ToolNames.Gateway, args: { op: "call", capability, args: {} } },
@@ -580,7 +591,7 @@ describe("job ownership, scheduling and execution settlement", () => {
 		const runtime = createJobRuntime({
 			chat: () => chat,
 			isCurrent: () => true,
-			constraints: () => undefined,
+			constraints: () => sessionLimits,
 			safety,
 			autonomy: () => "yolo",
 			hostRefusal: () => null,
@@ -596,7 +607,7 @@ describe("job ownership, scheduling and execution settlement", () => {
 			controller: host,
 			registry,
 			owner: () => owner,
-			constraints: () => undefined,
+			constraints: () => sessionLimits,
 			hostRefusal: () => null,
 		});
 		registry.register(jobTool.spec);

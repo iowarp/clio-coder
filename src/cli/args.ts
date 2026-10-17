@@ -1,6 +1,6 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
-import { parseToolLimitList } from "../core/tool-limit-flags.js";
+import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
@@ -237,7 +237,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 				else
 					parsed.constraints = {
 						...parsed.constraints,
-						...(arg === "--allow-tools" ? { allowedTools: names } : { delegatedTools: names }),
+						...toolLimitConstraints(arg, names),
 					};
 			}
 			continue;
