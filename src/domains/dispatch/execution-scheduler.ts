@@ -59,7 +59,12 @@ export interface ExecutionPlanAdmission {
  * ("did it converge?") is different from "did something break", and because
  * the bound is the number they get to change.
  */
-export type ExecutionLoopReason = "resolved" | "loop_bound_exhausted" | "loop_step_failed" | "loop_not_reached";
+export type ExecutionLoopReason =
+	| "resolved"
+	| "loop_bound_exhausted"
+	| "loop_step_failed"
+	| "loop_not_reached"
+	| "loop_canceled";
 
 export interface ExecutionLoopOutcome {
 	loopId: string;
@@ -566,6 +571,8 @@ export async function executePlan(
 			const attempts = attemptsRun.get(loop.id) ?? 0;
 			const repairs = repairsRun.get(loop.id) ?? 0;
 			if (loopResolved(loop)) return { loopId: loop.id, resolved: true, attempts, repairs, reason: "resolved" };
+			if ([...loop.checkStepIds, ...loop.repairStepIds].some((id) => canceledSteps.has(id)))
+				return { loopId: loop.id, resolved: false, attempts, repairs, reason: "loop_canceled" };
 			if (attempts === 0) return { loopId: loop.id, resolved: false, attempts, repairs, reason: "loop_not_reached" };
 			const ran = loop.checkStepIds.filter((id) => results.has(id)).length;
 			const brokenMember = [...loop.checkStepIds, ...loop.repairStepIds].some((id) => {
@@ -738,7 +745,9 @@ export async function executePlan(
 				// Loop continuation is decided after the wave settles, so a gate's
 				// verdict is read from a sealed result rather than from a live stream.
 				for (const { step, result } of settled) {
-					if (!signal?.aborted && !canceledSteps.has(step.id)) await settleCheck(step, result);
+					if (!canceledSteps.has(step.id)) await settleCheck(step, result);
+					else if (step.loop?.role === "check")
+						attemptsRun.set(step.loop.loopId, (attemptsRun.get(step.loop.loopId) ?? 0) + 1);
 				}
 				// A loop that spent its last attempt without converging ends the run
 				// under a stop policy, whether the verdict came from an exit code or

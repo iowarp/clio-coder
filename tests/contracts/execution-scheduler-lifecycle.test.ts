@@ -462,6 +462,89 @@ describe("execution scheduler lifecycle", () => {
 		await rejects(executePlan(plan(), replay.adapter), /not a completed successful step/u);
 		deepStrictEqual(replay.log, ["release-unconsumed", "release"]);
 	});
+	for (const before of [false, true]) {
+		it(`counts canceled code verification accurately when aborted ${before ? "before" : "during"} the check`, async () => {
+			const f = fixture();
+			const controller = new AbortController();
+			let checks = 0;
+			f.adapter.runCode = async (step) => {
+				checks += 1;
+				controller.abort();
+				return result(step.id, false);
+			};
+			const p = compileExecutionPlan({
+				topology: "fleet",
+				rootTask: "code check",
+				maxWorkers: 1,
+				onFailure: "stop",
+				loops: [{ id: "suite", checkKind: "code", maxAttempts: 1, checkStepIds: ["suite.check.1"], repairStepIds: [] }],
+				steps: [
+					{
+						kind: "code",
+						id: "suite.check.1",
+						commandId: "test",
+						scope: "readonly",
+						dependencies: [],
+						loop: { loopId: "suite", role: "check", attempt: 1 },
+					},
+				],
+			});
+			if (before) controller.abort();
+			const outcome = await executePlan(p, f.adapter, controller.signal);
+			strictEqual(checks, before ? 0 : 1);
+			deepStrictEqual(outcome.loops[0], {
+				loopId: "suite",
+				resolved: false,
+				attempts: before ? 0 : 1,
+				repairs: 0,
+				reason: before ? "loop_not_reached" : "loop_canceled",
+			});
+		});
+	}
+
+	it("preserves a check that finished before a sibling was interrupted", async () => {
+		const f = fixture();
+		const controller = new AbortController();
+		const checked = deferred<void>();
+		f.adapter.runCode = async (step) => {
+			if (step.id === "suite.check.1") {
+				checked.resolve();
+				return result(step.id);
+			}
+			await checked.promise;
+			controller.abort();
+			return result(step.id, false);
+		};
+		const p = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "code check with sibling",
+			maxWorkers: 2,
+			onFailure: "stop",
+			loops: [{ id: "suite", checkKind: "code", maxAttempts: 1, checkStepIds: ["suite.check.1"], repairStepIds: [] }],
+			steps: [
+				{
+					kind: "code",
+					id: "suite.check.1",
+					commandId: "test",
+					scope: "readonly",
+					dependencies: [],
+					loop: { loopId: "suite", role: "check", attempt: 1 },
+				},
+				{ kind: "code", id: "sibling", commandId: "test", scope: "readonly", dependencies: [] },
+			],
+		});
+		const outcome = await executePlan(p, f.adapter, controller.signal);
+		strictEqual(outcome.results.get("suite.check.1")?.succeeded, true);
+		strictEqual(outcome.results.get("sibling")?.succeeded, false);
+		deepStrictEqual(outcome.loops[0], {
+			loopId: "suite",
+			resolved: true,
+			attempts: 1,
+			repairs: 0,
+			reason: "resolved",
+		});
+	});
+
 	it("canceled agent verification cannot publish a passing loop decision", async () => {
 		const f = fixture();
 		const controller = new AbortController();
@@ -488,6 +571,8 @@ describe("execution scheduler lifecycle", () => {
 		const outcome = await pending;
 		strictEqual(decisions, 0);
 		strictEqual(outcome.loops[0]?.resolved, false);
+		strictEqual(outcome.loops[0]?.attempts, 1);
+		strictEqual(outcome.loops[0]?.reason, "loop_canceled");
 		strictEqual(f.log.includes("launch:dependent"), false);
 	});
 

@@ -1,8 +1,10 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { Writable } from "node:stream";
 import { test } from "node:test";
 import { runFleetWithShutdown } from "../../src/cli/fleet-lifecycle.js";
+import { createFleetReporter } from "../../src/cli/fleet-reporting.js";
 import type { Hook } from "../../src/core/termination.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import {
@@ -15,9 +17,23 @@ import { fleetWorkspaceLockPath } from "../../src/domains/dispatch/fleet-workspa
 import { readFleetRun } from "../../src/domains/dispatch/state.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline"]) {
+for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline", "closed-stdout", "closed-stderr"]) {
 	test(`fleet ${mode} shutdown seals the journal and releases the lock`, async () => {
 		const scratch = await isolateClioEnv("clio-coder-fleet-interrupt-");
+		const brokenPipe = new Writable({
+			write(_chunk, _encoding, callback) {
+				callback(Object.assign(new Error("reader closed"), { code: "EPIPE" }));
+			},
+		});
+		const sink = new Writable({
+			write(_chunk, _encoding, callback) {
+				callback();
+			},
+		});
+		const reporter = createFleetReporter(
+			mode === "closed-stdout" ? brokenPipe : sink,
+			mode === "closed-stderr" ? brokenPipe : sink,
+		);
 		try {
 			const root = join(scratch.dir, "workspace");
 			mkdirSync(root);
@@ -72,6 +88,7 @@ for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline"]) {
 						dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
 						agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
 						attributionEnabled: false,
+						onStepSettled: () => reporter.stdout("step settled\n"),
 						onStepDispatched: (step) => {
 							dispatched.push(step.stepId);
 							ok(installed && hook);
@@ -120,9 +137,16 @@ for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline"]) {
 						};
 					},
 				},
-				{ notice: (text) => notices.push(text) },
+				{
+					notice: (text) => {
+						notices.push(text);
+						reporter.stderr(`${text}\n`);
+					},
+				},
 			);
 			await shutdown;
+			reporter.stdout("summary\n");
+			reporter.stderr("shutdown complete\n");
 			strictEqual(notices.length, 1);
 			strictEqual(
 				notices[0],
@@ -135,6 +159,7 @@ for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline"]) {
 			deepStrictEqual(lifecycle, ["cleanup finished", "shutdown finished"]);
 			ok(unregistered);
 		} finally {
+			await reporter.dispose();
 			scratch.restore();
 		}
 	});

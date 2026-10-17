@@ -89,6 +89,7 @@ import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
+import { createFleetReporter } from "./fleet-reporting.js";
 import { parsePlaybookVars } from "./playbook-vars.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 import { convertWorkspaceForCommand } from "./workspace-conversion.js";
@@ -243,7 +244,10 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 	return null;
 }
 
-async function runFleet(args: ReadonlyArray<string>): Promise<number> {
+async function runFleet(
+	args: ReadonlyArray<string>,
+	reporter: ReturnType<typeof createFleetReporter>,
+): Promise<number> {
 	const { vars, rest, error } = parsePlaybookVars(args);
 	if (error !== undefined) return fail(error);
 	// A positional scan, so an option value is never read as the playbook name
@@ -487,14 +491,14 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					vars,
 					...(resume !== undefined ? { resume } : {}),
 					onStarted() {
-						process.stderr.write(
+						reporter.stderr(
 							`fleet ${playbook.name}: root=${fleetRootId} plan=${plan.hash} steps=${plan.steps.length} loops=${plan.loops.length}\n`,
 						);
 					},
 					onStepSettled(step) {
 						if (step.replayed === true && step.result !== undefined) {
 							if (json) {
-								process.stdout.write(
+								reporter.stdout(
 									`${JSON.stringify({
 										stepId: step.stepId,
 										status: "replayed",
@@ -505,16 +509,16 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 									})}\n`,
 								);
 							} else {
-								process.stdout.write(
+								reporter.stdout(
 									`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
 								);
 							}
 							return;
 						}
 						if (step.receipt !== undefined) {
-							if (json) process.stdout.write(`${JSON.stringify(step.receipt)}\n`);
+							if (json) reporter.stdout(`${JSON.stringify(step.receipt)}\n`);
 							else {
-								process.stdout.write(
+								reporter.stdout(
 									`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,
 								);
 							}
@@ -522,9 +526,9 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 						}
 						if (step.codeStep !== undefined) {
 							if (json) {
-								process.stdout.write(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
+								reporter.stdout(`${JSON.stringify({ codeStep: step.codeStep })}\n`);
 							} else {
-								process.stdout.write(
+								reporter.stdout(
 									`step ${step.stepId} code:${step.commandId}: ${
 										step.succeeded ? "passed" : "failed"
 									} exit=${step.codeStep.exitCode} ${step.codeStep.durationMs}ms record=${step.recordPath}\n`,
@@ -535,8 +539,8 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					onNotice(text, kind) {
 						// A notice without a kind (a failed workspace lock release) goes to stderr like a write boundary.
 						if (kind === "gate") {
-							if (!json) process.stdout.write(`${text}\n`);
-						} else process.stderr.write(`${text}\n`);
+							if (!json) reporter.stdout(`${text}\n`);
+						} else reporter.stderr(`${text}\n`);
 					},
 				});
 			},
@@ -550,6 +554,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			undefined,
 			{
 				beginDrain: beginDispatchDrain,
+				notice: (text) => reporter.stderr(`${text}\n`),
 				cleanupAllowanceMs: (loaded.loaded.length + 1) * resolveShutdownHookBudgetMs(),
 			},
 		);
@@ -563,7 +568,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	if (json) {
-		process.stdout.write(
+		reporter.stdout(
 			`${JSON.stringify({
 				playbook: playbook.name,
 				rootId: fleetRootId,
@@ -577,34 +582,34 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			})}\n`,
 		);
 	} else {
-		process.stdout.write(
+		reporter.stdout(
 			`fleet ${playbook.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderCostAggregate(outcome.totalCost)}\n`,
 		);
 		for (const loop of outcome.result.loops) {
-			process.stdout.write(
+			reporter.stdout(
 				`  loop ${loop.loopId}: ${loop.reason} after ${loop.attempts} verification(s) and ${loop.repairs} repair(s)\n`,
 			);
 		}
 		if (outcome.result.revalidated.length > 0) {
-			process.stdout.write(
+			reporter.stdout(
 				`  staleness: re-ran ${outcome.result.revalidated.join(
 					", ",
 				)} because a workspace step landed after the last green\n`,
 			);
 		}
 		for (const message of outcome.result.needsDecision) {
-			process.stdout.write(`  needs operator decision: ${message}\n`);
+			reporter.stdout(`  needs operator decision: ${message}\n`);
 		}
 		for (const boundary of outcome.result.writeBoundaries) {
 			if (!boundary.violated) continue;
-			process.stdout.write(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
+			reporter.stdout(`  write boundary ${boundary.window}: ${boundary.detail ?? WRITE_BOUNDARY_VIOLATION_REASON}\n`);
 		}
 		// The root id printed at the top is the only identifier this command
 		// advertises, so say what it is good for rather than leaving an operator
 		// to guess that the viewer wants a per-step run id.
-		process.stdout.write(`  clio-coder fleet view ${fleetRootId}   step index with each step's run id\n`);
+		reporter.stdout(`  clio-coder fleet view ${fleetRootId}   step index with each step's run id\n`);
 	}
-	return outcome.cleanRun ? 0 : 1;
+	return runSignal?.aborted ? getTerminationCoordinator().getExitCode() : outcome.cleanRun ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -840,9 +845,16 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 		return 2;
 	}
 	switch (sub) {
-		case "run":
-			await convertWorkspaceForCommand();
-			return runFleet(args.slice(1));
+		case "run": {
+			const reporter = createFleetReporter();
+			try {
+				await convertWorkspaceForCommand();
+				return await runFleet(args.slice(1), reporter);
+			} finally {
+				// Signal shutdown still writes notices after the run has sealed.
+				if (getTerminationCoordinator().getPhase() === "idle") await reporter.dispose();
+			}
+		}
 		case "status":
 			return runStatus(args.slice(1));
 		case "inspect":

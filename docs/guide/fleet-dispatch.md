@@ -1224,7 +1224,7 @@ At plan compilation, the orchestrator unrolls each loop statically into a determ
 - Receipt per attempt: Every attempt in an unrolled loop executes as an independent plan node and produces its own receipt.
 - Recovery role: Repair attempts following the first check are assigned the `recovery` execution role.
 - Spent bounds: Reaching `maxAttempts` without a passing check settles the loop with the terminal reason `loop_bound_exhausted`.
-- Four terminal reasons: A loop concludes with one of four reasons: `resolved` (verification passed), `loop_bound_exhausted` (attempt ceiling spent), `loop_step_failed` (underlying step errored or was denied), or `loop_not_reached` (prior plan dependencies failed).
+- Five terminal reasons: A loop concludes with one of five reasons: `resolved` (verification passed), `loop_bound_exhausted` (attempt ceiling spent), `loop_step_failed` (underlying step errored or was denied), `loop_not_reached` (prior plan dependencies failed), or `loop_canceled` (a running check or repair was interrupted). A check that finished and passed before a sibling was interrupted still resolves its loop.
 - Node counting: Unneeded nodes (verifications or repairs remaining after a loop resolves) are counted separately from skipped nodes.
 - Verification staleness: The scheduler enforces verification staleness by re-running a green code check step (at most 3 times per step) if a workspace-editing step finishes after it and before a dependent runs.
 - Cycle checkpoint: After each check step settles, Clio captures the workspace as an immutable ref `refs/clio-coder/loop/<sha256>` in the repository, without touching HEAD or the index, and prints `loop <id> cycle <n> checkpoint=<ref>`.
