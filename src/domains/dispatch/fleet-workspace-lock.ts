@@ -69,7 +69,7 @@ export class FleetWorkspaceBusyError extends Error {
 			? "wait for it to finish"
 			: `wait for it to finish; if it is gone, the lock is reclaimed ${FLEET_LOCK_STALE_MS / 1000} s after its last refresh, or remove ${lockPath} once ${holder.host} runs no fleet there`;
 		super(
-			`fleet root=${holder.rootId} (${owner}, since ${holder.acquiredAt}) is still running in ${holder.workspaceRoot}; this run was refused and nothing was dispatched. Lock: ${lockPath}; ${remedy}`,
+			`fleet root=${holder.rootId} (${owner}, since ${holder.acquiredAt}) is still running in ${holder.workspaceRoot}; this run was refused and nothing was dispatched. Lock: ${lockPath}\n${remedy}`,
 		);
 		this.name = "FleetWorkspaceBusyError";
 		this.holder = holder;

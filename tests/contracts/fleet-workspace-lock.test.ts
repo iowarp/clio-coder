@@ -78,6 +78,7 @@ describe("fleet workspace lock across processes", () => {
 			assert.equal(error.holder.rootId, "fleet-held");
 			assert.equal(error.holder.pid, holderPid);
 			assert.match(error.message, /root=fleet-held/);
+			assert.match(error.message, /\nwait for it to finish$/);
 			assert.match(error.message, new RegExp(`pid ${holderPid}\\b`));
 			// The refused run never existed, so its minted id is not announced.
 			assert.doesNotMatch(error.message, /fleet-second/);
