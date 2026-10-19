@@ -236,8 +236,12 @@ export interface SafetyJudgeNote {
 export interface SafetyJudgeDeps {
 	config: () => SafetyJudgeConfig;
 	complete: SafetyJudgeCompletion;
-	/** The operator's own messages in this session, oldest first. Never assistant text or tool output. */
-	operatorMessages: () => ReadonlyArray<string>;
+	/**
+	 * The operator's own messages on the session's active branch, oldest first,
+	 * through the turn the call serves when the call names it. Never assistant
+	 * text or tool output.
+	 */
+	operatorMessages: (call: { turnId?: string }) => ReadonlyArray<string>;
 	/** The current session, so block counts never carry from one session to another. */
 	session: () => string | null;
 	consequences?: (call: ClassifierCall) => ReadonlyArray<string>;
@@ -317,9 +321,19 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 			}
 			const startedAt = now();
 			const elapsed = (): number => Math.max(0, Math.round(now() - startedAt));
+			// How many operator messages the judge's prompt carried, once it is built, so
+			// an audit row shows whether the judge read the request the call serves.
+			let prompted: { operatorMessages?: number } = {};
 			const noVerdict = (cause: SafetyJudgeNoVerdictCause, detail?: string): SafetyJudgeOutcome => {
 				const latencyMs = elapsed();
-				audit({ ...base, verdict: "none", latencyMs, noVerdict: cause, ...(detail !== undefined ? { detail } : {}) });
+				audit({
+					...base,
+					...prompted,
+					verdict: "none",
+					latencyMs,
+					noVerdict: cause,
+					...(detail !== undefined ? { detail } : {}),
+				});
 				return { kind: "park", cause, gateReason: noVerdictReason(cause, detail), build, latencyMs };
 			};
 			const targetId = config.target;
@@ -336,11 +350,10 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					// A consequence sentence is a feature for the judge, never a precondition.
 				}
 				const system = safetyJudgeSystemPrompt(config);
-				const user = safetyJudgeUserPrompt({
-					operatorMessages: boundOperatorMessages(safeRead(deps.operatorMessages, [])),
-					subject,
-					consequences,
-				});
+				const turn = subject.turnId !== undefined ? { turnId: subject.turnId } : {};
+				const operatorMessages = boundOperatorMessages(safeRead(() => deps.operatorMessages(turn), []));
+				prompted = { operatorMessages: operatorMessages.length };
+				const user = safetyJudgeUserPrompt({ operatorMessages, subject, consequences });
 
 				const controller = new AbortController();
 				const timeoutMs = deps.timeoutMs ?? SAFETY_JUDGE_TIMEOUT_MS;
@@ -389,12 +402,12 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				const after = stateNow();
 				if (parsed.verdict === "allow") {
 					after.consecutive = 0;
-					audit({ ...base, verdict: "allow", rule: parsed.rule, reason: parsed.reason, latencyMs });
+					audit({ ...base, ...prompted, verdict: "allow", rule: parsed.rule, reason: parsed.reason, latencyMs });
 					return { kind: "allow", rule: parsed.rule, reason: parsed.reason, build, latencyMs };
 				}
 				after.consecutive += 1;
 				after.total += 1;
-				audit({ ...base, verdict: "block", rule: parsed.rule, reason: parsed.reason, latencyMs });
+				audit({ ...base, ...prompted, verdict: "block", rule: parsed.rule, reason: parsed.reason, latencyMs });
 				const counts = { consecutiveBlocks: after.consecutive, totalBlocks: after.total };
 				const position = {
 					...(subject.turnId !== undefined ? { turnId: subject.turnId } : {}),

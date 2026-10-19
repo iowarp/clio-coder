@@ -3,20 +3,23 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { validateSettings } from "../../src/core/config.js";
+import { type ClioSettings, validateSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permission.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
+import type { SafetyJudgeAuditInput } from "../../src/domains/safety/audit.js";
 import {
 	createSafetyJudge,
 	operatorOnlyAsk,
 	type SafetyJudgeCompletion,
 	type SafetyJudgeConfig,
 } from "../../src/domains/safety/safety-judge.js";
+import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { operatorMessagesForJudge } from "../../src/entry/safety-judge-host.js";
+import { createSafetyJudgeHost, operatorMessagesForJudge } from "../../src/entry/safety-judge-host.js";
 import { createRegistry, type PermissionRequiredMeta, type ToolSpec } from "../../src/tools/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -202,6 +205,74 @@ test("the judge reads the operator's messages and the call, never assistant text
 	match(user, /rule that asked: bash-unrecognized/u);
 	doesNotMatch(user, /ASSISTANT-PROSE|TOOL-OUTPUT|abc123secret/u);
 	match(prompts[0]?.system ?? "", /rewrite-history: force-push or rewrite shared history/u);
+});
+
+test("the judge reads the call's own turn when the session leaf lags, and never an abandoned /tree branch", async () => {
+	const entry = (turnId: string, parentTurnId: string | null, role: string, payload: unknown): SessionEntry =>
+		({ kind: "message", turnId, parentTurnId, timestamp: "2026-10-19T00:00:00.000Z", role, payload }) as SessionEntry;
+	const push = "Push main to origin with a plain git push (no force).";
+	// u2 is a branch the operator left with /tree; u3 is the turn in flight, parented on a1.
+	const entries = [
+		entry("u1", null, "user", { text: "Inspect the repository." }),
+		entry("a1", "u1", "assistant", { text: "Inspected." }),
+		entry("u2", "a1", "user", { text: "Force-push main over origin." }),
+		entry("a2", "u2", "assistant", { text: "Abandoned." }),
+		entry("u3", "a1", "user", { text: `<system-reminder>\nhint\n</system-reminder>\n\n${push}`, operatorText: push }),
+		entry("a3", "u3", "assistant", { text: "Pushing." }),
+		entry("c3", "a3", "tool_call", { name: "bash", args: { command: "git push origin main" } }),
+	];
+	// A leaf that has not caught up with the turn in flight cuts the request that turn serves.
+	deepStrictEqual(operatorMessagesForJudge(entries, "a1"), ["Inspect the repository."]);
+
+	let leaf = "a1";
+	const session = {
+		current: () => ({ id: "session-1" }),
+		readEntries: () => entries,
+		tree: () => ({ leafId: leaf }),
+		appendEntry: (input: unknown) => input,
+	} as unknown as SessionContract;
+	const prompts: string[] = [];
+	const audits: SafetyJudgeAuditInput[] = [];
+	const seat = createSafetyJudgeHost({
+		settings: () =>
+			({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target: "local", model: "m" } }) as ClioSettings,
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: answer("allow", "operator-named", "Asked for.") };
+		},
+		session: () => session,
+		safety: { audit: { recordSafetyJudge: (input: SafetyJudgeAuditInput) => audits.push(input) } } as never,
+	});
+	const decision = {
+		kind: "ask",
+		classification: { actionClass: "execute", reasons: [] },
+		confirmationRuleId: "bash-unrecognized",
+		rejection: { short: "asks", detail: "asks", hints: [] },
+	} as const;
+	await seat.review({
+		tool: ToolNames.Bash,
+		args: { command: "git push origin main" },
+		decision,
+		approvalAuthority: "operator",
+		turnId: "u3",
+	});
+	match(prompts[0] ?? "", /Message 2 of 2 \(newest\):\nPush main to origin with a plain git push \(no force\)\./u);
+	doesNotMatch(prompts[0] ?? "", /Force-push|hint/u);
+	strictEqual(audits[0]?.operatorMessages, 2);
+
+	// A worker ask carries no turn of its own and reads the session's live leaf.
+	leaf = "c3";
+	await seat.review({
+		tool: ToolNames.Bash,
+		args: { command: "git push origin main" },
+		decision,
+		approvalAuthority: "main",
+		worker: { runId: "run-1", agentId: "coder" },
+	});
+	match(prompts[1] ?? "", /Message 2 of 2 \(newest\):\nPush main/u);
+	doesNotMatch(prompts[1] ?? "", /Force-push/u);
+	strictEqual(audits[1]?.operatorMessages, 2);
+	strictEqual(audits[1]?.workerRunId, "run-1");
 });
 
 test("safety.judge parses from user settings and a project layer cannot set it", async (t) => {

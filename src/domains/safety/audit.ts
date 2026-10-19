@@ -212,6 +212,8 @@ export interface SafetyJudgeAuditRecord {
 	model?: string;
 	noVerdict?: string;
 	detail?: string;
+	/** Operator messages the judge's prompt carried; absent when no prompt was built (escalated, no route). */
+	operatorMessages?: number;
 }
 
 export interface SafetyJudgeAuditInput {
@@ -230,6 +232,7 @@ export interface SafetyJudgeAuditInput {
 	model?: string;
 	noVerdict?: string;
 	detail?: string;
+	operatorMessages?: number;
 	now?: Date;
 }
 
@@ -494,6 +497,7 @@ export function buildSafetyJudgeAuditRecord(input: SafetyJudgeAuditInput): Safet
 	if (input.model !== undefined) record.model = input.model;
 	if (input.noVerdict !== undefined) record.noVerdict = input.noVerdict;
 	if (input.detail !== undefined) record.detail = redactString(input.detail);
+	if (input.operatorMessages !== undefined) record.operatorMessages = input.operatorMessages;
 	return record;
 }
 

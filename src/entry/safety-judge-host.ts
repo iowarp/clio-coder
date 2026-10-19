@@ -31,10 +31,28 @@ export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
  * continuation nudge Clio synthesized is skipped, and injected reminders and
  * expansions are stripped by `operatorTextOfUserPayload`. Assistant messages,
  * thinking and tool results never reach the judge.
+ *
+ * `currentTurnId` is the turn the judged call serves, from the chat loop's
+ * live turn state. The path runs through it whenever the session leaf's path
+ * does not hold it, so a leaf that has not caught up with the turn in flight
+ * never cuts the request that turn carries, while a branch the operator left
+ * with /tree stays out because the path still walks parent links.
  */
-export function operatorMessagesForJudge(entries: ReadonlyArray<SessionEntry>, leafTurnId?: string): string[] {
+export function operatorMessagesForJudge(
+	entries: ReadonlyArray<SessionEntry>,
+	leafTurnId?: string,
+	currentTurnId?: string,
+): string[] {
+	let path = filterEntriesToActivePath(entries, leafTurnId);
+	if (
+		currentTurnId !== undefined &&
+		!path.some((entry) => entry.turnId === currentTurnId) &&
+		entries.some((entry) => entry.turnId === currentTurnId)
+	) {
+		path = filterEntriesToActivePath(entries, currentTurnId);
+	}
 	const texts: string[] = [];
-	for (const entry of filterEntriesToActivePath(entries, leafTurnId)) {
+	for (const entry of path) {
 		if (entry.kind !== "message" || entry.role !== "user") continue;
 		if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
 		const text = operatorTextOfUserPayload(entry.payload);
@@ -91,11 +109,19 @@ export function createSafetyJudgeHost(deps: {
 		config: () => resolveSafetyJudgeConfig(deps.settings()),
 		complete: deps.complete,
 		session: () => deps.session()?.current()?.id ?? null,
-		operatorMessages: () => {
+		operatorMessages: ({ turnId }) => {
 			const session = deps.session();
 			const meta = session?.current();
 			if (session === undefined || !meta) return [];
-			return operatorMessagesForJudge(session.readEntries(), session.tree(meta.id).leafId ?? undefined);
+			let leaf: string | undefined;
+			try {
+				leaf = session.tree(meta.id).leafId ?? undefined;
+			} catch {
+				// An unreadable tree snapshot must not erase every operator message: the
+				// newest ledger message stands in as the leaf, and the call's own turn
+				// still pins the path below.
+			}
+			return operatorMessagesForJudge(session.readEntries(), leaf, turnId);
 		},
 		audit: (input) => deps.safety?.audit.recordSafetyJudge?.(input),
 		note: (note) => {
