@@ -108,7 +108,8 @@ export const SETTINGS_LABELS_BY_ID = {
 
 export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	autonomy: "How freely Clio acts; the safety net always applies.",
-	"workers.onPermission": "Choose whether a worker skips the blocked tool, stops, or asks you to approve it.",
+	"workers.onPermission":
+		"Choose whether the safety judge reviews a worker's blocked tool, or the worker skips it, stops, or asks you to approve it.",
 	"workers.escalation.timeoutMs": "How long Clio waits for your answer when a worker asks permission.",
 	"workers.escalation.fallback": "What the worker does if you do not answer in time.",
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
@@ -263,7 +264,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"attribution.gitCommits":
 		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
 	"workers.onPermission":
-		"Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
+		"Safety judge reviews the call against your own messages while Clio runs at default; it runs on an allow and is denied on a block or when the judge gives no verdict. Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
 	"workers.escalation.timeoutMs":
 		"Used only when workers ask you. In sessions with nobody available to answer, the fallback applies. Enter at least 1 millisecond.",
 	"workers.escalation.fallback": "Deny the tool lets the worker continue without it. Stop the worker ends the run.",
@@ -306,6 +307,8 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		deny: "the worker skips the blocked tool and continues",
 		fail: "the worker stops and reports that permission was needed",
 		escalate: "Clio asks you; if you do not answer in time, it uses the fallback choice below",
+		judge:
+			"the safety judge reviews the call against your own messages at autonomy default; a block or no verdict denies it, and with the judge off the call is denied",
 	},
 	"workers.escalation.fallback": {
 		deny: "the worker skips the blocked tool and continues",
@@ -443,7 +446,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"safety.snapshots": ["auto", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
-	"fleet.permissions.mode": ["deny", "escalate", "fail", "main"],
+	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
 	"interface.outputDetail": ["compact", "standard", "detailed"],

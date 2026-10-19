@@ -1990,6 +1990,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"fail",
 						"escalate",
 						"main",
+						"judge",
 					] as const);
 					if (parsed !== undefined) settings.fleet.permissions.mode = parsed;
 				}

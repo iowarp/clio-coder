@@ -107,7 +107,7 @@ describe("settings and migration boundary", () => {
 		strictEqual(defaults.settings.chat.prewarm, false);
 		strictEqual(defaults.settings.chat.maxOutputTokens, 0);
 		strictEqual(defaults.settings.fleet.concurrency, "auto");
-		strictEqual(defaults.settings.fleet.permissions.mode, "deny");
+		strictEqual(defaults.settings.fleet.permissions.mode, "judge");
 		strictEqual(defaults.settings.context.memory.target, null);
 		strictEqual(defaults.settings.interface.mode, "regular");
 		strictEqual(defaults.settings.interface.smoothStreaming, "auto");

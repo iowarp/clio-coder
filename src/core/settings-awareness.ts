@@ -20,7 +20,9 @@ function describeSettingsPosture(settings: Readonly<ClioSettings>): string {
 				? "Native local workers route ordinary asks to the main agent, which grants them at yolo and forwards them to you otherwise; operator rails always come to you, and a request nobody can answer is denied."
 				: settings.fleet.permissions.mode === "fail"
 					? "Workers stop their run when a call needs approval."
-					: "Workers follow their allowed tool and safety policy; a call needing approval is denied and the worker can continue with allowed work.";
+					: settings.fleet.permissions.mode === "judge"
+						? "At autonomy default the safety judge reviews a native local worker's ordinary asks against your own messages; an allow runs the call, a block or no verdict denies it, and operator rails come to you when you are attended."
+						: "Workers follow their allowed tool and safety policy; a call needing approval is denied and the worker can continue with allowed work.";
 	const budget =
 		settings.safety.limits.sessionCostUsd === 0
 			? "Tracked spending has no session ceiling."

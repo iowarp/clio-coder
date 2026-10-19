@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { evaluateMainGrant } from "../../src/domains/dispatch/grant-authority.js";
+import { evaluateJudgedGrant, evaluateMainGrant } from "../../src/domains/dispatch/grant-authority.js";
 import {
 	createGrantBroker,
 	type GrantDecision,
@@ -12,12 +12,15 @@ import {
 	type GrantRequestInput,
 } from "../../src/domains/dispatch/grant-broker.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import type { SafetyJudgeAuditInput } from "../../src/domains/safety/audit.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
+import { createSafetyJudge, type SafetyJudgeConfig } from "../../src/domains/safety/safety-judge.js";
 import type { AgentEvent } from "../../src/engine/types.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
 import { startWorkerRun, type WorkerRunHandle, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import type { WorkerGrantRequestFrame } from "../../src/worker/protocol.js";
+import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../src/worker/spec-contract.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -190,6 +193,93 @@ describe("grant broker", () => {
 	});
 });
 
+const JUDGE_CONFIG: SafetyJudgeConfig = {
+	enabled: true,
+	target: "local",
+	model: "m",
+	environment: [],
+	allow: [],
+	deny: [],
+};
+
+/** The main session's judge seat with a faked completion; the operator asked only to run the marker script. */
+function fakeJudge(reply: () => string, config: SafetyJudgeConfig = JUDGE_CONFIG) {
+	const prompts: string[] = [];
+	const audits: SafetyJudgeAuditInput[] = [];
+	const judge = createSafetyJudge({
+		config: () => config,
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: reply() };
+		},
+		operatorMessages: () => ["run the marker script"],
+		session: () => "session-1",
+		consequences: () => [],
+		audit: (input) => audits.push(input),
+	});
+	return { judge, prompts, audits };
+}
+
+const judgeAnswer = (verdict: "allow" | "block", rule: string, reason: string): string =>
+	JSON.stringify({ verdict, rule, reason });
+
+describe("safety judge worker grants (fleet.permissions.mode=judge)", () => {
+	it("grants on allow, denies with the judge's reason on block, and denies on no verdict", async () => {
+		const { broker } = brokerWithLog();
+		const safety = createWorkerSafety();
+		const record = opened(broker);
+		const allow = fakeJudge(() => judgeAnswer("allow", "operator-named", "The operator asked to run the marker script."));
+		deepStrictEqual(await evaluateJudgedGrant({ record, autonomy: "default", safety, judge: allow.judge }), {
+			kind: "grant",
+			reason: "the safety judge allowed it (rule operator-named): The operator asked to run the marker script",
+		});
+		const prompt = allow.prompts[0] ?? "";
+		ok(prompt.includes("origin: a worker the agent dispatched (agent coder)"), prompt);
+		ok(prompt.includes("command: ./mark.sh") && prompt.includes("run the marker script"), prompt);
+		strictEqual(allow.audits[0]?.verdict, "allow");
+		strictEqual(allow.audits[0]?.workerRunId, "run-a1", "the audit row names the worker attempt");
+
+		const block = fakeJudge(() => judgeAnswer("block", "publish", "It publishes the build."));
+		deepStrictEqual(await evaluateJudgedGrant({ record, autonomy: "default", safety, judge: block.judge }), {
+			kind: "deny",
+			reason: "the safety judge blocked it (rule publish): It publishes the build",
+		});
+
+		const silent = fakeJudge(() => "I am not sure.");
+		const none = await evaluateJudgedGrant({ record, autonomy: "default", safety, judge: silent.judge });
+		strictEqual(none.kind, "deny");
+		ok(/gave no verdict \(unparsable\)/u.test(none.reason), none.reason);
+
+		const off = fakeJudge(() => judgeAnswer("allow", "task-local", "Fine."), { ...JUDGE_CONFIG, enabled: false });
+		strictEqual((await evaluateJudgedGrant({ record, autonomy: "default", safety, judge: off.judge })).kind, "deny");
+		strictEqual(off.prompts.length, 0);
+		// At yolo the worker inherits the main session's mode; the judge is not asked.
+		strictEqual((await evaluateJudgedGrant({ record, autonomy: "yolo", safety, judge: block.judge })).kind, "grant");
+		strictEqual(block.prompts.length, 1);
+		broker.dispose();
+	});
+
+	it("never judges an operator-authority ask and shares the session's escalation count", async () => {
+		const { broker } = brokerWithLog();
+		const safety = createWorkerSafety();
+		const block = fakeJudge(() => judgeAnswer("block", "publish", "It publishes the build."));
+		const rail = opened(broker, { approvalAuthority: "operator" });
+		strictEqual(
+			(await evaluateJudgedGrant({ record: rail, autonomy: "default", safety, judge: block.judge })).kind,
+			"deny",
+		);
+		strictEqual(block.prompts.length, 0, "an operator rail never reaches the judge");
+		const record = opened(broker, { workerRequestId: "perm-2", runId: "run-b1" });
+		for (let index = 0; index < 3; index += 1) {
+			strictEqual((await evaluateJudgedGrant({ record, autonomy: "default", safety, judge: block.judge })).kind, "deny");
+		}
+		const escalated = await evaluateJudgedGrant({ record, autonomy: "default", safety, judge: block.judge });
+		ok(escalated.kind === "deny" && /blocked repeatedly/u.test(escalated.reason), escalated.reason);
+		strictEqual(block.prompts.length, 3, "after three blocks a worker ask is denied unjudged");
+		broker.dispose();
+	});
+});
+
 type WorkerEvent = AgentEvent | ClioWorkerEvent;
 type Round = Array<{ name: string; arguments: string }> | { text: string };
 
@@ -308,6 +398,28 @@ describe("worker grant binding", () => {
 			event.type === "clio_coder_permission_grant_execution" ? [event.payload.phase] : [],
 		);
 		deepStrictEqual(executions, ["start", "end"]);
+	});
+
+	it("returns a host denial's reason to the model and counts it toward the refusal limit", {
+		timeout: 30_000,
+	}, async () => {
+		const mark = (arg: string) => ({ name: "bash", arguments: JSON.stringify({ command: `./mark.sh ${arg}` }) });
+		const reason = "the safety judge blocked it (rule publish): It publishes the build";
+		const run = await runGrantWorker([[mark("one")], [mark("two")], [mark("three")], [mark("four")]], (frame, handle) => {
+			handle.resolvePermission?.(frame.requestId, "deny", {
+				attemptToken: TOKEN,
+				attempt: 0,
+				argDigest: frame.argDigest,
+				issuer: "main",
+				reason,
+			});
+		});
+		strictEqual(run.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED);
+		strictEqual(run.frames.length, 3, "the third denied ask ends the run");
+		strictEqual(run.count, "");
+		const resolved = resolutions(run.events).map((payload) => payload.reason ?? "");
+		ok(resolved[0]?.startsWith(`permission denied: ${reason}; bash requires execute confirmation`), resolved[0]);
+		ok(resolved.at(-1)?.startsWith("permission refusal limit reached"), resolved.at(-1));
 	});
 
 	it("denies at once when a headless default run has no one to grant", { timeout: 30_000 }, async () => {

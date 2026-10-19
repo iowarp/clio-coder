@@ -10,9 +10,11 @@ export function grantRequestLines(view: WorkerGrantView): string[] {
 	const expires = Number.isFinite(remainingMs) ? `expires in ${Math.max(0, Math.round(remainingMs / 1000))}s` : "";
 	const authority =
 		view.approvalAuthority === "main"
-			? view.forwardedByMain === true
-				? "with the operator at your request; you may still deny"
-				: "you may decide"
+			? view.reviewer === "safety-judge"
+				? "with the main session's safety judge; you may still deny"
+				: view.forwardedByMain === true
+					? "with the operator at your request; you may still deny"
+					: "you may decide"
 			: "operator authority: only the operator can approve; you may deny";
 	return [
 		`permission request ${view.requestId} from run ${view.runId} (agent ${view.agentId}, attempt ${view.attempt}): ${view.summary}${view.target !== undefined ? ` target: ${view.target}` : ""}`,
@@ -34,6 +36,7 @@ export function requestsAwaitingMain(
 			(view) =>
 				view.approvalAuthority === "main" &&
 				view.forwardedByMain !== true &&
+				view.reviewer === undefined &&
 				(ids.has(view.runId) || ids.has(view.rootRunId)),
 		);
 }

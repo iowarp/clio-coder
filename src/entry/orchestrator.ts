@@ -235,6 +235,7 @@ import {
 	type ProtectedArtifactProtectEvent,
 } from "../domains/safety/protected-artifacts-registration.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
+import type { SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { createRunCostCap, runCostCeilingUsd } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
@@ -1908,6 +1909,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Bound once the session flow ledger exists; dispatch reads it per request.
 	let flowRestrictionsForDispatch: (() => FlowRestrictionSet | null) | null = null;
 	let sessionIdForDispatch: (() => string | null) | null = null;
+	// Bound once the safety judge and the autonomy resolver exist; a worker ask
+	// that arrives before then finds no judge and is denied.
+	let workerAskJudgeForDispatch: { seat: () => SafetyJudgeSeat; autonomy: () => AutonomyLevel } | null = null;
 
 	// Panes are an interactive-surface projection. Headless, ACP, and worker boots
 	// gate detection off so they never resolve a socket path or open a descriptor.
@@ -2002,6 +2006,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				workerPermissionResponder: !options.headless && (!options.acp || acpWorkerPermissions),
 				// A headless steer channel reaches the main session only.
 				workerSteering: !options.headless,
+				// Under fleet.permissions.mode=judge the main session's safety judge
+				// reviews native workers' ordinary asks in this process.
+				workerAskJudge: {
+					seat: () => workerAskJudgeForDispatch?.seat(),
+					autonomy: () => workerAskJudgeForDispatch?.autonomy() ?? "default",
+				},
 				// The merge card rides the same attended gate, and asks through
 				// whichever ask_user handler the TUI or the ACP client has by then.
 				...(!options.headless && (!options.acp || acpInterviews)
@@ -2870,6 +2880,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		session: () => session,
 		safety,
 	});
+	// The same seat answers dispatched workers' asks, so worker and main-session
+	// blocks share one session's escalation counts.
+	workerAskJudgeForDispatch = { seat: () => safetyJudge, autonomy: resolveEffectiveAutonomy };
 	// Sessions whose snapshot start-of-session prune has run in this process.
 	const snapshotPrunedSessions = new Set<string>();
 	const toolRegistry = createRegistry({

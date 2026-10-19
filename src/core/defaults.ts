@@ -126,10 +126,15 @@ export interface SystemOneSettings {
  * main agent to grant ordinary worker asks on native local workers through the
  * grant broker (src/domains/dispatch/grant-broker.ts): the main agent grants
  * them at yolo and forwards them to the operator at any other autonomy level.
+ * "judge", the default, hands ordinary worker asks on native local workers to
+ * the main session's safety judge while the main session runs at autonomy
+ * default (src/domains/dispatch/grant-authority.ts): an allow grants the call,
+ * a block or no verdict denies it. It behaves as "deny" at yolo, when
+ * safety.judge is off, and where no judge can answer.
  * Operator-authority asks always go to the operator, and an ask no one can
  * answer is denied.
  */
-export type WorkerPermissionMode = "deny" | "fail" | "escalate" | "main";
+export type WorkerPermissionMode = "deny" | "fail" | "escalate" | "main" | "judge";
 
 /** Bounds for the escalate posture; the timeout fallback keeps runs non-stall. */
 export interface WorkerEscalationSettings {
@@ -763,7 +768,7 @@ export const DEFAULT_SETTINGS = {
 			agentRoles: [] as ActiveAgentRole[],
 		} as AdaptiveRoutingSettings,
 		permissions: {
-			mode: "deny" as WorkerPermissionMode,
+			mode: "judge" as WorkerPermissionMode,
 			escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		},
 		concurrency: "auto" as "auto" | number,
@@ -954,7 +959,7 @@ fleet:
     agentRoles: []
   nodes: []
   permissions:
-    mode: deny
+    mode: judge
     escalation:
       timeoutMs: 120000
       fallback: deny

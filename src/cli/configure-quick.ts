@@ -242,7 +242,9 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 								? "stop a worker when approval is needed"
 								: settings.fleet.permissions.mode === "main"
 									? "main agent decides ordinary asks at yolo, else asks you; native local workers only"
-									: "ask you; unanswered requests follow the configured fallback",
+									: settings.fleet.permissions.mode === "judge"
+										? "safety judge reviews ordinary asks at default; native local workers only, others deny"
+										: "ask you; unanswered requests follow the configured fallback",
 					],
 					[
 						"Tracked spending",

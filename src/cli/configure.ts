@@ -1519,12 +1519,12 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			{
 				label: "Worker permission mode",
 				controlPath: "fleet.permissions.mode",
-				hint: "deny | fail | escalate | main",
+				hint: "judge | deny | fail | escalate | main",
 				run: async (io) => {
 					await askChoice(
 						io,
 						"Worker permission mode",
-						["deny", "fail", "escalate", "main"],
+						["judge", "deny", "fail", "escalate", "main"],
 						readSettings().fleet.permissions.mode,
 						(value) => {
 							updateSettings((draft) => {

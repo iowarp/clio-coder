@@ -199,6 +199,8 @@ export interface SafetyJudgeAuditRecord {
 	toolCallId?: string;
 	tool: string;
 	actionClass: string;
+	/** Set when the call was a dispatched worker's ask: that attempt's run id. */
+	workerRunId?: string;
 	/** The rule that made admission ask. */
 	askRule?: string;
 	/** `none` is no verdict (see `noVerdict`); `escalated` is a call handed to the operator unjudged. */
@@ -218,6 +220,7 @@ export interface SafetyJudgeAuditInput {
 	toolCallId?: string;
 	tool: string;
 	actionClass: string;
+	workerRunId?: string;
 	askRule?: string;
 	verdict: SafetyJudgeAuditRecord["verdict"];
 	rule?: string;
@@ -483,6 +486,7 @@ export function buildSafetyJudgeAuditRecord(input: SafetyJudgeAuditInput): Safet
 		latencyMs: Math.max(0, Math.round(input.latencyMs)),
 	};
 	if (input.toolCallId !== undefined) record.toolCallId = input.toolCallId;
+	if (input.workerRunId !== undefined) record.workerRunId = input.workerRunId;
 	if (input.askRule !== undefined) record.askRule = input.askRule;
 	if (input.rule !== undefined) record.rule = input.rule;
 	if (input.reason !== undefined) record.reason = redactString(input.reason);

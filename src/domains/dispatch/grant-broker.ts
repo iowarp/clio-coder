@@ -61,6 +61,12 @@ export interface GrantRequestInput {
 	reasons: ReadonlyArray<string>;
 	/** Epoch ms after which the request expires. */
 	deadlineAt: number;
+	/**
+	 * Set when the main session's safety judge decides this main-authority ask
+	 * (fleet.permissions.mode=judge) instead of the main agent; the dispatch call
+	 * then does not yield for it.
+	 */
+	reviewer?: "safety-judge";
 }
 
 export interface GrantRecord extends GrantRequestInput {

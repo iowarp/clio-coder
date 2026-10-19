@@ -172,7 +172,10 @@ export function askRouteForMode(mode: WorkerPermissionMode): {
 	// escalate always meant an operator decision; it keeps that meaning (Q7 revised).
 	if (mode === "escalate") return { asks: "main", approvalAuthority: "operator" };
 	// The explicit opt-in for the main agent to decide ordinary worker asks.
-	if (mode === "main") return { asks: "main", approvalAuthority: "main" };
+	// Under judge the main session's safety judge decides them with the same
+	// main authority, so neither can clear an operator rail; dispatch resolves
+	// judge to deny wherever no judge can answer.
+	if (mode === "main" || mode === "judge") return { asks: "main", approvalAuthority: "main" };
 	return { asks: mode, approvalAuthority: "operator" };
 }
 

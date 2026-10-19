@@ -140,6 +140,11 @@ export interface SafetyJudgeSubject {
 	turnId?: string;
 	toolCallId?: string;
 	signal?: AbortSignal;
+	/**
+	 * Set when the ask is a dispatched worker's, reviewed in the orchestrator.
+	 * Only a main-authority worker ask is judged; its operator rails are not.
+	 */
+	worker?: { runId: string; agentId: string };
 }
 
 /** The rule id an ask carries: its confirmation rail, damage-control match or policy rule. */
@@ -153,7 +158,11 @@ function askRuleId(decision: SafetyDecision): string | undefined {
 export function operatorOnlyAsk(subject: SafetyJudgeSubject): string | null {
 	if (subject.harness === true) return "a harness call";
 	if (OPERATOR_ONLY_TOOLS.has(subject.tool)) return `${subject.tool} is the operator's own channel`;
-	if (subject.approvalAuthority !== "operator") return "a worker escalation";
+	if (subject.worker !== undefined) {
+		// A worker's ordinary ask carries main authority, which the judge exercises
+		// for the main session; a rail only a person clears stays with the operator.
+		if (subject.approvalAuthority !== "main") return "a worker's operator-authority ask";
+	} else if (subject.approvalAuthority !== "operator") return "a worker escalation";
 	if (subject.dispatchPlan === true) return "a dispatch plan approval";
 	if (subject.source === "session-consent" || subject.source === "git-policy") return `a ${subject.source} ask`;
 	const rule = askRuleId(subject.decision);
@@ -214,6 +223,8 @@ export type SafetyJudgeCompletion = (request: {
 export interface SafetyJudgeNote {
 	kind: "block" | "escalation";
 	tool: string;
+	/** The dispatched worker attempt whose ask was judged. */
+	workerRunId?: string;
 	rule?: string;
 	reason: string;
 	consecutiveBlocks: number;
@@ -294,6 +305,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				...(subject.toolCallId !== undefined ? { toolCallId: subject.toolCallId } : {}),
 				tool: subject.tool,
 				actionClass,
+				...(subject.worker !== undefined ? { workerRunId: subject.worker.runId } : {}),
 				...(askRule !== undefined ? { askRule } : {}),
 				...(route.target !== undefined ? { target: route.target } : {}),
 				...(route.model !== undefined ? { model: route.model } : {}),
@@ -387,6 +399,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				const position = {
 					...(subject.turnId !== undefined ? { turnId: subject.turnId } : {}),
 					...(subject.toolCallId !== undefined ? { toolCallId: subject.toolCallId } : {}),
+					...(subject.worker !== undefined ? { workerRunId: subject.worker.runId } : {}),
 				};
 				note({ kind: "block", tool: subject.tool, rule: parsed.rule, reason: parsed.reason, ...counts, ...position });
 				if (after.consecutive >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS || after.total >= SAFETY_JUDGE_TOTAL_BLOCKS) {
@@ -542,7 +555,7 @@ function safetyJudgeSystemPrompt(config: Pick<SafetyJudgeConfig, "environment" |
 /** The dynamic part: the operator's messages, then the call. */
 function safetyJudgeUserPrompt(input: {
 	operatorMessages: ReadonlyArray<string>;
-	subject: Pick<SafetyJudgeSubject, "tool" | "args" | "decision">;
+	subject: Pick<SafetyJudgeSubject, "tool" | "args" | "decision" | "worker">;
 	consequences: ReadonlyArray<string>;
 }): string {
 	const { subject } = input;
@@ -564,6 +577,11 @@ function safetyJudgeUserPrompt(input: {
 	const askReason = decision.kind === "allow" ? undefined : decision.rejection.short;
 	const policyReason = decision.policy?.reasons.find((reason) => reason.trim().length > 0);
 	const facts = [
+		...(subject.worker !== undefined
+			? [
+					`origin: a worker the agent dispatched (agent ${boundedLine(subject.worker.agentId, 60)}); it acts for the agent and has no authority beyond the operator's messages`,
+				]
+			: []),
 		`tool: ${subject.tool}`,
 		`action class: ${decision.classification.actionClass}`,
 		...(askRule !== undefined ? [`rule that asked: ${askRule}`] : []),
@@ -604,12 +622,13 @@ function renderCallArguments(tool: string, args: Readonly<Record<string, unknown
 		];
 	}
 	if (tool === ToolNames.Write) {
+		const digested = digestedBytes(source.content);
 		const content = str("content") ?? "";
 		return [
 			`path: ${redactSecretString(str("path") ?? "(none)")}`,
-			`content size: ${Buffer.byteLength(content, "utf8")} bytes`,
+			`content size: ${digested ?? Buffer.byteLength(content, "utf8")} bytes`,
 			"content head:",
-			clip(redactSecretString(content), CONTENT_HEAD_CHARS),
+			digested !== undefined ? DIGESTED_TEXT : clip(redactSecretString(content), CONTENT_HEAD_CHARS),
 		];
 	}
 	if (tool === ToolNames.Edit) {
@@ -622,8 +641,8 @@ function renderCallArguments(tool: string, args: Readonly<Record<string, unknown
 				break;
 			}
 			const record = edit !== null && typeof edit === "object" ? (edit as Record<string, unknown>) : {};
-			const oldText = typeof record.oldText === "string" ? record.oldText : "";
-			const newText = typeof record.newText === "string" ? record.newText : "";
+			const oldText = typeof record.oldText === "string" ? record.oldText : textOrDigest(record.oldText);
+			const newText = typeof record.newText === "string" ? record.newText : textOrDigest(record.newText);
 			const shownOld = clip(redactSecretString(oldText), Math.min(300, left));
 			const shownNew = clip(redactSecretString(newText), Math.max(0, left - shownOld.length));
 			left -= shownOld.length + shownNew.length;
@@ -638,6 +657,24 @@ function renderCallArguments(tool: string, args: Readonly<Record<string, unknown
 		json = "(arguments could not be serialized)";
 	}
 	return [clip(json, ARGUMENTS_MAX_CHARS)];
+}
+
+/**
+ * A worker's ask crosses with long strings replaced by their digest and size
+ * (src/domains/safety/grant-effect.ts); the judge is told so instead of
+ * reading an empty value.
+ */
+const DIGESTED_TEXT = "(not shown: the worker sent only a digest of this text)";
+
+function digestedBytes(value: unknown): number | undefined {
+	if (value === null || typeof value !== "object" || !("$sha256" in value)) return undefined;
+	const bytes = (value as { bytes?: unknown }).bytes;
+	return typeof bytes === "number" ? bytes : undefined;
+}
+
+function textOrDigest(value: unknown): string {
+	const bytes = digestedBytes(value);
+	return bytes === undefined ? "" : `${DIGESTED_TEXT.slice(0, -1)}, ${bytes} bytes)`;
 }
 
 function clip(text: string, maxChars: number): string {

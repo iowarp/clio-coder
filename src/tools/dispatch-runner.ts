@@ -173,7 +173,8 @@ function watchGrantYield(dispatch: DispatchContract, runIds: () => ReadonlyArray
 	const grants = dispatch.grants;
 	if (grants === undefined) return { requested: new Promise(() => {}), dispose: () => {} };
 	const matches = (view: WorkerGrantView): boolean => {
-		if (view.approvalAuthority !== "main" || view.state !== "pending") return false;
+		// A judge-reviewed ask settles on the safety judge's verdict; the call need not yield for it.
+		if (view.approvalAuthority !== "main" || view.state !== "pending" || view.reviewer !== undefined) return false;
 		const ids = runIds();
 		return ids.includes(view.rootRunId) || ids.includes(view.runId);
 	};

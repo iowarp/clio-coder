@@ -189,6 +189,8 @@ export interface WorkerGrantView {
 	deadlineAt: string;
 	reason?: string;
 	forwardedByMain?: true;
+	/** The main session's safety judge decides this request; the main agent does not. */
+	reviewer?: "safety-judge";
 }
 
 export type MainGrantOutcome =

@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
+import { effectiveWorkerPermissionMode } from "../../src/domains/dispatch/grant-authority.js";
 import {
 	mainGrantsUnavailable,
 	parseWorkerPermissionDeclaration,
@@ -116,6 +117,32 @@ describe("worker permit", () => {
 			input({ mode: "main", inherited: { git: "inspect", asks: "main", approvalAuthority: "operator" } }),
 		);
 		strictEqual(retried.allowance.approvalAuthority, "operator");
+	});
+
+	it("routes judge with main authority and runs it as deny wherever no judge answers", () => {
+		const judge = resolveWorkerPermit(input({ mode: "judge" }));
+		deepStrictEqual(judge.allowance, { git: "inspect", asks: "main", approvalAuthority: "main" });
+		strictEqual(workerPermissionModeForPermit(judge.allowance), "escalate");
+
+		const answered = { autonomy: "default", judgeEnabled: true, judgeSeated: true, boundGrants: true } as const;
+		strictEqual(effectiveWorkerPermissionMode({ mode: "judge", ...answered }), "judge");
+		for (const unanswered of [
+			{ autonomy: "yolo" as const },
+			{ judgeEnabled: false },
+			{ judgeSeated: false },
+			{ boundGrants: false },
+		]) {
+			strictEqual(
+				effectiveWorkerPermissionMode({ mode: "judge", ...answered, ...unanswered }),
+				"deny",
+				JSON.stringify(unanswered),
+			);
+		}
+		// Explicit modes keep their meaning whatever the judge's state.
+		for (const mode of ["deny", "fail", "escalate", "main"] as const) {
+			strictEqual(effectiveWorkerPermissionMode({ mode, ...answered }), mode);
+			strictEqual(effectiveWorkerPermissionMode({ mode, ...answered, judgeEnabled: false }), mode);
+		}
 	});
 
 	it("narrows per task and refuses a widening request instead of ignoring it", () => {

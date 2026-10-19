@@ -188,6 +188,7 @@ import {
 	type RunEffectsRecorder,
 	recordToolExecutionEffects,
 } from "../safety/run-effects.js";
+import type { SafetyJudgeSeat } from "../safety/safety-judge.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { RecordOnlyWorkerPermit, WorkerMcpAttestation } from "../safety/worker-permit.js";
 import {
@@ -294,7 +295,7 @@ import {
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
-import { evaluateMainGrant } from "./grant-authority.js";
+import { effectiveWorkerPermissionMode, evaluateJudgedGrant, evaluateMainGrant } from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
 import {
 	classifyHeartbeat,
@@ -632,6 +633,15 @@ export interface DispatchBundleOptions {
 	 * fallback at once instead of waiting out the timeout (F9).
 	 */
 	workerPermissionResponder?: boolean;
+	/**
+	 * The main session's safety judge and live autonomy, present only in the
+	 * orchestrator. Under fleet.permissions.mode=judge it answers a native local
+	 * worker's main-authority asks in this process; without it judge runs as deny.
+	 */
+	workerAskJudge?: {
+		seat(): SafetyJudgeSeat | undefined;
+		autonomy(): AutonomyLevel;
+	};
 	/**
 	 * False when nothing can steer a dispatched worker: a headless session, the
 	 * fleet CLI, or `run --agent` without a steer channel. The worker prompt then
@@ -1944,6 +1954,12 @@ interface DispatchWorkerSpecInput {
 	permit: WorkerPermit;
 	/** Attempt binding for a main-authority permit's live grants (Phase D). */
 	grantAttempt?: WorkerGrantBinding;
+	/**
+	 * Present only for a judge-routed permit: true when this process's safety
+	 * judge answers the attempt's main-authority asks, false when the placement
+	 * cannot carry a bound grant and they are denied at once.
+	 */
+	judgeResponder?: boolean;
 	/** The main agent's effective autonomy when the attempt spawns. */
 	mainAutonomy?: AutonomyLevel;
 	/** The session's extension tool hooks at spawn; only a native worker's own tool loop can hold a call for them. */
@@ -2112,13 +2128,30 @@ function resolveDispatchPermit(
 	pathScope: DispatchPathScope,
 	settings: EffectiveSettings,
 	target: ResolvedTarget,
+	judgeSeated: boolean,
 	mcp?: WorkerMcpAttestation,
 ): WorkerPermit {
-	const permit = resolveDispatchPermitOnce(req, recipe, spec, tools, readOnly, pathScope, settings, target, mcp);
+	const permit = resolveDispatchPermitOnce(
+		req,
+		recipe,
+		spec,
+		tools,
+		readOnly,
+		pathScope,
+		settings,
+		target,
+		judgeSeated,
+		mcp,
+	);
 	// A run started outside the dispatch tool (a slash command, a watchdog, a
 	// host helper) has no main agent waiting on it. Its main-routed asks narrow
-	// to deny, and the permit on the receipt says so.
-	if (mainGrantsUnavailable(permit.allowance) && req.mainGrantRoute === undefined) {
+	// to deny, and the permit on the receipt says so. The safety judge needs no
+	// main agent to wait, so a judge-routed permit keeps its route.
+	if (
+		mainGrantsUnavailable(permit.allowance) &&
+		req.mainGrantRoute === undefined &&
+		!judgeRoutedPermit(permit, settings)
+	) {
 		return resolveDispatchPermitOnce(
 			{ ...req, permitNarrowing: { ...(req.permitNarrowing ?? {}), asks: "deny" } },
 			recipe,
@@ -2128,10 +2161,16 @@ function resolveDispatchPermit(
 			pathScope,
 			settings,
 			target,
+			judgeSeated,
 			mcp,
 		);
 	}
 	return permit;
+}
+
+/** True when the main session's safety judge, not the main agent, decides this permit's main-authority asks. */
+function judgeRoutedPermit(permit: WorkerPermit, settings: EffectiveSettings): boolean {
+	return mainGrantsUnavailable(permit.allowance) && settings?.fleet.permissions.mode === "judge";
 }
 
 function resolveDispatchPermitOnce(
@@ -2143,6 +2182,7 @@ function resolveDispatchPermitOnce(
 	pathScope: DispatchPathScope,
 	settings: EffectiveSettings,
 	target: ResolvedTarget,
+	judgeSeated: boolean,
 	mcp?: WorkerMcpAttestation,
 ): WorkerPermit {
 	const contract = dispatchResultContract(req, recipe);
@@ -2163,7 +2203,13 @@ function resolveDispatchPermitOnce(
 		...(req.permitNarrowing !== undefined ? { narrowing: req.permitNarrowing } : {}),
 		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
 		operatorAutonomy: settings?.safety.autonomy ?? "default",
-		mode: settings?.fleet.permissions.mode ?? "deny",
+		mode: effectiveWorkerPermissionMode({
+			mode: settings?.fleet.permissions.mode ?? "deny",
+			autonomy: settings?.safety.autonomy ?? "default",
+			judgeEnabled: settings?.safety.judge.enabled === true,
+			judgeSeated,
+			boundGrants: target.runtime.kind === "http" && runtimeEnforcement(target.runtime).grantPauseResume,
+		}),
 		hostHelper,
 		runtime: {
 			id: target.runtime.id,
@@ -3064,8 +3110,15 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		}
 		const attended = input.workerPermissionResponder;
 		// With nobody to answer, an escalation could only ever time out, so the
-		// worker applies the fallback at once and says why (F9).
-		const unattended = mainRouted ? !attended && input.mainAutonomy !== "yolo" : !attended;
+		// worker applies the fallback at once and says why (F9). A judge-routed
+		// ask is answered by the safety judge whether or not an operator is
+		// attended; its operator rails still need one.
+		const unattended =
+			input.judgeResponder !== undefined
+				? !input.judgeResponder
+				: mainRouted
+					? !attended && input.mainAutonomy !== "yolo"
+					: !attended;
 		const operatorUnattended = mainRouted && !attended && !unattended;
 		if (escalation || unattended || mainRouted) {
 			spec.escalation = {
@@ -3626,6 +3679,7 @@ export function createDispatchBundle(
 		deadlineAt: new Date(record.deadlineAt).toISOString(),
 		...(record.reason !== undefined ? { reason: record.reason } : {}),
 		...(record.forwardedByMain === true ? { forwardedByMain: true as const } : {}),
+		...(record.reviewer !== undefined ? { reviewer: record.reviewer } : {}),
 	});
 	const publishGrantChange = (record: GrantRecord, previous: GrantState | null): void => {
 		const origin = `worker:${record.runId}`;
@@ -3655,7 +3709,8 @@ export function createDispatchBundle(
 			// process has one; an ordinary ask waits for the main agent, whose
 			// dispatch call yields on it.
 			requested(record.approvalAuthority === "operator" && grantAttended);
-			if (record.approvalAuthority === "main") {
+			// The safety judge decides a judge-routed ask, so the main agent is not woken for it.
+			if (record.approvalAuthority === "main" && record.reviewer === undefined) {
 				const view = grantView(record);
 				for (const listener of grantPendingListeners) {
 					try {
@@ -3690,7 +3745,9 @@ export function createDispatchBundle(
 					: record.issuer !== undefined
 						? record.forwardedByMain === true && record.issuer === "operator"
 							? "operator:forwarded-by-main"
-							: record.issuer
+							: record.reviewer === "safety-judge" && record.issuer === "main"
+								? "safety-judge"
+								: record.issuer
 						: "worker";
 		context.bus.emit(BusChannels.PermissionResolved, {
 			status,
@@ -5370,9 +5427,10 @@ export function createDispatchBundle(
 			pathScope,
 			settings,
 			target,
+			options?.workerAskJudge !== undefined,
 			admission.mcp,
 		);
-		assertMainGrantRoutable(req, target.runtime, permit);
+		if (!judgeRoutedPermit(permit, settings)) assertMainGrantRoutable(req, target.runtime, permit);
 		const workerPermissionMode = workerPermissionModeForPermit(permit.allowance);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionMode);
 		const effectiveAdmission: DispatchAdmissionStage = {
@@ -6807,10 +6865,18 @@ export function createDispatchBundle(
 		const grantAttempt: WorkerGrantBinding | undefined = mainGrantsUnavailable(lifecycle.permit.allowance)
 			? { attemptToken: randomBytes(16).toString("hex"), attempt: req.lineage?.attempt ?? 0 }
 			: undefined;
+		// Under fleet.permissions.mode=judge this process's safety judge decides
+		// the attempt's main-authority asks. It reaches only a worker this process
+		// launched itself; any other placement denies them at once.
+		const judgeRouted = judgeRoutedPermit(lifecycle.permit, lifecycle.settings);
+		const judgeReachable =
+			judgeRouted &&
+			options?.workerAskJudge !== undefined &&
+			(placement === null || (placement.node.kind === "local" && placement.spawn === undefined));
 		let spec: WorkerSpec;
 		try {
-			assertMainGrantRoutable(req, lifecycle.target.runtime, lifecycle.permit, placement?.node ?? null);
-			if (grantAttempt !== undefined && placement?.spawn !== undefined) {
+			if (!judgeRouted) assertMainGrantRoutable(req, lifecycle.target.runtime, lifecycle.permit, placement?.node ?? null);
+			if (grantAttempt !== undefined && placement?.spawn !== undefined && !judgeRouted) {
 				throw new Error(
 					"dispatch: fleet.permissions.mode=main routes worker asks to the main agent, but this placement launches through a remote transport, which cannot carry a bound grant yet; use fleet.permissions.mode escalate or deny for this work",
 				);
@@ -6870,6 +6936,7 @@ export function createDispatchBundle(
 					workerPermissionResponder: options?.workerPermissionResponder === true,
 					permit: lifecycle.permit,
 					...(grantAttempt !== undefined ? { grantAttempt } : {}),
+					...(judgeRouted ? { judgeResponder: judgeReachable } : {}),
 					mainAutonomy: lifecycle.settings?.safety.autonomy ?? "default",
 					...(options?.workerHooks ? { extensionHooks: options.workerHooks.declarations() } : {}),
 				},
@@ -6981,8 +7048,13 @@ export function createDispatchBundle(
 				// The broker expires a little before the worker's own timer, so the
 				// denial it sends is the one that settles the request.
 				deadlineAt: now() + Math.max(1_000, request.timeoutMs - GRANT_DEADLINE_MARGIN_MS),
+				...(judgeReachable && request.authority === "main" ? { reviewer: "safety-judge" as const } : {}),
 			});
-			if (!opened.ok) denyAtOnce(opened.reason);
+			if (!opened.ok) {
+				denyAtOnce(opened.reason);
+				return;
+			}
+			if (opened.record.reviewer === "safety-judge") void decideJudgedGrant(opened.record, req.turnConstraints);
 		};
 		// A worker's call waits on its answer, so every request is answered, with
 		// the hook's own failure policy when it cannot run.
@@ -9187,9 +9259,10 @@ export function createDispatchBundle(
 			pathScope,
 			settings,
 			target,
+			options?.workerAskJudge !== undefined,
 			admission.mcp,
 		);
-		assertMainGrantRoutable(req, target.runtime, previewPermit);
+		if (!judgeRoutedPermit(previewPermit, settings)) assertMainGrantRoutable(req, target.runtime, previewPermit);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionModeForPermit(previewPermit.allowance));
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);
@@ -10096,6 +10169,44 @@ export function createDispatchBundle(
 	}
 
 	/**
+	 * The safety judge's answer to one worker ask under fleet.permissions.mode=judge,
+	 * decided in this process and never inside the worker. The verdict is
+	 * delivered through the broker like a main grant, bound to the attempt and
+	 * argument digest the worker parked; a request that left pending while the
+	 * judge read it (expiry, cancel, worker exit) keeps that settlement.
+	 */
+	async function decideJudgedGrant(
+		record: GrantRecord,
+		turnConstraints: DispatchRequest["turnConstraints"],
+	): Promise<void> {
+		const judge = options?.workerAskJudge;
+		const settled = new AbortController();
+		void grantBroker.waitForDecision(record.requestId).then(() => settled.abort());
+		let verdict: Awaited<ReturnType<typeof evaluateJudgedGrant>>;
+		try {
+			verdict = await evaluateJudgedGrant({
+				record,
+				autonomy: judge?.autonomy() ?? "default",
+				safety,
+				judge: judge?.seat(),
+				...(turnConstraints !== undefined ? { turnConstraints } : {}),
+				signal: settled.signal,
+			});
+		} catch (error) {
+			verdict = {
+				kind: "deny",
+				reason: `the safety judge failed (${error instanceof Error ? error.message : String(error)}), so the ask is denied`,
+			};
+		}
+		if (grantBroker.get(record.requestId)?.state !== "pending") return;
+		grantBroker.decide(record.requestId, {
+			decision: verdict.kind === "grant" ? "approve" : "deny",
+			issuer: "main",
+			reason: verdict.reason,
+		});
+	}
+
+	/**
 	 * The main agent's answer to one worker ask (Phase D). Denial always
 	 * settles. Approval is admitted by grant-authority.ts: granted as the main
 	 * agent's own call at yolo, forwarded to an attended operator below yolo,
@@ -10129,6 +10240,12 @@ export function createDispatchBundle(
 					? `request ${input.requestId} was already denied`
 					: `denied request ${input.requestId}; the worker continues without the ${result.record.tool} call`,
 			};
+		}
+		if (record.reviewer === "safety-judge" && record.state === "pending") {
+			return failed(
+				`request ${input.requestId} is with the main session's safety judge (fleet.permissions.mode=judge); it settles on the judge's verdict, so do not approve it yourself`,
+				record,
+			);
 		}
 		if (record.state !== "pending") {
 			const result = grantBroker.decide(input.requestId, { ...base, decision: "approve", issuer: "main" });

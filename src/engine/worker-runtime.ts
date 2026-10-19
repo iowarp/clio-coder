@@ -1664,6 +1664,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		authority: ApprovalAuthority;
 		/** Digest a bound decision must name. */
 		argDigest: string;
+		/**
+		 * The refusal a host denial of this main-authority execute ask counts
+		 * toward WORKER_REFUSAL_LIMIT, as a deny-posture refusal would: a
+		 * granting host that keeps refusing is no route either.
+		 */
+		refusal?: WorkerRefusal;
 		timer: ReturnType<typeof setTimeout>;
 	}
 	let activeEscalation: ActiveEscalation | null = null;
@@ -1682,6 +1688,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			clearTimeout(activeEscalation.timer);
 			activeEscalation = null;
 		}
+	};
+	/**
+	 * Count a host-refused main-authority execute ask. At the limit the run
+	 * ends as permission_required naming every refused command; returns that
+	 * final reason, or null while the worker may take another route.
+	 */
+	const countHostRefusal = (refusal: WorkerRefusal | undefined): string | null => {
+		if (refusal === undefined) return null;
+		executeRefusals.push(refusal);
+		return executeRefusals.length >= WORKER_REFUSAL_LIMIT ? workerRefusalLimitReason(executeRefusals) : null;
+	};
+	const endAtRefusalLimit = (reason: string): void => {
+		permissionFailure = true;
+		registry.cancelParkedCalls(reason);
+		process.stderr.write(`[worker] ${reason}\n`);
+		agent.abort();
 	};
 	const emitGrantExecution = (active: ActiveEscalation, event: GrantExecutionEvent): void => {
 		emit({
@@ -1751,11 +1773,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			source === "timeout"
 				? `escalation timed out with no ${grantBinding !== undefined ? "" : "operator "}decision`
 				: `${decider} denied`;
-		const reason = effectiveFail
+		const deniedReason = effectiveFail
 			? `permission required for ${active.tool} (${active.actionClass}); ${denialContext} and workers fallback=fail ends this run`
 			: hostReason !== undefined
 				? `permission denied: ${hostReason}; ${active.tool} requires ${active.actionClass} confirmation`
 				: `permission denied by ${source === "timeout" ? "escalation timeout fallback" : decider}: ${active.tool} requires ${active.actionClass} confirmation`;
+		const limitReason = source === "main" && !effectiveFail ? countHostRefusal(active.refusal) : null;
+		const reason = limitReason ?? deniedReason;
 		emit({
 			type: "clio_coder_permission_resolved",
 			payload: {
@@ -1773,6 +1797,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			permissionFailure = true;
 			registry.cancelParkedCalls(reason);
 			agent.abort();
+			return true;
+		}
+		if (limitReason !== null) {
+			endAtRefusalLimit(limitReason);
 			return true;
 		}
 		if (source === "timeout") registry.cancelParkedCalls(reason);
@@ -1875,7 +1903,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						: remembered.source === "main"
 							? "main agent"
 							: "operator";
-				const reason = `permission denied by ${decider}: an identical ${call.tool} call under the same permission conditions was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
+				const limitReason =
+					remembered.source === "main" && actionClass === "execute"
+						? countHostRefusal(describeWorkerRefusal(call, decision))
+						: null;
+				const reason =
+					limitReason ??
+					`permission denied by ${decider}: an identical ${call.tool} call under the same permission conditions was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
 				emit({
 					type: "clio_coder_permission_resolved",
 					payload: {
@@ -1888,7 +1922,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						reason,
 					},
 				} as ClioWorkerEvent);
-				registry.cancelParkedCall(meta.requestId, reason);
+				if (limitReason !== null) endAtRefusalLimit(limitReason);
+				else registry.cancelParkedCall(meta.requestId, reason);
 				return;
 			}
 			if (activeEscalation !== null) return;
@@ -1910,7 +1945,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// escalation the orchestrator never resolves. clearActiveEscalation
 			// clears it on every resolution path.
 			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
-			activeEscalation = { requestId, tool: call.tool, actionClass, callKey, authority, argDigest, timer };
+			activeEscalation = {
+				requestId,
+				tool: call.tool,
+				actionClass,
+				callKey,
+				authority,
+				argDigest,
+				...(grantBinding !== undefined && authority === "main" && actionClass === "execute"
+					? { refusal: describeWorkerRefusal(call, decision) }
+					: {}),
+				timer,
+			};
 			// The decider sees this exact call through a sanitized allowlisted
 			// preview of its object. Unlisted fields cross only as type-and-size
 			// summaries on this display event; the effect descriptor a grant is

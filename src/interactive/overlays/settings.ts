@@ -1385,8 +1385,8 @@ export function buildSettingItems(
 		settingItem("autonomy", settings.safety.autonomy, {
 			values: ["default", "yolo"],
 		}),
-		settingItem("workers.onPermission", settings.fleet.permissions.mode ?? "deny", {
-			values: ["deny", "fail", "escalate", "main"],
+		settingItem("workers.onPermission", settings.fleet.permissions.mode ?? "judge", {
+			values: ["judge", "deny", "fail", "escalate", "main"],
 		}),
 		settingItem("workers.escalation.timeoutMs", String(escalation.timeoutMs), {
 			submenu: editNumberSubmenu("Edit escalation timeout (ms)", "workers.escalation.timeoutMs"),
@@ -2429,7 +2429,7 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			else if (value === "yolo") settings.safety.autonomy = "yolo";
 			return;
 		case "workers.onPermission":
-			if (value === "deny" || value === "fail" || value === "escalate" || value === "main")
+			if (value === "deny" || value === "fail" || value === "escalate" || value === "main" || value === "judge")
 				settings.fleet.permissions.mode = value;
 			return;
 		case "delegation.defaults.toolGovernance":
@@ -3091,7 +3091,12 @@ interface RowColumns {
 
 const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 	"safety.autonomy": { default: "Default", yolo: "YOLO" },
-	"fleet.permissions.mode": { deny: "Deny the tool", fail: "Stop the worker", escalate: "Ask me" },
+	"fleet.permissions.mode": {
+		judge: "Safety judge",
+		deny: "Deny the tool",
+		fail: "Stop the worker",
+		escalate: "Ask me",
+	},
 	"fleet.permissions.escalation.fallback": { deny: "Deny the tool", fail: "Stop the worker" },
 	"integrations.externalAgents.defaults.toolGovernance": {
 		"clio-coder-policy": "Clio permissions",
