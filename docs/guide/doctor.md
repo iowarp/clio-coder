@@ -168,7 +168,13 @@ host ([main-session.ts](../../src/core/sandbox/main-session.ts)). With a sandbox
 backend and `safety.sandbox` not `off` it is `OK` and reads
 `default-autonomy shell commands run in the <backend> sandbox; writable roots: ...`,
 listing the workspace, the scratch roots, the package caches and the
-repository's git dirs. Without one it is `WARN` and reads
+repository's git dirs, then how many secret files in the workspace and scratch
+roots are masked and how Unix sockets are treated: refused by a seccomp
+filter, denied by the Seatbelt profile, allowed by
+`safety.sandboxUnixSockets: allow`, or masked as found because the filter could
+not load. The row is `WARN` when the secret-file search stopped at its limit or
+sockets fall back to masks, since abstract sockets then stay reachable.
+Without a backend it is `WARN` and reads
 `default-autonomy shell commands run uncontained and keep the approval rails (<reason>)`.
 The row also says how yolo treats scripts: `yolo runs unsandboxed`, sandboxed
 under `safety.sandbox: required`, or a `WARN` that yolo refuses scripts because

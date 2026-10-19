@@ -291,7 +291,7 @@ Runs a fresh `/bin/bash` per call and returns stdout/stderr. Login environment i
 | --- | --- |
 | `command` | Required shell command. |
 | `cwd` | Optional; must remain within the session workspace, except in a contained call at `default` or at `yolo`. |
-| `unsandboxed` | Optional boolean. At `default`, run outside the main-session sandbox; ask for it only after a command failed because of the sandbox, for example for a credential or a path outside the writable roots. The call then meets the uncontained rails, so the safety judge reviews a command outside the recognized set. |
+| `unsandboxed` | Optional boolean. At `default`, run outside the main-session sandbox; ask for it only after a command failed because of the sandbox, for example for a credential variable, a secret file, a local Unix socket or a path outside the writable roots. The call then meets the uncontained rails, so the safety judge reviews a command outside the recognized set. |
 | `timeout_ms` | Optional, default 300000 ms. |
 | `output_policy` | `full`, `bounded` (default), `summary`, or `metadata-only`. |
 
