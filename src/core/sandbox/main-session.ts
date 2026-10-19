@@ -242,6 +242,18 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 }
 
 /**
+ * Impure: the workspace repository's git control paths, the hooks
+ * directories, config and commondir files and `.git` pointer files that
+ * {@link resolveMainSandboxPolicy} keeps read-only, present or not. The
+ * policy engine asks before a typed tool writes one, so typed writes and the
+ * contained shell agree on what runs code outside the sandbox.
+ */
+export function mainSandboxGitControlPaths(workspace: string): string[] {
+	const git = mainSandboxGitLayout(workspace);
+	return git === undefined ? [] : [...new Set([...git.readOnlyPaths, ...git.absentHooks, ...git.absentFiles])];
+}
+
+/**
  * Pure: the writable roots are the workspace, the scratch roots, the cache
  * roots and the workspace repository's git dirs, and nothing else. Each other root's .git
  * and every .clio-coder are re-bound read-only as the worker policy does, the

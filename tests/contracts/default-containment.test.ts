@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,7 +15,9 @@ import { effectiveScratchRoots } from "../../src/domains/safety/scratch-roots.js
 import type { WorkspaceSnapshotOutcome } from "../../src/domains/workspace-snapshots/store.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { editTool } from "../../src/tools/edit.js";
 import { createRegistry, type RegistryDeps } from "../../src/tools/registry.js";
+import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function workspace(prefix: string): string {
@@ -163,6 +165,72 @@ test("reads of Clio's credential store are floor at default and at yolo", async 
 			strictEqual(decision.reasonCode, "yolo-floor:yolo-floor-clio-credentials", JSON.stringify(call.args));
 		}
 	}
+});
+
+test("typed writes and edits inside a scratch root run at default with no ask, even with the sandbox off", async (t) => {
+	const cwd = workspace("clio-contained-scratch-write-ws-");
+	// $TMPDIR is a built-in scratch root, and the typed tools resolve paths against the process cwd.
+	const scratch = workspace("clio-contained-scratch-write-");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const session = defaultSession(cwd, { sandbox: false, snapshots: false });
+	session.registry.register(writeTool);
+	session.registry.register(editTool);
+	const target = join(scratch, "smoke", "analyze.py");
+	const calls: ClassifierCall[] = [
+		{ tool: ToolNames.Write, args: { path: target, content: "print(1)\n" } },
+		// The file now exists, so these used to ask under outside-file-replacement.
+		{ tool: ToolNames.Edit, args: { path: target, edits: [{ oldText: "print(1)", newText: "print(2)" }] } },
+		{ tool: ToolNames.Write, args: { path: target, content: "print(3)\n" } },
+	];
+	for (const call of calls) {
+		const verdict = await session.registry.invoke(call);
+		strictEqual(verdict.kind, "ok", verdict.kind === "blocked" ? verdict.reason : call.tool);
+	}
+	strictEqual(readFileSync(target, "utf8"), "print(3)\n");
+	deepStrictEqual(session.reviewed, []);
+});
+
+test("outside scratch roots, in a scratch repository's .git and on secret paths the write rails still hold", () => {
+	const cwd = workspace("clio-contained-scratch-rails-ws-");
+	const scratch = workspace("clio-contained-scratch-rails-");
+	const safety = createWorkerSafety({ cwd });
+	const operatorDefault: OperatorDefaultScope = { level: "default", scratchRoots: [], sandbox: true, snapshots: true };
+	const write = (path: string): ClassifierCall => ({ tool: ToolNames.Write, args: { path, content: "x" } });
+	const admit = (call: ClassifierCall) =>
+		evaluateAdmission({ principal: "main", effects: [call], safety, autonomy: "default", operatorDefault });
+	// /opt is never a scratch root, so this path is outside every one on any host.
+	for (const path of ["/opt/clio-contained-scratch-probe/x.txt", join(scratch, "repo", ".git", "hooks", "pre-commit")]) {
+		const verdict = admit(write(path));
+		strictEqual(verdict.kind === "ask" && verdict.decision.policy?.reasonCode, "system-modify-confirm", path);
+	}
+	const secret = admit(write(join(scratch, "server.pem")));
+	strictEqual(secret.kind === "deny" && secret.decision.policy?.reasonCode, "path-policy:zeroAccessPaths");
+	// Without the operator's scope (a worker, a grant, a command job) a scratch write keeps its ask.
+	const unscoped = evaluateAdmission({ principal: "main", effects: [write(join(scratch, "a.txt"))], safety });
+	strictEqual(unscoped.kind, "ask");
+});
+
+test("a typed write to the workspace repository's hooks asks at default, and an ordinary workspace file runs", (t) => {
+	const cwd = workspace("clio-contained-git-control-");
+	mkdirSync(join(cwd, ".git"));
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const safety = createWorkerSafety({ cwd });
+	const operatorDefault: OperatorDefaultScope = { level: "default", scratchRoots: [], sandbox: true, snapshots: true };
+	const admit = (path: string) =>
+		evaluateAdmission({
+			principal: "main",
+			effects: [{ tool: ToolNames.Write, args: { path, content: "x" } }],
+			safety,
+			autonomy: "default",
+			operatorDefault,
+		});
+	const hook = admit(".git/hooks/pre-commit");
+	strictEqual(hook.kind === "ask" && hook.decision.policy?.reasonCode, "git-control-file");
+	strictEqual(admit("src/app.py").kind, "allow");
 });
 
 test("the default scratch roots include $TMPDIR and /tmp", () => {

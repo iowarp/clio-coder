@@ -12,7 +12,7 @@ import {
 	createPathWalkMemo,
 	type PathWalkMemo,
 } from "../../core/path-canonical.js";
-import type { YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
+import { mainSandboxGitControlPaths, type YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
@@ -245,7 +245,9 @@ export interface OperatorYoloScope {
  * still block; a contained bash or run_script call needs no ask for what its
  * command text hides; a damage-control hit a workspace snapshot can undo
  * runs; every other former damage-control block asks, so the safety judge
- * decides it with the operator's intent; and reads outside the workspace run.
+ * decides it with the operator's intent; a typed write or edit inside a
+ * scratch root runs like one inside the workspace; and reads outside the
+ * workspace run.
  */
 export interface OperatorDefaultScope {
 	level: "default";
@@ -1147,7 +1149,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		resort?: DefaultResort,
 	): SafetyPolicyDecision => {
 		const call = normalizeCallPaths(rawCall);
-		const rawClassification = classify(call);
+		const rawClassification = scratchRootWrite(classify(call), call, resort?.scratchRoots);
 		const command = commandArg(call.args);
 		// Resolve verify exactly as the tool does: the check id alone is not the
 		// command when the model also supplied argv. Scan and admit that full argv.
@@ -1341,6 +1343,21 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
 			}
 			return blockDecision(base, blockInput);
+		}
+		// The contained shell cannot write the repository's hooks, config or git
+		// dir pointers, so under the operator's default a typed write asks for
+		// them too and the safety judge weighs it against the operator's intent.
+		const gitControl = resort === undefined ? null : gitControlTarget(call, cwd);
+		if (gitControl !== null) {
+			const input = {
+				ruleId: GIT_CONTROL_FILE_RULE_ID,
+				reasonCode: GIT_CONTROL_FILE_RULE_ID,
+				reasons: [
+					`'${gitControl}' is a git hook, config or git dir pointer of the workspace repository; writing it would run code outside the sandbox on the next git command, so it requires approval`,
+				],
+				policySource: "builtin-classifier" as const,
+			};
+			return settle(posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input));
 		}
 		const outsideReplacement = outsideExistingTypedMutationTarget(call, cwd, classification, posture);
 		if (outsideReplacement !== null) {
@@ -3814,6 +3831,76 @@ function pathArg(args: Record<string, unknown> | undefined): string | null {
 	if (!args) return null;
 	const candidate = args.path ?? args.file_path ?? args.filePath;
 	return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+}
+
+/** Typed tools whose writes the operator's default admits inside a scratch root. */
+const SCRATCH_WRITE_TOOLS: ReadonlySet<string> = new Set([ToolNames.Write, ToolNames.Edit]);
+
+/**
+ * Directories below a scratch root that a typed write still asks for, as the
+ * main-session sandbox keeps them read-only: a repository's hooks and config
+ * run later outside any sandbox, and `.clio-coder` holds project authority.
+ */
+const SCRATCH_WRITE_PROTECTED_DIRS: ReadonlySet<string> = new Set([".git", ".clio-coder"]);
+
+/**
+ * The operator's default admits a typed write or edit that lands strictly
+ * inside a scratch root the way it admits one inside the workspace, as the
+ * contained shell already may: the classifier's outside-the-workspace
+ * system_modify becomes a write, so neither system-modify-confirm nor
+ * outside-file-replacement asks and no safety judge call is spent. The target
+ * is walked as the tool walks it (resolveMutationTarget), so a link inside a
+ * scratch root is judged by where it lands. Every rail that judges the target
+ * itself (the floor, path policy, authority rails, write roots) still runs.
+ */
+function scratchRootWrite(
+	classification: Classification,
+	call: ClassifierCall,
+	scratchRoots: ReadonlyArray<string> | undefined,
+): Classification {
+	if (scratchRoots === undefined || scratchRoots.length === 0) return classification;
+	if (classification.actionClass !== "system_modify" || !SCRATCH_WRITE_TOOLS.has(call.tool)) return classification;
+	// Only the classifier's placement of the target is relaxed, never another reason.
+	if (!classification.reasons.every((reason) => reason.startsWith("write-path-"))) return classification;
+	const target = pathArg(call.args);
+	const landing = target === null ? null : canonicalizeRawPath(expandPath(target), process.cwd());
+	if (landing === null) return classification;
+	// Scratch roots and the landing are both canonical, so a lexical comparison is exact.
+	const inside = scratchRoots
+		.map((root) => path.relative(root, landing))
+		.filter((rel) => rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+	if (inside.length === 0) return classification;
+	if (inside.some((rel) => rel.split(path.sep).some((part) => SCRATCH_WRITE_PROTECTED_DIRS.has(part)))) {
+		return classification;
+	}
+	return { actionClass: "write", reasons: [`scratch-root-write: ${landing}`] };
+}
+
+const GIT_CONTROL_FILE_RULE_ID = "git-control-file";
+
+/**
+ * The workspace repository's git control path a typed file mutation lands
+ * on, or null: a hooks directory, a config or commondir file, or a `.git`
+ * pointer file, the set the main-session sandbox keeps read-only. Read per
+ * call, so a repository created mid-session is covered. The target as named
+ * and where it lands are both compared with each control path as listed and
+ * as resolved, so a link on either side cannot hide a hook.
+ */
+function gitControlTarget(call: ClassifierCall, workspace: string): string | null {
+	const target = writeRootTargetPath(call);
+	if (target === null) return null;
+	const controls = mainSandboxGitControlPaths(workspace);
+	if (controls.length === 0) return null;
+	const expanded = expandPath(target);
+	const lexical = path.resolve(process.cwd(), expanded);
+	const physical = canonicalizeRawPath(expanded, process.cwd());
+	const landings = physical === null || physical === lexical ? [lexical] : [lexical, physical];
+	for (const control of controls) {
+		const real = canonicalizePath(control);
+		const forms = real === null || real === control ? [control] : [control, real];
+		if (landings.some((landing) => forms.some((form) => isSameOrDescendant(landing, form)))) return control;
+	}
+	return null;
 }
 
 /**
