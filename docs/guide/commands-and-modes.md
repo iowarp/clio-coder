@@ -809,9 +809,9 @@ When a command fails because of the sandbox, for example because it needs a cred
 
 ### Undoing file changes with /rewind
 
-In a Git work tree with `safety.snapshots: auto` (the default), Clio writes a private snapshot of the work tree before the first change of each turn and before every destructive command. Snapshots live under `refs/clio-coder/snapshots/<session>/` and never touch your index, HEAD or branches. Ignored files, untracked files over 16 MiB and nested repositories are not captured.
+In a Git work tree with `safety.snapshots: auto` (the default), Clio writes a private snapshot of the work tree before the first change of each turn and before every destructive command, branch delete or `git reset` to another commit. Each snapshot also pins HEAD and your stash entries, and a branch delete pins the branch it removes, so `git gc` keeps those commits. Snapshots and pins live under `refs/clio-coder/snapshots/<session>/` and never touch your index, HEAD or branches. Ignored files, untracked files over 16 MiB and nested repositories are not captured.
 
-`/rewind` lists this session's snapshots, newest first, with how many files each differs from the workspace by. `Enter` previews what a restore would change. Confirming takes one more snapshot first, so the rewind itself can be rewound, then restores modified and deleted files and removes files the snapshot did not have. Ignored files are left alone. Wait for a running turn to finish, or stop it, before rewinding. `/rewind` restores files; `/tree` moves the conversation.
+`/rewind` lists this session's snapshots, newest first, with how many files each differs from the workspace by. `Enter` previews what a restore would change. Confirming takes one more snapshot first, so the rewind itself can be rewound, then restores modified and deleted files and removes files the snapshot did not have. Ignored files are left alone. A rewind never moves refs: the details list a snapshot's pinned refs, and the preview marks each one still in place, moved since or gone, with the command that brings it back, such as `git branch <name> <sha>` or `git stash store -m <message> <sha>`, for you to run. Wait for a running turn to finish, or stop it, before rewinding. `/rewind` restores files; `/tree` moves the conversation.
 
 ### Telling the safety judge about your environment
 

@@ -307,5 +307,5 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `mainShellContained` and `mainSandboxPolicy` in [main-session.ts](../../src/core/sandbox/main-session.ts); `outwardShellReason` in [containment.ts](../../src/domains/safety/containment.ts).
 
 ### 77. Workspace Snapshot
-- **Definition**: A private Git commit of the work tree that Clio writes before the main agent's first mutating call of a turn and before every destructive call, stored at `refs/clio-coder/snapshots/<session>/<n>` without touching the operator's index, HEAD or branches. `/rewind` restores files from one. Controlled by `safety.snapshots`.
+- **Definition**: A private Git commit of the work tree that Clio writes before the main agent's first mutating call of a turn and before every destructive call, stored at `refs/clio-coder/snapshots/<session>/<n>` without touching the operator's index, HEAD or branches. It also pins HEAD, the stash entries and any branch a delete removes under `refs/clio-coder/snapshots/<session>/pins/<n>/`. `/rewind` restores files from one. Controlled by `safety.snapshots`.
 - **Owning Type**: `WorkspaceSnapshots` in [store.ts](../../src/domains/workspace-snapshots/store.ts).
