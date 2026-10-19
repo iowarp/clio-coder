@@ -277,6 +277,13 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
+		// The first sight of a hook file changed since the operator's baseline:
+		// the next git command Clio runs outside the sandbox asks the operator.
+		deps.bus.on(BusChannels.GitHooksChanged, (payload) => {
+			if (typeof payload?.message !== "string" || payload.message.length === 0) return;
+			deps.appendTranscriptNotice("warn", payload.message, "safety");
+			deps.requestRender();
+		}),
 		deps.bus.on(BusChannels.DispatchScopeNotice, (payload) => {
 			const notice = readDispatchScopeNotice(payload);
 			if (notice === null) return;

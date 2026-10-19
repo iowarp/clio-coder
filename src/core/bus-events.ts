@@ -53,6 +53,7 @@ export const BusChannels = {
 	SafetyBlocked: "safety.blocked",
 	LoopBlocked: "safety.loopBlocked",
 	ToolBudgetExceeded: "safety.toolBudgetExceeded",
+	GitHooksChanged: "safety.gitHooksChanged",
 	ProviderHealth: "provider.health",
 	RuntimeNotice: "runtime.notice",
 	ResidencyMutation: "residency.mutation",
@@ -879,6 +880,16 @@ export interface AgentStatusChangedPayload {
 // Shutdown
 // ---------------------------------------------------------------------------
 
+/**
+ * Published on {@link BusChannels.GitHooksChanged} the first time the git hook
+ * drift guard sees a hook file added or changed since the operator's
+ * baseline (src/domains/safety/hook-drift.ts). `message` is the notice line.
+ */
+export interface GitHooksChangedPayload {
+	message: string;
+	changes: ReadonlyArray<{ path: string; kind: "added" | "changed" | "removed"; size: number; firstLine: string }>;
+}
+
 /** Published on {@link BusChannels.ShutdownRequested} as draining begins. */
 export interface ShutdownRequestedPayload {
 	phase: TerminationPhase;
@@ -916,6 +927,7 @@ export type BusPayloadMap = {
 	[BusChannels.SafetyBlocked]: SafetyBlockedPayload;
 	[BusChannels.LoopBlocked]: LoopBlockedPayload;
 	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
+	[BusChannels.GitHooksChanged]: GitHooksChangedPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
 	[BusChannels.RuntimeNotice]: DeclaredRuntimeNotice;
 	[BusChannels.ResidencyMutation]: ResidencyMutationPayload;

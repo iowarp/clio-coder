@@ -12,6 +12,12 @@ import { GIT_CONTROL_FILE_RULE_ID, gitControlFileReason, SNAPSHOT_RECOVERABLE_RE
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
 import { classifyBashGit } from "./git-policy.js";
+import {
+	GIT_HOOKS_CHANGED_RULE_ID,
+	type GitHookDriftGuard,
+	type GitHookDriftReport,
+	runsGitHooksOutsideSandbox,
+} from "./hook-drift.js";
 import type { OperatorDefaultScope, OperatorYoloScope } from "./policy-engine.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 import type { WorkerGitAllowance } from "./worker-permit.js";
@@ -142,6 +148,13 @@ export interface AdmissionInput {
 	 */
 	sessionCodeConsentPending?: boolean;
 	/**
+	 * The main session's git hook drift guard, read only under the operator's
+	 * own default. Before a call that can run a git hook outside the sandbox,
+	 * a hook file added or changed since the operator's baseline makes the
+	 * call an operator-only ask, however the file got there.
+	 */
+	hookDrift?: Pick<GitHookDriftGuard, "check">;
+	/**
 	 * The worker's Git context (Phase C). Read for the worker principal only;
 	 * absent means the permit's allowance is `inspect` and no task worktree is
 	 * attested, so every Git mutation asks.
@@ -224,6 +237,8 @@ export type AdmissionDisposition =
 			level: AutonomyLevel;
 			exposure: AutonomyExposure;
 			readOutsideWorkspace: boolean;
+			/** The drift a `git-hooks-changed` ask showed; the operator's allow accepts exactly these files. */
+			hookDrift?: GitHookDriftReport;
 	  };
 
 /**
@@ -362,6 +377,19 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	// rules and the run's ceilings, and the hard limits above held the rest, so
 	// no confirmation rail, Git allowance or autonomy mapping asks (#407).
 	if (operatorYolo !== undefined) return { kind: "allow", decision: primary, authorized: false };
+
+	// A git hook added or changed since the operator's baseline runs outside
+	// the sandbox on this call, however it was planted, so only the operator
+	// decides the call, before any rail the judge could clear. An operator
+	// approval does not skip this: the host accepts the files the card named
+	// before re-admission, and a file changed since then asks again.
+	if (operatorDefault !== undefined && input.hookDrift !== undefined) {
+		const index = input.effects.findIndex((effect, at) =>
+			runsGitHooksOutsideSandbox(effect, effectDecisions[at]?.policy?.shellSandbox !== undefined),
+		);
+		const drift = index < 0 ? null : input.hookDrift.check();
+		if (drift !== null) return gitHooksChangedAsk(call.tool, drift, effectDecisions[index] ?? decision, level);
+	}
 
 	const covers = input.authorization !== undefined && input.authorization.actionClass === actionClass;
 	const authorized = covers && issuer === "operator";
@@ -595,6 +623,55 @@ function sessionCodeConsentAsk(tool: string, netDecision: SafetyDecision, level:
 		level,
 		exposure: "local",
 		readOutsideWorkspace: false,
+	};
+}
+
+/**
+ * The operator-only ask for a git command that would run hook files the
+ * operator has not seen. The safety judge never reviews it, a headless run
+ * denies it, and an unanswered card times out to a denial.
+ */
+function gitHooksChangedAsk(
+	tool: string,
+	drift: GitHookDriftReport,
+	netDecision: SafetyDecision,
+	level: AutonomyLevel,
+): AdmissionDisposition {
+	const ask: SafetyDecision = {
+		kind: "ask",
+		classification: netDecision.classification,
+		confirmationRuleId: GIT_HOOKS_CHANGED_RULE_ID,
+		rejection: {
+			short: `${tool} needs operator approval: git hook files changed during this session`,
+			detail: `${drift.summary}. A hook runs with the operator's privileges; only the operator can approve it.`,
+			hints: [
+				"Approving runs this call and accepts the hook files named here until they change again.",
+				"Do not rewrite the command to avoid git; ask the operator to review the hook files instead.",
+			],
+		},
+		...(netDecision.policy !== undefined
+			? {
+					policy: {
+						...netDecision.policy,
+						kind: "ask" as const,
+						ruleId: GIT_HOOKS_CHANGED_RULE_ID,
+						reasonCode: GIT_HOOKS_CHANGED_RULE_ID,
+						reasons: [drift.summary, ...netDecision.policy.reasons],
+					},
+				}
+			: {}),
+	};
+	return {
+		kind: "ask",
+		source: "safety-net",
+		approvalAuthority: "operator",
+		reason: ask.rejection.short,
+		decision: ask,
+		netDecision,
+		level,
+		exposure: "local",
+		readOutsideWorkspace: false,
+		hookDrift: drift,
 	};
 }
 

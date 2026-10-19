@@ -134,8 +134,11 @@ export interface GrantBroker {
 	findByWorker(runId: string, workerRequestId: string): GrantRecord | null;
 	list(filter?: GrantListFilter): GrantRecord[];
 	decide(requestId: string, input: GrantDecideInput): GrantDecideResult;
-	/** Record that the main agent sent this request to the operator. */
-	markForwarded(requestId: string): GrantRecord | null;
+	/**
+	 * Record that this request went to the operator: the main agent forwarded
+	 * it, or the host took it from the safety judge. `reason` says why on the card.
+	 */
+	markForwarded(requestId: string, reason?: string): GrantRecord | null;
 	/** Resolves with the record once it leaves `pending`, or null on abort. */
 	waitForDecision(requestId: string, signal?: AbortSignal): Promise<GrantRecord | null>;
 	/** Worker execution report for an authorized grant. */
@@ -380,10 +383,11 @@ export function createGrantBroker(deps: GrantBrokerDeps): GrantBroker {
 			}
 			return { ok: true, record: snapshot(record), duplicate: false };
 		},
-		markForwarded(requestId) {
+		markForwarded(requestId, reason) {
 			const record = records.get(requestId);
 			if (record === undefined || record.state !== "pending") return null;
 			record.forwardedByMain = true;
+			if (reason !== undefined) record.reason = reason;
 			const view = snapshot(record);
 			try {
 				deps.onChange?.(view, record.state);

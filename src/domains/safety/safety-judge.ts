@@ -7,6 +7,7 @@ import type { AdmissionAskSource, ApprovalAuthority } from "./admission.js";
 import type { SafetyJudgeAuditInput } from "./audit.js";
 import { describeMainCallConsequences } from "./call-consequence.js";
 import type { SafetyDecision } from "./contract.js";
+import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 
@@ -52,7 +53,8 @@ const REASON_MAX_CHARS = 300;
 /**
  * Asks the judge never sees. Each is a decision only the operator can make:
  * the session's consent to run repository code, project settings and
- * persistent fleet routing, Clio's own library and state. Dispatch plan
+ * persistent fleet routing, Clio's own library and state, and a git command
+ * that would run hook files changed since the operator's baseline. Dispatch plan
  * approvals, worker escalations, ask_user and configure_clio are excluded by
  * kind in {@link operatorOnlyAsk}.
  */
@@ -62,6 +64,7 @@ export const SAFETY_JUDGE_OPERATOR_ONLY_RULES: ReadonlySet<string> = new Set([
 	"fleet-routing-settings",
 	"library-confirm",
 	"clio-owned-state",
+	GIT_HOOKS_CHANGED_RULE_ID,
 ]);
 
 /** The operator channel itself and Clio's own settings tool. */

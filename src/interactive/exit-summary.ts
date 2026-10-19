@@ -58,6 +58,18 @@ function unattendedSummary(snapshot: Pick<ExitSummarySnapshot, "unattended">): s
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/** Hook files shown before the line says how many more there are. */
+const GIT_HOOKS_SHOWN = 4;
+
+/** `changed .git/hooks/pre-commit · added .husky/pre-push`, or null when no hook file changed this visit. */
+function gitHooksSummary(snapshot: Pick<ExitSummarySnapshot, "gitHooks">): string | null {
+	const hooks = snapshot.gitHooks ?? [];
+	if (hooks.length === 0) return null;
+	const shown = hooks.slice(0, GIT_HOOKS_SHOWN).map((hook) => `${hook.kind} ${hook.path}`);
+	const more = hooks.length > GIT_HOOKS_SHOWN ? [`${count(hooks.length - GIT_HOOKS_SHOWN)} more`] : [];
+	return [...shown, ...more].join(" · ");
+}
+
 function outcomes(snapshot: ExitSummarySnapshot): string {
 	const counts = new Map<string, number>();
 	for (const worker of snapshot.workers) counts.set(worker.outcome, (counts.get(worker.outcome) ?? 0) + 1);
@@ -94,6 +106,7 @@ export function renderExitSummary(
 	};
 	const models = modelList(snapshot);
 	const unattended = unattendedSummary(snapshot);
+	const gitHooks = gitHooksSummary(snapshot);
 	const session = snapshot.sessionName ? `${snapshot.sessionName} · ${snapshot.sessionId}` : snapshot.sessionId;
 	const resumeLines = wrap(theme?.fg("commandHint", resume) ?? resume);
 	if (!tty) lines.push(`Clio Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
@@ -116,6 +129,8 @@ export function renderExitSummary(
 		add("Cost", `${costLabel(snapshot.cost)} · ${formatCompactMs(snapshot.wallMs)} wall`);
 		// What Clio decided while the operator was away is never folded away.
 		if (unattended !== null) add("Unattended", unattended);
+		// Nor is a hook that runs outside the sandbox on the next git command.
+		if (gitHooks !== null) add("Git hooks", gitHooks);
 	} else {
 		add(
 			"Activity",
@@ -129,6 +144,7 @@ export function renderExitSummary(
 		add("Cost", costLabel(snapshot.cost));
 		if (snapshot.compactions > 0) add("Compactions", count(snapshot.compactions));
 		if (unattended !== null) add("Unattended", unattended);
+		if (gitHooks !== null) add("Git hooks", gitHooks);
 		if (style === "standard") {
 			divide();
 			if (models.length > 0) {

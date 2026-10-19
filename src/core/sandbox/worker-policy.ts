@@ -29,6 +29,19 @@ export interface WorkerSandboxPolicyInput {
 	env?: SandboxEnvPolicy;
 	/** `safety.sandboxUnixSockets`; absent blocks them. */
 	unixSockets?: UnixSocketMode;
+	/**
+	 * Every hooks directory git could run for the worker's tree, core.hooksPath
+	 * included (git-hooks-fingerprint.ts). One inside a writable root stays
+	 * read-only, because a hook planted there runs outside the sandbox on the
+	 * operator's next git command.
+	 */
+	gitHooksDirs?: ReadonlyArray<string>;
+}
+
+/** True when `candidate` lies strictly below `root`, which may end in a slash. */
+function strictlyInside(root: string, candidate: string): boolean {
+	const rel = path.relative(root, candidate);
+	return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
 /**
@@ -82,6 +95,8 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 					: writableRoots
 				).flatMap(protectedInside),
 				...(input.dependencyRoots ?? []),
+				// A hooks directory at or above a root would freeze the root itself, so only one strictly inside counts.
+				...(input.gitHooksDirs ?? []).filter((dir) => writableRoots.some((root) => strictlyInside(root, dir))),
 			]),
 		],
 		gitWritablePaths: [],

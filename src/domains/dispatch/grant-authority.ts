@@ -6,6 +6,7 @@ import type { ActionClass, Classification } from "../safety/action-classifier.js
 import { evaluateAdmission } from "../safety/admission.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../safety/contract.js";
+import { commandInvokesGit, type GitHookDriftGuard, type GitHookDriftReport } from "../safety/hook-drift.js";
 import type { SafetyJudgeOutcome, SafetyJudgeSeat } from "../safety/safety-judge.js";
 import type { GrantRecord } from "./grant-broker.js";
 
@@ -120,7 +121,11 @@ export function effectiveWorkerPermissionMode(input: {
 	return input.judgeSeated && input.judgeEnabled && input.boundGrants && input.autonomy === "default" ? "judge" : "deny";
 }
 
-export type JudgedGrantVerdict = { kind: "grant"; reason: string } | { kind: "deny"; reason: string };
+export type JudgedGrantVerdict =
+	| { kind: "grant"; reason: string }
+	| { kind: "deny"; reason: string }
+	/** Git hooks changed since the operator's baseline: only the operator answers, and an allow accepts `drift`. */
+	| { kind: "ask-operator"; reason: string; drift: GitHookDriftReport };
 
 export interface JudgedGrantInput {
 	record: GrantRecord;
@@ -132,6 +137,19 @@ export interface JudgedGrantInput {
 	/** The dispatching turn's host constraints; the delegation ceiling is `delegatedTools ?? allowedTools`. */
 	turnConstraints?: TurnConstraints;
 	signal?: AbortSignal;
+	/** The main session's git hook drift guard; a worker git call after drift is the operator's to answer. */
+	hookDrift?: Pick<GitHookDriftGuard, "check">;
+}
+
+/** Whether a worker effect runs git: a typed add or commit, a bash command naming git, or a script. */
+function effectRunsGit(effect: { tool: string; args: Record<string, unknown> }): boolean {
+	if (effect.tool === ToolNames.Git) {
+		const op = effect.args.op ?? effect.args.mode ?? effect.args.action;
+		return op === "add" || op === "commit";
+	}
+	if (effect.tool === ToolNames.RunScript) return true;
+	const command = effect.args.command;
+	return effect.tool === ToolNames.Bash && typeof command === "string" && commandInvokesGit(command);
 }
 
 /**
@@ -170,6 +188,19 @@ export async function evaluateJudgedGrant(input: JudgedGrantInput): Promise<Judg
 		return verdict.kind === "grant"
 			? { kind: "grant", reason: "granted under the main session's yolo" }
 			: deny(verdict.reason);
+	}
+	// A hook changed since the operator's baseline runs on this git call,
+	// inside the worker's sandbox when it has one and outside it when it has
+	// none, so the judge does not decide it.
+	if (input.hookDrift !== undefined && effectRunsGit(effect)) {
+		const drift = input.hookDrift.check();
+		if (drift !== null) {
+			return {
+				kind: "ask-operator",
+				reason: `${drift.summary}; only the operator can approve this worker's git call`,
+				drift,
+			};
+		}
 	}
 	if (input.judge === undefined) return deny("no safety judge answers worker asks in this process");
 	const call = { tool: effect.tool, args: effect.args };

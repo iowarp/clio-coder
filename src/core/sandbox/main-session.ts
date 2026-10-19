@@ -124,6 +124,13 @@ export interface MainSandboxGitLayout {
 	readOnlyPaths: ReadonlyArray<string>;
 	absentHooks: ReadonlyArray<string>;
 	absentFiles: ReadonlyArray<string>;
+	/**
+	 * Every hooks directory git could run from, present or not: each
+	 * repository's and submodule's default `hooks`, and each directory
+	 * core.hooksPath names, at or above the workspace included. The hook drift
+	 * guard fingerprints what they hold (git-hooks-fingerprint.ts).
+	 */
+	hooksDirs?: ReadonlyArray<string>;
 }
 
 /** Read in every git dir: config.worktree applies with extensions.worktreeConfig, commondir redirects the common dir. */
@@ -297,6 +304,7 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 	const readOnlyPaths: string[] = [];
 	const absentHooks: string[] = [];
 	const absentFiles: string[] = [];
+	const hooksDirs: string[] = [];
 	const dotGit = path.join(top, ".git");
 	const gitDir = isDirectory(dotGit) ? realDir(dotGit) : gitFileTarget(dotGit);
 	if (gitDir === null) return undefined;
@@ -321,6 +329,12 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 			}
 			addRepository(child, depth + 1);
 			const checkout = moduleWorktree(child);
+			// A submodule's own core.hooksPath is read from its config, relative to its checkout.
+			if (checkout !== null) {
+				for (const value of configHooksPaths(path.join(child, "config"), 0)) {
+					hooksDirs.push(gitConfigPath(value, checkout));
+				}
+			}
 			if (checkout === null || !pathExists(path.join(checkout, ".git"))) continue;
 			readOnlyPaths.push(path.join(checkout, ".git"));
 			// The checkout holds its `.git` file; inside the workspace it could otherwise be renamed aside.
@@ -332,6 +346,7 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 		addGitDir(commonDir);
 		const hooks = path.join(commonDir, "hooks");
 		(pathExists(hooks) ? readOnlyPaths : absentHooks).push(hooks);
+		hooksDirs.push(hooks);
 		const worktrees = path.join(commonDir, "worktrees");
 		if (isDirectory(worktrees)) {
 			mountDirs.push(worktrees);
@@ -355,6 +370,7 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 	// too. One at or above the workspace is skipped: keeping it read-only would
 	// freeze the whole workspace.
 	for (const hooks of configuredHooksDirs(top, commonDir, gitDir)) {
+		hooksDirs.push(hooks);
 		if (isInside(hooks, root)) continue;
 		// Only the workspace root is sure to be a writable mount, so only there
 		// can bubblewrap mount an empty tmpfs over an absent hooks directory.
@@ -367,6 +383,7 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 		readOnlyPaths: unique(readOnlyPaths),
 		absentHooks: unique(absentHooks),
 		absentFiles: unique(absentFiles),
+		hooksDirs: unique(hooksDirs),
 	};
 }
 

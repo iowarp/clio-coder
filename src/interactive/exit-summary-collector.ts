@@ -44,6 +44,12 @@ export interface ExitSummarySnapshot {
 	timeline: ReadonlyArray<{ elapsedMs: number; text: string }>;
 	timelineOmitted: number;
 	compactions: number;
+	/**
+	 * Git hook files added, changed or removed during this visit, by workspace
+	 * path. A hook runs outside Clio's sandbox on the next git command, so the
+	 * summary names them whatever its style.
+	 */
+	gitHooks?: ReadonlyArray<{ path: string; kind: string }>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,6 +75,8 @@ interface CollectorDeps {
 	getTurns: () => number | null;
 	getToolCounts: () => ReadonlyMap<string, number>;
 	getModel: () => { target: string; model: string } | null;
+	/** The git hook drift guard's account of hook files changed this visit (src/domains/safety/hook-drift.ts). */
+	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string }>;
 	now?: () => number;
 }
 
@@ -307,6 +315,15 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		snapshot(): ExitSummarySnapshot | null {
 			const session = deps.session?.current();
 			if (!session || !hasModelTurn) return null;
+			let gitHooks: ReadonlyArray<{ path: string; kind: string }> = [];
+			try {
+				gitHooks = (deps.gitHookChanges?.() ?? []).map((change) => {
+					const local = relative(process.cwd(), change.path);
+					return { path: local.startsWith("..") || isAbsolute(local) ? change.path : local, kind: change.kind };
+				});
+			} catch {
+				// The guard reads the filesystem; an unreadable tree leaves the line out rather than the summary.
+			}
 			const tools = new Map(deps.getToolCounts());
 			for (const stats of workerTools.values()) {
 				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
@@ -332,6 +349,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				timelineOmitted,
 				workers: [...workers.values()],
 				compactions,
+				...(gitHooks.length > 0 ? { gitHooks } : {}),
 			};
 		},
 		dispose(): void {

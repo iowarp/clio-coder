@@ -55,6 +55,7 @@ import {
 } from "../../core/response-schema.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import { sandboxEnvPolicy } from "../../core/sandbox/env-scrub.js";
+import { gitHookDirectories } from "../../core/sandbox/git-hooks-fingerprint.js";
 import type { WorkerSandboxSpec } from "../../core/sandbox/types.js";
 import {
 	resolveWorkerSandboxSpec,
@@ -179,6 +180,7 @@ import { type ActionClass, classify as classifyAction } from "../safety/action-c
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
+import type { GitHookDriftGuard } from "../safety/hook-drift.js";
 import type { FlowRestrictionSet } from "../safety/information-flow.js";
 import { isFlowRestrictionSet, mergeFlowRestrictions } from "../safety/information-flow.js";
 import { WRITE_ROOT_REFUSED_TOOLS } from "../safety/policy-engine.js";
@@ -642,6 +644,8 @@ export interface DispatchBundleOptions {
 	workerAskJudge?: {
 		seat(): SafetyJudgeSeat | undefined;
 		autonomy(): AutonomyLevel;
+		/** The main session's git hook drift guard; a worker git call after drift goes to the operator. */
+		hookDrift?(): Pick<GitHookDriftGuard, "check" | "accept"> | undefined;
 	};
 	/**
 	 * False when nothing can steer a dispatched worker: a headless session, the
@@ -2871,6 +2875,10 @@ function workerSandboxFor(input: {
 			...(input.settings !== undefined
 				? { env: sandboxEnvPolicy(input.settings), unixSockets: input.settings.safety.sandboxUnixSockets }
 				: {}),
+			// The hooks of the worker's tree stay read-only, as in the main-session sandbox.
+			...(mode !== "off"
+				? { gitHooksDirs: gitHookDirectories(input.req.taskWorktree?.path ?? input.req.cwd ?? process.cwd()).directories }
+				: {}),
 		}),
 	};
 }
@@ -3704,6 +3712,10 @@ export function createDispatchBundle(
 				timeoutMs: Math.max(0, record.deadlineAt - now()),
 				fallback,
 				escalation,
+				// Why a forwarded request reached the operator, such as changed git hooks, leads its reasons.
+				...(record.forwardedByMain === true && record.reason !== undefined
+					? { reasons: [record.reason, ...record.reasons] }
+					: {}),
 				approvalAuthority: record.approvalAuthority,
 				...(record.forwardedByMain === true ? { forwardedByMain: true } : {}),
 			});
@@ -10186,6 +10198,7 @@ export function createDispatchBundle(
 		const judge = options?.workerAskJudge;
 		const settled = new AbortController();
 		void grantBroker.waitForDecision(record.requestId).then(() => settled.abort());
+		const hookDrift = judge?.hookDrift?.();
 		let verdict: Awaited<ReturnType<typeof evaluateJudgedGrant>>;
 		try {
 			verdict = await evaluateJudgedGrant({
@@ -10195,6 +10208,7 @@ export function createDispatchBundle(
 				judge: judge?.seat(),
 				...(turnConstraints !== undefined ? { turnConstraints } : {}),
 				signal: settled.signal,
+				...(hookDrift !== undefined ? { hookDrift } : {}),
 			});
 		} catch (error) {
 			verdict = {
@@ -10203,6 +10217,24 @@ export function createDispatchBundle(
 			};
 		}
 		if (grantBroker.get(record.requestId)?.state !== "pending") return;
+		if (verdict.kind === "ask-operator") {
+			// Changed git hooks are the operator's call: attended, the request
+			// reaches the operator's card and an allow accepts the files it named;
+			// with nobody to ask it is denied.
+			if (!grantAttended) {
+				grantBroker.decide(record.requestId, { decision: "deny", issuer: "main", reason: verdict.reason });
+				return;
+			}
+			grantBroker.markForwarded(record.requestId, verdict.reason);
+			const answered = await grantBroker.waitForDecision(record.requestId);
+			if (
+				answered?.issuer === "operator" &&
+				(answered.state === "authorized" || answered.state === "executing" || answered.state === "completed")
+			) {
+				hookDrift?.accept(verdict.drift);
+			}
+			return;
+		}
 		grantBroker.decide(record.requestId, {
 			decision: verdict.kind === "grant" ? "approve" : "deny",
 			issuer: "main",

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
@@ -36,9 +37,11 @@ import {
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
+import { GIT_CONTROL_FILE_RULE_ID } from "../domains/safety/containment.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
 import { type DenialLayer, repeatedDenialReason, type ToolDenial } from "../domains/safety/denial.js";
+import type { GitHookDriftGuard, GitHookDriftReport } from "../domains/safety/hook-drift.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
@@ -430,6 +433,15 @@ export interface RegistryDeps {
 	 * before when the judge skips it or gives no verdict. Workers never carry it.
 	 */
 	safetyJudge?: SafetyJudgeSeat;
+	/**
+	 * The git hook drift guard. Only the main session's registry passes it: at
+	 * autonomy default a git command that would run a hook file added or
+	 * changed since the operator's baseline outside the sandbox asks the
+	 * operator under `git-hooks-changed`. The operator's allow accepts the
+	 * files the card named; an approved or judge-allowed `git-control-file`
+	 * write refreshes the file it wrote. Workers never carry it.
+	 */
+	hookDrift?: GitHookDriftGuard;
 	/**
 	 * Takes a workspace snapshot before an admitted call's body runs: before the
 	 * first mutating call of each turn, and before every destructive, deleting,
@@ -877,6 +889,8 @@ interface ParkedCall {
 	closePark: () => void;
 	options?: ToolInvokeOptions;
 	abortCleanup?: () => void;
+	/** The hook drift a `git-hooks-changed` park showed the operator. */
+	hookDrift?: GitHookDriftReport;
 }
 
 export function createRegistry(deps: RegistryDeps): ToolRegistry {
@@ -1551,6 +1565,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				source?: AdmissionAskSource;
 				/** A plan-scale dispatch, whose body runs only under an operator approval or yolo. */
 				planScale?: true;
+				/** The hook drift a `git-hooks-changed` ask names; an operator's allow accepts it. */
+				hookDrift?: GitHookDriftReport;
 		  };
 
 	/** The session's test-runner consent ask, the only obstacle among a call's host effects. */
@@ -1611,6 +1627,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(planScale ? { dispatchPlanScale: true } : {}),
 			},
 			...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
+			...(deps.hookDrift !== undefined && (deps.principal ?? "main") === "main" ? { hookDrift: deps.hookDrift } : {}),
 		});
 		if (admission.kind === "deny" && admission.code === "safety_net") {
 			const policy = admission.decision.policy;
@@ -1675,6 +1692,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(admission.source === "autonomy" && dispatchPlan !== null ? { dispatchPlan } : {}),
 			source: admission.source,
 			...(planScale ? { planScale: true as const } : {}),
+			...(admission.hookDrift !== undefined ? { hookDrift: admission.hookDrift } : {}),
 		};
 	};
 
@@ -2071,6 +2089,28 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	};
 
 	/**
+	 * A typed write the operator approved or the judge allowed under
+	 * git-control-file landed; the hook files it wrote join the drift baseline,
+	 * so the next git command does not ask about the change just approved.
+	 */
+	const refreshHooksAfterGitControlWrite = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		verdict: RegistryVerdict,
+	): void => {
+		if (deps.hookDrift === undefined || verdict.kind !== "ok" || verdict.result.kind === "error") return;
+		if (approvalRailOf(decision) !== GIT_CONTROL_FILE_RULE_ID) return;
+		const targets = [call.args?.path, call.args?.file_path]
+			.filter((target): target is string => typeof target === "string" && target.length > 0)
+			.map((target) => resolvePath(process.cwd(), target));
+		try {
+			deps.hookDrift.refresh(targets);
+		} catch {
+			// The baseline keeps its old entry, so the next git command asks: the safe direction.
+		}
+	};
+
+	/**
 	 * The safety judge's review of a main-session ask at autonomy default.
 	 * `skip` everywhere else: workers, yolo, a registry without a judge, and a
 	 * call already cancelled. The time spent judging is reported as park time,
@@ -2138,7 +2178,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				reasonCode: SAFETY_JUDGE_ALLOW_REASON_CODE,
 				reasons: [judged.reason],
 			});
-			return runSpec(judgedSpec, admissionCall, allowed, options);
+			const verdict = await runSpec(judgedSpec, admissionCall, allowed, options);
+			refreshHooksAfterGitControlWrite(admissionCall, outcome.decision, verdict);
+			return verdict;
 		}
 		if (judged.kind === "block") {
 			disposeAdmissionArgs(judgedSpec, admissionCall.args ?? {});
@@ -2229,6 +2271,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				meta,
 				resolve: settle,
 				closePark,
+				...(outcome.hookDrift !== undefined ? { hookDrift: outcome.hookDrift } : {}),
 			};
 			if (options !== undefined) parkedCall.options = options;
 			if (options?.signal) {
@@ -2397,6 +2440,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				) {
 					deps.sessionCodeConsent?.grant();
 				}
+				// The operator allowed a git-hooks-changed ask: the files the card
+				// named join the baseline before re-admission, so a file changed
+				// after the card was drawn still asks.
+				if (grant !== undefined && (grant.issuer ?? "operator") === "operator" && entry.hookDrift !== undefined) {
+					deps.hookDrift?.accept(entry.hookDrift);
+				}
 				const outcome = admit(entry.call, grant, entry.options);
 				if (outcome.kind === "park") {
 					if (observed) {
@@ -2437,6 +2486,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (grant !== undefined && (grant.issuer ?? "operator") === "operator") deps.safetyJudge?.operatorApproved();
 				if (observed) grant?.onExecution?.({ phase: "start" });
 				const verdict = await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions);
+				if (grant !== undefined && (grant.issuer ?? "operator") === "operator") {
+					refreshHooksAfterGitControlWrite(entry.call, entry.decision, verdict);
+				}
 				if (observed) {
 					grant?.onExecution?.({
 						phase: "end",

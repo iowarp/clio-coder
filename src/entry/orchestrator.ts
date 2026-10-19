@@ -32,6 +32,7 @@ import {
 } from "../core/safe-exec.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
 import { sandboxEnvPolicy } from "../core/sandbox/env-scrub.js";
+import { createGitHooksFingerprinter } from "../core/sandbox/git-hooks-fingerprint.js";
 import { mainShellContained, yoloScriptSandboxState } from "../core/sandbox/main-session.js";
 import {
 	applyOverrides,
@@ -216,6 +217,7 @@ import { expandSubmitText } from "../domains/resources/submit-expansion.js";
 import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
+import { createGitHookDriftGuard, type GitHookDriftGuard, gitHookDriftNotice } from "../domains/safety/hook-drift.js";
 import type { AutonomyLevel, FlowRestrictionSet, SafetyContract } from "../domains/safety/index.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
@@ -1916,7 +1918,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let sessionIdForDispatch: (() => string | null) | null = null;
 	// Bound once the safety judge and the autonomy resolver exist; a worker ask
 	// that arrives before then finds no judge and is denied.
-	let workerAskJudgeForDispatch: { seat: () => SafetyJudgeSeat; autonomy: () => AutonomyLevel } | null = null;
+	let workerAskJudgeForDispatch: {
+		seat: () => SafetyJudgeSeat;
+		autonomy: () => AutonomyLevel;
+		hookDrift: () => GitHookDriftGuard;
+	} | null = null;
 
 	// Panes are an interactive-surface projection. Headless, ACP, and worker boots
 	// gate detection off so they never resolve a socket path or open a descriptor.
@@ -2016,6 +2022,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				workerAskJudge: {
 					seat: () => workerAskJudgeForDispatch?.seat(),
 					autonomy: () => workerAskJudgeForDispatch?.autonomy() ?? "default",
+					hookDrift: () => workerAskJudgeForDispatch?.hookDrift(),
 				},
 				// The merge card rides the same attended gate, and asks through
 				// whichever ask_user handler the TUI or the ACP client has by then.
@@ -2885,9 +2892,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		session: () => session,
 		safety,
 	});
+	// The git hook drift guard takes its baseline now, at session start: a hook
+	// file added or changed later, however it got there, makes the next git
+	// command that would run it outside the sandbox an operator-only ask.
+	const hookFingerprinter = createGitHooksFingerprinter(process.cwd());
+	const hookDrift = createGitHookDriftGuard({
+		workspace: process.cwd(),
+		fingerprint: () => hookFingerprinter.fingerprint(),
+		onDrift: (changes) =>
+			bus.emit(BusChannels.GitHooksChanged, {
+				message: gitHookDriftNotice(changes, process.cwd()),
+				changes: changes.map(({ path, kind, size, firstLine }) => ({ path, kind, size, firstLine })),
+			}),
+	});
 	// The same seat answers dispatched workers' asks, so worker and main-session
 	// blocks share one session's escalation counts.
-	workerAskJudgeForDispatch = { seat: () => safetyJudge, autonomy: resolveEffectiveAutonomy };
+	workerAskJudgeForDispatch = {
+		seat: () => safetyJudge,
+		autonomy: resolveEffectiveAutonomy,
+		hookDrift: () => hookDrift,
+	};
 	// Sessions whose snapshot start-of-session prune has run in this process.
 	const snapshotPrunedSessions = new Set<string>();
 	const toolRegistry = createRegistry({
@@ -2931,6 +2955,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
 		sessionCodeConsent,
 		safetyJudge,
+		hookDrift,
 		// Recoverability for the main agent on every surface; workers never snapshot.
 		workspaceSnapshot: async ({ sessionId: requested, ...request }) => {
 			if (getCurrentSettings().safety.snapshots === "off") return null;
@@ -5510,6 +5535,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
+		gitHookChanges: () => hookDrift.sessionChanges(),
 		labelOperatorCommand,
 		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
