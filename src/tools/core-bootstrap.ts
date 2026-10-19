@@ -1,3 +1,4 @@
+import { bashShellPath } from "../core/bash-shell.js";
 import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { RouteProvenance } from "../core/route-provenance.js";
@@ -122,6 +123,8 @@ export interface CoreToolRegistration {
 	includeInteractiveTools: boolean;
 	/** True only when a worker bound its dispatch's agent-ledger port; the session never does. */
 	includeLedgerTools: boolean;
+	/** False on a host with no bash to spawn (Windows without Git Bash, #421). */
+	includeShellTool: boolean;
 }
 
 export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstrapDeps = {}): CoreToolRegistration {
@@ -136,9 +139,14 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	registry.register({
 		...builtin(editTool, { path: "src/tools/edit.ts", scope: "core" }),
 	});
-	registry.register({
-		...builtin(bashTool, { path: "src/tools/bash.ts", scope: "core" }),
-	});
+	// A host with no bash keeps the tool off every surface instead of failing
+	// each call with ENOENT, which also leaves find and ls attached (#421).
+	const includeShellTool = bashShellPath() !== null;
+	if (includeShellTool) {
+		registry.register({
+			...builtin(bashTool, { path: "src/tools/bash.ts", scope: "core" }),
+		});
+	}
 	registry.register({
 		...builtin(grepTool, { path: "src/tools/grep.ts", scope: "core" }),
 	});
@@ -393,6 +401,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		includeSessionTools: Boolean(session),
 		includeInteractiveTools: Boolean(deps.askUser),
 		includeLedgerTools,
+		includeShellTool,
 	};
 }
 

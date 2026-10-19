@@ -4054,7 +4054,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (!options.headless && !options.acp) {
 		middleware.registerHook(
 			createPlanCloseRegistration({
-				canAsk: () => askUserHandler !== null,
+				// Yolo's turn-ending contract stops a plan at its stated assumptions
+				// instead of a "Carry out this plan?" card, which parked unattended
+				// runs (#421), so the close nudge would contradict it there.
+				canAsk: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
 				isPlan: () => {
 					const interpretation = systemOneHost.interpretation();
 					return interpretation === undefined ? undefined : interpretation.intent === "plan";

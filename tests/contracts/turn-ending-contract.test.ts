@@ -18,11 +18,11 @@ import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("turn-ending contract in the session prompt", () => {
-	const systemPrompt = (inputs: { headless?: boolean; operatorInterviews?: boolean }) =>
+	const systemPrompt = (inputs: { headless?: boolean; operatorInterviews?: boolean }, safety = "safety.default") =>
 		compile(loadFragments(), {
 			identity: "identity.clio",
 			operatingContract: "operating.contract",
-			safety: "safety.default",
+			safety,
 			sessionInputs: {
 				coordinatorCapabilities: [ToolNames.AskUser, ToolNames.Read],
 				provider: "local",
@@ -45,6 +45,17 @@ describe("turn-ending contract in the session prompt", () => {
 		ok(prompt.includes("options carrying open choices: [Proceed with a per-user file (Recommended)"), prompt);
 		ok(prompt.includes("An explicit, specific operator instruction is its own consent"), prompt);
 		ok(prompt.includes(identityHalf), prompt);
+	});
+
+	// #421: yolo resolves ambiguity with a stated default and never parks a plan on an approval card.
+	it("renders the assume-and-proceed variant under yolo", () => {
+		const prompt = systemPrompt({ operatorInterviews: true }, "safety.yolo");
+		ok(prompt.includes("## Ending a turn"), prompt);
+		ok(prompt.includes("Under yolo a turn ends Done"), prompt);
+		ok(prompt.includes("Take the recommended default, state the assumption in the final reply"), prompt);
+		ok(prompt.includes("Reserve an ask_user call for a decision that blocks all progress"), prompt);
+		ok(!prompt.includes("Every turn ends in one of two states:"), prompt);
+		ok(!prompt.includes('always ends with ask_user "Carry out this plan?"'), prompt);
 	});
 
 	it("keeps only the no-offer half in headless and ACP prompts", () => {

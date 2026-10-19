@@ -5,6 +5,7 @@ import {
 	type BashProgressScheduler,
 	createBashOutputProgressController,
 } from "../../src/core/bash-exec.js";
+import { POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
 
 class DeterministicScheduler implements BashProgressScheduler {
 	#nowMs = 0;
@@ -113,5 +114,37 @@ describe("bash output settlement", () => {
 			outputBytes: 4,
 			outputCapped: false,
 		});
+	});
+});
+
+// #421: Windows has no /bin/bash, so the bash tool resolves Git Bash or reports none.
+describe("bash shell resolution", () => {
+	const windows = (env: NodeJS.ProcessEnv, files: string[]) =>
+		resolveBashShell({ platform: "win32", env, isFile: (file) => files.includes(file) });
+	const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
+
+	it("keeps /bin/bash on POSIX hosts", () => {
+		strictEqual(resolveBashShell({ platform: "linux", env: {}, isFile: () => false }), POSIX_BASH);
+	});
+
+	it("skips the WSL launcher on PATH and picks Git Bash", () => {
+		const env = {
+			Path: "C:\\Windows\\system32;C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps;C:\\tools\\git\\usr\\bin",
+			SystemRoot: "C:\\Windows",
+			ProgramFiles: "C:\\Program Files",
+		};
+		const launchers = [
+			"C:\\Windows\\system32\\bash.exe",
+			"C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\bash.exe",
+		];
+		strictEqual(windows(env, [...launchers, gitBash]), gitBash);
+		strictEqual(
+			windows(env, [...launchers, "C:\\tools\\git\\usr\\bin\\bash.exe", gitBash]),
+			"C:\\tools\\git\\usr\\bin\\bash.exe",
+		);
+	});
+
+	it("reports none when only the WSL launcher exists", () => {
+		strictEqual(windows({ PATH: "C:\\Windows\\System32" }, ["C:\\Windows\\System32\\bash.exe"]), null);
 	});
 });

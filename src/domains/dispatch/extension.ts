@@ -35,6 +35,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { type Dirent, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
+import { bashShellPath } from "../../core/bash-shell.js";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { taskCommitSubject } from "../../core/commit-message.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
@@ -2412,6 +2413,8 @@ function effectiveToolNames(
 	// attests; otherwise the run is refused for a mismatch instead of simply
 	// running without network.
 	const networkStripped = networkToolsDisabled();
+	// A host with no bash registers none in the worker's registry either (#421).
+	const shellStripped = bashShellPath() === null;
 	const harnessTools =
 		target.runtime.kind === "http" && !writeConfined && allowedTools.some(isHarnessExtensionToolName)
 			? enabledHarnessExtensionToolNames(cwd)
@@ -2427,6 +2430,7 @@ function effectiveToolNames(
 			// never holds it and a recipe naming it would drift the attestation.
 			tool !== ToolNames.Consult &&
 			!(networkStripped && (tool === ToolNames.WebFetch || tool === ToolNames.WebRead)) &&
+			!(shellStripped && tool === ToolNames.Bash) &&
 			!denied.has(tool) &&
 			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
 			!writeEscapingMcp.has(tool) &&

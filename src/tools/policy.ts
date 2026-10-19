@@ -150,6 +150,8 @@ const VISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Vision]);
 const MEMORY_RECALL_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryRecall]);
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
 const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebRead, ToolNames.WebFetch]);
+/** Registered only where a bash resolves (core/bash-shell.ts). */
+const SHELL_BOUND_TOOLS = new Set<ToolName>([ToolNames.Bash]);
 
 export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;
@@ -163,6 +165,8 @@ export interface BuiltinToolPolicyOptions {
 	 * unset option must keep demanding it.
 	 */
 	includeNetworkTools?: boolean;
+	/** Defaults to true like the network plane; only a host with no bash omits it. */
+	includeShellTool?: boolean;
 }
 
 export function validateBuiltinToolPolicy(
@@ -213,6 +217,7 @@ export function validateBuiltinToolPolicy(
 	const includePanesTools = options.includePanesTools ?? false;
 	const includeLedgerTools = options.includeLedgerTools ?? false;
 	const includeNetworkTools = options.includeNetworkTools ?? true;
+	const includeShellTool = options.includeShellTool ?? true;
 	const required = new Set<ToolName>(Object.values(ToolNames));
 	// The native interactive host alone supplies the durable continuity port.
 	required.delete(ToolNames.SelfCompact);
@@ -225,6 +230,7 @@ export function validateBuiltinToolPolicy(
 		if (!includePanesTools && PANES_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeLedgerTools && LEDGER_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeNetworkTools && NETWORK_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (!includeShellTool && SHELL_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (DECISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (VISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MUSIC_BOUND_TOOLS.has(tool)) required.delete(tool);

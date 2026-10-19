@@ -17,6 +17,7 @@ import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 import { expandPath } from "../../tools/path-utils.js";
+import type { RunScriptInterpreter } from "../../tools/run-script.js";
 import { resolveProjectVerifierExecutionCwd } from "../../tools/verify/catalog.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
 import { prepareVerifyArguments } from "../../tools/verify/surface.js";
@@ -920,11 +921,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		}
 
 		// run_script is the typed twin of `bash x.sh`, and the operator's yolo
-		// reads its script the same way before it runs (#419).
+		// reads its script the same way before it runs (#419). Only a shell
+		// reads that script as shell lines: Python's `x > prev[i]`, `a << 2` or
+		// `ln = 3` made the scan ask with no sandbox to clear it, and a SQL
+		// string blocked the script outright (#421).
 		if (yolo !== undefined && posture !== "confirmed" && call.tool === ToolNames.RunScript) {
 			const script = typeof call.args?.script === "string" ? call.args.script.trim() : "";
 			const scan =
-				script === ""
+				script === "" || !runsUnderShell(call.args)
 					? null
 					: scanNamedScript(scriptPath(script, cwd), yolo, callCwd, [callCwd], newScriptBudget(), {
 							zero: scriptPath(script, cwd),
@@ -1799,6 +1803,15 @@ function runsScriptFile(call: ClassifierCall): boolean {
 	if (call.tool !== ToolNames.Bash) return false;
 	const command = commandArg(call.args);
 	return command !== null && hasUnparsedShellScript(command) && (shellScriptSources(command)?.length ?? 0) > 0;
+}
+
+/** The `RUN_SCRIPT_INTERPRETERS` entries that read their script as shell source (#421). */
+const RUN_SCRIPT_SHELLS: ReadonlySet<string> = new Set<RunScriptInterpreter>(["bash", "sh"]);
+
+/** True when run_script hands its script to a shell, the only interpreter whose lines the yolo scan can read. */
+function runsUnderShell(args: Record<string, unknown> | undefined): boolean {
+	const interpreter = args?.interpreter;
+	return typeof interpreter === "string" && RUN_SCRIPT_SHELLS.has(interpreter.trim());
 }
 
 /** Why a yolo script asks when `safety.sandbox` is `required` and the host has no backend. */

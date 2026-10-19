@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
+import { bashShellPath } from "./bash-shell.js";
 import {
 	gitCommitAttributionEnabled,
 	reportCommitAttributionDiagnostic,
@@ -262,6 +263,9 @@ function parseNullDelimitedEnv(raw: string): NodeJS.ProcessEnv | null {
 }
 
 function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
+	// Git Bash's login environment spells PATH and the other path lists the
+	// MSYS way, which the Windows-side env Clio hands every child cannot take.
+	if (process.platform === "win32") return Promise.resolve(null);
 	return new Promise<NodeJS.ProcessEnv | null>((resolve) => {
 		let stdout = "";
 		let settled = false;
@@ -316,8 +320,8 @@ export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "st
 	return stderr.length > 0 ? `${stdout}${stdout.endsWith("\n") || stdout.length === 0 ? "" : "\n"}${stderr}` : stdout;
 }
 
-/** A `required` sandbox with no backend: the command never spawned. */
-function sandboxRefusedResult(message: string): BashCommandResult {
+/** A `required` sandbox with no backend, or a host with no bash: the command never spawned. */
+function notSpawnedResult(message: string): BashCommandResult {
 	return {
 		error: { name: "Error", message, code: 126 } as unknown as NodeJS.ErrnoException,
 		stdout: "",
@@ -332,6 +336,11 @@ function sandboxRefusedResult(message: string): BashCommandResult {
 }
 
 export async function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
+	const shell = bashShellPath();
+	if (shell === null)
+		return notSpawnedResult(
+			"no bash was found on this host; install Git for Windows (Git Bash) or put its bash.exe on PATH (#421)",
+		);
 	const plan = await bashSpawnPlan();
 	const attribution = withManagedGitCommitAttributionEnvironment(plan.env, {
 		cwd: options.cwd ?? process.cwd(),
@@ -341,7 +350,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 	// Preserve an upstream failure through output filters such as tail, so
 	// verification receipts cannot report success merely because the filter
 	// succeeded. A caller can explicitly opt out with `set +o pipefail`.
-	const shellArgv = ["/bin/bash", "-o", "pipefail", plan.mode, command];
+	const shellArgv = [shell, "-o", "pipefail", plan.mode, command];
 	// Inside a dispatched worker the command runs under the worker's OS
 	// sandbox (decision Q8), and a script the operator's yolo admitted runs
 	// under the yolo script sandbox (#419); everywhere else the plan is a
@@ -351,8 +360,8 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			? planYoloScriptSpawn(options.scriptSandbox, { argv: shellArgv }, options.cwd ?? process.cwd())
 			: undefined;
 	const sandbox = yoloPlan ?? planSandboxedSpawn({ argv: shellArgv }, options.cwd ?? process.cwd());
-	if (sandbox.kind === "refused") return sandboxRefusedResult(sandbox.message);
-	const spawnFile = sandbox.kind === "sandboxed" ? sandbox.file : "/bin/bash";
+	if (sandbox.kind === "refused") return notSpawnedResult(sandbox.message);
+	const spawnFile = sandbox.kind === "sandboxed" ? sandbox.file : shell;
 	const spawnArgs = sandbox.kind === "sandboxed" ? sandbox.args : shellArgv.slice(1);
 	return new Promise<BashCommandResult>((resolve) => {
 		const timeout = clampTimerDelayMs(options.timeoutMs ?? 300_000);

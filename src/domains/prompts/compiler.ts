@@ -482,13 +482,33 @@ const HEADLESS_UNMAPPED_CAPABILITIES: ReadonlySet<string> = new Set([
  * The turn-ending contract where an operator can answer an interview. The
  * examples pair the endings models write most with the ending the operator
  * wants; the no-offer half also lives in identity.clio for every surface.
+ * Yolo gets its own variant: an operator who set it has often walked away, and
+ * clarifying rounds and plan-approval cards parked overnight runs (#421).
  */
-function renderTurnEndingContract(direct: boolean): string[] {
+function renderTurnEndingContract(direct: boolean, yolo: boolean): string[] {
+	const askUserCall = direct
+		? "an ask_user call"
+		: 'an ask_user call through gateway(op="call", capability="ask_user", args={...})';
+	if (yolo) {
+		return [
+			"## Ending a turn",
+			'Under yolo a turn ends Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
+			"Ambiguity does not end the turn. Take the recommended default, state the assumption in the final reply, and keep working. Tools settle workspace facts.",
+			'A requested plan shows its steps with their stated assumptions, and the turn stops there; when the operator asked for the work to be carried out, carry the plan out instead. A plan never ends on an approval card or a "Carry out this plan?" question.',
+			`Reserve ${askUserCall} for a decision that blocks all progress: no reasonable default exists and a wrong guess would be expensive to reverse. Give it a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first. Act on answers; a decline or 'enough' ends in one sentence without restating earlier output.`,
+			"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because damage-control rules remain the safety gate.",
+			"Examples:",
+			'- "Want me to dive deeper into refresh?": stop after the explanation.',
+			'- A finished change closing "Let me know if you want tests.": stop after the change.',
+			'- "Chart a losing week" with a backtest and a thin live log in the workspace: chart the backtest, name that choice as an assumption in the final reply, and finish.',
+			'- "Delete the test folder and commit.": run the rm and the commit; no "Delete tests?" interview first.',
+		];
+	}
 	return [
 		"## Ending a turn",
 		"Every turn ends in one of two states:",
 		'1. Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
-		`2. Waiting on the operator: the turn's last act is an ask_user call${direct ? "" : ' through gateway(op="call", capability="ask_user", args={...})'} with a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first.`,
+		`2. Waiting on the operator: the turn's last act is ${askUserCall} with a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first.`,
 		"Use ask_user for clarification, plan approval, yes/no decisions, and going deeper. A question inside an explanation is fine; waiting for a typed answer is not. Tools settle workspace facts. Act on answers; a decline or 'enough' ends in one sentence without restating earlier output.",
 		"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because the approval cards on the risky commands are the safety gate. Ask only when the target is ambiguous or lies outside the workspace.",
 		"Examples:",
@@ -503,7 +523,7 @@ function renderTurnEndingContract(direct: boolean): string[] {
 	];
 }
 
-function renderToolContractBlock(inputs: SessionPromptInputs): string {
+function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: string): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
 			"# Tool Contract",
@@ -593,7 +613,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 				]
 			: []),
 		...(discovery.length > 0 ? ["", "## Finding the right capability", ...discovery] : []),
-		...(askUser ? ["", ...renderTurnEndingContract(admitted.has("ask_user"))] : []),
+		...(askUser ? ["", ...renderTurnEndingContract(admitted.has("ask_user"), autonomyLevel === "yolo")] : []),
 		"",
 		...(reachable("verify") && inputs.turnConstraints?.mode !== "answer" && inputs.turnConstraints?.mode !== "proposal"
 			? [
@@ -981,7 +1001,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		],
 		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true)],
 		["runtime", [renderRuntimeBlock(session), modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
-		["tool-contract", renderToolContractBlock(session)],
+		["tool-contract", renderToolContractBlock(session, autonomyLevel)],
 		["retrieval-hints", renderRetrievalHintsBlock(session)],
 		["memory", renderMemoryBlock(session.memorySection)],
 		["project-context", renderProjectBlock(session.contextFiles)],

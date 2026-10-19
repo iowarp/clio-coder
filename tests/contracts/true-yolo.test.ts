@@ -24,7 +24,7 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { jobAuthorityRefusal } from "../../src/entry/job-runtime.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";
-import { createRunScriptTool } from "../../src/tools/run-script.js";
+import { createRunScriptTool, runScriptSafetyProjection } from "../../src/tools/run-script.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const OPERATOR_YOLO: OperatorYoloScope = { scratchRoots: [] };
@@ -222,6 +222,35 @@ test("yolo reads a shell script before running it and blocks a catastrophic line
 		"block:damage-control:curl-pipe-shell",
 	]);
 	strictEqual(engineFor(cwd).evaluate(runScript(join(outside, "bench.sh")), "yolo", OPERATOR_YOLO).kind, "allow");
+});
+
+// #421: Python lines are not shell, so the shell line scan neither asks nor blocks for them.
+test("yolo reads a run_script through the shell line scan only when a shell interprets it", () => {
+	const cwd = workspace("clio-yolo-run-script-python-");
+	const python = ["for i, x in enumerate(xs):", "    up = x > prev[i]", "a = b << 2", "ln = 3", "eval = 1"];
+	writeFileSync(join(cwd, "plot.py"), [...python, 'q = "DROP TABLE trades"', ""].join("\n"));
+	const engine = engineFor(cwd);
+	const sandboxed: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "sandboxed" };
+	const refused: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "refused" };
+	// Admission judges the capability and its projected argv; both must pass for the run to start unasked.
+	const judged = (interpreter: string, scope: OperatorYoloScope = OPERATOR_YOLO) => {
+		const call = { tool: ToolNames.RunScript, args: { interpreter, script: "plot.py" } };
+		const effect = { tool: ToolNames.Bash, args: { command: runScriptSafetyProjection(call.args).command } };
+		return [engine.evaluate(call, "yolo", scope), engine.evaluate(effect, "yolo", scope)];
+	};
+	for (const interpreter of ["python", "python3"]) {
+		deepStrictEqual(
+			judged(interpreter).map((decision) => decision.kind),
+			["allow", "allow"],
+			interpreter,
+		);
+		strictEqual(judged(interpreter, sandboxed)[0]?.scriptSandbox?.workspace, cwd, interpreter);
+		strictEqual(judged(interpreter, refused)[0]?.kind, "ask", interpreter);
+	}
+	// The same text handed to a shell is still read line by line.
+	for (const interpreter of ["sh", "bash"]) {
+		strictEqual(judged(interpreter)[0]?.reasonCode, "damage-control:sql-drop-table", interpreter);
+	}
 });
 
 test("run_script runs a script and cwd outside the workspace only under the operator's yolo", async () => {
