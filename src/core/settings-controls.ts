@@ -440,6 +440,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.sandbox": ["auto", "required", "off"],
+	"safety.snapshots": ["auto", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
 	"fleet.permissions.mode": ["deny", "escalate", "fail", "main"],
@@ -531,6 +532,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"safety.sandboxNetwork": [
 		"Worker sandbox network",
 		"Let sandboxed worker commands reach the network. Workers that have web_fetch get network either way.",
+	],
+	"safety.snapshots": [
+		"Workspace snapshots",
+		"Before Clio first changes files in a turn, and before every destructive command, save the Git work tree as a private snapshot so /rewind can restore the files. Ignored files and untracked files over 16 MiB are left out. Your index, HEAD and branches are never touched. Off takes no snapshots.",
 	],
 	"safety.unattendedAfterSeconds": [
 		"Unattended timeout",

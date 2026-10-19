@@ -168,6 +168,7 @@ export interface OverlayLifecycleController {
 	openTasksOverlayState(): void;
 	openDecisionsOverlayState(): void;
 	openMemoryOverlayState(): void;
+	openRewindOverlayState(): void;
 	openViewOverlayState(initialFilter?: string): void;
 	/** `/btw <question>`: one side-question round rendered in its own overlay. */
 	openSideQuestionOverlayState(question: string): void;
@@ -586,6 +587,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openTasksOverlayState = overlayGeneralOpeners.openTasks;
 	const openDecisionsOverlayState = overlayGeneralOpeners.openDecisions;
 	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
+	const openRewindOverlayState = overlayGeneralOpeners.openRewind;
 	const openViewOverlayState = overlayGeneralOpeners.openView;
 	const openSideQuestionOverlayState = overlayGeneralOpeners.openSideQuestion;
 	const openDraftOverlayState = overlayGeneralOpeners.openDraft;
@@ -611,6 +613,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openTasksOverlayState,
 		openDecisionsOverlayState,
 		openMemoryOverlayState,
+		openRewindOverlayState,
 		openViewOverlayState,
 		openSideQuestionOverlayState,
 		openDraftOverlayState,

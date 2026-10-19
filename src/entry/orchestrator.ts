@@ -285,6 +285,7 @@ import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
+import { createWorkspaceSnapshots, pruneWorkspaceSnapshots } from "../domains/workspace-snapshots/index.js";
 import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
 import {
 	bindBoardActions,
@@ -2842,6 +2843,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	}
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
+	// Sessions whose snapshot start-of-session prune has run in this process.
+	const snapshotPrunedSessions = new Set<string>();
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
@@ -2871,6 +2874,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
 		sessionCodeConsent,
+		// Recoverability for the main agent on every surface; workers never snapshot.
+		workspaceSnapshot: async ({ sessionId: requested, ...request }) => {
+			if (getCurrentSettings().safety.snapshots === "off") return null;
+			const sessionId = requested ?? session?.current()?.id;
+			if (sessionId === undefined) return null;
+			const outcome = await createWorkspaceSnapshots({ stateDir: clioStateDir(), sessionId, cwd: process.cwd() }).snapshot(
+				request,
+			);
+			// A session's first snapshot is when it starts holding snapshot state,
+			// so it is also when idle sessions' refs and state are pruned.
+			if (!snapshotPrunedSessions.has(sessionId)) {
+				snapshotPrunedSessions.add(sessionId);
+				void pruneWorkspaceSnapshots({ stateDir: clioStateDir(), cwd: process.cwd(), keepSessionId: sessionId }).catch(
+					() => undefined,
+				);
+			}
+			return outcome;
+		},
 		// `acp` takes no read-only flag; only a client ceiling makes its turns read-only.
 		...(acpMode ? { hostReadOnlySource: "acp-ceiling" as const } : {}),
 	});

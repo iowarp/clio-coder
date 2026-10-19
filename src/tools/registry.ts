@@ -52,6 +52,8 @@ import type { SessionCodeConsent } from "../domains/safety/session-code-consent.
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { UNATTENDED_ALLOWED_BY } from "../domains/safety/unattended.js";
 import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
+import type { WorkspaceSnapshotOutcome, WorkspaceSnapshotRequest } from "../domains/workspace-snapshots/store.js";
+import { workspaceSnapshotTrigger } from "../domains/workspace-snapshots/trigger.js";
 import type { ImageContent } from "../engine/types.js";
 import { approvalGiver, withApprovalNote } from "./approval-note.js";
 import { askUserExposure } from "./ask-user.js";
@@ -400,6 +402,17 @@ export interface RegistryDeps {
 	 * never pending, so it keeps #377's allow. Workers never consult it.
 	 */
 	sessionCodeConsent?: Pick<SessionCodeConsent, "pending" | "grant">;
+	/**
+	 * Takes a workspace snapshot before an admitted call's body runs: before the
+	 * first mutating call of each turn, and before every destructive, deleting
+	 * or git-discarding call (`workspaceSnapshotTrigger`). Only the main
+	 * session's registry wires it; worker registries never snapshot. Resolves
+	 * null when snapshots are off or no session is open. An unavailable snapshot
+	 * never holds the call: it proceeds and its result says "no snapshot".
+	 */
+	workspaceSnapshot?: (
+		request: WorkspaceSnapshotRequest & { sessionId?: string },
+	) => Promise<WorkspaceSnapshotOutcome | null>;
 }
 
 /**
@@ -898,6 +911,63 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return isSource ? `${spec.name} refused while the information-flow policy is unavailable: ${refusal}` : null;
 	};
 
+	/** The turn whose first mutating call already took its snapshot, or is taking it. */
+	let snapshotTurn: { key: string; pending: Promise<WorkspaceSnapshotOutcome | null> } | null = null;
+
+	/**
+	 * Snapshot the workspace before an admitted call's body runs, when the
+	 * trigger asks for one. Returns the note for the call's result when the
+	 * snapshot could not be taken; the call runs either way.
+	 */
+	const snapshotBeforeBody = async (
+		spec: ToolSpec,
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		options: ToolInvokeOptions | undefined,
+	): Promise<MiddlewareEffect | null> => {
+		const take = deps.workspaceSnapshot;
+		if (take === undefined || (deps.principal ?? "main") !== "main") return null;
+		let effect: ClassifierCall = call;
+		try {
+			effect = spec.safetyCall?.(call.args ?? {}) ?? call;
+		} catch {
+			// Admission already ran this projection; the call's own name still classifies.
+		}
+		const trigger = workspaceSnapshotTrigger(effect, decision);
+		if (trigger.kind === "none") return null;
+		const turnKey = options?.turnId === undefined ? null : `${options.sessionId ?? ""}\0${options.turnId}`;
+		const request = {
+			tool: spec.name,
+			...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
+			...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
+			...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+		};
+		let pending: Promise<WorkspaceSnapshotOutcome | null>;
+		if (trigger.kind === "always") {
+			pending = take({ ...request, reason: trigger.reason });
+			if (turnKey !== null) snapshotTurn = { key: turnKey, pending };
+		} else {
+			// A turn takes one snapshot before its first mutation; a call without a
+			// turn (an operator command) has none to anchor.
+			if (turnKey === null) return null;
+			if (snapshotTurn?.key === turnKey) {
+				// A sibling call is still taking the turn's snapshot: mutate only after it lands.
+				await snapshotTurn.pending.catch(() => null);
+				return null;
+			}
+			pending = take({ ...request, reason: "turn-start" });
+			snapshotTurn = { key: turnKey, pending };
+		}
+		let outcome: WorkspaceSnapshotOutcome | null;
+		try {
+			outcome = await pending;
+		} catch (err) {
+			outcome = { kind: "unavailable", reason: err instanceof Error ? err.message : String(err), durationMs: 0 };
+		}
+		if (outcome?.kind !== "unavailable") return null;
+		return { kind: "annotate_tool_result", message: `no snapshot: ${outcome.reason}`, severity: "warn" };
+	};
+
 	const runSpec = async (
 		spec: ToolSpec,
 		call: ClassifierCall,
@@ -979,6 +1049,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				});
 				return block.redundantRepeat === true ? { ...verdict, redundantRepeat: true } : verdict;
 			}
+			// Recoverability point: admission allowed the call and no hook blocked it,
+			// so a snapshot here precedes exactly the bodies that will run.
+			const snapshotNote = await snapshotBeforeBody(spec, call, decision, options);
+			if (snapshotNote !== null) beforeEffects = [...beforeEffects, snapshotNote];
 			try {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
 				resultDisposition = resolveToolResultDisposition(spec, preparedArgs);

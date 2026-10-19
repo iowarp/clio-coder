@@ -44,6 +44,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// The main registry reads it at every admission, so the next tool call
 	// observes a change (#419).
 	"safety.scratchRoots",
+	// The main registry asks on every mutating call whether to snapshot.
+	"safety.snapshots",
 	// Each permission card and ask_user round reads it when it starts waiting,
 	// so the next one observes a change; a running countdown keeps its window.
 	"safety.unattendedAfterSeconds",

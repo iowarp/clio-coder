@@ -37,6 +37,7 @@ import {
 	THINKING_LEVELS,
 	type ThinkingLevel,
 	WORKING_SET_PROFILE_IDS,
+	WORKSPACE_SNAPSHOT_MODES,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { SANDBOX_MODES } from "./sandbox/types.js";
@@ -2333,6 +2334,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"sandbox",
 				"sandboxNetwork",
 				"scratchRoots",
+				"snapshots",
 				"unattendedAfterSeconds",
 			]);
 			if ("autonomy" in safety) {
@@ -2346,6 +2348,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("sandboxNetwork" in safety) {
 				const parsed = expectBoolean(issues, "safety.sandboxNetwork", safety.sandboxNetwork);
 				if (parsed !== undefined) settings.safety.sandboxNetwork = parsed;
+			}
+			if ("snapshots" in safety) {
+				const parsed = expectEnum(issues, "safety.snapshots", safety.snapshots, WORKSPACE_SNAPSHOT_MODES);
+				if (parsed !== undefined) settings.safety.snapshots = parsed;
 			}
 			if ("scratchRoots" in safety) {
 				const parsed = expectStringArray(issues, "safety.scratchRoots", safety.scratchRoots);

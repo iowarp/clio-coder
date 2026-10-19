@@ -35,6 +35,7 @@ import type { OutcomeRecord } from "../domains/system-one/index.js";
 import { draftTakenOutcome } from "../domains/system-one/outcomes.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
+import { createWorkspaceSnapshots, type WorkspaceSnapshots } from "../domains/workspace-snapshots/index.js";
 import type { TUI } from "../engine/tui.js";
 import type { DraftOutcome } from "../session-control/chat-loop.js";
 import type { DraftVerdict } from "../session-control/drafts.js";
@@ -54,6 +55,12 @@ import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/d
 import { openDraftOverlay, type TakenDraft } from "./overlays/draft.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openQueueNavigatorOverlay } from "./overlays/queue-navigator.js";
+import {
+	formatRewindOutcome,
+	openRewindConfirmOverlay,
+	openRewindListOverlay,
+	type RewindListHandle,
+} from "./overlays/rewind.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { abbreviateModelId } from "./theme/labels.js";
@@ -193,6 +200,8 @@ export interface OverlayGeneralOpeners {
 	openTasks(): void;
 	openDecisions(): void;
 	openMemory(): void;
+	/** `/rewind`: this session's workspace snapshots, a preview, then a confirmed restore. */
+	openRewind(): void;
 	openView(initialFilter?: string): void;
 	toggleDispatchBoard(): void;
 	/** The steering queue as a list the operator can reorder, relabel, edit, remove or send now. */
@@ -345,6 +354,74 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onClose: deps.closeOverlay,
 		});
 		deps.requestRender();
+	};
+
+	const openRewind = (): void => {
+		if (deps.transitions.state !== "closed") return;
+		const sessionId = deps.getSessionId?.() ?? null;
+		if (sessionId === null) {
+			deps.notify("warning", "/rewind needs an open session.", "rewind:no-session");
+			return;
+		}
+		const snapshots = createWorkspaceSnapshots({
+			stateDir: deps.stateDir,
+			sessionId,
+			cwd: deps.getSessionMeta()?.cwd ?? process.cwd(),
+		});
+		const records = snapshots.list();
+		deps.transitions.state = "rewind";
+		const list = openRewindListOverlay(deps.tui, {
+			records,
+			onSelect: (n) => previewRewind(snapshots, n, list),
+			onClose: deps.closeOverlay,
+		});
+		deps.transitions.handle = list;
+		if (records.length > 0) {
+			void snapshots.differences().then((counts) => {
+				if (deps.transitions.handle === list) list.setCounts(counts);
+			});
+		}
+		deps.requestRender();
+	};
+
+	/** Files are only written while no turn runs: a turn in flight is about to change them again. */
+	const turnBlocksRewind = (): boolean => {
+		if (deps.isTurnInFlight?.() !== true) return false;
+		deps.notify("warning", "Wait for the turn to finish, or stop it, before /rewind restores files.", "rewind:turn");
+		return true;
+	};
+
+	let rewindPreviewing = false;
+	const previewRewind = (snapshots: WorkspaceSnapshots, n: number, list: RewindListHandle): void => {
+		if (rewindPreviewing || turnBlocksRewind()) return;
+		const record = snapshots.list().find((candidate) => candidate.n === n);
+		if (record === undefined) return;
+		rewindPreviewing = true;
+		void snapshots.preview(n).then((preview) => {
+			rewindPreviewing = false;
+			if (deps.transitions.handle !== list) return;
+			if (preview.kind === "unavailable") {
+				deps.notify("error", `/rewind: ${preview.reason}`, "rewind:preview");
+				return;
+			}
+			list.hide();
+			deps.transitions.handle = openRewindConfirmOverlay(deps.tui, {
+				record,
+				plan: preview.plan,
+				columns: deps.terminal.columns,
+				onCancel: deps.closeOverlay,
+				onConfirm: () => {
+					deps.closeOverlay();
+					if (turnBlocksRewind()) return;
+					void snapshots.restore(n).then((outcome) => {
+						const notice = formatRewindOutcome(outcome);
+						deps.notify(notice.level, notice.text, "rewind:outcome");
+						deps.requestRender();
+					});
+				},
+			});
+			deps.requestRender();
+		});
 	};
 
 	const openMemory = (): void => {
@@ -768,6 +845,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		openTasks,
 		openDecisions,
 		openMemory,
+		openRewind,
 		openView,
 		toggleDispatchBoard,
 		openQueueNavigator,

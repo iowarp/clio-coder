@@ -621,6 +621,7 @@ function overlayScopeLabel(state: OverlayState): string {
 		settings: "Settings",
 		resume: "Resume",
 		tree: "Session tree",
+		rewind: "Rewind",
 		"message-picker": "Messages",
 		"cwd-fallback": "Working directory",
 		"ask-user": "Interview",

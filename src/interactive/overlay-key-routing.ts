@@ -19,6 +19,7 @@ export type OverlayState =
 	| "settings"
 	| "resume"
 	| "tree"
+	| "rewind"
 	| "message-picker"
 	| "cwd-fallback"
 	| "ask-user"
@@ -334,6 +335,8 @@ export function routeOverlayKey(
 	if (overlayState === "settings") return false;
 	if (overlayState === "resume") return false;
 	if (overlayState === "tree") return false;
+	// The snapshot list and its confirmation own their keys and Esc.
+	if (overlayState === "rewind") return false;
 	if (overlayState === "message-picker") return routeMessagePickerOverlayKey(data, deps);
 	if (overlayState === "cwd-fallback") return false;
 	if (overlayState === "ask-user") return false;

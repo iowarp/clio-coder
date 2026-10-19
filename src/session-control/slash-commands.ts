@@ -239,6 +239,8 @@ type SlashCommandVariant =
 	| { kind: "resume"; target?: string }
 	| { kind: "new" }
 	| { kind: "tree" }
+	/** `/rewind`: restore workspace files from a snapshot; `/tree` rewinds the conversation. */
+	| { kind: "rewind" }
 	| { kind: "fork" }
 	| { kind: "compact"; instructions: string | undefined }
 	| { kind: "export"; path: string | undefined }
@@ -942,6 +944,8 @@ export interface SessionCommandContext {
 	openResume?: (target?: string) => void;
 	startNewSession?: () => void;
 	openTree?: () => void;
+	/** Open `/rewind`, the workspace snapshot list. Absent on a host with no overlay layer. */
+	openRewind?: () => void;
 	openMessagePicker?: () => void;
 	openHelp?: (query?: string) => void;
 	openExtensions?: () => void;
@@ -3035,6 +3039,18 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "rewind",
+		acp: false,
+		description: "Restore workspace files from a snapshot taken before Clio's changes; /tree rewinds the conversation",
+		group: "Session",
+		kinds: ["rewind"],
+		args: {},
+		fromArgs: fromArgsOrUsage("rewind", { kind: "rewind" }),
+		handle(_command, ctx) {
+			ctx.openRewind?.();
+		},
+	},
+	{
 		name: "fork",
 		acp: false,
 		description: "Fork from an assistant turn",
@@ -3374,6 +3390,7 @@ const COMMAND_ORDER = [
 	"handoff",
 	"fork",
 	"tree",
+	"rewind",
 	"export",
 	"archive",
 	"quit",

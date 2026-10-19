@@ -207,6 +207,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openResume: (target?: string) => void;
 	startNewSession: () => void;
 	openTree: () => void;
+	openRewind?: () => void;
 	openMessagePicker: () => void;
 	openHelp: (query?: string) => void;
 	openExtensions: () => void;
@@ -647,6 +648,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openResume: deps.openResume,
 		startNewSession: deps.startNewSession,
 		openTree: deps.openTree,
+		...(deps.openRewind ? { openRewind: deps.openRewind } : {}),
 		openMessagePicker: deps.openMessagePicker,
 		openHelp: deps.openHelp,
 		openExtensions: deps.openExtensions,

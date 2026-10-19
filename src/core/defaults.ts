@@ -641,6 +641,12 @@ export interface SafetySettings {
 	 */
 	scratchRoots: string[];
 	/**
+	 * Workspace snapshots before the main agent mutates a Git work tree: auto
+	 * snapshots before each turn's first mutating call and before every
+	 * destructive one, and `/rewind` restores files from them; off takes none.
+	 */
+	snapshots: WorkspaceSnapshotMode;
+	/**
 	 * Seconds an attended permission card or ask_user round waits for the
 	 * operator before Clio resolves it and the turn continues: a parked call is
 	 * denied, an unanswered question takes its recommended option. 0 waits
@@ -648,6 +654,9 @@ export interface SafetySettings {
 	 */
 	unattendedAfterSeconds: number;
 }
+
+export type WorkspaceSnapshotMode = "auto" | "off";
+export const WORKSPACE_SNAPSHOT_MODES: ReadonlyArray<WorkspaceSnapshotMode> = ["auto", "off"];
 
 export interface IntegrationsSettings {
 	projectResources: ProjectResourcesSettings;
@@ -787,6 +796,7 @@ export const DEFAULT_SETTINGS = {
 		sandbox: "auto" as SandboxMode,
 		sandboxNetwork: false,
 		scratchRoots: [] as string[],
+		snapshots: "auto" as WorkspaceSnapshotMode,
 		unattendedAfterSeconds: 300,
 	} as SafetySettings,
 	interface: {
@@ -986,6 +996,8 @@ safety:
   # Extra absolute trees yolo may clean up like the workspace, beside the temp
   # dirs. Honored only in this file; project settings cannot set it.
   scratchRoots: []
+  # Git snapshots before the agent changes files, restored with /rewind: auto | off.
+  snapshots: auto
   # Seconds a permission card or ask_user question waits for you before Clio
   # resolves it and keeps working: the call is denied, the question takes its
   # recommended option. 0 waits forever. Honored only in this file.
