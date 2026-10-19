@@ -28,3 +28,8 @@ than a bodiless GET or HEAD) are approval-required. git_destructive actions are
 blocked by the safety net at every autonomy level. A plan-scale dispatch
 (several tasks, a compete, a remote node, or applying a compete winner) asks
 once for the whole plan. Keep edits focused so each change is easy to review.
+In the main session a call that would need approval may first be reviewed by
+Clio's safety judge against the operator's own requests. A blocked call returns
+the judge's reason as its result: do not repeat it or a reworded form of it.
+Work inside the workspace and scratch roots, or record the open decision for
+your final reply and continue.

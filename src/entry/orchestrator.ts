@@ -340,6 +340,7 @@ import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { backgroundSlotKey, relevanceStartRefusal } from "./relevance-eligibility.js";
 import { createReloadClasses } from "./reload-classes.js";
+import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
 
@@ -2843,6 +2844,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	}
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
+	// The safety judge reviews what autonomy default would park for the operator
+	// against the operator's own messages. Its round goes through System One's
+	// one-shot port and request admission, built further down; nothing calls the
+	// judge before the first tool call.
+	const safetyJudge = createSafetyJudgeHost({
+		settings: () => getCurrentSettings(),
+		complete: createSafetyJudgeCompletion({
+			providers,
+			oneShot: () => safetyJudgeOneShot,
+			flowRefusal: (destination) => admitModelFlow(destination),
+		}),
+		session: () => session,
+		safety,
+	});
 	// Sessions whose snapshot start-of-session prune has run in this process.
 	const snapshotPrunedSessions = new Set<string>();
 	const toolRegistry = createRegistry({
@@ -2874,6 +2889,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
 		sessionCodeConsent,
+		safetyJudge,
 		// Recoverability for the main agent on every surface; workers never snapshot.
 		workspaceSnapshot: async ({ sessionId: requested, ...request }) => {
 			if (getCurrentSettings().safety.snapshots === "off") return null;
@@ -3195,6 +3211,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		stateDir: clioStateDir(),
 	});
+	const safetyJudgeOneShot = createSystemOneOneShot(providers, admitSystemOneRequest);
 	const systemOneEndpointCapacity = (targetId: string): number => {
 		const target = providers.getTarget(targetId);
 		const key = target === null ? null : canonicalEndpointKey(target);

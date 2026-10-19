@@ -2336,6 +2336,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"scratchRoots",
 				"snapshots",
 				"unattendedAfterSeconds",
+				"judge",
 			]);
 			if ("autonomy" in safety) {
 				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS, RETIRED_AUTONOMY_VALUES);
@@ -2366,6 +2367,32 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("unattendedAfterSeconds" in safety) {
 				const parsed = expectInteger(issues, "safety.unattendedAfterSeconds", safety.unattendedAfterSeconds, { min: 0 });
 				if (parsed !== undefined) settings.safety.unattendedAfterSeconds = parsed;
+			}
+			if ("judge" in safety) {
+				if (!isPlainObject(safety.judge)) issues.add("safety.judge", `expected a map, got ${describe(safety.judge)}`);
+				else {
+					const judge = safety.judge;
+					issues.unknownKeys("safety.judge", judge, ["enabled", "target", "model", "environment", "allow", "deny"]);
+					if ("enabled" in judge) {
+						const parsed = expectBoolean(issues, "safety.judge.enabled", judge.enabled);
+						if (parsed !== undefined) settings.safety.judge.enabled = parsed;
+					}
+					if ("target" in judge && judge.target !== null) {
+						const parsed = expectString(issues, "safety.judge.target", judge.target);
+						if (parsed !== undefined && settings.targets.some((target) => target.id === parsed))
+							settings.safety.judge.target = parsed;
+						else if (parsed !== undefined) issues.add("safety.judge.target", `unknown target '${parsed}'`);
+					}
+					if ("model" in judge && judge.model !== null) {
+						const parsed = expectString(issues, "safety.judge.model", judge.model);
+						if (parsed !== undefined) settings.safety.judge.model = parsed;
+					}
+					for (const key of ["environment", "allow", "deny"] as const) {
+						if (!(key in judge)) continue;
+						const parsed = expectStringArray(issues, `safety.judge.${key}`, judge[key]);
+						if (parsed !== undefined) settings.safety.judge[key] = parsed;
+					}
+				}
 			}
 			if ("limits" in safety) {
 				if (!isPlainObject(safety.limits)) issues.add("safety.limits", `expected a map, got ${describe(safety.limits)}`);

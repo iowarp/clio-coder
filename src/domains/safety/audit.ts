@@ -29,6 +29,9 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
  *     /audit consumers know which session was reopened and how.
  *   - `agent_status_change`: emitted for alarmable agent-status transitions
  *     such as stuck, tool_blocked, retrying, and cancelled turns.
+ *   - `safety_judge`: emitted for every safety judge review of a call that
+ *     would have parked: its verdict, rule, reason, latency and route, or why
+ *     it gave none.
  *   - `completion_contract`: emitted at turn_end for every finish-contract
  *     decision (each OK reason and each engagement) so the decision is
  *     replayable from the ledger alone: it records the mutated paths, the
@@ -186,7 +189,49 @@ export interface CompletionContractAuditInput {
 	now?: Date;
 }
 
+/** One safety judge verdict, or its absence, for a call that would have parked. */
+export interface SafetyJudgeAuditRecord {
+	kind: "safety_judge";
+	ts: string;
+	correlationId: string;
+	sessionId: string | null;
+	turnId: string | null;
+	toolCallId?: string;
+	tool: string;
+	actionClass: string;
+	/** The rule that made admission ask. */
+	askRule?: string;
+	/** `none` is no verdict (see `noVerdict`); `escalated` is a call handed to the operator unjudged. */
+	verdict: "allow" | "block" | "none" | "escalated";
+	rule?: string;
+	reason?: string;
+	latencyMs: number;
+	target?: string;
+	model?: string;
+	noVerdict?: string;
+	detail?: string;
+}
+
+export interface SafetyJudgeAuditInput {
+	sessionId: string | null;
+	turnId?: string;
+	toolCallId?: string;
+	tool: string;
+	actionClass: string;
+	askRule?: string;
+	verdict: SafetyJudgeAuditRecord["verdict"];
+	rule?: string;
+	reason?: string;
+	latencyMs: number;
+	target?: string;
+	model?: string;
+	noVerdict?: string;
+	detail?: string;
+	now?: Date;
+}
+
 export type AuditRecord =
+	| SafetyJudgeAuditRecord
 	| ToolCallAuditRecord
 	| PermissionAuditRecord
 	| AbortAuditRecord
@@ -421,6 +466,30 @@ export function buildCompletionContractAuditRecord(input: CompletionContractAudi
 		record.quality = input.quality.map((finding) => ({ ...finding, message: redactString(finding.message) }));
 	if (input.verificationScope !== undefined)
 		record.verificationScope = redactArgs(input.verificationScope) as FinishContractVerificationScope;
+	return record;
+}
+
+export function buildSafetyJudgeAuditRecord(input: SafetyJudgeAuditInput): SafetyJudgeAuditRecord {
+	const now = input.now ?? new Date();
+	const record: SafetyJudgeAuditRecord = {
+		kind: "safety_judge",
+		ts: now.toISOString(),
+		correlationId: newCorrelationId(),
+		sessionId: input.sessionId,
+		turnId: input.turnId ?? null,
+		tool: input.tool,
+		actionClass: input.actionClass,
+		verdict: input.verdict,
+		latencyMs: Math.max(0, Math.round(input.latencyMs)),
+	};
+	if (input.toolCallId !== undefined) record.toolCallId = input.toolCallId;
+	if (input.askRule !== undefined) record.askRule = input.askRule;
+	if (input.rule !== undefined) record.rule = input.rule;
+	if (input.reason !== undefined) record.reason = redactString(input.reason);
+	if (input.target !== undefined) record.target = input.target;
+	if (input.model !== undefined) record.model = input.model;
+	if (input.noVerdict !== undefined) record.noVerdict = input.noVerdict;
+	if (input.detail !== undefined) record.detail = redactString(input.detail);
 	return record;
 }
 

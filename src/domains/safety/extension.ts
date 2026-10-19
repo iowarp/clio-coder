@@ -18,6 +18,7 @@ import {
 	buildAuditRecord,
 	buildCompletionContractAuditRecord,
 	buildPermissionAuditRecord,
+	buildSafetyJudgeAuditRecord,
 	buildSessionParkAuditRecord,
 	buildSessionResumeAuditRecord,
 	openAuditWriter,
@@ -142,6 +143,10 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 
 	function recordCompletionContractAudit(input: Parameters<typeof buildCompletionContractAuditRecord>[0]): void {
 		writeAudit(buildCompletionContractAuditRecord(input));
+	}
+
+	function recordSafetyJudgeAudit(input: Parameters<typeof buildSafetyJudgeAuditRecord>[0]): void {
+		writeAudit(buildSafetyJudgeAuditRecord(input));
 	}
 
 	const extension: DomainExtension = {
@@ -406,6 +411,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			recordCount: () => recordCount,
 			recordToolCall: recordToolCallAudit,
 			recordCompletionContract: recordCompletionContractAudit,
+			recordSafetyJudge: recordSafetyJudgeAudit,
 		},
 	};
 

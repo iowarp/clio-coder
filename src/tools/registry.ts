@@ -25,6 +25,7 @@ import type {
 } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import {
+	type AdmissionAskSource,
 	type AdmissionDisposition,
 	type AdmissionGitContext,
 	type AdmissionPrincipal,
@@ -48,6 +49,7 @@ import {
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { OperatorYoloScope } from "../domains/safety/policy-engine.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
+import type { SafetyJudgeOutcome, SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import type { SessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { UNATTENDED_ALLOWED_BY } from "../domains/safety/unattended.js";
@@ -403,6 +405,13 @@ export interface RegistryDeps {
 	 */
 	sessionCodeConsent?: Pick<SessionCodeConsent, "pending" | "grant">;
 	/**
+	 * The safety judge. Only the main session's registry passes it: at autonomy
+	 * default a call that would park for the operator is first reviewed against
+	 * the operator's own messages, and runs, comes back refused, or parks as
+	 * before when the judge skips it or gives no verdict. Workers never carry it.
+	 */
+	safetyJudge?: SafetyJudgeSeat;
+	/**
 	 * Takes a workspace snapshot before an admitted call's body runs: before the
 	 * first mutating call of each turn, and before every destructive, deleting
 	 * or git-discarding call (`workspaceSnapshotTrigger`). Only the main
@@ -548,8 +557,8 @@ export interface ToolInvokeOptions {
 	 */
 	allowedTools?: ReadonlyArray<ToolName>;
 	/**
-	 * How long this call sat parked awaiting an operator decision, reported when
-	 * the park resolves. A caller timing the invocation is measuring the tool,
+	 * How long this call sat parked awaiting an operator decision, or the safety
+	 * judge's review, reported when each wait ends. A caller timing the invocation is measuring the tool,
 	 * and the park is the operator, so the two have to be separable: without
 	 * this a `npm test` approved after a minute of reading was recorded as a
 	 * one-minute test run in the transcript, the receipt, and toolStats.
@@ -1445,6 +1454,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				axis: string;
 				approvalAuthority: ApprovalAuthority;
 				dispatchPlan?: DispatchPlanView;
+				/** Which admission step asked, for the safety judge's operator-only check. */
+				source?: AdmissionAskSource;
+				/** A plan-scale dispatch, whose body runs only under an operator approval or yolo. */
+				planScale?: true;
 		  };
 
 	/** The session's test-runner consent ask, the only obstacle among a call's host effects. */
@@ -1528,7 +1541,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (admission.kind === "allow") {
 			if (effectOutcome !== null) {
 				const decision = sessionConsentParkDecision(call, admission.decision, effectOutcome, dispatchPlan);
-				return { kind: "park", decision, axis: approvalAxisId(decision, level), approvalAuthority: "operator" };
+				return {
+					kind: "park",
+					decision,
+					axis: approvalAxisId(decision, level),
+					approvalAuthority: "operator",
+					source: "session-consent",
+				};
 			}
 			// A confirmed re-admission keeps the `allowed` row safety.evaluate wrote.
 			if (!admission.authorized) recordRegistryDisposition(call, admission.decision, "allowed");
@@ -1549,6 +1568,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				axis: approvalAxisId(decision, level),
 				approvalAuthority: "operator",
 				...(dispatchPlan !== null ? { dispatchPlan } : {}),
+				source: "session-consent",
+				...(planScale ? { planScale: true as const } : {}),
 			};
 		}
 		return {
@@ -1557,6 +1578,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			axis: approvalAxisId(askDecision, level),
 			approvalAuthority: admission.approvalAuthority,
 			...(admission.source === "autonomy" && dispatchPlan !== null ? { dispatchPlan } : {}),
+			source: admission.source,
+			...(planScale ? { planScale: true as const } : {}),
 		};
 	};
 
@@ -1952,6 +1975,50 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return true;
 	};
 
+	/**
+	 * The safety judge's review of a main-session ask at autonomy default.
+	 * `skip` everywhere else: workers, yolo, a registry without a judge, and a
+	 * call already cancelled. The time spent judging is reported as park time,
+	 * so the tool's own duration stays a measurement of the tool.
+	 */
+	const judgeParkedCall = (
+		call: ClassifierCall,
+		outcome: Extract<AdmitOutcome, { kind: "park" }>,
+		options: ToolInvokeOptions | undefined,
+	): SafetyJudgeOutcome | Promise<SafetyJudgeOutcome> => {
+		const judge = deps.safetyJudge;
+		if (judge === undefined || (deps.principal ?? "main") !== "main") return SAFETY_JUDGE_SKIP;
+		if ((deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL) !== "default" || options?.signal?.aborted === true) {
+			return SAFETY_JUDGE_SKIP;
+		}
+		let pending: SafetyJudgeOutcome | Promise<SafetyJudgeOutcome>;
+		try {
+			pending = judge.review({
+				tool: call.tool,
+				args: call.args,
+				decision: outcome.decision,
+				...(outcome.source !== undefined ? { source: outcome.source } : {}),
+				approvalAuthority: outcome.approvalAuthority,
+				...(outcome.planScale === true ? { dispatchPlan: true } : {}),
+				...(options?.origin === "harness" ? { harness: true } : {}),
+				...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+				...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
+				...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
+				...(options?.signal !== undefined ? { signal: options.signal } : {}),
+			});
+		} catch {
+			// The judge's own failure is no verdict: the call takes today's path.
+			return SAFETY_JUDGE_SKIP;
+		}
+		const report = (judged: SafetyJudgeOutcome): SafetyJudgeOutcome => {
+			if (judged.kind !== "skip" && judged.latencyMs > 0) options?.onParked?.(judged.latencyMs);
+			return judged;
+		};
+		// Only a review that asks a model is awaited, so every other ask parks in
+		// the same tick it did before the judge existed.
+		return pending instanceof Promise ? pending.then(report, () => SAFETY_JUDGE_SKIP) : report(pending);
+	};
+
 	/** Admit, park or run one call; `invoke` adds the main agent's denial memory around it. */
 	const invokeAdmitted = async (call: ClassifierCall, options?: ToolInvokeOptions): Promise<RegistryVerdict> => {
 		const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
@@ -1964,6 +2031,45 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			observeUnrecognizedExecute(admissionCall, outcome.decision, options);
 			return runSpec(outcome.spec, admissionCall, outcome.decision, options);
 		}
+		// The safety judge reviews the ask before anyone is asked. An allow runs
+		// the call, a block refuses it back to the model, and anything else parks
+		// exactly as before, with the judge's reason on the card when it had one.
+		const pendingJudgement = judgeParkedCall(call, outcome, options);
+		const judged = pendingJudgement instanceof Promise ? await pendingJudgement : pendingJudgement;
+		const judgedSpec = tools.get(admissionCall.tool as ToolName);
+		if (judged.kind === "allow" && judgedSpec !== undefined) {
+			const allowed = safetyJudgeAllowedDecision(outcome.decision);
+			recordRegistryDisposition(admissionCall, allowed, "allowed", {
+				reasonCode: SAFETY_JUDGE_ALLOW_REASON_CODE,
+				reasons: [judged.reason],
+			});
+			return runSpec(judgedSpec, admissionCall, allowed, options);
+		}
+		if (judged.kind === "block") {
+			disposeAdmissionArgs(judgedSpec, admissionCall.args ?? {});
+			const reasonCode = `${SAFETY_JUDGE_REASON_PREFIX}${judged.rule}`;
+			const blocked: SafetyDecision = {
+				kind: "block",
+				classification: outcome.decision.classification,
+				rejection: {
+					short: `${call.tool} blocked by the safety judge (rule ${judged.rule})`,
+					detail: judged.refusal,
+					hints: [],
+				},
+				...(outcome.decision.policy !== undefined
+					? { policy: { ...outcome.decision.policy, kind: "block" as const, reasonCode } }
+					: {}),
+			};
+			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode, reasons: [judged.reason] });
+			const verdict = withDenial(
+				{ kind: "blocked", reason: judged.refusal, decision: blocked },
+				"clio_policy",
+				judged.allowedBy,
+				reasonCode,
+			);
+			return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
+		}
+		const judgeGate = judged.kind === "park" ? { gateReason: judged.gateReason, gateBuild: judged.build } : {};
 		// A park settles only through a listener's answer, so with no listener
 		// the promise would never resolve. Refuse the call instead, fail closed.
 		if (permissionListeners.size === 0) {
@@ -1995,6 +2101,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 				...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 				...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
+				...judgeGate,
 			};
 			recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
 				requestId: meta.requestId,
@@ -2230,6 +2337,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// Seal the park before the body runs. Everything after this line is
 				// the tool working, and the caller charges that to the tool.
 				entry.closePark();
+				// An operator's approval turns the safety judge's review back on after it
+				// handed calls to the operator.
+				if (grant !== undefined && (grant.issuer ?? "operator") === "operator") deps.safetyJudge?.operatorApproved();
 				if (observed) grant?.onExecution?.({ phase: "start" });
 				const verdict = await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions);
 				if (observed) {
@@ -2387,6 +2497,23 @@ export const FLOW_RESTRICTIONS_DETAIL = "clio_coder_flow_restrictions";
 function withFlowRestrictions(result: ToolResult, restrictions: FlowRestrictionSet | null): ToolResult {
 	if (restrictions === null) return result;
 	return { ...result, details: { ...(result.details ?? {}), [FLOW_RESTRICTIONS_DETAIL]: restrictions } };
+}
+
+const SAFETY_JUDGE_SKIP: SafetyJudgeOutcome = { kind: "skip" };
+/** Audit code of a call the safety judge allowed instead of parking it. */
+const SAFETY_JUDGE_ALLOW_REASON_CODE = "safety-judge:allow";
+/** Prefix of the audit and denial code of a safety judge block; the judge's rule category follows. */
+const SAFETY_JUDGE_REASON_PREFIX = "safety-judge:";
+
+/** The parked ask turned into the allow the judge gave, keeping its classification and policy facts. */
+function safetyJudgeAllowedDecision(ask: SafetyDecision): SafetyDecision {
+	return {
+		kind: "allow",
+		classification: ask.classification,
+		...(ask.policy !== undefined
+			? { policy: { ...ask.policy, kind: "allow" as const, reasonCode: SAFETY_JUDGE_ALLOW_REASON_CODE } }
+			: {}),
+	};
 }
 
 const NO_PARK_LISTENER_REASON_CODE = "no_park_listener";

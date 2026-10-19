@@ -49,6 +49,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// Each permission card and ask_user round reads it when it starts waiting,
 	// so the next one observes a change; a running countdown keeps its window.
 	"safety.unattendedAfterSeconds",
+	// The judge reads its settings at every review, so the next parked call
+	// observes a change.
+	"safety.judge",
 ]);
 
 const NEXT_TURN_FIELDS = new Set<string>([

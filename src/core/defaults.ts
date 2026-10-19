@@ -653,6 +653,27 @@ export interface SafetySettings {
 	 * forever. Read only from the operator's own settings file.
 	 */
 	unattendedAfterSeconds: number;
+	/**
+	 * The safety judge at autonomy `default`: a model that reviews a call the
+	 * policy would park for approval against the operator's own messages, and
+	 * either runs it or refuses it back to the agent. Read only from the
+	 * operator's own settings file.
+	 */
+	judge: SafetyJudgeSettings;
+}
+
+export interface SafetyJudgeSettings {
+	enabled: boolean;
+	/** Target the judge asks; null asks the session's main chat route. */
+	target: string | null;
+	/** Model on that target; null asks the chat model, or the judge target's default model. */
+	model: string | null;
+	/** Facts about the operator's environment the judge reads, in their own words. */
+	environment: string[];
+	/** Extra allow rules appended to the judge's default rules. */
+	allow: string[];
+	/** Extra block rules appended to the judge's default rules. */
+	deny: string[];
 }
 
 export type WorkspaceSnapshotMode = "auto" | "off";
@@ -798,6 +819,14 @@ export const DEFAULT_SETTINGS = {
 		scratchRoots: [] as string[],
 		snapshots: "auto" as WorkspaceSnapshotMode,
 		unattendedAfterSeconds: 300,
+		judge: {
+			enabled: true,
+			target: null,
+			model: null,
+			environment: [] as string[],
+			allow: [] as string[],
+			deny: [] as string[],
+		} as SafetyJudgeSettings,
 	} as SafetySettings,
 	interface: {
 		exitSummary: "auto",
@@ -1002,6 +1031,18 @@ safety:
   # resolves it and keeps working: the call is denied, the question takes its
   # recommended option. 0 waits forever. Honored only in this file.
   unattendedAfterSeconds: 300
+  # At autonomy default, a model reviews each call that would need your approval
+  # against your own messages and runs or refuses it; it asks you only when it
+  # cannot decide or keeps refusing. target and model null use the chat route.
+  # environment lists facts about your machine; allow and deny add rules.
+  # Honored only in this file.
+  judge:
+    enabled: true
+    target: null
+    model: null
+    environment: []
+    allow: []
+    deny: []
 
 interface:
   # Clean-exit summary: auto follows outputDetail; brief | standard | report | off override it.

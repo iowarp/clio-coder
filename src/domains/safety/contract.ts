@@ -1,5 +1,5 @@
 import type { Classification, ClassifierCall } from "./action-classifier.js";
-import type { CompletionContractAuditInput, ToolCallAuditInput } from "./audit.js";
+import type { CompletionContractAuditInput, SafetyJudgeAuditInput, ToolCallAuditInput } from "./audit.js";
 import type { DamageControlMatch } from "./damage-control.js";
 import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import type { LoopVerdict } from "./loop-detector.js";
@@ -94,5 +94,7 @@ export interface SafetyContract {
 		recordCount(): number;
 		recordToolCall?(input: ToolCallAuditInput): void;
 		recordCompletionContract?(input: CompletionContractAuditInput): void;
+		/** The safety judge's hook for each review of a call that would have parked. */
+		recordSafetyJudge?(input: SafetyJudgeAuditInput): void;
 	};
 }

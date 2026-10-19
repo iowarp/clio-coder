@@ -541,6 +541,30 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Unattended timeout",
 		"Seconds a permission card or ask_user question waits for you before Clio resolves it and keeps working: the parked call is denied, each unanswered question takes its recommended option, and the session summary counts both. Any key on the card or question holds it. 0 waits forever. User settings only.",
 	],
+	"safety.judge.enabled": [
+		"Safety judge",
+		"At autonomy default, a model reviews each call that would need your approval against your own messages, then runs it or refuses it back to Clio with a reason. It asks you when it cannot decide, and after 3 refusals in a row or 20 in a session. User settings only.",
+	],
+	"safety.judge.target": [
+		"Safety judge connection",
+		"Connection the safety judge asks. Leave blank to use the chat connection. User settings only.",
+	],
+	"safety.judge.model": [
+		"Safety judge model",
+		"Model the safety judge asks. Leave blank to use the chat model, or the judge connection's default model. User settings only.",
+	],
+	"safety.judge.environment": [
+		"Safety judge environment",
+		"Facts about your environment the judge reads, such as 'shared HPC cluster; /scratch/$USER is mine'. User settings only.",
+	],
+	"safety.judge.allow": [
+		"Safety judge allow rules",
+		"Extra kinds of call the judge may run without your explicit request, added to its default rules. User settings only.",
+	],
+	"safety.judge.deny": [
+		"Safety judge block rules",
+		"Extra kinds of call the judge refuses unless you ask for that action, added to its default rules. User settings only.",
+	],
 	"safety.scratchRoots": [
 		"Yolo scratch roots",
 		"Absolute directories where the yolo main session may delete, truncate and chmod as it does in the workspace. The temp directories always count. User settings only.",

@@ -204,7 +204,9 @@ function stripProjectAutonomy(
  * yolo may delete outside the workspace (#419), so a repository can neither set
  * nor extend them. The unattended window decides how long Clio waits for this
  * operator before answering a card or a question itself (#421), so a
- * repository cannot shorten it to answer ahead of them.
+ * repository cannot shorten it to answer ahead of them. The safety judge
+ * reviews calls against the operator's words, so a repository can neither
+ * write its rules nor choose its model.
  */
 const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }> = [
 	{ key: "scratchRoots", message: "scratch roots are set only in user settings; project value ignored" },
@@ -212,6 +214,9 @@ const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }>
 		key: "unattendedAfterSeconds",
 		message: "the unattended timeout is set only in user settings; project value ignored",
 	},
+	// The judge decides which calls run without the operator, so a repository
+	// could otherwise add allow rules, retarget it or switch it off.
+	{ key: "judge", message: "the safety judge is configured only in user settings; project value ignored" },
 ];
 
 function stripProjectOperatorSafety(
