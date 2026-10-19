@@ -9,8 +9,10 @@ import { extractCommandPathWalks, shellCommandSteps } from "./protected-artifact
  * The yolo floor (#407, #419, #421). Yolo is the operator's
  * skip-permissions mode: no approval stops and no built-in rail. What still
  * blocks is this short list of actions nothing in a coding task needs and
- * nobody can undo, plus Clio's own state, operator-authored rules and the
- * run's explicit ceilings, which the policy engine applies beside it.
+ * nobody can undo, plus Clio's own state and credential store,
+ * operator-authored rules and the run's explicit ceilings, which the policy
+ * engine applies beside it. The operator's own session at autonomy default
+ * meets the same floor before anything else, so no judge can allow it.
  *
  * A floor hit is a hard block returned to the model with its reason; it never
  * parks. The floor reads command text and literal paths only: an interpreter
@@ -37,6 +39,8 @@ export const YOLO_FLOOR_RULE_IDS = {
 	clioOwned: "clio-owned-state",
 	/** Existing rail id: a workspace trust grant made from a tool call. */
 	trustAuthority: "trust-authority",
+	/** A read of Clio's own provider credential store, at every autonomy level. */
+	clioCredentials: "yolo-floor-clio-credentials",
 } as const;
 
 /** Every reason code a floor block carries starts with this. */

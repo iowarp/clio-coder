@@ -236,7 +236,7 @@ function lookupFragment(table: FragmentTable, id: string, role: string): LoadedF
 function safetyOneLiner(level: string): string {
 	switch (level) {
 		case "default":
-			return "workspace edits and recognized commands run; other bash asks for approval.";
+			return "workspace edits run; shell commands run contained in the OS sandbox when the host has one, and what would need approval is first reviewed by the safety judge.";
 		case "yolo":
 			return "nothing stops for approval and nobody answers questions; only the yolo floor and operator-authored rules block.";
 		default:

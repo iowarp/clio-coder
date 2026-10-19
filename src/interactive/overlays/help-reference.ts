@@ -201,10 +201,10 @@ export function openHelpOverlay(
 				"# Autonomy & safety net",
 				"**Tool surface**: which tools exist at all through registration, tool profiles, skill narrowing, and dispatch admission. " +
 					"Violations are terminal denials, never approvable.",
-				"**Safety net**: at default, damage-control rules and hard path protections block or ask. " +
-					"Yolo keeps only the floor (deleting or overwriting /, home or a system tree, mkfs, wipefs, block-device writes, fork bombs, writes into Clio's own state) and rules in an approved `.clio-coder/safety.yaml`.",
-				"**Mode** (`/settings`, persisted as `safety.autonomy`): default runs workspace edits and recognized checks, " +
-					"but asks for unfamiliar commands, outward actions, and larger dispatch plans. Yolo never asks: no approval stops, no sandbox unless `safety.sandbox` is required, and questions take their recommended option. " +
+				"**Safety net**: the floor (deleting or overwriting /, home or a system tree, mkfs, wipefs, block-device writes, fork bombs, writes into Clio's own state, reads of its credential store), secret and protected paths, and rules in an approved `.clio-coder/safety.yaml` block at every level. " +
+					"At default, other damage-control rules ask instead of blocking.",
+				"**Mode** (`/settings`, persisted as `safety.autonomy`): default runs workspace edits, and shell commands inside an OS sandbox where the host has one, without asking. " +
+					"Commands that leave the sandbox, outward actions and larger dispatch plans are first reviewed by the safety judge, and destructive workspace operations run after a snapshot `/rewind` can undo. Yolo never asks: no approval stops, no sandbox unless `safety.sandbox` is required, and questions take their recommended option. " +
 					"Its first activation shows a one-time acceptance card, and it is refused as root outside a container.",
 				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
 					"Workers resolve asks per `fleet.permissions.mode` (Fleet approvals routing in /settings); headless runs auto-deny.",

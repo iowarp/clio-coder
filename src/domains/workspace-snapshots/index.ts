@@ -17,6 +17,7 @@ export {
 	pruneWorkspaceSnapshots,
 	SNAPSHOT_MAX_UNTRACKED_BYTES,
 	SNAPSHOT_REF_PREFIX,
+	workspaceSnapshotRepositoryPresent,
 } from "./store.js";
 export type { WorkspaceSnapshotTrigger } from "./trigger.js";
 export { workspaceSnapshotTrigger } from "./trigger.js";

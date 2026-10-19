@@ -80,7 +80,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 	};
 	return {
 		classify: (call) => classifyAction(call),
-		evaluate(call, posture, operatorYolo) {
+		evaluate(call, posture, scope) {
 			const protectedReason = protectedArtifactMutationBlockReason(protectedArtifactState, call.tool, call.args);
 			if (protectedReason !== null) {
 				const classification = classifyAction(call);
@@ -106,7 +106,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 				return { kind: "block", classification, rejection, policy };
 			}
 			// A permit that inherited the operator's yolo is judged the true yolo way (#407).
-			const policy = policyEngine.evaluate(call, posture, operatorYolo);
+			const policy = policyEngine.evaluate(call, posture, scope);
 			const classification = policy.classification;
 			if (policy.kind === "block") {
 				const decision: SafetyDecision = {

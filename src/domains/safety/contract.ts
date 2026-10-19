@@ -3,7 +3,7 @@ import type { CompletionContractAuditInput, SafetyJudgeAuditInput, ToolCallAudit
 import type { DamageControlMatch } from "./damage-control.js";
 import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import type { LoopVerdict } from "./loop-detector.js";
-import type { OperatorYoloScope, SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
+import type { OperatorScope, SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
 import type { RejectionMessage } from "./rejection-feedback.js";
 import type { ScopeSpec } from "./scope.js";
 
@@ -47,12 +47,15 @@ export interface SafetyContract {
 	/**
 	 * Full evaluation: classify + damage-control match + decision. Writes the
 	 * safety-net audit row and emits safety.blocked on a block. Registry admission writes any final autonomy disposition
-	 * through `audit.recordToolCall`. `operatorYolo` is present only for the
-	 * main session's own calls at yolo (#419) and for a worker whose permit
-	 * inherited that yolo (#407); with it the net holds only the yolo floor,
-	 * operator-authored rules and the run's ceilings.
+	 * through `audit.recordToolCall`. `scope` is present only for the main
+	 * session's own calls (#419, Phase 2c) and for a worker whose permit
+	 * inherited the operator's yolo (#407). At yolo the net holds only the
+	 * yolo floor, operator-authored rules and the run's ceilings; at default it
+	 * holds the floor, the path, authority and ceiling rails, asks for former
+	 * damage-control blocks, and leaves to the main-session sandbox what a
+	 * contained call's command text hides.
 	 */
-	evaluate(call: ClassifierCall, posture?: string, operatorYolo?: OperatorYoloScope): SafetyDecision;
+	evaluate(call: ClassifierCall, posture?: string, scope?: OperatorScope): SafetyDecision;
 
 	/** Observe a call for loop detection. Returns the updated verdict. */
 	observeLoop(key: string, now?: number): LoopVerdict;

@@ -1,13 +1,13 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { canonicalizeRawPath } from "../../core/path-canonical.js";
+import { SHELL_MOVES } from "./command-readings.js";
 import { type ShellToken, scanShellLike, scanShellLikeDeep, shellCommandSteps } from "./protected-artifacts.js";
-import { SHELL_MOVES } from "./yolo-relaxations.js";
 
 /**
- * What the operator's yolo knows about the shell that runs a scanned script
- * (#419), carried from line to line so a delete or write is judged where it
- * lands. Like the delete judge's own walk, a cd adds where it lands and never
+ * What the floor's script scan knows about the shell that runs a scanned
+ * script (#419, #407), carried from line to line so a delete is judged where
+ * it lands. Like the delete judge's own walk, a cd adds where it lands and never
  * removes a directory: it may fail, run in a branch or a subshell, or sit in
  * a body that runs later.
  */

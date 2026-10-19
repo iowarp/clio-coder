@@ -15,15 +15,29 @@ import { protectedInside } from "./worker-policy.js";
 import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
 
 /**
- * The operator's yolo script sandbox (#419). Under the main session's yolo a
- * bash command that runs a script file, and run_script, run inside the OS
- * sandbox the dispatched workers use instead of resting on the static scan
- * alone: the filesystem stays readable, writes land only in the workspace, the
- * effective scratch roots, the package caches and the repository's git dirs,
- * and the network stays on because this is the
- * operator's own session. Unlike a worker the script sees the real /tmp,
- * where operators expect benchmark outputs.
+ * The main session's shell sandbox. At autonomy default every bash and
+ * run_script call of the operator's own session runs inside the OS sandbox the
+ * dispatched workers use, whenever a backend exists and `safety.sandbox` is
+ * not off: the filesystem stays readable, writes land only in the workspace,
+ * the effective scratch roots, the package caches and the repository's git
+ * dirs, credentials and the SSH agent are masked, the command gets its own PID
+ * namespace, and the network stays on because this is the operator's own
+ * session. Unlike a worker the command sees the real /tmp, where operators
+ * expect benchmark outputs. Containment is what lets such a call run without
+ * an approval ask; a call that asks to leave it (`unsandboxed: true`) or that
+ * publishes is judged instead. Under the operator's yolo only a script under
+ * `safety.sandbox: required` runs here (#419, #407).
  */
+
+/**
+ * Whether the main session's shell calls at autonomy default run contained on
+ * this host: `safety.sandbox` is auto or required and a backend answered the
+ * probe. With no backend nothing is contained and the default rails apply.
+ */
+export function mainShellContained(mode: SandboxMode, availability: SandboxAvailability): boolean {
+	if (mode === "off") return false;
+	return availability.available && availability.backend !== null && availability.executable !== null;
+}
 
 /**
  * How the operator's yolo treats a script on this host. Yolo runs scripts
@@ -41,7 +55,7 @@ export function yoloScriptSandboxState(mode: SandboxMode, availability: SandboxA
 	return "refused";
 }
 
-export interface YoloScriptSandboxPolicyInput {
+export interface MainSandboxPolicyInput {
 	/** The session workspace root. */
 	workspace: string;
 	/** Effective scratch roots: the built-in temp roots, the real /tmp among them, plus `safety.scratchRoots`. */
@@ -56,10 +70,10 @@ export interface YoloScriptSandboxPolicyInput {
 	/** Clio's own config, data, state and cache directories. */
 	clioDirs: ReadonlyArray<string>;
 	/** The workspace repository's git layout, when the workspace is inside one. */
-	git?: YoloScriptGitLayout;
+	git?: MainSandboxGitLayout;
 }
 
-export interface YoloScriptSandboxPolicy {
+export interface MainSandboxPolicy {
 	writableRoots: ReadonlyArray<string>;
 	/** Re-bound read-only inside the writable roots, after them. */
 	readOnlyPaths: ReadonlyArray<string>;
@@ -77,7 +91,7 @@ export interface YoloScriptSandboxPolicy {
  * aliases, filter drivers), so those stay read-only while objects, refs and
  * the index stay writable for commit, fetch, pull and checkout (#419).
  */
-export interface YoloScriptGitLayout {
+export interface MainSandboxGitLayout {
 	/**
 	 * Bound writable as mounts of their own: every git dir, the `worktrees`
 	 * and `modules` directories on the way to one, and submodule checkouts in
@@ -153,7 +167,7 @@ function isInside(parent: string, candidate: string): boolean {
  * the repository; a `.git` file (a linked worktree or a submodule) is
  * followed to its git dir and that dir's `commondir`.
  */
-export function yoloScriptGitLayout(workspace: string): YoloScriptGitLayout | undefined {
+export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | undefined {
 	const root = path.resolve(workspace);
 	let top = root;
 	while (!pathExists(path.join(top, ".git"))) {
@@ -236,7 +250,7 @@ export function yoloScriptGitLayout(workspace: string): YoloScriptGitLayout | un
  * Absent git paths are listed read-only too: seatbelt denies creating them,
  * while bubblewrap's -try binds skip them and the spawn plan covers them.
  */
-export function resolveYoloScriptSandboxPolicy(input: YoloScriptSandboxPolicyInput): YoloScriptSandboxPolicy {
+export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSandboxPolicy {
 	const git = input.git;
 	const writableRoots = [
 		...new Set([input.workspace, ...input.scratchRoots, ...input.cacheRoots, ...(git?.mountDirs ?? [])]),
@@ -266,7 +280,7 @@ export function resolveYoloScriptSandboxPolicy(input: YoloScriptSandboxPolicyInp
  * The built-in cache roots. ~/.local stays read-only: ~/.local/bin on PATH
  * would turn a script's write into a command the operator runs later.
  */
-function yoloScriptCacheRoots(): { cacheRoots: string[]; codeCaches: string[] } {
+function mainSandboxCacheRoots(): { cacheRoots: string[]; codeCaches: string[] } {
 	const xdgCache = process.env.XDG_CACHE_HOME?.trim();
 	// The XDG spec ignores a relative value.
 	const cache = xdgCache !== undefined && path.isAbsolute(xdgCache) ? xdgCache : path.join(homedir(), ".cache");
@@ -284,14 +298,14 @@ function yoloScriptCacheRoots(): { cacheRoots: string[]; codeCaches: string[] } 
 }
 
 /** The policy for roots an admission decided, with this process's Clio directories kept read-only. */
-export function yoloScriptSandboxPolicy(roots: {
+export function mainSandboxPolicy(roots: {
 	workspace: string;
 	scratchRoots: ReadonlyArray<string>;
-}): YoloScriptSandboxPolicy {
-	const git = yoloScriptGitLayout(roots.workspace);
-	return resolveYoloScriptSandboxPolicy({
+}): MainSandboxPolicy {
+	const git = mainSandboxGitLayout(roots.workspace);
+	return resolveMainSandboxPolicy({
 		...roots,
-		...yoloScriptCacheRoots(),
+		...mainSandboxCacheRoots(),
 		clioDirs: [clioConfigDir(), clioDataDir(), clioStateDir(), clioCacheDir()],
 		...(git !== undefined ? { git } : {}),
 	});
@@ -302,8 +316,8 @@ export function yoloScriptSandboxPolicy(roots: {
  * runtime sockets are masked with the worker sandbox's own list, and the
  * agent socket variable goes with them.
  */
-export function yoloScriptSandboxInvocationSpec(
-	policy: YoloScriptSandboxPolicy,
+export function mainSandboxInvocationSpec(
+	policy: MainSandboxPolicy,
 	command: SandboxCommand,
 	cwd: string,
 	maskedPaths: ReadonlyArray<SandboxMaskedPath>,
@@ -320,14 +334,14 @@ export function yoloScriptSandboxInvocationSpec(
 	};
 }
 
-export type YoloScriptSpawnPlan =
+export type MainSandboxSpawnPlan =
 	| { kind: "sandboxed"; file: string; args: string[]; afterExit: () => void }
 	| { kind: "refused"; message: string };
 
 /**
- * How one admitted yolo script spawns. Admission relaxed the scan because a
- * backend was there, so a backend that is gone at spawn time refuses the
- * command instead of running it bare.
+ * How one contained command spawns. Admission let it run without an ask
+ * because a backend was there, so a backend that is gone at spawn time
+ * refuses the command instead of running it bare.
  *
  * Under bubblewrap an absent hooks directory gets an empty tmpfs, so a hook
  * written there vanishes with the sandbox. An absent config or commondir file
@@ -336,19 +350,19 @@ export type YoloScriptSpawnPlan =
  * created; the caller runs it once the sandbox has exited, which ends every
  * process in its PID namespace.
  */
-export function planYoloScriptSpawn(
-	policy: YoloScriptSandboxPolicy,
+export function planMainSandboxSpawn(
+	policy: MainSandboxPolicy,
 	command: SandboxCommand,
 	cwd: string,
 	availability: SandboxAvailability = sandboxAvailability(),
-): YoloScriptSpawnPlan {
+): MainSandboxSpawnPlan {
 	if (!availability.available || availability.backend === null || availability.executable === null) {
 		return {
 			kind: "refused",
-			message: `sandbox: the yolo script sandbox is unavailable (${availability.reason ?? "no backend"}); the script was not run`,
+			message: `sandbox: the main-session sandbox is unavailable (${availability.reason ?? "no backend"}); the command was not run`,
 		};
 	}
-	const physicalPolicy: YoloScriptSandboxPolicy = {
+	const physicalPolicy: MainSandboxPolicy = {
 		...policy,
 		writableRoots: policy.writableRoots.map(physicalSandboxPath),
 		readOnlyPaths: policy.readOnlyPaths.map(physicalSandboxPath),
@@ -356,9 +370,9 @@ export function planYoloScriptSpawn(
 	const hookMasks: SandboxMaskedPath[] = policy.absentGitHooks
 		.filter((hooks) => !pathExists(hooks))
 		.map((hooks) => ({ path: hooks, kind: "directory" }));
-	const spec = yoloScriptSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), [
+	const spec = mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), [
 		...workerSandboxMasks(),
-		...yoloScriptAgentMasks(),
+		...mainSandboxAgentMasks(),
 		...hookMasks,
 	]);
 	const invocation = buildSandboxInvocation(spec, availability.backend, availability.executable);
@@ -367,17 +381,17 @@ export function planYoloScriptSpawn(
 		kind: "sandboxed",
 		file: invocation.file,
 		args: invocation.args,
-		afterExit: () => sweepYoloScriptGitFiles(absentFiles),
+		afterExit: () => sweepMainSandboxGitFiles(absentFiles),
 	};
 }
 
 /**
  * Keeps worker parity for ssh-agent. A worker's private /tmp hides the
- * sockets OpenSSH's agent puts under `/tmp/ssh-*`; a yolo script sees the
- * host's /tmp, so those directories are masked here, and so is the
+ * sockets OpenSSH's agent puts under `/tmp/ssh-*`; a contained command sees
+ * the host's /tmp, so those directories are masked here, and so is the
  * session's own SSH_AUTH_SOCK wherever it lives (#419).
  */
-export function yoloScriptAgentMasks(env: NodeJS.ProcessEnv = process.env, tmp: string = "/tmp"): SandboxMaskedPath[] {
+export function mainSandboxAgentMasks(env: NodeJS.ProcessEnv = process.env, tmp: string = "/tmp"): SandboxMaskedPath[] {
 	const masks: SandboxMaskedPath[] = [];
 	try {
 		for (const entry of readdirSync(tmp, { withFileTypes: true })) {
@@ -396,7 +410,7 @@ export function yoloScriptAgentMasks(env: NodeJS.ProcessEnv = process.env, tmp: 
 }
 
 /** Removes the git files in `absent` that exist now, and returns them. */
-function sweepYoloScriptGitFiles(absent: ReadonlyArray<string>): string[] {
+function sweepMainSandboxGitFiles(absent: ReadonlyArray<string>): string[] {
 	const planted = absent.filter(pathExists);
 	for (const file of planted) {
 		try {
@@ -410,25 +424,28 @@ function sweepYoloScriptGitFiles(absent: ReadonlyArray<string>): string[] {
 
 const WRITE_REFUSED = /\b(?:EROFS|EACCES|EPERM)\b|Read-only file system|Permission denied|Operation not permitted/u;
 
-/** One line for a failed sandboxed script whose output shows a refused write, else null. */
-export function yoloScriptSandboxWriteHint(output: string, policy: YoloScriptSandboxPolicy): string | null {
+/** One line for a failed contained command whose output shows a refused write, else null. */
+export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy): string | null {
 	if (!WRITE_REFUSED.test(output)) return null;
-	return `yolo script sandbox: this script could write only to ${policy.writableRoots.join(", ")} (git hooks and config, scratch roots' .git and .clio-coder read-only); to let scripts write another directory, add it to safety.scratchRoots in your user settings.`;
+	return `sandbox: this command could write only to ${policy.writableRoots.join(", ")} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request; a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
 }
 
-/** One line for doctor: whether yolo scripts run sandboxed here, and where they can write. */
-export function yoloScriptSandboxLine(
-	state: YoloScriptSandboxState,
+/** One line for doctor: how the main session's shell calls run on this host, and where a contained one can write. */
+export function mainSandboxLine(
+	mode: SandboxMode,
 	availability: SandboxAvailability,
 	writableRoots: ReadonlyArray<string>,
 ): string {
-	if (state === "sandboxed") {
-		return `yolo scripts run in the ${availability.backend} sandbox; writable roots: ${writableRoots.join(", ")}`;
+	const yolo = yoloScriptSandboxState(mode, availability);
+	const yoloLine =
+		yolo === "sandboxed"
+			? "yolo scripts run sandboxed too (safety.sandbox is required)"
+			: yolo === "refused"
+				? `yolo refuses scripts: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`
+				: "yolo runs unsandboxed";
+	if (mainShellContained(mode, availability)) {
+		return `default-autonomy shell commands run in the ${availability.backend} sandbox; writable roots: ${writableRoots.join(", ")}; ${yoloLine}`;
 	}
-	if (state === "refused") {
-		return `yolo scripts ask: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`;
-	}
-	return availability.available
-		? "yolo scripts run unsandboxed under the static scan: safety.sandbox is off"
-		: `yolo scripts run unsandboxed under the static scan: ${availability.reason ?? "no sandbox backend"}`;
+	const why = mode === "off" ? "safety.sandbox is off" : (availability.reason ?? "no sandbox backend");
+	return `default-autonomy shell commands run uncontained and keep the approval rails (${why}); ${yoloLine}`;
 }

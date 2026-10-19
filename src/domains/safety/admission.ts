@@ -8,10 +8,11 @@ import type { ActionClass, ClassifierCall } from "./action-classifier.js";
 import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
 import { autonomyCallInputs } from "./autonomy-inputs.js";
+import { SNAPSHOT_RECOVERABLE_REASON_CODE } from "./containment.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
 import { classifyBashGit } from "./git-policy.js";
-import type { OperatorYoloScope } from "./policy-engine.js";
+import type { OperatorDefaultScope, OperatorYoloScope } from "./policy-engine.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 import type { WorkerGitAllowance } from "./worker-permit.js";
 
@@ -32,6 +33,13 @@ import type { WorkerGitAllowance } from "./worker-permit.js";
  *
  * True yolo (#407) stops after step 2: its net holds only the floor,
  * operator-authored rules and the run's ceilings, so steps 3 to 5 never ask.
+ *
+ * The operator's own default (Phase 2c) runs every step, with three changes:
+ * a contained call (its decision carries `shellSandbox`) is admitted by
+ * autonomy whatever its command recognition and owes no test-runner consent;
+ * a lone discard or delete a workspace snapshot undoes runs; and any other
+ * destructive git asks instead of being refused, so the safety judge decides
+ * it.
  */
 
 export type AdmissionPrincipal = "main" | "worker";
@@ -100,6 +108,15 @@ export interface AdmissionInput {
 	 * command job are judged as main without it and keep the rails.
 	 */
 	operatorYolo?: OperatorYoloScope;
+	/**
+	 * The main session's own default (Phase 2c). Only the session's registry
+	 * passes it, beside its containment, and it reaches the net only for the
+	 * main principal at default: the floor blocks first, contained shell calls
+	 * run without the asks their command text would raise, damage control a
+	 * snapshot undoes runs, and every other former damage-control block asks.
+	 * Workers, grants and scheduled command jobs are judged without it.
+	 */
+	operatorDefault?: OperatorDefaultScope;
 	/**
 	 * The operator's yolo, bound by the host permit for every action class
 	 * (#407) and independent of model fields. The permit field keeps its
@@ -216,6 +233,9 @@ export type AdmissionDisposition =
  */
 const WORKER_YOLO_SCOPE: OperatorYoloScope = Object.freeze({ scratchRoots: [], scriptSandbox: "unsandboxed" });
 
+/** Classes a contained call is admitted at by autonomy default; the sandbox stands in for their asks. */
+const CONTAINED_CLASSES: ReadonlySet<ActionClass> = new Set<ActionClass>(["execute", "system_modify", "destructive"]);
+
 function deny(
 	code: AdmissionDenyCode,
 	reason: string,
@@ -273,8 +293,12 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	// inherited it. Nothing parks under it, so no authorization ever arrives.
 	const operatorYolo =
 		level !== "yolo" || issuer !== undefined ? undefined : principal === "main" ? input.operatorYolo : WORKER_YOLO_SCOPE;
+	// The operator's default holds through an operator's own approval, so an
+	// approved contained call still runs contained.
+	const operatorDefault =
+		level === "default" && principal === "main" && issuer !== "main" ? input.operatorDefault : undefined;
 	const evaluate = (call: ClassifierCall): SafetyDecision =>
-		normalize(input.safety.evaluate(withCwd(call, input.cwd), posture, operatorYolo));
+		normalize(input.safety.evaluate(withCwd(call, input.cwd), posture, operatorYolo ?? operatorDefault));
 	if (input.cwd !== undefined && !isAbsolute(input.cwd)) {
 		const reason = `admission cwd must be absolute: ${input.cwd}`;
 		return deny("context", reason, syntheticBlock(reason));
@@ -389,8 +413,38 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	if (authorized) return { kind: "allow", decision, authorized: true };
 
 	// Step 2, continued: a git_destructive class that reached here was not
-	// admitted by any rail and stays hard-blocked on every runtime.
-	const destructive = effectDecisions.find((d) => d.classification.actionClass === "git_destructive");
+	// admitted by any rail and stays hard-blocked on every runtime. The
+	// operator's default runs one a workspace snapshot undoes and asks for any
+	// other, so the safety judge decides it.
+	const destructive = effectDecisions.find(
+		(d) =>
+			d.classification.actionClass === "git_destructive" &&
+			!(operatorDefault !== undefined && d.policy?.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE),
+	);
+	if (destructive !== undefined && operatorDefault !== undefined) {
+		const ask: SafetyDecision = {
+			kind: "ask",
+			classification: destructive.classification,
+			rejection: {
+				short: `${call.tool} needs approval: destructive git at autonomy default`,
+				detail:
+					"The command can rewrite or discard git history no workspace snapshot keeps. At autonomy default it is reviewed against the operator's request instead of being refused.",
+				hints: ["Approving resumes only this call."],
+			},
+			...(destructive.policy !== undefined ? { policy: destructive.policy } : {}),
+		};
+		return {
+			kind: "ask",
+			source: "safety-net",
+			approvalAuthority: "operator",
+			reason: ask.rejection.short,
+			decision: ask,
+			netDecision: destructive,
+			level,
+			exposure: "local",
+			readOutsideWorkspace: false,
+		};
+	}
 	if (destructive !== undefined) {
 		return deny("git_destructive", "action git_destructive is hard-blocked", destructive);
 	}
@@ -437,6 +491,15 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 				exposure: git.outward ? "outward" : "local",
 				readOutsideWorkspace: false,
 			};
+		}
+		// The operator's default: a contained call runs in the main-session
+		// sandbox, which bounds what it writes and hides credentials, so neither
+		// its recognition nor a test runner's consent asks; a lone discard or
+		// delete the snapshot taken right before it undoes runs.
+		if (operatorDefault !== undefined) {
+			if (effectDecision.policy?.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE) continue;
+			const actionClass = effectDecision.classification.actionClass;
+			if (effectDecision.policy?.shellSandbox !== undefined && CONTAINED_CLASSES.has(actionClass)) continue;
 		}
 		const inputs = autonomyCallInputs(effect, effectDecision, input.autonomyExtra ?? {});
 		const disposition = mapAutonomy(level, effectDecision.classification.actionClass, inputs.options);

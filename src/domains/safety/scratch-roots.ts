@@ -4,10 +4,10 @@ import { canonicalizePath } from "../../core/path-canonical.js";
 import { isSameOrDescendant } from "./path-policy.js";
 
 /**
- * Operator scratch roots (#419). Under the main session's yolo, a delete,
- * truncate or chmod that lands inside one of these trees is judged like one
- * inside the workspace. `safety.scratchRoots` adds to the built-in temp roots
- * and is honored only from the operator's own settings file.
+ * Operator scratch roots (#419). The main session's contained shell calls may
+ * write them, and at autonomy default a delete that lands inside one is judged
+ * like one inside the workspace. `safety.scratchRoots` adds to the built-in
+ * temp roots and is honored only from the operator's own settings file.
  */
 
 /**
@@ -129,7 +129,11 @@ function resolveScratchRoots(
 	return { roots: [...roots], dropped };
 }
 
-/** tmpdir() already follows $TMPDIR; the rest are the conventional temp trees. */
-function builtinScratchRoots(): string[] {
-	return [tmpdir(), "/tmp", "/var/tmp", "/private/var/tmp"];
+/**
+ * tmpdir() already follows $TMPDIR, which counts only while it passes
+ * {@link scratchRootProblem}; the rest are the conventional temp trees, and
+ * macOS adds its per-user temp tree.
+ */
+function builtinScratchRoots(platform: NodeJS.Platform = process.platform): string[] {
+	return [tmpdir(), "/tmp", "/var/tmp", "/private/var/tmp", ...(platform === "darwin" ? ["/var/folders"] : [])];
 }

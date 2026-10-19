@@ -231,10 +231,13 @@ describe("headless no-op contract through the built binary", () => {
 		arguments: { path: "c2-proof.txt", content: PROOF },
 	};
 	// bash is a direct tool, so the gateway's call op refuses it; only a chain step may name it.
+	// At default a contained command runs in the sandbox, so the denied write
+	// asks to leave it, which keeps the hidden-content ask on every host.
+	const deniedArgs = { command: inline, unsandboxed: true };
 	const deniedInline: OpenAICompatToolCallScript = {
 		id: "call-inline",
 		name: "bash",
-		arguments: { command: inline },
+		arguments: deniedArgs,
 	};
 
 	/** Tool results already in the conversation, which is how far the script has got. */
@@ -386,7 +389,7 @@ describe("headless no-op contract through the built binary", () => {
 			steps: [1, 2, 3].map((attempt) => ({
 				id: `call-inline-${attempt}`,
 				name: "gateway",
-				arguments: { op: "chain", steps: [{ id: "denied", capability: "bash", args: { command: inline } }] },
+				arguments: { op: "chain", steps: [{ id: "denied", capability: "bash", args: deniedArgs }] },
 			})),
 			failOnNoop: false,
 		});
@@ -406,7 +409,7 @@ describe("headless no-op contract through the built binary", () => {
 						op: "chain",
 						steps: [
 							{ id: "write", capability: "write", args: writeProof.arguments },
-							{ id: "denied", capability: "bash", args: { command: inline }, after: ["write"] },
+							{ id: "denied", capability: "bash", args: deniedArgs, after: ["write"] },
 						],
 					},
 				},

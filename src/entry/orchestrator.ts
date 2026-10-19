@@ -31,7 +31,7 @@ import {
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../core/safe-exec.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
-import { yoloScriptSandboxState } from "../core/sandbox/yolo-script.js";
+import { mainShellContained, yoloScriptSandboxState } from "../core/sandbox/main-session.js";
 import {
 	applyOverrides,
 	applyRoutingPatch,
@@ -287,7 +287,11 @@ import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
-import { createWorkspaceSnapshots, pruneWorkspaceSnapshots } from "../domains/workspace-snapshots/index.js";
+import {
+	createWorkspaceSnapshots,
+	pruneWorkspaceSnapshots,
+	workspaceSnapshotRepositoryPresent,
+} from "../domains/workspace-snapshots/index.js";
 import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
 import {
 	bindBoardActions,
@@ -2892,9 +2896,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Awaited extension hooks return after the guard's own before_tool step.
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
 		autonomy: resolveEffectiveAutonomy,
-		// Only this registry carries the operator's yolo relaxations (#419).
+		// Only this registry carries the operator's own scope (#419): its yolo,
+		// and its containment at default, where shell calls run in the
+		// main-session sandbox and a snapshot precedes a destructive call.
 		scratchRoots: () => getCurrentSettings().safety.scratchRoots,
 		scriptSandbox: () => yoloScriptSandboxState(getCurrentSettings().safety.sandbox, sandboxAvailability()),
+		containment: () => {
+			const safety = getCurrentSettings().safety;
+			return {
+				sandbox: mainShellContained(safety.sandbox, sandboxAvailability()),
+				snapshots: safety.snapshots !== "off" && workspaceSnapshotRepositoryPresent(process.cwd()),
+			};
+		},
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read

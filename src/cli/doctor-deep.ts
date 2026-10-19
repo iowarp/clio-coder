@@ -1,11 +1,12 @@
 import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
-import type { YoloScriptSandboxState } from "../core/sandbox/yolo-script.js";
+import type { YoloScriptSandboxState } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import { type AutonomyLevel, mapAutonomy } from "../domains/safety/autonomy.js";
+import { SNAPSHOT_RECOVERABLE_REASON_CODE } from "../domains/safety/containment.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import { loadValidationContract } from "../domains/safety/validation-contract.js";
 
@@ -88,6 +89,13 @@ export interface ContractDryRunOptions {
 	scratchRoots?: ReadonlyArray<string>;
 	/** How this host runs a yolo script, so a validator that runs one gets the verdict the session would (#419). */
 	scriptSandbox?: YoloScriptSandboxState;
+	/**
+	 * The operator's containment at autonomy default on this host. With it a
+	 * default verdict is the operator's own session's: a contained command runs
+	 * in the main-session sandbox without approval. Absent keeps the rails a
+	 * worker or a host without a sandbox meets.
+	 */
+	containment?: { sandbox: boolean; snapshots: boolean };
 }
 
 /**
@@ -127,7 +135,16 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 		const where =
 			program === null ? "no program" : resolved === null ? `${program} not found` : `${program} is ${resolved}`;
 		const call = { tool: ToolNames.Bash, args: { command } };
-		const decision = posture === "yolo" ? engine.evaluate(call, posture, operatorYolo) : engine.evaluate(call);
+		const decision =
+			posture === "yolo"
+				? engine.evaluate(call, posture, operatorYolo)
+				: options.containment !== undefined
+					? engine.evaluate(call, undefined, {
+							level: "default",
+							scratchRoots: options.scratchRoots ?? [],
+							...options.containment,
+						})
+					: engine.evaluate(call);
 		let verdict: string;
 		let runs = false;
 		if (decision.kind === "block") {
@@ -140,9 +157,10 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 				? `asks for confirmation at default and at yolo in ${OPERATOR_VIEW} (${decision.reasonCode})`
 				: `asks for approval at default and runs at yolo in ${OPERATOR_VIEW} (${decision.reasonCode})`;
 		} else {
-			// Admission at the operator's yolo runs whatever the net allowed (#407).
+			// Admission at the operator's yolo runs whatever the net allowed (#407),
+			// and the operator's default runs a contained or recoverable call.
 			const disposition =
-				level === "yolo"
+				level === "yolo" || decision.shellSandbox !== undefined || decision.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE
 					? "allow"
 					: mapAutonomy(level, decision.actionClass, {
 							executeRecognized: decision.execRecognition !== "unrecognized",

@@ -7,8 +7,8 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
+import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
-import { planYoloScriptSpawn, type YoloScriptSandboxPolicy } from "./sandbox/yolo-script.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export const SAFE_EXEC_DEFAULT_TIMEOUT_MS = 120_000;
@@ -118,8 +118,8 @@ export interface RunCommandVectorOptions {
 	env?: Record<string, string>;
 	/** Trusted typed Git metadata writes for this invocation only (v060 review F1). */
 	typedGitWritablePaths?: ReadonlyArray<string>;
-	/** Set by run_script for a script the operator's yolo admitted on the sandbox (#419). */
-	scriptSandbox?: YoloScriptSandboxPolicy;
+	/** Set by run_script for a contained main-session call: it runs in the main-session sandbox with this policy. */
+	shellSandbox?: MainSandboxPolicy;
 	output?: SafeCommandOutputSink;
 	/**
 	 * Milliseconds between SIGTERM and SIGKILL when the runner stops the
@@ -489,11 +489,11 @@ export function runCommandVector(
 		// Inside a dispatched worker the vector runs under the worker's OS
 		// sandbox (decision Q8). The result keeps the requested file and argv so
 		// receipts and verification evidence describe the command, not bwrap.
-		const yoloPlan =
-			options.scriptSandbox !== undefined
-				? planYoloScriptSpawn(options.scriptSandbox, { argv: [file, ...args] }, cwd)
+		const containedPlan =
+			options.shellSandbox !== undefined
+				? planMainSandboxSpawn(options.shellSandbox, { argv: [file, ...args] }, cwd)
 				: undefined;
-		const sandbox = yoloPlan ?? planSandboxedSpawn({ argv: [file, ...args] }, cwd, options.typedGitWritablePaths);
+		const sandbox = containedPlan ?? planSandboxedSpawn({ argv: [file, ...args] }, cwd, options.typedGitWritablePaths);
 		if (sandbox.kind === "refused") {
 			settled = true;
 			resolve({
@@ -524,9 +524,9 @@ export function runCommandVector(
 				stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 			},
 		);
-		// The yolo script sandbox removes git config and commondir files its script
+		// The main-session sandbox removes git config and commondir files its command
 		// planted once the sandbox is gone, before the result resolves (#419).
-		if (yoloPlan?.kind === "sandboxed") child.once("exit", yoloPlan.afterExit);
+		if (containedPlan?.kind === "sandboxed") child.once("exit", containedPlan.afterExit);
 
 		const onAbort = (): void => {
 			aborted = true;

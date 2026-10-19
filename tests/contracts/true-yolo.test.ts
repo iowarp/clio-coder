@@ -9,7 +9,7 @@ import { scratchRootFindings } from "../../src/cli/doctor.js";
 import { runBashCommand } from "../../src/core/bash-exec.js";
 import { readSettings } from "../../src/core/config.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
-import { yoloScriptSandboxPolicy, yoloScriptSandboxState } from "../../src/core/sandbox/yolo-script.js";
+import { mainSandboxPolicy, yoloScriptSandboxState } from "../../src/core/sandbox/main-session.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
@@ -21,7 +21,11 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { createSafetyPolicyEngine, type OperatorYoloScope } from "../../src/domains/safety/policy-engine.js";
+import {
+	createSafetyPolicyEngine,
+	type OperatorScope,
+	type OperatorYoloScope,
+} from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { jobAuthorityRefusal } from "../../src/entry/job-runtime.js";
@@ -116,7 +120,7 @@ test("a scratch root of /, $HOME, a home ancestor or a system root fails validat
 test("the operator's scope reaches the net for the main principal at yolo and for a worker that inherited it", () => {
 	const cwd = workspace("clio-yolo-admission-");
 	const inner = createWorkerSafety({ cwd });
-	const seen: Array<OperatorYoloScope | undefined> = [];
+	const seen: Array<OperatorScope | undefined> = [];
 	const safety: Pick<SafetyContract, "evaluate"> = {
 		evaluate: (call, posture, scope) => {
 			seen.push(scope);
@@ -144,7 +148,11 @@ test("yolo runs bash from a cwd outside the workspace; default and worker yolo k
 	const cwd = workspace("clio-yolo-cwd-");
 	const outside = workspace("clio-yolo-cwd-outside-");
 	const call = { tool: ToolNames.Bash, args: { command: "make bench", cwd: outside } };
-	deepStrictEqual(verdicts(cwd, call), ["block:bash-cwd-escape", "block:bash-cwd-escape", "allow:bash-unrecognized"]);
+	deepStrictEqual(verdicts(cwd, call), [
+		"block:bash-cwd-escape",
+		"block:bash-cwd-escape",
+		"allow:yolo-admitted:bash-cwd-escape",
+	]);
 	const saved = process.cwd();
 	process.chdir(cwd);
 	try {
@@ -367,7 +375,7 @@ test("yolo reads a run_script through the shell line scan only when a shell inte
 			["allow", "allow"],
 			interpreter,
 		);
-		strictEqual(judged(interpreter, sandboxed)[0]?.scriptSandbox?.workspace, cwd, interpreter);
+		strictEqual(judged(interpreter, sandboxed)[0]?.shellSandbox?.workspace, cwd, interpreter);
 		strictEqual(judged(interpreter, refused)[0]?.reasonCode, "yolo-sandbox-required", interpreter);
 	}
 });
@@ -404,9 +412,9 @@ test("doctor warns when a configured scratch root is dropped for containing the 
 });
 
 /** A worker safety contract that records the operator scope each evaluation receives. */
-function scopeSpy(cwd: string): { safety: SafetyContract; seen: Array<OperatorYoloScope | undefined> } {
+function scopeSpy(cwd: string): { safety: SafetyContract; seen: Array<OperatorScope | undefined> } {
 	const inner = createWorkerSafety({ cwd });
-	const seen: Array<OperatorYoloScope | undefined> = [];
+	const seen: Array<OperatorScope | undefined> = [];
 	return {
 		seen,
 		safety: {
@@ -521,16 +529,16 @@ test("only safety.sandbox required sandboxes a yolo script, and without a backen
 	for (const command of ["bash clean.sh", "bash git.sh", 'bash "$SCRIPT"']) {
 		const decision = engine.evaluate(bash(command), "yolo", sandboxed);
 		strictEqual(decision.kind, "allow", command);
-		strictEqual(decision.scriptSandbox?.workspace, cwd, command);
-		strictEqual(decision.scriptSandbox?.scratchRoots.includes(realpathSync(tmpdir())), true, command);
+		strictEqual(decision.shellSandbox?.workspace, cwd, command);
+		strictEqual(decision.shellSandbox?.scratchRoots.includes(realpathSync(tmpdir())), true, command);
 		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
-		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).scriptSandbox, undefined, command);
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).shellSandbox, undefined, command);
 	}
 	const runScript = { tool: ToolNames.RunScript, args: { script: "clean.sh" } };
-	strictEqual(engine.evaluate(runScript, "yolo", sandboxed).scriptSandbox?.workspace, cwd);
+	strictEqual(engine.evaluate(runScript, "yolo", sandboxed).shellSandbox?.workspace, cwd);
 	strictEqual(engine.evaluate(runScript, "yolo", refused).kind, "block");
 	// A plain command is never wrapped, and a worker grant's yolo keeps the rails.
-	strictEqual(engine.evaluate(bash("ls"), "yolo", sandboxed).scriptSandbox, undefined);
+	strictEqual(engine.evaluate(bash("ls"), "yolo", sandboxed).shellSandbox, undefined);
 	strictEqual(engine.evaluate(bash("bash clean.sh"), "yolo").kind, "ask");
 });
 
@@ -549,7 +557,7 @@ test("a yolo script run through bash commits in the workspace repository and its
 	process.env.XDG_CACHE_HOME = cache;
 	// An absent code cache is skipped, not created.
 	strictEqual(
-		yoloScriptSandboxPolicy({ workspace: cwd, scratchRoots: [] }).readOnlyPaths.includes(join(cache, "pre-commit")),
+		mainSandboxPolicy({ workspace: cwd, scratchRoots: [] }).readOnlyPaths.includes(join(cache, "pre-commit")),
 		false,
 	);
 	strictEqual(existsSync(join(cache, "pre-commit")), false);
@@ -563,7 +571,7 @@ test("a yolo script run through bash commits in the workspace repository and its
 	const git = ["-c", "user.name=t", "-c", "user.email=t@t"];
 	execFileSync("git", ["init", "-q"], { cwd });
 	execFileSync("git", [...git, "commit", "-q", "--allow-empty", "-m", "init"], { cwd });
-	const policy = yoloScriptSandboxPolicy({ workspace: cwd, scratchRoots: [] });
+	const policy = mainSandboxPolicy({ workspace: cwd, scratchRoots: [] });
 	for (const root of [join(cwd, ".git"), cache, join(homedir(), ".npm")]) {
 		strictEqual(policy.writableRoots.includes(root), true, root);
 	}
@@ -573,7 +581,7 @@ test("a yolo script run through bash commits in the workspace repository and its
 	}
 	const result = await runBashCommand(
 		`git ${git.join(" ")} commit -q --allow-empty -m sandboxed && echo c > ${join(cache, "c")} && echo /evil > .git/commondir; echo h 2>/dev/null > ${join(cache, "pre-commit", "h")} || echo code-cache-refused`,
-		{ cwd, scriptSandbox: policy },
+		{ cwd, shellSandbox: policy },
 	);
 	strictEqual(result.exitCode, 0, `${result.stdout}${result.stderr}`);
 	strictEqual(existsSync(join(cwd, ".git", "commondir")), false);

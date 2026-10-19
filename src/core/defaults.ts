@@ -629,21 +629,24 @@ export interface SafetySettings {
 	};
 	review: ReviewSettings;
 	/**
-	 * OS sandbox for a dispatched worker's own commands (bash, run_script,
-	 * verification). auto sandboxes when a backend is available and records
-	 * when it is not; required refuses those commands without one; off never
-	 * sandboxes. Main-agent commands are not sandboxed. Under required a
-	 * script the operator's yolo runs (#419) runs in the yolo script sandbox
-	 * when a backend exists and is refused when none does; auto and off leave
-	 * yolo unsandboxed (#407).
+	 * OS sandbox for shell commands. A dispatched worker's own commands (bash,
+	 * run_script, verification) run in the worker sandbox, and at autonomy
+	 * default the main session's bash and run_script run contained in the
+	 * main-session sandbox. auto sandboxes when a backend is available and
+	 * records when it is not; required refuses worker commands without one;
+	 * off never sandboxes, so main-session commands keep the approval rails.
+	 * Under required a script the operator's yolo runs (#419) runs in the
+	 * main-session sandbox when a backend exists and is refused when none
+	 * does; auto and off leave yolo unsandboxed (#407).
 	 */
 	sandbox: SandboxMode;
 	/** Let sandboxed worker commands reach the network even without web_fetch. */
 	sandboxNetwork: boolean;
 	/**
-	 * Absolute trees the main session at yolo may delete, truncate and chmod in
-	 * as it does in the workspace, beside the built-in temp roots (#419). Read
-	 * only from the operator's own settings file.
+	 * Absolute trees the main session's sandbox may write and its deletes may
+	 * clean as it does in the workspace, beside the built-in temp roots ($TMPDIR,
+	 * /tmp, /var/tmp, and /var/folders on macOS) (#419). Read only from the
+	 * operator's own settings file.
 	 */
 	scratchRoots: string[];
 	/**
@@ -1033,12 +1036,14 @@ safety:
     workerResponseSeconds: 600
   review:
     enabled: false
-  # OS sandbox for dispatched worker commands: auto | required | off. Only
-  # required also sandboxes scripts the yolo main session runs.
+  # OS sandbox for shell commands: auto | required | off. Dispatched workers
+  # run in it, and at autonomy default your own commands run contained in it.
+  # Only required also sandboxes scripts the yolo main session runs.
   sandbox: auto
   sandboxNetwork: false
-  # Extra absolute trees yolo may clean up like the workspace, beside the temp
-  # dirs. Honored only in this file; project settings cannot set it.
+  # Extra absolute trees your sandboxed commands may write and clean up like
+  # the workspace, beside the temp dirs. Honored only in this file; project
+  # settings cannot set it.
   scratchRoots: []
   # Git snapshots before the agent changes files, restored with /rewind: auto | off.
   snapshots: auto

@@ -1,251 +1,19 @@
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { canonicalizeRawPath } from "../../core/path-canonical.js";
-import { isSameOrDescendant } from "./path-policy.js";
-import { type ShellCommandStep, shellCommandSteps } from "./protected-artifacts.js";
+import { shellCommandSteps } from "./protected-artifacts.js";
 
 /**
- * Command readings the operator's yolo uses to relax a flag rule for one call
- * (#419). Each answers for the commands it parsed; the policy engine checks
- * that every textual match of the rule is one of them, so a command this
- * parser cannot see keeps the rule.
+ * Command readings the policy engine judges a shell command by beyond its
+ * text (#419). The delete readings let the operator's default run a delete
+ * the workspace snapshot undoes; each answers for the commands it parsed, and
+ * the engine checks that every textual match of the rule is one of them, so a
+ * command this parser cannot see keeps the rule. The write readings tell the
+ * floor's script scan which files a command produces before a later script
+ * runs.
  */
 
 /** Commands that move the shell, after which a relative operand cannot be placed from the call's cwd. */
 export const SHELL_MOVES: ReadonlySet<string> = new Set(["cd", "pushd", "popd"]);
-
-/** The parsed steps of `command` that run `executable`, or null when a step moves the shell. */
-function stepsOf(command: string, executables: ReadonlySet<string>): ShellCommandStep[] | null {
-	const steps = shellCommandSteps(command, homedir());
-	if (steps.some((step) => SHELL_MOVES.has(step.executable))) return null;
-	return steps.filter((step) => executables.has(step.executable));
-}
-
-/** True when every operand names a fixed path inside the workspace or a scratch root. */
-function operandsInside(
-	operands: ReadonlyArray<string>,
-	callCwd: string,
-	workspace: string,
-	scratchRoots: ReadonlyArray<string>,
-): boolean {
-	return (
-		operands.length > 0 &&
-		operands.every((operand) => {
-			if (/[$`*?[{]/u.test(operand)) return false;
-			const resolved = canonicalizeRawPath(operand, callCwd);
-			if (resolved === null) return false;
-			return [workspace, ...scratchRoots].some((root) => isSameOrDescendant(resolved, root));
-		})
-	);
-}
-
-/** Files a `truncate` step names, its size and reference values skipped. */
-function truncateOperands(args: ReadonlyArray<string>): string[] {
-	const operands: string[] = [];
-	for (let index = 0; index < args.length; index += 1) {
-		const word = args[index] ?? "";
-		if (["-s", "--size", "-r", "--reference"].includes(word)) index += 1;
-		else if (!word.startsWith("-")) operands.push(word);
-	}
-	return operands;
-}
-
-/**
- * `truncate -s 0 f` and `: > f` under the operator's yolo: how many such steps
- * were read, and whether each empties only files inside the workspace or a
- * scratch root. Null when the command cannot be read that way.
- */
-export function truncationsInside(
-	command: string,
-	callCwd: string,
-	workspace: string,
-	scratchRoots: ReadonlyArray<string>,
-): number | null {
-	const steps = stepsOf(command, new Set(["truncate", ":"]));
-	if (steps === null) return null;
-	for (const step of steps) {
-		const operands = step.executable === "truncate" ? truncateOperands(step.args) : step.truncatingRedirects;
-		if (!operandsInside(operands, callCwd, workspace, scratchRoots)) return null;
-	}
-	return steps.length;
-}
-
-/**
- * Non-recursive `chmod 777` steps under the operator's yolo whose targets all
- * lie inside the workspace or a scratch root; null when any step is recursive,
- * names another mode, or reaches elsewhere.
- */
-export function worldWritableModesInside(
-	command: string,
-	callCwd: string,
-	workspace: string,
-	scratchRoots: ReadonlyArray<string>,
-): number | null {
-	const steps = stepsOf(command, new Set(["chmod"]));
-	if (steps === null) return null;
-	let counted = 0;
-	for (const step of steps) {
-		if (step.args.some((word) => word === "--recursive" || /^-[^-]*R/u.test(word))) return null;
-		const words = step.args.filter((word) => !word.startsWith("-"));
-		if (words[0] !== "777") continue;
-		if (!operandsInside(words.slice(1), callCwd, workspace, scratchRoots)) return null;
-		counted += 1;
-	}
-	return counted;
-}
-
-/** Options that take a value in the next word, per command; pkill's `-n` and `-o` are flags. */
-const KILL_VALUE_OPTIONS: Readonly<Record<"pkill" | "killall", ReadonlySet<string>>> = {
-	pkill: new Set(["-g", "-G", "-P", "-s", "-t", "-u", "-U", "-F", "--signal", "--pidfile", "--ns", "--nslist"]),
-	killall: new Set([
-		"-s",
-		"-u",
-		"-o",
-		"-y",
-		"-n",
-		"-Z",
-		"--signal",
-		"--user",
-		"--older-than",
-		"--younger-than",
-		"--ns",
-		"--context",
-	]),
-};
-
-/** `-9`, `-KILL`, `-SIGKILL`: a signal word, never a flag cluster such as killall's `-I`. */
-const SIGNAL_WORD = /^-(?:\d+|(?:SIG)?(?:KILL|TERM|HUP|INT|QUIT|ABRT|USR1|USR2|STOP|CONT|ALRM))$/u;
-
-/** What pkill and killall would match a process by: its names, and its command line for `pkill -f`. */
-interface KillMatchTargets {
-	names: string[];
-	commandLines: string[];
-}
-
-/** Far past any real process tree; a cycle or a runaway read stops here. */
-const ANCESTOR_WALK_LIMIT = 64;
-
-/**
- * This Clio process, every ancestor up to PID 1 (the shell, a multiplexer such
- * as herdr or tmux, the terminal) and PID 1 itself, read from /proc. Null where
- * /proc cannot be read, which keeps every forced kill blocked there (#419).
- */
-function protectedKillTargets(): KillMatchTargets | null {
-	const names = new Set([process.title, path.basename(process.execPath), path.basename(process.argv[1] ?? "")]);
-	const commandLines = new Set([process.argv.join(" ")]);
-	const read = (pid: string): number | null => {
-		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-		const open = stat.indexOf("(");
-		const close = stat.lastIndexOf(")");
-		names.add(stat.slice(open + 1, close));
-		const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8")
-			.split("\0")
-			.filter((word) => word.length > 0);
-		if (argv.length > 0) {
-			commandLines.add(argv.join(" "));
-			names.add(path.basename(argv[0] ?? ""));
-		}
-		// The comm field may hold spaces and parentheses; the ppid follows the last `)` and the state.
-		const ppid = Number(stat.slice(close + 2).split(" ")[1]);
-		return Number.isInteger(ppid) && ppid > 0 ? ppid : null;
-	};
-	try {
-		let pid: number | null = read("self");
-		let reachedInit = false;
-		for (let step = 0; pid !== null && step < ANCESTOR_WALK_LIMIT; step += 1) {
-			if (pid === 1) reachedInit = true;
-			pid = read(String(pid));
-			if (reachedInit) break;
-		}
-		if (!reachedInit) read("1");
-	} catch {
-		// No /proc (macOS, Windows) or an ancestor that cannot be read: refuse
-		// to guess, so the caller keeps the block.
-		return null;
-	}
-	return {
-		names: [...names].filter((name) => name.length > 0),
-		commandLines: [...commandLines].filter((line) => line.length > 0),
-	};
-}
-
-/** Why one `pkill -9` or `killall -9` step may not run under yolo, or null when it targets a named process. */
-function forcedKillProblem(step: ShellCommandStep, guarded: KillMatchTargets): string | null {
-	const valueOptions = KILL_VALUE_OPTIONS[step.executable === "pkill" ? "pkill" : "killall"];
-	const patterns: string[] = [];
-	let fullCommandLine = false;
-	let exact = false;
-	let ignoreCase = false;
-	let regex = step.executable === "pkill";
-	for (let index = 0; index < step.args.length; index += 1) {
-		const word = step.args[index] ?? "";
-		if (valueOptions.has(word)) {
-			index += 1;
-			continue;
-		}
-		if (word.startsWith("--")) {
-			if (word === "--full") fullCommandLine = true;
-			else if (word === "--exact") exact = true;
-			else if (word === "--ignore-case") ignoreCase = true;
-			else if (word === "--regexp") regex = true;
-			continue;
-		}
-		if (word.startsWith("-") && word.length > 1) {
-			if (SIGNAL_WORD.test(word)) continue;
-			const letters = word.slice(1);
-			if (step.executable === "pkill") {
-				if (letters.includes("f")) fullCommandLine = true;
-				if (letters.includes("x")) exact = true;
-				if (letters.includes("i")) ignoreCase = true;
-			} else {
-				if (letters.includes("r")) regex = true;
-				if (letters.includes("I")) ignoreCase = true;
-			}
-			continue;
-		}
-		patterns.push(word);
-	}
-	// pkill takes one pattern; without one (`pkill -9 -u me`) it kills every
-	// process the selectors leave, and killall with no name kills nothing.
-	if (patterns.length === 0 || (step.executable === "pkill" && patterns.length !== 1)) {
-		return "no named target";
-	}
-	const own = fullCommandLine ? guarded.commandLines : guarded.names;
-	for (const pattern of patterns) {
-		if (pattern.length === 0) return "an empty pattern";
-		if (!regex) {
-			if (own.some((name) => (ignoreCase ? name.toLowerCase() === pattern.toLowerCase() : name === pattern)))
-				return `'${pattern}' names this Clio process, an ancestor or PID 1`;
-			continue;
-		}
-		let matcher: RegExp;
-		try {
-			matcher = new RegExp(exact ? `^(?:${pattern})$` : pattern, ignoreCase ? "iu" : "u");
-		} catch {
-			return `'${pattern}' cannot be read as a pattern`;
-		}
-		if (matcher.test("")) return `'${pattern}' matches every process`;
-		if (own.some((name) => matcher.test(name))) return `'${pattern}' matches this Clio process, an ancestor or PID 1`;
-	}
-	return null;
-}
-
-/**
- * `pkill -9` and `killall -9` steps under the operator's yolo: how many were
- * read, when each names a target other than this Clio process, its ancestors
- * and PID 1. Null when any step has no target, a wildcard pattern, or one that
- * matches a guarded process (by name, or by command line under `pkill -f`),
- * and wherever the process tree cannot be read.
- */
-export function namedForcedKills(command: string): number | null {
-	const steps = shellCommandSteps(command, homedir()).filter(
-		(step) => (step.executable === "pkill" || step.executable === "killall") && step.args.includes("-9"),
-	);
-	if (steps.length === 0) return 0;
-	const guarded = protectedKillTargets();
-	return guarded !== null && steps.every((step) => forcedKillProblem(step, guarded) === null) ? steps.length : null;
-}
 
 /** find's link-following options: `-L` and `-H`, alone or clustered, and the `-follow` expression. */
 function followsLinks(word: string): boolean {
@@ -253,8 +21,8 @@ function followsLinks(word: string): boolean {
 }
 
 /**
- * `find -delete` steps under the operator's yolo: how many were read, or null
- * when any find in the command follows links (#419). The words are the ones
+ * `find -delete` steps: how many were read, or null when any find in the
+ * command follows links (#419). The words are the ones
  * the shell passes, so `"-L"`, `-fol''low` and `\-follow` count as well.
  */
 export function findDeletesNotFollowing(command: string): number | null {

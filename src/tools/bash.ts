@@ -2,7 +2,7 @@ import path from "node:path";
 import { Type } from "typebox";
 import { BASH_HARD_CAP_BYTES, type BashCommandResult, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
-import { yoloScriptSandboxWriteHint } from "../core/sandbox/yolo-script.js";
+import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
 import { expandPath } from "./path-utils.js";
 import { toolPresentationPolicy } from "./presentation.js";
@@ -263,12 +263,18 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. The default timeout is 300s; use panes for long-lived processes or an explicit timeout_ms. Network reachability follows the host and OS isolation; disabling web_fetch does not isolate bash networking. Read-only inspection (cat, head, tail, grep, rg, find, ls, wc, sed -n, git log/status/diff) of workspace paths, chained with &&, ||, ; or |, runs without an approval ask; loop variables, $(...), interpreter -e/-c source and redirection to files ask.",
+		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. Default timeout 300s; use panes for long-lived processes or an explicit timeout_ms. Networking follows the host and OS isolation; disabling web_fetch does not isolate bash networking. At autonomy default it runs unasked in an OS sandbox when available (workspace and scratch roots writable, secrets hidden); otherwise read-only inspection runs and other commands are reviewed.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
 			Type.String({
-				description: "Relative subdirectory of the workspace root; omit otherwise. Outside the root is blocked.",
+				description: "Relative subdirectory of the workspace root; omit otherwise. Outside the root needs the sandbox.",
+			}),
+		),
+		unsandboxed: Type.Optional(
+			Type.Boolean({
+				description:
+					"Leave the sandbox, only after a command failed because of it (credentials, a path outside the writable roots); the call is reviewed.",
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),
@@ -305,9 +311,10 @@ export const bashTool: ToolSpec = {
 		let cwd: string;
 		const requestedCwd = cwdArg === undefined ? undefined : expandPath(cwdArg);
 		try {
-			// The main session at yolo was admitted with a cwd outside the workspace (#419).
+			// The main session at yolo was admitted with a cwd outside the workspace
+			// (#419), and a contained call runs where the sandbox bounds its writes.
 			cwd =
-				options?.operatorYolo === true && requestedCwd !== undefined
+				(options?.operatorYolo === true || options?.shellSandbox !== undefined) && requestedCwd !== undefined
 					? path.resolve(process.cwd(), requestedCwd)
 					: resolveSafeCwd(requestedCwd, process.cwd());
 		} catch {
@@ -322,7 +329,7 @@ export const bashTool: ToolSpec = {
 				cwd,
 				timeoutMs: timeout,
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
-				...(options?.scriptSandbox === undefined ? {} : { scriptSandbox: options.scriptSandbox }),
+				...(options?.shellSandbox === undefined ? {} : { shellSandbox: options.shellSandbox }),
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {
@@ -360,7 +367,7 @@ export const bashTool: ToolSpec = {
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
 				const sandboxHint =
-					options?.scriptSandbox === undefined ? null : yoloScriptSandboxWriteHint(rawOutput, options.scriptSandbox);
+					options?.shellSandbox === undefined ? null : mainSandboxWriteHint(rawOutput, options.shellSandbox);
 				const status = `bash: command failed (exit ${code ?? "?"})${sandboxHint === null ? "" : `\n${sandboxHint}`}`;
 				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
 				return { kind: "error", message, details: bashResultDetails(result, rawOutput, "nonzero") };

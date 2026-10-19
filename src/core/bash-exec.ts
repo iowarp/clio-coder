@@ -8,8 +8,8 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
+import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
-import { planYoloScriptSpawn, type YoloScriptSandboxPolicy } from "./sandbox/yolo-script.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
@@ -59,8 +59,8 @@ export interface RunBashCommandOptions {
 	signal?: AbortSignal;
 	/** Cumulative snapshots, throttled to keep terminal rendering responsive. */
 	onUpdate?: (progress: BashCommandProgress) => void;
-	/** Set by the bash tool for a script the operator's yolo admitted on the sandbox (#419). */
-	scriptSandbox?: YoloScriptSandboxPolicy;
+	/** Set by the bash tool for a contained main-session call: it runs in the main-session sandbox with this policy. */
+	shellSandbox?: MainSandboxPolicy;
 }
 
 const BASH_UPDATE_THROTTLE_MS = 100;
@@ -352,14 +352,14 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 	// succeeded. A caller can explicitly opt out with `set +o pipefail`.
 	const shellArgv = [shell, "-o", "pipefail", plan.mode, command];
 	// Inside a dispatched worker the command runs under the worker's OS
-	// sandbox (decision Q8), and a script the operator's yolo admitted runs
-	// under the yolo script sandbox (#419); everywhere else the plan is a
+	// sandbox (decision Q8), and a contained main-session call runs under the
+	// main-session sandbox; everywhere else the plan is a
 	// direct spawn.
-	const yoloPlan =
-		options.scriptSandbox !== undefined
-			? planYoloScriptSpawn(options.scriptSandbox, { argv: shellArgv }, options.cwd ?? process.cwd())
+	const containedPlan =
+		options.shellSandbox !== undefined
+			? planMainSandboxSpawn(options.shellSandbox, { argv: shellArgv }, options.cwd ?? process.cwd())
 			: undefined;
-	const sandbox = yoloPlan ?? planSandboxedSpawn({ argv: shellArgv }, options.cwd ?? process.cwd());
+	const sandbox = containedPlan ?? planSandboxedSpawn({ argv: shellArgv }, options.cwd ?? process.cwd());
 	if (sandbox.kind === "refused") return notSpawnedResult(sandbox.message);
 	const spawnFile = sandbox.kind === "sandboxed" ? sandbox.file : shell;
 	const spawnArgs = sandbox.kind === "sandboxed" ? sandbox.args : shellArgv.slice(1);
@@ -381,9 +381,9 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 
-		// The yolo script sandbox removes git config and commondir files its script
+		// The main-session sandbox removes git config and commondir files its command
 		// planted once the sandbox is gone, before the result resolves (#419).
-		if (yoloPlan?.kind === "sandboxed") child.once("exit", yoloPlan.afterExit);
+		if (containedPlan?.kind === "sandboxed") child.once("exit", containedPlan.afterExit);
 
 		output.start();
 

@@ -213,7 +213,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	autonomy:
-		"Default edits the workspace, dispatches routine work, and runs recognized commands; project scripts, unfamiliar execution, outward actions, access outside the workspace, and larger dispatch plans ask. Yolo never asks and runs unsandboxed unless safety.sandbox is required; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Its first activation asks you to accept it once, and it is refused as root outside a container.",
+		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions, larger dispatch plans and former hard blocks are first reviewed by the safety judge against your requests, and destructive workspace operations run after a snapshot /rewind can undo. Yolo never asks and runs unsandboxed unless safety.sandbox is required; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Its first activation asks you to accept it once, and it is refused as root outside a container.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -529,8 +529,8 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Auto follows output style: compact gives a brief summary, standard gives activity and usage, detailed gives a one-page report. Choose brief, standard or report to override; off shows only how to resume.",
 	],
 	"safety.sandbox": [
-		"Worker command sandbox",
-		"Run dispatched workers' shell and verification commands in an OS sandbox that can write only the run's writable roots and a private /tmp. auto uses it when available, required refuses those commands without it, off never sandboxes. Your own chat commands are not sandboxed; under required, scripts the yolo session runs are sandboxed to the workspace and scratch roots, or refused without a backend.",
+		"Command sandbox",
+		"Run shell commands in an OS sandbox. At autonomy default your session's commands may write the workspace, scratch roots and package caches, with the network on and credentials hidden, and run without asking; dispatched workers' commands write only the run's writable roots and a private /tmp. auto uses it when available, required refuses worker commands without it, off never sandboxes. Under required, scripts the yolo session runs are sandboxed too, or refused without a backend.",
 	],
 	"safety.sandboxNetwork": [
 		"Worker sandbox network",
@@ -573,8 +573,8 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Extra kinds of call the judge refuses unless you ask for that action, added to its default rules. User settings only.",
 	],
 	"safety.scratchRoots": [
-		"Yolo scratch roots",
-		"Absolute directories where the yolo main session may delete, truncate and chmod as it does in the workspace. The temp directories always count. User settings only.",
+		"Scratch roots",
+		"Absolute directories your sandboxed commands may write at autonomy default, and where deletes run as they do in the workspace. TMPDIR, /tmp and /var/tmp always count. User settings only.",
 	],
 	"interface.demo": [
 		"Demo presentation and guidance",

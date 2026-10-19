@@ -322,8 +322,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		classify(call) {
 			return classifyCall(call);
 		},
-		evaluate(call, posture, operatorYolo) {
-			const policy = activePolicyEngine().evaluate(call, posture, operatorYolo);
+		evaluate(call, posture, scope) {
+			const policy = activePolicyEngine().evaluate(call, posture, scope);
 			const classification = policy.classification;
 
 			if (policy.kind === "block") {

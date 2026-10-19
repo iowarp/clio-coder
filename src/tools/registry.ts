@@ -7,10 +7,10 @@ import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.j
 import { normalizePromptHint } from "../core/prompt-hint.js";
 import { TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import {
-	type YoloScriptSandboxPolicy,
+	type MainSandboxPolicy,
+	mainSandboxPolicy,
 	type YoloScriptSandboxState,
-	yoloScriptSandboxPolicy,
-} from "../core/sandbox/yolo-script.js";
+} from "../core/sandbox/main-session.js";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
@@ -47,7 +47,7 @@ import {
 	resolveToolDestination,
 } from "../domains/safety/information-flow.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
-import type { OperatorYoloScope } from "../domains/safety/policy-engine.js";
+import type { OperatorDefaultScope, OperatorYoloScope } from "../domains/safety/policy-engine.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import type { SafetyJudgeOutcome, SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import type { SessionCodeConsent } from "../domains/safety/session-code-consent.js";
@@ -56,7 +56,7 @@ import { UNATTENDED_ALLOWED_BY } from "../domains/safety/unattended.js";
 import { YOLO_FLOOR_REASON_PREFIX } from "../domains/safety/yolo-floor.js";
 import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
 import type { WorkspaceSnapshotOutcome, WorkspaceSnapshotRequest } from "../domains/workspace-snapshots/store.js";
-import { workspaceSnapshotTrigger } from "../domains/workspace-snapshots/trigger.js";
+import { type WorkspaceSnapshotTrigger, workspaceSnapshotTrigger } from "../domains/workspace-snapshots/trigger.js";
 import type { ImageContent } from "../engine/types.js";
 import { approvalGiver, withApprovalNote } from "./approval-note.js";
 import { askUserExposure } from "./ask-user.js";
@@ -346,6 +346,15 @@ export interface RegistryDeps {
 	/** How the operator's yolo runs a script on this host, from `safety.sandbox` and the probed backend (#419). */
 	scriptSandbox?: () => YoloScriptSandboxState;
 	/**
+	 * The operator's containment at autonomy default, read per admission:
+	 * whether this session's bash and run_script calls run in the main-session
+	 * sandbox (`safety.sandbox` not off and a backend present), and whether a
+	 * workspace snapshot precedes a destructive call (a git work tree and
+	 * `safety.snapshots` on). Only the main session's registry wires it, beside
+	 * `scratchRoots`; without it default keeps today's rails.
+	 */
+	containment?: () => { sandbox: boolean; snapshots: boolean };
+	/**
 	 * The loop guard's parent-workspace mutation epoch for a turn. The main
 	 * agent's denial memory keys on it, so a refusal is repeated only while
 	 * nothing it was decided on has changed. Absent means epoch 0.
@@ -506,11 +515,14 @@ export interface ToolInvokeOptions {
 	 */
 	operatorYolo?: true;
 	/**
-	 * Set by the main session's registry when admission allowed a script under
-	 * the operator's yolo on the sandbox (#419): bash and run_script spawn it in
-	 * the yolo script sandbox with this policy. Never taken from a caller.
+	 * Set by the main session's registry when admission decided the call runs
+	 * contained: a bash or run_script call at autonomy default with a sandbox
+	 * backend, or a script under the operator's yolo with `safety.sandbox:
+	 * required` (#419). The tool spawns it in the main-session sandbox with this
+	 * policy, and a cwd outside the workspace is allowed inside it. Never taken
+	 * from a caller.
 	 */
-	scriptSandbox?: YoloScriptSandboxPolicy;
+	shellSandbox?: MainSandboxPolicy;
 	/** Trusted resolved model capability; never read from tool arguments. */
 	supportsImages?: boolean;
 	/** Trusted effective context window in tokens; sizes the per-turn observation pool. */
@@ -868,9 +880,21 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(deps.scriptSandbox !== undefined ? { scriptSandbox: deps.scriptSandbox() } : {}),
 				}
 			: undefined;
-	const withOperatorYolo = (level: AutonomyLevel): { operatorYolo?: OperatorYoloScope } => {
-		const scope = operatorYoloScope(level);
-		return scope === undefined ? {} : { operatorYolo: scope };
+	// The operator's own default exists only there too, beside its containment.
+	const operatorDefaultScope = (level: AutonomyLevel): OperatorDefaultScope | undefined =>
+		level === "default" &&
+		(deps.principal ?? "main") === "main" &&
+		deps.scratchRoots !== undefined &&
+		deps.containment !== undefined
+			? { level: "default", scratchRoots: deps.scratchRoots(), ...deps.containment() }
+			: undefined;
+	const withOperatorScope = (
+		level: AutonomyLevel,
+	): { operatorYolo?: OperatorYoloScope; operatorDefault?: OperatorDefaultScope } => {
+		const yolo = operatorYoloScope(level);
+		if (yolo !== undefined) return { operatorYolo: yolo };
+		const operatorDefault = operatorDefaultScope(level);
+		return operatorDefault === undefined ? {} : { operatorDefault };
 	};
 	/**
 	 * True yolo for this registry's calls (#407): the operator's session at
@@ -936,25 +960,33 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 
 	/**
 	 * Snapshot the workspace before an admitted call's body runs, when the
-	 * trigger asks for one. Returns the note for the call's result when the
-	 * snapshot could not be taken; the call runs either way.
+	 * trigger asks for one. `note` is the line for the call's result when the
+	 * snapshot could not be taken; `missing` says why no snapshot precedes a
+	 * call that needed one. Only a call admitted because a snapshot undoes it
+	 * (`recoverable`) is refused for that; every other call runs either way.
 	 */
 	const snapshotBeforeBody = async (
 		spec: ToolSpec,
 		call: ClassifierCall,
 		decision: SafetyDecision,
 		options: ToolInvokeOptions | undefined,
-	): Promise<MiddlewareEffect | null> => {
+	): Promise<{ note: MiddlewareEffect | null; missing: string | null }> => {
+		const recoverable = decision.policy?.recoverable === true;
 		const take = deps.workspaceSnapshot;
-		if (take === undefined || (deps.principal ?? "main") !== "main") return null;
+		if (take === undefined || (deps.principal ?? "main") !== "main") {
+			return { note: null, missing: recoverable ? "this session takes no workspace snapshots" : null };
+		}
 		let effect: ClassifierCall = call;
 		try {
 			effect = spec.safetyCall?.(call.args ?? {}) ?? call;
 		} catch {
 			// Admission already ran this projection; the call's own name still classifies.
 		}
-		const trigger = workspaceSnapshotTrigger(effect, decision);
-		if (trigger.kind === "none") return null;
+		const triggered = workspaceSnapshotTrigger(effect, decision);
+		// A call admitted because a snapshot undoes it always gets its own.
+		const trigger: WorkspaceSnapshotTrigger =
+			recoverable && triggered.kind !== "always" ? { kind: "always", reason: "destructive" } : triggered;
+		if (trigger.kind === "none") return { note: null, missing: null };
 		const turnKey = options?.turnId === undefined ? null : `${options.sessionId ?? ""}\0${options.turnId}`;
 		const request = {
 			tool: spec.name,
@@ -969,11 +1001,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		} else {
 			// A turn takes one snapshot before its first mutation; a call without a
 			// turn (an operator command) has none to anchor.
-			if (turnKey === null) return null;
+			if (turnKey === null) return { note: null, missing: null };
 			if (snapshotTurn?.key === turnKey) {
 				// A sibling call is still taking the turn's snapshot: mutate only after it lands.
 				await snapshotTurn.pending.catch(() => null);
-				return null;
+				return { note: null, missing: null };
 			}
 			pending = take({ ...request, reason: "turn-start" });
 			snapshotTurn = { key: turnKey, pending };
@@ -984,8 +1016,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		} catch (err) {
 			outcome = { kind: "unavailable", reason: err instanceof Error ? err.message : String(err), durationMs: 0 };
 		}
-		if (outcome?.kind !== "unavailable") return null;
-		return { kind: "annotate_tool_result", message: `no snapshot: ${outcome.reason}`, severity: "warn" };
+		if (outcome === null) {
+			return { note: null, missing: recoverable ? "workspace snapshots are off or no session is open" : null };
+		}
+		if (outcome.kind !== "unavailable") return { note: null, missing: null };
+		return {
+			note: { kind: "annotate_tool_result", message: `no snapshot: ${outcome.reason}`, severity: "warn" },
+			missing: outcome.reason,
+		};
 	};
 
 	const runSpec = async (
@@ -1073,8 +1111,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			}
 			// Recoverability point: admission allowed the call and no hook blocked it,
 			// so a snapshot here precedes exactly the bodies that will run.
-			const snapshotNote = await snapshotBeforeBody(spec, call, decision, options);
-			if (snapshotNote !== null) beforeEffects = [...beforeEffects, snapshotNote];
+			const snapshot = await snapshotBeforeBody(spec, call, decision, options);
+			if (snapshot.missing !== null && decision.policy?.recoverable === true) {
+				const reason = `${spec.name} did not run: it was admitted without approval because a workspace snapshot would undo it, and no snapshot could be taken (${snapshot.missing}). Take a route that discards nothing, or record the open decision for the operator.`;
+				const verdict = snapshotRequiredVerdict(decision, call.tool, reason);
+				recordRegistryDisposition(call, verdict.decision, "blocked", {
+					reasonCode: SNAPSHOT_REQUIRED_REASON_CODE,
+					reasons: [reason],
+				});
+				return verdict;
+			}
+			if (snapshot.note !== null) beforeEffects = [...beforeEffects, snapshot.note];
 			try {
 				const preparedArgs = prepareToolArgs(spec, call.args ?? {});
 				resultDisposition = resolveToolResultDisposition(spec, preparedArgs);
@@ -1085,7 +1132,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					flowAdmitsUrl: _callerFlowAdmitsUrl,
 					hookLanding: _callerHookLanding,
 					operatorYolo: _callerOperatorYolo,
-					scriptSandbox: _callerScriptSandbox,
+					shellSandbox: _callerShellSandbox,
 					...callerOptions
 				} = options ?? {};
 				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
@@ -1105,8 +1152,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(operatorYoloScope(deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL) !== undefined
 						? { operatorYolo: true as const }
 						: {}),
-					...(decision.policy?.scriptSandbox !== undefined
-						? { scriptSandbox: yoloScriptSandboxPolicy(decision.policy.scriptSandbox) }
+					...(decision.policy?.shellSandbox !== undefined
+						? { shellSandbox: mainSandboxPolicy(decision.policy.shellSandbox) }
 						: {}),
 					...(landing !== undefined && landing !== null ? { hookLanding: landing } : {}),
 					...(deps.flow !== undefined && !trueYolo()
@@ -1500,7 +1547,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(projectedCall !== undefined ? { capability: call, effects: [projectedCall] } : { effects: [call] }),
 			safety: deps.safety,
 			autonomy: level,
-			...withOperatorYolo(level),
+			...withOperatorScope(level),
 			...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
 			constraints: {
 				...(deps.readOnly === true ? { readOnly: true } : {}),
@@ -1765,7 +1812,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				effects: [effect.call],
 				safety: deps.safety,
 				autonomy: level,
-				...withOperatorYolo(level),
+				...withOperatorScope(level),
 				...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
 				...(effectSpec !== undefined
 					? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }
@@ -2495,6 +2542,8 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 
 /** Final reason code for a before_tool guard block, matching the audit convention (sd-01 §2.5). */
 const GUARD_BLOCK_REASON_CODE = "guard_block";
+/** Reason code of a recoverable call refused because the snapshot that would undo it was not taken. */
+const SNAPSHOT_REQUIRED_REASON_CODE = "snapshot-required";
 /** Reason code of a final information-flow block, for the audit row and the panel. */
 const FLOW_BLOCK_REASON_CODE = "information-flow";
 /** The path-reading tools a source rule can name; kept in step with the evaluator's READ_PATH_TOOLS. */
@@ -2635,6 +2684,23 @@ function guardBlockedVerdict(
 			hints: [],
 		},
 		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: GUARD_BLOCK_REASON_CODE } } : {}),
+	};
+	return { kind: "blocked", reason, decision: blocked };
+}
+
+/** Terminal blocked verdict for a recoverable call whose workspace snapshot could not be taken. */
+function snapshotRequiredVerdict(
+	decision: SafetyDecision,
+	tool: string,
+	reason: string,
+): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const blocked: SafetyDecision = {
+		kind: "block",
+		classification: decision.classification,
+		rejection: { short: `${tool} blocked: no workspace snapshot`, detail: reason, hints: [] },
+		...(decision.policy !== undefined
+			? { policy: { ...decision.policy, kind: "block" as const, reasonCode: SNAPSHOT_REQUIRED_REASON_CODE } }
+			: {}),
 	};
 	return { kind: "blocked", reason, decision: blocked };
 }

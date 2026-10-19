@@ -23,7 +23,7 @@ import {
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
 	type SafeCommandResult,
 } from "../core/safe-exec.js";
-import { yoloScriptSandboxWriteHint } from "../core/sandbox/yolo-script.js";
+import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import type { DynamicToolName } from "../core/tool-names.js";
 import { isSecretArgKey } from "../domains/safety/redaction.js";
 import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
@@ -642,6 +642,7 @@ const DESCRIPTION =
 	"Run one script from the workspace with an explicit interpreter, arguments, and working directory, as an observable scientific step. " +
 	"Complete stdout and stderr stream to .clio-coder/runs/<runId>/stdout.log and stderr.log and a run.json manifest records the script hash, exact argv, cwd, declared env keys, timing, outcome, and the observed state of declared inputs and outputs; the result carries bounded tails of both streams and names the run directory. " +
 	"Declared inputs and outputs are provenance only and do not restrict what the script may touch. No dependency installation, no retries, no hidden environment changes. " +
+	"At autonomy default the script runs in an OS sandbox when the host has one: the workspace, the scratch roots and package caches are writable, the network is on and credentials are hidden. " +
 	`Default timeout ${RUN_SCRIPT_CAPS.defaultTimeoutMs}ms; a nonzero exit, timeout, or cancellation returns an error that still names the logs and any partial outputs.`;
 
 export const runScriptToolSurface = {
@@ -683,6 +684,12 @@ export const runScriptToolSurface = {
 				description: "Extra environment variables for the script; keys are recorded, values never are.",
 			}),
 		),
+		unsandboxed: Type.Optional(
+			Type.Boolean({
+				description:
+					"Run outside the OS sandbox. Request it only after this script failed because of the sandbox, for example it needed credentials or a path outside the writable roots; the call is then reviewed against the operator's request.",
+			}),
+		),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
@@ -691,7 +698,12 @@ export const runScriptToolSurface = {
 		const projection = runScriptSafetyProjection(args);
 		return {
 			tool: "bash",
-			args: { command: projection.command, ...(projection.cwd === undefined ? {} : { cwd: projection.cwd }) },
+			args: {
+				command: projection.command,
+				...(projection.cwd === undefined ? {} : { cwd: projection.cwd }),
+				// The projected command leaves the sandbox exactly when the script asked to.
+				...(args.unsandboxed === true ? { unsandboxed: true } : {}),
+			},
 		};
 	},
 } satisfies ToolSurface;
@@ -736,7 +748,13 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 		...runScriptToolSurface,
 		async run(rawArgs, options): Promise<ToolResult> {
 			const args = prepareRunScriptArguments(rawArgs);
-			const validation = validateRequest(args, path.resolve(getWorkspaceRoot()), options?.operatorYolo === true);
+			// The operator's yolo (#419) and a contained call run a script or a cwd
+			// outside the workspace; the sandbox bounds where a contained one writes.
+			const validation = validateRequest(
+				args,
+				path.resolve(getWorkspaceRoot()),
+				options?.operatorYolo === true || options?.shellSandbox !== undefined,
+			);
 			if (!validation.ok) return { kind: "error", message: validation.message };
 			const request = validation.request;
 			const workspaceRoot = request.workspaceRoot;
@@ -797,7 +815,7 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 					timeoutMs: request.timeoutMs,
 					env: request.env,
 					...(signal ? { signal } : {}),
-					...(options?.scriptSandbox === undefined ? {} : { scriptSandbox: options.scriptSandbox }),
+					...(options?.shellSandbox === undefined ? {} : { shellSandbox: options.shellSandbox }),
 					output: {
 						retainHeadBytes: 0,
 						retainTailBytes: RUN_SCRIPT_CAPS.resultTailBytes,
@@ -933,9 +951,9 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			}
 			// The tail sections hold the end of each stream, where a refused write reports itself.
 			const sandboxHint =
-				outcome === "succeeded" || options?.scriptSandbox === undefined
+				outcome === "succeeded" || options?.shellSandbox === undefined
 					? null
-					: yoloScriptSandboxWriteHint(`${result.stdout}\n${result.stderr}`, options.scriptSandbox);
+					: mainSandboxWriteHint(`${result.stdout}\n${result.stderr}`, options.shellSandbox);
 			if (sandboxHint !== null) lines.push(sandboxHint);
 			if (result.sinkError !== undefined) {
 				lines.push(`log write failed (${result.sinkError}); the script was stopped and the logs are incomplete`);

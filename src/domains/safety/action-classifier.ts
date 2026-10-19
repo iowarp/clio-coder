@@ -341,8 +341,8 @@ export const DELETE_PATH_REASON_PREFIX = "delete-path-";
 /**
  * Deletes a bash command would make outside the workspace, in its .git, or at a
  * place it cannot name. `scratchRoots` (canonical) come only from the
- * operator's own yolo (#419): deletes inside them are judged like ones inside
- * the workspace, and a cd into one is followed as a base.
+ * operator's own default scope (#419): deletes inside them are judged like ones
+ * inside the workspace, and a cd into one is followed as a base.
  */
 export function bashDeleteReasons(
 	command: string,
@@ -350,23 +350,6 @@ export function bashDeleteReasons(
 	scratchRoots?: ReadonlyArray<string>,
 ): string[] {
 	return bashPathReasons(command, argCwd, scratchRoots).filter((reason) => reason.startsWith(DELETE_PATH_REASON_PREFIX));
-}
-
-/**
- * Delete and write reasons for one line of a script the operator's yolo reads
- * (#419), judged from `cwd`. A null `cwd` is a directory the scan could not
- * place, so every relative delete or write on the line is unresolved.
- */
-export function bashScriptLineReasons(
-	command: string,
-	cwd: string | null,
-	scratchRoots: ReadonlyArray<string>,
-): string[] {
-	const reasons = new Set<string>();
-	for (const walk of extractCommandPathWalks(command)) {
-		for (const reason of walkPathReasons(walk, cwd, scratchRoots)) reasons.add(reason);
-	}
-	return [...reasons];
 }
 
 /** Scratch roots a delete may clean without leaving the workspace rules. */

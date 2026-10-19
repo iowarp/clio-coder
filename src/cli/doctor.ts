@@ -1,8 +1,13 @@
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { canonicalizePath } from "../core/path-canonical.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
+import {
+	mainSandboxLine,
+	mainSandboxPolicy,
+	mainShellContained,
+	yoloScriptSandboxState,
+} from "../core/sandbox/main-session.js";
 import type { SandboxMode } from "../core/sandbox/types.js";
-import { yoloScriptSandboxLine, yoloScriptSandboxPolicy, yoloScriptSandboxState } from "../core/sandbox/yolo-script.js";
 import {
 	type DoctorFinding,
 	formatDoctorReport,
@@ -22,6 +27,7 @@ import {
 	observeHostCapacityFacts,
 	resolveLocalConcurrency,
 } from "../domains/scheduling/local-capacity.js";
+import { workspaceSnapshotRepositoryPresent } from "../domains/workspace-snapshots/store.js";
 import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { installationFindings } from "./doctor-installation.js";
@@ -107,23 +113,24 @@ export function scratchRootFindings(workspaceRoot: string): DoctorFinding[] {
 }
 
 /**
- * Whether a script the operator's yolo runs is confined by the OS sandbox on
- * this host, and where it may write (#419). Without a backend the static scan
- * alone judges it; under `safety.sandbox: required` it asks.
+ * How the main session's shell calls run on this host: contained in the
+ * main-session sandbox at autonomy default when a backend exists, and where a
+ * contained call may write; and whether yolo sandboxes its scripts (#419).
  */
-function yoloScriptSandboxFinding(workspaceRoot: string): DoctorFinding {
+function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
 	const availability = sandboxAvailability();
-	const state = yoloScriptSandboxState(configuredSandboxMode(), availability);
+	const mode = configuredSandboxMode();
 	const workspace = canonicalizePath(workspaceRoot) ?? workspaceRoot;
-	const roots = yoloScriptSandboxPolicy({
+	const roots = mainSandboxPolicy({
 		workspace,
 		scratchRoots: effectiveScratchRoots(configuredScratchRoots(), workspaceRoot),
 	}).writableRoots;
+	const uncontained = !mainShellContained(mode, availability);
 	return {
 		ok: true,
-		name: "yolo script sandbox",
-		level: state === "refused" ? "warn" : "ok",
-		detail: yoloScriptSandboxLine(state, availability, roots),
+		name: "shell sandbox",
+		level: uncontained || yoloScriptSandboxState(mode, availability) === "refused" ? "warn" : "ok",
+		detail: mainSandboxLine(mode, availability, roots),
 	};
 }
 
@@ -133,6 +140,15 @@ function configuredSandboxMode(): SandboxMode {
 	} catch {
 		// An unreadable settings file has its own doctor row; judge with the default.
 		return "auto";
+	}
+}
+
+function configuredSnapshotsOn(): boolean {
+	try {
+		return readSettings().safety.snapshots !== "off";
+	} catch {
+		// An unreadable settings file has its own doctor row; judge with the default.
+		return true;
 	}
 }
 
@@ -187,6 +203,10 @@ async function deepFindings(
 		autonomy: deep.autonomy ?? configuredAutonomy(),
 		scratchRoots: configuredScratchRoots(),
 		scriptSandbox: yoloScriptSandboxState(configuredSandboxMode(), sandboxAvailability()),
+		containment: {
+			sandbox: mainShellContained(configuredSandboxMode(), sandboxAvailability()),
+			snapshots: configuredSnapshotsOn() && workspaceSnapshotRepositoryPresent(workspaceRoot),
+		},
 	});
 	return [...toolRows, ...contractRows];
 }
@@ -393,9 +413,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// The validation contract lives in the workspace, not the home, so it is
 	// checked on every run: a broken contract is why rigor stayed normal.
 	const contractChecks = [validationContractFinding(workspaceRoot)];
-	const scratchChecks = untouched
-		? []
-		: [...scratchRootFindings(workspaceRoot), yoloScriptSandboxFinding(workspaceRoot)];
+	const scratchChecks = untouched ? [] : [...scratchRootFindings(workspaceRoot), shellSandboxFinding(workspaceRoot)];
 	// Task worktrees live in the workspace too. The sweep reads claims and asks
 	// git; it removes nothing.
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });

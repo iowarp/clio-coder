@@ -8,14 +8,15 @@ import { test } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { buildBwrapInvocation } from "../../src/core/sandbox/bwrap.js";
 import {
-	planYoloScriptSpawn,
-	resolveYoloScriptSandboxPolicy,
-	yoloScriptAgentMasks,
-	yoloScriptGitLayout,
-	yoloScriptSandboxInvocationSpec,
+	mainSandboxAgentMasks,
+	mainSandboxGitLayout,
+	mainSandboxInvocationSpec,
+	mainSandboxWriteHint,
+	mainShellContained,
+	planMainSandboxSpawn,
+	resolveMainSandboxPolicy,
 	yoloScriptSandboxState,
-	yoloScriptSandboxWriteHint,
-} from "../../src/core/sandbox/yolo-script.js";
+} from "../../src/core/sandbox/main-session.js";
 
 function run(file: string, args: string[]): Promise<{ code: number | null; output: string }> {
 	return new Promise((resolve) => {
@@ -26,9 +27,9 @@ function run(file: string, args: string[]): Promise<{ code: number | null; outpu
 	});
 }
 
-// #419: under safety.sandbox required, the operator's yolo runs scripts in the OS sandbox with the real /tmp.
-test("the yolo script sandbox writes the workspace and scratch roots only, keeps Clio's trees read-only and the network on", () => {
-	const policy = resolveYoloScriptSandboxPolicy({
+// #419: the main-session sandbox (default containment, and yolo scripts under safety.sandbox required) keeps the real /tmp.
+test("the main-session sandbox writes the workspace and scratch roots only, keeps Clio's trees read-only and the network on", () => {
+	const policy = resolveMainSandboxPolicy({
 		workspace: "/w",
 		scratchRoots: ["/tmp", "/bench"],
 		cacheRoots: ["/home/u/.cache", "/home/u/.npm"],
@@ -53,7 +54,7 @@ test("the yolo script sandbox writes the workspace and scratch roots only, keeps
 	assert.equal(policy.network, true);
 
 	const masks = [{ path: "/home/u/.ssh", kind: "directory" as const }];
-	const spec = yoloScriptSandboxInvocationSpec(policy, { argv: ["/bin/bash", "x.sh"] }, "/w", masks);
+	const spec = mainSandboxInvocationSpec(policy, { argv: ["/bin/bash", "x.sh"] }, "/w", masks);
 	const { args } = buildBwrapInvocation(spec);
 	assert.equal(args.includes("--unshare-net"), false);
 	assert.equal(args.includes("--tmpfs") && args[args.indexOf("--tmpfs") + 1] === "/tmp", false, "no private /tmp");
@@ -74,13 +75,19 @@ test("the yolo script sandbox writes the workspace and scratch roots only, keeps
 	assert.equal(yoloScriptSandboxState("off", available), "unsandboxed");
 	assert.equal(yoloScriptSandboxState("auto", missing), "unsandboxed");
 	assert.equal(yoloScriptSandboxState("required", missing), "refused");
-	assert.equal(planYoloScriptSpawn(policy, { argv: ["/bin/true"] }, "/w", missing).kind, "refused");
+	assert.equal(planMainSandboxSpawn(policy, { argv: ["/bin/true"] }, "/w", missing).kind, "refused");
+	// At autonomy default the main session's shell is contained whenever a backend exists and the mode is not off.
+	assert.equal(mainShellContained("auto", available), true);
+	assert.equal(mainShellContained("required", available), true);
+	assert.equal(mainShellContained("off", available), false);
+	assert.equal(mainShellContained("auto", missing), false);
+	assert.equal(mainShellContained("required", missing), false);
 
 	assert.match(
-		yoloScriptSandboxWriteHint("x: Read-only file system", policy) ?? "",
-		/yolo script sandbox.*\/w, \/tmp, \/bench.*safety\.scratchRoots/u,
+		mainSandboxWriteHint("x: Read-only file system", policy) ?? "",
+		/write only to \/w, \/tmp, \/bench.*unsandboxed: true.*safety\.scratchRoots/u,
 	);
-	assert.equal(yoloScriptSandboxWriteHint("no such file", policy), null);
+	assert.equal(mainSandboxWriteHint("no such file", policy), null);
 });
 
 test("under bwrap a yolo script writes its workspace and scratch roots, sees the host's /tmp and writes nothing else", async (t) => {
@@ -98,7 +105,7 @@ test("under bwrap a yolo script writes its workspace and scratch roots, sees the
 	mkdirSync(outside);
 	const cache = join(scratch, "cache");
 	mkdirSync(join(cache, "clio-coder"), { recursive: true });
-	const policy = resolveYoloScriptSandboxPolicy({
+	const policy = resolveMainSandboxPolicy({
 		workspace,
 		scratchRoots: [bench],
 		cacheRoots: [cache],
@@ -115,7 +122,7 @@ test("under bwrap a yolo script writes its workspace and scratch roots, sees the
 		`echo c > ${join(outside, "c.txt")} 2>/dev/null || echo outside-refused`,
 		`echo d > ${join(workspace, ".git", "d")} 2>/dev/null || echo git-refused`,
 	].join("; ");
-	const plan = planYoloScriptSpawn(policy, { argv: ["/bin/bash", "-c", script] }, workspace, availability);
+	const plan = planMainSandboxSpawn(policy, { argv: ["/bin/bash", "-c", script] }, workspace, availability);
 	assert.equal(plan.kind, "sandboxed");
 	if (plan.kind !== "sandboxed") return;
 	const result = await run(plan.file, plan.args);
@@ -143,7 +150,7 @@ function git(cwd: string, ...args: string[]): string {
 
 // #419: git inside a yolo script writes objects, refs and the index but never hooks, config or commondir.
 test("the yolo script sandbox makes the repository's git dirs writable and keeps their hooks, config and commondir read-only", () => {
-	const policy = resolveYoloScriptSandboxPolicy({
+	const policy = resolveMainSandboxPolicy({
 		workspace: "/w",
 		scratchRoots: ["/tmp"],
 		cacheRoots: [],
@@ -167,7 +174,7 @@ test("the yolo script sandbox makes the repository's git dirs writable and keeps
 	]) {
 		assert.ok(policy.readOnlyPaths.includes(path), path);
 	}
-	const { args } = buildBwrapInvocation(yoloScriptSandboxInvocationSpec(policy, { argv: ["/bin/true"] }, "/w", []));
+	const { args } = buildBwrapInvocation(mainSandboxInvocationSpec(policy, { argv: ["/bin/true"] }, "/w", []));
 	assert.ok(
 		args.indexOf("/w/.git/config") > args.lastIndexOf("/w/.git/modules/sub"),
 		"read-only rebinds follow the git mounts",
@@ -182,7 +189,7 @@ test("the git layout of a linked worktree covers its .git file, its git dir and 
 	git(main, "init", "-q");
 	git(main, "commit", "-q", "--allow-empty", "-m", "init");
 	git(main, "worktree", "add", "-q", join(scratch, "wt"));
-	const layout = yoloScriptGitLayout(join(scratch, "wt"));
+	const layout = mainSandboxGitLayout(join(scratch, "wt"));
 	assert.ok(layout !== undefined);
 	const common = join(main, ".git");
 	for (const dir of [common, join(common, "worktrees"), join(common, "worktrees", "wt")]) {
@@ -217,8 +224,8 @@ test("under bwrap git commits from a yolo script while hooks, config, commondir 
 	git(scratch, "init", "-q", `--separate-git-dir=${module}`, join(workspace, "sub"));
 	git(module, "config", "core.worktree", "../../../sub");
 	rmSync(join(module, "hooks"), { recursive: true, force: true });
-	const layout = yoloScriptGitLayout(workspace);
-	const policy = resolveYoloScriptSandboxPolicy({
+	const layout = mainSandboxGitLayout(workspace);
+	const policy = resolveMainSandboxPolicy({
 		workspace,
 		scratchRoots: [],
 		cacheRoots: [],
@@ -236,7 +243,7 @@ test("under bwrap git commits from a yolo script while hooks, config, commondir 
 		"mkdir -p .git/modules/sub/hooks && echo x > .git/modules/sub/hooks/post-checkout",
 		"echo /evil > .git/commondir",
 	].join("; ");
-	const plan = planYoloScriptSpawn(policy, { argv: ["/bin/bash", "-c", script] }, workspace, availability);
+	const plan = planMainSandboxSpawn(policy, { argv: ["/bin/bash", "-c", script] }, workspace, availability);
 	assert.equal(plan.kind, "sandboxed");
 	if (plan.kind !== "sandboxed") return;
 	const result = await run(plan.file, plan.args);
@@ -277,12 +284,12 @@ test("under bwrap a yolo script runs in its own PID namespace and cannot reach a
 	t.after(() => {
 		for (const server of servers) server.close();
 	});
-	const masks = yoloScriptAgentMasks({ SSH_AUTH_SOCK: join(scratch, "agent.sock") }, scratch);
+	const masks = mainSandboxAgentMasks({ SSH_AUTH_SOCK: join(scratch, "agent.sock") }, scratch);
 	assert.deepEqual(masks, [
 		{ path: join(scratch, "ssh-abc"), kind: "directory" },
 		{ path: join(scratch, "agent.sock"), kind: "file" },
 	]);
-	const policy = resolveYoloScriptSandboxPolicy({
+	const policy = resolveMainSandboxPolicy({
 		workspace: scratch,
 		scratchRoots: [],
 		cacheRoots: [],
@@ -294,7 +301,7 @@ test("under bwrap a yolo script runs in its own PID namespace and cannot reach a
 		`test -S ${join(scratch, "ssh-abc", "agent.1")} || echo tmp-agent-hidden`,
 		`test -S ${join(scratch, "agent.sock")} || echo auth-sock-hidden`,
 	].join("; ");
-	const spec = yoloScriptSandboxInvocationSpec(policy, { argv: ["/bin/bash", "-c", script] }, scratch, masks);
+	const spec = mainSandboxInvocationSpec(policy, { argv: ["/bin/bash", "-c", script] }, scratch, masks);
 	const { args } = buildBwrapInvocation(spec, availability.executable ?? undefined);
 	assert.ok(args.includes("--unshare-pid"));
 	const result = await run(availability.executable ?? "bwrap", args);

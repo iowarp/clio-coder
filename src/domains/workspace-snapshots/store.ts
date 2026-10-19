@@ -243,6 +243,24 @@ function lines(text: string): string[] {
 		.filter((line) => line.length > 0);
 }
 
+/**
+ * Cheap and synchronous: whether a snapshot of `cwd` has a Git work tree to
+ * capture, judged by a `.git` entry at or above it. Admission reads it on
+ * every call of the operator's default to decide whether a destructive call a
+ * snapshot would undo may run unasked; the snapshot itself still checks with
+ * Git and the call is refused when that fails.
+ */
+export function workspaceSnapshotRepositoryPresent(cwd: string): boolean {
+	for (let current = path.resolve(cwd); ; current = path.dirname(current)) {
+		try {
+			if (statSync(path.join(current, ".git"), { throwIfNoEntry: false }) !== undefined) return true;
+		} catch {
+			// An unreadable level cannot vouch for a repository; keep walking up.
+		}
+		if (path.dirname(current) === current) return false;
+	}
+}
+
 async function resolveRepository(cwd: string, deadline: number): Promise<Repository> {
 	if (!existsSync(cwd)) throw new SnapshotUnavailableError(`workspace ${cwd} does not exist`);
 	// One call answers every case: a bare repository and a .git directory print
