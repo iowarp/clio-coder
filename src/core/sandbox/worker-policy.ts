@@ -6,6 +6,7 @@ import {
 	type SandboxBackend,
 	type SandboxEnvPolicy,
 	type SandboxMode,
+	type UnixSocketMode,
 	WORKER_SANDBOX_SPEC_VERSION,
 	type WorkerSandboxSpec,
 } from "./types.js";
@@ -26,6 +27,8 @@ export interface WorkerSandboxPolicyInput {
 	dependencyRoots?: ReadonlyArray<string>;
 	/** How the worker's sandboxed commands scrub their inherited environment (env-scrub.ts). */
 	env?: SandboxEnvPolicy;
+	/** `safety.sandboxUnixSockets`; absent blocks them. */
+	unixSockets?: UnixSocketMode;
 }
 
 /**
@@ -86,6 +89,7 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		network: workerSandboxNetwork(input.allowedTools, input.networkSetting),
 		...(passEnv.length > 0 ? { passEnv: [...passEnv] } : {}),
 		...(secretEnv.length > 0 ? { secretEnv: [...secretEnv] } : {}),
+		...(input.unixSockets === "allow" ? { unixSockets: "allow" as const } : {}),
 	};
 }
 

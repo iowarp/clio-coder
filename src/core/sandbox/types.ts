@@ -12,6 +12,15 @@ export type SandboxMode = (typeof SANDBOX_MODES)[number];
 
 export type SandboxBackend = "bwrap" | "seatbelt";
 
+/**
+ * `safety.sandboxUnixSockets` values. `block` refuses new Unix-domain sockets
+ * inside the sandbox, because a socket visible in the filesystem view or the
+ * shared network namespace (a terminal multiplexer, X11, a daemon's control
+ * socket) runs commands outside it. `allow` leaves them reachable.
+ */
+export const UNIX_SOCKET_MODES = ["block", "allow"] as const;
+export type UnixSocketMode = (typeof UNIX_SOCKET_MODES)[number];
+
 export const WORKER_SANDBOX_SPEC_VERSION = 1;
 
 /**
@@ -47,6 +56,8 @@ export interface WorkerSandboxSpec {
 	passEnv?: ReadonlyArray<string>;
 	/** Credential variables Clio's own targets read, scrubbed whatever their names. Absent when empty. */
 	secretEnv?: ReadonlyArray<string>;
+	/** `safety.sandboxUnixSockets: allow`. Absent blocks Unix-domain sockets (unix-sockets.ts). */
+	unixSockets?: "allow";
 }
 
 /**
@@ -89,6 +100,14 @@ export interface SandboxInvocationSpec {
 	 * reaches the operator's own files. Default true.
 	 */
 	privateTmp?: boolean;
+	/**
+	 * Bubblewrap: the seccomp program file that refuses AF_UNIX sockets
+	 * (unix-sockets.ts). The launch opens it on a file descriptor bwrap reads
+	 * with `--seccomp`. Absent loads no filter.
+	 */
+	unixSocketFilter?: string;
+	/** Seatbelt: deny connecting to and binding Unix-domain sockets. Bubblewrap takes `unixSocketFilter` instead. */
+	denyUnixSockets?: boolean;
 }
 
 export interface SandboxInvocation {

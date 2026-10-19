@@ -241,6 +241,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "safety.sandbox":
 		case "safety.sandboxNetwork":
 		case "safety.sandboxPassEnv":
+		case "safety.sandboxUnixSockets":
 			return place("safety", "Worker approvals");
 		default:
 	}

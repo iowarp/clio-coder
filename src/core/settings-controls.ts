@@ -443,6 +443,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.sandbox": ["auto", "required", "off"],
+	"safety.sandboxUnixSockets": ["block", "allow"],
 	"safety.snapshots": ["auto", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
@@ -575,6 +576,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"safety.sandboxPassEnv": [
 		"Sandbox environment pass-through",
 		"Environment variables your sandboxed commands keep although they look like credentials. Every other token, key, password and URL with a password is removed before a sandboxed command starts, because it can reach the network without asking. User settings only.",
+	],
+	"safety.sandboxUnixSockets": [
+		"Sandbox unix sockets",
+		"Block stops sandboxed commands from opening Unix sockets, because a socket they can reach (tmux, an X11 display, a daemon's control socket) can run commands outside the sandbox. Database sockets, Docker and other local IPC then fail inside it, and a command that needs one runs unsandboxed after review. Allow leaves every socket reachable. User settings only.",
 	],
 	"safety.scratchRoots": [
 		"Scratch roots",

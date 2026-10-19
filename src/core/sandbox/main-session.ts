@@ -12,7 +12,9 @@ import type {
 	SandboxInvocationSpec,
 	SandboxMaskedPath,
 	SandboxMode,
+	UnixSocketMode,
 } from "./types.js";
+import { unixSocketHostState, unixSocketLaunch, unixSocketStateLine } from "./unix-sockets.js";
 import { protectedInside } from "./worker-policy.js";
 import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
 
@@ -77,6 +79,8 @@ export interface MainSandboxPolicyInput {
 	git?: MainSandboxGitLayout;
 	/** How the command's inherited environment is scrubbed. Absent scrubs with no pass list. */
 	env?: SandboxEnvPolicy;
+	/** `safety.sandboxUnixSockets`. Absent blocks them. */
+	unixSockets?: UnixSocketMode;
 }
 
 /** No pass list and no target credential names: the scrub's name and value rules alone. */
@@ -94,6 +98,8 @@ export interface MainSandboxPolicy {
 	/** Where each launch looks for secret files to mask: the workspace, then the scratch roots. */
 	secretRoots: { workspace: string; scratchRoots: ReadonlyArray<string> };
 	env: SandboxEnvPolicy;
+	/** Whether a contained command may create Unix-domain sockets (unix-sockets.ts). */
+	unixSockets: UnixSocketMode;
 }
 
 /**
@@ -410,6 +416,7 @@ export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSan
 		network: true,
 		secretRoots: { workspace: input.workspace, scratchRoots: input.scratchRoots },
 		env: input.env ?? DEFAULT_SANDBOX_ENV_POLICY,
+		unixSockets: input.unixSockets ?? "block",
 	};
 }
 
@@ -439,6 +446,7 @@ export function mainSandboxPolicy(roots: {
 	workspace: string;
 	scratchRoots: ReadonlyArray<string>;
 	env?: SandboxEnvPolicy;
+	unixSockets?: UnixSocketMode;
 }): MainSandboxPolicy {
 	const git = mainSandboxGitLayout(roots.workspace);
 	return resolveMainSandboxPolicy({
@@ -514,10 +522,22 @@ export function planMainSandboxSpawn(
 		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots },
 		baseMasks,
 	).masks;
-	const spec = mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), [
-		...baseMasks,
-		...secretMasks,
-	]);
+	// The command sees the host's /tmp and network namespace, where a
+	// multiplexer, display or daemon socket runs code outside the sandbox.
+	const sockets = unixSocketLaunch(
+		policy.unixSockets,
+		availability,
+		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots, privateTmp: false },
+		[...baseMasks, ...secretMasks],
+	);
+	const spec = {
+		...mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), [
+			...baseMasks,
+			...secretMasks,
+			...sockets.masks,
+		]),
+		...sockets.fields,
+	};
 	const invocation = buildSandboxInvocation(spec, availability.backend, availability.executable);
 	const absentFiles = policy.absentGitFiles.filter((file) => !pathExists(file));
 	return {
@@ -580,6 +600,7 @@ export function mainSandboxLine(
 	availability: SandboxAvailability,
 	writableRoots: ReadonlyArray<string>,
 	secretFiles?: { count: number; capped: boolean },
+	unixSockets: UnixSocketMode = "block",
 ): string {
 	const yolo = yoloScriptSandboxState(mode, availability);
 	const yoloLine =
@@ -595,7 +616,8 @@ export function mainSandboxLine(
 				: secretFiles.capped
 					? `; ${secretFiles.count} secret files in the workspace and scratch roots are masked, and the search stopped at its limit, so others stay readable`
 					: `; ${secretFiles.count} secret files in the workspace and scratch roots are masked`;
-		return `default-autonomy shell commands run in the ${availability.backend} sandbox; writable roots: ${writableRoots.join(", ")}${masked}; ${yoloLine}`;
+		const sockets = unixSocketStateLine(unixSocketHostState(unixSockets, availability));
+		return `default-autonomy shell commands run in the ${availability.backend} sandbox; writable roots: ${writableRoots.join(", ")}${masked}; ${sockets}; ${yoloLine}`;
 	}
 	const why = mode === "off" ? "safety.sandbox is off" : (availability.reason ?? "no sandbox backend");
 	return `default-autonomy shell commands run uncontained and keep the approval rails (${why}); ${yoloLine}`;

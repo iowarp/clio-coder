@@ -215,6 +215,11 @@ const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }>
 		key: "sandboxPassEnv",
 		message: "sandbox environment pass-through is set only in user settings; project value ignored",
 	},
+	// A repository could otherwise reopen the sockets that run code outside the sandbox.
+	{
+		key: "sandboxUnixSockets",
+		message: "sandbox unix-socket access is set only in user settings; project value ignored",
+	},
 	{
 		key: "unattendedAfterSeconds",
 		message: "the unattended timeout is set only in user settings; project value ignored",

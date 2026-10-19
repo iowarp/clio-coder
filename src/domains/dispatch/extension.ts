@@ -2868,7 +2868,9 @@ function workerSandboxFor(input: {
 			allowedTools: input.allowedTools,
 			networkSetting: input.settings?.safety.sandboxNetwork === true,
 			dependencyRoots,
-			...(input.settings !== undefined ? { env: sandboxEnvPolicy(input.settings) } : {}),
+			...(input.settings !== undefined
+				? { env: sandboxEnvPolicy(input.settings), unixSockets: input.settings.safety.sandboxUnixSockets }
+				: {}),
 		}),
 	};
 }

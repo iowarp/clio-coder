@@ -14,6 +14,7 @@ import type {
 	SandboxMaskedPath,
 	WorkerSandboxSpec,
 } from "./types.js";
+import { unixSocketHostState, unixSocketLaunch, unixSocketStateLine } from "./unix-sockets.js";
 
 /**
  * Process-wide sandbox policy for a dispatched worker. The worker entry sets
@@ -24,11 +25,13 @@ import type {
  */
 let active: WorkerSandboxSpec | null = null;
 let unavailableReported = false;
+let socketFallbackReported = false;
 let maskCache: ReadonlyArray<SandboxMaskedPath> | null = null;
 
 export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefined): void {
 	active = spec ?? null;
 	unavailableReported = false;
+	socketFallbackReported = false;
 }
 
 /** Native edit/write tools run outside the child sandbox, so publication must honor its read-only paths. */
@@ -168,17 +171,27 @@ export function composeWorkerSandboxInvocation(
 	maskedPaths: ReadonlyArray<SandboxMaskedPath> = workerSandboxMasks(),
 ): SandboxInvocation | null {
 	if (!availability.available || availability.backend === null || availability.executable === null) return null;
+	const writableRoots = policy.writableRoots.map((entry) =>
+		availability.backend === "bwrap" ? writableRoot(entry, policy.readableRoots[0] ?? cwd) : physicalSandboxPath(entry),
+	);
+	// Every launch refuses new Unix-domain sockets unless the operator allowed
+	// them: a socket the command can see may run code outside the sandbox.
+	const sockets = unixSocketLaunch(
+		policy.unixSockets ?? "block",
+		availability,
+		{ workspaceRoots: [cwd, ...policy.readableRoots, ...writableRoots], privateTmp: true },
+		maskedPaths,
+	);
 	const spec: SandboxInvocationSpec = {
 		command,
 		cwd: physicalSandboxPath(cwd),
-		writableRoots: policy.writableRoots.map((entry) =>
-			availability.backend === "bwrap" ? writableRoot(entry, policy.readableRoots[0] ?? cwd) : physicalSandboxPath(entry),
-		),
+		writableRoots,
 		readOnlyPaths: policy.readOnlyPaths.map(physicalSandboxPath),
 		gitWritablePaths: policy.gitWritablePaths.map(physicalSandboxPath),
 		readableRoots: policy.readableRoots.map(physicalSandboxPath),
 		network: policy.network,
-		maskedPaths,
+		maskedPaths: [...maskedPaths, ...sockets.masks],
+		...sockets.fields,
 		// Agent sockets are masked; a dangling variable only produces confusing
 		// connection errors in tools that honor it.
 		unsetEnv: ["SSH_AUTH_SOCK"],
@@ -222,6 +235,15 @@ function workerSpawnMasks(policy: WorkerSandboxSpec): SandboxMaskedPath[] {
 	return [...base, ...discoverSecretMasks({ workspaceRoots: workerSecretRoots(policy) }, base).masks];
 }
 
+/** Once per worker, on stderr like the missing-backend line: the filter could not load and masks stand in. */
+function reportSocketFallback(policy: WorkerSandboxSpec, availability: SandboxAvailability): void {
+	if (socketFallbackReported || policy.unixSockets === "allow" || availability.backend !== "bwrap") return;
+	const state = unixSocketHostState("block", availability);
+	if (state.kind !== "masks") return;
+	socketFallbackReported = true;
+	process.stderr.write(`[worker] sandbox ${unixSocketStateLine(state)}\n`);
+}
+
 /**
  * Decide how one worker child process spawns. No policy means the host runs
  * it directly (orchestrator, or `safety.sandbox: off`). `auto` without a
@@ -254,6 +276,7 @@ export function planSandboxedSpawn(
 		return { kind: "refused", message: error instanceof Error ? error.message : String(error) };
 	}
 	if (invocation !== null) {
+		reportSocketFallback(policy, availability);
 		return {
 			kind: "sandboxed",
 			file: invocation.file,

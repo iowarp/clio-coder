@@ -33,6 +33,23 @@ const SEATBELT_BASE_POLICY = [
 	'(allow file-write-data (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (regex #"^/dev/ttys[0-9]+$"))',
 ];
 
+/**
+ * UNVERIFIED like the rest of this profile. A granted network otherwise lets
+ * a contained command connect to any Unix-domain socket it can see, such as a
+ * terminal multiplexer's or a daemon's control socket, which runs commands
+ * outside the sandbox. They come after `(allow network*)` because a later
+ * matching rule wins. With the network on, macOS resolves host names through
+ * mDNSResponder's socket, so that one socket stays reachable; without a grant
+ * nothing is re-allowed.
+ */
+function seatbeltUnixSocketRules(network: boolean): string[] {
+	return [
+		"(deny network-outbound (remote unix-socket))",
+		...(network ? ['(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))'] : []),
+		"(deny network-bind (local unix-socket))",
+	];
+}
+
 function paramRule(prefix: string, count: number): string {
 	return Array.from({ length: count }, (_, index) => `(subpath (param "${prefix}_${index}"))`).join(" ");
 }
@@ -80,6 +97,7 @@ function buildSeatbeltProfile(spec: SandboxInvocationSpec): { profile: string; p
 	// Without a network grant, `(deny default)` already refuses every socket,
 	// Unix-domain ones included.
 	if (spec.network) lines.push("(allow network*)", "(allow system-socket)");
+	if (spec.denyUnixSockets === true) lines.push(...seatbeltUnixSocketRules(spec.network));
 	return { profile: lines.join("\n"), params };
 }
 

@@ -6,6 +6,7 @@ import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from 
 import { runCommandVector } from "../../core/safe-exec.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import { buildSandboxInvocation } from "../../core/sandbox/invocation.js";
+import { unixSocketLaunch } from "../../core/sandbox/unix-sockets.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
@@ -236,6 +237,8 @@ export async function compareHostVerificationBase(input: {
 				'export TMPDIR="$base_dir" TMP="$base_dir" TEMP="$base_dir"',
 				'exec "$@"',
 			].join("\n");
+			// The base check runs repository code, so it gets the same socket refusal as a worker command.
+			const sockets = unixSocketLaunch("block", sandbox, { workspaceRoots: [worktree.path], privateTmp: true }, []);
 			const invocation = buildSandboxInvocation(
 				{
 					command: {
@@ -256,7 +259,8 @@ export async function compareHostVerificationBase(input: {
 					cwd: worktree.path,
 					writableRoots: [],
 					network: false,
-					maskedPaths: [],
+					maskedPaths: sockets.masks,
+					...sockets.fields,
 				},
 				sandbox.backend,
 				sandbox.executable,

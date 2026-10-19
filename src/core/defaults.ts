@@ -14,7 +14,7 @@ import type { ProfileId } from "../domains/system-one/profiles.js";
 import type { SiteId } from "../domains/system-one/types.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
-import type { SandboxMode } from "./sandbox/types.js";
+import type { SandboxMode, UnixSocketMode } from "./sandbox/types.js";
 
 export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 export type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -657,6 +657,13 @@ export interface SafetySettings {
 	 */
 	sandboxPassEnv: string[];
 	/**
+	 * Unix-domain sockets inside the OS sandbox. block refuses new ones, since a
+	 * socket a contained command can see (a terminal multiplexer, X11, a
+	 * daemon's control socket) runs commands outside the sandbox; allow leaves
+	 * them reachable. Read only from the operator's own settings file.
+	 */
+	sandboxUnixSockets: UnixSocketMode;
+	/**
 	 * Workspace snapshots before the main agent mutates a Git work tree: auto
 	 * snapshots before each turn's first mutating call and before every
 	 * destructive one, and `/rewind` restores files from them; off takes none.
@@ -841,6 +848,7 @@ export const DEFAULT_SETTINGS = {
 		sandboxNetwork: false,
 		scratchRoots: [] as string[],
 		sandboxPassEnv: [] as string[],
+		sandboxUnixSockets: "block" as UnixSocketMode,
 		snapshots: "auto" as WorkspaceSnapshotMode,
 		unattendedAfterSeconds: 300,
 		yoloAccepted: false,
@@ -1057,6 +1065,10 @@ safety:
   # passwords, URLs with a password). Names listed here are kept. Honored only
   # in this file.
   sandboxPassEnv: []
+  # Unix sockets inside the sandbox: block | allow. A socket a sandboxed
+  # command can reach (tmux, X11, a daemon) can run commands outside it.
+  # Honored only in this file.
+  sandboxUnixSockets: block
   # Git snapshots before the agent changes files, restored with /rewind: auto | off.
   snapshots: auto
   # Seconds a permission card or ask_user question waits for you before Clio

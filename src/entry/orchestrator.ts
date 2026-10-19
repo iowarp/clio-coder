@@ -2910,6 +2910,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		sandboxEnv: () => sandboxEnvPolicy(getCurrentSettings()),
+		sandboxUnixSockets: () => getCurrentSettings().safety.sandboxUnixSockets,
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read

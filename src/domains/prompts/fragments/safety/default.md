@@ -15,7 +15,10 @@ SSH agent are hidden: credential variables are unset and secret files such as
 .env files and private keys cannot be read. When a command fails because of the
 sandbox, for example it needs one of those or writes outside those roots,
 rerun it with `unsandboxed: true`; that call is reviewed against the
-operator's request.
+operator's request. Local Unix sockets (database sockets, Docker, IPC daemons)
+are unreachable inside the sandbox; in the main session rerun a command that
+needs one with `unsandboxed: true` and the safety judge reviews it, while a
+dispatched worker names that command in its result.
 Pushes, publishes, code-host and cloud CLIs and network writes run outside the
 sandbox and are reviewed the same way. Main-session reads run anywhere except
 secret paths. Main-session destructive workspace operations (git reset --hard,

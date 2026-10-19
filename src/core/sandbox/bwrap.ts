@@ -6,6 +6,16 @@ export const DEFAULT_BWRAP_PATH = "/usr/bin/bwrap";
 /** The private /tmp mount point; anything the run must read under it is re-exposed. */
 const SANDBOX_TMP = "/tmp";
 
+/**
+ * The descriptor the unix-socket filter travels on. It sits above stdio and
+ * the Node IPC channel an extension runtime child holds on descriptor 3, and
+ * stays a single digit because a POSIX shell redirects only 0 through 9.
+ */
+export const UNIX_SOCKET_FILTER_FD = 9;
+
+/** A `unixSocketFilter` that reads the program from the launch's stdin, so probing support writes no file. */
+export const UNIX_SOCKET_FILTER_STDIN = "-";
+
 /** The shell argv both exec seams hand the sandbox for a bash command string. */
 export function sandboxCommandArgv(command: SandboxCommand): string[] {
 	return "argv" in command ? [...command.argv] : ["/bin/bash", "-o", "pipefail", "-c", command.shell];
@@ -64,6 +74,24 @@ export function buildBwrapInvocation(
 	}
 	for (const [key, value] of Object.entries(spec.setEnv ?? {})) args.push("--setenv", key, value);
 	for (const key of spec.unsetEnv ?? []) args.push("--unsetenv", key);
+	if (spec.unixSocketFilter !== undefined) args.push("--seccomp", String(UNIX_SOCKET_FILTER_FD));
 	args.push("--chdir", spec.cwd, "--", ...sandboxCommandArgv(spec.command));
-	return { file: bwrapPath, args };
+	if (spec.unixSocketFilter === undefined) return { file: bwrapPath, args };
+	// bwrap takes a seccomp program only as an open descriptor. A shell opens
+	// the program file on it and execs bwrap in its own place, so every caller
+	// keeps spawning one self-contained argv with its own stdio; bwrap reads
+	// and closes the descriptor before the command starts.
+	const fd = UNIX_SOCKET_FILTER_FD;
+	const source = spec.unixSocketFilter === UNIX_SOCKET_FILTER_STDIN ? `${fd}<&0 0</dev/null` : `${fd}<"$filter"`;
+	return {
+		file: "/bin/sh",
+		args: [
+			"-c",
+			`filter=$1; shift; exec "$@" ${source}`,
+			"clio-coder-sandbox",
+			spec.unixSocketFilter,
+			bwrapPath,
+			...args,
+		],
+	};
 }

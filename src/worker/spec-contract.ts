@@ -972,6 +972,7 @@ const WORKER_SANDBOX_KEYS = new Set([
 	"network",
 	"passEnv",
 	"secretEnv",
+	"unixSockets",
 ]);
 
 function readAbsolutePaths(value: unknown, source: string): void {
@@ -999,6 +1000,8 @@ function validateWorkerSandbox(value: unknown): void {
 	for (const key of ["passEnv", "secretEnv"] as const) {
 		if (sandbox[key] !== undefined) readStringArray(sandbox[key], `WorkerSpec.sandbox.${key}`);
 	}
+	if (sandbox.unixSockets !== undefined)
+		readEnum(sandbox.unixSockets, "WorkerSpec.sandbox.unixSockets", ["allow"] as const);
 }
 
 function validateWorkerFlowPolicy(value: unknown): void {

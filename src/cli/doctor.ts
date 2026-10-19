@@ -8,7 +8,8 @@ import {
 	yoloScriptSandboxState,
 } from "../core/sandbox/main-session.js";
 import { discoverSecretMasks } from "../core/sandbox/secret-files.js";
-import type { SandboxMode } from "../core/sandbox/types.js";
+import type { SandboxMode, UnixSocketMode } from "../core/sandbox/types.js";
+import { unixSocketHostState } from "../core/sandbox/unix-sockets.js";
 import {
 	type DoctorFinding,
 	formatDoctorReport,
@@ -126,18 +127,33 @@ function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
 	const roots = mainSandboxPolicy({ workspace, scratchRoots }).writableRoots;
 	const uncontained = !mainShellContained(mode, availability);
 	const secrets = uncontained ? null : discoverSecretMasks({ workspaceRoots: [workspace], scratchRoots });
+	const unixSockets = configuredUnixSockets();
+	// Masks stand in for a filter bubblewrap could not load, and abstract sockets stay reachable.
+	const socketFallback = !uncontained && unixSocketHostState(unixSockets, availability).kind === "masks";
 	return {
 		ok: true,
 		name: "shell sandbox",
 		level:
-			uncontained || secrets?.capped === true || yoloScriptSandboxState(mode, availability) === "refused" ? "warn" : "ok",
+			uncontained || secrets?.capped === true || socketFallback || yoloScriptSandboxState(mode, availability) === "refused"
+				? "warn"
+				: "ok",
 		detail: mainSandboxLine(
 			mode,
 			availability,
 			roots,
 			secrets === null ? undefined : { count: secrets.masks.length, capped: secrets.capped },
+			unixSockets,
 		),
 	};
+}
+
+function configuredUnixSockets(): UnixSocketMode {
+	try {
+		return readSettings().safety.sandboxUnixSockets;
+	} catch {
+		// An unreadable settings file has its own doctor row; judge with the default.
+		return "block";
+	}
 }
 
 function configuredSandboxMode(): SandboxMode {

@@ -40,7 +40,7 @@ import {
 	WORKSPACE_SNAPSHOT_MODES,
 } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
-import { SANDBOX_MODES } from "./sandbox/types.js";
+import { SANDBOX_MODES, UNIX_SOCKET_MODES } from "./sandbox/types.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
@@ -2336,6 +2336,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"sandboxNetwork",
 				"scratchRoots",
 				"sandboxPassEnv",
+				"sandboxUnixSockets",
 				"snapshots",
 				"unattendedAfterSeconds",
 				"yoloAccepted",
@@ -2376,6 +2377,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						return valid;
 					});
 				}
+			}
+			if ("sandboxUnixSockets" in safety) {
+				const parsed = expectEnum(issues, "safety.sandboxUnixSockets", safety.sandboxUnixSockets, UNIX_SOCKET_MODES);
+				if (parsed !== undefined) settings.safety.sandboxUnixSockets = parsed;
 			}
 			if ("yoloAccepted" in safety) {
 				const parsed = expectBoolean(issues, "safety.yoloAccepted", safety.yoloAccepted);

@@ -31,12 +31,13 @@ function findBwrap(env: NodeJS.ProcessEnv): string | null {
 
 /**
  * Run the probe directly rather than through safe-exec: safe-exec is the seam
- * that consults this module, and the probe is a fixed argv with no shell, no
- * model input, and a hard timeout.
+ * that consults this module, and the probe is a fixed argv with no model
+ * input and a hard timeout. Null when it succeeded, else why it failed.
  */
-function probe(invocation: SandboxInvocation): string | null {
+export function probeSandboxInvocation(invocation: SandboxInvocation, input?: Buffer): string | null {
 	const result = spawnSync(invocation.file, invocation.args, {
-		stdio: ["ignore", "ignore", "pipe"],
+		stdio: [input === undefined ? "ignore" : "pipe", "ignore", "pipe"],
+		...(input !== undefined ? { input } : {}),
 		timeout: PROBE_TIMEOUT_MS,
 		encoding: "utf8",
 	});
@@ -55,7 +56,7 @@ function detect(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): SandboxAvail
 		// The probe uses the same namespaces a real command does, so a kernel
 		// that forbids unprivileged user namespaces (or an outer container that
 		// strips them) reports unavailable here instead of failing every call.
-		const failure = probe(
+		const failure = probeSandboxInvocation(
 			buildBwrapInvocation(
 				{ command: { argv: ["/bin/true"] }, cwd: "/", writableRoots: [], network: false, maskedPaths: [] },
 				bwrap,
@@ -75,14 +76,17 @@ function detect(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): SandboxAvail
 		if (!executable(SEATBELT_EXECUTABLE)) {
 			return { available: false, backend: null, executable: null, reason: "sandbox-exec is not present" };
 		}
-		const failure = probe(
+		// The network grant and the unix-socket rules ride along, so a kernel
+		// that rejects any rule a real launch uses reports unavailable here.
+		const failure = probeSandboxInvocation(
 			buildSeatbeltInvocation({
 				command: { argv: ["/usr/bin/true"] },
 				cwd: "/",
 				writableRoots: ["/private/tmp"],
 				readOnlyPaths: ["/private/tmp/.clio-coder-probe"],
-				network: false,
+				network: true,
 				maskedPaths: [],
+				denyUnixSockets: true,
 			}),
 		);
 		if (failure !== null) {

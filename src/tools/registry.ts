@@ -11,7 +11,7 @@ import {
 	mainSandboxPolicy,
 	type YoloScriptSandboxState,
 } from "../core/sandbox/main-session.js";
-import type { SandboxEnvPolicy } from "../core/sandbox/types.js";
+import type { SandboxEnvPolicy, UnixSocketMode } from "../core/sandbox/types.js";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
@@ -361,6 +361,8 @@ export interface RegistryDeps {
 	 * read per call. Absent scrubs with the name and value rules alone.
 	 */
 	sandboxEnv?: () => SandboxEnvPolicy;
+	/** `safety.sandboxUnixSockets`, read per contained call. Absent blocks them. */
+	sandboxUnixSockets?: () => UnixSocketMode;
 	/**
 	 * The loop guard's parent-workspace mutation epoch for a turn. The main
 	 * agent's denial memory keys on it, so a refusal is repeated only while
@@ -1182,6 +1184,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 								shellSandbox: mainSandboxPolicy({
 									...decision.policy.shellSandbox,
 									...(deps.sandboxEnv !== undefined ? { env: deps.sandboxEnv() } : {}),
+									...(deps.sandboxUnixSockets !== undefined ? { unixSockets: deps.sandboxUnixSockets() } : {}),
 								}),
 							}
 						: {}),
