@@ -230,7 +230,7 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 				const settings = readSettings();
 				const autonomy = {
 					default: "edit and run recognized checks; unfamiliar commands ask",
-					yolo: "run without ordinary prompts; damage-control rules still apply",
+					yolo: "never asks; only the yolo floor and approved safety.yaml rules block",
 				}[settings.safety.autonomy];
 				presenter.fields([
 					["Autonomy", `${settings.safety.autonomy} · ${autonomy}`],

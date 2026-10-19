@@ -49,6 +49,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// Each permission card and ask_user round reads it when it starts waiting,
 	// so the next one observes a change; a running countdown keeps its window.
 	"safety.unattendedAfterSeconds",
+	// Read at each interactive yolo activation, so the next toggle observes it (#407).
+	"safety.yoloAccepted",
 	// The judge reads its settings at every review, so the next parked call
 	// observes a change.
 	"safety.judge",

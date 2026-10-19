@@ -212,7 +212,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	autonomy:
-		"Default edits the workspace, dispatches routine work, and runs recognized commands; project scripts, unfamiliar execution, outward actions, access outside the workspace, and larger dispatch plans ask. Yolo clears those approval prompts, while hard blocks, damage-control rules and protected paths still apply.",
+		"Default edits the workspace, dispatches routine work, and runs recognized commands; project scripts, unfamiliar execution, outward actions, access outside the workspace, and larger dispatch plans ask. Yolo never asks and runs unsandboxed unless safety.sandbox is required; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Its first activation asks you to accept it once, and it is refused as root outside a container.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -300,7 +300,7 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		default:
 			"workspace edits and recognized commands (tests, git inspection, trusted .clio-coder/safety.yaml entries) run; project build, lint, typecheck and CI scripts, unfamiliar commands, outward confirmations, access outside the workspace, and larger dispatch plans ask",
 		yolo:
-			"edits, commands, outward confirmations, access outside the workspace and dispatch plans run without asking; hard blocks, damage-control rules and protected paths still apply",
+			"everything runs without asking, unsandboxed by default; only the yolo floor and your approved safety.yaml rules block",
 	},
 	"workers.onPermission": {
 		deny: "the worker skips the blocked tool and continues",
@@ -527,7 +527,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.sandbox": [
 		"Worker command sandbox",
-		"Run dispatched workers' shell and verification commands in an OS sandbox that can write only the run's writable roots and a private /tmp. auto uses it when available, required refuses those commands without it, off never sandboxes. Your own chat commands are not sandboxed, except scripts under yolo, which run in a sandbox that writes only the workspace and scratch roots.",
+		"Run dispatched workers' shell and verification commands in an OS sandbox that can write only the run's writable roots and a private /tmp. auto uses it when available, required refuses those commands without it, off never sandboxes. Your own chat commands are not sandboxed; under required, scripts the yolo session runs are sandboxed to the workspace and scratch roots, or refused without a backend.",
 	],
 	"safety.sandboxNetwork": [
 		"Worker sandbox network",
@@ -540,6 +540,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"safety.unattendedAfterSeconds": [
 		"Unattended timeout",
 		"Seconds a permission card or ask_user question waits for you before Clio resolves it and keeps working: the parked call is denied, each unanswered question takes its recommended option, and the session summary counts both. Any key on the card or question holds it. 0 waits forever. User settings only.",
+	],
+	"safety.yoloAccepted": [
+		"Yolo accepted",
+		"Set when you accept the one-time card that turns yolo on: no approval stops, no sandbox by default, only the yolo floor blocks. Turn it off to see the card again. User settings only.",
 	],
 	"safety.judge.enabled": [
 		"Safety judge",

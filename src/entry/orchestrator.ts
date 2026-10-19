@@ -62,6 +62,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { narrowTurnConstraints, templateToolConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
+import { yoloRootRefusal } from "../core/yolo-host.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AGENT_CATEGORY_PURPOSE, AgentsDomainModule } from "../domains/agents/index.js";
@@ -2730,17 +2731,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
 	let activeAcpSessionAutonomy: AutonomyLevel | null = null;
+	// Root outside a container never runs yolo (#407). The uid and the
+	// container do not change while the process runs, so it is read once.
+	const yoloRefusal = yoloRootRefusal();
 	// The one effective-autonomy resolution. Every admission surface (registry
 	// admission, dispatch plan provenance, ACP session snapshot) resolves
 	// through these two functions so a fallback added to one surface cannot
-	// silently skip another.
-	const resolveBaselineAutonomy = (): AutonomyLevel =>
-		effectiveSettingsForDispatch?.().safety.autonomy ??
-		(options.headless !== undefined ? (options.headless.autonomy ?? "default") : undefined) ??
-		options.autonomy ??
-		(config?.get() ?? readSettings()).safety.autonomy ??
-		"default";
-	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
+	// silently skip another. The root refusal is enforced here too, so no
+	// surface that reaches yolo some other way (a hot-reloaded settings file)
+	// runs it.
+	const resolveBaselineAutonomy = (): AutonomyLevel => {
+		const level =
+			effectiveSettingsForDispatch?.().safety.autonomy ??
+			(options.headless !== undefined ? (options.headless.autonomy ?? "default") : undefined) ??
+			options.autonomy ??
+			(config?.get() ?? readSettings()).safety.autonomy ??
+			"default";
+		return level === "yolo" && yoloRefusal !== null ? "default" : level;
+	};
+	const resolveEffectiveAutonomy = (): AutonomyLevel => {
+		const level = activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
+		return level === "yolo" && yoloRefusal !== null ? "default" : level;
+	};
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	let readySkillSnapshot: { key: string; count: number; skills: ReturnType<typeof modelVisibleSkills> } | undefined;
 	const getReadySkillCount = (): number => {
@@ -3121,8 +3133,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			"clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
 		);
 	}
+	// An interactive session that would start at yolo holds at default when yolo
+	// is refused here, and until the operator has accepted it once; the
+	// acceptance card then asks (#407). Headless `--autonomy yolo` and an ACP
+	// client's mode choice count as acceptance.
+	const savedSafety = (config?.get() ?? readSettings()).safety;
+	let bootAutonomy = startupAutonomy;
+	let yoloHeldAtBoot = false;
+	if (options.headless === undefined && (startupAutonomy ?? savedSafety.autonomy) === "yolo") {
+		if (yoloRefusal !== null) {
+			bootAutonomy = "default";
+			if (interactive) initialNotices.push(`Autonomy is default. ${yoloRefusal}`);
+			else process.stderr.write(`clio-coder: autonomy default. ${yoloRefusal}\n`);
+		} else if (interactive && savedSafety.yoloAccepted !== true) {
+			bootAutonomy = "default";
+			yoloHeldAtBoot = true;
+		}
+	}
 	const sessionOverrides: SessionOverrides = new Map(
-		startupAutonomy === undefined ? [] : [["safety.autonomy", startupAutonomy]],
+		bootAutonomy === undefined ? [] : [["safety.autonomy", bootAutonomy]],
 	);
 	if (options.demo !== undefined) sessionOverrides.set("interface.demo", options.demo);
 	// The effective view is derived by deep-cloning the saved snapshot, and it
@@ -5172,6 +5201,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				onActiveSessionAutonomyChange: (level) => {
 					activeAcpSessionAutonomy = level;
 				},
+				yoloRefusal: () => yoloRefusal,
 				cwd: process.cwd(),
 				version: readClioVersionLabel(),
 				// Stdout belongs to JSON-RPC. Text this process did not author, such
@@ -5417,6 +5447,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: { onFirstFrameCommit: () => timer.mark("first TUI paint") }),
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
+		yoloRefusal,
+		...(yoloHeldAtBoot ? { yoloHeldAtBoot: true } : {}),
 		...(resources ? { resources } : {}),
 		...(extensions ? { extensions } : {}),
 		runtimeHooks,

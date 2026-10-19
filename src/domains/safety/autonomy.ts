@@ -4,11 +4,12 @@ import type { RejectionMessage } from "./rejection-feedback.js";
 /**
  * The autonomy axis (sd-01 §2.2/§2.3). An ordered operator-set dial that
  * controls exactly one thing: which action classes trigger the approval flow
- * versus run immediately versus auto-deny. It runs AFTER the safety net: a
- * net `block` is final at every level and damage-control `confirm` always
- * asks; this mapping applies only to level-dependent rows after the net passed.
- * The policy engine clears ordinary confirmation rails in yolo before the
- * action class reaches this mapping.
+ * versus run immediately versus auto-deny. It runs AFTER the safety net: at
+ * default a net `block` is final and a damage-control `confirm` asks; this
+ * mapping applies only to level-dependent rows after the net passed. The
+ * operator's yolo never reaches it (#407): admission stops after the net,
+ * which there holds only the yolo floor, operator-authored rules and the
+ * run's ceilings.
  *
  * An outward-facing gate parks in default mode and runs in yolo mode.
  *

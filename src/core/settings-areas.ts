@@ -232,6 +232,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "safety.autonomy":
 		case "safety.snapshots":
 		case "safety.unattendedAfterSeconds":
+		case "safety.yoloAccepted":
 		case "safetyNet":
 			return place("safety", "Autonomy");
 		case "safety.limits.sessionCostUsd":

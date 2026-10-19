@@ -26,7 +26,7 @@ function run(file: string, args: string[]): Promise<{ code: number | null; outpu
 	});
 }
 
-// #419: the operator's yolo runs scripts in the OS sandbox with the real /tmp.
+// #419: under safety.sandbox required, the operator's yolo runs scripts in the OS sandbox with the real /tmp.
 test("the yolo script sandbox writes the workspace and scratch roots only, keeps Clio's trees read-only and the network on", () => {
 	const policy = resolveYoloScriptSandboxPolicy({
 		workspace: "/w",
@@ -68,7 +68,9 @@ test("the yolo script sandbox writes the workspace and scratch roots only, keeps
 
 	const available = { available: true, backend: "bwrap" as const, executable: "/usr/bin/bwrap", reason: null };
 	const missing = { available: false, backend: null, executable: null, reason: "bubblewrap (bwrap) is not installed" };
-	assert.equal(yoloScriptSandboxState("auto", available), "sandboxed");
+	// #407: yolo is unsandboxed by default; only required keeps the script sandbox.
+	assert.equal(yoloScriptSandboxState("auto", available), "unsandboxed");
+	assert.equal(yoloScriptSandboxState("required", available), "sandboxed");
 	assert.equal(yoloScriptSandboxState("off", available), "unsandboxed");
 	assert.equal(yoloScriptSandboxState("auto", missing), "unsandboxed");
 	assert.equal(yoloScriptSandboxState("required", missing), "refused");

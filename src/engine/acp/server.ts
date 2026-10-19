@@ -579,6 +579,12 @@ export interface ClioAcpServerOptions {
 	/** Apply a route change only to this hosted session, leaving saved defaults alone. */
 	setSessionRouting?: (patch: { target?: string; model?: string; thinkingLevel?: AcpThinkingLevel }) => void;
 	onActiveSessionAutonomyChange?: (level: AutonomyLevel | null) => void;
+	/**
+	 * Why yolo cannot run in this process (root outside a container), or null
+	 * (#407). A client's choice of yolo is refused while it is set; otherwise
+	 * the explicit choice counts as the operator's acceptance.
+	 */
+	yoloRefusal?: () => string | null;
 	cwd?: string;
 	version?: string;
 	permissionTimeoutMs?: number;
@@ -4499,8 +4505,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			_meta: { [ACP_SESSION_META_KEY]: { target: session.target } },
 		});
 	};
+	const refuseYolo = (level: AutonomyLevel): void => {
+		const refusal = level === "yolo" ? (options.yoloRefusal?.() ?? null) : null;
+		if (refusal !== null) throw new AcpRequestError(-32602, refusal, { code: "yolo_refused" });
+	};
 	const setAutonomy = (session: AcpServerSession, level: unknown): void => {
 		if (!isAutonomyLevel(level)) throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
+		refuseYolo(level);
 		if (session.activePrompt !== null)
 			throw new AcpRequestError(-32602, "cannot change autonomy during an active prompt", { code: "prompt_active" });
 		if (session.autonomy === level) return;
@@ -5833,6 +5844,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					if (!isAutonomyLevel(value)) {
 						throw new AcpRequestError(-32602, "invalid autonomy level", { code: "invalid_params" });
 					}
+					refuseYolo(value);
 					patch[key] = value;
 					break;
 			}

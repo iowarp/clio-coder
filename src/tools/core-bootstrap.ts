@@ -241,10 +241,13 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	};
 	if (deps.askUser) {
 		registry.register({
-			...builtin(createAskUserTool({ askUser: deps.askUser }), {
-				path: "src/tools/ask-user.ts",
-				scope: "core",
-			}),
+			...builtin(
+				createAskUserTool({ askUser: deps.askUser, ...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}) }),
+				{
+					path: "src/tools/ask-user.ts",
+					scope: "core",
+				},
+			),
 		});
 		registry.register({
 			...builtin(

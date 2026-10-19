@@ -1507,7 +1507,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				hint: "default | yolo",
 				run: async (io) => {
 					io.out.write(
-						"  default edits the workspace and runs recognized checks; unfamiliar commands ask.\n  yolo clears ordinary prompts; damage-control rules and hard path protections still apply.\n",
+						"  default edits the workspace and runs recognized checks; unfamiliar commands ask.\n  yolo never asks and runs unsandboxed by default; only the yolo floor and approved safety.yaml rules block.\n",
 					);
 					await askChoice(io, "Autonomy level", ["default", "yolo"], readSettings().safety.autonomy, (value) => {
 						updateSettings((draft) => {

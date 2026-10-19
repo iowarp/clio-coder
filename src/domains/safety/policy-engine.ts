@@ -113,6 +113,15 @@ import {
 } from "./skill-authority.js";
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 import {
+	YOLO_FLOOR_PACK_RULE_IDS,
+	YOLO_FLOOR_REASON_PREFIX,
+	YOLO_FLOOR_RULE_IDS,
+	YOLO_FLOOR_TEXT_RULES,
+	type YoloFloorHit,
+	yoloFloorDeleteHit,
+	yoloFloorExecutableHit,
+} from "./yolo-floor.js";
+import {
 	downloadedFiles,
 	findDeletesNotFollowing,
 	namedForcedKills,
@@ -133,12 +142,12 @@ export type SafetyPolicySource =
 
 export interface SafetyPolicyDecision {
 	/**
-	 * Net verdict (sd-01 §2.2): `block` is final at every autonomy level,
-	 * `ask` is a net rail demanding operator confirmation at the current level,
-	 * including damage-control asks that remain active in yolo. Ordinary asks
-	 * are cleared by the yolo posture before this verdict is returned. An
-	 * `allow` means the net passed; the autonomy mapping decides what happens
-	 * next at the admission seam (tools/registry.ts, acp/tool-mediator.ts).
+	 * Net verdict (sd-01 §2.2): `block` is final, and `ask` is a net rail
+	 * demanding operator confirmation at the current level. Under the
+	 * operator's yolo scope only the floor, operator-authored rules and the
+	 * run's ceilings block and nothing asks (#407). An `allow` means the net
+	 * passed; the autonomy mapping decides what happens next at the admission
+	 * seam (tools/registry.ts, acp/tool-mediator.ts).
 	 */
 	kind: "allow" | "ask" | "block";
 	classification: Classification;
@@ -199,16 +208,20 @@ export interface SafetyPolicyMetadata {
 }
 
 /**
- * The main session's own yolo (#419). Admission passes it only for a call the
- * operator's session registry makes at yolo, which includes the turns that
- * scheduled `main` jobs and `main_turn` deliveries run in that session. A
- * worker, a worker grant and a scheduled command job never get it; `posture`
- * still says "yolo" for them and keeps today's rails.
+ * The operator's yolo (#407, #419). With a scope the engine judges a call the
+ * skip-permissions way: only the yolo floor, operator-authored rules and the
+ * run's ceilings (write roots, a required sandbox the host lacks) block, and
+ * nothing asks. Admission passes it for a call the operator's session
+ * registry makes at yolo, which includes the turns that scheduled `main` jobs
+ * and `main_turn` deliveries run in that session, and for a worker whose
+ * permit inherited the operator's yolo. A worker grant and a scheduled
+ * command job never get it; `posture` still says "yolo" for them and keeps
+ * the rails.
  */
 export interface OperatorYoloScope {
 	/** `safety.scratchRoots` from the operator's own settings, unvalidated here. */
 	scratchRoots: ReadonlyArray<string>;
-	/** How a script runs on this host; absent reads as `unsandboxed`, the static scan alone. */
+	/** How a script runs on this host; absent reads as `unsandboxed`. */
 	scriptSandbox?: YoloScriptSandboxState;
 }
 
@@ -277,6 +290,12 @@ interface YoloRelaxation {
 	pathRail: (command: string, cwd: string) => ScriptLineVerdict;
 	/** `sandboxed` turns the scan's asks into sandboxed runs; `refused` makes every script ask. */
 	scriptSandbox: YoloScriptSandboxState;
+	/**
+	 * Set for the true-yolo scan (#407): a line is judged by the floor alone,
+	 * and a line the scan cannot follow is skipped instead of ending the scan,
+	 * so a script nothing on the floor touches runs.
+	 */
+	floorLine?: (raw: string, read: ScriptLine, callCwd: string) => ScriptLineVerdict;
 }
 
 /** A hard block from the authority and protected-path rails. */
@@ -772,6 +791,209 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		};
 	};
 
+	// The yolo floor's text rules: the pack rules it keeps by id, then its own.
+	const floorRules: SourcedRule[] = [
+		...sourcedRules.filter((entry) => YOLO_FLOOR_PACK_RULE_IDS.has(entry.rule.id)),
+		...YOLO_FLOOR_TEXT_RULES.map((rule) => ({ rule, source: "damage-control:base" as const })),
+	];
+	/**
+	 * Operator-authored path rules (#407): the entries of a trusted
+	 * `.clio-coder/safety.yaml`, kept apart from the built-in defaults they are
+	 * merged with everywhere else. The loader drops an untrusted file's entries,
+	 * so what is here is what the operator approved. While it carries any, the
+	 * file itself is read-only too: an edit would drop its trust, and with it
+	 * every rule it holds.
+	 */
+	let operatorPathPolicy: CompiledPathPolicy | null = null;
+	const operatorPolicy = (): CompiledPathPolicy => {
+		if (operatorPathPolicy !== null) return operatorPathPolicy;
+		const own = projectPolicy.pathPolicy;
+		const authored = [own.zeroAccessPaths, own.readOnlyPaths, own.noWritePaths, own.noDeletePaths].some(
+			(entries) => (entries?.length ?? 0) > 0,
+		);
+		operatorPathPolicy = compilePathPolicy(
+			authored && projectPolicy.path !== null ? mergePathPolicyInputs(own, { readOnlyPaths: [projectPolicy.path] }) : own,
+			projectPolicyRoot,
+		);
+		return operatorPathPolicy;
+	};
+	/** A write or delete into one of Clio's own trees, however the command spells or reaches it. */
+	const clioOwnedMutation = (call: ClassifierCall, callCwd: string, command: string | null, trees: ClioOwnedTrees) => {
+		const targets = pathPolicyTargets(call, callCwd).filter((target) => target.operation !== "read");
+		if (targets.length === 0) return false;
+		const spelled = targets.some(
+			(target) =>
+				CLIO_OWNED_VARIABLE.test(target.path) ||
+				trees.spellings.some((spelling) => target.path === spelling || target.path.startsWith(`${spelling}/`)),
+		);
+		if (spelled) return true;
+		const memo = createPathWalkMemo();
+		return skillMutationReason(trees.roots, mutationCandidates(targets, callCwd, command, memo), memo) !== null;
+	};
+	const floorMatch = (hit: YoloFloorHit, actionClass = "system_modify") => ({
+		match: { ruleId: hit.ruleId, reason: hit.reason, actionClass, block: true } satisfies DamageControlMatch,
+		source: "builtin-classifier" as const,
+	});
+	/**
+	 * The floor a command meets: the text rules over every scan, then mkfs and
+	 * wipefs, deletes by target, trust grants and Clio's trees over the whole
+	 * command. The parsers follow its cds, substitutions and `sh -c` scripts
+	 * themselves, so a segment read alone would lose a cd and misplace a delete.
+	 */
+	const commandFloorHit = (
+		texts: ReadonlyArray<string>,
+		commands: ReadonlyArray<string>,
+		callCwd: string,
+		trees: ClioOwnedTrees,
+	): { match: DamageControlMatch; source: SafetyPolicySource } | null => {
+		const text = matchSourcedRule(texts, floorRules);
+		if (text !== null) return text;
+		const command = commands[0] ?? "";
+		for (const candidate of commands) {
+			const executable = yoloFloorExecutableHit(candidate);
+			if (executable !== null) return floorMatch(executable);
+			const deleted = yoloFloorDeleteHit(candidate, callCwd, cwd);
+			if (deleted !== null) return floorMatch(deleted);
+		}
+		if (invokesTrustMutation(command)) {
+			return floorMatch({
+				ruleId: YOLO_FLOOR_RULE_IDS.trustAuthority,
+				reason: `matched ${YOLO_FLOOR_RULE_IDS.trustAuthority}: workspace trust grants require the operator CLI`,
+			});
+		}
+		if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command } }, callCwd, command, trees)) {
+			return floorMatch({
+				ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
+				reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into or deletes Clio's own config, data, state or trust records, which only the operator changes`,
+			});
+		}
+		return null;
+	};
+	/** The floor relaxation the script line scan runs under: every line meets the floor alone. */
+	const floorScriptRelaxation = (scope: OperatorYoloScope, trees: ClioOwnedTrees): YoloRelaxation => ({
+		scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
+		blockRules: floorRules,
+		clioOwned: trees,
+		workspace: cwd,
+		pathRail: scriptPathRail,
+		scriptSandbox: "unsandboxed",
+		floorLine: (raw, read, callCwd) => {
+			// A here-document body or a comment is data the script carries, not a command.
+			if (read.data) return null;
+			const texts = read.expanded === raw ? [raw] : [read.expanded, raw];
+			for (const base of read.bases ?? [callCwd]) {
+				const hit = commandFloorHit(texts, texts, base, trees);
+				if (hit !== null) return hit;
+			}
+			return null;
+		},
+	});
+	/**
+	 * The yolo floor for one call (#407): the command's own text and targets,
+	 * then each shell script it runs by literal path, read line by line. A
+	 * script the scan cannot read through runs.
+	 */
+	const yoloFloorBlock = (
+		call: ClassifierCall,
+		callCwd: string,
+		command: string | null,
+		scope: OperatorYoloScope,
+	): Omit<
+		SafetyPolicyDecision,
+		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+	> | null => {
+		const trees = clioOwnedTrees();
+		const held = (hit: { match: DamageControlMatch; source: SafetyPolicySource }, reasons: string[] = []) => ({
+			ruleId: hit.match.ruleId,
+			reasonCode: `${YOLO_FLOOR_REASON_PREFIX}${hit.match.ruleId}`,
+			reasons: [...reasons, hit.match.reason, "the yolo floor holds at every autonomy level"],
+			match: hit.match,
+			policySource: hit.source,
+		});
+		if (command !== null) {
+			const decoded = [decodedAnsiCCommand(command), decodedLocaleQuoting(command)].filter(
+				(text): text is string => text !== null,
+			);
+			const commands = [...new Set([command, ...decoded])];
+			const hit = commandFloorHit([...new Set([...commands, ...shellCommandSegments(command)])], commands, callCwd, trees);
+			if (hit !== null) return held(hit);
+		} else if (clioOwnedMutation(call, callCwd, null, trees)) {
+			return held(
+				floorMatch({
+					ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into Clio's own config, data, state or trust records, which only the operator changes`,
+				}),
+			);
+		}
+		const relaxation = floorScriptRelaxation(scope, trees);
+		const scriptHit = (scan: ScriptHit | ScriptUnscannable | null) =>
+			scan !== null && !("unscannable" in scan)
+				? held(scan, [`script ${scan.file} line ${scan.line}: ${scan.text.slice(0, 200)}`])
+				: null;
+		if (call.tool === ToolNames.RunScript && runsUnderShell(call.args)) {
+			const script = typeof call.args?.script === "string" ? call.args.script.trim() : "";
+			const file = script === "" ? null : scriptPath(script, cwd);
+			const hit = scriptHit(
+				file === null
+					? null
+					: scanNamedScript(file, relaxation, callCwd, [callCwd], newScriptBudget(), { zero: file, source: file }),
+			);
+			if (hit !== null) return hit;
+		}
+		if (call.tool === ToolNames.Bash && command !== null && hasUnparsedShellScript(command)) {
+			const cwds = commandMoveBases(command, callCwd);
+			const written = commandWrittenPaths(command, cwds ?? [callCwd], newWrittenPaths());
+			const budget = newScriptBudget();
+			for (const script of shellScriptSources(command) ?? []) {
+				const hit = scriptHit(scanCommandScript(script, relaxation, callCwd, cwds, written, budget));
+				if (hit !== null) return hit;
+			}
+		}
+		return null;
+	};
+	/** An operator-authored path rule this call breaks, judged without the built-in defaults (#407). */
+	const operatorRuleBlock = (
+		call: ClassifierCall,
+		callCwd: string,
+		command: string | null,
+	): Omit<
+		SafetyPolicyDecision,
+		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+	> | null => {
+		const policy = operatorPolicy();
+		if (policy.entries.length === 0) return null;
+		const provenance = {
+			policySource: "project-policy" as const,
+			...(projectPolicy.hash !== null ? { policyHash: projectPolicy.hash } : {}),
+			...(projectPolicy.path !== null ? { projectPolicyPath: projectPolicy.path } : {}),
+		};
+		const held = "an operator-authored rule in .clio-coder/safety.yaml holds at yolo";
+		const judged = command !== null && call.tool !== ToolNames.Bash ? { tool: ToolNames.Bash, args: { command } } : call;
+		const pathBlock = evaluateProjectPathPolicy(policy, policy, judged, callCwd, createPathWalkMemo());
+		if (pathBlock !== null) {
+			return {
+				ruleId: pathBlock.reasonCode,
+				reasonCode: `operator-rule:${pathBlock.reasonCode}`,
+				reasons: [pathBlock.reason, held],
+				...provenance,
+			};
+		}
+		if (command === null) return null;
+		const zeroAccess: CompiledPathPolicy = {
+			root: policy.root,
+			entries: policy.entries.filter((entry) => entry.kind === "zeroAccessPaths"),
+			diagnostics: [],
+		};
+		const secretRead = evaluateBashZeroAccessRead(zeroAccess, command, callCwd);
+		if (secretRead === null) return null;
+		return {
+			ruleId: "secret_path_bash",
+			reasonCode: "operator-rule:secret_path_bash",
+			reasons: [`bash read of zero-access path blocked: '${secretRead.token}' matches ${secretRead.entrySource}`, held],
+			...provenance,
+		};
+	};
+
 	const evaluateCall = (
 		rawCall: ClassifierCall,
 		posture: string | undefined,
@@ -1180,11 +1402,71 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		return allowDecision(base, allowInput);
 	};
 
+	/**
+	 * A call under the operator's yolo, judged the skip-permissions way (#407).
+	 * What holds: the run's ceilings (write roots, an invalid approved policy,
+	 * a required sandbox the host lacks), the yolo floor and operator-authored
+	 * rules. Every other ask and block the net would raise is admitted, and the
+	 * allow keeps the rail it passed over in its reasons for the audit.
+	 */
+	const evaluateTrueYolo = (
+		rawCall: ClassifierCall,
+		posture: string | undefined,
+		scope: OperatorYoloScope,
+	): SafetyPolicyDecision => {
+		const call = normalizeCallPaths(rawCall);
+		const command = commandArg(call.args);
+		const verifyArgs = call.tool === ToolNames.Verify ? prepareVerifyArguments(call.args ?? {}) : null;
+		const verifyResolution = verifyArgs === null ? null : resolveVerifyCall(cwd, verifyArgs);
+		const verifyCommand =
+			verifyResolution === null || verifyArgs === null
+				? null
+				: (verifyResolutionArgv(verifyResolution, verifyArgs)?.join(" ") ?? null);
+		const checkCwd =
+			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain"
+				? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
+				: null;
+		const callCwd = typeof checkCwd === "string" ? checkCwd : cwdArg(call.args, cwd);
+		const judgedCommand = call.tool === ToolNames.Bash ? command : verifyCommand;
+		const base = baseDecision(call, classify(call), callCwd, posture, judgedCommand);
+		const floor = yoloFloorBlock(call, callCwd, judgedCommand, scope);
+		if (floor !== null) return blockDecision(base, floor);
+		if (scope.scriptSandbox === "refused" && runsScriptFile(rawCall)) {
+			return blockDecision(base, {
+				ruleId: YOLO_SANDBOX_REQUIRED_RULE_ID,
+				reasonCode: YOLO_SANDBOX_REQUIRED_RULE_ID,
+				reasons: [YOLO_SCRIPT_SANDBOX_REFUSED],
+				policySource: "builtin-classifier",
+			});
+		}
+		const normal = evaluateCall(rawCall, posture, scope);
+		if (normal.kind === "allow" || holdsAtYolo(normal)) return normal;
+		const operator = operatorRuleBlock(call, callCwd, judgedCommand);
+		if (operator !== null)
+			return blockDecision({ ...base, classification: normal.classification, actionClass: normal.actionClass }, operator);
+		const { rejection: _rejection, match: _match, ...rest } = normal;
+		return {
+			...rest,
+			kind: "allow",
+			reasonCode: `${YOLO_ADMITTED_REASON_PREFIX}${normal.reasonCode}`,
+			reasons: [
+				...normal.reasons,
+				`yolo admits this call: ${normal.ruleId ?? normal.reasonCode} would ${normal.kind} at default and does not hold at yolo`,
+			],
+			// What the net could not read through is what System One's yolo gate records.
+			...(normal.actionClass === "execute" ? { execRecognition: "unrecognized" as const } : {}),
+		};
+	};
+
 	const engine: SafetyPolicyEngine = {
 		evaluate(rawCall, posture, operatorYolo) {
-			const decision = evaluateCall(rawCall, posture, operatorYolo);
+			const decision =
+				operatorYolo === undefined
+					? evaluateCall(rawCall, posture, operatorYolo)
+					: evaluateTrueYolo(rawCall, posture, operatorYolo);
 			// A script the operator's yolo admitted runs in the yolo script sandbox,
 			// whatever stage allowed it, so the tool learns its roots here (#419).
+			// Only `safety.sandbox: required` asks for it at yolo (#407).
 			if (decision.kind !== "allow" || operatorYolo?.scriptSandbox !== "sandboxed" || !runsScriptFile(rawCall))
 				return decision;
 			const scriptSandbox = {
@@ -1814,9 +2096,35 @@ function runsUnderShell(args: Record<string, unknown> | undefined): boolean {
 	return typeof interpreter === "string" && RUN_SCRIPT_SHELLS.has(interpreter.trim());
 }
 
-/** Why a yolo script asks when `safety.sandbox` is `required` and the host has no backend. */
+/** Why yolo refuses a script when `safety.sandbox` is `required` and the host has no backend. */
 const YOLO_SCRIPT_SANDBOX_REFUSED =
-	'safety.sandbox is "required" and no OS sandbox is available, so a script under yolo asks before it runs';
+	'safety.sandbox is "required" and no OS sandbox is available, so yolo does not run a script; run its commands directly or set safety.sandbox to auto';
+
+/** Rule id of that refusal, a ceiling the operator set (#407). */
+const YOLO_SANDBOX_REQUIRED_RULE_ID = "yolo-sandbox-required";
+
+/** Reason code prefix of a call yolo admitted past a rail that would have asked or blocked (#407). */
+const YOLO_ADMITTED_REASON_PREFIX = "yolo-admitted:";
+
+/**
+ * Net blocks that hold at yolo besides the floor and operator rules: the
+ * run's write-root ceiling, a call that cannot run as given, and an approved
+ * project policy that no longer parses, whose operator rules cannot be read.
+ */
+const YOLO_HELD_RULE_IDS: ReadonlySet<string> = new Set([
+	"write-root",
+	"bash-empty-command",
+	"verify-cwd-invalid",
+	"project-policy-invalid",
+	YOLO_SANDBOX_REQUIRED_RULE_ID,
+]);
+
+/** True for a block the true-yolo evaluation keeps (#407). */
+function holdsAtYolo(decision: SafetyPolicyDecision): boolean {
+	if (decision.kind !== "block") return false;
+	if (decision.ruleId !== undefined && YOLO_HELD_RULE_IDS.has(decision.ruleId)) return true;
+	return decision.reasonCode.startsWith(YOLO_FLOOR_REASON_PREFIX) || decision.reasonCode.startsWith("operator-rule:");
+}
 
 /** A script operand as the shell resolves it; a name it expands at run time stays unplaceable. */
 function scriptPath(operand: string, callCwd: string): string | null {
@@ -2003,6 +2311,9 @@ function scanScript(
 	// A binary `exec` target is a program, not a script to read.
 	if (text.includes("\0")) return nested && !program ? { unscannable: `${file} is not text` } : null;
 	const lines = text.split(/\r?\n/u);
+	// The true-yolo scan judges every line by the floor and follows what it
+	// can; a line it cannot follow is skipped, never a reason to stop (#407).
+	const floorOnly = scan.yolo.floorLine !== undefined;
 	for (let index = 0; index < lines.length; index += 1) {
 		const start = index;
 		let logical = lines[index] ?? "";
@@ -2016,20 +2327,23 @@ function scanScript(
 		if (verdict !== null && "match" in verdict) return { ...at, ...verdict };
 		if (verdict !== null) scan.unresolved ??= `${file} line ${at.line} ${verdict.unresolved}: ${at.text.slice(0, 200)}`;
 		if (read.data) continue;
-		if (makesLink(read.expanded))
+		if (makesLink(read.expanded) && !floorOnly)
 			return { unscannable: `${file} line ${at.line} makes a link: ${at.text.slice(0, 200)}` };
 		const problem = advanceScriptShell(reader, shell, logical, read);
 		if (problem !== null)
 			scan.unresolved ??= `${file} line ${at.line} cannot be followed, ${problem}: ${at.text.slice(0, 200)}`;
 		const sources = scriptLineSources(read.expanded);
+		if (sources === null && floorOnly) continue;
 		if (sources === null)
 			return { unscannable: `${file} line ${at.line} runs a script that cannot be named: ${at.text.slice(0, 200)}` };
 		const cwds = read.context === "function" ? null : shell.cwds;
 		commandWrittenPaths(read.expanded, cwds ?? [scan.callCwd], scan.written);
 		for (const source of sources) {
+			if (depth >= YOLO_SCRIPT_NEST_DEPTH && floorOnly) continue;
 			if (depth >= YOLO_SCRIPT_NEST_DEPTH)
 				return { unscannable: `${file} line ${at.line} nests scripts deeper than ${YOLO_SCRIPT_NEST_DEPTH} levels` };
 			for (const candidate of scriptCandidates(source.path, cwds)) {
+				if (candidate !== null && isWrittenFirst(candidate, scan.written) && floorOnly) continue;
 				if (candidate !== null && isWrittenFirst(candidate, scan.written))
 					return { unscannable: `${file} line ${at.line} runs ${candidate}, which the script writes first` };
 				// `source` runs in this shell; `bash`, `sh` and `exec` start a child that changes nothing here.
@@ -2049,6 +2363,7 @@ function scanScript(
 							depth + 1,
 							source.program,
 						);
+				if (inner !== null && floorOnly && "unscannable" in inner) continue;
 				if (inner !== null) return inner;
 			}
 		}
@@ -2085,6 +2400,7 @@ type ScriptLineVerdict = { match: DamageControlMatch; source: SafetyPolicySource
  */
 function judgeScriptLine(raw: string, read: ScriptLine, scan: ScriptScan): ScriptLineVerdict {
 	const { yolo } = scan;
+	if (yolo.floorLine !== undefined) return yolo.floorLine(raw, read, scan.callCwd);
 	const texts = read.expanded === raw ? [raw] : [raw, read.expanded];
 	const bases = read.bases ?? [scan.callCwd];
 	for (const base of bases) {

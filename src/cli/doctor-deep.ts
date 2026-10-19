@@ -133,17 +133,20 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 		if (decision.kind === "block") {
 			verdict = `blocked by the safety policy (${decision.reasonCode})`;
 		} else if (decision.kind === "ask") {
-			// An ask that survives the yolo posture is a damage-control
-			// confirmation, which holds at both levels. Any other engine ask is
-			// an ordinary rail that yolo clears.
+			// The operator's yolo never asks (#407); the check stays so a verdict
+			// cannot claim a run the engine would not admit.
 			const asksAtYolo = level === "yolo" || engine.evaluate(call, "yolo", operatorYolo).kind === "ask";
 			verdict = asksAtYolo
 				? `asks for confirmation at default and at yolo in ${OPERATOR_VIEW} (${decision.reasonCode})`
 				: `asks for approval at default and runs at yolo in ${OPERATOR_VIEW} (${decision.reasonCode})`;
 		} else {
-			const disposition = mapAutonomy(level, decision.actionClass, {
-				executeRecognized: decision.execRecognition !== "unrecognized",
-			});
+			// Admission at the operator's yolo runs whatever the net allowed (#407).
+			const disposition =
+				level === "yolo"
+					? "allow"
+					: mapAutonomy(level, decision.actionClass, {
+							executeRecognized: decision.execRecognition !== "unrecognized",
+						});
 			runs = disposition === "allow";
 			// The mapping asks only at default, and it denies only the action
 			// classes admission hard-blocks at both levels (git_destructive).

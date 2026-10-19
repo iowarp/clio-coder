@@ -51,7 +51,7 @@ describe("headless approval wording in the session prompt", () => {
 	});
 	afterEach(() => env.restore());
 
-	for (const level of AUTONOMY_LEVELS) {
+	for (const level of AUTONOMY_LEVELS.filter((candidate) => candidate !== "yolo")) {
 		it(`tells a headless session at ${level} that approval-required calls are denied`, () => {
 			const headless = safetySection(level, { headless: true });
 			ok(headless.includes(HEADLESS_SESSION_APPROVAL_SEMANTICS), headless);
@@ -69,6 +69,16 @@ describe("headless approval wording in the session prompt", () => {
 			}
 		});
 	}
+
+	// #407: nothing parks at yolo, so neither sentence about parking renders.
+	it("says nothing about approval-required calls at yolo, headless or attached", () => {
+		for (const inputs of [{ headless: true }, {}]) {
+			const section = safetySection("yolo", inputs);
+			ok(!section.includes(HEADLESS_SESSION_APPROVAL_SEMANTICS), section);
+			ok(!section.includes(SESSION_APPROVAL_SEMANTICS), section);
+			match(section, /nothing stops for approval and nobody answers questions/);
+		}
+	});
 });
 
 describe("interactive-only guidance in the session prompt", () => {

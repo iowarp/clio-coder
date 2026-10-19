@@ -238,7 +238,7 @@ function safetyOneLiner(level: string): string {
 		case "default":
 			return "workspace edits and recognized commands run; other bash asks for approval.";
 		case "yolo":
-			return "act without ordinary approval stops; damage-control rules can still block or ask.";
+			return "nothing stops for approval and nobody answers questions; only the yolo floor and operator-authored rules block.";
 		default:
 			return "follow the active safety contract.";
 	}
@@ -256,9 +256,9 @@ export const SESSION_APPROVAL_SEMANTICS =
 
 /**
  * The headless replacement for `SESSION_APPROVAL_SEMANTICS`. A `clio-coder run`
- * denies every approval ask (src/core/headless-permission.ts), a yolo
- * damage-control confirm included, so promising a pause would send the model
- * to wait on an operator who never answers.
+ * denies every approval ask (src/core/headless-permission.ts), so promising a
+ * pause would send the model to wait on an operator who never answers. Yolo
+ * renders neither line, because nothing parks there (#407).
  */
 export const HEADLESS_SESSION_APPROVAL_SEMANTICS =
 	"No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run.";
@@ -266,8 +266,10 @@ export const HEADLESS_SESSION_APPROVAL_SEMANTICS =
 function renderSafetySection(safetyFragment: LoadedFragment, level: string, headless: boolean): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level)}`;
 	const body = safetyFragment.body.trim();
-	const approval = headless ? HEADLESS_SESSION_APPROVAL_SEMANTICS : SESSION_APPROVAL_SEMANTICS;
-	return body.length > 0 ? `${oneLine}\n${approval}\n\n${body}` : oneLine;
+	// Nothing parks under yolo (#407), so no line says what parking means.
+	const approval = level === "yolo" ? null : headless ? HEADLESS_SESSION_APPROVAL_SEMANTICS : SESSION_APPROVAL_SEMANTICS;
+	if (body.length === 0) return oneLine;
+	return approval === null ? `${oneLine}\n\n${body}` : `${oneLine}\n${approval}\n\n${body}`;
 }
 
 function renderRuntimeBlock(inputs: SessionPromptInputs): string {
@@ -490,13 +492,14 @@ function renderTurnEndingContract(direct: boolean, yolo: boolean): string[] {
 		? "an ask_user call"
 		: 'an ask_user call through gateway(op="call", capability="ask_user", args={...})';
 	if (yolo) {
+		// The operator is away by contract (#407): no waiting state, and no
+		// question to ask, so the variant never names the interview tool.
 		return [
 			"## Ending a turn",
-			'Under yolo a turn ends Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
+			'Under yolo every turn ends Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
 			"Ambiguity does not end the turn. Take the recommended default, state the assumption in the final reply, and keep working. Tools settle workspace facts.",
 			'A requested plan shows its steps with their stated assumptions, and the turn stops there; when the operator asked for the work to be carried out, carry the plan out instead. A plan never ends on an approval card or a "Carry out this plan?" question.',
-			`Reserve ${askUserCall} for a decision that blocks all progress: no reasonable default exists and a wrong guess would be expensive to reverse. Give it a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first. Act on answers; a decline or 'enough' ends in one sentence without restating earlier output.`,
-			"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because damage-control rules remain the safety gate.",
+			"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without re-confirming.",
 			"Examples:",
 			'- "Want me to dive deeper into refresh?": stop after the explanation.',
 			'- A finished change closing "Let me know if you want tests.": stop after the change.',
@@ -736,7 +739,12 @@ export function workerPermitLine(
 }
 
 function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {
-	const oneLine = `${workerPermitLine(inputs.permit, inputs.onPermission, inputs.taskWorktree === true)} ${workerSafetyOneLiner(inputs.onPermission)}`;
+	const permitLine = workerPermitLine(inputs.permit, inputs.onPermission, inputs.taskWorktree === true);
+	// Under the inherited yolo nothing requires approval, so the default line would mislead (#407).
+	const oneLine =
+		inputs.permit?.allowance.executeAutonomy === "yolo"
+			? permitLine
+			: `${permitLine} ${workerSafetyOneLiner(inputs.onPermission)}`;
 	const body = safetyFragment.body.trim();
 	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }
@@ -1091,7 +1099,11 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
 	// A worker is steered through @<agent>; the same guidance on several messages at one slot applies.
 	const steering = inputs.liveSteering === false ? undefined : table.byId.get("operating.steering");
-	const safety = lookupFragment(table, "safety.default", "safety");
+	// A worker that inherited the operator's yolo reads what it may do under it (#407).
+	const safety =
+		inputs.permit?.allowance.executeAutonomy === "yolo"
+			? lookupFragment(table, "safety.yolo-worker", "safety")
+			: lookupFragment(table, "safety.default", "safety");
 
 	const parts: string[] = [];
 	const sections: PromptSection[] = [];

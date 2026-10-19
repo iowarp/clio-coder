@@ -51,9 +51,11 @@ describe("turn-ending contract in the session prompt", () => {
 	it("renders the assume-and-proceed variant under yolo", () => {
 		const prompt = systemPrompt({ operatorInterviews: true }, "safety.yolo");
 		ok(prompt.includes("## Ending a turn"), prompt);
-		ok(prompt.includes("Under yolo a turn ends Done"), prompt);
+		ok(prompt.includes("Under yolo every turn ends Done"), prompt);
 		ok(prompt.includes("Take the recommended default, state the assumption in the final reply"), prompt);
-		ok(prompt.includes("Reserve an ask_user call for a decision that blocks all progress"), prompt);
+		// #407: the operator is away by contract, so the variant never offers a question.
+		ok(!prompt.includes("Reserve an ask_user call"), prompt);
+		ok(!/## Ending a turn[\s\S]*ask_user/u.test(prompt), prompt);
 		ok(!prompt.includes("Every turn ends in one of two states:"), prompt);
 		ok(!prompt.includes('always ends with ask_user "Carry out this plan?"'), prompt);
 	});

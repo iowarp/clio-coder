@@ -53,6 +53,7 @@ import type { SafetyJudgeOutcome, SafetyJudgeSeat } from "../domains/safety/safe
 import type { SessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { UNATTENDED_ALLOWED_BY } from "../domains/safety/unattended.js";
+import { YOLO_FLOOR_REASON_PREFIX } from "../domains/safety/yolo-floor.js";
 import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
 import type { WorkspaceSnapshotOutcome, WorkspaceSnapshotRequest } from "../domains/workspace-snapshots/store.js";
 import { workspaceSnapshotTrigger } from "../domains/workspace-snapshots/trigger.js";
@@ -871,6 +872,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const scope = operatorYoloScope(level);
 		return scope === undefined ? {} : { operatorYolo: scope };
 	};
+	/**
+	 * True yolo for this registry's calls (#407): the operator's session at
+	 * yolo, or a worker whose permit inherited it. Admission decides the net;
+	 * this tells the information-flow gate, which runs past admission, that its
+	 * refusals do not hold either.
+	 */
+	const trueYolo = (): boolean =>
+		(deps.principal ?? "main") === "worker"
+			? deps.workerExecuteAutonomy === "yolo"
+			: operatorYoloScope(deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL) !== undefined;
 	const parked: ParkedCall[] = [];
 	const permissionListeners = new Set<
 		(call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void
@@ -999,7 +1010,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// level, including yolo, and are decided before any hook can run the
 			// body. Permitted here grants nothing: admission already ran. A policy
 			// that cannot label sources refuses the source tools outright.
-			const flowViolation = sourceAdmissionRefusal(spec, call) ?? outboundFlowViolation(spec, call);
+			// Yolo admits the transfer as well (#407); the source's label is still
+			// absorbed below, so the session keeps the record of what it carried.
+			const flowViolation = trueYolo() ? null : (sourceAdmissionRefusal(spec, call) ?? outboundFlowViolation(spec, call));
 			if (flowViolation !== null) {
 				recordRegistryDisposition(call, decision, "blocked", {
 					reasonCode: FLOW_BLOCK_REASON_CODE,
@@ -1096,7 +1109,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						? { scriptSandbox: yoloScriptSandboxPolicy(decision.policy.scriptSandbox) }
 						: {}),
 					...(landing !== undefined && landing !== null ? { hookLanding: landing } : {}),
-					...(deps.flow !== undefined
+					...(deps.flow !== undefined && !trueYolo()
 						? { flowAdmitsUrl: (url: string) => outboundFlowViolation(spec, { tool: spec.name, args: { url } }) }
 						: {}),
 				});
@@ -1524,7 +1537,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const allowedBy =
 				policy?.policySource === "project-policy"
 					? `the project's safety policy${policy.ruleId !== undefined ? ` rule ${policy.ruleId}` : ""} must change, which only the operator can do.`
-					: "nothing within this run; it is a hard block of Clio's safety net.";
+					: policy?.reasonCode.startsWith(YOLO_FLOOR_REASON_PREFIX) === true
+						? "nothing within this run; it is the yolo floor, which holds at every autonomy level."
+						: "nothing within this run; it is a hard block of Clio's safety net.";
 			return {
 				kind: "terminal",
 				verdict: withDenial(

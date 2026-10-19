@@ -2336,6 +2336,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"scratchRoots",
 				"snapshots",
 				"unattendedAfterSeconds",
+				"yoloAccepted",
 				"judge",
 			]);
 			if ("autonomy" in safety) {
@@ -2363,6 +2364,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						return problem === null;
 					});
 				}
+			}
+			if ("yoloAccepted" in safety) {
+				const parsed = expectBoolean(issues, "safety.yoloAccepted", safety.yoloAccepted);
+				if (parsed !== undefined) settings.safety.yoloAccepted = parsed;
 			}
 			if ("unattendedAfterSeconds" in safety) {
 				const parsed = expectInteger(issues, "safety.unattendedAfterSeconds", safety.unattendedAfterSeconds, { min: 0 });

@@ -81,7 +81,11 @@ export interface WorkerPermitCeiling {
 }
 
 export interface WorkerPermitAllowance {
-	/** Host-bound operator posture for execute effects only; absent keeps default admission. */
+	/**
+	 * The operator's yolo, bound by the host for every action class (#407);
+	 * absent keeps default admission. The name predates true yolo, when it
+	 * covered execute effects only, and stays because receipts carry it.
+	 */
 	executeAutonomy?: "yolo";
 	git: WorkerGitAllowance;
 	asks: WorkerAskRoute;
@@ -502,7 +506,7 @@ export function workerPermitPromptLine(view: {
 				: "main (operator decides)"
 			: view.asks;
 	const scope = view.capabilityClass !== undefined ? `${view.capabilityClass}, ` : "";
-	const line = `Permit: ${scope}git ${view.git}, asks ${asks}.${view.executeAutonomy === "yolo" ? " Execute admission: operator-bound yolo; hard safety rules still apply." : ""}`;
+	const line = `Permit: ${scope}git ${view.git}, asks ${asks}.${view.executeAutonomy === "yolo" ? " Autonomy: the operator's yolo, for every action; your dispatch scope, sandbox and the yolo floor still apply." : ""}`;
 	// The host commits whatever the task worktree holds when the run settles.
 	// Without this a worker told to commit burns calls on denied `git commit`
 	// attempts and writes stray report files as a substitute.

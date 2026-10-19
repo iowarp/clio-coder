@@ -5,7 +5,6 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnAllowsTool } from "../../core/turn-constraints.js";
 import type { ActionClass, ClassifierCall } from "./action-classifier.js";
-import { classify } from "./action-classifier.js";
 import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
 import { autonomyCallInputs } from "./autonomy-inputs.js";
@@ -30,6 +29,9 @@ import type { WorkerGitAllowance } from "./worker-permit.js";
  *   4. autonomy (main, with an attended session's test-runner consent) or the
  *      worker's standing allowance, Git included;
  *   5. a matching authorization, which clears only what it is allowed to clear.
+ *
+ * True yolo (#407) stops after step 2: its net holds only the floor,
+ * operator-authored rules and the run's ceilings, so steps 3 to 5 never ask.
  */
 
 export type AdmissionPrincipal = "main" | "worker";
@@ -89,15 +91,22 @@ export interface AdmissionInput {
 	/** Operator autonomy. Read for the main principal only; workers never inherit it. */
 	autonomy?: AutonomyLevel;
 	/**
-	 * The main session's own yolo relaxations (#419). Only the session's registry
-	 * passes it, and it reaches the net only for the main principal at yolo.
-	 * Scheduled `main` jobs and `main_turn` deliveries are turns of the
-	 * operator's own session through that registry, so they get it; unattended
-	 * loops are the case #419 asks for. A worker grant and a scheduled command
-	 * job are judged as main without it and keep today's rails.
+	 * The main session's own yolo (#407, #419). Only the session's registry
+	 * passes it, and it reaches the net only for the main principal at yolo,
+	 * where it makes admission true yolo: nothing asks, and only the floor,
+	 * operator-authored rules and the run's ceilings refuse. Scheduled `main`
+	 * jobs and `main_turn` deliveries are turns of the operator's own session
+	 * through that registry, so they get it. A worker grant and a scheduled
+	 * command job are judged as main without it and keep the rails.
 	 */
 	operatorYolo?: OperatorYoloScope;
-	/** Standing execute authority bound by the host permit, independent of model fields. */
+	/**
+	 * The operator's yolo, bound by the host permit for every action class
+	 * (#407) and independent of model fields. The permit field keeps its
+	 * historical name `executeAutonomy`. A worker under it is admitted the true
+	 * yolo way, still bounded by its dispatch scope (read-only, tool scope,
+	 * write roots), its OS sandbox and the floor.
+	 */
 	workerExecuteAutonomy?: "yolo";
 	constraints?: AdmissionConstraints;
 	/** A tool-level confirmation rail required at every autonomy level. */
@@ -200,6 +209,13 @@ export type AdmissionDisposition =
 			readOutsideWorkspace: boolean;
 	  };
 
+/**
+ * The scope a worker inherits with the operator's yolo (#407): no scratch
+ * roots of its own and no yolo script sandbox, because its dispatch scope and
+ * its OS sandbox already bound where it writes.
+ */
+const WORKER_YOLO_SCOPE: OperatorYoloScope = Object.freeze({ scratchRoots: [], scriptSandbox: "unsandboxed" });
+
 function deny(
 	code: AdmissionDenyCode,
 	reason: string,
@@ -240,9 +256,7 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	const level: AutonomyLevel =
 		principal === "main"
 			? (input.autonomy ?? DEFAULT_AUTONOMY_LEVEL)
-			: input.workerExecuteAutonomy === "yolo" &&
-					input.effects.length > 0 &&
-					input.effects.every((effect) => classify(effect).actionClass === "execute")
+			: input.workerExecuteAutonomy === "yolo"
 				? "yolo"
 				: DEFAULT_AUTONOMY_LEVEL;
 	const issuer = input.authorization?.issuer;
@@ -255,7 +269,10 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 					? "yolo"
 					: undefined;
 	const normalize = input.normalize ?? ((decision: SafetyDecision) => decision);
-	const operatorYolo = principal === "main" && level === "yolo" ? input.operatorYolo : undefined;
+	// True yolo (#407): the operator's session at yolo, or a worker whose permit
+	// inherited it. Nothing parks under it, so no authorization ever arrives.
+	const operatorYolo =
+		level !== "yolo" || issuer !== undefined ? undefined : principal === "main" ? input.operatorYolo : WORKER_YOLO_SCOPE;
 	const evaluate = (call: ClassifierCall): SafetyDecision =>
 		normalize(input.safety.evaluate(withCwd(call, input.cwd), posture, operatorYolo));
 	if (input.cwd !== undefined && !isAbsolute(input.cwd)) {
@@ -316,6 +333,11 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 			skillViolation: surfaceViolation,
 		});
 	}
+
+	// Under true yolo the net already held only the floor, operator-authored
+	// rules and the run's ceilings, and the hard limits above held the rest, so
+	// no confirmation rail, Git allowance or autonomy mapping asks (#407).
+	if (operatorYolo !== undefined) return { kind: "allow", decision: primary, authorized: false };
 
 	const covers = input.authorization !== undefined && input.authorization.actionClass === actionClass;
 	const authorized = covers && issuer === "operator";

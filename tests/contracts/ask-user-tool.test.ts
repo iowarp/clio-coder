@@ -24,13 +24,15 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 type Reply = AskUserResult | ((questions: ReadonlyArray<AskUserQuestion>) => Promise<AskUserResult>);
 
-function fixture(replies: Reply[], autonomy: AutonomyLevel = "default") {
+function fixture(replies: Reply[], autonomy: AutonomyLevel = "default", live = false) {
 	const shown: Array<ReadonlyArray<AskUserQuestion>> = [];
 	const presentations: unknown[] = [];
 	const fallbacks: unknown[] = [];
 	const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => autonomy });
 	registerAllTools(registry, {
 		mcpCapabilities: false,
+		// The session wires the live autonomy into the tool; `live` does the same here.
+		...(live ? { getAutonomy: () => autonomy } : {}),
 		askUser: async (questions, options) => {
 			shown.push(questions);
 			presentations.push(options?.decisionPresentation);
@@ -295,6 +297,32 @@ describe("ask_user tool", () => {
 		const decision = (interview.decisions as Array<Record<string, unknown>>)[0];
 		strictEqual(decision?.source, "agent", "the board records Clio's choice as Clio's");
 		deepStrictEqual(decision?.alternatives, ["Node id"]);
+	});
+
+	// #407: the operator is away by contract at yolo, so nobody is asked and nothing waits.
+	it("resolves a yolo round at once, outward included, without showing it, as Clio's decisions", async () => {
+		const f = fixture([], "yolo", true);
+		const result = await f.call({ exposure: "outward", questions: [CACHE_QUESTION, { question: "Anything to add?" }] });
+		strictEqual(f.shown.length, 0, "the surface never sees a yolo round");
+		const interview = interviewOf(result);
+		strictEqual(interview.event, "round_auto_resolved");
+		strictEqual(interview.status, "complete");
+		deepStrictEqual(interview.latest_answers, [
+			{ question: CACHE_QUESTION.question, answer: "Capability tuple", options: ["Capability tuple"], auto: true },
+			{ question: "Anything to add?", answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true },
+		]);
+		if (result.kind !== "ok") throw new Error("expected ok");
+		strictEqual(result.terminate, undefined, "the turn continues");
+		deepStrictEqual(result.details?.unattended, { afterSeconds: 0, autoResolved: 2, away: true });
+		match(result.output, /operator is away by contract/);
+		match(result.output, /state each assumption in your final reply/);
+		const decision = (interview.decisions as Array<Record<string, unknown>>)[0];
+		strictEqual(decision?.source, "agent");
+		match(String(decision?.rationale), /Autonomy is yolo/);
+		// The same tool at default still asks the operator.
+		const asked = fixture([{ answers: [{ question: "Q?", answer: "A" }] }], "default", true);
+		await asked.call({ questions: [{ question: "Q?" }] });
+		strictEqual(asked.shown.length, 1);
 	});
 
 	it("answers an unanswered outward round no, whatever the model listed first", async () => {

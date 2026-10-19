@@ -35,16 +35,16 @@ const ELIGIBLE_PATH =
  * preview directly; both modes retain expiry and stale-value checks.
  * One pending proposal per session keeps both the UI and stale-value check
  * unambiguous. It deliberately never accepts credentials or arbitrary paths.
- * Persistent fleet routing is the exception to yolo: its apply parks on the
- * registry's confirmation rail at every autonomy level, so the operator
- * approves the exact preview there and this tool does not ask a second time.
+ * Persistent fleet routing applies through the registry's confirmation rail,
+ * so at default the operator approves the exact preview there and this tool
+ * does not ask a second time; yolo admits that rail like every other (#407).
  */
 export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 	let pending: Proposal | null = null;
 	return {
 		name: ToolNames.ConfigureClio,
 		description:
-			"Preview a saved global Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve; yolo applies directly, except fleet routing (fleet.default, fleet.profiles, fleet.agentProfiles), which always asks the operator. For a one-off run, pin dispatch's target and model instead of saving routing. Use action=preview with a settings path and text value; action=apply with proposalId. For agent model bindings, preview/apply fleet.profiles first, then fleet.agentProfiles; each value is a complete JSON map preserving existing entries, not a nested path. The save result names when the setting takes effect; session-owned routing requires exiting and starting a new Clio session. Project saves use the operator's /settings UI. Autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy.",
+			"Preview a saved global Clio routing or fleet setting, then apply the exact proposal. Default asks the operator to approve, fleet routing (fleet.default, fleet.profiles, fleet.agentProfiles) through its own approval card; yolo applies directly. For a one-off run, pin dispatch's target and model instead of saving routing. Use action=preview with a settings path and text value; action=apply with proposalId. For agent model bindings, preview/apply fleet.profiles first, then fleet.agentProfiles; each value is a complete JSON map preserving existing entries, not a nested path. The save result names when the setting takes effect; session-owned routing requires exiting and starting a new Clio session. Project saves use the operator's /settings UI. Autonomy is changed only by the operator through /settings, clio-coder configure, or --autonomy.",
 		placement: "gateway",
 		parameters: Type.Object({
 			action: StringEnum(["preview", "apply"]),
@@ -117,7 +117,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 					const routing = isFleetRoutingPath(path);
 					return {
 						kind: "ok",
-						output: `Proposed saved settings change:\n${pending.preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to ${autonomy === "yolo" && !routing ? "save it" : "request operator approval"}. This proposal expires in 10 minutes.${routing ? ` ${ROUTING_PIN_HINT}` : ""}`,
+						output: `Proposed saved settings change:\n${pending.preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to ${autonomy === "yolo" ? "save it" : "request operator approval"}. This proposal expires in 10 minutes.${routing ? ` ${ROUTING_PIN_HINT}` : ""}`,
 					};
 				} catch (error) {
 					return { kind: "error", message: error instanceof Error ? error.message : String(error) };

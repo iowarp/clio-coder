@@ -261,6 +261,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.scratchRoots` | `[]` | immediately; user layer only, and only the main session at yolo reads it |
 | `safety.snapshots` | `auto` | immediately; `auto` snapshots a Git work tree before each turn's first mutating call and before every destructive call, `off` takes none |
 | `safety.unattendedAfterSeconds` | `300` | immediately; user layer only; seconds an attended permission card or ask_user round waits before Clio denies the call or picks the recommended option; `0` waits forever |
+| `safety.yoloAccepted` | `false` | immediately; user layer only; set by the one-time card that turns yolo on interactively, and `false` shows the card again |
 | `safety.judge.enabled` | `true` | immediately; user layer only; at autonomy `default` a model reviews each main-session call that would park for approval against the operator's own messages, then runs it or refuses it with a reason |
 | `safety.judge.target` | `null` | immediately; user layer only; `null` asks the session's chat route |
 | `safety.judge.model` | `null` | immediately; user layer only; `null` asks the chat model, or the judge target's default model when `safety.judge.target` is set |

@@ -12,6 +12,7 @@ import { readStrictLayeredSettings } from "../core/settings-layers.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
+import { yoloRootRefusal } from "../core/yolo-host.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { SHADOW_AGENT_OPERATOR_STAND_IN, userOriginAudienceRefusal } from "../domains/agents/spec.js";
@@ -409,6 +410,14 @@ export async function runClioRun(
 				process.stderr.write("clio-coder run: --timeout applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
 				return 2;
+			}
+			// Yolo as root outside a container is refused before boot (#407).
+			if (parsed.autonomy === "yolo") {
+				const refusal = yoloRootRefusal();
+				if (refusal !== null) {
+					process.stderr.write(`clio-coder run: ${refusal}\n`);
+					return 2;
+				}
 			}
 			// Armed before anything that can block (piped stdin, boot, the
 			// provider), so the limit covers the whole run. Every return below

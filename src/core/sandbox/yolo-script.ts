@@ -26,17 +26,19 @@ import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
  */
 
 /**
- * How the operator's yolo treats a script on this host. `sandboxed` runs it
- * under the backend, `unsandboxed` keeps the static scan alone (no backend,
- * or `safety.sandbox: off`), and `refused` asks because `safety.sandbox` is
- * `required` and no backend exists.
+ * How the operator's yolo treats a script on this host. Yolo runs scripts
+ * unsandboxed by default (#407): it is the operator's skip-permissions mode,
+ * and `auto` keeps the OS sandbox for dispatched workers only. Only
+ * `safety.sandbox: required` keeps the script sandbox: `sandboxed` runs the
+ * script under the backend, and `refused` refuses it because no backend
+ * exists.
  */
 export type YoloScriptSandboxState = "sandboxed" | "unsandboxed" | "refused";
 
 export function yoloScriptSandboxState(mode: SandboxMode, availability: SandboxAvailability): YoloScriptSandboxState {
-	if (mode === "off") return "unsandboxed";
+	if (mode !== "required") return "unsandboxed";
 	if (availability.available && availability.backend !== null && availability.executable !== null) return "sandboxed";
-	return mode === "required" ? "refused" : "unsandboxed";
+	return "refused";
 }
 
 export interface YoloScriptSandboxPolicyInput {

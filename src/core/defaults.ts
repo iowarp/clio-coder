@@ -627,9 +627,10 @@ export interface SafetySettings {
 	 * OS sandbox for a dispatched worker's own commands (bash, run_script,
 	 * verification). auto sandboxes when a backend is available and records
 	 * when it is not; required refuses those commands without one; off never
-	 * sandboxes. Main-agent commands are not sandboxed, except a script the
-	 * operator's yolo runs (#419), which runs in the yolo script sandbox when
-	 * a backend exists and asks under required when none does.
+	 * sandboxes. Main-agent commands are not sandboxed. Under required a
+	 * script the operator's yolo runs (#419) runs in the yolo script sandbox
+	 * when a backend exists and is refused when none does; auto and off leave
+	 * yolo unsandboxed (#407).
 	 */
 	sandbox: SandboxMode;
 	/** Let sandboxed worker commands reach the network even without web_fetch. */
@@ -653,6 +654,13 @@ export interface SafetySettings {
 	 * forever. Read only from the operator's own settings file.
 	 */
 	unattendedAfterSeconds: number;
+	/**
+	 * The operator accepted what yolo does, once, through the acceptance card
+	 * of its first interactive activation (#407). Read only from the operator's
+	 * own settings file; headless `--autonomy yolo` and an ACP client's mode
+	 * choice count as acceptance and write nothing.
+	 */
+	yoloAccepted: boolean;
 	/**
 	 * The safety judge at autonomy `default`: a model that reviews a call the
 	 * policy would park for approval against the operator's own messages, and
@@ -819,6 +827,7 @@ export const DEFAULT_SETTINGS = {
 		scratchRoots: [] as string[],
 		snapshots: "auto" as WorkspaceSnapshotMode,
 		unattendedAfterSeconds: 300,
+		yoloAccepted: false,
 		judge: {
 			enabled: true,
 			target: null,
@@ -1019,7 +1028,8 @@ safety:
     workerResponseSeconds: 600
   review:
     enabled: false
-  # OS sandbox for dispatched worker commands and yolo scripts: auto | required | off.
+  # OS sandbox for dispatched worker commands: auto | required | off. Only
+  # required also sandboxes scripts the yolo main session runs.
   sandbox: auto
   sandboxNetwork: false
   # Extra absolute trees yolo may clean up like the workspace, beside the temp
@@ -1031,6 +1041,9 @@ safety:
   # resolves it and keeps working: the call is denied, the question takes its
   # recommended option. 0 waits forever. Honored only in this file.
   unattendedAfterSeconds: 300
+  # Set by the one-time card that turns yolo on interactively. Honored only in
+  # this file.
+  yoloAccepted: false
   # At autonomy default, a model reviews each call that would need your approval
   # against your own messages and runs or refuses it; it asks you only when it
   # cannot decide or keeps refusing. target and model null use the chat route.

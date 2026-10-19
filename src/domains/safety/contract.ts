@@ -48,7 +48,9 @@ export interface SafetyContract {
 	 * Full evaluation: classify + damage-control match + decision. Writes the
 	 * safety-net audit row and emits safety.blocked on a block. Registry admission writes any final autonomy disposition
 	 * through `audit.recordToolCall`. `operatorYolo` is present only for the
-	 * main session's own calls at yolo (#419).
+	 * main session's own calls at yolo (#419) and for a worker whose permit
+	 * inherited that yolo (#407); with it the net holds only the yolo floor,
+	 * operator-authored rules and the run's ceilings.
 	 */
 	evaluate(call: ClassifierCall, posture?: string, operatorYolo?: OperatorYoloScope): SafetyDecision;
 

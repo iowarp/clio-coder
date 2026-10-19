@@ -94,18 +94,15 @@ describe("doctor --deep validation contract dry run", () => {
 		strictEqual(atDefault[1]?.level, "warn");
 		match(
 			atDefault[1]?.detail ?? "",
-			/; asks for confirmation at default and at yolo in the operator's session \(damage-control:git-stash-drop\)$/,
-			"a damage-control confirmation asks at both levels",
+			/; asks for approval at default and runs at yolo in the operator's session \(damage-control:git-stash-drop\)$/,
+			"a damage-control confirmation asks at default only (#407)",
 		);
 
 		const atYolo = contractDryRunFindings({ workspaceRoot: workspace, autonomy: "yolo" });
 		strictEqual(atYolo[0]?.level, "ok", atYolo[0]?.detail);
 		match(atYolo[0]?.detail ?? "", /; runs without approval at yolo in the operator's session$/);
-		strictEqual(atYolo[1]?.level, "warn");
-		match(
-			atYolo[1]?.detail ?? "",
-			/; asks for confirmation at default and at yolo in the operator's session \(damage-control:git-stash-drop\)$/,
-		);
+		strictEqual(atYolo[1]?.level, "ok", atYolo[1]?.detail);
+		match(atYolo[1]?.detail ?? "", /; runs without approval at yolo in the operator's session$/);
 		ok([...atDefault, ...atYolo].every((f) => !/every autonomy level/.test(f.detail)));
 	});
 

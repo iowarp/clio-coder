@@ -98,6 +98,7 @@ import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
+import { createYoloActivation } from "./yolo-activation.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
 // names from "interactive/index.js"; the implementations live in
@@ -156,6 +157,10 @@ export interface InteractiveDeps {
 	onHydratedFrameCommit?: (frameId: number | null, interactivity: BootInteractivity) => void;
 	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
 	initialNotices?: ReadonlyArray<string>;
+	/** Why yolo cannot run here, read once at boot (root outside a container), or null (#407). */
+	yoloRefusal?: string | null;
+	/** The session was started at yolo and holds at default until the operator accepts it once (#407). */
+	yoloHeldAtBoot?: boolean;
 	resources?: ResourcesContract;
 	extensions?: ExtensionsContract;
 	/** `/extensions reload` seam; the composition root supplies the coordinator. */
@@ -788,8 +793,30 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			presentation.announceSettingChanges();
 			return result;
 		};
+	// Turning yolo on is gated: refused as root outside a container, and the
+	// first activation shows the acceptance card (#407).
+	const commitSetting = deps.commitSetting;
+	const yoloActivation =
+		commitSetting === undefined
+			? undefined
+			: createYoloActivation({
+					getSettings: () => deps.getSettings?.(),
+					refusal: deps.yoloRefusal ?? null,
+					commitSetting,
+					ask: (questions, options) => overlayLifecycle.openTransientAskUserOverlayState(questions, options),
+					prepareScreen: () => {
+						const state = overlayLifecycle.getState();
+						if (state !== "closed" && state !== "ask-user") overlayLifecycle.closeOverlay();
+					},
+					notify: (level, text, key) => notify(level, text, key),
+					afterCommit: () => {
+						presentation.announceSettingChanges();
+						footer.refresh();
+						tui.requestRender();
+					},
+				});
 	const settingActions = {
-		...(deps.commitSetting ? { commitSetting: withSettingFeedback(deps.commitSetting) } : {}),
+		...(yoloActivation ? { commitSetting: withSettingFeedback(yoloActivation.commit) } : {}),
 		...(deps.writeSettings ? { writeSettings: withSettingFeedback(deps.writeSettings) } : {}),
 		...(deps.onSetThinkingLevel ? { onSetThinkingLevel: withSettingFeedback(deps.onSetThinkingLevel) } : {}),
 		...(deps.onSelectModel ? { onSelectModel: withSettingFeedback(deps.onSelectModel) } : {}),
@@ -2075,6 +2102,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					// Upgrade advice is optional when cached metadata cannot be read (#416).
 				});
 		});
+		// A session started at yolo before the operator ever accepted it holds at
+		// default and asks once, now that the screen can show the card (#407).
+		if (deps.yoloHeldAtBoot === true && yoloActivation !== undefined) {
+			setImmediate(() => {
+				if (!startupAbort.signal.aborted) void yoloActivation.requestHeldAtBoot();
+			});
+		}
 		// A second terminal in this folder gets its own session; say so when another
 		// one is live here, so a shared folder never reads as a shared session (#420).
 		setImmediate(() => {

@@ -1,9 +1,8 @@
 /**
  * What a headless run answers a tool call that needs an approval nobody can
  * give. There is no operator on the other end of `clio-coder run`, so every
- * approval ask is denied with this sentence at both autonomy levels: the
- * ordinary asks of `default` and the damage-control confirmations that still
- * ask at `yolo`. The session prompt states the same fact up front
+ * approval ask is denied with this sentence. Only `default` asks; the
+ * operator's `yolo` never does (#407). The session prompt states the same fact up front
  * (`HEADLESS_SESSION_APPROVAL_SEMANTICS` in src/domains/prompts/compiler.ts).
  *
  * It lives here rather than inline at the deny site because two surfaces read

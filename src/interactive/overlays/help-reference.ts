@@ -201,10 +201,11 @@ export function openHelpOverlay(
 				"# Autonomy & safety net",
 				"**Tool surface**: which tools exist at all through registration, tool profiles, skill narrowing, and dispatch admission. " +
 					"Violations are terminal denials, never approvable.",
-				"**Safety net**: damage-control rules and hard path protections remain active in both modes. " +
-					"A damage-control block is final; a damage-control confirmation still asks in yolo.",
+				"**Safety net**: at default, damage-control rules and hard path protections block or ask. " +
+					"Yolo keeps only the floor (deleting or overwriting /, home or a system tree, mkfs, wipefs, block-device writes, fork bombs, writes into Clio's own state) and rules in an approved `.clio-coder/safety.yaml`.",
 				"**Mode** (`/settings`, persisted as `safety.autonomy`): default runs workspace edits and recognized checks, " +
-					"but asks for unfamiliar commands, outward actions, and larger dispatch plans. Yolo runs through ordinary confirmation rails automatically.",
+					"but asks for unfamiliar commands, outward actions, and larger dispatch plans. Yolo never asks: no approval stops, no sandbox unless `safety.sandbox` is required, and questions take their recommended option. " +
+					"Its first activation shows a one-time acceptance card, and it is refused as root outside a container.",
 				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
 					"Workers resolve asks per `fleet.permissions.mode` (Fleet approvals routing in /settings); headless runs auto-deny.",
 				"**Inspecting a mutation**: a parked `write` or `edit` card carries the target, the byte count, and a `sha256` digest of the exact call arguments. " +

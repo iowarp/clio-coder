@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { stripSkillInstallOfferTag } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
-import { type AutonomyExposure, DEFAULT_AUTONOMY_EXPOSURE } from "../domains/safety/autonomy.js";
+import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_EXPOSURE } from "../domains/safety/autonomy.js";
 import { classifyDecisionPresentation, decisionFactsForAnswer } from "../domains/safety/decision-presentation.js";
 import { StringEnum } from "../engine/ai.js";
 import type {
@@ -121,6 +121,12 @@ export type AskUserHandler = (
 
 export interface AskUserToolDeps {
 	askUser?: AskUserHandler;
+	/**
+	 * The session's live autonomy. At yolo the operator is away by contract
+	 * (#407): a round resolves at once without reaching the surface, and the
+	 * tool schema stays the same at every level so a toggle never changes it.
+	 */
+	getAutonomy?: () => AutonomyLevel;
 }
 
 export const askUserParameters = Type.Object({
@@ -395,6 +401,20 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
 }
 
 /**
+ * Answer every question of a round nobody is asked because the session runs
+ * at yolo (#407). Each takes its recommended (first) option, an outward one
+ * included, because yolo already admits the outward step itself; a free-text
+ * question proceeds on the model's judgment.
+ */
+function resolveAwayAnswers(questions: ReadonlyArray<AskUserQuestion>): AskUserAnswer[] {
+	return questions.map((question): AskUserAnswer => {
+		const first = question.options?.[0]?.label;
+		if (first === undefined) return { question: question.question, answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true };
+		return { question: question.question, answer: first, options: [first], auto: true };
+	});
+}
+
+/**
  * Answer, for an absent operator, every question the round left open (#421).
  * The prompt contract lists the recommended option first, so a question with
  * options takes that one; a free-text question proceeds on the model's
@@ -517,11 +537,18 @@ function uniqueDecisionKey(base: string, existing: ReadonlySet<string>): string 
 	return `${key}_${Date.now()}`;
 }
 
+/** Why Clio chose an answer for the operator: who was absent, and for how long. */
+function autoRationale(unattended: UnattendedRound | undefined): string {
+	return unattended?.away === true
+		? "Autonomy is yolo, so the operator is away by contract and was not asked; Clio chose this for them."
+		: `The operator did not answer within ${unattended?.afterSeconds ?? 0} s; Clio chose this for them.`;
+}
+
 function decisionFromAnswer(
 	answer: AskUserAnswer,
 	questions: ReadonlyArray<AskUserQuestion>,
 	existing: ReadonlySet<string>,
-	unattendedSeconds?: number,
+	unattended?: UnattendedRound,
 ): AskUserDecision {
 	const question = questions.find((candidate) => candidate.question === answer.question);
 	const label = question?.header;
@@ -542,7 +569,7 @@ function decisionFromAnswer(
 			? {
 					source: "agent" as const,
 					...(passedOver.length > 0 ? { alternatives: passedOver } : {}),
-					rationale: `The operator did not answer within ${unattendedSeconds ?? 0} s; Clio chose this for them.`,
+					rationale: autoRationale(unattended),
 				}
 			: {}),
 	};
@@ -578,12 +605,12 @@ function deriveAnswerDecisions(
 	questions: ReadonlyArray<AskUserQuestion>,
 	answers: ReadonlyArray<AskUserAnswer>,
 	policy: AskUserToolPolicy,
-	unattendedSeconds?: number,
+	unattended?: UnattendedRound,
 ): AskUserDecision[] {
 	const existing = new Set(policy.decisions.map((decision) => decision.key));
 	const decisions: AskUserDecision[] = [];
 	for (const answer of answers) {
-		const decision = decisionFromAnswer(answer, questions, existing, unattendedSeconds);
+		const decision = decisionFromAnswer(answer, questions, existing, unattended);
 		existing.add(decision.key);
 		decisions.push(decision);
 	}
@@ -660,6 +687,8 @@ function compactInterview(
 interface UnattendedRound {
 	afterSeconds: number;
 	autoResolved: number;
+	/** Nobody was asked: the session runs at yolo, where the operator is away by contract (#407). */
+	away?: true;
 }
 
 /**
@@ -675,6 +704,13 @@ function unattendedGuidance(
 	const chosen = answers
 		.filter((answer) => answer.auto === true)
 		.map((answer) => `- ${answer.question.split("\n")[0]?.trim() ?? answer.question} -> ${answer.answer}`);
+	if (unattended.away === true) {
+		return [
+			"Autonomy is yolo: the operator is away by contract, so nobody was asked and nobody will answer. Clio chose:",
+			...chosen,
+			"Each question took its recommended (first) option; a question without options means proceed on your best judgment. These are assumptions, not the operator's decisions: continue the task on them, do not ask again, and state each assumption in your final reply so the operator can revisit it.",
+		];
+	}
 	return [
 		`The operator did not answer within ${unattended.afterSeconds} s, so Clio answered for them and closed the interview. Clio chose:`,
 		...chosen,
@@ -804,6 +840,34 @@ export async function finalizeAskUserInterviewForHost(
 	onFinalized?.(policy);
 }
 
+/**
+ * Close an interview Clio answered for the operator: a timed-out round (#421)
+ * or a round at yolo nobody was asked (#407). The answers land on the
+ * decision board as Clio's decisions, and the model reads them as assumptions.
+ */
+async function closeAutoResolved(
+	policy: AskUserToolPolicy,
+	questions: ReadonlyArray<AskUserQuestion>,
+	answers: ReadonlyArray<AskUserAnswer>,
+	unattended: UnattendedRound,
+	answeredAt: string,
+	standalone: boolean,
+	options: ToolInvokeOptions | undefined,
+): Promise<ToolResult> {
+	policy.status = "complete";
+	policy.endedAt = answeredAt;
+	const note =
+		unattended.away === true
+			? "Answered by Clio: autonomy is yolo, so the operator was not asked."
+			: `Answered by Clio: no operator answer within ${unattended.afterSeconds} s.`;
+	policy.summary = policy.summary === undefined ? note : `${policy.summary} ${note}`;
+	if (!standalone) {
+		upsertDecisions(policy, deriveAnswerDecisions(questions, answers, policy, unattended));
+		await persistAskUserTranscript(policy, options);
+	}
+	return okInterviewResult(policy, "round_auto_resolved", answers, unattended);
+}
+
 async function defaultAskUserHandler(): Promise<AskUserResult> {
 	return cancelledAskUserResult();
 }
@@ -884,6 +948,26 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				);
 			}
 
+			if (deps.getAutonomy?.() === "yolo") {
+				// The operator is away by contract at yolo (#407): the round never
+				// reaches the surface, and Clio answers it at once the way an
+				// unanswered round is answered after the unattended window.
+				const answeredAt = new Date().toISOString();
+				const answers = resolveAwayAnswers(questions);
+				policy.callCount += 1;
+				policy.askedQuestionKeys.add(key);
+				policy.answerCount += answers.length;
+				policy.updatedAt = answeredAt;
+				policy.rounds.push({
+					round: policy.rounds.length + 1,
+					requestedAt: answeredAt,
+					answeredAt,
+					questions: transcriptQuestions(questions),
+					answers: transcriptAnswers(answers),
+				});
+				const unattended: UnattendedRound = { afterSeconds: 0, autoResolved: answers.length, away: true };
+				return closeAutoResolved(policy, questions, answers, unattended, answeredAt, standalone, options);
+			}
 			const requestedAt = new Date().toISOString();
 			policy.inFlight = true;
 			policy.status = "active";
@@ -938,15 +1022,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 						afterSeconds: timedOut.afterSeconds,
 						autoResolved: result.answers.filter((answer) => answer.auto === true).length,
 					};
-					policy.status = "complete";
-					policy.endedAt = answeredAt;
-					const note = `Answered by Clio: no operator answer within ${timedOut.afterSeconds} s.`;
-					policy.summary = policy.summary === undefined ? note : `${policy.summary} ${note}`;
-					if (!standalone) {
-						upsertDecisions(policy, deriveAnswerDecisions(questions, result.answers, policy, timedOut.afterSeconds));
-						await persistAskUserTranscript(policy, options);
-					}
-					return okInterviewResult(policy, "round_auto_resolved", result.answers, unattended);
+					return closeAutoResolved(policy, questions, result.answers, unattended, answeredAt, standalone, options);
 				}
 				if (standalone) {
 					policy.status = "complete";
