@@ -2,6 +2,7 @@ import type { PermissionResolvedPayload } from "../core/bus-events.js";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { ActionClass } from "../domains/safety/action-classifier.js";
+import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
 export interface PermissionResolution {
@@ -35,9 +36,15 @@ export function resolvePermission(
 		case "deny": {
 			// A deny that someone decided refuses the call. One settled by a
 			// cancelled prompt or a request that could not be put only cancels it,
-			// so the identical call is not refused as already denied.
+			// so the identical call is not refused as already denied. One nobody
+			// answered in time is Clio's own refusal (#421).
 			const decidedBy = resolution.payload.decidedBy;
-			const options = decidedBy === "cancelled" || decidedBy === "error" ? {} : { denied: true };
+			const options =
+				decidedBy === "cancelled" || decidedBy === "error"
+					? {}
+					: decidedBy === UNATTENDED_DECIDED_BY
+						? { denied: true, unattended: true }
+						: { denied: true };
 			if (resolution.payload.requestId !== undefined)
 				ports.registry?.cancelParkedCall(resolution.payload.requestId, reason, options);
 			else ports.registry?.cancelParkedCalls(reason, options);

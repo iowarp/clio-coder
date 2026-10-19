@@ -1,8 +1,20 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { BusChannels, type PermissionResolvedPayload } from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { CALL_TARGET_MAX_CHARS, describeCallTarget } from "../../src/domains/safety/call-target.js";
+import { UNATTENDED_ALLOWED_BY } from "../../src/domains/safety/unattended.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { type OverlayState, routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
+import {
+	createOverlayPermissionLifecycle,
+	type OverlayPermissionLifecycle,
+} from "../../src/interactive/overlay-permission-lifecycle.js";
 import { permissionHintEntries } from "../../src/interactive/permission-hint.js";
 import {
 	type ApprovalRequestView,
@@ -11,6 +23,9 @@ import {
 	permissionOverlayHint,
 } from "../../src/interactive/permission-overlay.js";
 import { renderToolAwaitingApproval } from "../../src/interactive/renderers/tool-execution.js";
+import type { UnattendedTimers } from "../../src/interactive/unattended-countdown.js";
+import { createRegistry } from "../../src/tools/registry.js";
+import { writeTool } from "../../src/tools/write.js";
 
 const DEEP_TARGET =
 	"/home/researcher/projects/high-entropy-alloys/sigma-phase-onset/.research/tasks/task-03/task-03-protocol-arc-melting-and-aging.md · content=<string 4173 bytes>";
@@ -187,4 +202,156 @@ test("a target the safety layer cut at its cap ends in an ellipsis on the card a
 	doesNotMatch(short, /npm test…/u);
 	const exact = "x".repeat(CALL_TARGET_MAX_CHARS);
 	strictEqual(describeCallTarget("bash", { command: exact }), exact, "an exactly sized target remains whole");
+});
+
+/** A monotonic clock the test moves by hand, firing due timers in order. */
+function manualTimers() {
+	let now = 0;
+	let seq = 0;
+	const due = new Map<number, { at: number; callback: () => void }>();
+	const timers: UnattendedTimers = {
+		now: () => now,
+		setTimeout: (callback, ms) => {
+			seq += 1;
+			due.set(seq, { at: now + ms, callback });
+			return seq;
+		},
+		clearTimeout: (handle) => {
+			due.delete(handle as number);
+		},
+	};
+	const advance = (ms: number): void => {
+		const target = now + ms;
+		for (;;) {
+			const next = [...due.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+			if (next === undefined || next[1].at > target) break;
+			due.delete(next[0]);
+			now = next[1].at;
+			next[1].callback();
+		}
+		now = target;
+	};
+	return { timers, advance };
+}
+
+const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+const OUTSIDE_WRITE = { tool: ToolNames.Write, args: { path: "../outside.txt", content: "x" } };
+
+/** The real registry parks an outside-workspace write; the lifecycle stands in for the TUI's card. */
+function unattendedFixture(windowMs: number) {
+	const base = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-unattended-")));
+	const root = join(base, "root");
+	mkdirSync(root, { recursive: true });
+	const originalCwd = process.cwd();
+	process.chdir(root);
+	const clock = manualTimers();
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
+	registry.register(writeTool);
+	const bus = createSafeEventBus();
+	const resolved: PermissionResolvedPayload[] = [];
+	bus.on(BusChannels.PermissionResolved, (payload) => {
+		resolved.push(payload);
+	});
+	const notices: string[] = [];
+	const stops: string[] = [];
+	const countdowns: Array<() => number | null> = [];
+	let state: OverlayState = "closed";
+	const lifecycle: OverlayPermissionLifecycle = createOverlayPermissionLifecycle({
+		toolRegistry: registry,
+		bus,
+		dispatch: {},
+		getAutonomy: () => "default",
+		getOverlayState: () => state,
+		openPermissionOverlay: (_view, _inspect, _invocation, _advisory, countdown) => {
+			if (state === "permission-confirm") return false;
+			state = "permission-confirm";
+			if (countdown !== undefined) countdowns.push(countdown);
+			return true;
+		},
+		closeOverlay: () => {
+			if (state !== "permission-confirm") return;
+			state = "closed";
+			lifecycle.onPermissionOverlayClosed();
+		},
+		appendNotice: (_level, text) => {
+			notices.push(text);
+		},
+		applyApprovalState: () => {},
+		requestRender: () => {},
+		stopActiveTurn: (reason) => {
+			stops.push(reason);
+		},
+		getUnattendedWindowMs: () => windowMs,
+		unattendedTimers: clock.timers,
+	});
+	return {
+		registry,
+		lifecycle,
+		clock,
+		resolved,
+		notices,
+		stops,
+		countdowns,
+		state: () => state,
+		cleanup: () => {
+			lifecycle.dispose();
+			process.chdir(originalCwd);
+			rmSync(base, { recursive: true, force: true });
+		},
+	};
+}
+
+test("a card nobody answers denies its call after the window, and the turn continues (#421)", async () => {
+	const f = unattendedFixture(5_000);
+	try {
+		const verdict = f.registry.invoke(OUTSIDE_WRITE, { turnId: "turn-1" });
+		await tick();
+		strictEqual(f.countdowns[0]?.(), 5_000);
+		const card = plain(
+			createPermissionOverlayBody(WRITE_VIEW, undefined, undefined, undefined, f.countdowns[0]).render(76),
+		);
+		match(card.join(" "), /No answer in 5 s denies this call and Clio continues without it\. Any key holds the card\./u);
+		f.clock.advance(5_000);
+		const settled = await verdict;
+		strictEqual(settled.kind, "blocked");
+		if (settled.kind !== "blocked") return;
+		strictEqual(settled.deniedPark, true);
+		match(settled.reason, /did not answer this write approval within 5 s, so Clio denied it automatically/u);
+		strictEqual(settled.denial?.allowedBy, UNATTENDED_ALLOWED_BY);
+		deepStrictEqual(f.stops, [], "a timeout never stops the turn");
+		strictEqual(f.state(), "closed");
+		strictEqual(f.resolved[0]?.decidedBy, "unattended");
+		match(f.notices.at(-1) ?? "", /No answer within 5 s: Clio denied write, which did not run/u);
+		// Nobody can approve the identical call later in the turn, so it is refused without another wait.
+		const repeat = await f.registry.invoke(OUTSIDE_WRITE, { turnId: "turn-1" });
+		strictEqual(repeat.kind, "blocked");
+		strictEqual(f.countdowns.length, 1, "the repeat never parked");
+	} finally {
+		f.cleanup();
+	}
+});
+
+test("a key on the card holds its countdown, and a 0 window waits forever (#421)", async () => {
+	for (const windowMs of [5_000, 0]) {
+		const f = unattendedFixture(windowMs);
+		try {
+			let settled = false;
+			const verdict = f.registry.invoke(OUTSIDE_WRITE, { turnId: "turn-1" });
+			void verdict.then(() => {
+				settled = true;
+			});
+			await tick();
+			if (windowMs > 0) f.lifecycle.notePresence();
+			strictEqual(f.countdowns[0]?.(), null, "no countdown left to show");
+			f.clock.advance(600_000);
+			await tick();
+			strictEqual(settled, false, `${windowMs}: the card still waits for the operator`);
+			strictEqual(f.resolved.length, 0);
+			f.lifecycle.cancel();
+			strictEqual((await verdict).kind, "blocked");
+			strictEqual(f.resolved[0]?.decidedBy, "operator");
+		} finally {
+			f.cleanup();
+		}
+	}
 });

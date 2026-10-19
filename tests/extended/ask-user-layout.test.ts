@@ -9,6 +9,7 @@ import {
 	formatAskUserQuestion,
 	optionAsksForText,
 } from "../../src/interactive/overlays/ask-user.js";
+import type { UnattendedTimers } from "../../src/interactive/unattended-countdown.js";
 import type { AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 import { createHarnessHold } from "../../src/tools/registry.js";
 
@@ -427,6 +428,70 @@ test("a question with defaultOption opens focused on it, and one without opens o
 	deepStrictEqual((await plainPending).answers[0]?.options, ["Merge"]);
 });
 
+/** A monotonic clock the test moves by hand, firing due timers in order. */
+function manualTimers() {
+	let now = 0;
+	let seq = 0;
+	const due = new Map<number, { at: number; callback: () => void }>();
+	const timers: UnattendedTimers = {
+		now: () => now,
+		setTimeout: (callback, ms) => {
+			seq += 1;
+			due.set(seq, { at: now + ms, callback });
+			return seq;
+		},
+		clearTimeout: (handle) => {
+			due.delete(handle as number);
+		},
+	};
+	const advance = (ms: number): void => {
+		const target = now + ms;
+		for (;;) {
+			const next = [...due.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+			if (next === undefined || next[1].at > target) break;
+			due.delete(next[0]);
+			now = next[1].at;
+			next[1].callback();
+		}
+		now = target;
+	};
+	return { timers, advance };
+}
+
+test("an unanswered round shows its countdown and closes as timed out; any key holds it (#421)", async () => {
+	const clock = manualTimers();
+	const idle = createAskUserViewForTesting({ rows: 40 });
+	const idlePending = idle.ask([SAFE_DEFAULT_ROUND], undefined, {
+		unattended: { windowMs: 5_000, timers: clock.timers },
+	});
+	match(plain(idle.render(100)).join("\n"), /No answer in 5 s picks the recommended option and Clio continues/);
+	clock.advance(5_000);
+	deepStrictEqual(await idlePending, { answers: [], timedOut: { afterSeconds: 5 } });
+
+	const present = createAskUserViewForTesting({ rows: 40 });
+	let settled = false;
+	const presentPending = present.ask([SAFE_DEFAULT_ROUND], undefined, {
+		unattended: { windowMs: 5_000, timers: clock.timers },
+	});
+	void presentPending.then(() => {
+		settled = true;
+	});
+	present.handleInput(DOWN);
+	clock.advance(60_000);
+	await new Promise((resolve) => setImmediate(resolve));
+	strictEqual(settled, false, "a key holds the round for the operator");
+	doesNotMatch(plain(present.render(100)).join("\n"), /No answer in/);
+	present.handleInput(ENTER);
+	deepStrictEqual((await presentPending).answers[0]?.options, ["Keep branch"]);
+
+	const waits = createAskUserViewForTesting({ rows: 40 });
+	const waitsPending = waits.ask([SAFE_DEFAULT_ROUND]);
+	clock.advance(60_000);
+	doesNotMatch(plain(waits.render(100)).join("\n"), /No answer in/, "a round with no window waits as before");
+	waits.handleInput(ENTER);
+	deepStrictEqual((await waitsPending).answers[0]?.options, ["Merge"]);
+});
+
 test("a harness round drops Enter inside its input guard, takes Esc, and answers after the guard", async () => {
 	const guarded = createAskUserViewForTesting({ rows: 40 });
 	const guardedPending = guarded.ask([{ ...SAFE_DEFAULT_ROUND, defaultOption: 1 }], undefined, {
@@ -452,7 +517,7 @@ test("a harness round drops Enter inside its input guard, takes Esc, and answers
 });
 
 /** A lifecycle on the real overlay transitions with a scripted overlay session, no TUI. */
-function lifecycleFixture() {
+function lifecycleFixture(unattendedMs = 0) {
 	const sessions: FakeSession[] = [];
 	const notices: string[] = [];
 	let permissionCloses = 0;
@@ -484,6 +549,7 @@ function lifecycleFixture() {
 		onHarnessWaiting: () => {
 			notices.push("waiting");
 		},
+		getUnattendedWindowMs: () => unattendedMs,
 		openAskUserOverlay: () => {
 			const session = new FakeSession();
 			sessions.push(session);
@@ -499,6 +565,7 @@ class FakeSession {
 	waiting = true;
 	private resolveRound: ((result: AskUserResult) => void) | null = null;
 	asked: string[] = [];
+	rounds: unknown[] = [];
 	setHidden(hidden: boolean): void {
 		this.hidden = hidden;
 	}
@@ -516,9 +583,10 @@ class FakeSession {
 	hide(): void {
 		this.close();
 	}
-	ask(questions: ReadonlyArray<AskUserQuestion>): Promise<AskUserResult> {
+	ask(questions: ReadonlyArray<AskUserQuestion>, _presentation?: unknown, round?: unknown): Promise<AskUserResult> {
 		if (this.resolveRound !== null) return Promise.resolve({ answers: [], cancelled: true, unavailable: true });
 		this.asked.push(questions[0]?.question ?? "");
+		this.rounds.push(round);
 		this.waiting = false;
 		return new Promise((resolve) => {
 			this.resolveRound = resolve;
@@ -638,4 +706,25 @@ test("a card behind another overlay tells the operator once and shows when the s
 	sessions[0]?.answer("Keep branch");
 	strictEqual((await shown).answers[0]?.answer, "Keep branch");
 	hold.release();
+});
+
+test("only an ask_user round gets the unattended window, and 0 waits forever (#421)", async () => {
+	const armed = lifecycleFixture(5_000);
+	const toolRound = armed.lifecycle.handler([{ question: "Which?" }], { ...MODEL_CALL, unattendedFallback: true });
+	await tick();
+	deepStrictEqual(armed.sessions[0]?.rounds[0], { unattended: { windowMs: 5_000 } });
+	armed.sessions[0]?.answer("A");
+	await toolRound;
+	const settingsRound = armed.lifecycle.handler([{ question: "Apply?" }], MODEL_CALL);
+	await tick();
+	strictEqual(armed.sessions[0]?.rounds[1], undefined, "a caller that is not ask_user keeps waiting");
+	armed.sessions[0]?.answer("Apply");
+	await settingsRound;
+
+	const off = lifecycleFixture(0);
+	const offRound = off.lifecycle.handler([{ question: "Which?" }], { ...MODEL_CALL, unattendedFallback: true });
+	await tick();
+	strictEqual(off.sessions[0]?.rounds[0], undefined);
+	off.sessions[0]?.answer("A");
+	await offRound;
 });

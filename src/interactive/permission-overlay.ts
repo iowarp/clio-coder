@@ -24,6 +24,7 @@ import {
 import { renderToolArguments } from "./renderers/tool-execution.js";
 import type { ClioToken } from "./theme/index.js";
 import { clioTheme } from "./theme/index.js";
+import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -75,6 +76,12 @@ export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
  */
 export type PermissionAdvisoryReader = () => string;
 
+/**
+ * Milliseconds before an unanswered card denies itself (#421), read once per
+ * frame; null once the operator is present or no window applies.
+ */
+export type PermissionCountdownReader = () => number | null;
+
 export interface PermissionOverlayBodyHandle extends Component, RowBudgetedBody {
 	/** Whether this card has a mutation the operator can read locally. */
 	canInspect(): boolean;
@@ -105,6 +112,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		private readonly inspect?: MutationInspector,
 		private readonly invocation?: () => unknown,
 		private readonly advisory?: PermissionAdvisoryReader,
+		private readonly countdown?: PermissionCountdownReader,
 	) {}
 
 	canInspect(): boolean {
@@ -184,7 +192,13 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			];
 		}
 		if (this.preview === null) {
-			const { facts, rest } = permissionCardSections(this.view, width, this.terms, this.readAdvisory());
+			const { facts, rest } = permissionCardSections(
+				this.view,
+				width,
+				this.terms,
+				this.readAdvisory(),
+				this.readCountdown(),
+			);
 			return this.windowCard(facts, rest, width);
 		}
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll);
@@ -229,6 +243,15 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			return this.advisory();
 		} catch {
 			return "";
+		}
+	}
+
+	private readCountdown(): number | null {
+		if (this.countdown === undefined) return null;
+		try {
+			return this.countdown();
+		} catch {
+			return null;
 		}
 	}
 
@@ -425,6 +448,7 @@ function permissionCardSections(
 	width: number,
 	terms = false,
 	advisory = "",
+	countdownMs: number | null = null,
 ): { facts: string[]; rest: string[] } {
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
@@ -460,6 +484,17 @@ function permissionCardSections(
 		// that no part of the harness acted on. The sentence says so itself; the
 		// styling keeps it from reading as a verdict at a glance.
 		...(advisory.length > 0 ? wrapSentence(clioTheme().fg("annotation", advisory), content) : []),
+		// Last among the facts so it never scrolls away: the operator who walks
+		// past the screen reads what happens if they keep walking.
+		...(countdownMs !== null
+			? wrapSentence(
+					clioTheme().fg(
+						"warning",
+						`No answer in ${formatUnattendedRemaining(countdownMs)} denies this call and Clio continues without it. Any key holds the card.`,
+					),
+					content,
+				)
+			: []),
 	];
 	// The queue count rides the rail title, and the terms follow the facts without a spacer row.
 	const rest =
@@ -496,6 +531,7 @@ export function createPermissionOverlayBody(
 	inspect?: MutationInspector,
 	invocation?: () => unknown,
 	advisory?: PermissionAdvisoryReader,
+	countdown?: PermissionCountdownReader,
 ): PermissionOverlayBodyHandle {
-	return new PermissionOverlayBody(view, inspect, invocation, advisory);
+	return new PermissionOverlayBody(view, inspect, invocation, advisory, countdown);
 }

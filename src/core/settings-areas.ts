@@ -230,6 +230,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "context.semantic.inboxes":
 			return place("context", "Semantic search");
 		case "safety.autonomy":
+		case "safety.unattendedAfterSeconds":
 		case "safetyNet":
 			return place("safety", "Autonomy");
 		case "safety.limits.sessionCostUsd":

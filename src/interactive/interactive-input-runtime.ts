@@ -94,6 +94,8 @@ export interface InteractiveInputRuntimeDeps {
 		cancelPermission?(): void;
 		retryPendingPermission?(): boolean;
 		stopTurnFromPermission(): void;
+		/** Any key while a card is up says the operator is present and holds its countdown (#421). */
+		notePermissionPresence?(): void;
 		canInspectMutation(): boolean;
 		isInspectingMutation(): boolean;
 		toggleMutationInspection(): void;
@@ -573,6 +575,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 	});
 	deps.registerInputListener((data) => {
 		deps.onInputIngress?.(classifyInputAction(data, deps), data);
+		if (data.length > 0 && !isKeyRelease(data)) deps.overlay.notePermissionPresence?.();
 		// Enter arriving before the parked card mounts must neither submit a
 		// steer nor approve a card the operator has not yet seen.
 		if (deps.overlay.retryPendingPermission?.() && matchesKey(data, "enter")) return { consume: true };

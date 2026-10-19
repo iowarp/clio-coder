@@ -200,21 +200,35 @@ function stripProjectAutonomy(
 }
 
 /**
- * Scratch roots widen where yolo may delete outside the workspace (#419), so a
- * repository can neither set nor extend them; only the operator's file names them.
+ * Safety keys only the operator's own file may set. Scratch roots widen where
+ * yolo may delete outside the workspace (#419), so a repository can neither set
+ * nor extend them. The unattended window decides how long Clio waits for this
+ * operator before answering a card or a question itself (#421), so a
+ * repository cannot shorten it to answer ahead of them.
  */
-function stripProjectScratchRoots(
+const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }> = [
+	{ key: "scratchRoots", message: "scratch roots are set only in user settings; project value ignored" },
+	{
+		key: "unattendedAfterSeconds",
+		message: "the unattended timeout is set only in user settings; project value ignored",
+	},
+];
+
+function stripProjectOperatorSafety(
 	blob: Record<string, unknown>,
 	origin: SettingsOrigin,
 	issues: SettingsLayerIssue[],
 ): Record<string, unknown> {
-	if (!isRecord(blob.safety) || !Object.hasOwn(blob.safety, "scratchRoots")) return blob;
-	issues.push({
-		origin,
-		path: "safety.scratchRoots",
-		message: "scratch roots are set only in user settings; project value ignored",
-	});
-	const { scratchRoots: _ignored, ...safety } = blob.safety;
+	if (!isRecord(blob.safety)) return blob;
+	const safety: Record<string, unknown> = { ...blob.safety };
+	let stripped = false;
+	for (const { key, message } of OPERATOR_ONLY_SAFETY_KEYS) {
+		if (!Object.hasOwn(safety, key)) continue;
+		issues.push({ origin, path: `safety.${key}`, message });
+		delete safety[key];
+		stripped = true;
+	}
+	if (!stripped) return blob;
 	const cleaned = { ...blob };
 	if (Object.keys(safety).length === 0) delete cleaned.safety;
 	else cleaned.safety = safety;
@@ -335,7 +349,7 @@ function prepareProjectLayers(
 		const blob =
 			raw.blob === undefined
 				? undefined
-				: stripProjectScratchRoots(
+				: stripProjectOperatorSafety(
 						stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
 						origin,
 						issues,

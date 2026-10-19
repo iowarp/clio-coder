@@ -6,7 +6,12 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createAskUserToolPolicy } from "../../src/session-control/chat-loop-messages.js";
-import type { AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
+import {
+	type AskUserQuestion,
+	type AskUserResult,
+	UNATTENDED_FREE_TEXT_ANSWER,
+	UNATTENDED_OUTWARD_ANSWER,
+} from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { createRegistry, type ToolResult } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -22,12 +27,14 @@ type Reply = AskUserResult | ((questions: ReadonlyArray<AskUserQuestion>) => Pro
 function fixture(replies: Reply[], autonomy: AutonomyLevel = "default") {
 	const shown: Array<ReadonlyArray<AskUserQuestion>> = [];
 	const presentations: unknown[] = [];
+	const fallbacks: unknown[] = [];
 	const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => autonomy });
 	registerAllTools(registry, {
 		mcpCapabilities: false,
 		askUser: async (questions, options) => {
 			shown.push(questions);
 			presentations.push(options?.decisionPresentation);
+			fallbacks.push(options?.unattendedFallback);
 			const reply = replies.shift();
 			if (reply === undefined) throw new Error("the operator was asked more rounds than the test scripted");
 			return typeof reply === "function" ? reply(questions) : reply;
@@ -38,6 +45,7 @@ function fixture(replies: Reply[], autonomy: AutonomyLevel = "default") {
 	return {
 		shown,
 		presentations,
+		fallbacks,
 		policy,
 		invoke(args: Record<string, unknown>) {
 			return registry.invoke(
@@ -265,6 +273,39 @@ describe("ask_user tool", () => {
 		}
 		deepStrictEqual(f.shown, []);
 		strictEqual(f.policy.status, "idle");
+	});
+
+	it("answers a round nobody answered with its recommended options, closes the interview, and says so", async () => {
+		const f = fixture([{ answers: [], timedOut: { afterSeconds: 300 } }]);
+		const result = await f.call({ questions: [CACHE_QUESTION, { question: "Anything to add?" }] });
+		strictEqual(f.fallbacks[0], true, "the tool lets the surface resolve its own rounds");
+		const interview = interviewOf(result);
+		strictEqual(interview.event, "round_auto_resolved");
+		strictEqual(interview.status, "complete");
+		deepStrictEqual(interview.latest_answers, [
+			{ question: CACHE_QUESTION.question, answer: "Capability tuple", options: ["Capability tuple"], auto: true },
+			{ question: "Anything to add?", answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true },
+		]);
+		if (result.kind !== "ok") throw new Error("expected ok");
+		strictEqual(result.terminate, undefined, "the turn continues");
+		deepStrictEqual(result.details?.unattended, { afterSeconds: 300, autoResolved: 2 });
+		match(result.output, /did not answer within 300 s/);
+		match(result.output, /How should the cache be keyed\? -> Capability tuple/);
+		match(result.output, /state each assumption in your final reply/);
+		const decision = (interview.decisions as Array<Record<string, unknown>>)[0];
+		strictEqual(decision?.source, "agent", "the board records Clio's choice as Clio's");
+		deepStrictEqual(decision?.alternatives, ["Node id"]);
+	});
+
+	it("answers an unanswered outward round no, whatever the model listed first", async () => {
+		const f = fixture([{ answers: [], timedOut: { afterSeconds: 60 } }], "yolo");
+		const result = await f.call({
+			exposure: "outward",
+			questions: [{ question: "Push the release?", options: [{ label: "Yes, push" }, { label: "No" }] }],
+		});
+		deepStrictEqual(interviewOf(result).latest_answers, [
+			{ question: "Push the release?", answer: UNATTENDED_OUTWARD_ANSWER, auto: true },
+		]);
 	});
 
 	it("records an outward round on the interview and keeps it outward after a later local round", async () => {

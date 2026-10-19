@@ -99,6 +99,11 @@ function finalizedInterviewEntryFields(policy: AskUserToolPolicy): DecisionLedge
 			...(decision.source_question ? { source_question: decision.source_question } : {}),
 			status: "active",
 			decidedAt,
+			// An answer Clio chose for an absent operator (#421) is Clio's
+			// decision on the board, with what it passed over and why.
+			...(decision.source === "agent" ? { source: "agent" as const } : {}),
+			...(decision.alternatives && decision.alternatives.length > 0 ? { alternatives: [...decision.alternatives] } : {}),
+			...(decision.rationale ? { rationale: decision.rationale } : {}),
 		});
 	}
 	return {

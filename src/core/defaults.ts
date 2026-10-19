@@ -640,6 +640,13 @@ export interface SafetySettings {
 	 * only from the operator's own settings file.
 	 */
 	scratchRoots: string[];
+	/**
+	 * Seconds an attended permission card or ask_user round waits for the
+	 * operator before Clio resolves it and the turn continues: a parked call is
+	 * denied, an unanswered question takes its recommended option. 0 waits
+	 * forever. Read only from the operator's own settings file.
+	 */
+	unattendedAfterSeconds: number;
 }
 
 export interface IntegrationsSettings {
@@ -780,6 +787,7 @@ export const DEFAULT_SETTINGS = {
 		sandbox: "auto" as SandboxMode,
 		sandboxNetwork: false,
 		scratchRoots: [] as string[],
+		unattendedAfterSeconds: 300,
 	} as SafetySettings,
 	interface: {
 		exitSummary: "auto",
@@ -978,6 +986,10 @@ safety:
   # Extra absolute trees yolo may clean up like the workspace, beside the temp
   # dirs. Honored only in this file; project settings cannot set it.
   scratchRoots: []
+  # Seconds a permission card or ask_user question waits for you before Clio
+  # resolves it and keeps working: the call is denied, the question takes its
+  # recommended option. 0 waits forever. Honored only in this file.
+  unattendedAfterSeconds: 300
 
 interface:
   # Clean-exit summary: auto follows outputDetail; brief | standard | report | off override it.

@@ -97,6 +97,14 @@ function decisionLines(decision: DecisionRecord, selected: boolean, expanded: bo
 			);
 		}
 		lines.push(...wrapIndented(`${theme.fg("annotation", "answer")} ${theme.fg("decisionExplanation", decision.value)}`));
+		// Clio's own choices, an absent operator's question included (#421), say why.
+		if (decision.source === "agent" && decision.rationale) {
+			lines.push(
+				...wrapIndented(
+					`${theme.fg("annotation", "chosen by Clio")} ${theme.fg("decisionExplanation", decision.rationale)}`,
+				),
+			);
+		}
 	}
 	return lines;
 }

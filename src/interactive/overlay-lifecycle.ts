@@ -1,4 +1,5 @@
 import type { LibraryEntryKind } from "../domains/resources/index.js";
+import { unattendedWindowMs } from "../domains/safety/unattended.js";
 import { TOOL_CALL_CARD_SITE } from "../domains/system-one/sites/tool-call.js";
 import { judgeDraftsAtSite } from "../session-control/drafts.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
@@ -198,6 +199,8 @@ export interface OverlayLifecycleController {
 	/** Re-present a parked call before composer input can submit through a mount gap. */
 	retryPendingPermission(): boolean;
 	stopTurnFromPermission(): void;
+	/** A key reached the app while a permission card was up: the operator is present (#421). */
+	notePermissionPresence(): void;
 	/** Whether the live permission card has a mutation the operator can read here. */
 	canInspectMutation(): boolean;
 	/** Whether that mutation is currently open. */
@@ -328,9 +331,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			return verdict?.value.line ?? "";
 		},
 		getOverlayState: () => overlayTransitions.state,
-		openPermissionOverlay: (view, inspect, invocation, advisory) => {
+		openPermissionOverlay: (view, inspect, invocation, advisory, countdown) => {
 			if (overlayTransitions.state === "permission-confirm") return false;
-			const body = createPermissionOverlayBody(view, inspect, invocation, advisory);
+			const body = createPermissionOverlayBody(view, inspect, invocation, advisory, countdown);
 			permissionBody = body;
 			const handle = showOverlayFrame(tui, body, {
 				// The card takes the editor's rails and keeps the draft editable under
@@ -385,6 +388,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				auditReason: "operator stopped the turn at a permission prompt",
 			}),
 		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
+		getUnattendedWindowMs: () => unattendedWindowMs(deps.app.getSettings?.().safety.unattendedAfterSeconds),
 	});
 
 	overlayAskUser = createOverlayAskUserLifecycle({
@@ -412,6 +416,16 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.registerAskUserHandler ? { registerHandler: deps.app.registerAskUserHandler } : {}),
 		...(openAskUserOverlayFactory ? { openAskUserOverlay: openAskUserOverlayFactory } : {}),
 		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
+		getUnattendedWindowMs: () => unattendedWindowMs(deps.app.getSettings?.().safety.unattendedAfterSeconds),
+		onRoundTimedOut: (questions, result) => {
+			const open = Math.max(0, questions.length - result.answers.length);
+			const seconds = result.timedOut?.afterSeconds ?? 0;
+			appendNotice(
+				"warn",
+				`No answer within ${seconds} s: Clio answered ${open === 1 ? "the open question" : `${open} open questions`} itself and continued; the ask_user row shows what it chose.`,
+				busNoticeSink,
+			);
+		},
 		onRoundAnswered: (questions, answers) =>
 			appendInterviewRecord(
 				answers.map((answer) => ({
@@ -649,6 +663,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			overlayPermission?.stopTurn();
 			footer.refresh();
 			tui.requestRender();
+		},
+		notePermissionPresence: () => {
+			if (overlayTransitions.state === "permission-confirm") overlayPermission?.notePresence();
 		},
 		canInspectMutation: () => permissionBody?.canInspect() ?? false,
 		isInspectingMutation: () => permissionBody?.isInspecting() ?? false,

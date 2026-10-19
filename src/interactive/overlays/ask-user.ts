@@ -30,6 +30,12 @@ import {
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
 import { type ClioToken, clioTheme, dotSep, editorTheme, GLYPH, rule, screenTitle } from "../theme/index.js";
+import {
+	formatUnattendedRemaining,
+	startUnattendedCountdown,
+	type UnattendedCountdown,
+	type UnattendedTimers,
+} from "../unattended-countdown.js";
 import { nextContentScrollOffset, type ViewScrollAction } from "../view/view-overlay.js";
 
 /**
@@ -62,6 +68,11 @@ export interface AskUserRoundOptions {
 	 */
 	inputGuardMs?: number;
 	harnessInterview?: ToolInvokeOptions["harnessInterview"];
+	/**
+	 * Close the round as `timedOut` after this window unless a key arrives
+	 * first (#421). Only a model's ask_user round carries it.
+	 */
+	unattended?: { windowMs: number; timers?: UnattendedTimers };
 }
 
 export interface AskUserOverlaySession extends OverlayHandle {
@@ -448,6 +459,8 @@ class AskUserOverlayView implements Component {
 	/** performance.now() before which input other than Esc is dropped. */
 	private inputGuardUntil = 0;
 	private harnessInterview: ToolInvokeOptions["harnessInterview"];
+	/** The round's unattended countdown, while one runs or until the operator holds it. */
+	private countdown: UnattendedCountdown | null = null;
 
 	constructor(private readonly deps: AskUserOverlayViewDeps) {}
 
@@ -474,10 +487,47 @@ class AskUserOverlayView implements Component {
 		this.detailsExpanded = false;
 		this.resetQuestionScroll();
 		this.rebuildControl();
+		this.startCountdown(round?.unattended);
 		this.deps.requestRender();
 		return new Promise<AskUserResult>((resolve) => {
 			this.resolveCurrent = resolve;
 		});
+	}
+
+	private startCountdown(unattended: AskUserRoundOptions["unattended"]): void {
+		this.countdown?.cancel();
+		this.countdown = null;
+		if (unattended === undefined || !(unattended.windowMs > 0)) return;
+		const afterSeconds = Math.round(unattended.windowMs / 1000);
+		this.countdown = startUnattendedCountdown({
+			windowMs: unattended.windowMs,
+			...(unattended.timers !== undefined ? { timers: unattended.timers } : {}),
+			// Whatever the operator committed stays theirs; the tool chooses for the rest.
+			onExpire: () => {
+				this.syncActiveControl();
+				this.finish({ answers: this.answers(), timedOut: { afterSeconds } });
+			},
+			onTick: () => this.deps.requestRender(),
+		});
+	}
+
+	/** The countdown row while the round may still resolve itself, else nothing. */
+	private renderCountdown(width: number): string[] {
+		const left = this.countdown?.remainingMs() ?? null;
+		if (left === null) return [];
+		const outcome =
+			this.presentation.tier === "outward"
+				? "declines this outward step"
+				: this.questions.length > 1
+					? "picks the recommended option for each question"
+					: "picks the recommended option";
+		return wrapTextWithAnsi(
+			clioTheme().fg(
+				"warning",
+				`No answer in ${formatUnattendedRemaining(left)} ${outcome} and Clio continues. Any key holds.`,
+			),
+			width,
+		);
 	}
 
 	cancel(): void {
@@ -527,6 +577,12 @@ class AskUserOverlayView implements Component {
 		if (this.phase !== "asking") {
 			if (matchesKey(data, "escape")) this.deps.onCancel();
 			return;
+		}
+		// Any key says the operator is here, the guarded ones included: the
+		// round waits for them from now on.
+		if (this.countdown !== null) {
+			this.countdown.hold();
+			this.deps.requestRender();
 		}
 		const question = this.currentQuestion();
 		const state = this.currentState();
@@ -655,6 +711,7 @@ class AskUserOverlayView implements Component {
 				safeWidth,
 			),
 			"",
+			...this.renderCountdown(safeWidth),
 			...(hasMenu ? [] : this.renderQuestionStrip(safeWidth)),
 		];
 		const header = this.renderQuestionHeader(question, safeWidth);
@@ -797,6 +854,8 @@ class AskUserOverlayView implements Component {
 	}
 
 	private finish(result: AskUserResult): void {
+		this.countdown?.cancel();
+		this.countdown = null;
 		const resolve = this.resolveCurrent;
 		this.resolveCurrent = null;
 		this.list = null;

@@ -532,6 +532,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Worker sandbox network",
 		"Let sandboxed worker commands reach the network. Workers that have web_fetch get network either way.",
 	],
+	"safety.unattendedAfterSeconds": [
+		"Unattended timeout",
+		"Seconds a permission card or ask_user question waits for you before Clio resolves it and keeps working: the parked call is denied, each unanswered question takes its recommended option, and the session summary counts both. Any key on the card or question holds it. 0 waits forever. User settings only.",
+	],
 	"safety.scratchRoots": [
 		"Yolo scratch roots",
 		"Absolute directories where the yolo main session may delete, truncate and chmod as it does in the workspace. The temp directories always count. User settings only.",

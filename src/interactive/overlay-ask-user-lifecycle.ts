@@ -3,12 +3,14 @@ import {
 	type AskUserAnswer,
 	type AskUserHandler,
 	type AskUserQuestion,
+	type AskUserResult,
 	cancelledAskUserResult,
 	unavailableAskUserResult,
 } from "../tools/ask-user.js";
 import type { HarnessHold } from "../tools/registry.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type AskUserOverlaySession, openAskUserOverlay } from "./overlays/ask-user.js";
+import type { UnattendedTimers } from "./unattended-countdown.js";
 
 /**
  * How long a harness round ignores keys after it appears. Time rather than
@@ -52,6 +54,15 @@ export interface OverlayAskUserLifecycleDeps {
 	 * → answer` row, so it is not fired for one; nor on cancel.
 	 */
 	onRoundAnswered?(questions: ReadonlyArray<AskUserQuestion>, answers: ReadonlyArray<AskUserAnswer>): void;
+	/**
+	 * How long a model's ask_user round waits before it closes as timed out and
+	 * Clio answers for the operator (`safety.unattendedAfterSeconds`, #421).
+	 * Read per round; 0 or absent waits forever.
+	 */
+	getUnattendedWindowMs?(): number;
+	unattendedTimers?: UnattendedTimers;
+	/** A round closed with nobody answering; the tool is about to choose for the operator. */
+	onRoundTimedOut?(questions: ReadonlyArray<AskUserQuestion>, result: AskUserResult): void;
 }
 
 export interface OverlayAskUserLifecycle {
@@ -268,7 +279,17 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		if (!activeSession) return unavailableAskUserResult();
 		const previousCancel = pendingCancel;
 		pendingCancel = cancel;
-		const result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
+		// Only the ask_user tool's own rounds may answer themselves; a settings
+		// confirmation or any other caller keeps waiting for the operator.
+		const windowMs = invokeOptions?.unattendedFallback === true ? (deps.getUnattendedWindowMs?.() ?? 0) : 0;
+		const result = await activeSession.ask(
+			questions,
+			invokeOptions?.decisionPresentation,
+			windowMs > 0
+				? { unattended: { windowMs, ...(deps.unattendedTimers !== undefined ? { timers: deps.unattendedTimers } : {}) } }
+				: undefined,
+		);
+		if (result.timedOut !== undefined) deps.onRoundTimedOut?.(questions, result);
 		if (result.unavailable === true) {
 			// A round already on screen kept its own cancel; this caller was not shown.
 			pendingCancel = previousCancel;

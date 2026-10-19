@@ -8,10 +8,11 @@ import type { CostRow } from "../domains/observability/cost-rows.js";
 import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { CostAggregate, ObservabilityContract } from "../domains/observability/index.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
+import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { WorkerReceiptFacts } from "../session-control/worker-stream.js";
-import { effectiveToolCall } from "../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 
 export interface ExitSummarySnapshot {
 	sessionId: string;
@@ -35,9 +36,29 @@ export interface ExitSummarySnapshot {
 		receipt: string;
 	}>;
 	permissions: { granted: number; denied: number; expired: number; blocked: number };
+	/**
+	 * What Clio answered itself because nobody answered in time (#421):
+	 * ask_user questions it chose for, and permission cards it denied.
+	 */
+	unattended: { questions: number; permissions: number };
 	timeline: ReadonlyArray<{ elapsedMs: number; text: string }>;
 	timelineOmitted: number;
 	compactions: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Questions Clio answered for an absent operator in one tool result, a gateway chain's steps included. */
+function autoResolvedQuestions(toolName: string, result: unknown): number {
+	const count = (candidate: unknown): number => {
+		const details = isRecord(candidate) ? candidate.details : undefined;
+		const unattended = isRecord(details) ? details.unattended : undefined;
+		const n = isRecord(unattended) ? unattended.autoResolved : undefined;
+		return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+	};
+	return count(result) + gatewayChainReceipts(toolName, result).reduce((sum, child) => sum + count(child.result), 0);
 }
 
 interface CollectorDeps {
@@ -70,6 +91,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const timeline: Array<{ elapsedMs: number; text: string }> = [];
 	let timelineOmitted = 0;
 	const permissions = { granted: 0, denied: 0, expired: 0, blocked: 0 };
+	const unattended = { questions: 0, permissions: 0 };
 	const highlight = (text: string): void => {
 		timeline.push({ elapsedMs: Math.max(0, now() - startedAt), text });
 		if (timeline.length > 32) {
@@ -118,6 +140,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		timeline.length = 0;
 		timelineOmitted = 0;
 		permissions.granted = permissions.denied = permissions.expired = permissions.blocked = 0;
+		unattended.questions = unattended.permissions = 0;
 		calls.clear();
 		workers.clear();
 		workerTools.clear();
@@ -207,6 +230,11 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		}),
 		deps.bus.on(BusChannels.PermissionResolved, (event) => {
 			permissions[event.status] += 1;
+			if (event.decidedBy === UNATTENDED_DECIDED_BY) {
+				unattended.permissions += 1;
+				highlight(`Permission timed out unanswered, denied${event.tool ? `: ${event.tool}` : ""}`);
+				return;
+			}
 			highlight(`Permission ${event.status}${event.tool ? `: ${event.tool}` : ""}`);
 		}),
 		deps.bus.on(BusChannels.SafetyBlocked, (event) => {
@@ -250,6 +278,11 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			if (event.type === "tool_execution_end") {
 				const call = calls.get(event.toolCallId);
 				if (event.isError) noteFailure(call?.tool ?? event.toolName);
+				const answeredAlone = event.isError ? 0 : autoResolvedQuestions(event.toolName, event.result);
+				if (answeredAlone > 0) {
+					unattended.questions += answeredAlone;
+					highlight(`Clio answered ${answeredAlone} unanswered question${answeredAlone === 1 ? "" : "s"}`);
+				}
 				if (call) {
 					const payload = { ...event };
 					noteFiles(mutatingReceipts([call.entry, { kind: "message", role: "tool_result", payload }]).paths, call.cwd);
@@ -294,6 +327,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				files: [...files.keys()].sort(),
 				fileChanges: [...files].map(([path, count]) => ({ path, count })).sort((a, b) => a.path.localeCompare(b.path)),
 				permissions: { ...permissions },
+				unattended: { ...unattended },
 				timeline: [...timeline],
 				timelineOmitted,
 				workers: [...workers.values()],

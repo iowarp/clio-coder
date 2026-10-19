@@ -56,6 +56,8 @@ export interface AskUserAnswer {
 	options?: string[];
 	/** The operator's typed text, exactly as submitted. Absent when they only chose. */
 	value?: string;
+	/** Clio chose this answer because nobody answered within the unattended window (#421). */
+	auto?: true;
 }
 
 export interface AskUserDecision {
@@ -68,6 +70,12 @@ export interface AskUserDecision {
 	text?: string;
 	/** Question that produced this decision; derived by the harness, not model-supplied. */
 	source_question?: string;
+	/** `agent` when Clio chose for an absent operator; derived by the harness, not model-supplied. */
+	source?: "agent";
+	/** The options Clio passed over for an absent operator; derived by the harness. */
+	alternatives?: string[];
+	/** Why Clio chose for the operator; derived by the harness. */
+	rationale?: string;
 }
 
 export interface AskUserResult {
@@ -79,7 +87,22 @@ export interface AskUserResult {
 	 * retries on it; the operator's own Esc never sets it.
 	 */
 	unavailable?: true;
+	/**
+	 * Nobody answered within `safety.unattendedAfterSeconds` and nobody touched
+	 * the round (#421). `answers` holds only what was committed before then; the
+	 * ask_user tool chooses for every question left.
+	 */
+	timedOut?: { afterSeconds: number };
 }
+
+/** The answer to a free-text question nobody answered in time. */
+export const UNATTENDED_FREE_TEXT_ANSWER = "no answer: proceed with your best judgment";
+/**
+ * The answer to an outward question nobody answered in time. A timeout only
+ * ever denies, so an unanswered question about publishing or sending
+ * something is a no, whatever the model listed first.
+ */
+export const UNATTENDED_OUTWARD_ANSWER = "no answer: this outward step is not approved; do not take it";
 
 export interface AskUserCall {
 	action: AskUserAction;
@@ -336,8 +359,18 @@ function normalizeAnswerOptions(value: unknown): string[] | undefined {
 	return labels.length > 0 ? labels : undefined;
 }
 
+/** A surface's timeout report, dropped when it carries no usable window. */
+function normalizeTimedOut(value: unknown): { afterSeconds: number } | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const seconds = (value as { afterSeconds?: unknown }).afterSeconds;
+	return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
+		? { afterSeconds: Math.round(seconds) }
+		: undefined;
+}
+
 function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, result: AskUserResult): AskUserResult {
 	if (result.cancelled === true) return cancelledAskUserResult();
+	const timedOut = normalizeTimedOut(result.timedOut);
 	const answers: AskUserAnswer[] = [];
 	for (let index = 0; index < questions.length; index += 1) {
 		const fallbackQuestion = questions[index]?.question ?? "";
@@ -358,7 +391,30 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
 			...(value !== undefined ? { value } : {}),
 		});
 	}
-	return { answers };
+	return { answers, ...(timedOut !== undefined ? { timedOut } : {}) };
+}
+
+/**
+ * Answer, for an absent operator, every question the round left open (#421).
+ * The prompt contract lists the recommended option first, so a question with
+ * options takes that one; a free-text question proceeds on the model's
+ * judgment; an outward question is answered no, because a timeout never
+ * approves anything that leaves the workspace. Answers the operator committed
+ * before the window closed are kept as theirs.
+ */
+function resolveUnattendedAnswers(
+	questions: ReadonlyArray<AskUserQuestion>,
+	answered: ReadonlyArray<AskUserAnswer>,
+	exposure: AutonomyExposure,
+): AskUserAnswer[] {
+	return questions.flatMap((question): AskUserAnswer[] => {
+		const operator = answered.find((answer) => answer.question === question.question);
+		if (operator !== undefined) return [operator];
+		if (exposure === "outward") return [{ question: question.question, answer: UNATTENDED_OUTWARD_ANSWER, auto: true }];
+		const first = question.options?.[0]?.label;
+		if (first === undefined) return [{ question: question.question, answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true }];
+		return [{ question: question.question, answer: first, options: [first], auto: true }];
+	});
 }
 
 /** Puts each answered question back to the text the model sent, where a surface echoed the displayed text. */
@@ -438,6 +494,7 @@ function transcriptAnswers(answers: ReadonlyArray<AskUserAnswer>): AskUserTransc
 		answer: answer.answer,
 		...(answer.options && answer.options.length > 0 ? { options: [...answer.options] } : {}),
 		...(answer.value !== undefined ? { value: answer.value } : {}),
+		...(answer.auto === true ? { auto: true as const } : {}),
 	}));
 }
 
@@ -464,10 +521,16 @@ function decisionFromAnswer(
 	answer: AskUserAnswer,
 	questions: ReadonlyArray<AskUserQuestion>,
 	existing: ReadonlySet<string>,
+	unattendedSeconds?: number,
 ): AskUserDecision {
 	const question = questions.find((candidate) => candidate.question === answer.question);
 	const label = question?.header;
 	const key = uniqueDecisionKey(label ?? answer.question, existing);
+	// Clio's choice for an absent operator is recorded as Clio's, with what it
+	// passed over, so the decision board never shows it as the operator's word.
+	const passedOver = (question?.options ?? [])
+		.map((option) => option.label)
+		.filter((option) => option !== answer.answer);
 	return {
 		key,
 		value: answer.answer,
@@ -475,6 +538,13 @@ function decisionFromAnswer(
 		...(answer.options && answer.options.length > 0 ? { options: [...answer.options] } : {}),
 		...(answer.value !== undefined ? { text: answer.value } : {}),
 		source_question: answer.question,
+		...(answer.auto === true
+			? {
+					source: "agent" as const,
+					...(passedOver.length > 0 ? { alternatives: passedOver } : {}),
+					rationale: `The operator did not answer within ${unattendedSeconds ?? 0} s; Clio chose this for them.`,
+				}
+			: {}),
 	};
 }
 
@@ -486,6 +556,9 @@ function toTranscriptDecision(decision: AskUserDecision): AskUserTranscriptDecis
 		...(decision.options && decision.options.length > 0 ? { options: [...decision.options] } : {}),
 		...(decision.text !== undefined ? { text: decision.text } : {}),
 		...(decision.source_question ? { source_question: decision.source_question } : {}),
+		...(decision.source === "agent" ? { source: "agent" as const } : {}),
+		...(decision.alternatives && decision.alternatives.length > 0 ? { alternatives: [...decision.alternatives] } : {}),
+		...(decision.rationale ? { rationale: decision.rationale } : {}),
 	};
 }
 
@@ -505,11 +578,12 @@ function deriveAnswerDecisions(
 	questions: ReadonlyArray<AskUserQuestion>,
 	answers: ReadonlyArray<AskUserAnswer>,
 	policy: AskUserToolPolicy,
+	unattendedSeconds?: number,
 ): AskUserDecision[] {
 	const existing = new Set(policy.decisions.map((decision) => decision.key));
 	const decisions: AskUserDecision[] = [];
 	for (const answer of answers) {
-		const decision = decisionFromAnswer(answer, questions, existing);
+		const decision = decisionFromAnswer(answer, questions, existing, unattendedSeconds);
 		existing.add(decision.key);
 		decisions.push(decision);
 	}
@@ -582,21 +656,60 @@ function compactInterview(
 	};
 }
 
+/** How an unattended round was settled, for the model and the session record. */
+interface UnattendedRound {
+	afterSeconds: number;
+	autoResolved: number;
+}
+
+/**
+ * What the model reads after Clio answered for an absent operator (#421): who
+ * chose, what was chosen for each question, and that the choices are
+ * assumptions its final reply must state.
+ */
+function unattendedGuidance(
+	unattended: UnattendedRound,
+	answers: ReadonlyArray<AskUserAnswer>,
+	exposure: AutonomyExposure,
+): string[] {
+	const chosen = answers
+		.filter((answer) => answer.auto === true)
+		.map((answer) => `- ${answer.question.split("\n")[0]?.trim() ?? answer.question} -> ${answer.answer}`);
+	return [
+		`The operator did not answer within ${unattended.afterSeconds} s, so Clio answered for them and closed the interview. Clio chose:`,
+		...chosen,
+		exposure === "outward"
+			? "An outward question nobody answered is a no: do not take that step. Continue with the rest of the task, and name each unanswered outward step as an open decision in your final reply."
+			: "Each unanswered question took its recommended (first) option; a question without options means proceed on your best judgment. These are assumptions, not the operator's decisions: continue the task on them without asking again, and state each assumption in your final reply so the operator can revisit it.",
+	];
+}
+
 function renderAskUserState(
 	policy: AskUserToolPolicy,
 	event: string,
 	latestAnswers: ReadonlyArray<AskUserAnswer> = [],
+	unattended?: UnattendedRound,
 ): string {
 	const interview = compactInterview(policy, event, latestAnswers);
 	const planAnswer = policy.rounds
 		.flatMap((round) => round.answers)
 		.reverse()
 		.find((answer) => /^carry out this plan\?$/iu.test(answer.question.trim()));
+	// A choice Clio made for an absent operator never authorizes a plan.
 	const planApproved =
 		policy.status !== "cancelled" &&
+		planAnswer?.auto !== true &&
 		planAnswer?.options?.length === 1 &&
 		/^proceed\b/iu.test(planAnswer.options[0] ?? "") &&
 		!planAnswer.value?.trim();
+	if (unattended !== undefined) {
+		return [
+			`ask_user result: ${event}`,
+			...unattendedGuidance(unattended, latestAnswers, policy.exposure ?? DEFAULT_AUTONOMY_EXPOSURE),
+			"",
+			JSON.stringify({ interview }, null, 2),
+		].join("\n");
+	}
 	const guidance =
 		event === "standalone_answered"
 			? "The operator answered this standalone question. Act on the answer within the requested scope. The earlier completed interview and its decisions are unchanged."
@@ -622,16 +735,19 @@ function okInterviewResult(
 	policy: AskUserToolPolicy,
 	event: string,
 	latestAnswers: ReadonlyArray<AskUserAnswer> = [],
+	unattended?: UnattendedRound,
 ): ToolResult {
 	const interview = compactInterview(policy, event, latestAnswers);
 	return {
 		kind: "ok",
-		output: renderAskUserState(policy, event, latestAnswers),
+		output: renderAskUserState(policy, event, latestAnswers, unattended),
 		details: {
 			interview,
 			answers: latestAnswers,
 			decisions: policy.decisions,
 			...(policy.status === "cancelled" ? { cancelled: true } : {}),
+			// Read by the session summary, which counts what Clio answered alone.
+			...(unattended !== undefined ? { unattended } : {}),
 		},
 		// Esc on a clarification means stop, never "go ahead on a guess" (a
 		// cancelled interview once let a YOLO turn dispatch an unrequested
@@ -786,8 +902,14 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					...options,
 					askUserPolicy: policy,
 					decisionPresentation: classifyDecisionPresentation(decisionFactsForAnswer(exposure)),
+					unattendedFallback: true,
 				});
-				const result = normalizeAskUserResult(questions, restoreQuestions(handled, shown, questions));
+				const normalized = normalizeAskUserResult(questions, restoreQuestions(handled, shown, questions));
+				const timedOut = normalized.timedOut;
+				const result =
+					timedOut === undefined
+						? normalized
+						: { ...normalized, answers: resolveUnattendedAnswers(questions, normalized.answers, exposure) };
 				const answeredAt = new Date().toISOString();
 				policy.callCount += 1;
 				policy.askedQuestionKeys.add(key);
@@ -808,6 +930,23 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					policy.endedAt = answeredAt;
 					if (!standalone) await persistAskUserTranscript(policy, options);
 					return okInterviewResult(policy, "cancelled", []);
+				}
+				if (timedOut !== undefined) {
+					// Clio answered for an absent operator, so the interview closes
+					// here: another round would only wait out the window again.
+					const unattended: UnattendedRound = {
+						afterSeconds: timedOut.afterSeconds,
+						autoResolved: result.answers.filter((answer) => answer.auto === true).length,
+					};
+					policy.status = "complete";
+					policy.endedAt = answeredAt;
+					const note = `Answered by Clio: no operator answer within ${timedOut.afterSeconds} s.`;
+					policy.summary = policy.summary === undefined ? note : `${policy.summary} ${note}`;
+					if (!standalone) {
+						upsertDecisions(policy, deriveAnswerDecisions(questions, result.answers, policy, timedOut.afterSeconds));
+						await persistAskUserTranscript(policy, options);
+					}
+					return okInterviewResult(policy, "round_auto_resolved", result.answers, unattended);
 				}
 				if (standalone) {
 					policy.status = "complete";

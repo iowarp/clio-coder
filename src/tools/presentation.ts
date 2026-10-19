@@ -330,7 +330,10 @@ function interviewPairs(args: ToolRowArgs, details: Readonly<Record<string, unkn
 		if (fields === null) continue;
 		const question = complete ? (text(fields, "label") ?? text(fields, "key")) : text(fields, "question");
 		const answer = text(fields, complete ? "value" : "answer");
-		if (question !== null && answer !== null) pairs.push({ question, answer });
+		// An answer Clio chose because nobody answered in time says so on the row (#421).
+		const auto = !complete && fields.auto === true;
+		if (question !== null && answer !== null)
+			pairs.push({ question, answer: auto ? `${answer} (chosen by Clio)` : answer });
 	}
 	return pairs;
 }

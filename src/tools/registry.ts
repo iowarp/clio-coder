@@ -50,6 +50,7 @@ import type { OperatorYoloScope } from "../domains/safety/policy-engine.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
 import type { SessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
+import { UNATTENDED_ALLOWED_BY } from "../domains/safety/unattended.js";
 import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
 import type { ImageContent } from "../engine/types.js";
 import { approvalGiver, withApprovalNote } from "./approval-note.js";
@@ -503,6 +504,13 @@ export interface ToolInvokeOptions {
 	askUserPolicy?: AskUserToolPolicy;
 	/** Host-derived display copy for an ask_user round. It has no admission authority. */
 	decisionPresentation?: DecisionPresentation;
+	/**
+	 * Set by the ask_user tool alone: the surface may close a round nobody
+	 * answers within `safety.unattendedAfterSeconds` and report it as
+	 * `timedOut`, and the tool chooses for the operator (#421). A harness card
+	 * or a settings confirmation never carries it, so those still wait.
+	 */
+	unattendedFallback?: true;
 	/** Registry-authenticated one-shot operator approval for this execution. */
 	approval?: {
 		requestId: string;
@@ -568,6 +576,8 @@ export interface AskUserTranscriptAnswer {
 	 * issue #228.
 	 */
 	value?: string;
+	/** Clio chose this answer because nobody answered within the unattended window (#421). */
+	auto?: true;
 }
 
 export interface AskUserTranscriptDecision {
@@ -579,6 +589,14 @@ export interface AskUserTranscriptDecision {
 	/** The typed text behind {@link value}, when the answer had any. Harness-derived. */
 	text?: string;
 	source_question?: string;
+	/**
+	 * `agent` when Clio chose the answer because nobody answered in time
+	 * (#421), with the options it passed over and why. Harness-derived; the
+	 * decision board records it as Clio's decision, not the operator's.
+	 */
+	source?: "agent";
+	alternatives?: string[];
+	rationale?: string;
 }
 
 export interface AskUserTranscriptRound {
@@ -723,6 +741,8 @@ export interface ToolRegistry {
 	hasParkedCalls(): boolean;
 	/** Number of calls currently waiting for operator confirmation. */
 	parkedCount(): number;
+	/** Whether this approval request is still parked, so a late timer can tell it from one already settled. */
+	isParked(requestId: string): boolean;
 	/**
 	 * Re-fire the permission-required signal for the oldest parked call without
 	 * changing queue order or resolving anything.
@@ -766,6 +786,13 @@ export interface ToolRegistry {
 export interface ParkCancelOptions {
 	/** Someone answered the ask and refused the call. Absent means the ask was cancelled unanswered. */
 	denied?: boolean;
+	/**
+	 * With `denied`: nobody answered within `safety.unattendedAfterSeconds`, so
+	 * Clio refused the call itself (#421). Like a headless refusal, nobody
+	 * could approve an identical call later in the turn, so the registry
+	 * remembers it and refuses the repeat without parking it again.
+	 */
+	unattended?: boolean;
 }
 
 export type RegistryVerdict =
@@ -1494,18 +1521,22 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		verdict: Extract<RegistryVerdict, { kind: "blocked" }>,
 		reason: string,
 		denied = false,
+		unattended = false,
 	): Extract<RegistryVerdict, { kind: "blocked" }> => {
 		const headless = reason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER) || reason === NO_PARK_LISTENER_REASON;
+		const timedOut = denied && unattended;
 		if (!denied && !headless) return verdict;
 		const refused = withDenial(
 			verdict,
 			"operator_approval",
 			headless
 				? "an operator must approve it, which a headless run cannot do: rerun interactively, or let an approved policy or autonomy level admit it."
-				: "the operator must approve it; ask what to do instead of repeating it.",
+				: timedOut
+					? UNATTENDED_ALLOWED_BY
+					: "the operator must approve it; ask what to do instead of repeating it.",
 			verdict.decision.policy?.ruleId,
 		);
-		if (headless && refused.denial !== undefined) unattendedDenials.add(refused.denial);
+		if ((headless || timedOut) && refused.denial !== undefined) unattendedDenials.add(refused.denial);
 		return refused;
 	};
 
@@ -1757,7 +1788,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		delete entry.abortCleanup;
 	};
 
-	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string, denied?: boolean): void => {
+	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string, options?: ParkCancelOptions): void => {
 		cleanupParkedEntry(entry);
 		disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
 		// A denied/cancelled park is still a model attempt: observe it so
@@ -1766,7 +1797,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
 		entry.resolve(
 			guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ??
-				parkDenial(parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason), reason, denied),
+				parkDenial(
+					parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason),
+					reason,
+					options?.denied,
+					options?.unattended,
+				),
 		);
 	};
 
@@ -1831,12 +1867,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 	};
 
-	const cancelParkedCallById = (requestId: string, reason: string, denied?: boolean): boolean => {
+	const cancelParkedCallById = (requestId: string, reason: string, options?: ParkCancelOptions): boolean => {
 		const index = parked.findIndex((entry) => entry.meta.requestId === requestId);
 		if (index === -1) return false;
 		const [entry] = parked.splice(index, 1);
 		if (!entry) return false;
-		resolveParkedAsBlocked(entry, reason, denied);
+		resolveParkedAsBlocked(entry, reason, options);
 		const next = parked[0];
 		if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 		return true;
@@ -1942,7 +1978,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	let deniedCallsLevel: AutonomyLevel | null = null;
 	/**
 	 * Operator-approval refusals that no operator could have answered
-	 * otherwise: a headless run or a registry with no listener. An attended
+	 * otherwise: a headless run, a registry with no listener, or an attended
+	 * card nobody answered within the unattended window (#421). An attended
 	 * operator who refused once may approve when asked again, so only these
 	 * are remembered.
 	 */
@@ -2153,15 +2190,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			deniedCalls.clear();
 		},
 		cancelParkedCall(requestId, reason, cancelOptions) {
-			return cancelParkedCallById(requestId, reason, cancelOptions?.denied);
+			return cancelParkedCallById(requestId, reason, cancelOptions);
 		},
 		cancelParkedCalls(reason, cancelOptions) {
 			if (parked.length === 0) return;
 			const pending = parked.splice(0, parked.length);
 			for (const entry of pending) {
-				resolveParkedAsBlocked(entry, reason, cancelOptions?.denied);
+				resolveParkedAsBlocked(entry, reason, cancelOptions);
 			}
 		},
+		isParked: (requestId) => parked.some((entry) => entry.meta.requestId === requestId),
 		onPermissionRequired(listener) {
 			permissionListeners.add(listener);
 			return () => {
@@ -2290,6 +2328,8 @@ const DENIED_CALL_MEMORY_LIMIT = 64;
 function askUserAnswered(verdict: RegistryVerdict): boolean {
 	if (verdict.kind !== "ok" || verdict.result.kind !== "ok") return false;
 	const details = verdict.result.details;
+	// A round Clio answered for an absent operator (#421) is no operator's answer.
+	if (details?.unattended !== undefined) return false;
 	return details?.cancelled !== true && Array.isArray(details?.answers) && details.answers.length > 0;
 }
 

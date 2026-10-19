@@ -8,6 +8,7 @@ import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE, fitConsequenceLine } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
+import { UNATTENDED_DECIDED_BY, unattendedPermissionReason } from "../domains/safety/unattended.js";
 import type { ToolApprovalStateEvent } from "../session-control/chat-loop.js";
 import { resolvePermission } from "../session-control/index.js";
 import type { NoticeSource } from "../session-control/notice-source.js";
@@ -24,7 +25,9 @@ import {
 	askAxis,
 	describeCallTarget,
 	type PermissionAdvisoryReader,
+	type PermissionCountdownReader,
 } from "./permission-overlay.js";
+import { startUnattendedCountdown, type UnattendedCountdown, type UnattendedTimers } from "./unattended-countdown.js";
 
 /**
  * What the card advisory is told about a parked call: the sanitized target the
@@ -43,11 +46,19 @@ type PermissionToolRegistry = Pick<
 	| "cancelParkedCall"
 	| "cancelParkedCalls"
 	| "hasParkedCalls"
+	| "isParked"
 	| "onPermissionRequired"
 	| "parkedCount"
 	| "renotifyHead"
 	| "resumeParkedCalls"
 >;
+
+/** What an unattended denial says about the call it refuses. */
+interface UnattendedPark {
+	tool: string;
+	actionClass: string;
+	seconds: number;
+}
 
 interface WorkerEscalationEntry {
 	runId: string;
@@ -80,6 +91,7 @@ export interface OverlayPermissionLifecycleDeps {
 		inspect?: MutationInspector,
 		invocation?: () => unknown,
 		advisory?: PermissionAdvisoryReader,
+		countdown?: PermissionCountdownReader,
 	): boolean;
 	closeOverlay(): void;
 	appendNotice(level: NoticeLevel, text: string, source?: NoticeSource): void;
@@ -105,6 +117,15 @@ export interface OverlayPermissionLifecycleDeps {
 	 * advisory (`PermissionRequiredMeta.gateReason`).
 	 */
 	describeToolRisk?(subject: ToolRiskSubject): Promise<string>;
+	/**
+	 * How long a main-agent card waits for the operator before Clio denies the
+	 * call and the turn continues (`safety.unattendedAfterSeconds`, #421). Read
+	 * once per request when it parks; 0 or absent waits forever. Worker
+	 * escalations keep their own `fleet.permissions.escalate.timeoutMs`.
+	 */
+	getUnattendedWindowMs?(): number;
+	/** Monotonic timers for the countdowns; tests inject a manual clock. */
+	unattendedTimers?: UnattendedTimers;
 }
 
 export interface OverlayPermissionLifecycle {
@@ -117,6 +138,12 @@ export interface OverlayPermissionLifecycle {
 	 * time, and quitting the app was the only exit.
 	 */
 	stopTurn(): void;
+	/**
+	 * The operator pressed a key while a card was on screen. The card's own
+	 * countdown stops for good, and calls queued behind it start their window
+	 * again, so a present operator never loses a queued ask to the timeout.
+	 */
+	notePresence(): void;
 	onPermissionOverlayClosed(): void;
 	/**
 	 * Re-present whatever is still parked once no overlay holds the screen. A
@@ -370,6 +397,87 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let denied = false;
 	let stopping = false;
 	let withdrawingWorker = false;
+	/** Set when the card on screen closed because its countdown ran out, not because anyone answered. */
+	let timedOut: UnattendedPark | null = null;
+	/** Unattended countdowns of parked main-agent calls, by approval request id. */
+	const countdowns = new Map<string, UnattendedPark & { countdown: UnattendedCountdown }>();
+	const onScreenRequestId = (): string | undefined => pendingPermission?.meta?.requestId;
+	const dropCountdown = (requestId: string | undefined): void => {
+		if (requestId === undefined) return;
+		countdowns.get(requestId)?.countdown.cancel();
+		countdowns.delete(requestId);
+	};
+	const dropAllCountdowns = (): void => {
+		for (const entry of countdowns.values()) entry.countdown.cancel();
+		countdowns.clear();
+	};
+	/**
+	 * Deny one parked call nobody answered. It goes back to the model as an
+	 * ordinary denial, so the turn continues; a timeout never approves and never
+	 * stops the turn. A call already settled some other way (an abort, a
+	 * shutdown) is left alone, so nothing is counted for it.
+	 */
+	const denyUnattended = (requestId: string, entry: UnattendedPark): void => {
+		if (deps.toolRegistry?.isParked(requestId) !== true) return;
+		resolvePermission(
+			{ bus: deps.bus, registry: deps.toolRegistry },
+			{
+				action: "deny",
+				reason: unattendedPermissionReason(entry.tool, entry.seconds),
+				payload: {
+					status: "denied",
+					requestId,
+					origin: "main",
+					decidedBy: UNATTENDED_DECIDED_BY,
+					tool: entry.tool,
+					actionClass: entry.actionClass,
+					reason: `no operator answer within ${entry.seconds} s`,
+					requestedBy: "tool",
+					at: Date.now(),
+				},
+			},
+		);
+		deps.appendNotice(
+			"warn",
+			`No answer within ${entry.seconds} s: Clio denied ${entry.tool}, which did not run, and the turn continued.`,
+		);
+	};
+	const expireUnattended = (requestId: string): void => {
+		const entry = countdowns.get(requestId);
+		countdowns.delete(requestId);
+		if (entry === undefined) return;
+		if (onScreenRequestId() === requestId) {
+			// The close answers through onPermissionOverlayClosed, the same path
+			// an operator's key takes, so the next parked call is presented after.
+			timedOut = entry;
+			deps.closeOverlay();
+			return;
+		}
+		denyUnattended(requestId, entry);
+	};
+	const armCountdown = (requestId: string, tool: string, actionClass: string): void => {
+		// Requests settled without this lifecycle (an abort, a cancelled turn)
+		// leave their countdowns behind; the next park is the moment to drop them.
+		for (const known of [...countdowns.keys()]) {
+			if (deps.toolRegistry?.isParked(known) !== true) dropCountdown(known);
+		}
+		if (countdowns.has(requestId)) return;
+		const windowMs = deps.getUnattendedWindowMs?.() ?? 0;
+		if (!(windowMs > 0)) return;
+		const countdown = startUnattendedCountdown({
+			windowMs,
+			...(deps.unattendedTimers !== undefined ? { timers: deps.unattendedTimers } : {}),
+			onExpire: () => expireUnattended(requestId),
+			onTick: () => {
+				if (onScreenRequestId() === requestId) deps.requestRender();
+			},
+		});
+		countdowns.set(requestId, { countdown, tool, actionClass, seconds: Math.round(windowMs / 1000) });
+	};
+	const countdownReader =
+		(requestId: string): PermissionCountdownReader =>
+		() =>
+			countdowns.get(requestId)?.countdown.remainingMs() ?? null;
 
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
 		const advisory = advisorySlot(deps, {
@@ -464,6 +572,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					view,
 				});
 			}
+			// The window runs from the park whether or not a card can show yet: an
+			// operator who left a picker open is as absent as one who left the card.
+			armCountdown(meta.requestId, call.tool, decision.classification.actionClass);
 			// Facts only, and only the ones already on the card. The parked args
 			// hold mutation text and command strings that have not been through the
 			// call-target allowlist, so the advisory reads the sanitized target the
@@ -477,7 +588,15 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 							target: view.target ?? "",
 							requestId: view.requestId,
 						});
-			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view), () => call.args, advisory)) {
+			if (
+				!deps.openPermissionOverlay(
+					view,
+					mainMutationInspector(call, view),
+					() => call.args,
+					advisory,
+					countdownReader(meta.requestId),
+				)
+			) {
 				announceParked();
 				return;
 			}
@@ -524,16 +643,21 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		pendingWorker = null;
 		const wasConfirmed = confirmed;
 		const wasDenied = denied;
+		const wasTimedOut = timedOut;
 		confirmed = false;
 		denied = false;
+		timedOut = null;
 		// Closing a modal is not an operator decision. Re-present the parked
 		// request when another lifecycle closes its screen without an answer.
-		if (!wasConfirmed && !wasDenied && !stopping) {
+		if (!wasConfirmed && !wasDenied && !stopping && wasTimedOut === null) {
 			if (worker) workerQueue.unshift(worker);
 			retryPending();
 			return;
 		}
-		if (worker) {
+		dropCountdown(permission?.meta?.requestId);
+		if (wasTimedOut !== null && permission?.meta !== undefined) {
+			denyUnattended(permission.meta.requestId, wasTimedOut);
+		} else if (worker) {
 			try {
 				deps.dispatch.resolveWorkerPermission?.(worker.runId, worker.requestId, wasConfirmed ? "approve" : "deny");
 			} catch (error) {
@@ -602,6 +726,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (stopping) {
 			stopping = false;
 			workerQueue.length = 0;
+			dropAllCountdowns();
 			return;
 		}
 		retryPending();
@@ -633,9 +758,22 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					: `[Clio Coder] turn stopped at the approval card; ${tool} did not run.`,
 			);
 		},
+		notePresence: () => {
+			if (pendingPermission === null && pendingWorker === null) return;
+			const onScreen = onScreenRequestId();
+			let changed = false;
+			for (const [requestId, entry] of countdowns) {
+				if (entry.countdown.state() !== "running") continue;
+				if (requestId === onScreen) entry.countdown.hold();
+				else entry.countdown.restart();
+				changed = true;
+			}
+			if (changed) deps.requestRender();
+		},
 		onPermissionOverlayClosed,
 		retryPending,
 		dispose: () => {
+			dropAllCountdowns();
 			unsubscribePermission();
 			unsubscribeWorker();
 			unsubscribeWorkerResolution();

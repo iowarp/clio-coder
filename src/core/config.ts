@@ -2326,7 +2326,15 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.safety)) issues.add("safety", `expected a map, got ${describe(raw.safety)}`);
 		else {
 			const safety = raw.safety;
-			issues.unknownKeys("safety", safety, ["autonomy", "limits", "review", "sandbox", "sandboxNetwork", "scratchRoots"]);
+			issues.unknownKeys("safety", safety, [
+				"autonomy",
+				"limits",
+				"review",
+				"sandbox",
+				"sandboxNetwork",
+				"scratchRoots",
+				"unattendedAfterSeconds",
+			]);
 			if ("autonomy" in safety) {
 				const parsed = expectEnum(issues, "safety.autonomy", safety.autonomy, AUTONOMY_LEVELS, RETIRED_AUTONOMY_VALUES);
 				if (parsed !== undefined) settings.safety.autonomy = parsed;
@@ -2348,6 +2356,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						return problem === null;
 					});
 				}
+			}
+			if ("unattendedAfterSeconds" in safety) {
+				const parsed = expectInteger(issues, "safety.unattendedAfterSeconds", safety.unattendedAfterSeconds, { min: 0 });
+				if (parsed !== undefined) settings.safety.unattendedAfterSeconds = parsed;
 			}
 			if ("limits" in safety) {
 				if (!isPlainObject(safety.limits)) issues.add("safety.limits", `expected a map, got ${describe(safety.limits)}`);
