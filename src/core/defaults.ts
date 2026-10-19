@@ -650,6 +650,13 @@ export interface SafetySettings {
 	 */
 	scratchRoots: string[];
 	/**
+	 * Environment variables a sandboxed command keeps although their names or
+	 * values look like credentials. Every other credential variable is removed
+	 * before the sandbox starts, since a contained command reaches the network
+	 * without a judgment. Read only from the operator's own settings file.
+	 */
+	sandboxPassEnv: string[];
+	/**
 	 * Workspace snapshots before the main agent mutates a Git work tree: auto
 	 * snapshots before each turn's first mutating call and before every
 	 * destructive one, and `/rewind` restores files from them; off takes none.
@@ -833,6 +840,7 @@ export const DEFAULT_SETTINGS = {
 		sandbox: "auto" as SandboxMode,
 		sandboxNetwork: false,
 		scratchRoots: [] as string[],
+		sandboxPassEnv: [] as string[],
 		snapshots: "auto" as WorkspaceSnapshotMode,
 		unattendedAfterSeconds: 300,
 		yoloAccepted: false,
@@ -1045,6 +1053,10 @@ safety:
   # the workspace, beside the temp dirs. Honored only in this file; project
   # settings cannot set it.
   scratchRoots: []
+  # Sandboxed commands start without credential variables (tokens, keys,
+  # passwords, URLs with a password). Names listed here are kept. Honored only
+  # in this file.
+  sandboxPassEnv: []
   # Git snapshots before the agent changes files, restored with /rewind: auto | off.
   snapshots: auto
   # Seconds a permission card or ask_user question waits for you before Clio

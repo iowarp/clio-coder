@@ -970,6 +970,8 @@ const WORKER_SANDBOX_KEYS = new Set([
 	"gitWritablePaths",
 	"readableRoots",
 	"network",
+	"passEnv",
+	"secretEnv",
 ]);
 
 function readAbsolutePaths(value: unknown, source: string): void {
@@ -994,6 +996,9 @@ function validateWorkerSandbox(value: unknown): void {
 		readAbsolutePaths(sandbox[key], `WorkerSpec.sandbox.${key}`);
 	}
 	if (typeof sandbox.network !== "boolean") throw new Error("WorkerSpec.sandbox.network must be a boolean");
+	for (const key of ["passEnv", "secretEnv"] as const) {
+		if (sandbox[key] !== undefined) readStringArray(sandbox[key], `WorkerSpec.sandbox.${key}`);
+	}
 }
 
 function validateWorkerFlowPolicy(value: unknown): void {

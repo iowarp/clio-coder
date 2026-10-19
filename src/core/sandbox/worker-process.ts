@@ -4,9 +4,11 @@ import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
 import { canonicalizePath } from "../path-canonical.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
+import { discoverSecretMasks } from "./secret-files.js";
 import type {
 	SandboxAvailability,
 	SandboxCommand,
+	SandboxEnvPolicy,
 	SandboxInvocation,
 	SandboxInvocationSpec,
 	SandboxMaskedPath,
@@ -190,8 +192,35 @@ export function composeWorkerSandboxInvocation(
 
 export type SandboxedSpawnPlan =
 	| { kind: "direct" }
-	| { kind: "sandboxed"; file: string; args: string[] }
+	| { kind: "sandboxed"; file: string; args: string[]; env: SandboxEnvPolicy }
 	| { kind: "refused"; message: string };
+
+/**
+ * The trees a worker's command can see that hold the run's own files: its
+ * directory write roots and its readable roots (cwd, task worktree, parent
+ * checkouts), minus Git metadata, which holds no secret file and is large.
+ */
+function workerSecretRoots(policy: WorkerSandboxSpec): string[] {
+	const roots = [
+		...policy.writableRoots.filter((root) => root.endsWith("/") || isDirectoryPath(root)),
+		...policy.readableRoots,
+	];
+	return [...new Set(roots)].filter((root) => !root.split(path.sep).includes(".git"));
+}
+
+function isDirectoryPath(entry: string): boolean {
+	try {
+		return statSync(entry).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/** Secret files under the worker's own trees, on top of the home credential masks. */
+function workerSpawnMasks(policy: WorkerSandboxSpec): SandboxMaskedPath[] {
+	const base = workerSandboxMasks();
+	return [...base, ...discoverSecretMasks({ workspaceRoots: workerSecretRoots(policy) }, base).masks];
+}
 
 /**
  * Decide how one worker child process spawns. No policy means the host runs
@@ -219,11 +248,19 @@ export function planSandboxedSpawn(
 			command,
 			cwd,
 			availability,
+			availability.available ? workerSpawnMasks(policy) : workerSandboxMasks(),
 		);
 	} catch (error) {
 		return { kind: "refused", message: error instanceof Error ? error.message : String(error) };
 	}
-	if (invocation !== null) return { kind: "sandboxed", file: invocation.file, args: invocation.args };
+	if (invocation !== null) {
+		return {
+			kind: "sandboxed",
+			file: invocation.file,
+			args: invocation.args,
+			env: { passEnv: policy.passEnv ?? [], secretNames: policy.secretEnv ?? [] },
+		};
+	}
 	const reason = availability.reason ?? "no sandbox backend";
 	if (policy.mode === "required") {
 		return {

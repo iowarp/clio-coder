@@ -31,6 +31,7 @@ import {
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../core/safe-exec.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
+import { sandboxEnvPolicy } from "../core/sandbox/env-scrub.js";
 import { mainShellContained, yoloScriptSandboxState } from "../core/sandbox/main-session.js";
 import {
 	applyOverrides,
@@ -2908,6 +2909,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				snapshots: safety.snapshots !== "off" && workspaceSnapshotRepositoryPresent(process.cwd()),
 			};
 		},
+		sandboxEnv: () => sandboxEnvPolicy(getCurrentSettings()),
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		// System One reads what the deterministic checks cannot: content other people
 		// wrote, and an unrecognized command that yolo would run unread. Both are read

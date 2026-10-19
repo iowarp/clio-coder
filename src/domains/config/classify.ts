@@ -44,6 +44,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// The main registry reads it at every admission, so the next tool call
 	// observes a change (#419).
 	"safety.scratchRoots",
+	// The main registry reads it for every contained call; dispatch copies it
+	// into each new WorkerSpec, so a running worker keeps the list it started with.
+	"safety.sandboxPassEnv",
 	// The main registry asks on every mutating call whether to snapshot.
 	"safety.snapshots",
 	// Each permission card and ask_user round reads it when it starts waiting,

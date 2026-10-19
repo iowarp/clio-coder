@@ -240,6 +240,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 			return place("safety", "Spending & tool limits");
 		case "safety.sandbox":
 		case "safety.sandboxNetwork":
+		case "safety.sandboxPassEnv":
 			return place("safety", "Worker approvals");
 		default:
 	}

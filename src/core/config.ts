@@ -2335,6 +2335,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"sandbox",
 				"sandboxNetwork",
 				"scratchRoots",
+				"sandboxPassEnv",
 				"snapshots",
 				"unattendedAfterSeconds",
 				"yoloAccepted",
@@ -2363,6 +2364,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						const problem = scratchRootProblem(root);
 						if (problem !== null) issues.add("safety.scratchRoots", `${root}: ${problem}`);
 						return problem === null;
+					});
+				}
+			}
+			if ("sandboxPassEnv" in safety) {
+				const parsed = expectStringArray(issues, "safety.sandboxPassEnv", safety.sandboxPassEnv);
+				if (parsed !== undefined) {
+					settings.safety.sandboxPassEnv = parsed.filter((name) => {
+						const valid = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name);
+						if (!valid) issues.add("safety.sandboxPassEnv", `${name}: not an environment variable name`);
+						return valid;
 					});
 				}
 			}

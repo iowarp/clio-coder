@@ -7,6 +7,7 @@ import {
 	mainShellContained,
 	yoloScriptSandboxState,
 } from "../core/sandbox/main-session.js";
+import { discoverSecretMasks } from "../core/sandbox/secret-files.js";
 import type { SandboxMode } from "../core/sandbox/types.js";
 import {
 	type DoctorFinding,
@@ -121,16 +122,21 @@ function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
 	const availability = sandboxAvailability();
 	const mode = configuredSandboxMode();
 	const workspace = canonicalizePath(workspaceRoot) ?? workspaceRoot;
-	const roots = mainSandboxPolicy({
-		workspace,
-		scratchRoots: effectiveScratchRoots(configuredScratchRoots(), workspaceRoot),
-	}).writableRoots;
+	const scratchRoots = effectiveScratchRoots(configuredScratchRoots(), workspaceRoot);
+	const roots = mainSandboxPolicy({ workspace, scratchRoots }).writableRoots;
 	const uncontained = !mainShellContained(mode, availability);
+	const secrets = uncontained ? null : discoverSecretMasks({ workspaceRoots: [workspace], scratchRoots });
 	return {
 		ok: true,
 		name: "shell sandbox",
-		level: uncontained || yoloScriptSandboxState(mode, availability) === "refused" ? "warn" : "ok",
-		detail: mainSandboxLine(mode, availability, roots),
+		level:
+			uncontained || secrets?.capped === true || yoloScriptSandboxState(mode, availability) === "refused" ? "warn" : "ok",
+		detail: mainSandboxLine(
+			mode,
+			availability,
+			roots,
+			secrets === null ? undefined : { count: secrets.masks.length, capped: secrets.capped },
+		),
 	};
 }
 

@@ -54,6 +54,7 @@ import {
 	UnsupportedResponseSchemaError,
 } from "../../core/response-schema.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import { sandboxEnvPolicy } from "../../core/sandbox/env-scrub.js";
 import type { WorkerSandboxSpec } from "../../core/sandbox/types.js";
 import {
 	resolveWorkerSandboxSpec,
@@ -2867,6 +2868,7 @@ function workerSandboxFor(input: {
 			allowedTools: input.allowedTools,
 			networkSetting: input.settings?.safety.sandboxNetwork === true,
 			dependencyRoots,
+			...(input.settings !== undefined ? { env: sandboxEnvPolicy(input.settings) } : {}),
 		}),
 	};
 }

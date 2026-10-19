@@ -43,6 +43,22 @@ export interface WorkerSandboxSpec {
 	readableRoots: ReadonlyArray<string>;
 	/** False isolates the command in an empty network namespace. */
 	network: boolean;
+	/** `safety.sandboxPassEnv`: variables the environment scrub keeps. Absent when empty. */
+	passEnv?: ReadonlyArray<string>;
+	/** Credential variables Clio's own targets read, scrubbed whatever their names. Absent when empty. */
+	secretEnv?: ReadonlyArray<string>;
+}
+
+/**
+ * How a sandboxed command's inherited environment is scrubbed before the
+ * sandbox starts (env-scrub.ts). Credential variables never reach a contained
+ * command, which can reach the network without any judgment.
+ */
+export interface SandboxEnvPolicy {
+	/** `safety.sandboxPassEnv`: names kept even when they look like credentials. */
+	passEnv: ReadonlyArray<string>;
+	/** Credential variables Clio's own targets read (`auth.apiKeyEnvVar`), removed whatever they are named. */
+	secretNames: ReadonlyArray<string>;
 }
 
 /** A path hidden from the sandboxed process. Only existing paths can be masked. */

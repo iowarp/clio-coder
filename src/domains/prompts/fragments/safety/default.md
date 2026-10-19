@@ -11,9 +11,11 @@ OS sandbox, bash and run_script commands run inside it without asking: the
 workspace and the scratch roots (TMPDIR, /tmp, /var/tmp and the operator's
 safety.scratchRoots) are writable along with package caches and the
 repository's git objects and refs, the network is on, and credentials and the
-SSH agent are hidden. When a command fails because of the sandbox, for example
-it needs credentials or writes outside those roots, rerun it with
-`unsandboxed: true`; that call is reviewed against the operator's request.
+SSH agent are hidden: credential variables are unset and secret files such as
+.env files and private keys cannot be read. When a command fails because of the
+sandbox, for example it needs one of those or writes outside those roots,
+rerun it with `unsandboxed: true`; that call is reviewed against the
+operator's request.
 Pushes, publishes, code-host and cloud CLIs and network writes run outside the
 sandbox and are reviewed the same way. Main-session reads run anywhere except
 secret paths. Main-session destructive workspace operations (git reset --hard,

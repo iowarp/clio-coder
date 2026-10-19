@@ -4,6 +4,7 @@ import { ToolNames } from "../tool-names.js";
 import {
 	type SandboxAvailability,
 	type SandboxBackend,
+	type SandboxEnvPolicy,
 	type SandboxMode,
 	WORKER_SANDBOX_SPEC_VERSION,
 	type WorkerSandboxSpec,
@@ -23,6 +24,8 @@ export interface WorkerSandboxPolicyInput {
 	networkSetting: boolean;
 	/** Parent checkouts supplying shared task dependencies; also visible when under /tmp. */
 	dependencyRoots?: ReadonlyArray<string>;
+	/** How the worker's sandboxed commands scrub their inherited environment (env-scrub.ts). */
+	env?: SandboxEnvPolicy;
 }
 
 /**
@@ -54,6 +57,8 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 			? [...input.writeBoundaries]
 			: [input.taskWorktree?.path ?? input.cwd];
 	const layout = input.taskWorktree === undefined ? null : readTaskWorktreeGitLayout(input.taskWorktree.path);
+	const passEnv = input.env?.passEnv ?? [];
+	const secretEnv = input.env?.secretNames ?? [];
 	const readableRoots = [
 		input.cwd,
 		...(input.taskWorktree !== undefined ? [input.taskWorktree.path] : []),
@@ -79,6 +84,8 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		gitWritablePaths: [],
 		readableRoots: [...new Set(readableRoots)],
 		network: workerSandboxNetwork(input.allowedTools, input.networkSetting),
+		...(passEnv.length > 0 ? { passEnv: [...passEnv] } : {}),
+		...(secretEnv.length > 0 ? { secretEnv: [...secretEnv] } : {}),
 	};
 }
 
@@ -181,5 +188,5 @@ export function workerSandboxLine(spec: WorkerSandboxSpec | undefined, availabil
 			? ""
 			: ` These write-root files do not exist yet and shell commands cannot create them, so create each with the write tool before any command writes to it: ${missing.join(", ")}.`;
 	const backend = seatbelt ? "seatbelt (experimental, unverified macOS profile)" : availability.backend;
-	return `Shell sandbox: ${backend}. Commands you run can write ${writes}; .git and .clio-coder stay read-only; network is ${spec.network ? "allowed" : "off"}.${seed}`;
+	return `Shell sandbox: ${backend}. Commands you run can write ${writes}; .git and .clio-coder stay read-only; network is ${spec.network ? "allowed" : "off"}; credential variables are unset and secret files such as .env and private keys cannot be read, so name a command that needs one in your result instead of working around it.${seed}`;
 }

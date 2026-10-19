@@ -8,6 +8,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
+import { scrubSandboxEnv } from "./sandbox/env-scrub.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
@@ -202,10 +203,10 @@ export function createBashOutputProgressController(
 	};
 }
 
-function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+/** What every bash command's environment drops, sandboxed or not: exported functions and Clio's control keys. */
+function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env = { ...source };
-	for (const key of Object.keys(env))
-		if (isSecretArgKey(key) || key.startsWith("BASH_FUNC_")) Reflect.deleteProperty(env, key);
+	for (const key of Object.keys(env)) if (key.startsWith("BASH_FUNC_")) Reflect.deleteProperty(env, key);
 	env.AI_AGENT = AI_AGENT_NAME;
 	// An inherited CDPATH sends a relative cd somewhere the command does not
 	// name, and bash admission resolves cds from the command's text alone.
@@ -213,6 +214,12 @@ function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
+	return env;
+}
+
+function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const env = baseToolEnv(source);
+	for (const key of Object.keys(env)) if (isSecretArgKey(key)) Reflect.deleteProperty(env, key);
 	return env;
 }
 
@@ -294,6 +301,8 @@ function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
 interface BashSpawnPlan {
 	mode: "-c" | "-lc";
 	env: NodeJS.ProcessEnv;
+	/** The same environment before any credential filter, which `safety.sandboxPassEnv` names are kept from. */
+	source: NodeJS.ProcessEnv;
 }
 
 function captureLoginEnvOnce(): Promise<NodeJS.ProcessEnv | null> {
@@ -307,12 +316,12 @@ function captureLoginEnvOnce(): Promise<NodeJS.ProcessEnv | null> {
 
 async function bashSpawnPlan(): Promise<BashSpawnPlan> {
 	const captured = await captureLoginEnvOnce();
-	if (captured === null) return { mode: "-c", env: buildToolEnv() };
+	if (captured === null) return { mode: "-c", env: buildToolEnv(), source: baseToolEnv(process.env) };
 	// Captured (login-transformed) values win; keys added to process.env after
 	// the capture still flow through; the CLIO control keys are re-stripped
 	// last so they never reach the child from either source.
-	const env = buildToolEnv({ ...process.env, ...captured });
-	return { mode: "-c", env };
+	const merged = { ...process.env, ...captured };
+	return { mode: "-c", env: buildToolEnv(merged), source: baseToolEnv(merged) };
 }
 
 export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "stderr">): string {
@@ -342,11 +351,6 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			"no bash was found on this host; install Git for Windows (Git Bash) or put its bash.exe on PATH (#421)",
 		);
 	const plan = await bashSpawnPlan();
-	const attribution = withManagedGitCommitAttributionEnvironment(plan.env, {
-		cwd: options.cwd ?? process.cwd(),
-		enabled: gitCommitAttributionEnabled(process.env),
-	});
-	reportCommitAttributionDiagnostic(attribution.diagnostic);
 	// Preserve an upstream failure through output filters such as tail, so
 	// verification receipts cannot report success merely because the filter
 	// succeeded. A caller can explicitly opt out with `set +o pipefail`.
@@ -361,6 +365,15 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			: undefined;
 	const sandbox = containedPlan ?? planSandboxedSpawn({ argv: shellArgv }, options.cwd ?? process.cwd());
 	if (sandbox.kind === "refused") return notSpawnedResult(sandbox.message);
+	// A sandboxed command reaches the network without a judgment, so its
+	// environment loses every credential variable before the sandbox starts;
+	// the scrub covers the names the plain filter drops and more.
+	const toolEnv = sandbox.kind === "sandboxed" ? scrubSandboxEnv(plan.source, sandbox.env, plan.source).env : plan.env;
+	const attribution = withManagedGitCommitAttributionEnvironment(toolEnv, {
+		cwd: options.cwd ?? process.cwd(),
+		enabled: gitCommitAttributionEnabled(process.env),
+	});
+	reportCommitAttributionDiagnostic(attribution.diagnostic);
 	const spawnFile = sandbox.kind === "sandboxed" ? sandbox.file : shell;
 	const spawnArgs = sandbox.kind === "sandboxed" ? sandbox.args : shellArgv.slice(1);
 	return new Promise<BashCommandResult>((resolve) => {

@@ -572,6 +572,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Safety judge block rules",
 		"Extra kinds of call the judge refuses unless you ask for that action, added to its default rules. User settings only.",
 	],
+	"safety.sandboxPassEnv": [
+		"Sandbox environment pass-through",
+		"Environment variables your sandboxed commands keep although they look like credentials. Every other token, key, password and URL with a password is removed before a sandboxed command starts, because it can reach the network without asking. User settings only.",
+	],
 	"safety.scratchRoots": [
 		"Scratch roots",
 		"Absolute directories your sandboxed commands and file edits may write at autonomy default without asking, and where deletes run as they do in the workspace. TMPDIR, /tmp and /var/tmp always count. User settings only.",

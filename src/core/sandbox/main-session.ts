@@ -4,9 +4,11 @@ import path from "node:path";
 import { clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../xdg.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
+import { discoverSecretMasks } from "./secret-files.js";
 import type {
 	SandboxAvailability,
 	SandboxCommand,
+	SandboxEnvPolicy,
 	SandboxInvocationSpec,
 	SandboxMaskedPath,
 	SandboxMode,
@@ -20,7 +22,9 @@ import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
  * dispatched workers use, whenever a backend exists and `safety.sandbox` is
  * not off: the filesystem stays readable, writes land only in the workspace,
  * the effective scratch roots, the package caches and the repository's git
- * dirs, credentials and the SSH agent are masked, the command gets its own PID
+ * dirs, credentials and the SSH agent are masked, the secret files inside the
+ * workspace and scratch roots cannot be read, the inherited environment loses
+ * its credential variables (env-scrub.ts), the command gets its own PID
  * namespace, and the network stays on because this is the operator's own
  * session. Unlike a worker the command sees the real /tmp, where operators
  * expect benchmark outputs. Containment is what lets such a call run without
@@ -71,7 +75,12 @@ export interface MainSandboxPolicyInput {
 	clioDirs: ReadonlyArray<string>;
 	/** The workspace repository's git layout, when the workspace is inside one. */
 	git?: MainSandboxGitLayout;
+	/** How the command's inherited environment is scrubbed. Absent scrubs with no pass list. */
+	env?: SandboxEnvPolicy;
 }
+
+/** No pass list and no target credential names: the scrub's name and value rules alone. */
+const DEFAULT_SANDBOX_ENV_POLICY: SandboxEnvPolicy = { passEnv: [], secretNames: [] };
 
 export interface MainSandboxPolicy {
 	writableRoots: ReadonlyArray<string>;
@@ -82,6 +91,9 @@ export interface MainSandboxPolicy {
 	/** Git config and commondir files that do not exist yet; one a script leaves behind is removed. */
 	absentGitFiles: ReadonlyArray<string>;
 	network: true;
+	/** Where each launch looks for secret files to mask: the workspace, then the scratch roots. */
+	secretRoots: { workspace: string; scratchRoots: ReadonlyArray<string> };
+	env: SandboxEnvPolicy;
 }
 
 /**
@@ -396,6 +408,8 @@ export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSan
 		absentGitHooks: git?.absentHooks ?? [],
 		absentGitFiles: git?.absentFiles ?? [],
 		network: true,
+		secretRoots: { workspace: input.workspace, scratchRoots: input.scratchRoots },
+		env: input.env ?? DEFAULT_SANDBOX_ENV_POLICY,
 	};
 }
 
@@ -424,6 +438,7 @@ function mainSandboxCacheRoots(): { cacheRoots: string[]; codeCaches: string[] }
 export function mainSandboxPolicy(roots: {
 	workspace: string;
 	scratchRoots: ReadonlyArray<string>;
+	env?: SandboxEnvPolicy;
 }): MainSandboxPolicy {
 	const git = mainSandboxGitLayout(roots.workspace);
 	return resolveMainSandboxPolicy({
@@ -458,7 +473,7 @@ export function mainSandboxInvocationSpec(
 }
 
 export type MainSandboxSpawnPlan =
-	| { kind: "sandboxed"; file: string; args: string[]; afterExit: () => void }
+	| { kind: "sandboxed"; file: string; args: string[]; afterExit: () => void; env: SandboxEnvPolicy }
 	| { kind: "refused"; message: string };
 
 /**
@@ -471,7 +486,8 @@ export type MainSandboxSpawnPlan =
  * cannot be covered the same way: the mount point would leave an empty file,
  * and git refuses an empty commondir. `afterExit` removes one the script
  * created; the caller runs it once the sandbox has exited, which ends every
- * process in its PID namespace.
+ * process in its PID namespace. The caller spawns the sandbox with the
+ * environment scrubbed by `env`.
  */
 export function planMainSandboxSpawn(
 	policy: MainSandboxPolicy,
@@ -493,10 +509,14 @@ export function planMainSandboxSpawn(
 	const hookMasks: SandboxMaskedPath[] = policy.absentGitHooks
 		.filter((hooks) => !pathExists(hooks))
 		.map((hooks) => ({ path: hooks, kind: "directory" }));
+	const baseMasks = [...workerSandboxMasks(), ...mainSandboxAgentMasks(), ...hookMasks];
+	const secretMasks = discoverSecretMasks(
+		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots },
+		baseMasks,
+	).masks;
 	const spec = mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), [
-		...workerSandboxMasks(),
-		...mainSandboxAgentMasks(),
-		...hookMasks,
+		...baseMasks,
+		...secretMasks,
 	]);
 	const invocation = buildSandboxInvocation(spec, availability.backend, availability.executable);
 	const absentFiles = policy.absentGitFiles.filter((file) => !pathExists(file));
@@ -505,6 +525,7 @@ export function planMainSandboxSpawn(
 		file: invocation.file,
 		args: invocation.args,
 		afterExit: () => sweepMainSandboxGitFiles(absentFiles),
+		env: policy.env,
 	};
 }
 
@@ -550,7 +571,7 @@ const WRITE_REFUSED = /\b(?:EROFS|EACCES|EPERM)\b|Read-only file system|Permissi
 /** One line for a failed contained command whose output shows a refused write, else null. */
 export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy): string | null {
 	if (!WRITE_REFUSED.test(output)) return null;
-	return `sandbox: this command could write only to ${policy.writableRoots.join(", ")} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request; a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
+	return `sandbox: this command could write only to ${policy.writableRoots.join(", ")} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request; a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
 }
 
 /** One line for doctor: how the main session's shell calls run on this host, and where a contained one can write. */
@@ -558,6 +579,7 @@ export function mainSandboxLine(
 	mode: SandboxMode,
 	availability: SandboxAvailability,
 	writableRoots: ReadonlyArray<string>,
+	secretFiles?: { count: number; capped: boolean },
 ): string {
 	const yolo = yoloScriptSandboxState(mode, availability);
 	const yoloLine =
@@ -567,7 +589,13 @@ export function mainSandboxLine(
 				? `yolo refuses scripts: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`
 				: "yolo runs unsandboxed";
 	if (mainShellContained(mode, availability)) {
-		return `default-autonomy shell commands run in the ${availability.backend} sandbox; writable roots: ${writableRoots.join(", ")}; ${yoloLine}`;
+		const masked =
+			secretFiles === undefined
+				? ""
+				: secretFiles.capped
+					? `; ${secretFiles.count} secret files in the workspace and scratch roots are masked, and the search stopped at its limit, so others stay readable`
+					: `; ${secretFiles.count} secret files in the workspace and scratch roots are masked`;
+		return `default-autonomy shell commands run in the ${availability.backend} sandbox; writable roots: ${writableRoots.join(", ")}${masked}; ${yoloLine}`;
 	}
 	const why = mode === "off" ? "safety.sandbox is off" : (availability.reason ?? "no sandbox backend");
 	return `default-autonomy shell commands run uncontained and keep the approval rails (${why}); ${yoloLine}`;

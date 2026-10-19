@@ -210,6 +210,11 @@ function stripProjectAutonomy(
  */
 const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }> = [
 	{ key: "scratchRoots", message: "scratch roots are set only in user settings; project value ignored" },
+	// A repository could otherwise hand its own commands the operator's tokens.
+	{
+		key: "sandboxPassEnv",
+		message: "sandbox environment pass-through is set only in user settings; project value ignored",
+	},
 	{
 		key: "unattendedAfterSeconds",
 		message: "the unattended timeout is set only in user settings; project value ignored",

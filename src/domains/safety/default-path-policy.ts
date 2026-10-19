@@ -1,5 +1,6 @@
 import { foreignAgentDirs } from "../interop/registry.js";
 import type { PathPolicyInput } from "./path-policy.js";
+import { WORKSPACE_SECRET_PATHS } from "./secret-paths.js";
 
 /**
  * Generated trees the default policy keeps out of hand edits. The operator's
@@ -27,55 +28,22 @@ export const BUILD_OUTPUT_PATHS: ReadonlyArray<string> = [
  */
 export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 	zeroAccessPaths: [
-		".env",
-		".env.local",
-		".env.development",
-		".env.production",
-		".env.staging",
-		".env.test",
-		".env.*.local",
-		"*.env",
+		...WORKSPACE_SECRET_PATHS,
 		"~/.ssh/",
 		"~/.gnupg/",
 		"~/.aws/",
 		"~/.config/gcloud/",
-		"*-credentials.json",
-		"*serviceAccount*.json",
-		"*service-account*.json",
 		"~/.azure/",
 		"~/.kube/",
-		"kubeconfig",
-		"*-secret.yaml",
-		"secrets.yaml",
 		"~/.docker/",
-		"*.pem",
-		"*.key",
-		"*.p12",
-		"*.pfx",
-		"*.tfstate",
-		"*.tfstate.backup",
-		".terraform/",
-		".vercel/",
-		".netlify/",
-		"firebase-adminsdk*.json",
-		"serviceAccountKey.json",
-		".supabase/",
 		"~/.netrc",
 		"~/.npmrc",
 		"~/.pypirc",
 		"~/.git-credentials",
-		".git-credentials",
 		// Remote URLs in the repo git config can embed access tokens, and .git
 		// is hidden from grep/find but not from direct reads without this entry.
+		// The shell sandbox keeps it readable and read-only, since git needs it.
 		".git/config",
-		// Clio's own provider secret store. The literal covers a repo-level file
-		// of the same name on purpose; the expanded clioConfigDir() form is
-		// appended at policy construction (policy-engine.ts), since this static
-		// list cannot call config helpers.
-		"credentials.yaml",
-		"dump.sql",
-		"backup.sql",
-		"*.dump",
 	],
 	readOnlyPaths: [
 		// Clio's own operator-authority files in the project. `safety.yaml` is the

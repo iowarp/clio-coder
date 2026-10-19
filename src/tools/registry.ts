@@ -11,6 +11,7 @@ import {
 	mainSandboxPolicy,
 	type YoloScriptSandboxState,
 } from "../core/sandbox/main-session.js";
+import type { SandboxEnvPolicy } from "../core/sandbox/types.js";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
@@ -354,6 +355,12 @@ export interface RegistryDeps {
 	 * `scratchRoots`; without it default keeps today's rails.
 	 */
 	containment?: () => { sandbox: boolean; snapshots: boolean };
+	/**
+	 * How a contained call's inherited environment is scrubbed: the operator's
+	 * `safety.sandboxPassEnv` and the variables Clio's targets read keys from,
+	 * read per call. Absent scrubs with the name and value rules alone.
+	 */
+	sandboxEnv?: () => SandboxEnvPolicy;
 	/**
 	 * The loop guard's parent-workspace mutation epoch for a turn. The main
 	 * agent's denial memory keys on it, so a refusal is repeated only while
@@ -1171,7 +1178,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						? { operatorYolo: true as const }
 						: {}),
 					...(decision.policy?.shellSandbox !== undefined
-						? { shellSandbox: mainSandboxPolicy(decision.policy.shellSandbox) }
+						? {
+								shellSandbox: mainSandboxPolicy({
+									...decision.policy.shellSandbox,
+									...(deps.sandboxEnv !== undefined ? { env: deps.sandboxEnv() } : {}),
+								}),
+							}
 						: {}),
 					...(landing !== undefined && landing !== null ? { hookLanding: landing } : {}),
 					...(deps.flow !== undefined && !trueYolo()
