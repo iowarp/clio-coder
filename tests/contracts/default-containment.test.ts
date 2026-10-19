@@ -265,6 +265,25 @@ test("a typed write to the workspace repository's hooks asks at default, and an 
 	strictEqual(admit("src/app.py").kind, "allow");
 });
 
+test("a worker's typed write to its repository's hooks asks the main agent at default, and an ordinary file runs", (t) => {
+	const cwd = workspace("clio-worker-git-control-");
+	mkdirSync(join(cwd, ".git"));
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const safety = createWorkerSafety({ cwd, writeRoots: [`${cwd}/`] });
+	const admit = (path: string) =>
+		evaluateAdmission({
+			principal: "worker",
+			effects: [{ tool: ToolNames.Write, args: { path, content: "x" } }],
+			safety,
+		});
+	const hook = admit(".git/hooks/pre-commit");
+	strictEqual(hook.kind === "ask" && hook.approvalAuthority, "main");
+	strictEqual(hook.decision.policy?.ruleId, "git-control-file");
+	strictEqual(admit("src/app.py").kind, "allow");
+});
+
 test("the default scratch roots include $TMPDIR and /tmp", () => {
 	const roots = effectiveScratchRoots([], workspace("clio-contained-scratch-"));
 	ok(roots.includes(realpathSync(tmpdir())), roots.join(", "));

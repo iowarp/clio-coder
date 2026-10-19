@@ -183,6 +183,19 @@ export const SNAPSHOT_RECOVERABLE_GIT_RULE_IDS: ReadonlySet<string> = new Set([
  */
 export const SNAPSHOT_RECOVERABLE_REASON_CODE = "snapshot-recoverable";
 
+/**
+ * Rule of a typed file mutation that lands on a git hook, config or git dir
+ * pointer of the repository, which the sandbox keeps read-only. The
+ * operator's default asks for it in the policy engine; a worker at default
+ * asks the main agent for it at admission.
+ */
+export const GIT_CONTROL_FILE_RULE_ID = "git-control-file";
+
+/** Why a write to `controlPath` needs approval. */
+export function gitControlFileReason(controlPath: string): string {
+	return `'${controlPath}' is a git hook, config or git dir pointer of the workspace repository; writing it would run code outside the sandbox on the next git command, so it requires approval`;
+}
+
 /** Classifier patterns (`action-classifier.ts`) for the same recoverable discards. */
 export const SNAPSHOT_RECOVERABLE_GIT_PATTERNS: ReadonlySet<string> = new Set([
 	"pattern:git-reset-hard",

@@ -161,6 +161,17 @@ function isInside(parent: string, candidate: string): boolean {
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
+/** Impure: the directory holding the nearest `.git` at or above `workspace`, or null outside a repository. */
+export function gitRepositoryTop(workspace: string): string | null {
+	let top = path.resolve(workspace);
+	while (!pathExists(path.join(top, ".git"))) {
+		const parent = path.dirname(top);
+		if (parent === top) return null;
+		top = parent;
+	}
+	return top;
+}
+
 /**
  * Impure: the git layout of the repository holding the workspace, or
  * undefined outside one. The nearest `.git` at or above the workspace names
@@ -169,12 +180,8 @@ function isInside(parent: string, candidate: string): boolean {
  */
 export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | undefined {
 	const root = path.resolve(workspace);
-	let top = root;
-	while (!pathExists(path.join(top, ".git"))) {
-		const parent = path.dirname(top);
-		if (parent === top) return undefined;
-		top = parent;
-	}
+	const top = gitRepositoryTop(root);
+	if (top === null) return undefined;
 	const mountDirs: string[] = [];
 	const readOnlyPaths: string[] = [];
 	const absentHooks: string[] = [];

@@ -8,7 +8,7 @@ import type { ActionClass, ClassifierCall } from "./action-classifier.js";
 import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
 import { autonomyCallInputs } from "./autonomy-inputs.js";
-import { SNAPSHOT_RECOVERABLE_REASON_CODE } from "./containment.js";
+import { GIT_CONTROL_FILE_RULE_ID, gitControlFileReason, SNAPSHOT_RECOVERABLE_REASON_CODE } from "./containment.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
 import { classifyBashGit } from "./git-policy.js";
@@ -501,6 +501,14 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 			const actionClass = effectDecision.classification.actionClass;
 			if (effectDecision.policy?.shellSandbox !== undefined && CONTAINED_CLASSES.has(actionClass)) continue;
 		}
+		// A worker's typed write to a git hook, config or git dir pointer plants
+		// code that runs outside its sandbox on the operator's or the main
+		// session's next git command, so at default it asks the main agent; a
+		// main grant for the call discharges it.
+		const gitControl = principal === "worker" && level === "default" ? effectDecision.policy?.gitControl : undefined;
+		if (gitControl !== undefined && !mainAuthorized) {
+			return workerGitControlAsk(call.tool, gitControl, effectDecision, level);
+		}
 		const inputs = autonomyCallInputs(effect, effectDecision, input.autonomyExtra ?? {});
 		const disposition = mapAutonomy(level, effectDecision.classification.actionClass, inputs.options);
 		if (disposition === "allow") {
@@ -581,6 +589,47 @@ function sessionCodeConsentAsk(tool: string, netDecision: SafetyDecision, level:
 		kind: "ask",
 		source: "session-consent",
 		approvalAuthority: "operator",
+		reason: ask.rejection.short,
+		decision: ask,
+		netDecision,
+		level,
+		exposure: "local",
+		readOutsideWorkspace: false,
+	};
+}
+
+/** The main-authority ask for a worker's typed write to a git control path. */
+function workerGitControlAsk(
+	tool: string,
+	controlPath: string,
+	netDecision: SafetyDecision,
+	level: AutonomyLevel,
+): AdmissionDisposition {
+	const detail = gitControlFileReason(controlPath);
+	const ask: SafetyDecision = {
+		kind: "ask",
+		classification: netDecision.classification,
+		rejection: {
+			short: `${tool} needs approval: it writes a git control file of the repository`,
+			detail,
+			hints: ["Approving resumes only this call."],
+		},
+		...(netDecision.policy !== undefined
+			? {
+					policy: {
+						...netDecision.policy,
+						kind: "ask" as const,
+						ruleId: GIT_CONTROL_FILE_RULE_ID,
+						reasonCode: GIT_CONTROL_FILE_RULE_ID,
+						reasons: [detail, ...netDecision.policy.reasons],
+					},
+				}
+			: {}),
+	};
+	return {
+		kind: "ask",
+		source: "autonomy",
+		approvalAuthority: "main",
 		reason: ask.rejection.short,
 		decision: ask,
 		netDecision,

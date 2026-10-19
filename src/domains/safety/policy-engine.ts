@@ -12,7 +12,11 @@ import {
 	createPathWalkMemo,
 	type PathWalkMemo,
 } from "../../core/path-canonical.js";
-import { mainSandboxGitControlPaths, type YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
+import {
+	gitRepositoryTop,
+	mainSandboxGitControlPaths,
+	type YoloScriptSandboxState,
+} from "../../core/sandbox/main-session.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
@@ -32,6 +36,8 @@ import {
 import { downloadedFiles, findDeletesNotFollowing, removedAbsolutePaths, unpackedTargets } from "./command-readings.js";
 import {
 	cleansIgnoredFiles,
+	GIT_CONTROL_FILE_RULE_ID,
+	gitControlFileReason,
 	outwardShellReason,
 	SNAPSHOT_RECOVERABLE_GIT_PATTERNS,
 	SNAPSHOT_RECOVERABLE_GIT_RULE_IDS,
@@ -202,6 +208,13 @@ export interface SafetyPolicyDecision {
 	 * snapshot cannot be taken.
 	 */
 	recoverable?: true;
+	/**
+	 * Set on an allowed typed file mutation outside the operator's own scopes
+	 * that lands on a git control path of this engine's repository (a hooks
+	 * directory, a config or commondir file, a `.git` pointer). Admission asks
+	 * the main agent for it when a worker at autonomy default makes the call.
+	 */
+	gitControl?: string;
 }
 
 export interface SafetyPolicyMetadata {
@@ -645,6 +658,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const writeRootsOsConfined = options.writeRootsOsConfined === true;
+	// Outside the operator's own scopes a typed write pays the git control walk
+	// only when the cwd sat inside a repository as the engine was built. A
+	// worker's engine lives for one run, and its per-call fs budget is pinned
+	// (admission-fs-ops).
+	const cwdInRepository = gitRepositoryTop(cwd) !== null;
 	const skillRoots = activeClioSkillRoots(cwd);
 	const readExemptRoots = [
 		...readScopeExemptRoots(),
@@ -1352,9 +1370,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const input = {
 				ruleId: GIT_CONTROL_FILE_RULE_ID,
 				reasonCode: GIT_CONTROL_FILE_RULE_ID,
-				reasons: [
-					`'${gitControl}' is a git hook, config or git dir pointer of the workspace repository; writing it would run code outside the sandbox on the next git command, so it requires approval`,
-				],
+				reasons: [gitControlFileReason(gitControl)],
 				policySource: "builtin-classifier" as const,
 			};
 			return settle(posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input));
@@ -1546,6 +1562,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				allowInput.readScope = "outside-workspace";
 				allowInput.reasons = [...allowInput.reasons, `read-path-outside-workspace: ${escaped}`];
 			}
+		}
+		// Outside the operator's own scopes the net only marks a typed write to
+		// a git control path; admission asks the main agent when a worker at
+		// default made it. A yolo posture admits it unread.
+		if (resort === undefined && posture !== "yolo" && cwdInRepository) {
+			const gitControl = gitControlTarget(call, cwd);
+			if (gitControl !== null) allowInput.gitControl = gitControl;
 		}
 		return settle(allowDecision(base, allowInput));
 	};
@@ -3875,8 +3898,6 @@ function scratchRootWrite(
 	}
 	return { actionClass: "write", reasons: [`scratch-root-write: ${landing}`] };
 }
-
-const GIT_CONTROL_FILE_RULE_ID = "git-control-file";
 
 /**
  * The workspace repository's git control path a typed file mutation lands
