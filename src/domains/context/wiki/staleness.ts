@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { internalGitArgv } from "../../../core/internal-git.js";
 import { readWikiMeta, type WikiMeta } from "./meta.js";
 import { captureWikiSourceContent, wikiSourcesMatch } from "./source-content.js";
 
@@ -15,7 +16,7 @@ function splitNullTerminatedPaths(output: string): string[] {
 
 function currentGitHead(cwd: string): string | null {
 	try {
-		const out = execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+		const out = execFileSync("git", internalGitArgv(["rev-parse", "--verify", "HEAD"], cwd), {
 			cwd,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
@@ -27,17 +28,17 @@ function currentGitHead(cwd: string): string | null {
 }
 
 function collectChangedPaths(cwd: string, gitHead: string): Set<string> {
-	const committed = execFileSync("git", ["diff", "--name-only", "-z", `${gitHead}..HEAD`], {
+	const committed = execFileSync("git", internalGitArgv(["diff", "--name-only", "-z", `${gitHead}..HEAD`], cwd), {
 		cwd,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
 	});
-	const trackedWorking = execFileSync("git", ["diff", "--name-only", "-z", "HEAD"], {
+	const trackedWorking = execFileSync("git", internalGitArgv(["diff", "--name-only", "-z", "HEAD"], cwd), {
 		cwd,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
 	});
-	const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+	const untracked = execFileSync("git", internalGitArgv(["ls-files", "--others", "--exclude-standard", "-z"], cwd), {
 		cwd,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],

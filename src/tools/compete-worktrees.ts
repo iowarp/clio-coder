@@ -33,6 +33,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { internalGitArgv } from "../core/internal-git.js";
 import type { RunGateWorktreeProvenance, RunKind } from "../domains/dispatch/types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "../domains/dispatch/workspace-checkpoint.js";
 import {
@@ -137,7 +138,7 @@ const PROCESS_EXIT_GRACE_MS = 750;
 const PROCESS_POLL_MS = 25;
 
 function git(root: string, args: string[]): string {
-	return execFileSync("git", ["-C", root, ...args], {
+	return execFileSync("git", internalGitArgv(["-C", root, ...args]), {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,

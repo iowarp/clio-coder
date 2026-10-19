@@ -1,8 +1,10 @@
 /** Demand-only current evidence. Never folded into the project snapshot or assistant summaries. */
+
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { createUserTasksStore, USER_TASKS_RELATIVE_PATH } from "../user-tasks/store.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
@@ -41,9 +43,11 @@ export async function readProjectStatus(
 	let git: Record<string, unknown> = { state: "unknown" };
 	try {
 		const [head, branch, status] = await Promise.all([
-			exec("git", ["rev-parse", "--verify", "HEAD"], { cwd, timeout: 5_000 }),
-			exec("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd, timeout: 5_000 }).catch(() => null),
-			exec("git", ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], {
+			exec("git", internalGitArgv(["rev-parse", "--verify", "HEAD"], cwd), { cwd, timeout: 5_000 }),
+			exec("git", internalGitArgv(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd), { cwd, timeout: 5_000 }).catch(
+				() => null,
+			),
+			exec("git", internalGitArgv(["status", "--porcelain=v1", "-z", "--untracked-files=normal"], cwd), {
 				cwd,
 				timeout: 5_000,
 				maxBuffer: 64 * 1024,

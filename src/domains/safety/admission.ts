@@ -642,11 +642,11 @@ function gitHooksChangedAsk(
 		classification: netDecision.classification,
 		confirmationRuleId: GIT_HOOKS_CHANGED_RULE_ID,
 		rejection: {
-			short: `${tool} needs operator approval: git hook files changed during this session`,
+			short: `${tool} needs operator approval: git hooks or executable git config changed during this session`,
 			detail: `${drift.summary}. A hook runs with the operator's privileges; only the operator can approve it.`,
 			hints: [
-				"Approving runs this call and accepts the hook files named here until they change again.",
-				"Do not rewrite the command to avoid git; ask the operator to review the hook files instead.",
+				"Approving runs this call and accepts the hook files and config values named here until they change again.",
+				"Do not rewrite the command to avoid git; ask the operator to review the changes instead.",
 			],
 		},
 		...(netDecision.policy !== undefined

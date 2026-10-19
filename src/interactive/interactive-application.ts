@@ -222,7 +222,7 @@ export interface InteractiveDeps {
 	toolRegistry?: ToolRegistry;
 	session?: SessionContract;
 	/** Git hook files changed since this process started, for the exit summary (src/domains/safety/hook-drift.ts). */
-	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string }>;
+	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string; key?: string }>;
 	/** Read current session entries for replay/context rebuilds after local non-chat entries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Live session task board for the footer tasks row and the /tasks overlay. */

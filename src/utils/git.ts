@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { internalGitArgv } from "../core/internal-git.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,7 +13,7 @@ const execFileAsync = promisify(execFile);
  */
 export async function getCurrentBranch(cwd?: string): Promise<string | null> {
 	try {
-		const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+		const { stdout } = await execFileAsync("git", internalGitArgv(["rev-parse", "--abbrev-ref", "HEAD"], cwd), {
 			cwd,
 			timeout: 1000,
 		});

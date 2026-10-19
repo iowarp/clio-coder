@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readlinkSync, readSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { internalGitArgv } from "../core/internal-git.js";
 
 export interface CheckoutSnapshot {
 	root: string;
@@ -14,7 +15,7 @@ export function snapshotCheckout(cwd: string): CheckoutSnapshot | null {
 	let status: Buffer;
 	try {
 		root = realpathSync(
-			execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+			execFileSync("git", internalGitArgv(["-C", cwd, "rev-parse", "--show-toplevel"]), {
 				timeout: 10_000,
 				stdio: ["ignore", "pipe", "pipe"],
 			})
@@ -23,7 +24,16 @@ export function snapshotCheckout(cwd: string): CheckoutSnapshot | null {
 		);
 		status = execFileSync(
 			"git",
-			["-C", root, "-c", "status.renames=false", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+			internalGitArgv([
+				"-C",
+				root,
+				"-c",
+				"status.renames=false",
+				"status",
+				"--porcelain=v1",
+				"-z",
+				"--untracked-files=all",
+			]),
 			{
 				timeout: 15_000,
 				maxBuffer: 16 * 1024 * 1024,
@@ -82,7 +92,7 @@ export function changedCheckoutDiff(before: CheckoutSnapshot, cwd: string, inclu
 	const paths = changedCheckoutPaths(before, after).filter(include);
 	if (paths.length === 0) return "";
 	try {
-		return execFileSync("git", ["-C", before.root, "diff", "--no-color", "--no-ext-diff", "HEAD", "--", ...paths], {
+		return execFileSync("git", internalGitArgv(["-C", before.root, "diff", "--no-color", "HEAD", "--", ...paths]), {
 			timeout: 10_000,
 			maxBuffer: 8 * 1024 * 1024,
 			stdio: ["ignore", "pipe", "pipe"],

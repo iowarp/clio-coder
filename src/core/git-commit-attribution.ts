@@ -19,6 +19,7 @@ import {
 	decisionTrailerRefs,
 } from "./commit-attribution.js";
 import { writeDiagnostic } from "./diagnostics.js";
+import { internalGitArgv } from "./internal-git.js";
 import { clioStateDir } from "./xdg.js";
 
 /** Effective `attribution.gitCommits` for child-process seams. Internal state, not an operator override. */
@@ -136,7 +137,7 @@ function withoutManagedGitConfig(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 function gitOutput(cwd: string, env: NodeJS.ProcessEnv, args: ReadonlyArray<string>): string | null {
 	try {
-		return execFileSync("git", [...args], {
+		return execFileSync("git", internalGitArgv(args, cwd), {
 			cwd,
 			env,
 			encoding: "utf8",

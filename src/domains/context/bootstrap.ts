@@ -5,6 +5,7 @@ import { dirname, join, parse, relative, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { readCiRunCommands } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
@@ -1252,7 +1253,7 @@ function loadBootstrapSiblingFiles(adoption: AdoptionScanResult): SiblingContext
 
 function gitStatus(cwd: string): string {
 	try {
-		return execFileSync("git", ["status", "--short"], {
+		return execFileSync("git", internalGitArgv(["status", "--short"], cwd), {
 			cwd,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
@@ -1963,7 +1964,7 @@ async function runBootstrapWork(
 	};
 	out(input.io, formatBootstrapSummary(summary));
 	if (action === "wrote" || action === "refreshed") {
-		const ignored = await runCommandVector("git", ["check-ignore", "--quiet", "--", "CLIO-CODER.md"], {
+		const ignored = await runCommandVector("git", internalGitArgv(["check-ignore", "--quiet", "--", "CLIO-CODER.md"]), {
 			cwd,
 			workspaceRoot: cwd,
 			timeoutMs: 5_000,

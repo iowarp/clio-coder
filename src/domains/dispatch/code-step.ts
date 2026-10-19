@@ -24,6 +24,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
+import { internalGitArgv } from "../../core/internal-git.js";
 import {
 	PLAYBOOK_COMMAND_BASE_ENV,
 	type PlaybookCommand,
@@ -206,7 +207,7 @@ export function resolveCommandArgv(
 
 /** Whether the checkout has anything a commit could record. */
 export function workspaceHasChanges(root: string): boolean {
-	const status = execFileSync("git", ["-C", root, "status", "--porcelain", "-uall"], {
+	const status = execFileSync("git", internalGitArgv(["-C", root, "status", "--porcelain", "-uall"]), {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,

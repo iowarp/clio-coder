@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
 
 /** Stable recovery namespace; labels never enter Git's ref grammar unchecked. */
@@ -24,7 +25,7 @@ export function captureWorkspaceCheckpoint(cwd: string, ref: string, message: st
 	});
 	const config = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"];
 	const git = (args: string[]) =>
-		execFileSync("git", ["-C", cwd, ...config, ...args], {
+		execFileSync("git", internalGitArgv(["-C", cwd, ...config, ...args]), {
 			env,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
@@ -55,7 +56,7 @@ export function captureWorkspaceCheckpoint(cwd: string, ref: string, message: st
 		git(head === null ? ["read-tree", "--empty"] : ["read-tree", head]);
 		git(["add", "-A", "--", "."]);
 		const tree = git(["write-tree"]);
-		const commit = git(["commit-tree", tree, ...(head === null ? [] : ["-p", head]), "-m", message]);
+		const commit = git(["commit-tree", "--no-gpg-sign", tree, ...(head === null ? [] : ["-p", head]), "-m", message]);
 		git(["update-ref", ref, commit, ""]);
 		return ref;
 	} finally {

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { WORKING_SET_PROFILE_IDS, type WorkingSetProfileId } from "../core/defaults.js";
+import { internalGitArgv } from "../core/internal-git.js";
 import { assertSafeId } from "../core/safe-id.js";
 import { clioStatePath } from "../core/xdg.js";
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
@@ -274,7 +275,7 @@ function policyForTrace(id: ReplayPolicyId, graph: ReferenceGraph, seed: number)
 
 function gitSha(): string | null {
 	try {
-		return execFileSync("git", ["rev-parse", "HEAD"], {
+		return execFileSync("git", internalGitArgv(["rev-parse", "HEAD"]), {
 			cwd: process.cwd(),
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],

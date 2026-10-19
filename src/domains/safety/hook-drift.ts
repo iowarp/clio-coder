@@ -5,6 +5,7 @@ import {
 	type GitHookChange,
 	type GitHookFile,
 	type GitHooksFingerprint,
+	gitHookEntryId,
 } from "../../core/sandbox/git-hooks-fingerprint.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "./action-classifier.js";
@@ -22,7 +23,9 @@ import { sanitizeCallTargetText } from "./call-target.js";
  * changed since then makes the call an operator-only ask under
  * `git-hooks-changed`. The operator's allow accepts exactly the files the
  * card named; an approved or judge-allowed `git-control-file` write accepts
- * the file it wrote.
+ * the file it wrote. An executable git config value (core.fsmonitor, a
+ * filter driver, an `!` alias) counts as a hook: the fingerprint carries
+ * each one by its config file and key.
  */
 export const GIT_HOOKS_CHANGED_RULE_ID = "git-hooks-changed";
 
@@ -39,18 +42,30 @@ export interface GitHookDriftReport {
 }
 
 export interface GitHookDriftGuard {
-	/** Added or changed hook files since the baseline, or null when there are none. */
-	check(): GitHookDriftReport | null;
+	/**
+	 * Added or changed hook files since the baseline, or null when there are
+	 * none. A `silent` check neither tells `onDrift` nor counts what it saw as
+	 * reported, for a caller whose drift asks nothing (yolo).
+	 */
+	check(options?: { silent?: boolean }): GitHookDriftReport | null;
 	/** The operator allowed a drift ask: the files it named, as it saw them, join the baseline. */
 	accept(report: GitHookDriftReport): void;
 	/** An approved git control write landed: hook files at or below `targets` join the baseline as they are now. */
 	refresh(targets: ReadonlyArray<string>): void;
 	/** Every hook file that changed since the guard started, including one changed and then put back. */
 	sessionChanges(): GitHookChange[];
+	/**
+	 * Executable config values of the repository holding `dir` added or
+	 * changed against the baseline, read through the cheap config path rather
+	 * than a fingerprint walk. Empty without a `config` dependency.
+	 */
+	configDrift(dir: string): GitHookChange[];
 }
 
 export interface GitHookDriftDeps {
 	fingerprint: () => GitHooksFingerprint;
+	/** One repository's executable config by entry id (GitHooksFingerprinter.config). */
+	config?: (dir: string) => ReadonlyMap<string, GitHookFile>;
 	/** The workspace, so the card names a hook by its workspace path. */
 	workspace: string;
 	/** Told once per distinct change, the first time a check sees it. */
@@ -62,8 +77,15 @@ function displayPath(file: string, workspace: string): string {
 	return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : file;
 }
 
-/** `added .git/hooks/pre-commit (57 bytes, executable, '#!/bin/sh')` */
-function describeGitHookChange(change: GitHookChange, workspace: string): string {
+/**
+ * `added .git/hooks/pre-commit (57 bytes, executable, '#!/bin/sh')`, or for
+ * config `changed core.fsmonitor in .git/config ('./watch.sh')`.
+ */
+export function describeGitHookChange(change: GitHookChange, workspace: string): string {
+	if (change.key !== undefined) {
+		const value = change.kind !== "removed" && change.firstLine.length > 0 ? ` ('${change.firstLine}')` : "";
+		return sanitizeCallTargetText(`${change.kind} ${change.key} in ${displayPath(change.path, workspace)}${value}`);
+	}
 	const facts = [
 		change.size < 0 ? "unreadable" : `${change.size} bytes`,
 		...(change.kind !== "removed" && !change.executable ? ["not executable"] : []),
@@ -76,18 +98,18 @@ function describeGitHookChange(change: GitHookChange, workspace: string): string
 function summarize(changes: ReadonlyArray<GitHookChange>, workspace: string): string {
 	const named = changes.slice(0, REPORT_MAX_FILES).map((change) => describeGitHookChange(change, workspace));
 	const more = changes.length > REPORT_MAX_FILES ? `; and ${changes.length - REPORT_MAX_FILES} more` : "";
-	return `git hook files changed since the session started or the operator last accepted them, and this git command would run them outside the sandbox: ${named.join("; ")}${more}`;
+	return `git hook files or executable git config changed since the session started or the operator last accepted them, and this git command would run them outside the sandbox: ${named.join("; ")}${more}`;
 }
 
 /** The transcript notice for changes a check saw for the first time. */
 export function gitHookDriftNotice(changes: ReadonlyArray<GitHookChange>, workspace: string): string {
 	const named = changes.slice(0, REPORT_MAX_FILES).map((change) => describeGitHookChange(change, workspace));
 	const more = changes.length > REPORT_MAX_FILES ? `; and ${changes.length - REPORT_MAX_FILES} more` : "";
-	return `[safety] git hook files changed during this session: ${named.join("; ")}${more}. A hook runs outside the sandbox, so the next git command Clio runs outside it asks you first.`;
+	return `[safety] git hook files or executable git config changed during this session: ${named.join("; ")}${more}. A hook runs outside the sandbox, so the next git command the agent runs outside it asks you first, and Clio's own git operations run with hooks off.`;
 }
 
 function changeKey(change: GitHookChange): string {
-	return `${change.path}\0${change.kind}\0${change.hash}`;
+	return `${gitHookEntryId(change)}\0${change.kind}\0${change.hash}`;
 }
 
 function realOrSelf(entry: string): string {
@@ -110,16 +132,17 @@ export function createGitHookDriftGuard(deps: GitHookDriftDeps): GitHookDriftGua
 	const reported = new Set<string>();
 	const detected = new Map<string, GitHookChange>();
 	return {
-		check() {
+		check(options) {
 			const current = deps.fingerprint().files;
 			// A removed hook adds no code; drift is what git would now run that the operator has not seen.
 			const changes = diffGitHookFiles(baseline, current).filter((change) => change.kind !== "removed");
 			if (changes.length === 0) return null;
 			const summary = summarize(changes, deps.workspace);
-			const fresh = changes.filter((change) => !reported.has(changeKey(change)));
+			const silent = options?.silent === true;
+			const fresh = silent ? [] : changes.filter((change) => !reported.has(changeKey(change)));
 			for (const change of changes) {
-				reported.add(changeKey(change));
-				detected.set(change.path, change);
+				if (!silent) reported.add(changeKey(change));
+				detected.set(gitHookEntryId(change), change);
 			}
 			if (fresh.length > 0) {
 				try {
@@ -130,8 +153,9 @@ export function createGitHookDriftGuard(deps: GitHookDriftDeps): GitHookDriftGua
 			}
 			const files = new Map<string, GitHookFile>();
 			for (const change of changes) {
-				const file = current.get(change.path);
-				if (file !== undefined) files.set(change.path, file);
+				const id = gitHookEntryId(change);
+				const file = current.get(id);
+				if (file !== undefined) files.set(id, file);
 			}
 			return { changes, files, summary };
 		},
@@ -146,17 +170,44 @@ export function createGitHookDriftGuard(deps: GitHookDriftDeps): GitHookDriftGua
 				return scopes.some((scope) => forms.some((form) => atOrBelow(scope, form)));
 			};
 			const current = deps.fingerprint().files;
-			for (const file of new Set([...baseline.keys(), ...current.keys()])) {
-				if (!inScope(file)) continue;
-				const now = current.get(file);
-				if (now === undefined) baseline.delete(file);
-				else baseline.set(file, now);
+			for (const id of new Set([...baseline.keys(), ...current.keys()])) {
+				// A config value is in scope when the file that sets it was the write's target.
+				const entry = current.get(id) ?? baseline.get(id);
+				if (entry === undefined || !inScope(entry.path)) continue;
+				const now = current.get(id);
+				if (now === undefined) baseline.delete(id);
+				else baseline.set(id, now);
 			}
 		},
+		configDrift(dir) {
+			if (deps.config === undefined) return [];
+			const current = deps.config(dir);
+			const changes: GitHookChange[] = [];
+			for (const [id, file] of current) {
+				const prior = baseline.get(id);
+				if (prior !== undefined && prior.hash === file.hash) continue;
+				const change: GitHookChange = {
+					path: file.path,
+					kind: prior === undefined ? "added" : "changed",
+					...(file.key !== undefined ? { key: file.key } : {}),
+					size: file.size,
+					firstLine: file.firstLine,
+					executable: file.executable,
+					hash: file.hash,
+				};
+				changes.push(change);
+				detected.set(id, change);
+			}
+			return changes.sort((a, b) => a.path.localeCompare(b.path) || (a.key ?? "").localeCompare(b.key ?? ""));
+		},
 		sessionChanges() {
-			const changes = new Map(diffGitHookFiles(start, deps.fingerprint().files).map((change) => [change.path, change]));
-			for (const [file, change] of detected) if (!changes.has(file)) changes.set(file, change);
-			return [...changes.values()].sort((a, b) => a.path.localeCompare(b.path));
+			const changes = new Map(
+				diffGitHookFiles(start, deps.fingerprint().files).map((change) => [gitHookEntryId(change), change]),
+			);
+			for (const [id, change] of detected) if (!changes.has(id)) changes.set(id, change);
+			return [...changes.values()].sort(
+				(a, b) => a.path.localeCompare(b.path) || (a.key ?? "").localeCompare(b.key ?? ""),
+			);
 		},
 	};
 }

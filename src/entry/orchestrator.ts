@@ -19,6 +19,7 @@ import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from ".
 import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
+import { installInternalGitPolicy } from "../core/internal-git.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
@@ -232,6 +233,7 @@ import {
 	SafetyDomainModule,
 } from "../domains/safety/index.js";
 import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
+import { createInternalGitPolicy } from "../domains/safety/internal-git-policy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import {
 	createProtectedArtifactsRegistration,
@@ -2899,12 +2901,44 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const hookDrift = createGitHookDriftGuard({
 		workspace: process.cwd(),
 		fingerprint: () => hookFingerprinter.fingerprint(),
+		// The cheap path Clio's own status and diff probes check before each run.
+		config: (dir) => hookFingerprinter.config(dir),
 		onDrift: (changes) =>
 			bus.emit(BusChannels.GitHooksChanged, {
 				message: gitHookDriftNotice(changes, process.cwd()),
-				changes: changes.map(({ path, kind, size, firstLine }) => ({ path, kind, size, firstLine })),
+				changes: changes.map(({ path, kind, key, size, firstLine }) => ({
+					path,
+					kind,
+					...(key !== undefined ? { key } : {}),
+					size,
+					firstLine,
+				})),
 			}),
 	});
+	// Git Clio runs itself (task worktrees, landing worker results) runs
+	// outside any sandbox, so after drift it runs with hooks off at default
+	// (src/domains/safety/internal-git-policy.ts, src/core/internal-git.ts).
+	installInternalGitPolicy(
+		createInternalGitPolicy({
+			workspace: process.cwd(),
+			guard: hookDrift,
+			autonomy: resolveEffectiveAutonomy,
+			emptyHooksDir: join(clioStateDir(), "git", "no-hooks"),
+			onDrift: (record) =>
+				bus.emit(BusChannels.InternalGitDrift, {
+					message: record.message,
+					announce: record.announce,
+					operation: record.operation,
+					hardened: record.hardened,
+					outcome: record.outcome,
+					changes: record.changes.map(({ path, kind, key }) => ({
+						path,
+						kind,
+						...(key !== undefined ? { key } : {}),
+					})),
+				}),
+		}),
+	);
 	// The same seat answers dispatched workers' asks, so worker and main-session
 	// blocks share one session's escalation counts.
 	workerAskJudgeForDispatch = {

@@ -1,10 +1,12 @@
 /** Mechanical publication checks; these do not prove a claim or that a writer read its source. */
+
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import type { Tokens } from "marked";
 import { parse } from "yaml";
+import { internalGitArgv } from "../../../core/internal-git.js";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
 import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
 import { isGeneratedWikiFile, WIKI_INDEX, WIKI_QUICKSTART, wikiMarkdownFilesInDir } from "./layout.js";
@@ -474,7 +476,7 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		if (glob && !template) {
 			if (trackedFiles === undefined) {
 				try {
-					trackedFiles = execFileSync("git", ["ls-files", "--cached", "-z"], {
+					trackedFiles = execFileSync("git", internalGitArgv(["ls-files", "--cached", "-z"], root), {
 						cwd: root,
 						encoding: "utf8",
 						maxBuffer: 128 * 1024 * 1024,

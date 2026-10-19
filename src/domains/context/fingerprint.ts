@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 import { readCodewiki } from "./codewiki/artifact.js";
 import { isIndexablePath } from "./codewiki/paths.js";
@@ -57,7 +58,7 @@ function extensionOf(name: string): string {
 
 function currentGitHead(cwd: string): string | null {
 	try {
-		return execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+		return execFileSync("git", internalGitArgv(["rev-parse", "--verify", "HEAD"], cwd), {
 			cwd,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],

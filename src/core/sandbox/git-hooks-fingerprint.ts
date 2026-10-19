@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	closeSync,
@@ -11,7 +12,7 @@ import {
 	statSync,
 } from "node:fs";
 import path from "node:path";
-import { mainSandboxGitLayout } from "./main-session.js";
+import { gitConfigScopeFiles, mainSandboxGitLayout } from "./main-session.js";
 
 /**
  * What git would run outside Clio's sandbox. A hook runs with the full
@@ -28,13 +29,26 @@ import { mainSandboxGitLayout } from "./main-session.js";
  * a fingerprint costs a stat per workspace directory and per hook file: a
  * directory is read again only when its mtime moved, and a hook file is
  * hashed again only when its stat identity changed.
+ *
+ * Git configuration can name programs too (core.fsmonitor, core.sshCommand,
+ * diff.external, filter drivers, credential helpers, `!` aliases and the
+ * rest of {@link gitConfigValueRuns}), so each repository's executable config
+ * values join the fingerprint as entries of kind `config`, one per config
+ * file and key, global and system scopes included. One `git config --list
+ * --show-origin -z` per repository reads them, and it runs again only after
+ * one of the files it read, or a scope file it could read next, moved.
  */
 
-/** One file git would run from a hooks directory. */
+/**
+ * One file git would run from a hooks directory, or one executable git config
+ * value (`kind: "config"`).
+ */
 export interface GitHookFile {
-	/** Absolute path as listed in its hooks directory. */
+	/** Absolute path as listed in its hooks directory; for config, the file that sets it, or git's origin label. */
 	path: string;
-	kind: "file" | "symlink";
+	kind: "file" | "symlink" | "config";
+	/** The config key as git lists it (`core.fsmonitor`, `filter.lfs.clean`); absent for a hook file. */
+	key?: string;
 	/** Any execute bit on what git would open, the link's target for a link. */
 	executable: boolean;
 	/** Bytes git would read; -1 for a dangling link or an unreadable file. */
@@ -48,7 +62,7 @@ export interface GitHookFile {
 export interface GitHooksFingerprint {
 	/** Hooks directories scanned, present or not. */
 	directories: ReadonlyArray<string>;
-	/** Hook files by absolute path. */
+	/** Hook files and executable config values, by {@link gitHookEntryId}. */
 	files: ReadonlyMap<string, GitHookFile>;
 	/** True when the nested-repository walk stopped at its bound, so a deeper repository is not covered. */
 	capped: boolean;
@@ -59,6 +73,8 @@ export type GitHookChangeKind = "added" | "changed" | "removed";
 export interface GitHookChange {
 	path: string;
 	kind: GitHookChangeKind;
+	/** The config key, for an executable config value. */
+	key?: string;
 	/** The file now, or as last seen for a removed one. */
 	size: number;
 	firstLine: string;
@@ -76,6 +92,80 @@ const DISCOVERY_SKIPPED: ReadonlySet<string> = new Set([".git", "node_modules"])
 const HASH_MAX_BYTES = 4 * 1024 * 1024;
 const FIRST_LINE_BYTES = 512;
 const FIRST_LINE_CHARS = 120;
+const CONFIG_LIST_TIMEOUT_MS = 5_000;
+const CONFIG_LIST_MAX_BYTES = 4 * 1024 * 1024;
+
+/** A hook file's path, or a config value's file and key: what a fingerprint, a baseline and a change are keyed by. */
+export function gitHookEntryId(entry: { path: string; key?: string }): string {
+	return entry.key === undefined ? entry.path : `${entry.path}\0${entry.key}`;
+}
+
+/** core.* keys whose value is a program, a shell command, or (core.hooksPath) where hooks run from. */
+const CORE_PROGRAM_KEYS: ReadonlySet<string> = new Set([
+	"alternaterefscommand",
+	"askpass",
+	"editor",
+	"fsmonitor",
+	"gitproxy",
+	"hookspath",
+	"pager",
+	"sshcommand",
+]);
+const BOOLEAN_WORDS: ReadonlySet<string> = new Set(["true", "false", "yes", "no", "on", "off", "1", "0"]);
+
+/**
+ * Pure: whether git runs `value` of `key` as a program. `key` is as `git
+ * config --list` prints it: section and name lowercased, a subsection as
+ * written. An empty value, which resets a list or turns a feature off, runs
+ * nothing; a boolean core.fsmonitor selects git's own daemon or none.
+ */
+function gitConfigValueRuns(key: string, value: string): boolean {
+	const first = key.indexOf(".");
+	const last = key.lastIndexOf(".");
+	if (first <= 0 || last === key.length - 1) return false;
+	const section = key.slice(0, first);
+	const name = key.slice(last + 1);
+	const sub = first === last ? null : key.slice(first + 1, last);
+	const trimmed = value.trim();
+	if (trimmed === "") return false;
+	switch (section) {
+		case "core":
+			return (
+				sub === null && CORE_PROGRAM_KEYS.has(name) && !(name === "fsmonitor" && BOOLEAN_WORDS.has(trimmed.toLowerCase()))
+			);
+		case "sequence":
+			return sub === null && name === "editor";
+		case "diff":
+			return sub === null ? name === "external" : name === "textconv" || name === "command";
+		case "filter":
+			return sub !== null && (name === "clean" || name === "smudge" || name === "process");
+		case "merge":
+			return sub !== null && name === "driver";
+		case "credential":
+			return name === "helper";
+		case "gpg":
+			return name === "program" || (sub === "ssh" && name === "defaultkeycommand");
+		case "alias":
+			return trimmed.startsWith("!");
+		case "uploadpack":
+			return sub === null && name === "packobjectshook";
+		case "remote":
+			return sub !== null && (name === "uploadpack" || name === "receivepack" || name === "vcs");
+		case "pager":
+			return sub === null && !BOOLEAN_WORDS.has(trimmed.toLowerCase());
+		case "trailer":
+			return sub !== null && (name === "command" || name === "cmd");
+		case "submodule":
+			return sub !== null && name === "update" && trimmed.startsWith("!");
+		case "difftool":
+		case "mergetool":
+			return sub !== null && name === "cmd";
+		case "interactive":
+			return sub === null && name === "difffilter";
+		default:
+			return false;
+	}
+}
 
 interface ListedDirectory {
 	key: string;
@@ -197,20 +287,158 @@ function createRepositoryWalker(root: string): () => { tops: string[]; capped: b
 	};
 }
 
-/** Every hooks directory of the repository holding `root` and of each nested top. */
-function hooksDirectoriesOf(root: string, tops: ReadonlyArray<string>): string[] {
-	const directories = new Set<string>();
-	for (const top of [root, ...tops]) {
-		let dirs: ReadonlyArray<string>;
+/** Where one repository keeps what git runs: its hooks directories, and the files its configuration comes from. */
+interface RepositoryScope {
+	/**
+	 * The work tree top holding the workspace root or a nested repository top,
+	 * where its config is listed: git prints a relative origin from there.
+	 */
+	dir: string;
+	hooksDirs: ReadonlyArray<string>;
+	configFiles: ReadonlyArray<string>;
+}
+
+/** The nearest directory at or above `dir` holding a `.git`, or `dir` itself outside a repository. */
+function workTreeTop(dir: string): string {
+	for (let at = dir; ; at = path.dirname(at)) {
 		try {
-			dirs = mainSandboxGitLayout(top)?.hooksDirs ?? [];
+			lstatSync(path.join(at, ".git"));
+			return at;
+		} catch {
+			if (path.dirname(at) === at) return dir;
+		}
+	}
+}
+
+/** The scope of the repository holding `root` and of each nested top. */
+function repositoryScopes(root: string, tops: ReadonlyArray<string>): RepositoryScope[] {
+	return [...new Set([workTreeTop(root), ...tops])].map((dir) => {
+		try {
+			const layout = mainSandboxGitLayout(dir);
+			return {
+				dir,
+				hooksDirs: layout?.hooksDirs ?? [],
+				configFiles: layout?.configFiles ?? gitConfigScopeFiles(null, null),
+			};
 		} catch {
 			// An unreadable layout still leaves the default hooks directory a hook would most likely land in.
-			dirs = [path.join(top, ".git", "hooks")];
+			return {
+				dir,
+				hooksDirs: [path.join(dir, ".git", "hooks")],
+				configFiles: [...gitConfigScopeFiles(null, null), path.join(dir, ".git", "config")],
+			};
 		}
-		for (const dir of dirs) directories.add(dir);
+	});
+}
+
+/** Every hooks directory of the repository holding `root` and of each nested top. */
+function hooksDirectoriesOf(scopes: ReadonlyArray<RepositoryScope>): string[] {
+	return [...new Set(scopes.flatMap((scope) => scope.hooksDirs))];
+}
+
+/** One repository's executable config as last listed. */
+interface ConfigListing {
+	/** {@link statStamp} of the watched files when the listing ran; a listing that failed has none. */
+	stamp: string | null;
+	/** Config files the listing named as origins: includes, besides the scope files. */
+	origins: ReadonlyArray<string>;
+	entries: ReadonlyMap<string, GitHookFile>;
+}
+
+function statStamp(files: ReadonlyArray<string>): string {
+	return files
+		.map((file) => {
+			try {
+				return `${file}\0${fileIdentity(statSync(file))}`;
+			} catch {
+				return `${file}\0-`;
+			}
+		})
+		.join("\n");
+}
+
+/** Variables that would point a listing at another repository than the one in its directory. */
+const REPOSITORY_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY"];
+
+/**
+ * Impure: the executable config values git reads in `dir`, every scope
+ * included, as fingerprint entries, and the files they came from. Null when
+ * git cannot list them. Listing config runs no hook and no configured
+ * program.
+ */
+function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>; origins: string[] } | null {
+	const env = { ...process.env };
+	for (const name of REPOSITORY_ENV) Reflect.deleteProperty(env, name);
+	let output: string;
+	try {
+		output = execFileSync("git", ["config", "--list", "--show-origin", "-z"], {
+			cwd: dir,
+			env,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: CONFIG_LIST_TIMEOUT_MS,
+			maxBuffer: CONFIG_LIST_MAX_BYTES,
+		});
+	} catch {
+		return null;
 	}
-	return [...directories];
+	// `-z` prints `<origin>\0<key>\n<value>\0` per value, and only `<key>` for a key with no `=`.
+	const fields = output.split("\0");
+	const groups = new Map<string, { path: string; key: string; values: string[] }>();
+	const origins = new Set<string>();
+	for (let at = 0; at + 1 < fields.length; at += 2) {
+		const origin = fields[at] as string;
+		const pair = fields[at + 1] as string;
+		const newline = pair.indexOf("\n");
+		const key = newline < 0 ? pair : pair.slice(0, newline);
+		const value = newline < 0 ? "" : pair.slice(newline + 1);
+		// Git prints a file below the work tree top relative to it, having moved there to read config.
+		const file = origin.startsWith("file:") ? path.resolve(dir, origin.slice("file:".length)) : null;
+		if (file !== null) origins.add(file);
+		const where = file ?? origin.replace(/:$/u, "");
+		const id = gitHookEntryId({ path: where, key });
+		const group = groups.get(id) ?? { path: where, key, values: [] };
+		group.values.push(value);
+		groups.set(id, group);
+	}
+	const entries = new Map<string, GitHookFile>();
+	for (const [id, group] of groups) {
+		if (!group.values.some((value) => gitConfigValueRuns(group.key, value))) continue;
+		const joined = group.values.join("\0");
+		entries.set(id, {
+			path: group.path,
+			kind: "config",
+			key: group.key,
+			executable: true,
+			size: Buffer.byteLength(joined),
+			hash: createHash("sha256").update(joined).digest("hex"),
+			firstLine: firstLineOf(Buffer.from(group.values.at(-1) ?? "")),
+		});
+	}
+	return { entries, origins: [...origins] };
+}
+
+/**
+ * Impure: `scope`'s executable config, listed again only when a watched file
+ * moved since `cached`: a scope file, or an origin the last listing named.
+ */
+function executableConfigOf(scope: RepositoryScope, cached: ConfigListing | undefined): ConfigListing {
+	const watched = (origins: ReadonlyArray<string>): string[] => [...new Set([...scope.configFiles, ...origins])];
+	const stamp = statStamp(watched(cached?.origins ?? []));
+	if (cached !== undefined && cached.stamp === stamp) return cached;
+	const listed = listExecutableConfig(scope.dir);
+	// A failed listing keeps what was last seen and lists again next time.
+	if (listed === null) return { stamp: null, origins: cached?.origins ?? [], entries: cached?.entries ?? new Map() };
+	const sameOrigins =
+		cached !== undefined &&
+		listed.origins.length === cached.origins.length &&
+		listed.origins.every((origin) => cached.origins.includes(origin));
+	// A file the listing names for the first time is stamped after it was read.
+	return {
+		stamp: sameOrigins ? stamp : statStamp(watched(listed.origins)),
+		origins: listed.origins,
+		entries: listed.entries,
+	};
 }
 
 /** Walkers kept for {@link gitHookDirectories}, so a dispatch's repeat calls re-stat instead of re-reading. */
@@ -234,13 +462,23 @@ export function gitHookDirectories(root: string): { directories: string[]; cappe
 		directoryWalkers.set(base, walk);
 	}
 	const { tops, capped } = walk();
-	return { directories: hooksDirectoriesOf(base, tops), capped };
+	return { directories: hooksDirectoriesOf(repositoryScopes(base, tops)), capped };
 }
 
 export interface GitHooksFingerprinter {
 	/** The hooks git could run now. Reuses listings and hashes whose stat identity held. */
 	fingerprint(): GitHooksFingerprint;
+	/**
+	 * The executable config values git reads in the repository holding `dir`,
+	 * by {@link gitHookEntryId}, without walking for hooks. Cheap enough for a
+	 * status probe: a stat per config file, and a `git config` listing only
+	 * after one of them moved.
+	 */
+	config(dir: string): ReadonlyMap<string, GitHookFile>;
 }
+
+/** Repository scopes {@link GitHooksFingerprinter.config} keeps beyond those the last walk found. */
+const CONFIG_SCOPES_KEPT = 64;
 
 /**
  * Impure: a fingerprinter for the workspace at `workspace`, with its own
@@ -251,6 +489,8 @@ export function createGitHooksFingerprinter(workspace: string): GitHooksFingerpr
 	const walk = createRepositoryWalker(root);
 	let listings = new Map<string, ListedHooks>();
 	let hashed = new Map<string, HashedFile>();
+	let configs = new Map<string, ConfigListing>();
+	let scopesByTop = new Map<string, RepositoryScope>();
 
 	const hookFile = (file: string, nextHashed: Map<string, HashedFile>): GitHookFile | null => {
 		let link: Stats;
@@ -300,7 +540,8 @@ export function createGitHooksFingerprinter(workspace: string): GitHooksFingerpr
 	return {
 		fingerprint() {
 			const { tops, capped } = walk();
-			const directories = hooksDirectoriesOf(root, tops);
+			const scopes = repositoryScopes(root, tops);
+			const directories = hooksDirectoriesOf(scopes);
 			const nextListings = new Map<string, ListedHooks>();
 			const nextHashed = new Map<string, HashedFile>();
 			const files = new Map<string, GitHookFile>();
@@ -330,14 +571,41 @@ export function createGitHooksFingerprinter(workspace: string): GitHooksFingerpr
 					if (entry !== null) files.set(file, entry);
 				}
 			}
+			const nextConfigs = new Map<string, ConfigListing>();
+			for (const scope of scopes) {
+				const listing = executableConfigOf(scope, configs.get(scope.dir));
+				nextConfigs.set(scope.dir, listing);
+				// The global and system entries every repository lists share one id.
+				for (const [id, entry] of listing.entries) files.set(id, entry);
+			}
 			listings = nextListings;
 			hashed = nextHashed;
+			configs = nextConfigs;
+			scopesByTop = new Map(scopes.map((scope) => [scope.dir, scope]));
 			return { directories, files, capped };
+		},
+		config(dir) {
+			const top = workTreeTop(path.resolve(dir));
+			let scope = scopesByTop.get(top);
+			if (scope === undefined) {
+				scope = repositoryScopes(top, [])[0] as RepositoryScope;
+				if (scopesByTop.size >= CONFIG_SCOPES_KEPT) {
+					const oldest = scopesByTop.keys().next().value;
+					if (oldest !== undefined) scopesByTop.delete(oldest);
+				}
+				scopesByTop.set(top, scope);
+			}
+			const listing = executableConfigOf(scope, configs.get(top));
+			configs.set(top, listing);
+			return listing.entries;
 		},
 	};
 }
 
-/** Pure: added and changed files of `after` against `before`, then removed ones, sorted by path. */
+/**
+ * Pure: added and changed entries of `after` against `before`, then removed
+ * ones, sorted by path and key. Both maps are keyed by {@link gitHookEntryId}.
+ */
 export function diffGitHookFiles(
 	before: ReadonlyMap<string, GitHookFile>,
 	after: ReadonlyMap<string, GitHookFile>,
@@ -346,18 +614,19 @@ export function diffGitHookFiles(
 	const change = (file: GitHookFile, kind: GitHookChangeKind): GitHookChange => ({
 		path: file.path,
 		kind,
+		...(file.key !== undefined ? { key: file.key } : {}),
 		size: file.size,
 		firstLine: file.firstLine,
 		executable: file.executable,
 		hash: kind === "removed" ? "" : file.hash,
 	});
-	for (const file of after.values()) {
-		const prior = before.get(file.path);
+	for (const [id, file] of after) {
+		const prior = before.get(id);
 		if (prior === undefined) changes.push(change(file, "added"));
 		else if (prior.hash !== file.hash || prior.executable !== file.executable || prior.kind !== file.kind) {
 			changes.push(change(file, "changed"));
 		}
 	}
-	for (const file of before.values()) if (!after.has(file.path)) changes.push(change(file, "removed"));
-	return changes.sort((a, b) => a.path.localeCompare(b.path));
+	for (const [id, file] of before) if (!after.has(id)) changes.push(change(file, "removed"));
+	return changes.sort((a, b) => a.path.localeCompare(b.path) || (a.key ?? "").localeCompare(b.key ?? ""));
 }

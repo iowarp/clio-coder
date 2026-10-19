@@ -61,12 +61,40 @@ function unattendedSummary(snapshot: Pick<ExitSummarySnapshot, "unattended">): s
 /** Hook files shown before the line says how many more there are. */
 const GIT_HOOKS_SHOWN = 4;
 
-/** `changed .git/hooks/pre-commit · added .husky/pre-push`, or null when no hook file changed this visit. */
+function gitHookEntry(hook: { path: string; kind: string; key?: string }): string {
+	return hook.key === undefined ? `${hook.kind} ${hook.path}` : `${hook.kind} ${hook.key} in ${hook.path}`;
+}
+
+/** `changed .git/hooks/pre-commit · added core.fsmonitor in .git/config`, or null when nothing changed this visit. */
 function gitHooksSummary(snapshot: Pick<ExitSummarySnapshot, "gitHooks">): string | null {
 	const hooks = snapshot.gitHooks ?? [];
 	if (hooks.length === 0) return null;
-	const shown = hooks.slice(0, GIT_HOOKS_SHOWN).map((hook) => `${hook.kind} ${hook.path}`);
+	const shown = hooks.slice(0, GIT_HOOKS_SHOWN).map(gitHookEntry);
 	const more = hooks.length > GIT_HOOKS_SHOWN ? [`${count(hooks.length - GIT_HOOKS_SHOWN)} more`] : [];
+	return [...shown, ...more].join(" · ");
+}
+
+/** How the summary words each outcome of src/domains/safety/internal-git-policy.ts. */
+const INTERNAL_GIT_OUTCOMES: Readonly<Record<string, string>> = {
+	"hooks-off": "without hooks",
+	overridden: "with changed config overridden",
+	skipped: "skipped",
+	yolo: "under yolo with changes",
+};
+
+/**
+ * `git worktree add without hooks (added .git/hooks/post-checkout) · git
+ * merge under yolo with changes (...)`, or null when Clio's own git met no drift.
+ */
+function internalGitSummary(snapshot: Pick<ExitSummarySnapshot, "internalGit">): string | null {
+	const runs = snapshot.internalGit ?? [];
+	if (runs.length === 0) return null;
+	const shown = runs.slice(0, GIT_HOOKS_SHOWN).map((run) => {
+		const changes = run.changes.slice(0, GIT_HOOKS_SHOWN).map(gitHookEntry);
+		const more = run.changes.length > GIT_HOOKS_SHOWN ? [`${count(run.changes.length - GIT_HOOKS_SHOWN)} more`] : [];
+		return `${run.operation} ${INTERNAL_GIT_OUTCOMES[run.outcome] ?? run.outcome} (${[...changes, ...more].join(", ")})`;
+	});
+	const more = runs.length > GIT_HOOKS_SHOWN ? [`${count(runs.length - GIT_HOOKS_SHOWN)} more`] : [];
 	return [...shown, ...more].join(" · ");
 }
 
@@ -107,6 +135,7 @@ export function renderExitSummary(
 	const models = modelList(snapshot);
 	const unattended = unattendedSummary(snapshot);
 	const gitHooks = gitHooksSummary(snapshot);
+	const internalGit = internalGitSummary(snapshot);
 	const session = snapshot.sessionName ? `${snapshot.sessionName} · ${snapshot.sessionId}` : snapshot.sessionId;
 	const resumeLines = wrap(theme?.fg("commandHint", resume) ?? resume);
 	if (!tty) lines.push(`Clio Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
@@ -131,6 +160,7 @@ export function renderExitSummary(
 		if (unattended !== null) add("Unattended", unattended);
 		// Nor is a hook that runs outside the sandbox on the next git command.
 		if (gitHooks !== null) add("Git hooks", gitHooks);
+		if (internalGit !== null) add("Internal git", internalGit);
 	} else {
 		add(
 			"Activity",
@@ -145,6 +175,7 @@ export function renderExitSummary(
 		if (snapshot.compactions > 0) add("Compactions", count(snapshot.compactions));
 		if (unattended !== null) add("Unattended", unattended);
 		if (gitHooks !== null) add("Git hooks", gitHooks);
+		if (internalGit !== null) add("Internal git", internalGit);
 		if (style === "standard") {
 			divide();
 			if (models.length > 0) {

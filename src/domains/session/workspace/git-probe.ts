@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
+import { internalGitArgv } from "../../../core/internal-git.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,7 +43,11 @@ const EMPTY_STATUS_PROBE: GitStatusProbeResult = { isGit: false, branch: null, d
 
 function gitOk(cwd: string, args: string[]): string | null {
 	try {
-		const out = execFileSync("git", args, { cwd, timeout: TIMEOUT_MS, stdio: ["ignore", "pipe", "ignore"] });
+		const out = execFileSync("git", internalGitArgv(args, cwd), {
+			cwd,
+			timeout: TIMEOUT_MS,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
 		return out.toString().trim();
 	} catch {
 		return null;
@@ -51,7 +56,11 @@ function gitOk(cwd: string, args: string[]): string | null {
 
 async function gitOkAsync(cwd: string, args: string[]): Promise<string | null> {
 	try {
-		const { stdout } = await execFileAsync("git", args, { cwd, timeout: TIMEOUT_MS, encoding: "utf8" });
+		const { stdout } = await execFileAsync("git", internalGitArgv(args, cwd), {
+			cwd,
+			timeout: TIMEOUT_MS,
+			encoding: "utf8",
+		});
 		return stdout.trim();
 	} catch {
 		return null;

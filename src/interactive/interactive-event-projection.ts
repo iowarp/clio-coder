@@ -284,6 +284,15 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.appendTranscriptNotice("warn", payload.message, "safety");
 			deps.requestRender();
 		}),
+		// Git Clio ran itself with hooks off after drift, announced once per set
+		// of changes. At yolo it ran as configured, and only the exit summary
+		// records it.
+		deps.bus.on(BusChannels.InternalGitDrift, (payload) => {
+			if (payload?.hardened !== true || payload.announce !== true) return;
+			if (typeof payload.message !== "string" || payload.message.length === 0) return;
+			deps.appendTranscriptNotice("warn", payload.message, "safety");
+			deps.requestRender();
+		}),
 		deps.bus.on(BusChannels.DispatchScopeNotice, (payload) => {
 			const notice = readDispatchScopeNotice(payload);
 			if (notice === null) return;

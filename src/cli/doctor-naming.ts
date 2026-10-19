@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { internalGitArgv } from "../core/internal-git.js";
 
 import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
@@ -37,7 +38,14 @@ function legacyGitRefsFinding(cwd: string): DoctorFinding {
 	try {
 		refs = execFileSync(
 			"git",
-			["-C", cwd, "for-each-ref", "--format=%(refname:short)", "refs/heads/clio/task", "refs/heads/clio/compete"],
+			internalGitArgv([
+				"-C",
+				cwd,
+				"for-each-ref",
+				"--format=%(refname:short)",
+				"refs/heads/clio/task",
+				"refs/heads/clio/compete",
+			]),
 			{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 },
 		)
 			.split("\n")

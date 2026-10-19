@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { internalGitArgv } from "../core/internal-git.js";
 import { enumerateWorkspaceFilesAsync } from "../core/workspace-files.js";
 import { fuzzyFilter, stripTerminalSequences } from "../engine/tui.js";
 import { isEditorSteerTargetToken } from "./editor-steer.js";
@@ -74,23 +75,26 @@ function safeRelativePath(path: string): string | null {
 
 function gitTrackedFiles(basePath: string): Promise<ReadonlySet<string>> {
 	return new Promise((resolveTracked) => {
-		execFile(
-			"git",
-			["--literal-pathspecs", "ls-files", "-z", "--cached"],
-			{ cwd: basePath, encoding: "utf8", maxBuffer: GIT_OUTPUT_LIMIT_BYTES },
-			(error, stdout) => {
-				if (error) {
-					resolveTracked(new Set());
-					return;
-				}
-				const tracked = new Set<string>();
-				for (const raw of stdout.split("\0")) {
-					const normalized = safeRelativePath(raw);
-					if (normalized) tracked.add(normalized);
-				}
-				resolveTracked(tracked);
-			},
-		);
+		let argv: string[];
+		try {
+			argv = internalGitArgv(["--literal-pathspecs", "ls-files", "-z", "--cached"], basePath);
+		} catch {
+			// Clio refused its own read after config drift; completion goes on without tracked-file hints.
+			resolveTracked(new Set());
+			return;
+		}
+		execFile("git", argv, { cwd: basePath, encoding: "utf8", maxBuffer: GIT_OUTPUT_LIMIT_BYTES }, (error, stdout) => {
+			if (error) {
+				resolveTracked(new Set());
+				return;
+			}
+			const tracked = new Set<string>();
+			for (const raw of stdout.split("\0")) {
+				const normalized = safeRelativePath(raw);
+				if (normalized) tracked.add(normalized);
+			}
+			resolveTracked(tracked);
+		});
 	});
 }
 

@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stripAuthoredTrailers } from "../core/commit-message.js";
+import { internalGitArgv } from "../core/internal-git.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import {
 	LEGACY_TASK_WORKTREE_KIND,
@@ -119,7 +120,7 @@ const OWNER_FILE_SUFFIX = TASK_WORKTREE_OWNER_SUFFIX;
 export const COMMIT_IDENTITY = "clio-coder-task";
 
 function gitBytes(root: string, args: string[]): Buffer {
-	return execFileSync("git", ["-C", root, ...args], {
+	return execFileSync("git", internalGitArgv(["-C", root, ...args]), {
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,
 	});
@@ -661,7 +662,7 @@ const BASE_DIFF_MAX_BYTES = 8 * 1024 * 1024;
  */
 export function taskWorktreeBaseDiff(worktree: TaskWorktree): string | null {
 	try {
-		return execFileSync("git", ["-C", worktree.path, "diff", "--no-color", "--no-ext-diff", "-U0", worktree.base], {
+		return execFileSync("git", internalGitArgv(["-C", worktree.path, "diff", "--no-color", "-U0", worktree.base]), {
 			stdio: ["ignore", "pipe", "pipe"],
 			timeout: 30_000,
 			maxBuffer: BASE_DIFF_MAX_BYTES,

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
+import { internalGitArgv } from "../core/internal-git.js";
 import { codemapPath, legacyCodewikiPath } from "../domains/context/codewiki/artifact.js";
 import { type CodewikiCoordinatedResult, coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
@@ -27,7 +28,11 @@ function defaultRepoMapPath(cwd: string): string {
 
 function gitValue(cwd: string, args: string[], raw = false): string | null {
 	try {
-		const out = execFileSync("git", args, { cwd, timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).toString("utf8");
+		const out = execFileSync("git", internalGitArgv(args, cwd), {
+			cwd,
+			timeout: 5000,
+			stdio: ["ignore", "pipe", "ignore"],
+		}).toString("utf8");
 		// Porcelain status columns start with a meaningful space; trimming would shift them.
 		return raw ? out : out.trim();
 	} catch {

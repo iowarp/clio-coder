@@ -131,6 +131,13 @@ export interface MainSandboxGitLayout {
 	 * guard fingerprints what they hold (git-hooks-fingerprint.ts).
 	 */
 	hooksDirs?: ReadonlyArray<string>;
+	/**
+	 * The files whose change can change the configuration git reads for the
+	 * work tree: {@link gitConfigScopeFiles} and the git dir's `HEAD`, which an
+	 * `includeIf "onbranch:"` section depends on. The hook drift guard
+	 * re-reads executable config only after one of them moves.
+	 */
+	configFiles?: ReadonlyArray<string>;
 }
 
 /** Read in every git dir: config.worktree applies with extensions.worktreeConfig, commondir redirects the common dir. */
@@ -255,13 +262,11 @@ function configHooksPaths(file: string, depth: number): string[] {
 }
 
 /**
- * Impure: the hooks directories core.hooksPath names for the work tree at
- * `top`, from the system, global, repository and worktree config. Every value
- * counts, not only the one git would pick, and a relative one is taken from
- * the work tree, where git runs hooks. Husky 9 names `.husky/_`, whose stubs
- * run the scripts in `.husky` itself, so that parent counts too.
+ * The config files git reads before the command line, present or not: the
+ * system and global files, then, inside a repository, the common dir's
+ * `config` and the git dir's `config.worktree`.
  */
-function configuredHooksDirs(top: string, commonDir: string, gitDir: string): string[] {
+export function gitConfigScopeFiles(commonDir: string | null, gitDir: string | null): string[] {
 	const xdg = process.env.XDG_CONFIG_HOME?.trim();
 	const configHome = xdg !== undefined && path.isAbsolute(xdg) ? xdg : path.join(homedir(), ".config");
 	const files = [
@@ -270,10 +275,21 @@ function configuredHooksDirs(top: string, commonDir: string, gitDir: string): st
 		path.join(configHome, "git", "config"),
 		path.join(homedir(), ".gitconfig"),
 		process.env.GIT_CONFIG_GLOBAL,
-		path.join(commonDir, "config"),
-		path.join(gitDir, "config.worktree"),
+		commonDir === null ? undefined : path.join(commonDir, "config"),
+		gitDir === null ? undefined : path.join(gitDir, "config.worktree"),
 	].filter((file): file is string => file !== undefined && file.length > 0);
-	const dirs = [...new Set(files)]
+	return [...new Set(files)];
+}
+
+/**
+ * Impure: the hooks directories core.hooksPath names for the work tree at
+ * `top`, from the system, global, repository and worktree config. Every value
+ * counts, not only the one git would pick, and a relative one is taken from
+ * the work tree, where git runs hooks. Husky 9 names `.husky/_`, whose stubs
+ * run the scripts in `.husky` itself, so that parent counts too.
+ */
+function configuredHooksDirs(top: string, commonDir: string, gitDir: string): string[] {
+	const dirs = gitConfigScopeFiles(commonDir, gitDir)
 		.flatMap((file) => configHooksPaths(file, 0))
 		.map((value) => gitConfigPath(value, top));
 	return [...new Set(dirs.flatMap((dir) => (path.basename(dir) === "_" ? [dir, path.dirname(dir)] : [dir])))];
@@ -384,6 +400,7 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 		absentHooks: unique(absentHooks),
 		absentFiles: unique(absentFiles),
 		hooksDirs: unique(hooksDirs),
+		configFiles: [...gitConfigScopeFiles(commonDir, gitDir), path.join(gitDir, "HEAD")],
 	};
 }
 

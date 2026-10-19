@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { HOME_SECRET_RELATIVE_PATHS, WORKSPACE_SECRET_PATHS } from "../../domains/safety/secret-paths.js";
+import { internalGitArgv } from "../internal-git.js";
 import type { SandboxMaskedPath } from "./types.js";
 
 /**
@@ -204,7 +205,7 @@ function gitProbeEnv(): NodeJS.ProcessEnv {
 
 function git(root: string, args: ReadonlyArray<string>): string[] | null {
 	try {
-		const output = execFileSync("git", ["--literal-pathspecs", "-c", "core.fsmonitor=false", ...args], {
+		const output = execFileSync("git", internalGitArgv(["--literal-pathspecs", ...args], root), {
 			cwd: root,
 			env: gitProbeEnv(),
 			stdio: ["ignore", "pipe", "ignore"],

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { internalGitArgv } from "../../../core/internal-git.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { type WikiPage, wikiDir, wikiMarkdownFilesInDir } from "./layout.js";
 import type { ResolvedWikiDepth, WikiDepth, WikiPlan } from "./plan.js";
@@ -102,7 +103,7 @@ export function wikiMetaPath(cwd: string): string {
 
 export function currentWikiGitHead(cwd: string): string | null {
 	try {
-		return execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+		return execFileSync("git", internalGitArgv(["rev-parse", "--verify", "HEAD"], cwd), {
 			cwd,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],

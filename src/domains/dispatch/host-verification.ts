@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
@@ -60,7 +61,7 @@ function outputTail(value: string): string {
 }
 
 function repositoryRoot(cwd: string): string {
-	return execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+	return execFileSync("git", internalGitArgv(["-C", cwd, "rev-parse", "--show-toplevel"]), {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,
@@ -140,7 +141,20 @@ const DEPENDENCY_MANIFESTS = [
 /** Each manifest is absent on both sides or has the same blob id; hashes avoid reading lockfiles into memory. */
 async function manifestsMatchBase(root: string, base: string): Promise<boolean> {
 	const git = (args: string[]) =>
-		runCommandVector("git", ["-C", root, ...args], { timeoutMs: 5_000, maxOutputBytes: 1_024 });
+		runCommandVector("git", internalGitArgv(["-C", root, ...args]), { timeoutMs: 5_000, maxOutputBytes: 1_024 });
+	try {
+		return await manifestsMatch(root, base, git);
+	} catch {
+		// Clio refused its own hash-object after config drift: unproven manifests do not match.
+		return false;
+	}
+}
+
+async function manifestsMatch(
+	root: string,
+	base: string,
+	git: (args: string[]) => ReturnType<typeof runCommandVector>,
+): Promise<boolean> {
 	for (const name of DEPENDENCY_MANIFESTS) {
 		const atBase = await git(["rev-parse", "--verify", "-q", `${base}:${name}`]);
 		const baseId = atBase.exitCode === 0 ? atBase.stdout.trim() : null;

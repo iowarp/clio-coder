@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { readSettings, updateSettings } from "../../core/config.js";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { type LifecycleContext, recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
@@ -634,16 +635,22 @@ export async function syncLibrary(
 	if (!settings.sync) throw new Error("library_sync_disabled");
 	const remote = confirmedRemote();
 	const cwd = path.dirname(catalogPath());
-	const remoteResult = await runner("git", ["remote", "get-url", "library"], { cwd, workspaceRoot: cwd });
+	const remoteResult = await runner("git", internalGitArgv(["remote", "get-url", "library"], cwd), {
+		cwd,
+		workspaceRoot: cwd,
+	});
 	if (remoteResult.exitCode !== 0 || remoteResult.stdout.trim() !== remote)
 		throw new Error("library_remote_unconfirmed");
 	if (direction === "sync") {
-		const fetched = await runner("git", ["fetch", "library"], { cwd, workspaceRoot: cwd });
+		const fetched = await runner("git", internalGitArgv(["fetch", "library"], cwd), { cwd, workspaceRoot: cwd });
 		if (fetched.exitCode !== 0) throw new Error(fetched.stderr.trim() || "library sync failed");
-		const advanced = await runner("git", ["merge", "--ff-only", "FETCH_HEAD"], { cwd, workspaceRoot: cwd });
+		const advanced = await runner("git", internalGitArgv(["merge", "--ff-only", "FETCH_HEAD"], cwd), {
+			cwd,
+			workspaceRoot: cwd,
+		});
 		if (advanced.exitCode !== 0) throw new Error(advanced.stderr.trim() || "library sync failed");
 		return;
 	}
-	const result = await runner("git", ["push", "library"], { cwd, workspaceRoot: cwd });
+	const result = await runner("git", internalGitArgv(["push", "library"], cwd), { cwd, workspaceRoot: cwd });
 	if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `library ${direction} failed`);
 }

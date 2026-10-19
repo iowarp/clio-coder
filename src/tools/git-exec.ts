@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { internalGitArgv } from "../core/internal-git.js";
 import { buildSafeToolEnv } from "../core/safe-exec.js";
 import { readTaskWorktreeGitLayout, taskWorktreeGitWritablePaths } from "../core/sandbox/worktree-git.js";
 import type { AdmissionGitContext } from "../domains/safety/admission.js";
@@ -27,10 +28,11 @@ const TYPED_GIT_ENV: Readonly<Record<string, string>> = {
 	GIT_EDITOR: ":",
 };
 
-/** Host-selected configuration every typed op carries: no pager, no fsmonitor helper. */
+/** Host-selected configuration every typed op carries: no pager, no fsmonitor helper, no signature check on log or show. */
 const TYPED_GIT_BASE_CONFIG: ReadonlyArray<readonly [string, string]> = [
 	["core.pager", "cat"],
 	["core.fsmonitor", "false"],
+	["log.showSignature", "false"],
 ];
 
 /** Command-scope configuration as the GIT_CONFIG_COUNT environment pairs Git reads. */
@@ -55,7 +57,7 @@ export function typedGitInspectEnv(): Record<string, string> {
 
 function gitRead(cwd: string, args: ReadonlyArray<string>): string | null {
 	try {
-		return execFileSync("git", [...args], {
+		return execFileSync("git", internalGitArgv(args, cwd), {
 			cwd,
 			env: buildSafeToolEnv({ ...TYPED_GIT_ENV, GIT_OPTIONAL_LOCKS: "0" }),
 			encoding: "utf8",

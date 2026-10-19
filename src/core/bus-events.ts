@@ -54,6 +54,7 @@ export const BusChannels = {
 	LoopBlocked: "safety.loopBlocked",
 	ToolBudgetExceeded: "safety.toolBudgetExceeded",
 	GitHooksChanged: "safety.gitHooksChanged",
+	InternalGitDrift: "safety.internalGitDrift",
 	ProviderHealth: "provider.health",
 	RuntimeNotice: "runtime.notice",
 	ResidencyMutation: "residency.mutation",
@@ -887,7 +888,33 @@ export interface AgentStatusChangedPayload {
  */
 export interface GitHooksChangedPayload {
 	message: string;
-	changes: ReadonlyArray<{ path: string; kind: "added" | "changed" | "removed"; size: number; firstLine: string }>;
+	changes: ReadonlyArray<{
+		path: string;
+		kind: "added" | "changed" | "removed";
+		/** The config key, for an executable git config value. */
+		key?: string;
+		size: number;
+		firstLine: string;
+	}>;
+}
+
+/**
+ * Published on {@link BusChannels.InternalGitDrift} when git Clio runs itself
+ * (a task worktree's `git worktree add`, a merge landing a worker's result)
+ * meets hook or executable config drift (src/domains/safety/internal-git-policy.ts).
+ * `hardened` is true when it ran with hooks off and the changed config
+ * overridden; false at yolo, where it ran as configured. `message` is the
+ * notice line, shown when `announce` marks the first operation that met these
+ * changes.
+ */
+export interface InternalGitDriftPayload {
+	message: string;
+	announce: boolean;
+	operation: string;
+	hardened: boolean;
+	/** `hooks-off` and `yolo` for a mutation; `overridden` or `skipped` for Clio's read-only git. */
+	outcome: "hooks-off" | "overridden" | "skipped" | "yolo";
+	changes: ReadonlyArray<{ path: string; kind: "added" | "changed" | "removed"; key?: string }>;
 }
 
 /** Published on {@link BusChannels.ShutdownRequested} as draining begins. */
@@ -928,6 +955,7 @@ export type BusPayloadMap = {
 	[BusChannels.LoopBlocked]: LoopBlockedPayload;
 	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
 	[BusChannels.GitHooksChanged]: GitHooksChangedPayload;
+	[BusChannels.InternalGitDrift]: InternalGitDriftPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
 	[BusChannels.RuntimeNotice]: DeclaredRuntimeNotice;
 	[BusChannels.ResidencyMutation]: ResidencyMutationPayload;

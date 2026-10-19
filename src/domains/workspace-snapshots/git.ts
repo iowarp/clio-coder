@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
 
 /**
@@ -9,7 +10,8 @@ import { buildSafeToolEnv } from "../../core/safe-exec.js";
  * subprocesses: they bypass `runCommandVector` because its commit-attribution
  * wrapper probes the repository with synchronous Git calls for every distinct
  * Git environment, which tripled snapshot latency, and snapshot plumbing runs
- * no hooks for attribution to reach.
+ * no hooks for attribution to reach: every call pins core.hooksPath to
+ * /dev/null and goes through internalGitArgv (src/core/internal-git.ts).
  */
 
 /** Raised for every condition that makes a snapshot or a rewind unavailable. */
@@ -58,7 +60,20 @@ export function runGit(args: ReadonlyArray<string>, call: GitCall): Promise<GitR
 	const remaining = call.deadline - performance.now();
 	if (remaining <= 0) return Promise.reject(new SnapshotUnavailableError("timed out"));
 	return new Promise((resolve, reject) => {
-		const child = spawn("git", [...(call.config ?? []).flatMap((pair) => ["-c", pair]), ...args], {
+		// Snapshot plumbing never runs a hook: ref updates would otherwise fire
+		// reference-transaction and index writes post-index-change, outside any sandbox.
+		let argv: string[];
+		try {
+			argv = internalGitArgv(
+				["-c", "core.hooksPath=/dev/null", ...(call.config ?? []).flatMap((pair) => ["-c", pair]), ...args],
+				call.cwd,
+			);
+		} catch (error) {
+			// Clio refused its own git after config drift no -c can override; the snapshot is unavailable.
+			reject(new SnapshotUnavailableError(error instanceof Error ? error.message : String(error)));
+			return;
+		}
+		const child = spawn("git", argv, {
 			cwd: call.cwd,
 			env: buildSafeToolEnv({
 				GIT_TERMINAL_PROMPT: "0",

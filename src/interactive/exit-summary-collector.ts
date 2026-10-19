@@ -47,9 +47,28 @@ export interface ExitSummarySnapshot {
 	/**
 	 * Git hook files added, changed or removed during this visit, by workspace
 	 * path. A hook runs outside Clio's sandbox on the next git command, so the
-	 * summary names them whatever its style.
+	 * summary names them whatever its style. `key` names an executable git
+	 * config value; `path` is then the config file that sets it.
 	 */
-	gitHooks?: ReadonlyArray<{ path: string; kind: string }>;
+	gitHooks?: ReadonlyArray<{ path: string; kind: string; key?: string }>;
+	/**
+	 * Git operations Clio ran itself after such a change, by `outcome`: a
+	 * mutation with hooks off and the changed config overridden (`hooks-off`)
+	 * or as configured under yolo (`yolo`), and its read-only git with the
+	 * changed config overridden (`overridden`) or not run (`skipped`)
+	 * (src/domains/safety/internal-git-policy.ts).
+	 */
+	internalGit?: ReadonlyArray<{
+		operation: string;
+		outcome: string;
+		changes: ReadonlyArray<{ path: string; kind: string; key?: string }>;
+	}>;
+}
+
+/** A path inside the workspace by its workspace path, any other as given. */
+function workspacePath(file: string): string {
+	const local = relative(process.cwd(), file);
+	return local.startsWith("..") || isAbsolute(local) ? file : local;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,7 +95,7 @@ interface CollectorDeps {
 	getToolCounts: () => ReadonlyMap<string, number>;
 	getModel: () => { target: string; model: string } | null;
 	/** The git hook drift guard's account of hook files changed this visit (src/domains/safety/hook-drift.ts). */
-	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string }>;
+	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string; key?: string }>;
 	now?: () => number;
 }
 
@@ -165,8 +184,27 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		workerStarted.delete(run.runId);
 		refreshUsage();
 	};
+	// Like the git hook line, this account is the process's, never reset with the visit.
+	const internalGit = new Map<
+		string,
+		{ operation: string; outcome: string; changes: Map<string, { path: string; kind: string; key?: string }> }
+	>();
 	const unsubscribers = [
 		deps.observability.subscribe(refreshUsage),
+		deps.bus.on(BusChannels.InternalGitDrift, (event) => {
+			if (typeof event?.operation !== "string" || !Array.isArray(event.changes)) return;
+			const outcome = typeof event.outcome === "string" ? event.outcome : event.hardened === true ? "hooks-off" : "yolo";
+			const id = `${event.operation}\0${outcome}`;
+			const entry = internalGit.get(id) ?? { operation: event.operation, outcome, changes: new Map() };
+			for (const change of event.changes) {
+				entry.changes.set(`${change.path}\0${change.key ?? ""}`, {
+					path: workspacePath(change.path),
+					kind: change.kind,
+					...(change.key !== undefined ? { key: change.key } : {}),
+				});
+			}
+			internalGit.set(id, entry);
+		}),
 		deps.bus.on(BusChannels.SessionResumed, () => {
 			baseTurns = deps.getTurns() ?? 0;
 			hasModelTurn ||= deps.session?.current()?.hasModelTurn === true;
@@ -315,12 +353,13 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		snapshot(): ExitSummarySnapshot | null {
 			const session = deps.session?.current();
 			if (!session || !hasModelTurn) return null;
-			let gitHooks: ReadonlyArray<{ path: string; kind: string }> = [];
+			let gitHooks: ReadonlyArray<{ path: string; kind: string; key?: string }> = [];
 			try {
-				gitHooks = (deps.gitHookChanges?.() ?? []).map((change) => {
-					const local = relative(process.cwd(), change.path);
-					return { path: local.startsWith("..") || isAbsolute(local) ? change.path : local, kind: change.kind };
-				});
+				gitHooks = (deps.gitHookChanges?.() ?? []).map((change) => ({
+					path: workspacePath(change.path),
+					kind: change.kind,
+					...(change.key !== undefined ? { key: change.key } : {}),
+				}));
 			} catch {
 				// The guard reads the filesystem; an unreadable tree leaves the line out rather than the summary.
 			}
@@ -350,6 +389,15 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				workers: [...workers.values()],
 				compactions,
 				...(gitHooks.length > 0 ? { gitHooks } : {}),
+				...(internalGit.size > 0
+					? {
+							internalGit: [...internalGit.values()].map((entry) => ({
+								operation: entry.operation,
+								outcome: entry.outcome,
+								changes: [...entry.changes.values()],
+							})),
+						}
+					: {}),
 			};
 		},
 		dispose(): void {

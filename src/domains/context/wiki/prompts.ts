@@ -13,6 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
+import { internalGitArgv } from "../../../core/internal-git.js";
 import { loadFragments } from "../../prompts/fragment-loader.js";
 import { type DecisionLedgerEntry, decisionRef } from "../../session/entries.js";
 import { renderCodewikiDigest } from "../codewiki/digest.js";
@@ -112,7 +113,7 @@ function repositoryGuidance(cwd: string): string {
 
 function gitLines(cwd: string, args: ReadonlyArray<string>, cap: number): string | null {
 	try {
-		const out = execFileSync("git", [...args], {
+		const out = execFileSync("git", internalGitArgv(args, cwd), {
 			cwd,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],

@@ -34,6 +34,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { asDirectoryPathBoundary, pathBoundaryEntryCovers } from "../../core/path-boundary.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
@@ -55,7 +56,7 @@ const ABSENT = "absent";
 const GIT_TIMEOUT_MS = 30_000;
 
 function git(root: string, args: ReadonlyArray<string>, input?: string): string {
-	return execFileSync("git", ["-C", root, ...args], {
+	return execFileSync("git", internalGitArgv(["-C", root, ...args]), {
 		encoding: "utf8",
 		stdio: ["pipe", "pipe", "pipe"],
 		timeout: GIT_TIMEOUT_MS,
@@ -65,7 +66,7 @@ function git(root: string, args: ReadonlyArray<string>, input?: string): string 
 }
 
 function gitBytes(root: string, args: ReadonlyArray<string>): Buffer {
-	return execFileSync("git", ["-C", root, ...args], {
+	return execFileSync("git", internalGitArgv(["-C", root, ...args]), {
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: GIT_TIMEOUT_MS,
 		maxBuffer: 256 * 1024 * 1024,

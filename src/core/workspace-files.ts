@@ -2,6 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import fs, { type Dir } from "node:fs";
 import { join, sep } from "node:path";
 import { performance } from "node:perf_hooks";
+import { internalGitArgv } from "./internal-git.js";
 
 /**
  * Cooperative-yield surface for the async enumeration forms. Structurally
@@ -203,7 +204,7 @@ function splitGitPathOutput(output: string): string[] {
 function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): string[] | null {
 	let output: Buffer;
 	try {
-		output = execFileSync("git", gitVisibleFilesArgs(candidates), {
+		output = execFileSync("git", internalGitArgv(gitVisibleFilesArgs(candidates), cwd), {
 			cwd,
 			maxBuffer: GIT_OUTPUT_LIMIT_BYTES,
 			stdio: ["ignore", "pipe", "ignore"],
@@ -216,7 +217,15 @@ function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): strin
 
 function gitVisibleFilesAsync(cwd: string, candidates?: ReadonlyArray<string>): Promise<string[] | null> {
 	return new Promise((resolve) => {
-		execFile("git", gitVisibleFilesArgs(candidates), { cwd, maxBuffer: GIT_OUTPUT_LIMIT_BYTES }, (error, stdout) => {
+		let argv: string[];
+		try {
+			argv = internalGitArgv(gitVisibleFilesArgs(candidates), cwd);
+		} catch {
+			// Clio refused its own read after config drift; the caller falls back as it does for any git failure.
+			resolve(null);
+			return;
+		}
+		execFile("git", argv, { cwd, maxBuffer: GIT_OUTPUT_LIMIT_BYTES }, (error, stdout) => {
 			resolve(error ? null : splitGitPathOutput(stdout));
 		});
 	});
