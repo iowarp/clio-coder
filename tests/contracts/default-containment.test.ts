@@ -12,7 +12,10 @@ import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { createSafetyPolicyEngine, type OperatorDefaultScope } from "../../src/domains/safety/policy-engine.js";
 import { operatorOnlyAsk, type SafetyJudgeSubject } from "../../src/domains/safety/safety-judge.js";
 import { effectiveScratchRoots } from "../../src/domains/safety/scratch-roots.js";
-import type { WorkspaceSnapshotOutcome } from "../../src/domains/workspace-snapshots/store.js";
+import {
+	createWorkspaceSnapshots,
+	type WorkspaceSnapshotOutcome,
+} from "../../src/domains/workspace-snapshots/store.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { editTool } from "../../src/tools/edit.js";
@@ -128,6 +131,35 @@ test("git reset --hard runs after its snapshot, is refused without one, and asks
 	strictEqual((await off.registry.invoke(bash("git reset --hard"))).kind, "blocked");
 	deepStrictEqual(off.ran, []);
 	deepStrictEqual(reviewedCommands(off.reviewed), ["git reset --hard"]);
+});
+
+test("a recoverable stash drop is refused when its snapshot cannot pin the stash", async () => {
+	const cwd = workspace("clio-contained-pins-");
+	const git = (...args: string[]) =>
+		spawnSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@invalid", ...args], { cwd, encoding: "utf8" });
+	git("init", "-q");
+	writeFileSync(join(cwd, "a.txt"), "one\n");
+	git("add", ".");
+	git("commit", "-qm", "init");
+	writeFileSync(join(cwd, "a.txt"), "two\n");
+	git("stash", "push", "-q");
+	// A ref where the pin directory belongs fails every pin write; the files snapshot still lands.
+	git("update-ref", "refs/clio-coder/snapshots/s-1/pins", "HEAD");
+	const snapshots = createWorkspaceSnapshots({
+		stateDir: workspace("clio-contained-pins-state-"),
+		sessionId: "s-1",
+		cwd,
+	});
+	const session = defaultSession(
+		cwd,
+		{ sandbox: true, snapshots: true },
+		{ workspaceSnapshot: (request) => snapshots.snapshot(request) },
+	);
+	const refused = await session.registry.invoke(bash("git stash drop"));
+	strictEqual(refused.kind === "blocked" && refused.decision.policy?.reasonCode, "snapshot-required");
+	match(refused.kind === "blocked" ? refused.reason : "", /could not pin the stash/);
+	deepStrictEqual(session.ran, []);
+	strictEqual(snapshots.list().length, 1);
 });
 
 test("a force push asks at default instead of being refused, and the floor still refuses", () => {

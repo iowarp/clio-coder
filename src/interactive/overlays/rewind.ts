@@ -8,7 +8,9 @@
 import type {
 	RewindOutcome,
 	RewindPlan,
+	RewindRef,
 	SnapshotDifferences,
+	SnapshotPin,
 	WorkspaceSnapshotRecord,
 } from "../../domains/workspace-snapshots/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
@@ -32,6 +34,21 @@ function differenceLabel(n: number, counts: RewindCounts): string {
 	if (count === 0) return "same as now";
 	return `${count} file${count === 1 ? "" : "s"} differ${count === 1 ? "s" : ""}`;
 }
+
+/** One pinned ref as the operator reads it: what it is and the commit it holds. */
+function pinLabel(pin: SnapshotPin): string {
+	const short = pin.sha.slice(0, 12);
+	if (pin.kind === "head") return `HEAD ${short} ${pin.branch !== undefined ? `on ${pin.branch}` : "(detached)"}`;
+	if (pin.kind === "stash") return `stash@{${pin.index}} ${short}${pin.message.length > 0 ? ` ${pin.message}` : ""}`;
+	return `branch ${pin.name} ${short}`;
+}
+
+const REF_STATE_LABEL: Readonly<Record<RewindRef["state"], string>> = {
+	"in-place": "still in place",
+	moved: "moved since",
+	gone: "gone",
+	unknown: "not checked",
+};
 
 /** Rows for the snapshot list, one per snapshot, newest first as the service returns them. */
 function rewindListItems(records: ReadonlyArray<WorkspaceSnapshotRecord>, counts: RewindCounts): ListOverlayItem[] {
@@ -58,6 +75,12 @@ function rewindListItems(records: ReadonlyArray<WorkspaceSnapshotRecord>, counts
 					for (const skip of record.skipped.slice(0, 12))
 						lines.push(`- ${skip.path} (${skip.why === "too-large" ? "untracked, over 16 MiB" : "nested repository"})`);
 					if (record.skipped.length > 12) lines.push(`- and ${record.skipped.length - 12} more`);
+				}
+				const pins = record.pins ?? [];
+				if (pins.length > 0) {
+					lines.push("**Pinned refs:**");
+					for (const pin of pins.slice(0, 12)) lines.push(`- ${pinLabel(pin)}`);
+					if (pins.length > 12) lines.push(`- and ${pins.length - 12} more`);
 				}
 				lines.push("", "Enter shows what a rewind to this snapshot would change before anything is written.");
 				return lines;
@@ -137,8 +160,18 @@ function formatRewindConfirmBody(
 		`Left alone (${plan.kept.length})`,
 		plan.kept.map((kept) => `${kept.path}: ${kept.why}`),
 	);
+	if (plan.refs.length > 0) {
+		rows.push(rule(theme, contentWidth));
+		rows.push(theme.fg("groupHeading", `Pinned refs (${plan.refs.length})`));
+		for (const ref of plan.refs) {
+			wrap("menuDescription", `  ${pinLabel(ref.pin)} · ${REF_STATE_LABEL[ref.state]}`);
+			if (ref.recover !== null) wrap("inlineCode", `    ${ref.recover}`);
+		}
+	}
 	rows.push(rule(theme, contentWidth));
 	wrap("annotation", "Gitignored files are never touched. Your Git index, HEAD and branches do not change.");
+	if (plan.refs.some((ref) => ref.recover !== null))
+		wrap("annotation", "A rewind restores files only. Run the commands shown to bring back a moved or deleted ref.");
 
 	const maxScroll = Math.max(0, rows.length - REWIND_VISIBLE_ROWS);
 	const start = Math.max(0, Math.min(scroll, maxScroll));
@@ -226,8 +259,13 @@ export function formatRewindOutcome(outcome: RewindOutcome): {
 			text: `/rewind failed: ${outcome.reason}. Snapshot #${outcome.preRewind.n} holds the files from before the rewind.`,
 		};
 	const left = outcome.kept.length + outcome.failed.length;
+	const recover = outcome.refs.flatMap((ref) => (ref.recover !== null ? [`  ${ref.recover}`] : []));
+	const refs =
+		recover.length > 0
+			? `\nRefs pinned by snapshot #${outcome.n} have moved or are gone. Run these to bring them back:\n${recover.join("\n")}`
+			: "";
 	return {
-		level: outcome.failed.length > 0 ? "warning" : "success",
-		text: `Rewound files to snapshot #${outcome.n}: restored ${outcome.restored.length}, removed ${outcome.removed.length}${left > 0 ? `, left ${left} alone` : ""}${outcome.failed.length > 0 ? ` (${outcome.failed.map((f) => `${f.path}: ${f.why}`).join("; ")})` : ""}. Snapshot #${outcome.preRewind.n} holds the files from before the rewind.`,
+		level: outcome.failed.length > 0 || recover.length > 0 ? "warning" : "success",
+		text: `Rewound files to snapshot #${outcome.n}: restored ${outcome.restored.length}, removed ${outcome.removed.length}${left > 0 ? `, left ${left} alone` : ""}${outcome.failed.length > 0 ? ` (${outcome.failed.map((f) => `${f.path}: ${f.why}`).join("; ")})` : ""}. Snapshot #${outcome.preRewind.n} holds the files from before the rewind.${refs}`,
 	};
 }

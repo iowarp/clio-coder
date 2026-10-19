@@ -1,3 +1,4 @@
+export type { RefsAtRisk, RewindRef, SnapshotPin } from "./pins.js";
 export type {
 	PruneWorkspaceSnapshotsOptions,
 	RewindKept,

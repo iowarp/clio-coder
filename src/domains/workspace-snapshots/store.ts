@@ -14,6 +14,19 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { GITLINK_MODE, parseRawDiff, runGit, SnapshotUnavailableError, splitNul } from "./git.js";
+import {
+	pinIdentity,
+	pinnedBranchNames,
+	type RefState,
+	type RefsAtRisk,
+	type RewindRef,
+	readRefState,
+	rewindRefs,
+	type SnapshotPin,
+	STASH_PIN_LIMIT,
+	snapshotPins,
+	unpinnedRefs,
+} from "./pins.js";
 
 /**
  * Workspace snapshots: the recoverability layer under autonomy. A snapshot is
@@ -21,8 +34,11 @@ import { GITLINK_MODE, parseRawDiff, runGit, SnapshotUnavailableError, splitNul 
  * that are not ignored), built in a private per-session index so the operator's
  * index, HEAD, branches and worktree are never touched. Refs live under
  * `refs/clio-coder/snapshots/<session>/<n>`, which Git keeps in the common
- * directory of a linked worktree. Only a Git work tree can be snapshotted;
- * everything else reports the snapshot unavailable and the caller proceeds.
+ * directory of a linked worktree, and each snapshot's ref pins (HEAD, the
+ * stash, branches about to be deleted; see `pins.ts`) under
+ * `refs/clio-coder/snapshots/<session>/pins/<n>/`. Only a Git work tree can be
+ * snapshotted; everything else reports the snapshot unavailable and the
+ * caller proceeds.
  */
 
 export const SNAPSHOT_REF_PREFIX = "refs/clio-coder/snapshots";
@@ -58,6 +74,8 @@ export interface WorkspaceSnapshotRecord {
 	commit: string;
 	ref: string;
 	skipped: SnapshotSkip[];
+	/** Refs this snapshot keeps reachable; absent on records written before ref pinning. */
+	pins?: SnapshotPin[];
 }
 
 export interface WorkspaceSnapshotRequest {
@@ -65,10 +83,21 @@ export interface WorkspaceSnapshotRequest {
 	tool?: string;
 	toolCallId?: string;
 	turnId?: string;
+	/** Refs the call is about to destroy or move; its branches are pinned at their tips. */
+	refs?: RefsAtRisk;
 }
 
 export type WorkspaceSnapshotOutcome =
-	| { kind: "taken"; record: WorkspaceSnapshotRecord; reused: boolean; durationMs: number }
+	| {
+			kind: "taken";
+			record: WorkspaceSnapshotRecord;
+			reused: boolean;
+			durationMs: number;
+			/** Why some refs were not pinned; the files are still in the snapshot. */
+			pinNote?: string;
+			/** Refs at risk (`request.refs`) the snapshot does not hold, named for the operator. */
+			unpinned?: string[];
+	  }
 	| { kind: "unavailable"; reason: string; durationMs: number };
 
 export interface RewindKept {
@@ -84,6 +113,8 @@ export interface RewindPlan {
 	remove: string[];
 	/** Differences a rewind leaves alone, with the reason. */
 	kept: RewindKept[];
+	/** The snapshot's ref pins against the refs as they stand; a rewind never moves a ref. */
+	refs: RewindRef[];
 }
 
 export type RewindPreview = { kind: "plan"; plan: RewindPlan } | { kind: "unavailable"; reason: string };
@@ -98,6 +129,8 @@ export type RewindOutcome =
 			removed: string[];
 			kept: RewindKept[];
 			failed: RewindKept[];
+			/** Pins the operator brings back by hand with each `recover` command. */
+			refs: RewindRef[];
 	  }
 	| { kind: "unavailable"; reason: string }
 	| { kind: "failed"; reason: string; preRewind: WorkspaceSnapshotRecord };
@@ -434,21 +467,48 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 	const snapshotLocked = async (
 		request: WorkspaceSnapshotRequest,
 		deadline: number,
-	): Promise<{ record: WorkspaceSnapshotRecord; reused: boolean }> => {
+	): Promise<{ record: WorkspaceSnapshotRecord; reused: boolean; pinNote: string | null; unpinned: string[] }> => {
 		const repo = await resolveRepository(cwd, deadline);
 		const log = readLog(dir);
 		if (log !== null && log.workspace !== repo.root)
 			throw new SnapshotUnavailableError(`this session's snapshots belong to ${log.workspace}`);
-		const staged = await stageWorkspace(repo, deadline);
+		// Refs are read beside staging: neither touches the other's state, and a
+		// failed read costs only the pins, never the snapshot or the call.
+		const [staged, refs] = await Promise.all([
+			stageWorkspace(repo, deadline),
+			readRefState(repo.root, deadline, request.refs?.branches ?? []).then(
+				(state): { state: RefState | null; note: string | null } => ({
+					state,
+					note:
+						state.stash.length > STASH_PIN_LIMIT ? `stash entries after the first ${STASH_PIN_LIMIT} are not pinned` : null,
+				}),
+				(error: unknown) => ({ state: null, note: `refs not pinned: ${errorText(error)}` }),
+			),
+		]);
+		const pinsAt = (n: number): SnapshotPin[] =>
+			refs.state === null ? [] : snapshotPins(SNAPSHOT_REF_PREFIX, sessionId, n, refs.state);
 		const last = log?.snapshots.at(-1);
-		if (last !== undefined && last.tree === staged.tree) return { record: last, reused: true };
-		// A lost log must not reuse a number whose ref still exists.
+		// The same tree is reused only while it already pins every ref as it
+		// stands; a moved HEAD, a new stash entry or a branch about to be deleted
+		// takes a new record, so each record's pins say what was true when it was taken.
+		if (last !== undefined && last.tree === staged.tree) {
+			const held = new Set((last.pins ?? []).map(pinIdentity));
+			if (pinsAt(last.n).every((pin) => held.has(pinIdentity(pin))))
+				return {
+					record: last,
+					reused: true,
+					pinNote: refs.note,
+					unpinned: unpinnedRefs(request.refs, refs.state, pinsAt(last.n), last.pins ?? []),
+				};
+		}
+		// A lost log must not reuse a number whose snapshot ref or pins still exist.
+		const sessionPrefix = `${SNAPSHOT_REF_PREFIX}/${sessionId}/`;
 		const n =
 			log?.next ??
-			(await sessionRefs(repo.root, sessionId, deadline)).reduce(
-				(max, ref) => Math.max(max, Number(ref.split("/").at(-1)) + 1 || max),
-				1,
-			);
+			(await sessionRefs(repo.root, sessionId, deadline)).reduce((max, ref) => {
+				const taken = /^(?:pins\/)?(\d+)(?:\/|$)/u.exec(ref.slice(sessionPrefix.length));
+				return taken === null ? max : Math.max(max, Number(taken[1]) + 1);
+			}, 1);
 		const message = [
 			`Clio Coder snapshot ${n} (${request.reason})`,
 			"",
@@ -466,6 +526,22 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		).stdout.trim();
 		const ref = `${SNAPSHOT_REF_PREFIX}/${sessionId}/${n}`;
 		await runGit(["update-ref", ref, commit], { cwd: repo.root, deadline });
+		// One transaction, apart from the snapshot ref: the pins land together or
+		// not at all, and a failure leaves the files snapshot standing with a note.
+		let pins = pinsAt(n);
+		let pinNote = refs.note;
+		if (pins.length > 0) {
+			try {
+				await runGit(["update-ref", "--stdin"], {
+					cwd: repo.root,
+					deadline,
+					input: pins.map((pin) => `update ${pin.ref} ${pin.sha}\n`).join(""),
+				});
+			} catch (error) {
+				pins = [];
+				pinNote = `refs not pinned: ${errorText(error)}`;
+			}
+		}
 		const record: WorkspaceSnapshotRecord = {
 			n,
 			at: new Date().toISOString(),
@@ -477,6 +553,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			commit,
 			ref,
 			skipped: staged.skipped,
+			pins,
 		};
 		const snapshots = [...(log?.snapshots ?? []), record];
 		const dropped = snapshots.length > keep ? snapshots.splice(0, snapshots.length - keep) : [];
@@ -492,13 +569,13 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		try {
 			await deleteRefs(
 				repo.root,
-				dropped.map((old) => old.ref),
+				dropped.flatMap((old) => [old.ref, ...(old.pins ?? []).map((pin) => pin.ref)]),
 				deadline,
 			);
 		} catch {
 			// Retention is best effort; the age prune removes what is left.
 		}
-		return { record, reused: false };
+		return { record, reused: false, pinNote, unpinned: unpinnedRefs(request.refs, refs.state, pinsAt(n), pins) };
 	};
 
 	/**
@@ -507,7 +584,12 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 	 * something staging leaves out: an ignored file, an oversized untracked file
 	 * or a nested repository, and a rewind never touches those.
 	 */
-	const planRewind = async (repo: Repository, target: WorkspaceSnapshotRecord, current: string, deadline: number) => {
+	const planRewind = async (
+		repo: Repository,
+		target: WorkspaceSnapshotRecord,
+		current: string,
+		deadline: number,
+	): Promise<Omit<RewindPlan, "refs">> => {
 		const diff = parseRawDiff(
 			(await runGit(["diff-tree", "-r", "-z", "--no-renames", target.tree, current], { cwd: repo.root, deadline })).stdout,
 		);
@@ -555,6 +637,19 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			};
 		}
 		return { n: target.n, restore, remove, kept };
+	};
+
+	/** The target's pins placed against the refs as they stand; unreadable refs leave each pin `unknown`. */
+	const placePins = async (repo: Repository, target: WorkspaceSnapshotRecord, deadline: number) => {
+		const pins = target.pins ?? [];
+		if (pins.length === 0) return [];
+		let now: RefState | null = null;
+		try {
+			now = await readRefState(repo.root, deadline, pinnedBranchNames(pins));
+		} catch {
+			// The preview still lists every pin and the command that recreates it.
+		}
+		return rewindRefs(pins, now);
 	};
 
 	const findRecord = (n: number): WorkspaceSnapshotRecord => {
@@ -658,7 +753,8 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 					rmSync(scratchIndex, { force: true });
 				}
 			}
-			return { kind: "restored", n, preRewind: pre, restored: writable, removed, kept: plan.kept, failed };
+			const refs = await placePins(repo, target, deadline);
+			return { kind: "restored", n, preRewind: pre, restored: writable, removed, kept: plan.kept, failed, refs };
 		} catch (error) {
 			return { kind: "failed", reason: errorText(error), preRewind: pre };
 		}
@@ -673,8 +769,17 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			const elapsed = (): number => Math.round(performance.now() - started);
 			if (idProblem !== null) return { kind: "unavailable", reason: idProblem, durationMs: 0 };
 			try {
-				const { record, reused } = await locked(() => snapshotLocked(request, performance.now() + timeoutMs));
-				return { kind: "taken", record, reused, durationMs: elapsed() };
+				const { record, reused, pinNote, unpinned } = await locked(() =>
+					snapshotLocked(request, performance.now() + timeoutMs),
+				);
+				return {
+					kind: "taken",
+					record,
+					reused,
+					durationMs: elapsed(),
+					...(pinNote !== null ? { pinNote } : {}),
+					...(unpinned.length > 0 ? { unpinned } : {}),
+				};
 			} catch (error) {
 				return { kind: "unavailable", reason: errorText(error), durationMs: elapsed() };
 			}
@@ -717,7 +822,8 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 					const deadline = performance.now() + timeoutMs;
 					const repo = await resolveRepository(cwd, deadline);
 					const current = (await stageWorkspace(repo, deadline)).tree;
-					return { kind: "plan" as const, plan: await planRewind(repo, target, current, deadline) };
+					const plan = await planRewind(repo, target, current, deadline);
+					return { kind: "plan" as const, plan: { ...plan, refs: await placePins(repo, target, deadline) } };
 				});
 			} catch (error) {
 				return { kind: "unavailable", reason: errorText(error) };
@@ -800,13 +906,23 @@ export async function pruneWorkspaceSnapshots(
 			cwd: repo.root,
 			deadline,
 		});
-		const stale: string[] = [];
-		for (const line of lines(out.stdout)) {
+		const dated = lines(out.stdout).map((line) => {
 			const [ref = "", epoch = ""] = line.split(" ");
-			const session = ref.slice(SNAPSHOT_REF_PREFIX.length + 1).split("/")[0] ?? "";
+			return { ref, epoch: Number(epoch) };
+		});
+		const epochs = new Map(dated.map(({ ref, epoch }) => [ref, epoch]));
+		const stale: string[] = [];
+		for (const { ref, epoch } of dated) {
+			const [session = "", ...rest] = ref.slice(SNAPSHOT_REF_PREFIX.length + 1).split("/");
 			if (session.length === 0 || session === options.keepSessionId) continue;
 			if (existsSync(path.join(root, session))) continue;
-			if (Number(epoch) * 1000 < cutoff) stale.push(ref);
+			// A pin holds a commit of any age (an old branch tip), so it goes by the
+			// date of the snapshot it belongs to while that snapshot's ref exists.
+			const anchor =
+				rest[0] === "pins" && rest[1] !== undefined
+					? (epochs.get(`${SNAPSHOT_REF_PREFIX}/${session}/${rest[1]}`) ?? epoch)
+					: epoch;
+			if (anchor * 1000 < cutoff) stale.push(ref);
 		}
 		await deleteRefs(repo.root, stale, deadline);
 		refs += stale.length;

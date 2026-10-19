@@ -423,8 +423,8 @@ export interface RegistryDeps {
 	safetyJudge?: SafetyJudgeSeat;
 	/**
 	 * Takes a workspace snapshot before an admitted call's body runs: before the
-	 * first mutating call of each turn, and before every destructive, deleting
-	 * or git-discarding call (`workspaceSnapshotTrigger`). Only the main
+	 * first mutating call of each turn, and before every destructive, deleting,
+	 * git-discarding or branch-deleting call (`workspaceSnapshotTrigger`). Only the main
 	 * session's registry wires it; worker registries never snapshot. Resolves
 	 * null when snapshots are off or no session is open. An unavailable snapshot
 	 * never holds the call: it proceeds and its result says "no snapshot".
@@ -961,9 +961,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	/**
 	 * Snapshot the workspace before an admitted call's body runs, when the
 	 * trigger asks for one. `note` is the line for the call's result when the
-	 * snapshot could not be taken; `missing` says why no snapshot precedes a
-	 * call that needed one. Only a call admitted because a snapshot undoes it
-	 * (`recoverable`) is refused for that; every other call runs either way.
+	 * snapshot, or a ref pin, could not be taken; `missing` says why no
+	 * snapshot holding everything the call destroys precedes it. Only a call
+	 * admitted because a snapshot undoes it (`recoverable`) is refused for
+	 * that; every other call runs either way.
 	 */
 	const snapshotBeforeBody = async (
 		spec: ToolSpec,
@@ -996,7 +997,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		};
 		let pending: Promise<WorkspaceSnapshotOutcome | null>;
 		if (trigger.kind === "always") {
-			pending = take({ ...request, reason: trigger.reason });
+			pending = take({
+				...request,
+				reason: trigger.reason,
+				...(trigger.refs !== undefined ? { refs: trigger.refs } : {}),
+			});
 			if (turnKey !== null) snapshotTurn = { key: turnKey, pending };
 		} else {
 			// A turn takes one snapshot before its first mutation; a call without a
@@ -1019,7 +1024,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (outcome === null) {
 			return { note: null, missing: recoverable ? "workspace snapshots are off or no session is open" : null };
 		}
-		if (outcome.kind !== "unavailable") return { note: null, missing: null };
+		if (outcome.kind !== "unavailable") {
+			if (outcome.pinNote === undefined && outcome.unpinned === undefined) return { note: null, missing: null };
+			const detail = outcome.pinNote ?? "not pinned";
+			// A call admitted because the snapshot undoes it is refused when a ref
+			// it destroys is not pinned; any other call only hears about it.
+			const unpinned = outcome.unpinned ?? [];
+			return {
+				note: { kind: "annotate_tool_result", message: `snapshot #${outcome.record.n}: ${detail}`, severity: "warn" },
+				missing:
+					unpinned.length > 0
+						? `snapshot #${outcome.record.n} holds the files but could not pin ${unpinned.join(", ")}: ${detail}`
+						: null,
+			};
+		}
 		return {
 			note: { kind: "annotate_tool_result", message: `no snapshot: ${outcome.reason}`, severity: "warn" },
 			missing: outcome.reason,
@@ -1113,7 +1131,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// so a snapshot here precedes exactly the bodies that will run.
 			const snapshot = await snapshotBeforeBody(spec, call, decision, options);
 			if (snapshot.missing !== null && decision.policy?.recoverable === true) {
-				const reason = `${spec.name} did not run: it was admitted without approval because a workspace snapshot would undo it, and no snapshot could be taken (${snapshot.missing}). Take a route that discards nothing, or record the open decision for the operator.`;
+				const reason = `${spec.name} did not run: it was admitted without approval because a workspace snapshot would undo it, and no complete snapshot could be taken (${snapshot.missing}). Take a route that discards nothing, or record the open decision for the operator.`;
 				const verdict = snapshotRequiredVerdict(decision, call.tool, reason);
 				recordRegistryDisposition(call, verdict.decision, "blocked", {
 					reasonCode: SNAPSHOT_REQUIRED_REASON_CODE,
