@@ -99,7 +99,10 @@ export interface MainSandboxGitLayout {
 	 * protected directory aside and put a forged one in its place.
 	 */
 	mountDirs: ReadonlyArray<string>;
-	/** Existing hooks directories, config and commondir files, and the `.git` files that point at a git dir. */
+	/**
+	 * Existing hooks directories, config and commondir files, the `.git` files
+	 * that point at a git dir, and the directories core.hooksPath names.
+	 */
 	readOnlyPaths: ReadonlyArray<string>;
 	absentHooks: ReadonlyArray<string>;
 	absentFiles: ReadonlyArray<string>;
@@ -161,8 +164,98 @@ function isInside(parent: string, candidate: string): boolean {
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
+/** Includes followed while reading core.hooksPath. */
+const GIT_CONFIG_INCLUDE_DEPTH = 4;
+
+/** One git config value: quotes removed, escapes applied, an unquoted comment dropped. */
+function gitConfigValue(raw: string): string {
+	let value = "";
+	let quoted = false;
+	for (let at = 0; at < raw.length; at++) {
+		const char = raw[at];
+		if (char === "\\" && at + 1 < raw.length) {
+			const next = raw[++at];
+			value += next === "n" ? "\n" : next === "t" ? "\t" : next;
+			continue;
+		}
+		if (char === '"') {
+			quoted = !quoted;
+			continue;
+		}
+		if (!quoted && (char === "#" || char === ";")) break;
+		value += char;
+	}
+	return value.trim();
+}
+
+/** A config path value: `~/` is the home directory, a relative path is taken from `base`. */
+function gitConfigPath(value: string, base: string): string {
+	if (value === "~") return homedir();
+	if (value.startsWith("~/")) return path.join(homedir(), value.slice(2));
+	return path.resolve(base, value);
+}
+
+/** Every core.hooksPath value in one config file and in the files it includes, conditionally or not. */
+function configHooksPaths(file: string, depth: number): string[] {
+	let text: string;
+	try {
+		text = readFileSync(file, "utf8");
+	} catch {
+		return [];
+	}
+	const values: string[] = [];
+	let section = "";
+	for (const raw of text.split(/\r?\n/u)) {
+		let line = raw.trim();
+		const header = /^\[([^\]]*)\](.*)$/u.exec(line);
+		if (header !== null) {
+			section = (header[1] ?? "").trim().toLowerCase();
+			line = (header[2] ?? "").trim();
+		}
+		const entry = /^([A-Za-z][\w-]*)\s*=(.*)$/u.exec(line);
+		if (entry === null) continue;
+		const key = (entry[1] ?? "").toLowerCase();
+		const value = gitConfigValue(entry[2] ?? "");
+		if (value === "") continue;
+		if (section === "core" && key === "hookspath") values.push(value);
+		else if (
+			key === "path" &&
+			(section === "include" || section.startsWith("includeif")) &&
+			depth < GIT_CONFIG_INCLUDE_DEPTH
+		) {
+			values.push(...configHooksPaths(gitConfigPath(value, path.dirname(file)), depth + 1));
+		}
+	}
+	return values;
+}
+
+/**
+ * Impure: the hooks directories core.hooksPath names for the work tree at
+ * `top`, from the system, global, repository and worktree config. Every value
+ * counts, not only the one git would pick, and a relative one is taken from
+ * the work tree, where git runs hooks. Husky 9 names `.husky/_`, whose stubs
+ * run the scripts in `.husky` itself, so that parent counts too.
+ */
+function configuredHooksDirs(top: string, commonDir: string, gitDir: string): string[] {
+	const xdg = process.env.XDG_CONFIG_HOME?.trim();
+	const configHome = xdg !== undefined && path.isAbsolute(xdg) ? xdg : path.join(homedir(), ".config");
+	const files = [
+		"/etc/gitconfig",
+		process.env.GIT_CONFIG_SYSTEM,
+		path.join(configHome, "git", "config"),
+		path.join(homedir(), ".gitconfig"),
+		process.env.GIT_CONFIG_GLOBAL,
+		path.join(commonDir, "config"),
+		path.join(gitDir, "config.worktree"),
+	].filter((file): file is string => file !== undefined && file.length > 0);
+	const dirs = [...new Set(files)]
+		.flatMap((file) => configHooksPaths(file, 0))
+		.map((value) => gitConfigPath(value, top));
+	return [...new Set(dirs.flatMap((dir) => (path.basename(dir) === "_" ? [dir, path.dirname(dir)] : [dir])))];
+}
+
 /** Impure: the directory holding the nearest `.git` at or above `workspace`, or null outside a repository. */
-export function gitRepositoryTop(workspace: string): string | null {
+function gitRepositoryTop(workspace: string): string | null {
 	let top = path.resolve(workspace);
 	while (!pathExists(path.join(top, ".git"))) {
 		const parent = path.dirname(top);
@@ -239,6 +332,17 @@ export function mainSandboxGitLayout(workspace: string): MainSandboxGitLayout | 
 	addRepository(commonDir, 0);
 	// A linked worktree's own git dir lies under the common dir's worktrees and is already covered.
 	if (!mountDirs.includes(gitDir)) addGitDir(gitDir);
+	// core.hooksPath moves the hooks git runs (husky's .husky, a .githooks
+	// directory) out of the git dir, so the directory it names stays read-only
+	// too. One at or above the workspace is skipped: keeping it read-only would
+	// freeze the whole workspace.
+	for (const hooks of configuredHooksDirs(top, commonDir, gitDir)) {
+		if (isInside(hooks, root)) continue;
+		// Only the workspace root is sure to be a writable mount, so only there
+		// can bubblewrap mount an empty tmpfs over an absent hooks directory.
+		const masked = !pathExists(hooks) && path.dirname(hooks) === root;
+		(masked ? absentHooks : readOnlyPaths).push(hooks);
+	}
 	const unique = (entries: string[]): string[] => [...new Set(entries)];
 	return {
 		mountDirs: unique(mountDirs),

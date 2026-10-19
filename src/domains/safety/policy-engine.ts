@@ -12,11 +12,7 @@ import {
 	createPathWalkMemo,
 	type PathWalkMemo,
 } from "../../core/path-canonical.js";
-import {
-	gitRepositoryTop,
-	mainSandboxGitControlPaths,
-	type YoloScriptSandboxState,
-} from "../../core/sandbox/main-session.js";
+import { mainSandboxGitControlPaths, type YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
@@ -210,8 +206,9 @@ export interface SafetyPolicyDecision {
 	recoverable?: true;
 	/**
 	 * Set on an allowed typed file mutation outside the operator's own scopes
-	 * that lands on a git control path of this engine's repository (a hooks
-	 * directory, a config or commondir file, a `.git` pointer). Admission asks
+	 * that lands on a git control path (a hooks directory, the core.hooksPath
+	 * directory, a config or commondir file, a `.git` pointer) of this
+	 * engine's repository or, by name, of any repository. Admission asks
 	 * the main agent for it when a worker at autonomy default makes the call.
 	 */
 	gitControl?: string;
@@ -658,11 +655,22 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const writeRootsOsConfined = options.writeRootsOsConfined === true;
-	// Outside the operator's own scopes a typed write pays the git control walk
-	// only when the cwd sat inside a repository as the engine was built. A
-	// worker's engine lives for one run, and its per-call fs budget is pinned
-	// (admission-fs-ops).
-	const cwdInRepository = gitRepositoryTop(cwd) !== null;
+	// The cwd repository's git control paths (the shell sandbox's read-only
+	// set, the core.hooksPath directories included) are resolved when the
+	// engine is built and again only after a call that may have rewritten a
+	// git config, so a typed write pays no walk for them: the per-call fs
+	// budget is pinned (admission-fs-ops). The name pattern covers a
+	// repository created after that.
+	let gitControls = resolveGitControls(cwd);
+	let gitControlsStale = false;
+	const gitControlHit = (call: ClassifierCall, candidates: ReturnType<typeof mutationCandidates>): string | null => {
+		if (!WRITE_ROOT_TOOLS.has(call.tool)) return null;
+		if (gitControlsStale) {
+			gitControls = resolveGitControls(cwd);
+			gitControlsStale = false;
+		}
+		return gitControlLanding(candidates, gitControls);
+	};
 	const skillRoots = activeClioSkillRoots(cwd);
 	const readExemptRoots = [
 		...readScopeExemptRoots(),
@@ -1365,7 +1373,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// The contained shell cannot write the repository's hooks, config or git
 		// dir pointers, so under the operator's default a typed write asks for
 		// them too and the safety judge weighs it against the operator's intent.
-		const gitControl = resort === undefined ? null : gitControlTarget(call, cwd);
+		const gitControl = resort === undefined ? null : gitControlHit(call, candidates);
 		if (gitControl !== null) {
 			const input = {
 				ruleId: GIT_CONTROL_FILE_RULE_ID,
@@ -1566,8 +1574,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// Outside the operator's own scopes the net only marks a typed write to
 		// a git control path; admission asks the main agent when a worker at
 		// default made it. A yolo posture admits it unread.
-		if (resort === undefined && posture !== "yolo" && cwdInRepository) {
-			const gitControl = gitControlTarget(call, cwd);
+		if (resort === undefined && posture !== "yolo") {
+			const gitControl = gitControlHit(call, candidates);
 			if (gitControl !== null) allowInput.gitControl = gitControl;
 		}
 		return settle(allowDecision(base, allowInput));
@@ -1659,18 +1667,30 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		});
 	};
 
+	const evaluateScoped = (
+		rawCall: ClassifierCall,
+		posture: string | undefined,
+		scope: OperatorScope | undefined,
+	): SafetyPolicyDecision => {
+		if (scope?.level === "default") return evaluateOperatorDefault(rawCall, posture, scope);
+		const decision = scope === undefined ? evaluateCall(rawCall, posture) : evaluateTrueYolo(rawCall, posture, scope);
+		// A script the operator's yolo admitted under `safety.sandbox: required`
+		// runs in the main-session sandbox, whatever stage allowed it (#419, #407).
+		if (decision.kind !== "allow" || scope?.scriptSandbox !== "sandboxed" || !runsScriptFile(rawCall)) return decision;
+		const shellSandbox = {
+			workspace: canonicalizePath(cwd) ?? cwd,
+			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
+		};
+		return { ...decision, shellSandbox };
+	};
+
 	const engine: SafetyPolicyEngine = {
 		evaluate(rawCall, posture, scope) {
-			if (scope?.level === "default") return evaluateOperatorDefault(rawCall, posture, scope);
-			const decision = scope === undefined ? evaluateCall(rawCall, posture) : evaluateTrueYolo(rawCall, posture, scope);
-			// A script the operator's yolo admitted under `safety.sandbox: required`
-			// runs in the main-session sandbox, whatever stage allowed it (#419, #407).
-			if (decision.kind !== "allow" || scope?.scriptSandbox !== "sandboxed" || !runsScriptFile(rawCall)) return decision;
-			const shellSandbox = {
-				workspace: canonicalizePath(cwd) ?? cwd,
-				scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
-			};
-			return { ...decision, shellSandbox };
+			const decision = evaluateScoped(rawCall, posture, scope);
+			// A judge's allow runs the asked call without a second admission, so an
+			// ask counts as well as an allow; the refresh waits for the next typed write.
+			if (decision.kind !== "block" && mayRewriteGitConfig(rawCall, decision, cwd)) gitControlsStale = true;
+			return decision;
 		},
 		writeTargetViolation(target) {
 			if (writeRoots.length === 0) return null;
@@ -3899,29 +3919,123 @@ function scratchRootWrite(
 	return { actionClass: "write", reasons: [`scratch-root-write: ${landing}`] };
 }
 
+/** A git control path as listed and as resolved, both case-folded where the filesystem usually ignores case. */
+interface GitControl {
+	path: string;
+	forms: ReadonlyArray<string>;
+}
+
+/** macOS and Windows volumes usually ignore case, so `.HUSKY/pre-commit` would land in `.husky`. */
+const foldPathCase: (location: string) => string =
+	process.platform === "darwin" || process.platform === "win32"
+		? (location) => location.toLowerCase()
+		: (location) => location;
+
 /**
- * The workspace repository's git control path a typed file mutation lands
- * on, or null: a hooks directory, a config or commondir file, or a `.git`
- * pointer file, the set the main-session sandbox keeps read-only. Read per
- * call, so a repository created mid-session is covered. The target as named
- * and where it lands are both compared with each control path as listed and
- * as resolved, so a link on either side cannot hide a hook.
+ * Impure: the cwd repository's git control paths, the hooks directories
+ * (core.hooksPath included), config and commondir files and `.git` pointer
+ * files the main-session sandbox keeps read-only, each as listed and as
+ * resolved, so a link on the control side cannot hide one.
  */
-function gitControlTarget(call: ClassifierCall, workspace: string): string | null {
-	const target = writeRootTargetPath(call);
-	if (target === null) return null;
-	const controls = mainSandboxGitControlPaths(workspace);
-	if (controls.length === 0) return null;
-	const expanded = expandPath(target);
-	const lexical = path.resolve(process.cwd(), expanded);
-	const physical = canonicalizeRawPath(expanded, process.cwd());
-	const landings = physical === null || physical === lexical ? [lexical] : [lexical, physical];
-	for (const control of controls) {
+function resolveGitControls(cwd: string): GitControl[] {
+	return mainSandboxGitControlPaths(cwd).map((control) => {
 		const real = canonicalizePath(control);
 		const forms = real === null || real === control ? [control] : [control, real];
-		if (landings.some((landing) => forms.some((form) => isSameOrDescendant(landing, form)))) return control;
+		return { path: control, forms: forms.map(foldPathCase) };
+	});
+}
+
+/** Files of a git dir whose contents become code or move the git dir. */
+const GIT_DIR_CONTROL_FILES: ReadonlySet<string> = new Set(["config", "config.worktree", "commondir"]);
+/** Files of a linked worktree's git dir under `.git/worktrees/<name>/`. */
+const GIT_WORKTREE_CONTROL_FILES: ReadonlySet<string> = new Set(["config.worktree", "commondir", "gitdir"]);
+
+/**
+ * Pure: whether `location` is a git control path by its name alone, with no
+ * filesystem call: a `.git` pointer file, or below a `.git` directory its
+ * hooks, `config`, `config.worktree`, `commondir` or `info/attributes`, a
+ * linked worktree's `config.worktree`, `commondir` or `gitdir`, and the hooks
+ * and those files of a submodule git dir under `modules`. Case is ignored.
+ * It covers a repository created after the engine was built, wherever it sits.
+ */
+function isGitControlName(location: string): boolean {
+	const parts = location
+		.toLowerCase()
+		.split(/[\\/]+/u)
+		.filter((part) => part.length > 0);
+	if (parts.at(-1) === ".git") return true;
+	for (let at = parts.indexOf(".git"); at >= 0; at = parts.indexOf(".git", at + 1)) {
+		const rest = parts.slice(at + 1);
+		const [first, second] = rest;
+		const last = rest.at(-1) ?? "";
+		if (first === "hooks") return true;
+		if (rest.length === 1 && GIT_DIR_CONTROL_FILES.has(last)) return true;
+		if (rest.length === 2 && first === "info" && second === "attributes") return true;
+		if (first === "worktrees" && rest.length === 3 && GIT_WORKTREE_CONTROL_FILES.has(last)) return true;
+		if (
+			first === "modules" &&
+			(rest.includes("hooks") ||
+				GIT_DIR_CONTROL_FILES.has(last) ||
+				last === "gitdir" ||
+				(last === "attributes" && rest.at(-2) === "info"))
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * The git control path a typed file mutation lands on, or null. Each target
+ * is judged as named and where the admission walk already resolved it, by
+ * name and against the resolved set, so this costs no filesystem call.
+ */
+function gitControlLanding(
+	candidates: ReturnType<typeof mutationCandidates>,
+	controls: ReadonlyArray<GitControl>,
+): string | null {
+	for (const candidate of candidates) {
+		for (const location of [candidate.lexical, candidate.resolved]) {
+			if (isGitControlName(location)) return location;
+			const folded = foldPathCase(location);
+			for (const control of controls) {
+				if (control.forms.some((form) => isSameOrDescendant(folded, form))) return control.path;
+			}
+		}
 	}
 	return null;
+}
+
+/**
+ * Shell commands that may move core.hooksPath or create a repository: git
+ * config, init, clone, worktree and submodule, husky, package installs whose
+ * scripts run husky, and edits that name a git config file.
+ */
+const GIT_CONFIG_COMMAND =
+	/\bhookspath\b|\bhusky\b|\.gitconfig\b|\.git[\\/]|\bgit\b[^\n]*\b(?:config|init|clone|worktree|submodule)\b|\b(?:npm|pnpm|yarn|bun)\b[^\n]*\b(?:install|i|ci|add)\b/iu;
+
+/**
+ * Pure: whether a call the net let through (allowed, or asked and possibly
+ * approved later) may rewrite a git config, so the resolved git control set
+ * is refreshed before the next typed write is judged: a typed write on a git
+ * control path or a global git config, a shell command that names one, and
+ * any script, whose source the net does not read.
+ */
+function mayRewriteGitConfig(call: ClassifierCall, decision: SafetyPolicyDecision, cwd: string): boolean {
+	if (decision.gitControl !== undefined || decision.ruleId === GIT_CONTROL_FILE_RULE_ID) return true;
+	if (call.tool === ToolNames.RunScript) return true;
+	if (call.tool === ToolNames.Bash) {
+		const command = commandArg(call.args);
+		return command !== null && GIT_CONFIG_COMMAND.test(command);
+	}
+	const target = writeRootTargetPath(call);
+	if (target === null) return false;
+	const landing = path.resolve(cwd, expandPath(target));
+	return (
+		isGitControlName(landing) ||
+		path.basename(landing) === ".gitconfig" ||
+		landing.endsWith(`${path.sep}git${path.sep}config`)
+	);
 }
 
 /**

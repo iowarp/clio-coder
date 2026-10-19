@@ -233,10 +233,10 @@ test("outside scratch roots, in a scratch repository's .git and on secret paths 
 	const admit = (call: ClassifierCall) =>
 		evaluateAdmission({ principal: "main", effects: [call], safety, autonomy: "default", operatorDefault });
 	// /opt is never a scratch root, so this path is outside every one on any host.
-	for (const path of ["/opt/clio-contained-scratch-probe/x.txt", join(scratch, "repo", ".git", "hooks", "pre-commit")]) {
-		const verdict = admit(write(path));
-		strictEqual(verdict.kind === "ask" && verdict.decision.policy?.reasonCode, "system-modify-confirm", path);
-	}
+	const outside = admit(write("/opt/clio-contained-scratch-probe/x.txt"));
+	strictEqual(outside.kind === "ask" && outside.decision.policy?.reasonCode, "system-modify-confirm");
+	const hook = admit(write(join(scratch, "repo", ".git", "hooks", "pre-commit")));
+	strictEqual(hook.kind === "ask" && hook.decision.policy?.reasonCode, "git-control-file");
 	const secret = admit(write(join(scratch, "server.pem")));
 	strictEqual(secret.kind === "deny" && secret.decision.policy?.reasonCode, "path-policy:zeroAccessPaths");
 	// Without the operator's scope (a worker, a grant, a command job) a scratch write keeps its ask.
@@ -284,6 +284,58 @@ test("a worker's typed write to its repository's hooks asks the main agent at de
 	strictEqual(admit("src/app.py").kind, "allow");
 });
 
+test("a typed write into a repository created after the engine was built asks at default, main and worker alike", (t) => {
+	const cwd = workspace("clio-git-control-late-");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const main = createWorkerSafety({ cwd });
+	const worker = createWorkerSafety({ cwd, writeRoots: [`${cwd}/`] });
+	spawnSync("git", ["init", "-q"], { cwd });
+	spawnSync("git", ["init", "-q", "nested"], { cwd });
+	const operatorDefault: OperatorDefaultScope = { level: "default", scratchRoots: [], sandbox: true, snapshots: true };
+	const write = (path: string): ClassifierCall => ({ tool: ToolNames.Write, args: { path, content: "x" } });
+	const admitMain = (path: string) =>
+		evaluateAdmission({ principal: "main", effects: [write(path)], safety: main, autonomy: "default", operatorDefault });
+	const admitWorker = (path: string) =>
+		evaluateAdmission({ principal: "worker", effects: [write(path)], safety: worker });
+	for (const path of [".git/hooks/pre-commit", "nested/.git/hooks/pre-commit"]) {
+		const asked = admitMain(path);
+		strictEqual(asked.kind === "ask" && asked.decision.policy?.reasonCode, "git-control-file", path);
+		const workerAsked = admitWorker(path);
+		strictEqual(workerAsked.kind === "ask" && workerAsked.approvalAuthority, "main", path);
+		strictEqual(workerAsked.decision.policy?.ruleId, "git-control-file", path);
+	}
+	strictEqual(admitMain("src/app.py").kind, "allow");
+	strictEqual(admitWorker("src/app.py").kind, "allow");
+});
+
+test("a typed write into the core.hooksPath directory asks at default, also once the session has set it", (t) => {
+	const cwd = workspace("clio-git-control-hooks-path-");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	spawnSync("git", ["init", "-q"], { cwd });
+	mkdirSync(join(cwd, ".husky"));
+	const before = createWorkerSafety({ cwd });
+	spawnSync("git", ["config", "core.hooksPath", ".husky"], { cwd });
+	const main = createWorkerSafety({ cwd });
+	const worker = createWorkerSafety({ cwd, writeRoots: [`${cwd}/`] });
+	const operatorDefault: OperatorDefaultScope = { level: "default", scratchRoots: [], sandbox: true, snapshots: true };
+	const write = (path: string): ClassifierCall => ({ tool: ToolNames.Write, args: { path, content: "x" } });
+	const admitMain = (safety: typeof main, call: ClassifierCall) =>
+		evaluateAdmission({ principal: "main", effects: [call], safety, autonomy: "default", operatorDefault });
+	const asked = admitMain(main, write(".husky/pre-commit"));
+	strictEqual(asked.kind === "ask" && asked.decision.policy?.reasonCode, "git-control-file");
+	const workerAsked = evaluateAdmission({ principal: "worker", effects: [write(".husky/pre-commit")], safety: worker });
+	strictEqual(workerAsked.kind === "ask" && workerAsked.approvalAuthority, "main");
+	strictEqual(admitMain(main, write("src/app.py")).kind, "allow");
+	// An engine built before the setting re-reads it after an admitted command that may have written it.
+	strictEqual(admitMain(before, bash("git config core.hooksPath .husky")).kind, "allow");
+	const refreshed = admitMain(before, write(".husky/pre-commit"));
+	strictEqual(refreshed.kind === "ask" && refreshed.decision.policy?.reasonCode, "git-control-file");
+});
+
 test("the default scratch roots include $TMPDIR and /tmp", () => {
 	const roots = effectiveScratchRoots([], workspace("clio-contained-scratch-"));
 	ok(roots.includes(realpathSync(tmpdir())), roots.join(", "));
@@ -321,4 +373,32 @@ test("under bwrap a contained main-session command writes the workspace and /tmp
 	match(output, /tmp-writable/u);
 	match(output, /home-read-only/u);
 	strictEqual(existsSync(join(cwd, "a.txt")), true);
+});
+
+test("under bwrap the core.hooksPath directory is read-only for a contained command", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const cwd = workspace("clio-contained-hooks-path-");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	spawnSync("git", ["init", "-q"], { cwd });
+	spawnSync("git", ["config", "core.hooksPath", ".husky"], { cwd });
+	mkdirSync(join(cwd, ".husky"));
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd }),
+		autonomy: () => "default",
+		scratchRoots: () => [],
+		containment: () => ({ sandbox: true, snapshots: false }),
+	});
+	registry.register(bashTool);
+	const verdict = await registry.invoke(bash("echo a > a.txt; echo x > .husky/pre-commit || echo hooks-path-read-only"));
+	strictEqual(verdict.kind, "ok", verdict.kind === "blocked" ? verdict.reason : "");
+	const output = verdict.kind === "ok" && verdict.result.kind === "ok" ? verdict.result.output : "";
+	match(output, /hooks-path-read-only/u);
+	strictEqual(existsSync(join(cwd, "a.txt")), true);
+	strictEqual(existsSync(join(cwd, ".husky", "pre-commit")), false);
 });
