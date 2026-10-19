@@ -521,9 +521,12 @@ synthesis lock. A second reply with no tool call ends the run as `worker_no_work
 ### Worker permission refusals
 
 A worker has no operator by default, so `fleet.permissions.mode` (`/settings safety`, Worker
-approvals; `deny` by default, `fail`, `escalate` or `main`) decides what happens to a call that needs an
-approval nobody can give; [built-in-agents.md](built-in-agents.md) describes each posture. In
-`deny` mode a refused execute call returns to the worker model as a tool result and
+approvals; `judge` by default, `deny`, `fail`, `escalate` or `main`) decides what happens to a call that needs an
+approval; [built-in-agents.md](built-in-agents.md) describes each posture. Under `judge`, while
+the main session runs at autonomy `default`, the main session's safety judge reviews a native
+local worker's ordinary ask against the operator's messages: an allow runs the call once inside
+the worker's permit and sandbox, and anything else denies it. Elsewhere `judge` behaves as `deny`. In
+`deny` mode, and for a denied execute ask under `judge` or `main`, a refused execute call returns to the worker model as a tool result and
 the third one ends the run with exit 3, outcome `permission_required`, and a
 reason that names every refused command. Refusals of other action classes never
 count, `fail` ends at the first refusal, and the Claude SDK worker runtime ends at
@@ -563,12 +566,13 @@ outcome. The mechanics are in [worker-dispatch-mechanics.md](../architecture/wor
 ## Topologies
 
 All topologies go through the dispatch tool, the same admission chain, and
-the autonomy matrix. Workers do not inherit the session autonomy. Each worker runs under its own
-permit, which admits at `default` except that a `yolo` session adds
-`executeAutonomy: yolo` for a mediated, non-read-only worker whose recipe and task
-do not declare `asks: deny` or `asks: fail`. That grant lifts only execute-class calls
-(`bash`, `run_script`, `verify`) to `yolo`
-(see [safety-model.md](../architecture/safety-model.md)).
+the autonomy matrix. Workers inherit the main session's autonomy through their own
+permit and keep their own OS sandbox. At `default` a worker meets the deterministic safety net and its
+asks follow `fleet.permissions.mode`. A `yolo` session adds `executeAutonomy: yolo` for a
+mediated, non-read-only worker whose recipe and task do not declare `asks: deny` or
+`asks: fail`, and that worker runs every action class the yolo way: only the yolo floor,
+operator rules in an approved `.clio-coder/safety.yaml` and its dispatch scope refuse a call
+(see [safety-model.md](../architecture/safety-model.md#workers-at-each-level)).
 A `readOnly` dispatch restriction denies mutation and outside reads; reviewers and judges use it.
 
 | Topology | Invocation | Semantics |
@@ -1076,7 +1080,7 @@ handoffs bound to receipt digests. The scheduler performs whole-plan preflight a
 the first worker spawns. A missing authority grant is an admission failure.
 
 A plan-scale dispatch call maps to an approval ask at the `default` autonomy
-level and runs without the stop at `yolo`. A call is plan-scale when it fans out more than one task, continues a
+level, which only the operator answers (the safety judge never reviews a plan, and a headless run denies it), and runs without the stop at `yolo`. A call is plan-scale when it fans out more than one task, continues a
 Scout split, runs compete or council, places work on a remote node, carries a task
 with approved failover, or applies a compete winner with `apply_winner`
 ([dispatch-plan.ts](../../src/tools/dispatch-plan.ts)). Before asking, Clio resolves the effective agent, target,

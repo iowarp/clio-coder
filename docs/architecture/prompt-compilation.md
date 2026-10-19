@@ -56,7 +56,7 @@ There are 24 fragments. Sections that are not fragments (`tool-contract`, `retri
 | `operating.skill-installs` | yes | no | no | Attended and `operating.discovered-skills` rendered. |
 | `operating.worker` | no | no | yes | Always. |
 | `dispatch.read-only` | no | no | yes | The dispatch is read-only. |
-| `safety.default`, `safety.yolo` | by autonomy | by autonomy | `safety.default` | The main prompt selects `safety.<level>` from the effective autonomy. A worker always reads `safety.default`. |
+| `safety.default`, `safety.yolo`, `safety.yolo-worker` | by autonomy | by autonomy | `safety.default` or `safety.yolo-worker` | The main prompt selects `safety.<level>` from the effective autonomy. A worker reads `safety.yolo-worker` when its permit inherited the operator's yolo, else `safety.default`. |
 | `wiki.page`, `wiki.plan` | no | no | no | Never part of a system prompt. See [Wiki generation fragments](#wiki-generation-fragments). |
 
 For a given autonomy level the safety body is shared by all three tiers; only the lines above it differ.
@@ -93,9 +93,9 @@ These fragments are not attended-only. Their tiers are in the inventory above.
 - `operating.discovered-skills` teaches progressive skill discovery through `context(scope="skills")` and carries `{SKILL_ACTIVATION_POLICY}`.
 - `operating.worker` is the assigned-task contract. A task worded as an instruction to dispatch or delegate is the worker's own assignment, and the worker does it itself.
 - `dispatch.read-only` restricts a run to inspection inside the workspace.
-- `safety.default` and `safety.yolo` describe what runs, what is approval-required and what is blocked, in the safety net's action-class vocabulary. They are the model-facing mirror of the enforced autonomy mapping and grant nothing themselves.
+- `safety.default` and `safety.yolo` describe what runs, what is approval-required and what is blocked, in the safety net's action-class vocabulary. `safety.default` describes containment, workspace snapshots and the safety judge; `safety.yolo` says the operator is away by contract, names the floor, and tells the model to take reasonable defaults and state its assumptions. `safety.yolo-worker` is the worker form of the yolo statement. They are the model-facing mirror of the enforced admission and grant nothing themselves.
 
-The safety section opens with `Autonomy: <level>.` and a one-line directive, then one approval sentence, then the fragment body. The attended approval sentence says that approval-required calls pause for one operator confirmation. A worker has no autonomy level, so its section opens with a line naming its permit and ends the line with its `onPermission` routing:
+The safety section opens with `Autonomy: <level>.` and a one-line directive, then one approval sentence, then the fragment body. The attended approval sentence says that approval-required calls pause for one operator confirmation. At `yolo` nothing parks, so the section carries no approval sentence. A worker has no autonomy level, so its section opens with a line naming its permit and ends the line with its `onPermission` routing:
 
 | `onPermission` | Sentence in the worker prompt |
 | --- | --- |
@@ -109,7 +109,7 @@ A headless main prompt carries `identity.clio`, `identity.self-awareness`, `oper
 
 `operating.contract-headless` is the only fragment that renders for headless main alone. It carries the unattended finishing rule: restate the task as separate clauses, check whether existing tests cover each clause, write a focused reproduction test only when no existing test covers the clause and the task and project instructions allow tests, make the reproduction fail on untouched code first, and map each clause to evidence in the diff or a check that ran before the final report. A clause without evidence is unfinished.
 
-The safety section swaps the attended approval sentence for this one: "No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run." A headless run denies every approval ask at both autonomy levels, a yolo damage-control confirmation included (`src/core/headless-permission.ts`), so the prompt never promises a pause.
+The safety section swaps the attended approval sentence for this one: "No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run." A headless run denies every approval ask the safety judge does not allow (`src/core/headless-permission.ts`), and at `yolo` nothing asks, so the prompt never promises a pause.
 
 Other differences from the attended tier:
 

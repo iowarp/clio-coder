@@ -170,7 +170,7 @@ and provisioning belong to that server.
 ## What System One is not
 
 - It is not the main model and does not change which model answers you.
-- It is not a safety net. The yolo gate and the tool-result classifier only record, and the classifier, damage-control rules and protected paths decide.
+- It is not a safety net. The yolo gate and the tool-result classifier only record. The deterministic safety rules and, at autonomy `default`, the safety judge decide; the judge is not a System One site.
 - It is not required for any feature. Every consumer keeps its previous behavior when System One is absent, unbound, slow, failed or unfitted.
 
 ## The `systemOne` settings block

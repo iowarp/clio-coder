@@ -28,7 +28,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
 | `clio-coder --with-panes` | Activate guest pane integration for this invocation when Clio is inside a reachable herdr session. |
 | `clio-coder --no-panes` | Keep panes off even when settings turn them on. |
-| `clio-coder --autonomy <level>` | Start this interactive session at `default` or `yolo` without modifying `settings.yaml`. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
+| `clio-coder --autonomy <level>` | Start this interactive session at `default` or `yolo` without modifying `settings.yaml`. A `yolo` start holds at `default` until the one-time acceptance card is accepted, and starts at `default` with a notice as root outside a container. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
 | `clio-coder --allow-tools <names\|none>` / `--delegate-tools <names\|none>` | Limit the interactive session's own capabilities or its workers' capabilities with a comma-separated list. For `run` and `acp`, put these flags after the subcommand. The limits hold on every turn and propagate to workers. |
 | `clio-coder --no-skills` | Disable skill discovery for one invocation and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Make one explicit skill file or directory available for one invocation (repeatable). Clio loads its instructions when the skill is activated through `context(scope="skills", name=...)`. |
@@ -119,7 +119,7 @@ An unknown subcommand prints the command list to stderr and exits 2. The retired
 
 Without `--cwd`, ACP binds the first session's absolute workspace path before it loads project settings or tools. `--cwd PATH` binds the workspace when Clio starts.
 
-ACP frontends can list, load, resume, and delete sessions through the stable session methods. Clio offers `default` and `yolo` as ACP modes. A frontend can change autonomy with `session/set_mode` or the `autonomy` configuration option (category `mode`). The `model` and `thinkingLevel` options (category `thought_level`) change only the hosted session; saved defaults stay as they were. Mode and option changes are refused with `prompt_active` while a prompt is running.
+ACP frontends can list, load, resume, and delete sessions through the stable session methods. Clio offers `default` and `yolo` as ACP modes. A frontend can change autonomy with `session/set_mode` or the `autonomy` configuration option (category `mode`). The `model` and `thinkingLevel` options (category `thought_level`) change only the hosted session; saved defaults stay as they were. Mode and option changes are refused with `prompt_active` while a prompt is running. Choosing `yolo` counts as the operator's yolo acceptance, and is refused with `yolo_refused` when Clio runs as root outside a container.
 
 The startup flags `--api-key`, `--no-context-files` (`-nc`), `--no-skills` and `--skill` apply to the interactive session, `clio-coder run` and `clio-coder acp`. `--with-panes` and `--no-panes` apply to the interactive session alone. A startup flag given before any other subcommand is refused with exit 2 and a message naming the flag and the subcommand, because that command would ignore it.
 
@@ -219,7 +219,7 @@ project settings saves and by the operator-install approval above.
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
-| `--autonomy <level>` | Main-agent one-run autonomy override: `default` or `yolo`. It does not change saved settings. Combining it with `--agent` is a usage error; use `--read-only` to restrict a dispatch. |
+| `--autonomy <level>` | Main-agent one-run autonomy override: `default` or `yolo`. It does not change saved settings. A headless run takes `yolo` only from this flag: a `settings.yaml` that sets `yolo` runs at `default` and says so on stderr. `--autonomy yolo` as root outside a container exits 2. Combining it with `--agent` is a usage error; use `--read-only` to restrict a dispatch. |
 | `--read-only` | Enforce read-only admission on the main agent: refuse writes, commands and delegation, and start only MCP servers the operator classes as read. A refused call returns to the model and does not itself fail the run. With `--agent`, restrict the dispatch to read-only tools. `--agent-profile`, `--agent-runtime`, `--tool-profile` and `--require` need `--agent` (`fleet dispatch flags require --agent <recipe-id>`). |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. `--temperature` takes a number of 0 or more, `--top-p` and `--min-p` take 0 to 1, and `--top-k` takes a number of 0 or more, rounded down. They reach the main agent and an `--agent` worker alike. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. They reach the main agent and an `--agent` worker alike. |
@@ -421,6 +421,7 @@ The registry table below lists every interactive slash command. On a bare `/`, c
 | `/new` | `/new` | Start a fresh session. While a run is active it cancels the run first and returns queued follow-ups to the editor |
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
 | `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd, `s` to cycle tree order or most recent first, `e` to label the selected entry, and `Shift+T` to toggle timestamps. |
+| `/rewind` | `/rewind` | Restore workspace files from a snapshot Clio took before its changes; `/tree` rewinds the conversation. See [Undoing file changes with /rewind](#undoing-file-changes-with-rewind). |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
@@ -586,7 +587,7 @@ cancels the underlying owner. The menu does not search as you type.
 
 `Alt+E` and `Alt+A` drive Herdr docks that hide instead of close; [Panes and the Files Pane](panes-and-files.md#showing-hiding-and-closing-docks) specifies the shared tap model. `Alt+W` is the workers dock key in a pane-host session and is covered in [Fleet Dispatch](fleet-dispatch.md).
 
-Additional menu entries: `y` toggles default and yolo autonomy for this session, `i` interrupts with the draft, `s` backgrounds the newest
+Additional menu entries: `y` toggles default and yolo autonomy for this session (the first switch to yolo shows its acceptance card), `i` interrupts with the draft, `s` backgrounds the newest
 eligible attached dispatch, `g` edits the expanded draft externally, `x` dismisses
 one notification, `z` undoes the focused editable field, `r` toggles transcript
 search, `p` pages the transcript up and Home/End jump to its bounds (the page-down entry also lists `n`, but the queue navigator claims that suffix first, so pick page down with Up/Down and Enter). Previous/next
@@ -713,7 +714,7 @@ A clean interactive exit prints a session summary on stdout after the TUI has st
 | `standard` | `Activity` (turns, files changed, workers), `Time` (wall and model time), `Tokens`, `Cost` and `Compactions` when there were any; then up to three `Model` rows with `Models` counting the rest, `Tools` with the first 8 tools by name and a count of further kinds, and `Workers` with the count per outcome. |
 | `report` | The same `Activity`, `Time`, `Tokens`, `Cost` and `Compactions` rows, then titled sections: `Models` (per model the call count, cost, tokens, ids the request named when they differ, and side questions, handoffs, prewarms, memory, failed compactions or system one calls; a model without usage reads `usage not reported; cost unknown`), `Tools` (calls and observed failures per tool), `Workers` (`agent · outcome · receipt · target / model · runId`), `Files` (change observations per path), `Approvals & refusals` and `Timeline`. |
 
-Outside `brief`, `Tokens` reads as input, output, cache read, cache write and reasoning counts. `Time` marks model time `(partly measured)` when some API calls carried no timing. Changed files are the paths that successful mutating tool calls and worker receipts reported, relative to the working directory when inside it. A command's side effects that no receipt names are not counted. A `report` fits one terminal page of at most 80 rows: sections that do not fit are dropped with `… N more sections; resume to inspect`, and a section cut short ends with `… N more detail lines`.
+Every style except `off` adds an `Unattended` row when Clio answered something alone while the operator was away, such as `2 questions auto-resolved · 1 permission ask timed out and denied` ([Running long jobs unattended](#running-long-jobs-unattended)). Outside `brief`, `Tokens` reads as input, output, cache read, cache write and reasoning counts. `Time` marks model time `(partly measured)` when some API calls carried no timing. Changed files are the paths that successful mutating tool calls and worker receipts reported, relative to the working directory when inside it. A command's side effects that no receipt names are not counted. A `report` fits one terminal page of at most 80 rows: sections that do not fit are dropped with `… N more sections; resume to inspect`, and a section cut short ends with `… N more detail lines`.
 
 Cost reads `$0.00 (free)` when every call was known free and `<amount> (known)` when every price came from a declared rate. It reads `~<amount> est` when it includes estimates, `<amount> +? (partly unknown)` when some calls had no price (`(estimated; partly unknown)` when estimates are in it too), `unknown pricing` when no call had a price, and `unknown (not measured)` when nothing was measured. On a terminal the block is a themed frame headed `Clio Coder · Session summary`, or `· Session report` for `report`, with `this visit` on its right edge. On a pipe it is plain lines starting `Clio Coder · Session summary · this visit` (or `Session report`), with no color, frame or wrapping.
 
@@ -793,7 +794,48 @@ and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 
-The settings UI offers **default** for supervised workspace edits and **yolo** for work that should proceed without ordinary confirmation prompts. Hard blocks and damage-control asks remain active at both levels; at `yolo` the main session judges a few of them by their target, such as deletes inside scratch roots and scripts it can read ([Yolo relaxations](../architecture/safety-model.md#yolo-relaxations)). `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` when execution must be restricted. An interactive session can preview a Clio Coder settings change with `configure_clio`; `default` requests the host's Apply choice and cannot raise autonomy, while `yolo` applies the exact preview directly, except that edits to `fleet.default`, `fleet.profiles` and `fleet.agentProfiles` ask the operator at every autonomy level. See the [settings reference](configuration-reference.md), [safety model](../architecture/safety-model.md), [Bash policy](tool-usage.md), and [information flow](information-flow.md) for source labels and approved destinations.
+Clio Coder has two autonomy levels. **default** contains shell work in an OS sandbox, snapshots before destructive steps, and has a safety judge review what escapes containment before anyone is asked. **yolo** is the skip-permissions mode: nothing asks and only a short floor of catastrophic actions, rules in an approved `.clio-coder/safety.yaml` and the run's ceilings block. Set the level in `/settings`, `clio-coder configure`, with `--autonomy`, the leader-key `y` toggle, or an ACP client's mode. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` when execution must be restricted. An interactive session can preview a Clio Coder settings change with `configure_clio`; at `default` applying it requests the host's Apply choice, and an edit to `fleet.default`, `fleet.profiles` or `fleet.agentProfiles` asks the operator on its own approval card, while `yolo` applies the exact preview directly. See the [settings reference](configuration-reference.md), [safety model](../architecture/safety-model.md), [Bash policy](tool-usage.md), and [information flow](information-flow.md) for source labels and approved destinations.
+
+### Choosing an autonomy level
+
+| Level | Choose it for | What happens |
+| --- | --- | --- |
+| `default` | Everyday work, attended or left running. | Workspace edits, and file edits inside the scratch roots, run. With a sandbox backend, `bash` and `run_script` run inside the main-session sandbox without asking: the workspace, the scratch roots and the package caches are writable, credentials and the SSH agent are hidden, and the network stays on. In a Git work tree, destructive workspace operations such as `git reset --hard` or `rm -rf build` run after a workspace snapshot. A call that leaves the sandbox, publishes, writes a git hook or config file, or trips a damage-control rule goes to the safety judge, which runs it or refuses it against your own messages. You are asked only when the judge has no verdict, after it has blocked repeatedly, or for decisions only you make: project settings, fleet routing, library installs, plan-scale dispatch and `ask_user` questions. |
+| `yolo` | Long unattended jobs in a container or another disposable environment. | Nothing asks and `ask_user` answers itself with each question's recommended option. Commands run unsandboxed as you, with your credentials; `safety.sandbox: required` sandboxes only scripts. The floor still blocks deleting or overwriting `/`, your home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into Clio's own config, state and trust records, and reads of Clio's credential store. The first interactive switch shows a one-time acceptance card, recorded as `safety.yoloAccepted`, and yolo is refused as root outside a container. |
+
+Workers you dispatch inherit the level inside their own sandbox. At `default` the ordinary asks of native local workers go to the same safety judge (`fleet.permissions.mode: judge`); at `yolo` workers run the yolo way inside their dispatch scope. The exact rules are in the [safety model](../architecture/safety-model.md#what-runs-what-is-judged-what-blocks).
+
+When a command fails because of the sandbox, for example because it needs a credential or writes outside the writable roots, Clio can rerun it with `unsandboxed: true`, and a command outside the recognized set then goes to the safety judge. A directory your scripts and file edits should always be able to write belongs in `safety.scratchRoots` in your user settings. `clio-coder doctor` shows whether this host contains shell commands and where they may write.
+
+### Undoing file changes with /rewind
+
+In a Git work tree with `safety.snapshots: auto` (the default), Clio writes a private snapshot of the work tree before the first change of each turn and before every destructive command. Snapshots live under `refs/clio-coder/snapshots/<session>/` and never touch your index, HEAD or branches. Ignored files, untracked files over 16 MiB and nested repositories are not captured.
+
+`/rewind` lists this session's snapshots, newest first, with how many files each differs from the workspace by. `Enter` previews what a restore would change. Confirming takes one more snapshot first, so the rewind itself can be rewound, then restores modified and deleted files and removes files the snapshot did not have. Ignored files are left alone. Wait for a running turn to finish, or stop it, before rewinding. `/rewind` restores files; `/tree` moves the conversation.
+
+### Telling the safety judge about your environment
+
+The judge reads your messages in this session and the proposed call, never the agent's reasoning or tool output. It blocks destroying data outside the workspace and scratch roots, publishing, rewriting shared history, sending secrets to unrelated hosts, changing shared or system configuration, weakening Clio's safety, killing processes the session did not start, mass cloud deletes and running code fetched from the network, unless one of your messages names that action. Facts it cannot infer go in your user `settings.yaml`:
+
+```yaml
+safety:
+  judge:
+    environment:
+      - "Shared HPC cluster; /scratch/$USER is mine to create and delete in."
+      - "The staging database on db-staging.internal is disposable."
+    allow:
+      - "restarting the dev containers this project's compose file defines"
+    deny:
+      - "anything that writes under /projects/shared"
+```
+
+`environment` lines describe your machine in your own words. `allow` and `deny` lines add rules to the judge's defaults. `target` and `model` pick the judge's route; left `null`, the judge asks the chat route. `enabled: false` turns the judge off, so every such call asks you instead. These keys are honored only in user settings and apply at the next review.
+
+### Running long jobs unattended
+
+- **Attended `default`, then walk away.** `safety.unattendedAfterSeconds` (default `300`) bounds how long an approval card or `ask_user` question waits in the TUI. An unanswered card is denied and the turn continues on another route; an unanswered question takes its recommended option, and an outward one is answered no. Pressing any key while the countdown runs stops it. When you come back, `/decisions` shows what Clio chose for you, and the exit summary's `Unattended` line counts it. `0` waits forever.
+- **Headless `clio-coder run` at `default`.** Containment, snapshots and the judge apply, and every ask the judge does not allow is denied at once. The judge reads only your prompt, so name the actions the job needs, such as "push the branch when tests pass".
+- **`clio-coder run --autonomy yolo` in a container.** Nothing stops the run except the floor, your `safety.yaml` rules and the run's ceilings. Run it where an unattended command cannot damage the host. As root outside a detected container it exits 2; set `CLIO_CODER_SANDBOXED=1` when the process already runs in a sandbox the detection does not recognize.
 
 ## Dispatch and Built-In Agents
 

@@ -92,7 +92,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 
 | Topic | Guide |
 | --- | --- |
-| Autonomy, default-deny execution, project policy, and damage-control rules | [Safety Model](architecture/safety-model.md) |
+| Autonomy levels, shell containment, the safety judge, workspace snapshots and `/rewind`, the yolo floor, project policy, and damage-control rules | [Safety Model](architecture/safety-model.md) |
 | Source labels, approved destinations, worker admission, and refusal recovery | [Information Flow](guide/information-flow.md) |
 | System One decision sites, record-only safety observations, calibration, shadow mode, and the opt-in dataset | [System One](guide/system-one.md) |
 | Required checks by changed path, fresh verification snapshots, and completion findings | [Project Quality Policies](guide/quality-policy.md) |

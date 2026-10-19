@@ -176,7 +176,7 @@ explains worker route selection.
 | `fleet.adaptiveRouting.roles` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.postures` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.agentRoles` | `[]` | next dispatch |
-| `fleet.permissions.mode` | `deny` | next dispatch |
+| `fleet.permissions.mode` | `judge` | next dispatch; `judge` hands a native local worker's ordinary ask to the main session's safety judge at autonomy `default` and runs as `deny` elsewhere |
 | `fleet.permissions.escalation.timeoutMs` | `120000` | next dispatch |
 | `fleet.permissions.escalation.fallback` | `deny` | next dispatch |
 | `fleet.concurrency` | `auto` | restart |
@@ -256,13 +256,13 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.review.enabled` | `false` | immediately |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately |
-| `safety.sandbox` | `auto` | next dispatch; `auto` runs native worker bash, run_script and verify under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified, `required` refuses those commands without a sandbox, `off` never sandboxes |
+| `safety.sandbox` | `auto` | next turn; `auto` runs native worker bash, run_script and verify, and the main session's bash and run_script at autonomy `default`, under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified; `required` refuses worker commands without a sandbox and also sandboxes yolo scripts; `off` never sandboxes |
 | `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` already get |
-| `safety.scratchRoots` | `[]` | immediately; user layer only, and only the main session at yolo reads it |
+| `safety.scratchRoots` | `[]` | immediately; user layer only; extra directories the main session's sandboxed commands and typed `write` and `edit` calls may write at autonomy `default` without asking, where its deletes run as they do in the workspace |
 | `safety.snapshots` | `auto` | immediately; `auto` snapshots a Git work tree before each turn's first mutating call and before every destructive call, `off` takes none |
 | `safety.unattendedAfterSeconds` | `300` | immediately; user layer only; seconds an attended permission card or ask_user round waits before Clio denies the call or picks the recommended option; `0` waits forever |
 | `safety.yoloAccepted` | `false` | immediately; user layer only; set by the one-time card that turns yolo on interactively, and `false` shows the card again |
-| `safety.judge.enabled` | `true` | immediately; user layer only; at autonomy `default` a model reviews each main-session call that would park for approval against the operator's own messages, then runs it or refuses it with a reason |
+| `safety.judge.enabled` | `true` | immediately; user layer only; at autonomy `default` a model reviews each main-session call that would park for approval against the operator's own messages, then runs it or refuses it with a reason; it also answers worker asks under `fleet.permissions.mode: judge` |
 | `safety.judge.target` | `null` | immediately; user layer only; `null` asks the session's chat route |
 | `safety.judge.model` | `null` | immediately; user layer only; `null` asks the chat model, or the judge target's default model when `safety.judge.target` is set |
 | `safety.judge.environment` | `[]` | immediately; user layer only; facts about the operator's environment the judge reads |

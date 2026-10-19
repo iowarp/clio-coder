@@ -165,7 +165,7 @@ call through Clio Coder's shared admission evaluator, through both the `canUseTo
 callback and a `PreToolUse` hook. The run uses `permissionMode: "default"`, reads
 no user Claude settings (`settingSources: []`), and persists no Claude session.
 A call cannot be parked for a later decision, so an escalation posture collapses
-to a deny. The runtime ends at its first execute-class refusal: the worker exits
+to a deny, and `fleet.permissions.mode: judge` runs as `deny`. The runtime ends at its first execute-class refusal: the worker exits
 3 with outcome `permission_required`. The native worker runtime instead returns
 each refused execute call to the model as a tool result and ends on the third
 (`WORKER_REFUSAL_LIMIT` in `src/engine/worker-refusals.ts`); the SDK runtime has

@@ -213,7 +213,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	autonomy:
-		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions, larger dispatch plans and former hard blocks are first reviewed by the safety judge against your requests, and destructive workspace operations run after a snapshot /rewind can undo. Yolo never asks and runs unsandboxed unless safety.sandbox is required; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Its first activation asks you to accept it once, and it is refused as root outside a container.",
+		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions and former hard blocks are first reviewed by the safety judge against your requests, larger dispatch plans ask you, and destructive workspace operations run after a snapshot /rewind can undo. Yolo never asks and runs unsandboxed unless safety.sandbox is required; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Its first activation asks you to accept it once, and it is refused as root outside a container.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -299,7 +299,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, string>>> = {
 	autonomy: {
 		default:
-			"workspace edits and recognized commands (tests, git inspection, trusted .clio-coder/safety.yaml entries) run; project build, lint, typecheck and CI scripts, unfamiliar commands, outward confirmations, access outside the workspace, and larger dispatch plans ask",
+			"workspace edits, reads anywhere outside secret paths, and shell commands inside the OS sandbox run (without a sandbox, only recognized commands); outward actions, commands that leave the sandbox and former hard blocks go to the safety judge; larger dispatch plans and project settings ask you",
 		yolo:
 			"everything runs without asking, unsandboxed by default; only the yolo floor and your approved safety.yaml rules block",
 	},
@@ -574,7 +574,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.scratchRoots": [
 		"Scratch roots",
-		"Absolute directories your sandboxed commands may write at autonomy default, and where deletes run as they do in the workspace. TMPDIR, /tmp and /var/tmp always count. User settings only.",
+		"Absolute directories your sandboxed commands and file edits may write at autonomy default without asking, and where deletes run as they do in the workspace. TMPDIR, /tmp and /var/tmp always count. User settings only.",
 	],
 	"interface.demo": [
 		"Demo presentation and guidance",

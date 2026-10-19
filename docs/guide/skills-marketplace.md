@@ -19,14 +19,14 @@ The project-scope choice does not approve workspace trust, and neither does the 
 
 ## Operator ownership of installed skills
 
-Active `.clio-coder/{skills,plugins,extensions}/` and `<configDir>/{skills,plugins,extensions}/` trees are operator-owned. Main and worker tool admission refuses recognized model writes, edits, deletes and shell mutations to those trees at both autonomy levels (`default` and `yolo`) with reason `skill-authority`, and reads stay allowed. A model shell call is also inspected for the operator CLI:
+Active `.clio-coder/{skills,plugins,extensions}/` and `<configDir>/{skills,plugins,extensions}/` trees are operator-owned. Main and worker tool admission refuses recognized model writes, edits, deletes and shell mutations to those trees at autonomy `default` with reason `skill-authority`, and reads stay allowed. At `yolo` the yolo floor still refuses them under Clio's own config directory (`clio-owned-state`), while the project's `.clio-coder/` trees are not protected. A model shell call is also inspected for the operator CLI:
 
 | Model shell call | Disposition |
 | --- | --- |
-| `clio-coder library install`, `import`, `update`, `remove`, `enable`, `disable`, `pin`, `register`, `sync`, `push`, `remote` | One-shot operator confirmation in `default` (reason `library-confirm`). Admitted in `yolo` unless a damage-control rule also matches. A headless run denies the ask. |
+| `clio-coder library install`, `import`, `update`, `remove`, `enable`, `disable`, `pin`, `register`, `sync`, `push`, `remote` | One-shot operator confirmation in `default` (reason `library-confirm`), which the safety judge never answers. Admitted in `yolo`. A headless run denies the ask. |
 | `clio-coder library install --dry-run`, `import --dry-run`, `update --dry-run`, `enable --dry-run`, `disable --dry-run`, `remove --dry-run`, and `search`, `list`, `components`, `inspect`, `validate`, `drift`, `reload`, `skills`, `inventory` | Not treated as mutations. A `--dry-run` builds the plan and writes nothing, so it never asks. |
-| `clio-coder share import` without `--dry-run`, `clio-coder extensions test`, `clio-coder extensions validate` | One-shot operator confirmation in `default`, admitted in `yolo` unless a damage-control rule also matches, denied in a headless run. An import installs packages from an archive the model may have written, and the other two run a package's own code. |
-| `clio-coder extensions` install, update, remove, enable, disable, pin; `clio-coder interop adopt --yes`; any `clio-coder config trust` | Blocked at every autonomy level. The trust form is blocked as `trust-authority`, so the model cannot approve a project's extensions, plugins or other surfaces. |
+| `clio-coder share import` without `--dry-run`, `clio-coder extensions test`, `clio-coder extensions validate` | One-shot operator confirmation in `default`, admitted in `yolo`, denied in a headless run. An import installs packages from an archive the model may have written, and the other two run a package's own code. |
+| `clio-coder extensions` install, update, remove, enable, disable, pin; `clio-coder interop adopt --yes`; any `clio-coder config trust` | Blocked at `default`. At `yolo` only the trust form stays blocked: it is part of the yolo floor as `trust-authority`, so the model cannot approve a project's extensions, plugins or other surfaces at any level. |
 
 This is a command-inspection and tool-admission boundary, not an operating-system sandbox for arbitrary scripts or dynamically constructed shell commands.
 

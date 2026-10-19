@@ -94,7 +94,7 @@ classifies tools by name before applying that default, unless
 | Tools | Class | Behavior |
 | --- | --- | --- |
 | `slurm_list`, `slurm_describe`, `slurm_cluster`, and the older `check_job_status`, `list_slurm_jobs`, `get_slurm_info`, `get_job_details`, `get_job_output`, `get_queue_info`, `get_node_info`, `get_allocation_status` | `read` | Run without asking at `default` and `yolo`. Polling a job costs no approval. |
-| `slurm_submit`, `slurm_cancel`, and the older `submit_slurm_job`, `cancel_slurm_job`, `submit_array_job`, `allocate_slurm_nodes`, `deallocate_slurm_nodes` | `execute` | Always ask the operator before they reach the scheduler, at every autonomy level including `yolo`. Approving resumes only that call. |
+| `slurm_submit`, `slurm_cancel`, and the older `submit_slurm_job`, `cancel_slurm_job`, `submit_array_job`, `allocate_slurm_nodes`, `deallocate_slurm_nodes` | `execute` | Ask before they reach the scheduler under rule `slurm-allocation`. At `default` the safety judge reviews the call first against the operator's messages and the operator decides when it gives no verdict; approving resumes only that call. At `yolo` they run without asking. |
 | Any other tool name | the server's class | The `toolActionClasses` entry for the tool, else the declared or trusted class, or an advisory annotation for an implicit user class. |
 
 The confirmation is attached to the tool name and does not depend on the class.

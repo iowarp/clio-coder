@@ -161,6 +161,22 @@ gives the branch, the age, the `git log <base>..<branch>` command to inspect
 it, and the commands to drop it. A claim whose branch and worktree are both gone is reported as stale; `doctor --fix` removes that stale claim after rechecking both. Doctor never removes a surviving branch or worktree. See
 [Fleet dispatch](fleet-dispatch.md).
 
+## Shell sandbox rows
+
+The `shell sandbox` row says how the main session's shell commands run on this
+host ([main-session.ts](../../src/core/sandbox/main-session.ts)). With a sandbox
+backend and `safety.sandbox` not `off` it is `OK` and reads
+`default-autonomy shell commands run in the <backend> sandbox; writable roots: ...`,
+listing the workspace, the scratch roots, the package caches and the
+repository's git dirs. Without one it is `WARN` and reads
+`default-autonomy shell commands run uncontained and keep the approval rails (<reason>)`.
+The row also says how yolo treats scripts: `yolo runs unsandboxed`, sandboxed
+under `safety.sandbox: required`, or a `WARN` that yolo refuses scripts because
+`required` has no backend. Each configured `safety.scratchRoots` entry that this
+workspace leaves out gets a `WARN` `safety.scratchRoots` row with the reason,
+such as a root that contains the workspace. See
+[Containment at default](../architecture/safety-model.md#containment-at-default).
+
 ## Slurm MCP rows
 
 `slurm clio-kit` names the `clio-kit` binary on `PATH` and whether its build
@@ -216,9 +232,12 @@ doctor resolves the program (the first word after any `NAME=value`
 assignments) on PATH, or relative to the workspace when it contains a `/`.
 Then it evaluates the command as a bash call the way tool admission does, at
 the configured `safety.autonomy` or at the session's level for `/doctor deep`.
-The safety policy engine decides under that level's posture, so yolo clears
-the ordinary rails, and the autonomy mapping at that level decides the rest.
-Nothing is executed.
+At `default` it uses this host's containment for the operator's session: with a
+sandbox backend the command runs contained, and a discard or delete a workspace
+snapshot undoes runs when the workspace is a Git work tree with
+`safety.snapshots` on. At `yolo` only the floor, operator rules and the run's
+ceilings refuse. Otherwise the autonomy mapping at that level decides. Nothing
+is executed.
 
 The row is `OK` when the program resolves and the command would run without an
 approval ask at that level. Otherwise it is `WARN`. The verdict says what
@@ -226,10 +245,9 @@ really happens:
 
 | Verdict | What happens |
 | --- | --- |
-| `runs without approval at <level>` | The command runs at the evaluated level. |
-| `asks for approval at default and runs at yolo` | An ordinary rail, such as `$(...)` command substitution or an unrecognized command. Default asks and yolo runs it. |
-| `asks for confirmation at default and yolo` | A damage-control confirmation rule matched. It asks at both levels. |
-| `blocked by the safety policy` | A block. It holds at both levels. |
+| `runs without approval at default`, or `at yolo in the operator's session` | The command runs at the evaluated level. |
+| `asks for approval at default and runs at yolo in the operator's session` | An ask at `default`, such as an uncontained unrecognized command, `$(...)` on a host without a sandbox, or a damage-control rule. In a session the safety judge reviews it before anyone is asked, and a headless run denies what the judge does not allow. Yolo runs it. |
+| `blocked by the safety policy` | A block at the evaluated level: at `default` the floor, path policy or an authority rail; at `yolo` the floor, an operator rule or a ceiling. |
 
 A verdict that comes from a safety rule names the rule's reason code in
 parentheses. A command that asks only because it is unrecognized gets a hint

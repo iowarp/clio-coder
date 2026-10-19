@@ -63,7 +63,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `RouteCandidate` in [route-decision.ts](../../src/domains/dispatch/route-decision.ts).
 
 ### 15. Posture (Autonomy Level)
-- **Definition**: The operator-set dial, `default` or `yolo`, that decides which action classes ask for approval and which run at once. Hard blocks and damage-control rules apply at both levels, apart from the main session's yolo relaxations that judge a few rules by their target. A dispatched worker resolves its own approval asks through `fleet.permissions.mode`, and a read-only dispatch restricts its tools. Routing postures (`quality`, `balanced`, `latency`, `economy`) under `fleet.adaptiveRouting.postures` are a different axis that ranks candidate routes.
+- **Definition**: The operator-set dial, `default` or `yolo`. `default` contains the main session's shell work in an OS sandbox, runs snapshot-recoverable destructive work after a workspace snapshot, and sends what escapes containment to the safety judge before the operator is asked. `yolo` asks nothing: only the yolo floor, operator rules in an approved `.clio-coder/safety.yaml` and the run's ceilings block. Dispatched workers inherit the level through their permit, resolve their own asks through `fleet.permissions.mode`, and a read-only dispatch restricts their tools. See the [safety model](../architecture/safety-model.md#autonomy). Routing postures (`quality`, `balanced`, `latency`, `economy`) under `fleet.adaptiveRouting.postures` are a different axis that ranks candidate routes.
 - **Owning Type**: `AutonomyLevel` in [autonomy.ts](../../src/domains/safety/autonomy.ts).
 
 ### 16. Capability Class
@@ -103,7 +103,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `InteropAgentFacts` in [types.ts](../../src/domains/interop/types.ts).
 
 ### 25. noWritePaths
-- **Definition**: A damage-control path policy class that permits reads while blocking writes and deletes under every registered foreign agent directory across all autonomy levels.
+- **Definition**: A damage-control path policy class that permits reads while blocking writes and deletes under every registered foreign agent directory at autonomy `default`. At `yolo` only `noWritePaths` entries in an approved `.clio-coder/safety.yaml` hold.
 - **Owning Type**: `PathPolicyKind` in [path-policy.ts](../../src/domains/safety/path-policy.ts).
 
 ### 26. Foreign Prompt Root
@@ -293,3 +293,19 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 73. Component
 - **Definition**: One discoverable unit a package or Clio itself provides: a skill, an agent, a prompt template or a playbook. A package holds components, and `clio-coder library components` reads them with their owner, origin and invocation.
+
+### 74. Safety Judge
+- **Definition**: The model that reviews, at autonomy `default`, each main-session call that would park for an operator approval, and each ordinary worker ask under `fleet.permissions.mode: judge`. It reads only the operator's messages and the redacted call, then allows it, blocks it back to the model with a rule and a reason, or gives no verdict, which sends the call to the operator. Three consecutive or twenty total blocks in a session hand the next call to the operator. Configured by `safety.judge`.
+- **Owning Type**: `SafetyJudgeSeat` and `createSafetyJudge` in [safety-judge.ts](../../src/domains/safety/safety-judge.ts).
+
+### 75. Yolo Floor
+- **Definition**: The short list of actions blocked at every autonomy level: deleting or overwriting `/`, the home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into Clio's own config, state and trust records, and reads of Clio's credential store. A floor block carries reason code `yolo-floor:<rule id>` and no judge or approval clears it.
+- **Owning Type**: `YOLO_FLOOR_RULE_IDS` in [yolo-floor.ts](../../src/domains/safety/yolo-floor.ts).
+
+### 76. Containment
+- **Definition**: Running the main session's `bash` and `run_script` calls at autonomy `default` inside the main-session sandbox, which lets only the workspace, the scratch roots, the package caches and the repository's git dirs be written, hides credentials and the SSH agent, and keeps the network on. A contained call needs no approval for what Clio cannot read in its command text; a call with `unsandboxed: true` or one that reaches outward is not contained.
+- **Owning Type**: `mainShellContained` and `mainSandboxPolicy` in [main-session.ts](../../src/core/sandbox/main-session.ts); `outwardShellReason` in [containment.ts](../../src/domains/safety/containment.ts).
+
+### 77. Workspace Snapshot
+- **Definition**: A private Git commit of the work tree that Clio writes before the main agent's first mutating call of a turn and before every destructive call, stored at `refs/clio-coder/snapshots/<session>/<n>` without touching the operator's index, HEAD or branches. `/rewind` restores files from one. Controlled by `safety.snapshots`.
+- **Owning Type**: `WorkspaceSnapshots` in [store.ts](../../src/domains/workspace-snapshots/store.ts).

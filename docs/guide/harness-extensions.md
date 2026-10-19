@@ -338,7 +338,7 @@ A worker that cannot hold a call is refused rather than run past a blocking hook
 
 `clio-coder fleet run`, `clio-coder run --agent`, `clio-coder context wiki` and `clio-coder context init` start their own extension host to run these hooks. When that host fails to start and a blocking tool hook applies, the command refuses before it dispatches any worker, naming the extension, and `context init` falls back to its heuristic bootstrap. Inside a session, bootstrap generation dispatches through the session, whose extension host runs the hooks.
 
-A desk or extension that seals interview results with a key file cannot hide that key from the main agent. The main agent's shell runs unsandboxed as the same user and can read any file the extension can. Treat the seal as tamper evidence against workers, not against the main agent.
+A desk or extension that seals interview results with a key file cannot hide that key from the main agent. The main agent's shell runs as the same user and can read any file the extension can: at `yolo` it runs unsandboxed, and the main-session sandbox at `default` keeps the filesystem readable and masks only known credential paths. Treat the seal as tamper evidence against workers, not against the main agent.
 
 ## Extension CLI
 

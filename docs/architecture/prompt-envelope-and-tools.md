@@ -220,7 +220,7 @@ resolves and the mux is live. `web_read` and `web_fetch` are omitted when
 and `ledger`; `science-local` adds `verify`; `council-read-only` is `read`, `grep`, `find`, `ls`, `git`, `code_nav` and `context`; `full-agent` keeps everything that
 the runtime registered and the recipe allows.
 
-The session prompt's turn-ending section tells the model that an explicit, specific operator instruction is its own consent and is carried out without an `ask_user` re-confirmation, because the approval cards gate the risky commands. It asks only when the target is ambiguous or lies outside the workspace.
+The session prompt's turn-ending section tells the model that an explicit, specific operator instruction is its own consent and is carried out without an `ask_user` re-confirmation, because the approval cards gate the risky commands. It asks only when the target is ambiguous or lies outside the workspace. At `yolo` the section renders a variant for an operator who has walked away: a turn ends Done, ambiguity is settled by the recommended default stated as an assumption, a requested plan stops at its steps and assumptions instead of an approval card, and `ask_user` is reserved for a decision that blocks all progress.
 
 `ask_user` keeps its typed `exposure: local | outward` admission fact separate from caller prose. The registry uses exposure only in the enforced autonomy mapping. After admission, the host carries the normalized fact into the shared decision-presentation classifier; question text, headers, options, summaries, and requested color or severity words cannot select a consequence tier. The resulting presentation object contains no admission disposition and cannot grant authority.
 

@@ -201,13 +201,13 @@ export function openHelpOverlay(
 				"# Autonomy & safety net",
 				"**Tool surface**: which tools exist at all through registration, tool profiles, skill narrowing, and dispatch admission. " +
 					"Violations are terminal denials, never approvable.",
-				"**Safety net**: the floor (deleting or overwriting /, home or a system tree, mkfs, wipefs, block-device writes, fork bombs, writes into Clio's own state, reads of its credential store), secret and protected paths, and rules in an approved `.clio-coder/safety.yaml` block at every level. " +
+				"**Safety net**: the floor (deleting or overwriting /, home or a system tree, mkfs, wipefs, block-device writes, fork bombs, writes into Clio's own state, reads of its credential store) and rules in an approved `.clio-coder/safety.yaml` block at every level; secret and protected paths block at default. " +
 					"At default, other damage-control rules ask instead of blocking.",
 				"**Mode** (`/settings`, persisted as `safety.autonomy`): default runs workspace edits, and shell commands inside an OS sandbox where the host has one, without asking. " +
-					"Commands that leave the sandbox, outward actions and larger dispatch plans are first reviewed by the safety judge, and destructive workspace operations run after a snapshot `/rewind` can undo. Yolo never asks: no approval stops, no sandbox unless `safety.sandbox` is required, and questions take their recommended option. " +
+					"Commands that leave the sandbox and outward actions are first reviewed by the safety judge, larger dispatch plans ask you, and destructive workspace operations run after a snapshot `/rewind` can undo. Yolo never asks: no approval stops, no sandbox unless `safety.sandbox` is required, and questions take their recommended option. " +
 					"Its first activation shows a one-time acceptance card, and it is refused as root outside a container.",
 				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
-					"Workers resolve asks per `fleet.permissions.mode` (Fleet approvals routing in /settings); headless runs auto-deny.",
+					"Workers resolve asks per `fleet.permissions.mode` (Fleet approvals routing in /settings); headless runs deny what the safety judge does not allow.",
 				"**Inspecting a mutation**: a parked `write` or `edit` card carries the target, the byte count, and a `sha256` digest of the exact call arguments. " +
 					"Press `v` to read the complete proposed content, or the complete effective diff against the file on disk, and `v` again to put it away; ↑/↓ and PageUp/PageDown scroll it. " +
 					"Enter still allows, `s` still stops, and Esc still denies while it is open. The mutation text is shown locally and never enters the transcript, a notice, a desktop notification, or the render trace. " +

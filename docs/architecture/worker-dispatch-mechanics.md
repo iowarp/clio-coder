@@ -80,7 +80,7 @@ Clio Coder divides worker output into two isolated streams to protect control si
    * **Cancel acknowledgment:** `{"kind": "cancel_ack", "at": <ms>}` confirms the worker saw a cancel request.
    * **Ledger post:** `{"kind": "ledger_post", "body": ...}` carries a `claim`, `finding`, `review`, or `message` entry for the shared agent ledger. The orchestrator drops a post that arrives before the announce is accepted.
    * **Model loaded:** `{"kind": "model_loaded", "load": ...}` reports a model load the worker observed. Only target and model ids cross the lane; the orchestrator resolves the endpoint itself and releases the load when the worker exits.
-   * **Grant request:** `{"kind": "grant_request", "request": ...}` carries the effect descriptor of a worker ask routed to the main agent under `fleet.permissions.mode: main`. It stays off the bulk lane because that lane is journaled and displayed. A descriptor too large for the frame crosses as its digest alone, and the host then refuses a main grant.
+   * **Grant request:** `{"kind": "grant_request", "request": ...}` carries the effect descriptor of a worker ask routed to the main authority: the main agent under `fleet.permissions.mode: main`, or the main session's safety judge under `judge`. It stays off the bulk lane because that lane is journaled and displayed. A descriptor too large for the frame crosses as its digest alone, and the host then refuses a main grant.
 
    Every parsed control frame, whatever its kind, counts as worker liveness. Stderr lines without the `@clio-control/1 ` prefix are free-form diagnostics. The orchestrator keeps the last 4096 bytes of them as `stderrTail`, which receipts and failure classification read.
 
@@ -97,7 +97,7 @@ The worker entry mounts a custom stdin demultiplexer (`createWorkerStdinDemux`) 
    are not offered steering by the dispatch contract or TUI.
 2. **Permission Decisions:**
    `{"type": "permission_decision", "requestId": "req-xxx", "decision": "approve"|"deny"}`
-   Resolves a parked tool call that was escalated to the operator or, under `fleet.permissions.mode: main`, to the main agent. A grant-bound decision also carries a `binding` (attempt token, attempt number, argument digest, issuer). A decision whose binding is missing, malformed, or names another attempt or different arguments denies the parked call.
+   Resolves a parked tool call that was escalated to the operator or, under `fleet.permissions.mode: main` or `judge`, to the main agent or the safety judge. A grant-bound decision also carries a `binding` (attempt token, attempt number, argument digest, issuer). A decision whose binding is missing, malformed, or names another attempt or different arguments denies the parked call.
 3. **Ledger Deltas:**
    `{"type": "ledger_delta", "entries": [...]}`
    Pushes newly admitted agent ledger entries into the worker's local mirror, so a ledger read answers without a round trip. The orchestrator replays the board on subscription, and early batches are buffered in order.
@@ -136,7 +136,7 @@ ACP delegations send no periodic heartbeat. They are bounded by an event-inactiv
 
 ## 4. Permission Escalation and Parking
 
-When a tool requires explicit confirmation (for example running an unrecognized bash command in `default` mode), the worker evaluates `onPermission`. The spec carries `deny`, `fail`, or `escalate`. The setting `fleet.permissions.mode` (default `deny`) selects the posture, and `main` travels as `escalate` with a permit that routes asks to the main agent.
+When a tool requires explicit confirmation (for example running an unrecognized bash command in `default` mode), the worker evaluates `onPermission`. The spec carries `deny`, `fail`, or `escalate`. The setting `fleet.permissions.mode` (default `judge`) selects the posture. `main` and `judge` travel as `escalate` with a permit that routes ordinary asks to the main authority: under `main` the main agent decides them, and under `judge` the main session's safety judge decides them in the orchestrator and the grant broker delivers its verdict like a main grant. Dispatch resolves `judge` to `deny` where no judge can answer ([grant-authority.ts](../../src/domains/dispatch/grant-authority.ts)).
 
 ```mermaid
 stateDiagram-v2
@@ -176,7 +176,7 @@ stateDiagram-v2
 
 To prevent a worker process from repeatedly re-prompting the operator for a call that was already denied, [worker-runtime.ts](../../src/engine/worker-runtime.ts) keeps an in-memory map of denied escalations (`workerPermissionCacheKey`). A key combines the exact call (`tool` name and arguments) with the permission conditions (asking axis, action class, and safety-net policy provenance). When a worker re-issues an identical call under the same conditions after a denial from the operator, the main agent, or the timeout fallback, the denial is returned immediately with a reason naming the earlier request, and no escalation event is emitted. Approvals are never remembered. Each approval executes at most one call, and an identical later call needs its own decision. Any change in arguments or policy rails requires a new card.
 
-Refusals under the `escalate` posture do not count toward the [refusal limit](#worker-refusal-limit). Only the `deny` posture does.
+Refusals by the operator or the timeout fallback do not count toward the [refusal limit](#worker-refusal-limit). Refusals under the `deny` posture count, and so does a main-authority denial of an execute call under `main` or `judge`, including a remembered one returned for an identical retry.
 
 ---
 
@@ -345,8 +345,8 @@ The limit is `WORKER_REFUSAL_LIMIT = 3` in [worker-refusals.ts](../../src/engine
 | `deny` posture, execute-class refusal | Returned to the model. Counts toward the limit. The third ends the run with exit `3`. |
 | `deny` posture, other action class | Returned to the model with a denial that names the tool and action class but not the command. Never counts and never ends the run. |
 | `fail` posture (`onPermission: "fail"`) | The first refusal ends the run with exit `3`. The reason reads `permission required for <tool> (<class>); fleet.permissions.mode=fail ends this run`. |
-| `escalate` or `main` posture with a responder | Denials by the operator, the main agent, or the timeout fallback are returned to the model and never count. A timeout whose fallback is `fail` ends the run at once. |
-| `escalate` or `main` posture with no responder (headless run, ACP, fleet CLI) | The posture collapses to its configured fallback immediately. Fallback `deny` behaves as the `deny` row, and fallback `fail` as the `fail` row. |
+| `escalate`, `main` or `judge` posture with a responder | Denials by the operator or the timeout fallback are returned to the model and never count. A main-authority denial of an execute call, by the main agent under `main` or the safety judge under `judge`, is returned to the model and counts toward the limit, because a granting host that keeps refusing is no route either. A timeout whose fallback is `fail` ends the run at once. |
+| `escalate` or `main` posture with no responder (headless run, ACP, fleet CLI), or a `judge` ask the judge cannot reach (a remote placement) | The posture collapses to its configured fallback immediately. Fallback `deny` behaves as the `deny` row, and fallback `fail` as the `fail` row. |
 | Claude SDK worker runtime (`claude-sdk`) | Ends at its first execute refusal under any posture, with exit `3` (`endsPermissionRun` in [sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts)). The three-refusal allowance applies to the native worker runtime only. This behavior has not been exercised against a live Claude subscription. |
 
 Exit `3` is the `permission` failure class, which never retries. The main agent's `dispatch` tool also blocks an identical dispatch for the rest of the user turn after an attested `permission_required` failure, with the reason `dispatch duplicate blocked: this exact dispatch already failed with permission_required in this user turn`. The remedy is to change the authorized scope or route, because changing the command cannot create an approval route that does not exist.
