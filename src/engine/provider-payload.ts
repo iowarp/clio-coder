@@ -35,7 +35,12 @@ const NAMED_CHOICE = {
 	"mistral-conversations": (name: string): Choice<MistralOptions> => ({ type: "function", function: { name } }),
 	"openai-responses": (name: string): Choice<OpenAIResponsesOptions> => ({ type: "function", name }),
 	"azure-openai-responses": (name: string): Choice<AzureOpenAIResponsesOptions> => ({ type: "function", name }),
-	"openai-codex-responses": (): Choice<OpenAICodexResponsesOptions> => "required",
+	// The ChatGPT Codex backend refuses a forced choice, named or "required":
+	// "Unsupported parameter: 'tool_choice' is not supported by rustponsesapi"
+	// failed a coder worker's terminal handoff in #423, and Codex CLI itself only
+	// sends "auto". Over the one narrowed tool, "auto" is the closest round, as on
+	// Claude models that reject a forced choice. A text-only round keeps "none".
+	"openai-codex-responses": (): Choice<OpenAICodexResponsesOptions> => "auto",
 	"openai-completions": (): Choice<OpenAICompletionsOptions> => "required",
 } as const;
 
