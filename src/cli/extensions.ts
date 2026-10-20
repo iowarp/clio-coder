@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { readLayeredSettings } from "../core/settings-layers.js";
 import { approveOperatorProjectInstall, captureProjectInstallBaseline } from "../core/workspace-trust.js";
 import { envelopeReviewLines, reviewExtensionEnvelope } from "../domains/extensions/envelope-review.js";
 import {
@@ -306,6 +307,8 @@ async function runOperatorCommand(parsed: Parsed): Promise<number> {
 			const { embedForExtension } = await import("../domains/semantic-app/index.js");
 			return embedForExtension({ projectRoot: workspace }, request, signal);
 		},
+		// The layered read keeps a broken user file from failing the command; the key is user-layer only.
+		sandboxUnixSockets: () => readLayeredSettings(process.cwd()).settings.safety.sandboxUnixSockets,
 		context: () => ({ workspace: process.cwd(), sessionId: null, mode: "headless" }),
 		isIdle: () => true,
 		onlyId: id,

@@ -4663,6 +4663,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				const { embedForExtension } = await import("../domains/semantic-app/index.js");
 				return embedForExtension({ projectRoot: workspace }, request, signal);
 			},
+			sandboxUnixSockets: () => getCurrentSettings().safety.sandboxUnixSockets,
 			notify: (line) => process.stderr.write(`clio-coder: ${line}\n`),
 			...(ask ? { ask } : {}),
 		});

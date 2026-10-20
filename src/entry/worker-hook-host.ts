@@ -11,6 +11,7 @@ export interface WorkerHookHostOptions {
 	/** The installed packages the host may start: loadable, with an api 2 runtime. */
 	list: ExtensionHostOptions["list"];
 	notify: (line: string) => void;
+	sandboxUnixSockets?: ExtensionHostOptions["sandboxUnixSockets"];
 }
 
 export interface WorkerHookHost {
@@ -50,6 +51,7 @@ export function startWorkerHookHost(options: WorkerHookHostOptions): WorkerHookH
 		sessionId: () => null,
 		targetId: () => "",
 		notify: options.notify,
+		...(options.sandboxUnixSockets ? { sandboxUnixSockets: options.sandboxUnixSockets } : {}),
 	});
 	return {
 		workerHooks: reload.workerHooks,

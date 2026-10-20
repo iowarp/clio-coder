@@ -16,6 +16,8 @@ import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.j
 import { composeWorkerSandboxInvocation } from "../../src/core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { settingsChangeKind } from "../../src/domains/config/classify.js";
+import type { ExtensionRuntimeDeclarationV2 } from "../../src/domains/extensions/manifest-v2.js";
+import { planExtensionLaunch } from "../../src/domains/extensions/runtime-sandbox.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Kernel ABI constants, written out here rather than imported so the program is checked against them.
@@ -149,6 +151,37 @@ test("the seatbelt profile denies unix-socket connects and binds when blocking, 
 		composeWorkerSandboxInvocation(spec, { argv: ["/usr/bin/true"] }, "/", seatbelt, [])?.args[1] ?? "";
 	assert.match(composed(policy), /\(deny network-bind \(local unix-socket\)\)/u);
 	assert.doesNotMatch(composed({ ...policy, unixSockets: "allow" }), /unix-socket/u);
+});
+
+test("the extension runtime launch blocks unix sockets by default and honors the operator's allow", async (t) => {
+	const home = await isolateClioEnv("clio-unix-socket-extension-");
+	t.after(() => home.restore());
+	const roots = {
+		workspace: join(home.dir, "workspace"),
+		packageCopy: join(home.dir, "runtime", "package"),
+		storeDir: join(home.dir, "store"),
+		bootstrap: join(home.dir, "bootstrap", "runtime-child-v2.mjs"),
+	};
+	for (const directory of [roots.workspace, roots.packageCopy, roots.storeDir, join(home.dir, "bootstrap")])
+		mkdirSync(directory, { recursive: true });
+	const declaration = {
+		permissions: { fs: { read: [], write: [] }, exec: false, net: false },
+	} as unknown as ExtensionRuntimeDeclarationV2;
+	const seatbelt = { available: true, backend: "seatbelt" as const, executable: "/usr/bin/sandbox-exec", reason: null };
+	const profile = (unixSockets?: "block" | "allow"): string => {
+		const launch = planExtensionLaunch({
+			declaration,
+			roots,
+			argv: [process.execPath, roots.bootstrap],
+			availability: seatbelt,
+			...(unixSockets !== undefined ? { unixSockets } : {}),
+		});
+		assert.equal(launch.report.backend, "seatbelt", launch.report.reason);
+		return launch.args[1] ?? "";
+	};
+	assert.match(profile(), /\(deny network-bind \(local unix-socket\)\)/u);
+	assert.match(profile("block"), /\(deny network-bind \(local unix-socket\)\)/u);
+	assert.doesNotMatch(profile("allow"), /unix-socket/u);
 });
 
 test("safety.sandboxUnixSockets defaults to block, is user-layer only, applies live and reaches the worker spec", async (t) => {

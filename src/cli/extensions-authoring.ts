@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { readLayeredSettings } from "../core/settings-layers.js";
 import { scaffoldExtension } from "../domains/extensions/authoring/scaffold.js";
 import { testExtensionPackage } from "../domains/extensions/authoring/test-runner.js";
 import { validateExtensionPackage } from "../domains/extensions/authoring/validate.js";
@@ -56,7 +57,9 @@ export async function runExtensionsAuthoring(argv: ReadonlyArray<string>): Promi
 			return 0;
 		}
 		if (command === "test") return await testExtensionPackage(resolve(positional));
-		const report = await validateExtensionPackage(positional);
+		const report = await validateExtensionPackage(positional, {
+			unixSockets: readLayeredSettings(process.cwd()).settings.safety.sandboxUnixSockets,
+		});
 		if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 		else {
 			process.stdout.write(`${report.valid ? "Valid" : "Invalid"}: ${report.path}\n`);

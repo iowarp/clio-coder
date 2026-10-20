@@ -1,5 +1,6 @@
 import type { LoadResult } from "../core/domain-loader.js";
 import { getSharedBus } from "../core/shared-bus.js";
+import type { ConfigContract } from "../domains/config/contract.js";
 import type { DispatchBundleOptions } from "../domains/dispatch/extension.js";
 import { type ExtensionsContract, isLoadableExtension } from "../domains/extensions/index.js";
 import type { MiddlewareContract } from "../domains/middleware/index.js";
@@ -57,6 +58,7 @@ export function createCliWorkerHooks(command: string): {
 		async start(loaded) {
 			const extensions = loaded.getContract<ExtensionsContract>("extensions");
 			const middleware = loaded.getContract<MiddlewareContract>("middleware");
+			const config = loaded.getContract<ConfigContract>("config");
 			if (!extensions || !middleware) return null;
 			const list = (cwd: string) =>
 				extensions.list(cwd, { all: true }).filter((entry) => isLoadableExtension(entry) && entry.runtimeV2 !== undefined);
@@ -65,7 +67,14 @@ export function createCliWorkerHooks(command: string): {
 			let failure: string;
 			try {
 				const { startWorkerHookHost } = await import("../entry/worker-hook-host.js");
-				host = startWorkerHookHost({ extensions, middleware, bus: getSharedBus(), list, notify });
+				host = startWorkerHookHost({
+					extensions,
+					middleware,
+					bus: getSharedBus(),
+					list,
+					notify,
+					...(config ? { sandboxUnixSockets: () => config.get().safety.sandboxUnixSockets } : {}),
+				});
 				// The host already reported a runtime that failed through notify.
 				const failed = workerHookStartupFailure(await host.ready);
 				if (failed === null) return null;

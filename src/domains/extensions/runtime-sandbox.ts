@@ -5,6 +5,7 @@ import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import {
 	type SandboxAvailability,
 	type SandboxBackend,
+	type UnixSocketMode,
 	WORKER_SANDBOX_SPEC_VERSION,
 } from "../../core/sandbox/types.js";
 import { composeWorkerSandboxInvocation } from "../../core/sandbox/worker-process.js";
@@ -104,7 +105,8 @@ export function prepareDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarati
 /**
  * Compose the child's launch. With an OS sandbox the child runs read-only
  * outside its declared write roots, with secrets masked, Clio-managed paths
- * re-bound read-only, and an empty network namespace unless `net` is declared.
+ * re-bound read-only, new Unix-domain sockets refused unless the operator
+ * allowed them, and an empty network namespace unless `net` is declared.
  * Without one the child runs under the Node flags alone and the report says so,
  * so a declared `net: false` is never presented as enforced.
  */
@@ -113,6 +115,8 @@ export function planExtensionLaunch(input: {
 	roots: ExtensionLaunchRoots;
 	argv: ReadonlyArray<string>;
 	availability?: SandboxAvailability;
+	/** The operator's `safety.sandboxUnixSockets`; absent blocks them, as in every other sandbox. */
+	unixSockets?: UnixSocketMode;
 }): ExtensionLaunch {
 	const { declaration, roots, argv } = input;
 	const net = declaration.permissions.net;
@@ -146,6 +150,7 @@ export function planExtensionLaunch(input: {
 				gitWritablePaths: [],
 				readableRoots: [workspace, path.dirname(roots.packageCopy), path.dirname(roots.bootstrap)],
 				network: net,
+				...(input.unixSockets === "allow" ? { unixSockets: "allow" as const } : {}),
 			},
 			{ argv },
 			workspace,

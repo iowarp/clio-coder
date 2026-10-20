@@ -6,6 +6,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
+import type { UnixSocketMode } from "../../core/sandbox/types.js";
 import type { EmbeddingResponse } from "../providers/embedding/types.js";
 import { resolveExtensionEntrypoint } from "./command-schema.js";
 import { parseExtensionManifest } from "./discovery.js";
@@ -54,6 +55,8 @@ export interface RuntimeProcessV2Options {
 	/** A host-owned, consent-gated service; no credentials or route objects cross IPC. */
 	embed?: (request: ExtensionEmbeddingRequest, signal: AbortSignal) => Promise<EmbeddingResponse>;
 	onState?: () => void;
+	/** The operator's `safety.sandboxUnixSockets` when this runtime starts; absent blocks them. */
+	unixSockets?: UnixSocketMode;
 }
 
 export interface RuntimeRoots {
@@ -215,6 +218,7 @@ export class ExtensionRuntimeProcessV2 {
 				}),
 				bootstrap,
 			],
+			...(options.unixSockets !== undefined ? { unixSockets: options.unixSockets } : {}),
 		});
 		this.sandbox = launch.report;
 		// The parent never forwards child stdout/stderr to a terminal or protocol stream.

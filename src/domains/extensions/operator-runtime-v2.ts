@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { recordPackageActivity } from "../../core/package-activity.js";
+import type { UnixSocketMode } from "../../core/sandbox/types.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { EmbeddingResponse } from "../providers/embedding/types.js";
 import { extensionIdentity } from "./activity.js";
@@ -59,6 +60,11 @@ export interface OperatorRuntimeV2Options {
 	/** Root of per-extension state, store and files. */
 	stateDir?: () => string;
 	embed?: (request: ExtensionEmbeddingRequest, signal: AbortSignal, workspace: string) => Promise<EmbeddingResponse>;
+	/**
+	 * The operator's `safety.sandboxUnixSockets`, read as each runtime starts so
+	 * a change reaches the next one. Absent blocks them.
+	 */
+	sandboxUnixSockets?: () => UnixSocketMode;
 	surface?: ExtensionSurfaceModel;
 	/** Processes another manager already holds against the shared cap. */
 	reserved?: () => number;
@@ -365,12 +371,14 @@ export class OperatorExtensionRuntimeV2 {
 		const created: { process?: ExtensionRuntimeProcessV2 } = {};
 		let reportedState = "";
 		const embed = this.options.embed;
+		const unixSockets = this.options.sandboxUnixSockets?.();
 		created.process = new ExtensionRuntimeProcessV2(entry, {
 			snapshot: { ...context, generation, activeWorkspace, plugin: servedPlugin(entry) },
 			options: Object.fromEntries(entry.runtimeV2.config.map((field) => [field.key, field.default])),
 			keyValue,
 			storeDir: paths.storeDir,
 			...(embed ? { embed: (request, signal) => embed(request, signal, context.workspace) } : {}),
+			...(unixSockets !== undefined ? { unixSockets } : {}),
 			onState: () => {
 				const runtime = created.process;
 				if (runtime && runtime.state !== reportedState) {

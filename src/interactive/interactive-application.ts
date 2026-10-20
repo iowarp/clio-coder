@@ -588,6 +588,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					const { embedForExtension } = await import("../domains/semantic-app/index.js");
 					return embedForExtension({ projectRoot: workspace }, request, signal);
 				},
+				sandboxUnixSockets: () => deps.getSettings?.().safety.sandboxUnixSockets ?? "block",
 				context: () => ({
 					workspace: process.cwd(),
 					sessionId: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,

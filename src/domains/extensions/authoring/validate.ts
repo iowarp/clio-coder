@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { UnixSocketMode } from "../../../core/sandbox/types.js";
 import { loadManifestFromRoot } from "../discovery.js";
 import { extensionContentDigestWithCapture } from "../integrity.js";
 import type { ExtensionCapabilityEnvelope } from "../manifest-v2.js";
@@ -28,7 +29,11 @@ export interface ExtensionValidationReport {
 	};
 }
 
-export async function validateExtensionPackage(root: string): Promise<ExtensionValidationReport> {
+/** `unixSockets` is the operator's `safety.sandboxUnixSockets`, so registration runs in the sandbox an install would. */
+export async function validateExtensionPackage(
+	root: string,
+	options: { unixSockets?: UnixSocketMode } = {},
+): Promise<ExtensionValidationReport> {
 	const path = resolve(root);
 	const candidate = loadManifestFromRoot(path);
 	const declaration = candidate.manifest?.runtimeV2;
@@ -82,6 +87,7 @@ export async function validateExtensionPackage(root: string): Promise<ExtensionV
 			options: Object.fromEntries(declaration.config.map((field) => [field.key, field.default])),
 			keyValue: createMemoryExtensionKeyValueHost(),
 			storeDir: join(scratch, "store"),
+			...(options.unixSockets !== undefined ? { unixSockets: options.unixSockets } : {}),
 		});
 		await child.staged;
 		report.registration = {
