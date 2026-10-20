@@ -9,7 +9,7 @@ import type { ContextOperationOutcome } from "../core/context-operation.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { Component } from "../engine/tui.js";
 import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { CONTEXT_KIND_TITLES, outcomeTone, outcomeWord, plain } from "./context-operation-view.js";
+import { CONTEXT_KIND_TITLES, outcomeTone, outcomeWord, plain, unchangedTokenLead } from "./context-operation-view.js";
 import { animationStep, clioTheme, formatCompactMs, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
@@ -137,7 +137,8 @@ export function formatContextActivityRailLines(
 			? ` · ${plain(activity.detail)}`
 			: "";
 	const others = !settled && activity.otherRunning ? ` · +${activity.otherRunning} more running` : "";
-	const text = `${plain(activity.message)}${counts}${detail}${others}`;
+	const size = settled ? unchangedTokenLead(activity.operation) : "";
+	const text = `${size}${plain(activity.message)}${counts}${detail}${others}`;
 	const message = theme.fg(failed ? tone : "annotation", text);
 	if (failed) {
 		rows.push(...wrapTextWithAnsi(message, Math.max(1, width)).map((line) => padAnsi(line, width)));

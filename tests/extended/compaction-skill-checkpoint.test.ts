@@ -932,6 +932,88 @@ describe("typed historical skill checkpoints (pure source)", () => {
 		strictEqual(captureSkillContext(crossed, selection), undefined);
 	});
 
+	it("verifies a skill load that is the second call of a sequential batch and cuts inside its turn (#422)", async () => {
+		// One long turn: the load runs after a sibling, so its call hangs off the
+		// sibling's result, and all later work continues the skill's own turn.
+		const sequential = (): SessionEntry[] => {
+			const entries = history().entries.filter((entry) => entry.turnId !== "task");
+			const assistant = entries[1];
+			ok(assistant?.kind === "message");
+			(assistant.payload as { content: unknown[] }).content.unshift({
+				type: "toolCall",
+				id: "sibling",
+				name: "find",
+				arguments: { pattern: "*.md" },
+			});
+			entries.splice(
+				2,
+				0,
+				message(
+					"sibling-call",
+					"tool_call",
+					{ toolCallId: "sibling", name: "find", args: { pattern: "*.md" } },
+					"assistant",
+				),
+				message(
+					"sibling-result",
+					"tool_result",
+					{ toolCallId: "sibling", toolName: "find", isError: false, result: { content: [{ type: "text", text: "a.md" }] } },
+					"sibling-call",
+				),
+			);
+			for (const entry of entries) {
+				if (entry.turnId === "call") entry.parentTurnId = "sibling-result";
+				if (entry.turnId === "work") entry.parentTurnId = "result";
+			}
+			return entries;
+		};
+		const entries = sequential();
+		ok(captureSkillContext(entries, selection));
+		const result = await run(entries, selection);
+		ok(result.skillContext);
+		ok(result.messagesSummarized > 0);
+		ok(result.firstKeptEntryIndex > 0, "the cut lands inside the skill's turn instead of at its start");
+		// Any other entry between the batch links still proves nothing.
+		const interrupted = sequential();
+		interrupted.splice(4, 0, {
+			kind: "custom",
+			turnId: "retry",
+			parentTurnId: "sibling-result",
+			timestamp,
+			customType: "retryStatus",
+			data: {},
+		});
+		const call = interrupted.find((entry) => entry.turnId === "call");
+		ok(call);
+		call.parentTurnId = "retry";
+		strictEqual(captureSkillContext(interrupted, selection), undefined);
+	});
+
+	it("makes no summarizer call when the history before a protected turn is bookkeeping only (#422)", async () => {
+		const { entries } = history();
+		entries.unshift({
+			kind: "custom",
+			turnId: "prewarm",
+			parentTurnId: null,
+			timestamp,
+			customType: "prewarmSkipped",
+			data: { ran: false },
+		});
+		let calls = 0;
+		const result = await compact({
+			entries,
+			model,
+			summarize: async () => {
+				calls++;
+				return summarize();
+			},
+			keepRecentTokens: 100,
+		});
+		strictEqual(calls, 0);
+		strictEqual(result.summary, "");
+		strictEqual(result.emptyReason, "protected-skill");
+	});
+
 	it("keeps protection with unknown, incomplete, ambiguous, mismatched or worker evidence", async () => {
 		const mutations: Array<(entries: SessionEntry[]) => void> = [
 			(entries) => {
@@ -979,6 +1061,32 @@ describe("typed historical skill checkpoints (pure source)", () => {
 			strictEqual(captureSkillContext(entries, selection), undefined);
 			strictEqual((await run(entries, selection)).messagesSummarized, 0);
 		}
+		// A dispatch fold's receipt, with a run id and no main turn or load, carried
+		// nothing into this transcript and protects nothing (#422). Naming a main
+		// user turn makes it ambiguous again.
+		const { entries: source } = history();
+		const receipt = source.find((entry) => entry.kind === "skillActivation");
+		ok(receipt?.kind === "skillActivation");
+		const { turnId: _mainTurn, ...workerActivation } = receipt.activation;
+		const folded = (activation: typeof receipt.activation): SessionEntry[] => [
+			...source.filter((entry) => entry.turnId === "task"),
+			{
+				kind: "workerRun",
+				turnId: "worker-run",
+				parentTurnId: null,
+				timestamp,
+				assignmentId: "assignment",
+				runId: "worker",
+				origin: "agent",
+				agentId: "scout",
+				runtime: { kind: "clio" },
+			},
+			{ kind: "custom", turnId: "settled", parentTurnId: null, timestamp, customType: "workerSettled", data: {} },
+			{ kind: "skillActivation", turnId: "receipt", parentTurnId: null, timestamp, activation },
+			...source.filter((entry) => entry.turnId === "work" || entry.turnId === "tail"),
+		];
+		ok((await run(folded({ ...workerActivation, runId: "worker" }))).messagesSummarized > 0);
+		strictEqual((await run(folded({ ...workerActivation, runId: "worker", turnId: "task" }))).messagesSummarized, 0);
 	});
 
 	it("does not promote checkpoint instructions after off/replacement or on a sibling branch", async () => {

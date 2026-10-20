@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 // Direct modules, not the memory barrel: entries and compaction sit in the
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
@@ -165,12 +166,25 @@ export interface CompactInput {
 	 * anchor already includes it.
 	 */
 	continuityNote?: ContinuityNoteCost;
+	/**
+	 * `summaryDigest` of the last automatic attempt whose checkpoint would not
+	 * reduce context. A request that hashes to it again is not sent: the same
+	 * input cannot produce a different verdict, and each repeat is paid (#422).
+	 */
+	skipSummaryDigest?: string;
 }
+
+/** Why a pass returned without a summary and without calling the summarizer. */
+export type CompactEmptyReason = "protected-recent" | "protected-skill" | "repeat-no-gain";
 
 export interface CompactResult {
 	memoryReceipt?: MemoryConsumptionReceipt;
 	/** The paid checkpoint was discarded because it would not reduce context. */
 	noGain?: boolean;
+	/** Digest of the summarizer request(s) this pass sent, or matched against `skipSummaryDigest`. */
+	summaryDigest?: string;
+	/** Set on an empty result that made no summarizer call. */
+	emptyReason?: CompactEmptyReason;
 	skillContext?: SkillContextCheckpoint;
 	userContext?: PreservedUserContext;
 	/** Generated summary text. Empty when there was nothing to summarize. */
@@ -218,12 +232,56 @@ function findLatestCompactionIndex(entries: ReadonlyArray<SessionEntry>): number
 	return -1;
 }
 
+/**
+ * Whether a slice carries anything the summarizer would read. Custom records,
+ * worker settlements, model changes and activation receipts serialize to an
+ * empty or receipt-only conversation, and a paid call over them cannot reduce
+ * context (#422).
+ */
+function hasConversation(slice: ReadonlyArray<SessionEntry>): boolean {
+	return slice.some(
+		(entry) =>
+			(entry.kind === "message" && entry.role !== "checkpoint") ||
+			(entry.kind === "bashExecution" && entry.excludeFromContext !== true) ||
+			entry.kind === "branchSummary",
+	);
+}
+
+const isUserMessage = (entry: SessionEntry | undefined): boolean => entry?.kind === "message" && entry.role === "user";
+
+/**
+ * A dispatch fold appends a worker's skill loads to this ledger tagged with
+ * its run (`foldDispatchSkillActivations`). The worker read those instructions
+ * in its own subprocess and nothing in this transcript carries them, yet
+ * protecting the receipt's turn froze every later cut (#422). Skip a receipt
+ * only when that is provable: it names no main user turn and no main call in
+ * its turn loads the same skill. Anything ambiguous keeps protection.
+ */
+function isFoldedWorkerReceipt(entries: ReadonlyArray<SessionEntry>, index: number): boolean {
+	const entry = entries[index];
+	if (entry?.kind !== "skillActivation" || entry.activation.runId === undefined) return false;
+	const { name, turnId } = entry.activation;
+	if (turnId && entries.some((candidate) => candidate.turnId === turnId && isUserMessage(candidate))) return false;
+	let start = index;
+	while (start > 0 && !isUserMessage(entries[start])) start--;
+	let end = index + 1;
+	while (end < entries.length && !isUserMessage(entries[end])) end++;
+	return !entries
+		.slice(start, end)
+		.some(
+			(candidate) =>
+				candidate.kind === "message" &&
+				candidate.role === "tool_call" &&
+				historicalSkillCall(payloadObject(candidate.payload), name) !== null,
+		);
+}
+
 function findLatestSkillActivationProtectionStart(
 	entries: ReadonlyArray<SessionEntry>,
 	startIndex: number,
 ): number | null {
 	for (let i = entries.length - 1; i >= startIndex; i--) {
-		if (entries[i]?.kind !== "skillActivation") continue;
+		if (entries[i]?.kind !== "skillActivation" || isFoldedWorkerReceipt(entries, i)) continue;
 		const turnStart = findTurnStartForProtection(entries, i, startIndex);
 		return turnStart === -1 ? i : turnStart;
 	}
@@ -266,6 +324,25 @@ function resultFollowsCallInBatch(
 		parent = link.parentTurnId;
 	}
 	return false;
+}
+
+/**
+ * The same linear chaining parents a call on its assistant only when it is the
+ * first call of its batch; a later call in a sequential batch is parented on
+ * the previous sibling's result (#422). Walk back through sibling calls and
+ * results to the issuing assistant. Any other entry on the way, or a chain
+ * that leaves the turn, proves nothing.
+ */
+function batchAssistantForCall(turn: ReadonlyArray<SessionEntry>, call: SessionEntry): SessionEntry | undefined {
+	let parent = call.parentTurnId;
+	for (let hops = 0; hops < turn.length && parent; hops++) {
+		const link = turn.find((candidate) => candidate.turnId === parent);
+		if (link?.kind !== "message") return undefined;
+		if (link.role === "assistant") return link;
+		if (link.role !== "tool_call" && link.role !== "tool_result") return undefined;
+		parent = link.parentTurnId;
+	}
+	return undefined;
 }
 
 interface HistoricalSkillCall {
@@ -409,7 +486,7 @@ export function captureSkillContext(
 		if (!selectedCall) return undefined;
 		const callId = payloadObject(call.payload)?.toolCallId;
 		if (typeof callId !== "string" || !callId) return undefined;
-		const assistant = turn.find((candidate) => candidate.turnId === call.parentTurnId);
+		const assistant = batchAssistantForCall(turn, call);
 		if (
 			assistant?.kind !== "message" ||
 			assistant.role !== "assistant" ||
@@ -965,16 +1042,16 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 			? { firstKeptEntryIndex: protectedStart, turnStartIndex: -1, isSplitTurn: false }
 			: rawCut;
 	const historyEnd = cut.isSplitTurn ? cut.turnStartIndex : cut.firstKeptEntryIndex;
-	const pre = entries.slice(boundaryStart, Math.max(boundaryStart, historyEnd));
-	const turnPrefix = cut.isSplitTurn
-		? entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
-		: [];
+	const preRange = [boundaryStart, Math.max(boundaryStart, historyEnd)] as const;
+	const prefixRange = [Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex] as const;
+	// A slice of bookkeeping alone counts as empty, so no call is paid for it.
+	const pre = hasConversation(entries.slice(...preRange)) ? entries.slice(...preRange) : [];
+	const turnPrefix =
+		cut.isSplitTurn && hasConversation(entries.slice(...prefixRange)) ? entries.slice(...prefixRange) : [];
 	// The projection keeps every ledger position, so the same ranges over
 	// `input.entries` are the raw slices memory prepared its observations from.
-	const rawPre = input.entries.slice(boundaryStart, Math.max(boundaryStart, historyEnd));
-	const rawTurnPrefix = cut.isSplitTurn
-		? input.entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
-		: [];
+	const rawPre = pre.length > 0 ? input.entries.slice(...preRange) : [];
+	const rawTurnPrefix = turnPrefix.length > 0 ? input.entries.slice(...prefixRange) : [];
 	const previousContextEntries = priorCompactionContextEntries(entries, prevCompactionIndex);
 	const rawPriorSuffix = priorCompactionContextEntries(input.entries, prevCompactionIndex).slice(1);
 	const previousContextText = serializeConversation(previousContextEntries);
@@ -995,19 +1072,21 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		turnPrefix.length === 0 &&
 		firstKept !== null &&
 		cut.firstKeptEntryIndex >= boundaryStart &&
-		priorSuffix.some((entry) => entry.kind === "message" || entry.kind === "bashExecution") &&
+		hasConversation(priorSuffix) &&
 		priorSuffix.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) >=
 			2 * (priorCheckpoint?.kind === "compactionSummary" ? estimateTokens(priorCheckpoint) : 0);
 
+	const emptyResult = (emptyReason: CompactEmptyReason): CompactResult => ({
+		summary: "",
+		firstKeptEntryIndex: cut.firstKeptEntryIndex,
+		firstKeptTurnId: firstKept?.turnId ?? null,
+		tokensBefore,
+		messagesSummarized: 0,
+		isSplitTurn: cut.isSplitTurn,
+		emptyReason,
+	});
 	if (pre.length === 0 && turnPrefix.length === 0 && !summarizePriorSuffix) {
-		return {
-			summary: "",
-			firstKeptEntryIndex: cut.firstKeptEntryIndex,
-			firstKeptTurnId: firstKept?.turnId ?? null,
-			tokensBefore,
-			messagesSummarized: 0,
-			isSplitTurn: cut.isSplitTurn,
-		};
+		return emptyResult(cut === rawCut ? "protected-recent" : "protected-skill");
 	}
 
 	const systemPrompt = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
@@ -1025,6 +1104,9 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 				)
 			: undefined;
 	let memoryOffer: MemoryCompactionOffer | null = null;
+	// Recorded only once the request is actually sent, so a request skipped as a
+	// repeat leaves no offer-used event behind.
+	let commitMemoryOffer: (() => void) | undefined;
 	const represent = (
 		slice: readonly SessionEntry[],
 		rawSlice: readonly SessionEntry[],
@@ -1056,35 +1138,59 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		if (use.substitutedInputTokens >= use.originalInputTokens)
 			return declined("no-gain", { proposed: use.substitutedInputTokens, raw: use.originalInputTokens });
 		memoryOffer = offer;
-		offer.onUse?.(use);
-		traceObservation("offer-used", {
-			receipt: offer.receipt,
-			...use,
-			retainedBoundary: firstKept?.turnId ?? null,
-		});
+		commitMemoryOffer = () => {
+			offer.onUse?.(use);
+			traceObservation("offer-used", {
+				receipt: offer.receipt,
+				...use,
+				retainedBoundary: firstKept?.turnId ?? null,
+			});
+		};
 		return proposed;
 	};
+	const historyText =
+		pre.length > 0 || summarizePriorSuffix
+			? represent(
+					summarizePriorSuffix ? priorSuffix : pre,
+					summarizePriorSuffix ? rawPriorSuffix : rawPre,
+					summarizePriorSuffix ? serializeConversation(previousContextEntries.slice(0, 1)) : previousContextText,
+					false,
+				)
+			: undefined;
+	const prefixText = turnPrefix.length > 0 ? represent(turnPrefix, rawTurnPrefix, previousContextText, true) : undefined;
+	// The exact requests about to be sent, on the route that would serve them.
+	// Credentials and headers stay out; they do not change what is summarized.
+	const summaryDigest = createHash("sha256")
+		.update(
+			JSON.stringify({
+				route: {
+					provider: input.model.provider,
+					api: input.model.api,
+					id: input.model.id,
+					baseUrl: input.model.baseUrl,
+					contextWindow: input.model.contextWindow,
+					maxTokens: input.model.maxTokens,
+				},
+				systemPrompt,
+				maxTokens: maxTokens ?? null,
+				historyText: historyText ?? null,
+				prefixText: prefixText ?? null,
+			}),
+		)
+		.digest("hex");
+	if (input.skipSummaryDigest === summaryDigest) return { ...emptyResult("repeat-no-gain"), summaryDigest };
+	commitMemoryOffer?.();
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
-	if (pre.length > 0 || summarizePriorSuffix) {
-		const previousText = summarizePriorSuffix
-			? serializeConversation(previousContextEntries.slice(0, 1))
-			: previousContextText;
-		const userText = represent(
-			summarizePriorSuffix ? priorSuffix : pre,
-			summarizePriorSuffix ? rawPriorSuffix : rawPre,
-			previousText,
-			false,
-		);
-		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
+	if (historyText !== undefined) {
+		const historySummary = await runSummaryStream(input, historyText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
 		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
 		validateHistorySummary(historySummary.text);
 		summaryParts.push(historySummary.text);
 	}
-	if (turnPrefix.length > 0) {
-		const userText = represent(turnPrefix, rawTurnPrefix, previousContextText, true);
-		const prefixSummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
+	if (prefixText !== undefined) {
+		const prefixSummary = await runSummaryStream(input, prefixText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, prefixSummary.usage);
 		if (prefixSummary.text.length === 0) throw new Error("compaction returned an empty split-turn summary");
 		summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
@@ -1159,6 +1265,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		tokensBefore,
 		messagesSummarized: pre.length + turnPrefix.length + (summarizePriorSuffix ? priorSuffix.length : 0),
 		isSplitTurn: cut.isSplitTurn,
+		summaryDigest,
 		...(memoryOffer !== null ? { memoryReceipt: (memoryOffer as MemoryCompactionOffer).receipt } : {}),
 		...(usage !== undefined ? { usage } : {}),
 		...(skillContext !== undefined ? { skillContext } : {}),

@@ -110,7 +110,7 @@ flowchart TD
     F --> C
 ```
 
-Three paths reach a reduction. The threshold path needs `context.compaction.auto: true`, a known window, no failure pause, and projected tokens outside the rearm band. The forced fit path runs when estimated input plus output reservation exceeds the window, before a submit or a continuation, and it ignores `auto`, the pause and the band. Server overflow recovery and `self_compact` use the same forced fit path. With an unknown window these skip eviction and summarize directly. `/context compact` is always a direct summary. See [Context continuity](../guide/context-continuity.md#automatic-compaction-and-its-failure-pause) for the pause after 3 consecutive automatic failures.
+Three paths reach a reduction. The threshold path needs `context.compaction.auto: true`, a known window, no failure pause, and projected tokens outside the rearm band. The forced fit path runs when estimated input plus output reservation exceeds the window, before a submit or a continuation, and it ignores `auto`, the pause and the band. Server overflow recovery and `self_compact` use the same forced fit path. With an unknown window these skip eviction and summarize directly. `/context compact` is always a direct summary. See [Context continuity](../guide/context-continuity.md#automatic-compaction-and-its-failure-pause) for the pause after 3 consecutive automatic failures and for the rule that an automatic run does not resend a summary request that would not reduce context.
 
 ### 1. Working-Set Eviction (Reversible)
 

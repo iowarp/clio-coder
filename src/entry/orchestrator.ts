@@ -1382,6 +1382,7 @@ async function runCompactionFlow(
 		| "beforeSummaryCall"
 		| "checkpointForSummary"
 		| "checkpointTokenFigures"
+		| "skipSummaryDigest"
 	>,
 	summarize?: CompactInput["summarize"],
 	admission?: {
@@ -1524,7 +1525,9 @@ async function runCompactionFlow(
 	if (result.messagesSummarized === 0 || result.summary.length === 0) {
 		preserveCalls();
 		if (calls.length > 0) throw new Error("compaction returned no summary; reported usage retained without a checkpoint");
-		return null;
+		// The empty result carries why nothing was summarized, which the
+		// operation's conclusion names (#422).
+		return result;
 	}
 	if (estimateTokensAfterCompaction(entries, result, continuityNote.tokens) >= result.tokensBefore) {
 		preserveCalls();
@@ -1640,8 +1643,9 @@ function compactionCheckpointWasWritten(path: string, turnId: string): boolean {
 /**
  * Compose the production chat-loop compaction callback. Errors intentionally
  * propagate: the chat loop owns activity failure reporting and distinguishes
- * a thrown read/model/persistence failure from the legitimate null no-op that
- * `runCompactionFlow` returns for an empty session or an unavailable cut.
+ * a thrown read/model/persistence failure from the legitimate no-op that
+ * `runCompactionFlow` returns: null for an empty session, and a result with no
+ * summary and its `emptyReason` for an unavailable cut.
  */
 export function createProductionAutoCompact(
 	session: SessionContract,
@@ -1670,6 +1674,7 @@ export function createProductionAutoCompact(
 		| "beforeSummaryCall"
 		| "checkpointForSummary"
 		| "checkpointTokenFigures"
+		| "skipSummaryDigest"
 	>,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>

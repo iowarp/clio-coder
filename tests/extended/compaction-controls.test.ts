@@ -824,6 +824,111 @@ describe("production compaction controls", () => {
 		strictEqual(attempts, 5, "a successful compaction lifts the pause");
 	});
 
+	/** An automatic-path turn context over the fixture's six long user turns. */
+	function automaticContext(f: ReturnType<typeof fixture>, autoCompact: typeof f.run = f.run) {
+		const state = createTurnState("off");
+		const runtime = {
+			targetId: "chat-target",
+			runtimeId: "fixture",
+			wireModelId: "chat",
+			runtimeResolution: {
+				costProvenance: "known_free",
+				capabilityDecisions: { maxTokens: 8192 },
+				contextWindowDetails: { effectiveContextWindow: 32768 },
+			},
+			agent: {
+				state: {
+					systemPrompt: "Continue the task.",
+					tools: [],
+					messages: [],
+					thinkingLevel: "off",
+					model: { ...faux.getModel("chat"), contextWindow: 32768, maxTokens: 8192 },
+				},
+			},
+		} as unknown as AgentRuntime;
+		state.runtime = runtime;
+		state.activeUserTurnId = f.entries().at(-1)?.turnId ?? null;
+		state.lastTurnId = state.activeUserTurnId;
+		const bus = createSafeEventBus();
+		const activity: ContextActivityPayload[] = [];
+		bus.on(BusChannels.ContextActivity, (event) => {
+			activity.push(event);
+		});
+		const context = createTurnContext({
+			bus,
+			state,
+			session: f.session,
+			getSettings: () => f.settings,
+			providers: f.providers,
+			readSessionEntries: f.entries,
+			autoCompact,
+			middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+			emitNotice: () => {},
+		});
+		context.refreshAgentMessagesFromSession(runtime);
+		f.settings.context.compaction.threshold = 0.01;
+		return { state, runtime, context, activity };
+	}
+
+	it("does not resend an automatic summary request that already ended without gain (#422)", async () => {
+		const f = fixture(true);
+		f.settings.context.workingSet.enabled = false;
+		// A checkpoint larger than everything it replaces never reduces context.
+		f.response.text = syntheticCompactionSummary("x".repeat(200_000));
+		const { state, runtime, context, activity } = automaticContext(f);
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(context.lastCompactionWasNoGain(), true);
+		strictEqual(f.calls.length, 1);
+		// A bookkeeping row changes the attempt key, as every tool batch does, but
+		// not the request the summarizer would read.
+		const marker = appendEntry(f.state, {
+			kind: "thinkingLevelChange",
+			thinkingLevel: "off",
+			parentTurnId: state.lastTurnId,
+		});
+		f.pinLeaf(marker.turnId);
+		state.lastTurnId = marker.turnId;
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(f.calls.length, 1, "an identical automatic request is not paid for twice");
+		const settled = activity.at(-1);
+		strictEqual(settled?.operation?.outcome, "unchanged");
+		strictEqual(settled?.message, "same history as the last summary without gain; no call made");
+		ok(settled?.operation?.tokens && settled.operation.tokens.before > 0);
+		strictEqual(await context.runAutoCompact(runtime, true), false);
+		strictEqual(f.calls.length, 2, "/compact always calls the summarizer");
+	});
+
+	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {
+		const f = fixture();
+		let attempts = 0;
+		const { state, runtime, context, activity } = automaticContext(f, (...args) => {
+			attempts++;
+			return f.run(...args);
+		});
+		// The last eviction left more than the ledger projects now, so growth since
+		// it is inside the band.
+		const eviction = appendEntry(f.state, {
+			kind: "contextEviction",
+			policyId: "structural-v2",
+			trigger: "pressure",
+			evicted: [],
+			tokensBefore: 2_000_000,
+			tokensAfter: 1_000_000,
+			pressureBefore: 0.9,
+			snapshotIdBefore: null,
+			parentTurnId: state.lastTurnId,
+		});
+		f.pinLeaf(eviction.turnId);
+		state.lastTurnId = eviction.turnId;
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(attempts, 0);
+		deepStrictEqual(activity, []);
+		strictEqual(
+			f.entries().some((entry) => entry.kind === "custom" && entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE),
+			false,
+		);
+	});
+
 	it("routes a configured dedicated summary model through the production callback", async () => {
 		const f = fixture();
 		f.settings.context.compaction.model = "summary-target/summary";

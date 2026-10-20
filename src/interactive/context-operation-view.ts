@@ -134,6 +134,16 @@ export function tokenRow(operation: ContextOperation): string | null {
 	return `${footerTokens(tokens.before)} → ${footerTokens(tokens.after)} tokens${delta} · estimate`;
 }
 
+/**
+ * The context size a settled operation left unchanged, leading the rail's
+ * reason so a narrow rail still shows it (#422). Before and after are equal
+ * by definition, so one figure says it.
+ */
+export function unchangedTokenLead(operation: Pick<ContextOperation, "outcome" | "tokens"> | undefined): string {
+	if (operation?.outcome !== "unchanged" || !operation.tokens) return "";
+	return `${footerTokens(operation.tokens.after)} tokens · `;
+}
+
 const WARNINGS_SHOWN = 6;
 
 /**

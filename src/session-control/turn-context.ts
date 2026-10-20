@@ -164,6 +164,7 @@ export interface TurnContextDeps {
 					| "beforeSummaryCall"
 					| "checkpointForSummary"
 					| "checkpointTokenFigures"
+					| "skipSummaryDigest"
 				>,
 		  ) => Promise<CompactResult | null>)
 		| undefined;
@@ -513,6 +514,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// compaction succeeds or the session changes. /compact and overflow recovery
 	// are forced and still run.
 	let autoCompactFailures = 0;
+	// The summarizer request of the last automatic attempt whose checkpoint
+	// would not reduce context. The attempt key above changes with every tool
+	// batch, while a cut held behind a protected turn sends the same request
+	// each time, so without this every request above the threshold paid one
+	// summary call that was discarded (#422). Forced runs neither read nor set it.
+	let noGainSummaryDigest: string | null = null;
 
 	// The live budget view and the identity that decides when an advisory
 	// re-arms. `branchAnchorTurnId` moves only on real branch navigation, so two
@@ -1254,6 +1261,41 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			!shouldCompact(pressureEstimate.tokens, compactionThreshold, pressureEstimate.contextWindow).shouldCompact
 		)
 			return false;
+		// The hysteresis band. A checkpoint runs before every request, so without
+		// it a policy with unconditional rungs fires an event per step and
+		// cold-starts the prefix cache each time. Inside the band the automatic
+		// path does nothing at all, summary included; the overflow path still
+		// forces a fit, and the request-fit admission remains the safety net. The
+		// replay runner gates identically. It holds before the operation exists, so
+		// a held checkpoint shows no rail activity and records no operation (#422).
+		if (
+			pressureEstimate &&
+			!requiredFit &&
+			deps.session?.current() &&
+			!(process.env.CLIO_CODER_LEGACY_MASK === "1" && !handoff) &&
+			settings.context.workingSet.enabled
+		) {
+			let held = false;
+			try {
+				const entries = deps.readSessionEntries() ?? [];
+				const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
+				resolveWorkingSetPolicy(settings.context.workingSet.policy);
+				held = withinRearmBand({
+					projectedTokens: projectedWorkingSetTokens(
+						selectVisibleEntries(entries, state.lastTurnId ?? undefined),
+						view,
+						estimateTokens,
+					),
+					contextWindow: pressureEstimate.contextWindow,
+					rearmFraction: settings.context.workingSet.rearmFraction,
+					lastEvictionTokensAfter: view.lastEvictionTokensAfter,
+				});
+			} catch {
+				// Safe to ignore here: the eviction stage repeats this read inside the
+				// operation and surfaces the same error with its activity.
+			}
+			if (held) return false;
+		}
 		// Empty cuts are reusable only while their source and provider context
 		// remain unchanged. Tools can grow the same user turn into a useful cut.
 		const attemptKey =
@@ -1429,22 +1471,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						policyId = policy.id;
 						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
 						const projectedTokens = projectedWorkingSetTokens(visibleEntries, view, estimateTokens);
-						// The hysteresis band. A checkpoint runs before every request, so
-						// without it a policy with unconditional rungs fires an event per
-						// step and cold-starts the prefix cache each time. Inside the band
-						// the automatic path does nothing at all, summary included; the
-						// overflow path still forces a fit, and the request-fit admission
-						// remains the safety net. The replay runner gates identically.
-						if (
-							!requiredFit &&
-							withinRearmBand({
-								projectedTokens,
-								contextWindow: estimate.contextWindow,
-								rearmFraction: settings.context.workingSet.rearmFraction,
-								lastEvictionTokensAfter: view.lastEvictionTokensAfter,
-							})
-						)
-							return false;
 						planned = (deps.planEviction ?? planEviction)(policy, {
 							entries: visibleEntries,
 							view,
@@ -1640,6 +1666,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 		}
 		let summarySignal = compactionController?.signal;
+		const automaticSummary = trigger === "auto" && !force;
+		// An unchanged or summary-less settle still names the measured context
+		// and the specific reason nothing was reduced (#422).
+		const settleWithoutSummary = (reason: string | null): void => {
+			if (reason !== null) compactionConclusion = preSummaryStageActed ? `${compactionConclusion}; ${reason}` : reason;
+			compactionTokens = {
+				before: compactionTokens?.before ?? footerTokensBefore,
+				after: liveContextEstimate(agentRuntime, pendingUserText).tokens,
+				basis: "runtime-estimate",
+			};
+		};
 		try {
 			result = await compactionTrigger.fire(async () => {
 				summarySignal = signal;
@@ -1649,6 +1686,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						...budget,
 						...handoff,
 						...(summarySignal ? { signal: summarySignal } : {}),
+						...(automaticSummary && noGainSummaryDigest !== null ? { skipSummaryDigest: noGainSummaryDigest } : {}),
 						checkpointTokenFigures: (entry) => {
 							const messages = buildModelReplayAgentMessagesFromTurns(
 								[...(deps.readSessionEntries?.() ?? []), { ...entry, timestamp: new Date().toISOString() }],
@@ -1689,18 +1727,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		summarySignal?.throwIfAborted();
 		if (result?.noGain) {
 			lastCompactionNoGain = true;
-			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
-			deps.emitNotice(message);
-			if (summaryLifecycleStarted) {
-				emitCompactionActivity("completed", message);
-			}
+			// Remembered even when eviction acted in this pass: the summary request
+			// is what repeats, and eviction already changed what it would read.
+			if (automaticSummary && result.summaryDigest !== undefined) noGainSummaryDigest = result.summaryDigest;
+			deps.emitNotice("compaction would not reduce context; checkpoint discarded (usage recorded)");
+			settleWithoutSummary("summary would not reduce context (usage recorded)");
 			rememberEmptyAutomaticAttempt();
 			return false;
 		}
 		if (!result || result.summary.length === 0) {
 			if (summaryLifecycleStarted) {
 				emitCompactionActivity("completed", "nothing to compact");
+				settleWithoutSummary(null);
 			} else {
+				settleWithoutSummary(
+					result?.emptyReason === "repeat-no-gain"
+						? "same history as the last summary without gain; no call made"
+						: result?.emptyReason === "protected-skill"
+							? "nothing older than the protected skill turn to summarize"
+							: result?.emptyReason === "protected-recent"
+								? "nothing older than the protected recent window to summarize"
+								: "nothing to summarize",
+				);
 				rememberEmptyAutomaticAttempt();
 			}
 			return false;
@@ -1759,6 +1807,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		compactionTokens = { before: tokensBefore, after: tokensAfter, basis: "runtime-estimate" };
 		emitCompactionActivity("completed", "context compaction complete");
 		autoCompactFailures = 0;
+		noGainSummaryDigest = null;
 
 		deps.emitNotice(
 			renderCompactionSummaryLine({
@@ -2534,6 +2583,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			pendingPromptLogEntry = null;
 			emptyAutoCompactContextKey = null;
 			autoCompactFailures = 0;
+			noGainSummaryDigest = null;
 			noUsefulCutBasisKey = null;
 			reconciledAnchor = null;
 			// Real branch navigation. The epoch separates two visits to the same

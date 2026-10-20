@@ -39,6 +39,8 @@ What the pause does and does not stop:
 - **Clears the pause:** any successful summary compaction, forced or automatic, and any session change in the same process (`/new`, `/resume`, `/fork`, `/tree`, `/handoff`). The count lives in process memory, so a restart also clears it.
 - **Does not count:** a short session with nothing older to summarize, and a discarded no-gain checkpoint.
 
+Automatic compaction does not resend a summary request that already ended without gain. When an automatic summary would not reduce context, Clio Coder remembers that summarizer request, and a later automatic run whose request is byte-identical on the same route makes no call and settles `no change` with the reason `same history as the last summary without gain; no call made`. Forced runs and `CLIO_CODER_FORCE_COMPACT=1` always call the summarizer. The remembered request clears on the same events that clear the pause.
+
 ## `/compact` instructions
 
 `/compact <text>` and `/context compact <text>` pass the text to the summarizer twice.
@@ -53,6 +55,17 @@ The block holds the full instruction text. The operator note, prefix included, i
 An automatic compaction and `/context compact` each emit one canonical compaction notice and leave a persistent row in the transcript, for example `[context engine] compacted 36.2K → 28.6K tokens; 42 messages summarized to 1823 chars`. A cut that lands mid-turn appends ` (split turn)`. Later notices do not replace it. The two figures are the ones the footer shows: the whole next request, with the system prompt, tool schemas, summary and retained suffix, not the summary alone. After `/resume` the stored summary renders as `[compaction summary] compacted 36.2K → 28.6K tokens, cont. at turn <id>`, with ` via <trigger>` appended where the entry recorded `auto`, `force` or `overflow`. A summary stored before the after figure was recorded shows `~<tokens> tokens before` instead.
 
 The settled `Context compact` card in the transcript adds `· no summary` when the run completed without a summarizer checkpoint, so an eviction or masking pass, whose output stays recallable, does not read like a summary (`src/interactive/context-operation-view.ts`).
+
+A compaction that reduces nothing leaves no transcript card. Its rail above the composer settles as `Context compact · no change`, and the rail's message row leads with the measured context size before the reason, for example `141.9K tokens · nothing older than the protected skill turn to summarize`.
+
+| Reason | Meaning |
+| --- | --- |
+| `summary would not reduce context (usage recorded)` | The summarizer ran and its checkpoint was discarded. |
+| `same history as the last summary without gain; no call made` | An automatic run skipped the call under the repeat rule in [Automatic compaction and its failure pause](#automatic-compaction-and-its-failure-pause). |
+| `nothing older than the protected skill turn to summarize` | The cut stops at the turn that loaded a skill, and nothing before that turn is left to summarize. |
+| `nothing older than the protected recent window to summarize` | Everything since the last checkpoint sits inside the recent context a cut keeps. |
+
+A summary cut never removes the turn that loaded a skill unless the checkpoint carries that skill. A skill load folded in from a dispatched worker does not hold the main session's cut. A slice that holds only bookkeeping, such as custom records, worker settlements and model changes, counts as nothing to summarize, so no summarizer call is paid for it.
 
 Other outcomes have their own notices:
 
