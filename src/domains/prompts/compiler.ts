@@ -345,29 +345,6 @@ export function sessionCanUseSkills(inputs: SessionPromptInputs): boolean {
 	);
 }
 
-/** Runtime guidance is deliberately small and follows all captured context. */
-function renderTurnGuidance(constraints: TurnConstraints | undefined): string {
-	if (!constraints) return "";
-	const lines: string[] = [];
-	if (constraints.mode === "answer") lines.push("Answer the requested question; stop when it is answered.");
-	if (constraints.mode === "proposal")
-		lines.push(
-			"Propose from supplied context; inspect only missing facts. Leave implementation blocked pending authorization.",
-		);
-	if (constraints.mode === "change") lines.push("Carry out the requested change within the authorized scope.");
-	if (constraints.delegation === "forbidden") lines.push("Work directly; do not delegate.");
-	if (constraints.skills === "disabled") lines.push("Skill activation and discovery are disabled for this turn.");
-	if (constraints.readOnly === true)
-		lines.push("This task is read-only: every write, command, or delegation is denied, and no approval clears it.");
-	if (constraints.allowedTools) {
-		const names = [...new Set(constraints.allowedTools)].sort();
-		lines.push(
-			names.length > 0 ? `Allowed capabilities for this turn: ${names.join(", ")}.` : "Use no tools for this turn.",
-		);
-	}
-	return lines.length > 0 ? ["# Current task scope", ...lines].join("\n") : "";
-}
-
 /** Tool names come from attached schemas; hints never manufacture a surface. */
 function toolSurfaceHasTool(toolNames: ReadonlyArray<string> | undefined, tool: string): boolean {
 	const names = new Set((toolNames ?? []).map((name) => name.trim()));
@@ -796,7 +773,8 @@ function estimatePromptTokens(text: string): number {
 /**
  * Layer order: immutable identity/constitution, conditional role/capabilities,
  * harness paths, captured project context, memory and runtime, then
- * customization and the current task scope. Only identity/constitution are
+ * customization. The current task scope is not compiled; it rides in the
+ * turn's reminder (#422). Only identity/constitution are
  * guaranteed stable across every runtime input; stablePrefix measures that
  * exact UTF-8 prefix. Everything through harness-awareness depends only on the
  * install, autonomy and tool surface, so two projects on one install share it
@@ -826,7 +804,7 @@ export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
  * - session: captured once per session (workspace, project handbook, model,
  *   operator profile); stable across that session's turns.
  * - turn: may change between turns of one session (task-scored memory,
- *   path-scoped project rules, the current task scope).
+ *   path-scoped project rules).
  * Anything a turn adds after the system prompt (reminders, skill bodies,
  * gateway results) is outside the compiled prompt and has no layer here. An id
  * missing from the table (a future additional fragment) counts as turn, the
@@ -852,7 +830,6 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
 	"context.catalogs": "session",
 	"context.operator-profile": "session",
 	"context.project-rules": "turn",
-	"turn-scope": "turn",
 };
 
 /**
@@ -1019,7 +996,6 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		push(fragment.id, fragment.body);
 	}
 	push("context-operation-update", session.contextOperationUpdate ?? "");
-	push("turn-scope", renderTurnGuidance(session.turnConstraints));
 
 	const systemPrompt = parts.join("\n\n");
 	const baseFragments = [
@@ -1125,7 +1101,6 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
 	}
-	push("turn-scope", renderTurnGuidance(inputs.turnConstraints));
 
 	const systemPrompt = parts.join("\n\n");
 	const fragmentManifest: FragmentManifestEntry[] = [

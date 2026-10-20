@@ -264,11 +264,10 @@ describe("typed prompt layers", () => {
 		for (const prompt of [answer, proposal]) {
 			for (const id of ["delegation", "skills"]) ok(!prompt.sections.some((s) => s.id === id));
 			ok(!prompt.systemPrompt.includes("verify consequential worker claims"));
-			strictEqual(prompt.sections.at(-1)?.id, "turn-scope");
+			// #423: the scope lines ride in the turn's reminder, never the compiled prompt.
+			ok(!prompt.systemPrompt.includes("# Current task scope"));
 			ok(Buffer.byteLength(prompt.systemPrompt) < Buffer.byteLength(change.systemPrompt));
 		}
-		ok(answer.systemPrompt.endsWith("Use no tools for this turn."));
-		ok(proposal.systemPrompt.includes("Leave implementation blocked pending authorization"));
 		ok(change.systemPrompt.includes("Within the operator's scope, verify consequential worker claims"));
 	});
 

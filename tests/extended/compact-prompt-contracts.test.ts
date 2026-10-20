@@ -294,8 +294,8 @@ it("worker scope changes leave its constitutional prefix and assigned-task role 
 		scoped.systemPrompt.slice(0, scoped.systemPrompt.indexOf("# Tool Contract")),
 		base.systemPrompt.slice(0, base.systemPrompt.indexOf("# Tool Contract")),
 	);
-	strictEqual(scoped.sections.at(-1)?.id, "turn-scope");
-	strictEqual(scoped.systemPrompt.endsWith("Use no tools for this turn."), true);
+	// #423: the scope rides in the worker's task messages, not its compiled prompt.
+	strictEqual(scoped.systemPrompt.includes("# Current task scope"), false);
 	strictEqual(
 		scoped.sections.some((section) => section.id === "delegation" || section.id === "skills"),
 		false,

@@ -68,6 +68,7 @@ import {
 	snapshotTurnConstraints,
 	type TurnConstraints,
 	toolSurfaceSources,
+	turnScopeGuidance,
 } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
@@ -1446,6 +1447,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let disposed = false;
 	const context = createTurnContext({
 		turnSignal: () => submitOwner?.signal,
+		standingTurnConstraints: () => sessionToolLimits,
 		interactiveGuidance: deps.interactiveGuidance === true,
 		operatorInterviews: deps.operatorInterviews === true,
 		headless: deps.headless === true,
@@ -2740,7 +2742,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
 					if (!admissionCurrent()) return;
 				}
-				const reminderProjection = middleware.takePendingReminderProjection();
+				// The turn's scope is host-framed text in its own user message, kept
+				// verbatim in history, never a recompile of the system prompt (#422).
+				// Continuations repeat it so a mid-turn compaction cannot drop it.
+				const turnScope = turnScopeGuidance(state.currentTurnConstraints);
+				const reminderProjection = middleware.takePendingReminderProjection(turnScope ? [turnScope] : []);
 				// Pending skill requests are plain visible text in the user message
 				// itself: persisted in the ledger, no hidden prompt machinery.
 				const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests, agentRuntime.agent.state.tools);

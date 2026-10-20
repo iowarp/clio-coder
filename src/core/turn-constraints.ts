@@ -220,6 +220,33 @@ function isToolNameList(value: unknown): boolean {
 }
 
 /** Capability policy, shared by schema projection, gateway, admission and prompts. */
+/**
+ * The scope lines a turn delivers in its host-framed reminder. They never enter
+ * a compiled prompt: a scope that toggled between turns recompiled the system
+ * prompt and re-billed the whole conversation as a cache write (#422).
+ */
+export function turnScopeGuidance(constraints: TurnConstraints | undefined): string {
+	if (!constraints) return "";
+	const lines: string[] = [];
+	if (constraints.mode === "answer") lines.push("Answer the requested question; stop when it is answered.");
+	if (constraints.mode === "proposal")
+		lines.push(
+			"Propose from supplied context; inspect only missing facts. Leave implementation blocked pending authorization.",
+		);
+	if (constraints.mode === "change") lines.push("Carry out the requested change within the authorized scope.");
+	if (constraints.delegation === "forbidden") lines.push("Work directly; do not delegate.");
+	if (constraints.skills === "disabled") lines.push("Skill activation and discovery are disabled for this turn.");
+	if (constraints.readOnly === true)
+		lines.push("This task is read-only: every write, command, or delegation is denied, and no approval clears it.");
+	if (constraints.allowedTools) {
+		const names = [...new Set(constraints.allowedTools)].sort();
+		lines.push(
+			names.length > 0 ? `Allowed capabilities for this turn: ${names.join(", ")}.` : "Use no tools for this turn.",
+		);
+	}
+	return lines.length > 0 ? ["# Current task scope", ...lines].join("\n") : "";
+}
+
 export function turnAllowsTool(constraints: TurnConstraints | undefined, capability: string): boolean {
 	if (constraints?.delegation === "forbidden" && capability === ToolNames.Dispatch) return false;
 	return listAllowsTool(constraints?.allowedTools, capability);

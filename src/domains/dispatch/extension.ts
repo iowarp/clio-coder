@@ -73,7 +73,12 @@ import {
 	type ToolName,
 	ToolNames,
 } from "../../core/tool-names.js";
-import { snapshotTurnConstraints, toolSurfaceSources, workerTurnConstraints } from "../../core/turn-constraints.js";
+import {
+	snapshotTurnConstraints,
+	toolSurfaceSources,
+	turnScopeGuidance,
+	workerTurnConstraints,
+} from "../../core/turn-constraints.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -1775,6 +1780,12 @@ export function buildDynamicPromptMessages(
 			"This dispatch restricts this run to inspection inside the workspace. Do not call tools to write, execute, dispatch, or read outside the workspace. Forbidden calls are denied without asking. Describe needed changes as text for the dispatching agent.",
 		].join("\n\n");
 		messages.push({ id: "dispatch-read-only", body, contentHash: sha256(body) });
+	}
+	// The scope rides in a task message, as the session's does in its reminder,
+	// so the compiled worker prompt does not vary with it (#422).
+	const scope = turnScopeGuidance(req.turnConstraints);
+	if (scope.length > 0) {
+		messages.push({ id: "dispatch-turn-scope", body: scope, contentHash: sha256(scope) });
 	}
 	const requirements = renderDispatchIntentRequirements(req.intent, {
 		shellAvailable: dynamicContext.shellToolsAdmitted === true,

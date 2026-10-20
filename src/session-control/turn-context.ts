@@ -40,6 +40,7 @@ import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import { isBuiltinToolName, ToolNames } from "../core/tool-names.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import {
 	createLiveBudgetProducer,
@@ -134,6 +135,12 @@ const AUTO_COMPACT_FAILURE_LIMIT = 3;
 
 export interface TurnContextDeps {
 	turnSignal?: () => AbortSignal | undefined;
+	/**
+	 * The session's standing tool limits (operator flags, an ACP ceiling). The
+	 * session prompt compiles from these alone; a turn's own scope rides in its
+	 * reminder, so a scope change never recompiles the prompt (#422).
+	 */
+	standingTurnConstraints?: () => TurnConstraints | undefined;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
 	/** An ACP client that advertised interviews: ask_user guidance without the TUI-only demo tips. */
@@ -2197,8 +2204,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							},
 						];
 			});
+			const standingConstraints = deps.standingTurnConstraints?.();
 			const sessionInputs: SessionPromptInputs = {
-				...(state.currentTurnConstraints ? { turnConstraints: state.currentTurnConstraints } : {}),
+				...(standingConstraints ? { turnConstraints: standingConstraints } : {}),
 				...(deps.getReadySkillCount ? { readySkillCount: deps.getReadySkillCount() } : {}),
 				demo: deps.interactiveGuidance === true && settings.interface.demo,
 				provider: agentRuntime.targetId,
