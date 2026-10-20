@@ -63,7 +63,9 @@ import {
 } from "../../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
 import { describeLocalCapacity } from "../../domains/scheduling/local-capacity.js";
+import { capabilityEngineSource, capabilitySettings } from "../../domains/system-one/capability-settings.js";
 import { describeBindings } from "../../domains/system-one/recorder/bindings.js";
+import { RELEVANCE_SITE } from "../../domains/system-one/sites/relevance.js";
 import type { SiteId } from "../../domains/system-one/types.js";
 import { SITE_IDS } from "../../domains/system-one/types.js";
 import { TURN_CONTROL_WORKFLOWS } from "../../domains/turn-control/index.js";
@@ -2052,28 +2054,36 @@ const SITE_NOTES: Readonly<Record<SiteId, { readonly does: string; readonly send
 function systemOneSiteRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
 	const engineNames = Object.keys(live().systemOne.engines);
 	const bindings = new Map(describeBindings(settings).map((binding) => [binding.site, binding]));
+	const effective = capabilitySettings(settings).systemOne;
 	return SITE_IDS.map((site) => {
 		const binding = bindings.get(site);
 		const engine = binding?.engine ?? null;
+		const config = engine === null ? undefined : effective.engines[engine];
+		const derived = config !== undefined && capabilityEngineSource(config) !== undefined;
 		const note = SITE_NOTES[site];
 		const state =
 			binding === undefined || engine === null
 				? "Off: asks nothing."
 				: binding.problem !== undefined
 					? `Bound to engine ${engine}, which cannot answer: ${binding.problem}. The site asks nothing until it can.`
-					: `Asks ${binding.target}/${binding.model ?? "default"} through engine ${engine}.`;
+					: `Asks ${binding.target}/${binding.model ?? "default"} through engine ${engine}.${derived ? ` Derived from context.memory; uses the site's ${RELEVANCE_SITE.deadlineMs} ms deadline.` : ""}`;
 		const selectable = engineNames.length > 0;
 		return settingItem(`systemOne.sites.${site}`, engine ?? SITE_OFF_CHOICE, {
 			label: SITE_LABELS[site],
-			description: `Experimental. ${state} It ${note.does}. Sends ${note.sends}.${selectable ? "" : " Add a decision engine in the settings file first."}`,
-			...(selectable
+			description: `Experimental. ${state} It ${note.does}. Sends ${note.sends}.${selectable || derived ? "" : " Add a decision engine in the settings file first."}`,
+			...(derived
 				? {
-						submenu: selectListSubmenu(`Decision engine: ${SITE_LABELS[site]}`, [
-							{ value: SITE_OFF_CHOICE, label: "Off" },
-							...engineNames.map((name) => ({ value: name, label: name })),
-						]),
+						readOnly: true,
+						affordance: "Derived from context.memory; configure an explicit relevance binding in the settings file",
 					}
-				: { readOnly: true, affordance: "Add a decision engine in the settings file" }),
+				: selectable
+					? {
+							submenu: selectListSubmenu(`Decision engine: ${SITE_LABELS[site]}`, [
+								{ value: SITE_OFF_CHOICE, label: "Off" },
+								...engineNames.map((name) => ({ value: name, label: name })),
+							]),
+						}
+					: { readOnly: true, affordance: "Add a decision engine in the settings file" }),
 		});
 	});
 }

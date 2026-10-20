@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { createRedactionTally } from "../evidence/redact.js";
 import type { CallContract } from "./calibration.js";
 import { cutsFor, validationOf } from "./calibration.js";
@@ -44,6 +45,8 @@ export const ANSWERED_BUILD_TTL_MS = 10 * 60_000;
 
 /** One engine and the tasks of a site it answers. */
 export interface RunnerRoute {
+	/** Only synthesized engines stop permanently after repeated failures (#429). */
+	readonly derivedFrom?: "context.memory";
 	readonly name: string;
 	readonly engine: DecisionEngine;
 	/** Identity of the engine's configuration, so a repointed target does not inherit the old one's timeouts. */
@@ -143,6 +146,8 @@ export function createRunner(deps: RunnerDeps): Runner {
 	// Only timeouts trip the breaker: a refused connection or an unusable answer
 	// comes back in milliseconds and costs the turn nothing.
 	const breakers = new Map<string, BreakerState>();
+	// A derived outage stays disabled past the timeout breaker's cooldown in its own session (#429).
+	const derivedFailures = new Map<string | null, Map<string, number>>();
 	// Calls that have not left their record yet. A turn waits only briefly for a
 	// slow answer, and the call goes on to record it whenever it settles, so a
 	// process that exits in between would lose the row without something to wait on.
@@ -233,6 +238,16 @@ export function createRunner(deps: RunnerDeps): Runner {
 		const callId = `dc_${randomUUID()}`;
 		const at = new Date().toISOString();
 		const session = sessionAtStart();
+		const sessionKey = session ?? null;
+		let failuresForSession = derivedFailures.get(sessionKey);
+		if (failuresForSession === undefined) {
+			// Pre-turn calls precede session creation; keep their failures when it is adopted (#429).
+			failuresForSession = (sessionKey !== null ? derivedFailures.get(null) : undefined) ?? new Map<string, number>();
+			if (sessionKey !== null) derivedFailures.delete(null);
+			derivedFailures.set(sessionKey, failuresForSession);
+		}
+		const failedDecisions = failuresForSession;
+		const derivedKey = (route: RunnerRoute): string => JSON.stringify([route.digest, site.id]);
 		const started = performance.now();
 		const deadlineMs = binding.timeoutMs ?? site.deadlineMs;
 		const plans: RoutePlan[] = binding.routes.map((route) => ({
@@ -259,6 +274,23 @@ export function createRunner(deps: RunnerDeps): Runner {
 				policy?: DecisionRecord["policy"];
 			} = {},
 		): number => {
+			for (const plan of plans) {
+				if (plan.route.derivedFrom === undefined) continue;
+				const key = derivedKey(plan.route);
+				const previous = failedDecisions.get(key) ?? 0;
+				if (previous >= BREAKER_THRESHOLD) continue;
+				if (plan.reply !== undefined) {
+					failedDecisions.delete(key);
+				} else if (["failed", "timeout", "overflow", "unsupported"].includes(plan.outcome)) {
+					const failures = previous + 1;
+					failedDecisions.set(key, failures);
+					if (failures === BREAKER_THRESHOLD) {
+						writeDiagnostic(
+							`[clio-coder:system-one] Disabled engine '${plan.route.name}' at site '${site.id}' for this session after ${failures} consecutive failed decisions. It was derived from ${plan.route.derivedFrom}; configure systemOne.sites.${site.id} explicitly to choose an engine.`,
+						);
+					}
+				}
+			}
 			if (outcome !== "answered") {
 				try {
 					options.onFailure?.(scrub(errorText(detail.error ?? outcome), createRedactionTally(), false));
@@ -397,6 +429,11 @@ export function createRunner(deps: RunnerDeps): Runner {
 		let missingCut = 0;
 		for (const plan of live) {
 			const { route } = plan;
+			if (route.derivedFrom !== undefined && (failedDecisions.get(derivedKey(route)) ?? 0) >= BREAKER_THRESHOLD) {
+				plan.outcome = "breaker-open";
+				plan.error = `engine '${route.name}' derived from ${route.derivedFrom} is disabled for this session after ${BREAKER_THRESHOLD} consecutive failed decisions`;
+				continue;
+			}
 			if (site.requiredCut !== undefined) {
 				const known = knownBuilds.get(route.digest);
 				const build =

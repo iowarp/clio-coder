@@ -11,6 +11,7 @@
 
 import type { ClioSettings } from "../../../core/config.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
+import { capabilitySettings } from "../capability-settings.js";
 import type { DecisionTask } from "../contract.js";
 import { SITE_TASKS } from "../contract.js";
 import type { SiteBindingInfo } from "../types.js";
@@ -21,7 +22,7 @@ export interface RuntimeLookup {
 }
 
 export function describeBindings(settings: Readonly<ClioSettings>, runtimes?: RuntimeLookup): SiteBindingInfo[] {
-	const { sites, engines } = settings.systemOne;
+	const { sites, engines } = capabilitySettings(settings).systemOne;
 	return SITE_IDS.map((site): SiteBindingInfo => {
 		const binding = sites[site];
 		if (binding === undefined) return { site, engine: null };

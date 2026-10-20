@@ -176,7 +176,7 @@ export async function observeCacheDeployment(
 	}
 }
 
-function isLocalAddress(address: string): boolean {
+export function isLocalAddress(address: string): boolean {
 	if (address === "::1" || /^(fc|fd)[0-9a-f]{2}:/i.test(address)) return true;
 	const parts = address.split(".").map(Number);
 	if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;

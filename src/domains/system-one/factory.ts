@@ -13,6 +13,7 @@ import type { ProvidersContract } from "../providers/contract.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { cutsFor } from "./calibration.js";
+import { capabilityEngineSource } from "./capability-settings.js";
 import type { DecisionTask } from "./contract.js";
 import { SITE_TASKS } from "./contract.js";
 import { createLlmEngine, llmEngineProblem } from "./engines/llm.js";
@@ -216,7 +217,16 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 		const { usable } = resolution;
 		if (usable === undefined) return null;
 		const own = engineFor(usable);
-		const routes: RunnerRoute[] = [{ name: usable.name, engine: own.engine, digest: own.digest, tasks: null }];
+		const derivedFrom = capabilityEngineSource(usable.cfg);
+		const routes: RunnerRoute[] = [
+			{
+				name: usable.name,
+				engine: own.engine,
+				digest: own.digest,
+				tasks: null,
+				...(derivedFrom !== undefined ? { derivedFrom } : {}),
+			},
+		];
 		for (const route of resolution.routes ?? []) {
 			if (route.usable === undefined) {
 				const problem = route.problem ?? "unusable";
