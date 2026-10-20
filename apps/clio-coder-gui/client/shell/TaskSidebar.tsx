@@ -12,12 +12,14 @@ import { platformLabel, systemStatus } from "../pages/system-model.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
+import { ExploreDrawer } from "./ExploreDrawer.js";
 import { InlineRename } from "./InlineRename.js";
 import { Menu, MenuItem } from "./Menu.js";
 import { SettingsSidebar } from "./SettingsSidebar.js";
 import { isSettingsPath, STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
 import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
 import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
+import "./task-sidebar-actions.css";
 
 const TASKS_PER_PROJECT = 6;
 const PROJECTS_SHOWN = 10;
@@ -50,6 +52,7 @@ export function TaskSidebar({
 	const theme = useTheme();
 	countRender("task-sidebar");
 	const location = useLocation();
+	const [exploring, setExploring] = useState(false);
 	// The settings rail lists Library, Fleet and the other inspection pages, so it stays up on them.
 	// Library and System are also linked from the work rail; reached from there, they keep that rail.
 	const inSettings = useRef(false);
@@ -114,6 +117,33 @@ export function TaskSidebar({
 				</button>
 			</div>
 
+			<nav className="wb-side__discover" aria-label="Find and explore">
+				<button type="button" className="wb-action" onClick={onSearch} title="Search tasks and commands">
+					<Icon name="search" />
+					<span>Search</span>
+				</button>
+				<button
+					type="button"
+					className="wb-action"
+					aria-haspopup="dialog"
+					aria-expanded={exploring}
+					onClick={() => setExploring(true)}
+				>
+					<Icon name="overview" />
+					<span>Explore</span>
+				</button>
+			</nav>
+			{exploring ? (
+				<ExploreDrawer
+					activeWorkspaceId={activeWorkspaceId}
+					onClose={() => setExploring(false)}
+					onNavigate={() => {
+						setExploring(false);
+						onNavigate();
+					}}
+				/>
+			) : null}
+
 			{settings ? (
 				<div className="wb-side__panel">
 					<Link className="wb-back" to={backTo.current} onClick={onNavigate}>
@@ -127,38 +157,23 @@ export function TaskSidebar({
 						<button
 							type="button"
 							className="wb-action wb-action--primary"
-							disabled={!activeWorkspaceId || actions.launch.busy}
-							onClick={() => activeWorkspaceId && actions.newTask(activeWorkspaceId)}
-							title={activeWorkspaceId ? "Start a new task in the current workspace" : "Open a workspace first"}
+							disabled={actions.launch.busy}
+							onClick={() => actions.newTask(activeWorkspaceId ?? undefined)}
+							title="Open your task composer"
 						>
 							{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
 							<span>{actions.launch.busy ? "Starting…" : "New task"}</span>
-							<kbd>{chordHint("newTask")}</kbd>
 						</button>
 						<button type="button" className="wb-action" onClick={onOpenWorkspace}>
 							<Icon name="folderOpen" />
 							<span>Open workspace</span>
-							<kbd>{chordHint("openWorkspace")}</kbd>
 						</button>
-						<NavLink to="/library" className="wb-action" onClick={onNavigate}>
-							<Icon name="library" />
-							<span>Library</span>
-						</NavLink>
 					</nav>
 
 					{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the task list independently. */}
 					<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by workspace">
 						<div className="wb-side__heading">
 							<h2>Workspaces</h2>
-							<button
-								type="button"
-								className="wb-icon wb-icon--small"
-								aria-label="Search tasks and commands"
-								title={`Search tasks and commands (${chordHint("palette")})`}
-								onClick={onSearch}
-							>
-								<Icon name="search" />
-							</button>
 						</div>
 
 						{workspaces.isPending ? <p className="wb-note">Loading workspaces…</p> : null}

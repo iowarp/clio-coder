@@ -9,6 +9,7 @@ import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
+import { homeDraft, updateHomeDraft } from "../pages/home-draft.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
 import { ownDrafts } from "./own-drafts.js";
 import { reusableDraft, sessionIdFromPath } from "./shell-model.js";
@@ -34,8 +35,8 @@ export function rememberWorkspace(id: string): void {
 
 export interface TaskActions {
 	readonly launch: ProjectLaunch;
-	/** Start a task in a project, or return to the untouched draft this window made there instead of spawning a second child. */
-	newTask(workspaceId: string): void;
+	/** Open the Home composer, or return to this window's untouched task when Home has no unfinished request. */
+	newTask(workspaceId?: string): void;
 	resume(sessionId: string, workspaceId: string): void;
 	/** Show a task in a second window. A saved one is loaded here first, so the new window finds it open. */
 	openWindow(sessionId: string, workspaceId: string, held: boolean): void;
@@ -72,14 +73,21 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 		},
 	});
 	const newTask = useCallback(
-		(workspaceId: string) => {
-			rememberWorkspace(workspaceId);
-			const draft = reusableDraft(sessions.data ?? [], workspaceId, ownDrafts());
+		(workspaceId?: string) => {
+			const home = homeDraft();
+			if (workspaceId && !home.pending && !home.text && !home.textIssue) {
+				rememberWorkspace(workspaceId);
+				updateHomeDraft({ workspaceId });
+			}
+			const draft =
+				workspaceId && !home.pending && !home.text && !home.textIssue
+					? reusableDraft(sessions.data ?? [], workspaceId, ownDrafts())
+					: undefined;
 			afterNavigate?.();
 			if (draft) void navigate(`/sessions/${draft.id}`);
-			else launch.start(workspaceId);
+			else void navigate("/");
 		},
-		[sessions.data, navigate, launch, afterNavigate],
+		[sessions.data, navigate, afterNavigate],
 	);
 	return {
 		launch,
