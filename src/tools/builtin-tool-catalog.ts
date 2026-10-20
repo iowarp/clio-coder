@@ -320,7 +320,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 		promptHint:
 			"For an operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. " +
-			"Leave unrelated inbox tasks alone. Before claiming completion, list and confirm the linked board row is completed " +
+			"Leave unrelated inbox tasks alone. Before claiming completion, confirm from the state a successful tasks call returned (list only when you hold none) that the linked board row is completed " +
 			"and the durable operator task is done with the same session/board link; report the IDs and actual state. " +
 			'For 3+ authorized steps without a board, use action="plan" before edits through the advertised tasks route; add steps to an existing board to preserve pickup links. ' +
 			"Start work; done needs a note describing the work and any failed or unrun checks. Verification receipts record observed checks separately. " +
