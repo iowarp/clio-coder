@@ -27,10 +27,10 @@ const queries = new QueryClient({
 				error.problem.code === "not_found"
 			)
 				return;
-			reportProblem(error);
+			reportProblem(error, query.queryHash);
 		},
 	}),
-	mutationCache: new MutationCache({ onError: reportProblem }),
+	mutationCache: new MutationCache({ onError: (error) => reportProblem(error) }),
 });
 function RouteError() {
 	const error = useRouteError();
