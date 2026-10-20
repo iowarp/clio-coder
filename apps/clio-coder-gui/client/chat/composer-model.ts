@@ -99,6 +99,13 @@ export class DraftStore {
 		this.#commit({ ...this.#state, mode, key: this.#submittedKey === this.#state.key ? this.#mint() : this.#state.key });
 	}
 
+	/** Attachment edits after an attempted send change its body and therefore its request identity. */
+	attachmentsChanged(): void {
+		if (this.#submittedKey !== this.#state.key) return;
+		this.#restoredSubmission = false;
+		this.#commit({ ...this.#state, key: this.#mint() });
+	}
+
 	/** An unchanged retry keeps this key; editing after a send starts a new request. */
 	markSubmitted(sent: Draft): void {
 		if (this.#state.key === sent.key) {
@@ -924,4 +931,54 @@ export function outcomeDetailGroups(outcome: TurnOutcomeView) {
 		groups.set(field.group, bucket);
 	}
 	return [...groups].map(([label, fields]) => ({ label, fields }));
+}
+
+/** Visible delivery feedback follows the same intent and capability facts as submission. */
+export function composerDelivery(
+	situation: ComposerSituation,
+	mode: SteerMode,
+	contextRunning: boolean,
+	readingAttachments: boolean,
+): { label: string; detail: string; tone: "neutral" | "running" | "warn" } {
+	if (situation.sessionState !== "open")
+		return {
+			label: situation.sessionState === "parked" ? "Paused" : "Unavailable",
+			detail: CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.",
+			tone: "warn",
+		};
+	if (situation.sending)
+		return { label: "Sending", detail: "You can keep drafting while this request is sent.", tone: "running" };
+	if (readingAttachments)
+		return {
+			label: "Reading attachments",
+			detail: "Review is available as soon as the files are ready.",
+			tone: "running",
+		};
+	if (contextRunning && !situation.turnRunning)
+		return { label: "Context work", detail: "Your draft is kept until the current operation finishes.", tone: "running" };
+	if (!situation.turnRunning)
+		return { label: "Your next message", detail: "Attach context or explore Actions before sending.", tone: "neutral" };
+	if (situation.steeringUnavailable)
+		return {
+			label: "Working",
+			detail:
+				situation.steeringUnavailable === "checking"
+					? "Checking which message controls this agent supports."
+					: "Message controls could not be checked. Your draft is kept.",
+			tone: "warn",
+		};
+	if (!situation.steering.steer)
+		return {
+			label: "Draft for later",
+			detail: "This agent cannot take direction during a turn. Your draft stays here.",
+			tone: "neutral",
+		};
+	const selected = situation.steering.modes.includes(mode) ? mode : situation.steering.modes[0];
+	return selected === "end-of-turn"
+		? { label: "After this turn", detail: "Send adds this message to the follow-up queue.", tone: "running" }
+		: {
+				label: "During this turn",
+				detail: "Send adds direction between tool calls. Stop ends the current turn.",
+				tone: "running",
+			};
 }

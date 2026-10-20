@@ -76,3 +76,29 @@ export function visualActions(entries: readonly SlashEntry[], query: string): re
 			),
 		);
 }
+
+/** The file-review view is a local pane, so it is discoverable without an engine command. */
+export function matchesChanges(query: string): boolean {
+	return query
+		.toLowerCase()
+		.trim()
+		.split(/\s+/u)
+		.filter(Boolean)
+		.every((word) => "changes files review edited touched paths".includes(word));
+}
+
+export function actionCategoryRows(
+	items: readonly VisualAction[],
+	category: ActionGroup | "All actions",
+): readonly VisualAction[] {
+	return category === "All actions" ? items : items.filter((item) => item.group === category);
+}
+
+/** A command that takes the next prompt slot must wait for the active turn to settle. */
+export function actionWaitsForTurn(entry: SlashEntry, running: boolean): boolean {
+	if (!running || entry.kind !== "command") return false;
+	return (
+		entry.command.promptTurn === true ||
+		(!!entry.subcommand && entry.command.promptTurnSubcommands?.includes(entry.subcommand) === true)
+	);
+}
