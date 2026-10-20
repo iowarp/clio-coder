@@ -6,7 +6,6 @@ import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
 import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/composer-model.js";
-import { STARTER_PROMPTS } from "../chat/starter-prompts.js";
 import { useFieldAssist } from "../chat/use-field-assist.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
@@ -22,6 +21,27 @@ import { reconcileFirstTask, useFirstTask } from "./use-first-task.js";
 import "../chat/composer-box.css";
 import "./home.css";
 import { setupLink, useSetupStatus } from "./target-onboarding.js";
+
+const TASK_STARTERS = [
+	{
+		icon: "compose",
+		title: "Build something",
+		detail: "Turn an idea into something real",
+		prompt: "I'd like to build ",
+	},
+	{
+		icon: "toolchain",
+		title: "Fix a problem",
+		detail: "Work through something that isn't right",
+		prompt: "Help me fix a problem: ",
+	},
+	{
+		icon: "search",
+		title: "Explore a project",
+		detail: "Understand what's here and how it works",
+		prompt: "Give me a friendly overview of this project. Explain what it does, how it works, and where to start.",
+	},
+] as const;
 
 /** The project the next task lands in, with a way to switch projects or open another folder. */
 function WorkspaceMenu({
@@ -248,10 +268,13 @@ export function Home({ client }: { client: Client }) {
 							</>
 						) : (
 							<>
-								What are we <em>working on</em>?
+								What would you like to <em>do</em>?
 							</>
 						)}
 					</h1>
+					{!onboarding ? (
+						<p className="newtask__intro">Bring an idea, a question, or a problem. Start with your own words.</p>
+					) : null}
 					{onboarding ? (
 						<Onboarding
 							ready={ready}
@@ -352,6 +375,7 @@ export function Home({ client }: { client: Client }) {
 									aria-label={busy ? "Starting task…" : "Start task"}
 								>
 									{busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
+									<span>{busy ? "Starting…" : "Start task"}</span>
 								</button>
 							</div>
 						</div>
@@ -367,17 +391,17 @@ export function Home({ client }: { client: Client }) {
 							<Icon name="models" />
 							<span>
 								{ready
-									? (summary ?? "Connected model")
+									? (setup.data?.model ?? setup.data?.targetId ?? "Connected model")
 									: setup.isPending
 										? "Checking model connection…"
 										: "Model connection needs attention"}
 							</span>
 							<span className="newtask__context-label">
-								Task details <Icon name="chevronDown" />
+								Task settings <Icon name="chevronDown" />
 							</span>
 						</summary>
 						<dl>
-							<dt>Workspace</dt>
+							<dt>Project folder</dt>
 							<dd>{workspace?.path ?? "Choose a workspace above"}</dd>
 							<dt>Connection</dt>
 							<dd>
@@ -462,18 +486,23 @@ export function Home({ client }: { client: Client }) {
 							{send.error.message}
 						</p>
 					) : null}
-					{workspaceId && !pending ? (
+					{workspaceId && !pending && !text ? (
 						<ul className="newtask__starters" aria-label="Ways to start">
-							{STARTER_PROMPTS.map((prompt) => (
-								<li key={prompt}>
+							{TASK_STARTERS.map((starter) => (
+								<li key={starter.title}>
 									<button
 										type="button"
 										onClick={() => {
-											setText(prompt);
-											field.current?.focus();
+											setText(starter.prompt);
+											requestAnimationFrame(() => {
+												field.current?.focus();
+												field.current?.setSelectionRange(starter.prompt.length, starter.prompt.length);
+											});
 										}}
 									>
-										{prompt}
+										<Icon name={starter.icon} />
+										<strong>{starter.title}</strong>
+										<span>{starter.detail}</span>
 									</button>
 								</li>
 							))}
