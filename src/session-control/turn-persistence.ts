@@ -14,7 +14,7 @@ import type { ObservabilityContract } from "../domains/observability/contract.js
 import { aggregateCostAmounts } from "../domains/observability/cost.js";
 import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
 import { normalizeCostProvenance, resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
-import { noteCodexStreamQuota } from "../domains/quota/index.js";
+import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
@@ -361,6 +361,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		}
 		const anthropicResponse = (message as { anthropicResponse?: AnthropicResponseObservation }).anthropicResponse;
 		if (message.api === "anthropic-messages" && anthropicResponse) payload.anthropicResponse = anthropicResponse;
+		if (anthropicResponse && state.runtime?.runtimeId === "anthropic-max") {
+			noteAnthropicStreamQuota(state.runtime.targetId, anthropicResponse);
+		}
 		if (timing) payload.timing = timing;
 		if (deliveryId) {
 			payload.continuityDeliveryId = deliveryId;

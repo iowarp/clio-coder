@@ -46,6 +46,9 @@ export interface UsageSnapshot {
 	credits?: UsageCredits | null;
 	plan?: string | null;
 	message?: string | null;
+	/** #423: subscription facts from sanitized Anthropic inference response headers. */
+	rateLimit?: Readonly<Record<string, string>>;
+	representativeClaim?: string | null;
 	/** Seconds to wait, captured from a 429 `Retry-After` header. */
 	retryAfterSeconds?: number | null;
 	/** True when the snapshot is a cached last-good value rather than a fresh read. */

@@ -13,7 +13,7 @@
  */
 
 import type { QuotaSeverity } from "./severity.js";
-import { compareQuotaSeverity, primaryWindow, windowSeverity } from "./severity.js";
+import { anthropicRateLimitSeverity, compareQuotaSeverity, primaryWindow, windowSeverity } from "./severity.js";
 import type { UsageSnapshot, UsageWindow } from "./types.js";
 
 export type { QuotaSeverity } from "./severity.js";
@@ -21,7 +21,7 @@ export { primaryWindow, QUOTA_SEVERITY_FLOORS, severityForPct, windowAtWarning, 
 
 /** The snapshot's worst severity, which is what a single indicator should show. */
 export function snapshotSeverity(snapshot: UsageSnapshot): QuotaSeverity {
-	let worst: QuotaSeverity = "normal";
+	let worst: QuotaSeverity = anthropicRateLimitSeverity(snapshot.rateLimit?.status) ?? "normal";
 	for (const window of snapshot.windows) {
 		const severity = windowSeverity(window);
 		if (compareQuotaSeverity(severity, worst) > 0) worst = severity;
@@ -44,7 +44,8 @@ export function windowByKey(snapshot: UsageSnapshot, key: string): UsageWindow |
  *
  * anthropic-max and claude-code are separate credentials on one Anthropic
  * subscription, so showing both doubles the apparent budget. When their
- * windows agree, the one carrying a plan label survives.
+ * windows agree, inference headers win to retain their quota claim (#423),
+ * otherwise the one carrying a plan label survives.
  */
 export function foldDuplicateAccounts(snapshots: ReadonlyArray<UsageSnapshot>): UsageSnapshot[] {
 	const kept: UsageSnapshot[] = [];
@@ -55,6 +56,11 @@ export function foldDuplicateAccounts(snapshots: ReadonlyArray<UsageSnapshot>): 
 			continue;
 		}
 		const existing = kept[twin];
+		if (snapshot.rateLimit !== undefined) {
+			kept[twin] = snapshot;
+			continue;
+		}
+		if (existing?.rateLimit !== undefined) continue;
 		if (existing !== undefined && existing.plan == null && snapshot.plan != null) kept[twin] = snapshot;
 	}
 	return kept;
@@ -91,6 +97,10 @@ function sameAccount(left: UsageSnapshot, right: UsageSnapshot): boolean {
 export function footerQuotaSegment(snapshots: ReadonlyArray<UsageSnapshot>): string | null {
 	const parts: string[] = [];
 	for (const snapshot of foldDuplicateAccounts(snapshots)) {
+		if (snapshot.rateLimit?.status === "rejected") {
+			parts.push(`${shortName(snapshot.displayName)} quota rejected`);
+			continue;
+		}
 		if (snapshot.status !== "ok") continue;
 		const weekly = windowByKey(snapshot, "weekly");
 		const session = windowByKey(snapshot, "session");

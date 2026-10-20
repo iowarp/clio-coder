@@ -1,1 +1,10 @@
-export { codexStreamSnapshots, noteCodexStreamQuota, observedCodexQuota, observedQuota } from "./observed.js";
+export {
+	anthropicQuotaNotice,
+	codexStreamSnapshots,
+	noteAnthropicStreamQuota,
+	noteCodexStreamQuota,
+	observedAnthropicQuota,
+	observedCodexQuota,
+	observedQuota,
+	onAnthropicQuotaChange,
+} from "./observed.js";

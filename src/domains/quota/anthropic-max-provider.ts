@@ -15,6 +15,7 @@
 
 import { openAuthStorage } from "../providers/auth/index.js";
 import { fetchAnthropicUsage } from "./anthropic-usage.js";
+import { anthropicStreamSnapshot } from "./observed.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
 
 export const ANTHROPIC_MAX_QUOTA_PROVIDER_ID = "anthropic-max";
@@ -96,6 +97,8 @@ export function createAnthropicMaxQuotaProvider(options: AnthropicMaxQuotaOption
 		},
 
 		async fetch(): Promise<UsageSnapshot> {
+			const streamed = anthropicStreamSnapshot(now().getTime());
+			if (streamed !== null) return streamed;
 			const credentials = await readCredentials();
 			if (credentials === null) {
 				return snapshot("no_credentials", "Clio holds no Anthropic OAuth credential");

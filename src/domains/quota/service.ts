@@ -15,7 +15,7 @@ import { readSettings } from "../../core/config.js";
 import { getRuntimeRegistry } from "../providers/index.js";
 import type { QuotaCache } from "./cache.js";
 import { createQuotaCache, DEFAULT_QUOTA_CACHE_TTL_MS } from "./cache.js";
-import { codexStreamSnapshots } from "./observed.js";
+import { anthropicStreamSnapshot, codexStreamSnapshots, withAnthropicStreamSnapshot } from "./observed.js";
 import { localQuotaSnapshot } from "./presentation.js";
 import { buildQuotaProviders } from "./registry.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
@@ -46,7 +46,7 @@ export function createQuotaService(options: QuotaServiceOptions = {}): QuotaServ
 		readSettings().targets.some((target) => getRuntimeRegistry().get(target.runtime)?.tier === "local-native");
 
 	const withLocal = (snapshots: UsageSnapshot[]): UsageSnapshot[] => {
-		snapshots = [...snapshots, ...codexStreamSnapshots()];
+		snapshots = [...withAnthropicStreamSnapshot(snapshots), ...codexStreamSnapshots()];
 		if (!includeLocal) return snapshots;
 		const local = options.localRuntimeLabel
 			? localQuotaSnapshot({ runtimeLabel: options.localRuntimeLabel })
@@ -68,6 +68,10 @@ export function createQuotaService(options: QuotaServiceOptions = {}): QuotaServ
 			const settled = await Promise.all(
 				providers.map(async (provider) => {
 					try {
+						if (provider.id === "anthropic-max") {
+							const streamed = anthropicStreamSnapshot();
+							if (streamed !== null) return streamed;
+						}
 						return await cache.resolve(provider);
 					} catch (error) {
 						return {

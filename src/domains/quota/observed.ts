@@ -7,7 +7,9 @@
  * without ever spending a usage read of its own. Nothing here fetches.
  */
 
-import type { CodexQuotaObservation } from "../../engine/types.js";
+import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
+import { parseAnthropicHeaders } from "./anthropic-headers.js";
+import { anthropicRateLimitSeverity } from "./severity.js";
 import type { UsageSnapshot } from "./types.js";
 import { formatPlan } from "./types.js";
 
@@ -68,6 +70,87 @@ function readObserved(key: string, nowMs: number): ObservedQuota | null {
 
 const codexTargets = new Map<string, string>();
 const STREAM_QUOTA_TTL_MS = 5 * 60_000;
+
+const anthropicTargets = new Map<string, string>();
+const anthropicListeners = new Set<(targetId: string, snapshot: UsageSnapshot) => void>();
+
+/** #423: consumers share observations without coupling quota storage to an operator surface. */
+export function onAnthropicQuotaChange(listener: (targetId: string, snapshot: UsageSnapshot) => void): () => void {
+	anthropicListeners.add(listener);
+	return () => {
+		anthropicListeners.delete(listener);
+	};
+}
+
+/** #423: scope inference quota to the target and sanitized account, independently of sibling CLI logins. */
+export function noteAnthropicStreamQuota(targetId: string, observation: AnthropicResponseObservation): void {
+	const snapshot = parseAnthropicHeaders(observation);
+	const storedAtMs = Date.parse(observation.observedAt);
+	if (snapshot === null || !Number.isFinite(storedAtMs)) return;
+	const key = JSON.stringify(["anthropic-stream", targetId, observation.accountScope]);
+	const previous = observed.get(key);
+	const previousTarget = observed.get(anthropicTargets.get(targetId) ?? "");
+	if (previous !== undefined && previous.storedAtMs > storedAtMs) return;
+	observed.set(key, {
+		snapshot,
+		storedAtMs,
+		ttlMs: STREAM_QUOTA_TTL_MS,
+		retryUntilMs:
+			snapshot.rateLimit?.status === "rejected"
+				? storedAtMs + Math.max(1, observation.retryAfterSeconds ?? STREAM_QUOTA_TTL_MS / 1000) * 1000
+				: null,
+	});
+	if (previousTarget !== undefined && previousTarget.storedAtMs > storedAtMs) return;
+	anthropicTargets.set(targetId, key);
+	if (previousTarget?.snapshot?.rateLimit?.status === snapshot.rateLimit?.status) return;
+	for (const listener of anthropicListeners) {
+		try {
+			listener(targetId, snapshot);
+		} catch {
+			// #423: an operator notice cannot prevent persistence of provider evidence.
+		}
+	}
+}
+
+export function observedAnthropicQuota(targetId: string, nowMs: number, accountScope?: string): ObservedQuota | null {
+	const key =
+		accountScope === undefined
+			? anthropicTargets.get(targetId)
+			: JSON.stringify(["anthropic-stream", targetId, accountScope]);
+	return key === undefined ? null : readObserved(key, nowMs);
+}
+
+/** #423: a fresh inference reading supersedes any surface's older poll cache. */
+export function anthropicStreamSnapshot(nowMs = Date.now()): UsageSnapshot | null {
+	let newest: UsageSnapshot | null = null;
+	for (const key of anthropicTargets.values()) {
+		const reading = readObserved(key, nowMs);
+		if (reading?.stale || !reading?.snapshot) continue;
+		if (newest === null || Date.parse(reading.snapshot.fetchedAt ?? "") > Date.parse(newest.fetchedAt ?? ""))
+			newest = reading.snapshot;
+	}
+	return newest;
+}
+
+export function withAnthropicStreamSnapshot(
+	snapshots: ReadonlyArray<UsageSnapshot>,
+	nowMs = Date.now(),
+): UsageSnapshot[] {
+	const streamed = anthropicStreamSnapshot(nowMs);
+	return streamed === null
+		? [...snapshots]
+		: [...snapshots.filter((snapshot) => snapshot.providerId !== "anthropic-max"), streamed];
+}
+
+/** #423: notices use the same provider severity as quota presentation and admission. */
+export function anthropicQuotaNotice(snapshot: UsageSnapshot): { level: "warning" | "error"; message: string } | null {
+	const severity = anthropicRateLimitSeverity(snapshot.rateLimit?.status);
+	if (severity !== "warning" && severity !== "critical") return null;
+	return {
+		level: severity === "critical" ? "error" : "warning",
+		message: `Anthropic Max quota: ${snapshot.message ?? snapshot.rateLimit?.status}. Background memory waits for quota to recover.`,
+	};
+}
 
 function codexKey(targetId: string, accountScope: string): string {
 	return JSON.stringify(["codex-stream", targetId, accountScope]);

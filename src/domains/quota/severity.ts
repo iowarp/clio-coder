@@ -26,6 +26,17 @@ export const QUOTA_SEVERITY_FLOORS: Readonly<Record<Exclude<QuotaSeverity, "norm
 
 const SEVERITY_RANK: Readonly<Record<QuotaSeverity, number>> = { normal: 0, caution: 1, warning: 2, critical: 3 };
 
+/** #423: provider rejection and warnings bind even when utilization windows are absent. */
+export function anthropicRateLimitSeverity(status: string | undefined): QuotaSeverity | null {
+	return status === "rejected"
+		? "critical"
+		: status === "allowed_warning"
+			? "warning"
+			: status === "allowed"
+				? "normal"
+				: null;
+}
+
 export function severityForPct(usedPct: number): QuotaSeverity {
 	if (usedPct >= QUOTA_SEVERITY_FLOORS.critical) return "critical";
 	if (usedPct >= QUOTA_SEVERITY_FLOORS.warning) return "warning";

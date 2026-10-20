@@ -9,6 +9,7 @@
  * rule: a read happens because a surface was looked at, never on a timer.
  */
 
+import { withAnthropicStreamSnapshot } from "./observed.js";
 import { quotaSummaryLine } from "./presentation.js";
 import { createQuotaService, type QuotaService } from "./service.js";
 import type { UsageSnapshot } from "./types.js";
@@ -73,11 +74,11 @@ export function createQuotaSummaryFeed(options: QuotaSummaryFeedOptions = {}): Q
 	return {
 		peek(): string | null {
 			if (!disposed && (readAt === null || now() - readAt >= ttlMs)) refresh();
-			return line;
+			return quotaSummaryLine(withAnthropicStreamSnapshot(snapshots, now())) ?? line;
 		},
 		peekSnapshots(): ReadonlyArray<UsageSnapshot> {
 			if (!disposed && (readAt === null || now() - readAt >= ttlMs)) refresh();
-			return snapshots;
+			return withAnthropicStreamSnapshot(snapshots, now());
 		},
 		dispose(): void {
 			disposed = true;

@@ -205,7 +205,12 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
-import { observedCodexQuota } from "../domains/quota/index.js";
+import {
+	anthropicQuotaNotice,
+	observedAnthropicQuota,
+	observedCodexQuota,
+	onAnthropicQuotaChange,
+} from "../domains/quota/index.js";
 import { observedQuota } from "../domains/quota/observed.js";
 import { quotaProviderIdForRuntime } from "../domains/quota/registry.js";
 import {
@@ -902,6 +907,9 @@ function prepareBackgroundMemoryRoute(
 					const scope =
 						status.source === "stored-oauth" && stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
 					routeQuota = observedCodexQuota(targetId, scope, nowMs);
+				} else if (initial.refined.runtimeId === "anthropic-max") {
+					const streamed = observedAnthropicQuota(targetId, nowMs);
+					if (streamed !== null && !streamed.stale) routeQuota = streamed;
 				}
 				const decision = decideBackgroundStep({
 					route: routeFacts,
@@ -1016,6 +1024,7 @@ function prepareBackgroundMemoryRoute(
 }
 
 const emitMemoryFlowNotice = declareRuntimeNoticeProducer("background-memory-flow", ["memory-flow-blocked"]);
+const emitQuotaNotice = declareRuntimeNoticeProducer("anthropic-quota", ["stress"]);
 
 const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
 
@@ -2311,6 +2320,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			process.stderr.write(`[clio-coder:runtime] ${notice.level ?? "info"}: ${notice.message}\n`);
 		});
 	}
+
+	termination.onDrain(
+		onAnthropicQuotaChange((targetId, snapshot) => {
+			const notice = anthropicQuotaNotice(snapshot);
+			if (notice !== null)
+				emitQuotaNotice(
+					{
+						kind: "stress",
+						...notice,
+						targetId,
+						runtimeId: "anthropic-max",
+						model: "",
+					},
+					bus,
+				);
+		}),
+	);
 
 	// Install guardrail policy before any guard registration or tool reads it.
 	// The effective session view replaces this boot projection below.
