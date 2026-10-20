@@ -407,7 +407,7 @@ export class Supervisor {
 		};
 		if (level !== undefined) {
 			try {
-				if ((await entry.client.autonomy(id)).level !== level) await entry.client.autonomy(id, level);
+				await entry.client.autonomy(id, level);
 			} catch (error) {
 				refused(error);
 			}

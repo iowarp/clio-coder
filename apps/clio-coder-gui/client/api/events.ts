@@ -40,9 +40,9 @@ export function subscribe(
 		const autonomy = accepted?.telemetry?.autonomy;
 		if (!autonomy) return;
 		const queryKey = ["session-autonomy", snapshot.id];
+		void queries.cancelQueries({ queryKey, exact: true });
 		const current = queries.getQueryData<typeof autonomy>(queryKey);
 		if (current?.level === autonomy.level && current.source === autonomy.source) return;
-		void queries.cancelQueries({ queryKey, exact: true });
 		queries.setQueryData(queryKey, autonomy);
 	};
 	// REST snapshots and SSE deltas both pass through the session revision buffer before seeding mode (GUI-03).
@@ -204,7 +204,10 @@ export function subscribe(
 				void queries.cancelQueries({ queryKey: [key, id] });
 				void queries.invalidateQueries({ queryKey: [key, id] });
 			}
-		for (const id of configured) if (!resumed.has(id)) refreshAutonomy(id);
+		for (const id of configured) {
+			const held = sessionBuffer(id);
+			if (!resumed.has(id) && (held.hasGap || !held.value?.telemetry?.autonomy)) refreshAutonomy(id);
+		}
 		for (const entry of operations) {
 			if (entry.operation)
 				queries.setQueryData<Operation>(["operation", entry.resource], (current) =>
