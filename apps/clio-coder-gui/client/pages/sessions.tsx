@@ -11,6 +11,7 @@ import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
+import { ConversationOutline } from "../chat/ConversationOutline.js";
 import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { useContextOperationRef, useStopContext } from "../chat/context-command.js";
 import { contextWorkView } from "../chat/context-work-model.js";
@@ -210,6 +211,8 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
 	const renameTask = useRenameTask(client);
 	const [renaming, setRenaming] = useState(false);
+	const [outline, setOutline] = useState(false);
+	const pendingJump = useRef<string | null>(null);
 	const [dismissedContext, setDismissedContext] = useState<string | null>(null);
 	const stopContext = useStopContext(client, id);
 	const scroll = useRef<HTMLDivElement | null>(null);
@@ -246,6 +249,35 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	// A deep link starts without a cached snapshot. Attach the observer only once
 	// the transcript element exists; a ref becoming non-null does not rerun an effect.
 	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline, running);
+	const restoreScroll = follow.restore;
+	useEffect(() => {
+		if (outline || !pendingJump.current) return;
+		const turnId = pendingJump.current;
+		pendingJump.current = null;
+		let landing = 0;
+		const frame = requestAnimationFrame(() => {
+			landing = requestAnimationFrame(() => {
+				const container = scroll.current;
+				const target = [...(container?.querySelectorAll<HTMLElement>("[data-turn-id]") ?? [])].find(
+					(element) => element.dataset.turnId === turnId,
+				);
+				if (!container || !target) return;
+				// A deliberate jump leaves follow mode. Later output must not pull the reader away.
+				restoreScroll({
+					top: Math.max(
+						0,
+						container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - 24,
+					),
+					following: false,
+				});
+				target.focus({ preventScroll: true });
+			});
+		});
+		return () => {
+			cancelAnimationFrame(frame);
+			cancelAnimationFrame(landing);
+		};
+	}, [outline, restoreScroll]);
 	// One object per change of reported settings or health, so a streamed delta leaves the composer alone.
 	const settings = snapshot?.state === "open" ? sessionSettings.data?.settings.chat : undefined;
 	const config = snapshot?.state === "open" ? snapshot.config : undefined;
@@ -391,6 +423,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						) : null}
 						{/* The task's own actions sit with its name, not with the view controls at the far end. */}
 						<Menu label="Task actions">
+							<MenuItem icon="search" onClick={() => setOutline(true)}>
+								Find in conversation
+							</MenuItem>
 							<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
 								Rename task
 							</MenuItem>
@@ -431,6 +466,15 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							onOpen={pane.show}
 						/>
 						<div className="wb-bar__end">
+							<button
+								type="button"
+								className="wb-chip conversation__find"
+								aria-label="Find in conversation"
+								title="Find a request or response in this conversation"
+								onClick={() => setOutline(true)}
+							>
+								<Icon name="search" /> Find
+							</button>
 							<PaneToggles
 								client={client}
 								sessionId={snapshot.id}
@@ -580,6 +624,18 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					onViewChange={pane.setView}
 					route={route}
 				/>
+				{outline ? (
+					<ConversationOutline
+						turns={turns}
+						rows={turnRows}
+						truncated={snapshot.timelineTruncated === true}
+						onClose={() => setOutline(false)}
+						onSelect={(turnId) => {
+							pendingJump.current = turnId;
+							setOutline(false);
+						}}
+					/>
+				) : null}
 			</section>
 		</PaneContext.Provider>
 	);
