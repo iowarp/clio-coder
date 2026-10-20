@@ -74,6 +74,39 @@ export function calculatePricingCostUsd(
 	);
 }
 
+/**
+ * C1 / #423: tier boundaries price the whole input, including cache reads/writes.
+ * Prefer Pi's tier schedule. These fallbacks cover synthesized flat-price rows:
+ * https://platform.claude.com/docs/en/about-claude/pricing (Haiku 5.5, 100K)
+ * https://developers.openai.com/api/docs/pricing (GPT-6 family, 272K), 2026-10-20.
+ */
+export function compactionBudget(
+	contextWindow: number,
+	threshold: number,
+	maxTokens = 200_000,
+	model?: Pick<Model<Api>, "id" | "cost"> | null,
+): { ceilingTokens: number; threshold: number; fractionScale: number; budgetWindow: number } {
+	const boundaries = (model?.cost?.tiers ?? [])
+		.filter((tier) => tier.inputTokensAbove > 0 && tier.input > (model?.cost?.input ?? 0))
+		.map((tier) => tier.inputTokensAbove);
+	const id = model?.id?.split("/").at(-1) ?? "";
+	if (boundaries.length === 0) {
+		if (/^claude-haiku-5-5(?:$|-)/.test(id)) boundaries.push(100_000);
+		else if (/^gpt-6(?:\.\d+)?-(?:astra|sol|luna)(?:$|-)/.test(id)) boundaries.push(272_000);
+	}
+	// A 2% estimation margin stays below the price boundary; it is not a fit guarantee.
+	const tierCeiling = boundaries.length > 0 ? Math.floor(Math.min(...boundaries) * 0.98) : Infinity;
+	const ceilingTokens = Math.min(maxTokens, tierCeiling);
+	// Working-set fractions use min(window, ceiling); the trigger keeps min(threshold × window, ceiling).
+	const fractionScale = contextWindow > 0 ? Math.min(1, ceilingTokens / contextWindow) : 1;
+	return {
+		ceilingTokens,
+		threshold: Math.min(threshold, fractionScale),
+		fractionScale,
+		budgetWindow: contextWindow * fractionScale,
+	};
+}
+
 /** The runtime facts pricing reads: its id for the catalog, its tier for locality. */
 export type PricingRuntime = Pick<RuntimeDescriptor, "id" | "tier">;
 

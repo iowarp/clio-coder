@@ -10,6 +10,7 @@ import {
 	type ResolvedPressurePolicy,
 	resolvePressurePolicy,
 } from "../../src/domains/context/budget/pressure.js";
+import { compactionBudget } from "../../src/domains/providers/catalog.js";
 
 const WINDOWS = [32_000, 64_000, 128_000, 1_000_000] as const;
 
@@ -423,4 +424,22 @@ describe("jumps and purity", () => {
 		deepStrictEqual(first, second);
 		ok(Object.isFrozen(first) && Object.isFrozen(first.memory) && Object.isFrozen(first.admission));
 	});
+});
+
+it("economic reduction leaves real-window admission and overflow intact", () => {
+	const budget = compactionBudget(1_000_000, DEFAULT_POLICY.reduce);
+	const policy = {
+		...DEFAULT_POLICY,
+		notice: DEFAULT_POLICY.notice * budget.fractionScale,
+		prepare: DEFAULT_POLICY.prepare * budget.fractionScale,
+		reduce: budget.threshold,
+		target: DEFAULT_POLICY.target * budget.fractionScale,
+	};
+	strictEqual(evaluatePressure(factsAtRatio(0.199, 1_000_000), policy).admission.result, "admit");
+	const crossing = factsAtRatio(0.2, 1_000_000);
+	strictEqual(evaluatePressure(crossing, policy).admission.result, "reduce-first");
+	const noCut = evaluatePressure({ ...crossing, reduction: "no-useful-cut" }, policy);
+	strictEqual(noCut.admission.result, "admit");
+	strictEqual(noCut.headroomTokens, 800_000);
+	strictEqual(evaluatePressure({ ...crossing, outputReserveTokens: 800_001 }, policy).admission.result, "unsafe");
 });

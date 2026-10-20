@@ -207,6 +207,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 			return place("advanced", "Size limits");
 		case "context.compaction.auto":
 		case "context.compaction.threshold":
+		case "context.compaction.maxTokens":
 		case "context.compaction.model":
 			return place("context", "Compaction");
 		case "context.workingSet.enabled":

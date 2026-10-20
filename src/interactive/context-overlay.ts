@@ -211,7 +211,10 @@ function renderContextLedgerLines(
 			? `autocompact at ${Math.round(ledger.compactionThreshold * 100)}% (${ledger.compactionAuto ? "auto" : "manual"})`
 			: "autocompact off";
 	const toolsLabel = ledger.toolCount > 0 ? `${ledger.toolCount} active tool${ledger.toolCount === 1 ? "" : "s"}` : null;
-	const footer = toolsLabel ? `${compaction} · ${toolsLabel}` : compaction;
+	const ceiling = ledger.compactionCeilingTokens
+		? ` · ceiling ${formatTokens(ledger.compactionCeilingTokens)} tokens`
+		: "";
+	const footer = toolsLabel ? `${compaction}${ceiling} · ${toolsLabel}` : `${compaction}${ceiling}`;
 	lines.push(theme.fg("annotation", footer));
 
 	if (ledger.promptCache) {

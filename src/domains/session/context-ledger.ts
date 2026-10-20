@@ -82,6 +82,7 @@ export interface BuildContextLedgerInput {
 	measured?: boolean;
 	/** Compaction trigger ratio (0..1); null when compaction is unconfigured. */
 	compactionThreshold?: number | null;
+	compactionCeilingTokens?: number | null;
 	/** Whether automatic compaction is enabled. */
 	compactionAuto?: boolean;
 	/**
@@ -189,6 +190,7 @@ export interface ContextLedger {
 	/** True when `usedTokens` is anchored to provider-measured usage. */
 	measured: boolean;
 	compactionThreshold: number | null;
+	compactionCeilingTokens?: number | null;
 	compactionAuto: boolean;
 	/** Preload class label for the project category detail line; null when unknown. */
 	projectPreload: string | null;
@@ -391,6 +393,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		percent: percentOf(usedTokens, window),
 		measured: input.measured === true && liveTotal > 0,
 		compactionThreshold: effectiveThreshold,
+		compactionCeilingTokens: input.compactionCeilingTokens ?? null,
 		compactionAuto: input.compactionAuto === true,
 		projectPreload: input.projectPreload ?? null,
 		projectHandbookFiles: input.projectHandbookFiles ?? null,

@@ -192,6 +192,8 @@ export interface FleetRouteSettings {
 export interface CompactionSettings {
 	auto: boolean;
 	threshold: number;
+	/** C1 / #422: economic input ceiling, independent of the serving window. */
+	maxTokens?: number;
 	excludeLastTurns: number;
 	model?: string;
 	systemPrompt?: string;
@@ -803,6 +805,7 @@ export const DEFAULT_SETTINGS = {
 		compaction: {
 			auto: true,
 			threshold: 0.8,
+			maxTokens: 200_000,
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
@@ -1010,6 +1013,7 @@ context:
   compaction:
     auto: true
     threshold: 0.8
+    maxTokens: 200000
   memory:
     enabled: true
     observations:

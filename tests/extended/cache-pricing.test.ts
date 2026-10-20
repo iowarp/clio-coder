@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import {
 	calculatePricingCostUsd,
+	compactionBudget,
 	getCatalogModelForRuntime,
 	resolveEffectivePricing,
 } from "../../src/domains/providers/catalog.js";
@@ -89,4 +90,28 @@ test("catalog synthesis preserves SDK context price tiers and explicit target pr
 		null,
 	);
 	strictEqual(explicitSonnet.cost.cacheRead, 0.7);
+});
+
+test("economic compaction honors catalog tiers, flat-row fallbacks, and smaller real windows", () => {
+	for (const [runtime, id, maxTokens, expected] of [
+		["anthropic", "claude-haiku-5-5", 200_000, 98_000],
+		["openai-codex", "gpt-6-luna", 200_000, 200_000],
+		["openai", "gpt-6.1-sol", 400_000, 266_560],
+	] as const) {
+		const model = getCatalogModelForRuntime(runtime, id);
+		ok(model);
+		for (const row of [model, { ...model, cost: { ...model.cost, tiers: [] } }]) {
+			const budget = compactionBudget(1_000_000, 0.8, maxTokens, row);
+			strictEqual(budget.ceilingTokens, expected);
+			ok(Math.abs(budget.threshold * 1_000_000 - expected) < 1e-9);
+			ok(0.6 * budget.budgetWindow < expected, "eviction target stays below the trigger");
+		}
+	}
+	const small = compactionBudget(32_000, 0.8);
+	strictEqual(small.threshold, 0.8);
+	strictEqual(small.budgetWindow, 32_000);
+	const incident = compactionBudget(500_000, 0.87, 200_000, getCatalogModelForRuntime("openai-codex", "gpt-6.1-sol"));
+	strictEqual(incident.threshold * 500_000, 200_000);
+	strictEqual(incident.budgetWindow * 0.6, 120_000);
+	strictEqual(incident.budgetWindow * 0.1, 20_000);
 });

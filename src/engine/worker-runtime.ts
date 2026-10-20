@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
+import { compactionBudget } from "../domains/providers/catalog.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
@@ -1172,7 +1173,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				systemPrompt: systemPrompt ?? "",
 				tools: currentContext.tools ?? [],
 				contextWindow: window,
-				threshold: workerSettings.context.compaction.threshold,
+				threshold: compactionBudget(
+					window,
+					workerSettings.context.compaction.threshold,
+					workerSettings.context.compaction.maxTokens,
+					currentModel,
+				).threshold,
 				autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
 				outputReserve: resolvePressureOutputReserve(
 					currentModel.maxTokens,

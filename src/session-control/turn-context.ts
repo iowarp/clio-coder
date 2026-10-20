@@ -3,6 +3,7 @@ import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
+import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
@@ -1063,6 +1064,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const accounting = agentRuntime
 			? liveRuntimeAccounting(agentRuntime, pendingUserText, history)
 			: historicalAccounting(snapshot, settings);
+		const economic = compactionBudget(
+			accounting.effectiveWindow ?? 0,
+			policyResolution.policy.reduce,
+			settings.context.compaction.maxTokens,
+			agentRuntime?.agent.state.model ??
+				getCatalogModelForRuntime(
+					accounting.runtimeId ?? settings.targets.find((target) => target.id === accounting.targetId)?.runtime ?? "",
+					accounting.modelId ?? "",
+				),
+		);
+		const configured = policyResolution.policy;
+		const policy = {
+			...configured,
+			notice: configured.notice * (economic.threshold / configured.reduce),
+			prepare: configured.prepare * (economic.threshold / configured.reduce),
+			reduce: economic.threshold,
+			target: configured.target * economic.fractionScale,
+		};
 		const reductionBasisKey = sha256Json([
 			"reduction-basis/1",
 			contentFingerprint,
@@ -1076,8 +1095,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// route clamp may be the binding constraint. Both belong in the key.
 			agentRuntime?.runtimeResolution.capabilityDecisions?.maxTokens ?? null,
 			snapshot?.categories.reserve ?? null,
-			policyResolution.policy.reduce,
-			policyResolution.policy.target,
+			policy.reduce,
+			policy.target,
 		]);
 
 		return {
@@ -1090,7 +1109,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Compaction headroom recorded by the capture. Carried under its own
 			// name so nothing can mistake it for the output reserve.
 			thresholdReserveTokens: snapshot?.categories.reserve ?? null,
-			policy: policyResolution.policy,
+			policy,
 			policyRejection: policyResolution.rejection,
 			// Reduction has not been asked about unless an automatic attempt for
 			// this exact basis already came back empty.
@@ -1253,7 +1272,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 		if (!force && autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT) return false;
-		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
+		const economic = compactionBudget(
+			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+			cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD,
+			cfg?.maxTokens,
+			agentRuntime.agent.state.model,
+		);
+		const compactionThreshold = economic.threshold;
+		const workingSetTarget = settings.context.workingSet.target * economic.fractionScale;
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (
 			pressureEstimate &&
@@ -1286,7 +1312,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						view,
 						estimateTokens,
 					),
-					contextWindow: pressureEstimate.contextWindow,
+					contextWindow: economic.budgetWindow,
 					rearmFraction: settings.context.workingSet.rearmFraction,
 					lastEvictionTokensAfter: view.lastEvictionTokensAfter,
 				});
@@ -1487,10 +1513,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 									: compactionThreshold,
 								target: requiredFit
 									? Math.min(
-											settings.context.workingSet.target,
+											workingSetTarget,
 											Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
 										)
-									: settings.context.workingSet.target,
+									: workingSetTarget,
 							},
 							estimateTokens,
 						});
@@ -2357,7 +2383,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const beforeView = refreshLiveBudget();
 			const before = liveContextEstimate(agentRuntime);
 			const settings = deps.getSettings();
-			const threshold = settings.context.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
+			const threshold = compactionBudget(
+				before.contextWindow,
+				settings.context.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD,
+				settings.context.compaction?.maxTokens,
+				agentRuntime.agent.state.model,
+			).threshold;
 			const knownWindow = before.contextWindow > 0;
 			const verdict = knownWindow
 				? shouldCompact(before.tokens, threshold, before.contextWindow)
@@ -2430,6 +2461,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				: windowWithoutRuntime();
 			const compactionThreshold = window.contextWindow > 0 ? (settings.context.compaction?.threshold ?? null) : null;
 			const compactionAuto = settings.context.compaction?.auto !== false && window.contextWindow > 0;
+			const economic = compactionBudget(
+				window.contextWindow,
+				compactionThreshold ?? DEFAULT_COMPACTION_THRESHOLD,
+				settings.context.compaction.maxTokens,
+				state.runtime?.agent.state.model ??
+					getCatalogModelForRuntime(
+						state.runtime?.runtimeId ??
+							currentContextSnapshot?.runtimeId ??
+							settings.targets.find((target) => target.id === settings.chat.target)?.runtime ??
+							"",
+						state.runtime?.wireModelId ?? settings.chat.model ?? "",
+					),
+			);
+			const compactionCeilingTokens = economic.ceilingTokens;
 			const provider = state.runtime?.targetId ?? settings.chat?.target ?? null;
 			const model = state.runtime?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
@@ -2440,7 +2485,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					model,
 					...window,
 					toolCount: liveToolCount,
-					compactionThreshold,
+					compactionThreshold: compactionThreshold === null ? null : economic.threshold,
+					compactionCeilingTokens,
 					compactionAuto,
 					promptCache: lastPromptCache,
 					prewarm: lastPrewarm,
@@ -2456,7 +2502,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				provider,
 				model,
 				...window,
-				compactionThreshold,
+				compactionThreshold: compactionThreshold === null ? null : economic.threshold,
+				compactionCeilingTokens,
 				compactionAuto,
 				systemPromptTokens: currentContextSnapshot.categories.system,
 				toolSchemaTokens: currentContextSnapshot.categories.tools,

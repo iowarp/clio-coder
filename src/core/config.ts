@@ -2152,6 +2152,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				else {
 					const compaction = context.compaction;
 					issues.unknownKeys("context.compaction", compaction, [
+						"maxTokens",
 						"auto",
 						"threshold",
 						"model",
@@ -2170,6 +2171,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("threshold" in compaction) {
 						const parsed = expectNumber(issues, "context.compaction.threshold", compaction.threshold, { min: 0, max: 1 });
 						if (parsed !== undefined) settings.context.compaction.threshold = parsed;
+					}
+					if ("maxTokens" in compaction) {
+						const parsed = expectInteger(issues, "context.compaction.maxTokens", compaction.maxTokens, { min: 1 });
+						if (parsed !== undefined) settings.context.compaction.maxTokens = parsed;
 					}
 					for (const key of ["model", "systemPrompt"] as const) {
 						if (!(key in compaction)) continue;

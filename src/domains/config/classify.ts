@@ -19,6 +19,8 @@ export interface ConfigDiff {
 }
 
 const HOT_RELOAD_FIELDS = new Set<string>([
+	// C1 / #422: pressure checkpoints and /context read the economic ceiling live.
+	"context.compaction.maxTokens",
 	"interface.exitSummary",
 	"interface.keybindings",
 	"safety.autonomy",
