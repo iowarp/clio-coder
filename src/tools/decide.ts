@@ -58,7 +58,16 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.Decide,
 		description:
-			"Record a design decision between viable options, with rejected alternatives and rationale, before implementing. Verify implementation against the active choice before commit; decision trailers do not prove adherence. If policy changes, a call with the same key revises your earlier agent choice; operator choices require operator revision through ask_user. Record the revision before commit.",
+			"Record a design choice; when arguments are known, include decide and next authorized read/work in one gateway op=chain, " +
+			"with work's after naming the decide step id, without a separate decide-only response. " +
+			"Include rejected alternatives and rationale between viable options. Bookkeeping is not a reason to end a model response. " +
+			"Set the implementation step's after to the decide step id so it runs only after successful recording. " +
+			"The successful returned decision is authoritative; no extra confirmation call is needed. " +
+			"A decision grants no operator authorization and does not prove implementation or checks succeeded; observe their results before claiming completion. " +
+			"If recording fails, resolve the failure before implementing that choice. " +
+			"Verify implementation against the active choice before commit; decision trailers do not prove adherence. " +
+			"If policy changes, a call with the same key revises your earlier agent choice; operator choices require operator revision through ask_user. " +
+			"Record the revision before commit.",
 		parameters: Type.Object({
 			key: Type.String({
 				description: `Stable kebab-case name for the decision, e.g. "cache-key-shape" (at most ${DECIDE_CAPS.keyBytes} bytes).`,

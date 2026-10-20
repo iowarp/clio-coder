@@ -191,12 +191,23 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Tasks,
 		description:
-			"Session task board. plan declares a titled board (replaces any prior board); add appends tasks; " +
+			"Session task board: chain known start -> work and done -> start -> next work with gateway op=chain and after dependencies; " +
+			"done needs observed evidence; successful returned state is authoritative (no immediate list). " +
+			"When IDs and arguments are known, include bookkeeping with the next substantive operation in the same model response. " +
+			'Example chain steps: {id:"close",capability:"tasks",args:{action:"done",id:"t1",note:"Observed prior result; no checks required"}}, ' +
+			'{id:"start",capability:"tasks",args:{action:"start",id:"t2"},after:["close"]}, ' +
+			'{id:"work",capability:"read",args:{path:"known.txt"},after:["start"]}; substitute actual known IDs, paths and evidence. ' +
+			"plan declares a titled board (replaces any prior board); add appends tasks; " +
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
 			"done requires a completion claim with failed or unrun checks; only verification receipts prove observed checks. " +
 			"block parks it with a required reason; drop cancels it; list shows the board. " +
 			"For operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. Never pick unrelated tasks. " +
-			"Before claiming completion, list: the linked row must be completed and the operator task done on the same session/board link; report IDs and states. " +
+			"A successful mutation's returned board and operator-task snapshot are authoritative; list only if that state is missing, stale or inconsistent. " +
+			"Before claiming completion, confirm from that state that the linked row is completed and the operator task done on the same session/board link; report IDs and states. " +
+			"Each dependent step's after names its predecessor's step id. Mark done only for work and check results already observed; " +
+			"after orders execution, not evidence: never predict a successful result or prewrite done for work/checks in that chain. " +
+			"Failed mutations, including partial operator-task updates, are not successful completion; inspect and reconcile actual state before claiming success. " +
+			"Initial ID discovery and final closure may stand alone. " +
 			"Work that did not happen is blocked or dropped, never done. A self-created plan is not operator authorization. " +
 			"When the operator explicitly asks to start a demo or inspection, perform read-only work within that request's scope without asking again; " +
 			"block only unrequested file changes or individual tasks awaiting a real operator decision, and continue authorized tasks. " +

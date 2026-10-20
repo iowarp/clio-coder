@@ -18,7 +18,12 @@ export function taskBoardReminderMessage(steps: number): string {
 	return (
 		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ` +
 		'tasks action="plan" with a title and one task per authorized step, then work them one at a time ' +
-		'("start", then "done" with an evidence note). A plan does not authorize implementation: ' +
+		'("start", then "done" with an evidence note for observed work and check results, disclosing failed or unrun checks). ' +
+		"Bookkeeping is not a reason to end a model response: when IDs and arguments are known, use gateway op=chain for " +
+		"done -> start -> next read/work, or decide -> authorized implementation, with each dependent step's after naming its predecessor's step id. " +
+		"Never predict results or prewrite done for work/checks in that chain. Successful returned board and operator-task state is authoritative; " +
+		"list only if it is missing, stale or inconsistent. Failed or partial updates are not completion; reconcile actual state before claiming success. " +
+		"Initial ID discovery and final closure may stand alone. A plan or decision does not authorize implementation: " +
 		'for proposed work awaiting an operator go-ahead, use action="block" with a note naming the pending operator decision, ' +
 		'or action="drop", and wait.'
 	);
