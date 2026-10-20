@@ -891,6 +891,7 @@ export function createProvidersBundle(
 				return authStore.resolveForTarget(resolveAuthTarget(target, runtime), {
 					includeFallback: false,
 					...(options?.signal ? { signal: options.signal } : {}),
+					...(options?.rejectedApiKey !== undefined ? { rejectedApiKey: options.rejectedApiKey } : {}),
 				});
 			},
 			getStored(providerId) {

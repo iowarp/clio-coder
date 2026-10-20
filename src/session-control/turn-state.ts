@@ -13,6 +13,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type {
+	AuthResolution,
 	CostProvenance,
 	ResolvedRuntimeTarget,
 	RuntimeDescriptor,
@@ -32,6 +33,8 @@ export interface ChatLoopTarget {
 }
 
 export interface AgentRuntime {
+	lastAuthResolution?: AuthResolution;
+	lastProviderStatus?: number;
 	agent: ReturnType<typeof createEngineAgent>["agent"];
 	targetId: string;
 	runtimeId: string;

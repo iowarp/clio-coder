@@ -163,7 +163,7 @@ export interface ProvidersContract {
 		resolveForTarget(
 			target: TargetDescriptor,
 			runtime: RuntimeDescriptor,
-			options?: AuthOperationOptions,
+			options?: AuthOperationOptions & { rejectedApiKey?: string },
 		): Promise<AuthResolution>;
 		getStored(providerId: string): AuthCredential | null;
 		listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }>;

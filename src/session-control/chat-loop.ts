@@ -1621,6 +1621,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	if (deps.turnOutcomeCollector === undefined) deps.middleware?.registerHook(outcomeCollector);
 
 	const recovery = createTurnRecovery({
+		auth: deps.providers.auth,
 		turnSignal: () => submitOwner?.signal,
 		turnIdentity: () => submitGeneration,
 		state,
@@ -3084,7 +3085,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							cause: err,
 							...(typeof err === "object" && err !== null && "status" in err ? { status: err.status } : {}),
 						});
-						if (isRetryableRecoveryFailure(classification)) {
+						if (isRetryableRecoveryFailure(classification) || classification.kind === "auth") {
 							const failureMessage = {
 								role: "assistant",
 								content: [{ type: "text", text: "" }],
@@ -3092,7 +3093,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								errorMessage: message,
 								timestamp: Date.now(),
 							} as AgentMessage;
-							await recovery.runTransientRetryChain(
+							const handled = await recovery.runTransientRetryChain(
 								agentRuntime,
 								runtimePromptText,
 								{
@@ -3103,7 +3104,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								undefined,
 								classification,
 							);
-							return;
+							if (handled) return;
 						}
 						emitNotice(operatorFacingEngineError(message));
 						return;

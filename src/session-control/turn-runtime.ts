@@ -637,12 +637,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						? { kind: "required", toolName: middlewareChoice.toolName }
 						: undefined,
 				]);
-				if (!state.synthesisToolLock) return engineMainStreamSimple(currentModel, controlled.context, controlled.options);
+				delete localRuntime.lastProviderStatus;
+				const requestOptions = {
+					...controlled.options,
+					onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof controlled.options>["onResponse"]>>) => {
+						// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
+						localRuntime.lastProviderStatus = args[0].status;
+						await controlled.options?.onResponse?.(...args);
+					},
+				};
+				if (!state.synthesisToolLock) return engineMainStreamSimple(currentModel, controlled.context, requestOptions);
 				const request = resolvedRequestContext(controlled.context);
 				return engineMainStreamSimple(
 					currentModel,
 					{ ...request, systemPrompt: lockedSynthesisSystemPrompt(request.systemPrompt ?? "") },
-					controlled.options,
+					requestOptions,
 				);
 			},
 			initialState: {
@@ -768,6 +777,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					signal ? { signal } : undefined,
 				);
 				if (!currentRun() || signal?.aborted) throw new Error("Request ownership changed while resolving authentication.");
+				localRuntime.lastAuthResolution = resolved;
 				// A failed OAuth refresh carries its remedy in detail; Pi's own "No API key" error would drop it.
 				if (
 					resolved.apiKey === undefined &&

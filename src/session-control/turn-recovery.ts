@@ -7,6 +7,7 @@
  */
 
 import type { toContextOverflowError } from "../domains/providers/errors.js";
+import type { ProvidersContract } from "../domains/providers/index.js";
 import type { RecoveryFailure, RetryCountdownHandle, RetrySettings } from "../domains/session/retry.js";
 import {
 	classifyRecoveryFailure,
@@ -43,6 +44,7 @@ export interface RetryStatusEvent {
 }
 
 export interface TurnRecoveryDeps {
+	auth?: ProvidersContract["auth"];
 	turnSignal?: () => AbortSignal | undefined;
 	turnIdentity?: () => unknown;
 	state: ChatTurnState;
@@ -278,12 +280,92 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			classifyRecoveryFailure({
 				message: failure.errorMessage,
 				runtimeId: agentRuntime.runtimeId,
+				...(agentRuntime.lastProviderStatus !== undefined ? { status: agentRuntime.lastProviderStatus } : {}),
 				cancelled: cancelled() || state.activeInterruptReason !== null || failure.stopReason === "aborted",
 				hasAttemptOutput: recoveryAttemptHasOutput(messages),
 			});
 		let classified =
 			classification ??
 			classify(initialFailure, attemptMessages ?? (initialFailure.message ? [initialFailure.message] : []));
+		const retryAuth = async (failure: TerminalAssistantFailure): Promise<boolean> => {
+			const rejected = agentRuntime.lastAuthResolution;
+			if (!deps.auth || rejected?.source !== "stored-oauth" || rejected.apiKey === undefined) return false;
+			const { target, runtime } = agentRuntime.runtimeResolution;
+			const persistFailure = (errorMessage: string): void => {
+				const model = agentRuntime.agent.state.model;
+				const message = {
+					role: "assistant",
+					content: [],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						callInvoked: false,
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "error",
+					errorMessage,
+					timestamp: Date.now(),
+				} as AgentMessage;
+				(agentRuntime.agent.state as MutableAgentState).errorMessage = errorMessage;
+				agentRuntime.agent.state.messages.push(message);
+				ensureFailureVisibleAndPersisted({ stopReason: "error", errorMessage, message });
+				recordRetryStatus({ phase: "exhausted", attempt: 1, maxAttempts: 1, errorMessage }, false);
+			};
+			ensureFailureVisibleAndPersisted(failure);
+			recordRetryStatus({
+				phase: "retrying",
+				attempt: 1,
+				maxAttempts: 1,
+				errorMessage: `Refreshing OAuth authentication for target '${target.id}' and retrying once.`,
+			});
+			pruneFailedAssistantFromContext(agentRuntime.agent);
+			try {
+				const refreshed = await deps.auth.resolveForTarget(target, runtime, {
+					rejectedApiKey: rejected.apiKey,
+					...(signal ? { signal } : {}),
+				});
+				if (cancelled()) return true;
+				if (!refreshed.available || refreshed.apiKey === undefined) {
+					throw new Error(refreshed.detail ?? "OAuth credential could not be refreshed.");
+				}
+			} catch {
+				if (cancelled()) return true;
+				// Reuse the CLI login syntax, and keep refresh-provider diagnostics out of the remedy (#427).
+				const errorMessage = `OAuth credential for target '${target.id}' could not be refreshed. Run clio-coder auth login ${rejected.providerId} again.`;
+				persistFailure(errorMessage);
+				return true;
+			}
+			if (cancelled()) return true;
+			(agentRuntime.agent.state as MutableAgentState).errorMessage = undefined;
+			try {
+				// Continue the failed round with its existing user and tool messages (#427).
+				await agentRuntime.agent.continue();
+			} catch (error) {
+				if (!cancelled()) persistFailure(error instanceof Error ? error.message : String(error));
+				return true;
+			}
+			if (cancelled()) return true;
+			const settled = detectTerminalFailureFromState(agentRuntime.agent);
+			if (settled) ensureFailureVisibleAndPersisted(settled);
+			recordRetryStatus(
+				{
+					phase: settled ? "exhausted" : "recovered",
+					attempt: 1,
+					maxAttempts: 1,
+					...(settled ? { errorMessage: settled.errorMessage } : {}),
+				},
+				false,
+			);
+			return true;
+		};
+		// Auth recovery has its own one-shot budget even when transient retries are disabled (#427).
+		if (classified.kind === "auth") return retryAuth(initialFailure);
 		if (agentRuntime.runtimeId === "litellm" && !isRetryableRecoveryFailure(classified)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
 			return true;
@@ -342,6 +424,9 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 					cause: err,
 					...(typeof err === "object" && err !== null && "status" in err ? { status: err.status } : {}),
 				});
+				if (classified.kind === "auth") {
+					if (await retryAuth({ stopReason: "error", errorMessage: message })) return true;
+				}
 				if (!isRetryableRecoveryFailure(classified) || attempt >= settings.maxRetries) {
 					recordRetryStatus({
 						phase: "exhausted",
@@ -380,6 +465,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			const nextFailure = reclassifyStallAbort(state, settled);
 			ensureFailureVisibleAndPersisted(nextFailure);
 			classified = classify(nextFailure, agentRuntime.agent.state.messages.slice(attemptStart));
+			if (classified.kind === "auth" && (await retryAuth(nextFailure))) return true;
 			if (!isRetryableRecoveryFailure(classified)) {
 				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;

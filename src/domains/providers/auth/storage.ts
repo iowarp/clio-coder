@@ -13,6 +13,9 @@ import {
 	refreshOAuthCredentials,
 } from "./oauth.js";
 
+// Refresh before clock skew or request latency can make a locally valid token fail (#427).
+const OAUTH_EXPIRY_MARGIN_MS = 5 * 60_000;
+
 export interface ApiKeyCredential {
 	type: "api_key";
 	key: string;
@@ -528,6 +531,7 @@ export class AuthStorage {
 	private async refreshOAuthCredentialWithLock(
 		providerId: string,
 		signal: AbortSignal,
+		rejectedApiKey?: string,
 	): Promise<{ apiKey: string; credential: OAuthCredential } | null> {
 		let latestData: AuthStorageData | undefined;
 		const result = await this.backend.withLockAsync(
@@ -543,7 +547,10 @@ export class AuthStorage {
 				if (stored?.type !== "oauth") {
 					return { result: null };
 				}
-				if (Date.now() < stored.expires) {
+				if (
+					Date.now() + OAUTH_EXPIRY_MARGIN_MS < stored.expires &&
+					(rejectedApiKey === undefined || (await getOAuthApiKey(providerId, stored)) !== rejectedApiKey)
+				) {
 					return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
 				}
 				const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
@@ -569,6 +576,40 @@ export class AuthStorage {
 		this.writeDamage = null;
 		this.failedOAuth.delete(providerId);
 		return result;
+	}
+
+	async forceRefreshApiKey(
+		providerId: string,
+		rejectedApiKey: string,
+		signal: AbortSignal = new AbortController().signal,
+	): Promise<AuthResolution> {
+		try {
+			// Compare the rejected key under the lock so a concurrent rotation wins (#427).
+			const refreshed = await this.refreshOAuthCredentialWithLock(providerId, signal, rejectedApiKey);
+			if (refreshed) {
+				return {
+					providerId,
+					available: true,
+					credentialType: "oauth",
+					source: "stored-oauth",
+					detail: providerId,
+					apiKey: refreshed.apiKey,
+				};
+			}
+		} catch (error) {
+			if (signal.aborted) throw signal.reason ?? error;
+			// The rejected token must never be returned after a failed forced refresh (#427).
+			this.reload();
+		}
+		const stored = this.data[providerId];
+		if (stored?.type === "oauth") this.failedOAuth.set(providerId, stored);
+		return {
+			providerId,
+			available: false,
+			credentialType: "oauth",
+			source: "stored-oauth",
+			detail: this.oauthFailureDetail(providerId),
+		};
 	}
 
 	async resolveApiKey(
@@ -614,7 +655,7 @@ export class AuthStorage {
 					detail: `No OAuth flow is registered for '${providerId}'.`,
 				};
 			}
-			if (Date.now() < stored.expires) {
+			if (Date.now() + OAUTH_EXPIRY_MARGIN_MS < stored.expires) {
 				this.failedOAuth.delete(providerId);
 				return {
 					providerId,
@@ -646,7 +687,7 @@ export class AuthStorage {
 				// failed for any other reason is answered by re-reading the store below.
 				this.reload();
 				const updated = this.data[providerId];
-				if (updated?.type === "oauth" && Date.now() < updated.expires) {
+				if (updated?.type === "oauth" && Date.now() + OAUTH_EXPIRY_MARGIN_MS < updated.expires) {
 					return {
 						providerId,
 						available: true,
@@ -704,8 +745,14 @@ export class AuthStorage {
 
 	async resolveForTarget(
 		target: AuthTarget,
-		opts?: { includeFallback?: boolean; signal?: AbortSignal },
+		opts?: { includeFallback?: boolean; signal?: AbortSignal; rejectedApiKey?: string },
 	): Promise<AuthResolution> {
+		if (opts?.rejectedApiKey !== undefined) {
+			return this.forAuthTarget(
+				target,
+				await this.forceRefreshApiKey(target.providerId, opts.rejectedApiKey, opts.signal),
+			);
+		}
 		const args: {
 			targetId?: string;
 			explicitEnvVar?: string;
