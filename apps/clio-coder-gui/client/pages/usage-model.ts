@@ -229,10 +229,19 @@ export function usageView(report: UsageReport): UsageView {
 		share: bar.tokens && widest > 0 ? bar.tokens / widest : 0,
 	}));
 
+	const hasOriginSplit = ORIGINS.some(([key]) => Object.hasOwn(sessionTokens, key));
 	const origins = ORIGINS.flatMap(([key, label]) => {
+		if (!Object.hasOwn(sessionTokens, key)) return [];
 		const value = number(sessionTokens[key]);
-		return value === null ? [] : [{ label, value: value.toLocaleString("en-US") }];
+		return [{ label, value: value === null ? "Not recorded" : value.toLocaleString("en-US") }];
 	});
+	if (!hasOriginSplit && first("tokens")) {
+		const calls = number(sessionTokens.apiCalls);
+		origins.push({
+			label: "Session and side calls",
+			value: calls === null ? "Not recorded" : calls.toLocaleString("en-US"),
+		});
+	}
 
 	if (workers) {
 		const calls = number(workers.apiCalls);
@@ -250,10 +259,8 @@ export function usageView(report: UsageReport): UsageView {
 				: null,
 		origins,
 		originsNote: origins.length
-			? "Calls are split by what asked for them; a tool loop can make several conversation calls. Worker calls include shadow and internal helpers."
-			: first("tokens")
-				? "No side question, handoff, pre-warm or background memory step was recorded in this window, so every recorded call belongs to a turn."
-				: "Call origins were not recorded in this window.",
+			? "Session and side-call counts come from session usage; worker calls come from disjoint receipt totals, including shadow and internal helpers. A tool loop can make several conversation calls."
+			: "Call origins were not recorded in this window.",
 		missingStores,
 		models: [...all("model-usage"), ...all("worker-model-usage")],
 		skillsActivated: all("skill-activated"),
