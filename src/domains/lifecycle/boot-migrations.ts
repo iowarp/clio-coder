@@ -1,15 +1,17 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { MigrationReport } from "./migrations/index.js";
+import { MIGRATION_NOTICES_FILE, readMigrationNotices } from "./migrations/notices.js";
 import { REGISTERED_MIGRATION_IDS } from "./migrations/registry-ids.js";
 
 /**
  * A background update installs the new package with `--no-post-install`, so the
  * first launch of the new version meets state the previous release wrote and no
  * `clio-coder upgrade` has run. Boot applies the pending migrations once, under
- * the migration runner's own lock, and keeps what they report for the notice the
- * session shows. A fresh home never lands here: initialization records every
+ * the migration runner's own lock. Reports persist until an interactive launch
+ * claims them. A fresh home never lands here: initialization records every
  * registered migration as applied.
  */
 let notices: string[] = [];
@@ -21,7 +23,31 @@ function describeMigrationReport(id: string, report: MigrationReport): string {
 	return parts.join(" ");
 }
 
-export async function applyPendingMigrationsAtBoot(): Promise<void> {
+export function takePendingMigrationNotices(): string[] {
+	const stateDir = clioStateDir();
+	const path = join(stateDir, MIGRATION_NOTICES_FILE);
+	if (!existsSync(path)) return [];
+	try {
+		// Share the writer's migrations.json lock so a claim cannot erase a new report.
+		// A second interactive boot must never stall; after 50 ms the other process claims it.
+		return withStateFileLockSync(
+			join(stateDir, "migrations.json"),
+			() => {
+				if (!existsSync(path)) return [];
+				const pending = readMigrationNotices(stateDir);
+				unlinkSync(path);
+				return pending.map((entry) => describeMigrationReport(entry.id, entry));
+			},
+			{ timeoutMs: 50 },
+		);
+	} catch {
+		return [];
+	}
+}
+
+export async function applyPendingMigrationsAtBoot(
+	interactive = process.env.CLIO_CODER_INTERACTIVE === "1",
+): Promise<void> {
 	const stateDir = clioStateDir();
 	const manifest = join(stateDir, "migrations.json");
 	if (!existsSync(manifest)) return;
@@ -40,7 +66,7 @@ export async function applyPendingMigrationsAtBoot(): Promise<void> {
 		const result = await runPending(stateDir);
 		for (const id of result.applied) {
 			const report = result.reports?.[id];
-			if (report && (report.changed.length > 0 || report.attention.length > 0))
+			if (!interactive && report && (report.changed.length > 0 || report.attention.length > 0))
 				notices.push(describeMigrationReport(id, report));
 		}
 	} catch (error) {

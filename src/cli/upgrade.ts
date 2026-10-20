@@ -24,6 +24,7 @@ import {
 } from "../domains/lifecycle/release-version.js";
 import { readStateInfo } from "../domains/lifecycle/state.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
+import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { printError } from "./shared.js";
 
@@ -178,7 +179,7 @@ async function runChild(
 			tail = `${tail}${chunk.toString("utf8")}`.slice(-16384);
 		};
 		child.stdout?.on("data", (chunk: Buffer) => {
-			stdout = `${stdout}${chunk.toString("utf8")}`.slice(0, 8192);
+			stdout = `${stdout}${chunk.toString("utf8")}`.slice(0, 1024 * 1024);
 			keepTail(chunk);
 		});
 		child.stderr?.on("data", keepTail);
@@ -188,7 +189,17 @@ async function runChild(
 				resolve(stdout);
 				return;
 			}
-			reject(new Error(`${label} exited with code ${code ?? -1}${tail.trim() ? `:\n${tail.trim()}` : ""}`));
+			let detail = tail.trim();
+			try {
+				const report = JSON.parse(stdout) as { errors?: unknown } | null;
+				if (Array.isArray(report?.errors)) {
+					const errors = report.errors.filter((error: unknown) => typeof error === "string" && error.trim());
+					if (errors.length > 0) detail = errors.join("\n");
+				}
+			} catch {
+				// Non-JSON children still provide their captured output on failure.
+			}
+			reject(new Error(`${label} exited with code ${code ?? -1}${detail ? `:\n${detail}` : ""}`));
 		});
 	});
 }
@@ -248,10 +259,34 @@ async function runDoctorFixAfterInstall(_installation: Installation): Promise<vo
 	if (failures.length) throw new Error(failures.map((finding) => `${finding.name}: ${finding.detail}`).join("\n"));
 }
 
-async function runPostInstallUpgrade(opts: UpgradeOptions, installation: Installation): Promise<void> {
-	const args = [installation.entry, "upgrade", "--post-install", `--channel=${opts.channel}`];
+async function runPostInstallUpgrade(
+	opts: UpgradeOptions,
+	installation: Installation,
+	presenter: LifecyclePresenter,
+): Promise<void> {
+	const args = [installation.entry, "upgrade", "--post-install", `--channel=${opts.channel}`, "--json"];
 	if (opts.skipMigrations) args.push("--skip-migrations");
-	await runChild(nodeFor(installation), args, "clio-coder upgrade --post-install");
+	const output = await runChild(nodeFor(installation), args, "clio-coder upgrade --post-install");
+	let report: { steps: Array<{ type: string; message: string }>; warnings: string[] };
+	try {
+		report = JSON.parse(output);
+		if (
+			!Array.isArray(report?.steps) ||
+			!report.steps.every((step) => step && typeof step.type === "string" && typeof step.message === "string") ||
+			!Array.isArray(report.warnings) ||
+			!report.warnings.every((warning) => typeof warning === "string")
+		)
+			throw new Error("Invalid post-install report");
+	} catch {
+		for (const line of output.split(/\r?\n/).filter((line) => line.trim())) presenter.note(line);
+		return;
+	}
+	for (const step of report.steps) {
+		if (step.type === "completed") presenter.completedStep(step.message);
+		else if (step.type === "substep") presenter.substep(step.message);
+		else if (step.type === "note") presenter.note(step.message);
+	}
+	for (const warning of report.warnings) presenter.warn(warning);
 }
 
 async function runBackgroundRestart(installation: Installation): Promise<string> {
@@ -674,7 +709,7 @@ export async function runUpgradeCommand(
 			return 1;
 		}
 		try {
-			await deps.runPostInstallUpgrade(opts, activeInstallation);
+			await deps.runPostInstallUpgrade(opts, activeInstallation, presenter);
 			return finish();
 		} catch (err) {
 			presenter.fail("post-install checks failed", err instanceof Error ? err.message : String(err));

@@ -137,7 +137,7 @@ test("upgrade updates the same prefix and runs checks with the exact installed e
 	assert.equal(JSON.parse(result.stdout).status, "success");
 	assert.deepEqual(f.calls(), [
 		{ command: "npm", args: ["install", "-g", "--prefix", f.prefix, "@iowarp/clio-coder@99.0.0"] },
-		{ entry: f.entry, args: ["upgrade", "--post-install", "--channel=latest"] },
+		{ entry: f.entry, args: ["upgrade", "--post-install", "--channel=latest", "--json"] },
 	]);
 });
 
@@ -178,7 +178,7 @@ test("restart follows successful checks, relaunches with argv the real parser ac
 		f.calls().map((row) => row.args),
 		[
 			["install", "-g", "--prefix", f.prefix, "@iowarp/clio-coder@99.0.0"],
-			["upgrade", "--post-install", "--channel=latest"],
+			["upgrade", "--post-install", "--channel=latest", "--json"],
 			[],
 		],
 	);

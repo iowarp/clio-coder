@@ -40,6 +40,7 @@ import playbooksAndPackages from "./2026-10-06-playbooks-and-packages.js";
 import acpAdapters from "./2026-10-07-acp-adapters.js";
 import claudeSubscription from "./2026-10-07-claude-subscription.js";
 import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
+import { appendMigrationNotice } from "./notices.js";
 import { REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
 /** What a migration tells the operator: what it changed, and what still needs them. */
@@ -181,6 +182,11 @@ export async function runPending(
 			applied.add(migration.id);
 			newlyApplied.push(migration.id);
 			writeManifest(path, { applied: [...applied] });
+			if (report && (report.changed.length > 0 || report.attention.length > 0)) {
+				// A post-install parent, including every shipped 0.6.4 parent, drops the child's
+				// stdout, so the report must outlive the process.
+				appendMigrationNotice(stateDir, { id: migration.id, changed: report.changed, attention: report.attention });
+			}
 		}
 		const allApplied = [...applied];
 		// Nothing pending still writes a manifest, so a fresh home gains an

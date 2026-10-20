@@ -1830,10 +1830,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.installSignalHandlers();
 
 	ensureClioState();
-	const { applyPendingMigrationsAtBoot, takeBootMigrationNotices } = await import(
+	const { applyPendingMigrationsAtBoot, takeBootMigrationNotices, takePendingMigrationNotices } = await import(
 		"../domains/lifecycle/boot-migrations.js"
 	);
-	await applyPendingMigrationsAtBoot();
+	await applyPendingMigrationsAtBoot(
+		!options.headless && options.acp === undefined && process.env.CLIO_CODER_INTERACTIVE === "1",
+	);
 	const bootConversions = takeBootMigrationNotices();
 	{
 		// A workspace's `.clio-coder/` converts the first time Clio opens it, before any domain reads it.
@@ -2204,6 +2206,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// the keyboard to tell, and the record is left unclaimed for the boot that does.
 	const upgrade = interactive ? takeUpgradeNotice() : null;
 	if (upgrade !== null) initialNotices.push(describeUpgradeNotice(upgrade));
+	if (interactive) initialNotices.push(...takePendingMigrationNotices());
 	// One notice per conversion; a surface with no operator at the keyboard gets it on stderr.
 	for (const conversion of bootConversions) {
 		if (interactive) initialNotices.push(conversion);
