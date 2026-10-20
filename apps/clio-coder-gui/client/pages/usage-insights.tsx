@@ -19,6 +19,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 	const [coverage, setCoverage] = useState("");
 	const inspector = useRef<HTMLHeadingElement>(null);
 	const opener = useRef<HTMLButtonElement>(null);
+	const search = useRef<HTMLInputElement>(null);
 	const models = usageModelInsights(report);
 	const matching = filterUsageModels(models, query, coverage);
 	const rows = compareUsageModels(matching, metric);
@@ -31,7 +32,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 	}, [selectedId]);
 	const closeInspector = () => {
 		setSelectedId(null);
-		opener.current?.focus();
+		(opener.current?.isConnected ? opener.current : search.current)?.focus();
 	};
 	return (
 		<div className="usage-analysis">
@@ -42,13 +43,14 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 						<h2 id="usage-comparison-title">Where the work happens</h2>
 					</div>
 					<span className="usage-model-count">
-						<Icon name="models" /> {models.length} model / target pairs
+						<Icon name="models" /> {models.length} model / target {models.length === 1 ? "pair" : "pairs"}
 					</span>
 				</header>
 				<div className="usage-explore-controls">
 					<label>
 						Find a model or target
 						<input
+							ref={search}
 							type="search"
 							value={query}
 							onChange={(event) => setQuery(event.target.value)}
@@ -165,7 +167,9 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 							))}
 						</dl>
 						<details>
-							<summary>Model provenance · {selected.facts.length} source facts</summary>
+							<summary>
+								Model provenance · {selected.facts.length} source {selected.facts.length === 1 ? "fact" : "facts"}
+							</summary>
 							{selected.facts.map((fact) => (
 								<div className="usage-source-fact" key={JSON.stringify(fact)}>
 									<h4>{fact.name}</h4>
