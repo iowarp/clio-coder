@@ -349,7 +349,7 @@ async function main() {
 		autoUpdate = "1";
 		postInstall = "0";
 	}
-	if (autoUpdate === "preserve") autoUpdate = old?.autoUpdate === false ? "0" : "1";
+	if (autoUpdate === "preserve") autoUpdate = old?.autoUpdate === false && !old?.versionPin ? "0" : "1";
 	if (!inside(path.join(root, "versions"), current) || !inside(path.join(root, "runtime"), node))
 		throw new Error("Candidate is outside owned install directories");
 	if (process.platform === "win32" && /[%\r\n"]/u.test([node, old?.launcherNode, old?.node, root, launcher].join("")))

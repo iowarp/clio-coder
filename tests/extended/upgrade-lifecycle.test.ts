@@ -274,8 +274,8 @@ it("hands post-install checks to the installed binary with the selected options"
 		const { code } = await upgrade(temp, ["--channel", "beta", "--skip-migrations"], {
 			inspectInstallation: () => installation("npm"),
 			lookUpAvailableVersion: async () => ({ asked: true, version: "99.0.0" }),
-			runNpmInstall: async (channel) => {
-				calls.push(`install:${channel}`);
+			runNpmInstall: async (_installation, invocation) => {
+				calls.push(`install:${invocation.args.at(-1)}`);
 			},
 			runPostInstallUpgrade: async (options) => {
 				calls.push(`post:${options.channel}:${options.skipMigrations}`);
@@ -288,7 +288,7 @@ it("hands post-install checks to the installed binary with the selected options"
 			},
 		});
 		strictEqual(code, 0);
-		deepStrictEqual(calls, ["install:beta", "post:beta:true"]);
+		deepStrictEqual(calls, ["install:@iowarp/clio-coder@99.0.0", "post:beta:true"]);
 	} finally {
 		temp.cleanup();
 	}

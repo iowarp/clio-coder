@@ -181,6 +181,92 @@ export function npmInstallArgs(installation: Installation, channel: string): str
 	return ["install", "-g", "--prefix", installation.prefix, `${PACKAGE_NAME}@${channel}`];
 }
 
+export interface UpgradeInvocation {
+	command: string;
+	args: string[];
+	env: Record<string, string | undefined>;
+}
+
+/** A resolved version makes "Installing with" name the exact version that runs. */
+export function npmUpgradeInvocation(
+	installation: Installation,
+	version: string,
+	runtime: { windows: boolean; node: string; npmCli: string | null },
+): UpgradeInvocation {
+	const args = npmInstallArgs(installation, version);
+	if (!runtime.windows) return { command: "npm", args, env: {} };
+	if (runtime.npmCli === null)
+		throw new Error("Cannot locate npm-cli.js beside Node; use npm install -g from your terminal");
+	return { command: runtime.node, args: [runtime.npmCli, ...args], env: {} };
+}
+
+/**
+ * The runtime stays the one the manifest names unless --refresh-runtime,
+ * so an upgrade does not quietly download a new Node.
+ */
+export function installerUpgradeInvocation(
+	installation: Installation,
+	opts: { channel: string; channelExplicit: boolean; refreshRuntime: boolean },
+	windows: boolean,
+): UpgradeInvocation {
+	const record = installation.installer;
+	if (installation.kind !== "installer" || record === undefined)
+		throw new Error("installer upgrade needs an install.sh installation");
+	const args = windows
+		? [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				join(installation.root, "scripts", "install.ps1"),
+				"-Channel",
+				opts.channel,
+				"-InstallDir",
+				record.root,
+				"-BinDir",
+				dirname(record.launcher),
+				"-NoPostInstall",
+			]
+		: [
+				join(installation.root, "scripts", "install.sh"),
+				"--channel",
+				opts.channel,
+				"--install-dir",
+				record.root,
+				"--bin-dir",
+				dirname(record.launcher),
+				"--no-post-install",
+			];
+	if (record.versionPin && !opts.channelExplicit) args.push(windows ? "-Version" : "--version", record.versionPin);
+	const env: UpgradeInvocation["env"] = {};
+	if (opts.refreshRuntime) {
+		env.CLIO_CODER_NODE_VERSION = undefined;
+		args.push(windows ? "-RefreshRuntime" : "--refresh-runtime");
+	} else if (record.nodeVersion) env.CLIO_CODER_NODE_VERSION = record.nodeVersion;
+	return { command: windows ? "powershell.exe" : "sh", args, env };
+}
+
+export function formatUpgradeInvocation(invocation: UpgradeInvocation, windows = process.platform === "win32"): string {
+	if (windows) {
+		const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+		const overrides = Object.entries(invocation.env).map(([name, value]) =>
+			value === undefined ? `Remove-Item Env:${name};` : `$env:${name}=${quote(value)};`,
+		);
+		return [...overrides, "&", ...[invocation.command, ...invocation.args].map(quote)].join(" ");
+	}
+	const quote = (value: string) => (/^[A-Za-z0-9_./:@=+-]+$/u.test(value) ? value : shellQuote(value));
+	const removed = Object.entries(invocation.env).filter(([, value]) => value === undefined);
+	const prefix = removed.flatMap(([name]) => ["-u", name]);
+	const overrides = Object.entries(invocation.env).flatMap(([name, value]) =>
+		value === undefined ? [] : [`${name}=${quote(value)}`],
+	);
+	return [
+		...(prefix.length ? ["env", ...prefix] : []),
+		...overrides,
+		...[invocation.command, ...invocation.args].map(quote),
+	].join(" ");
+}
+
 /**
  * The installer run that releases a version pin. A pinned install keeps its
  * version through `clio-coder upgrade` and installer reruns; only an explicit

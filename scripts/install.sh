@@ -858,7 +858,7 @@ main() {
 	if [ -z "$package_file" ]; then
 		case "$version" in
 			latest | beta | dev)
-				PATH="$runtime_dir/bin:$PATH" "$node_bin" "$npm_cli" view "$PACKAGE" dist-tags --json >"$work/dist-tags.json" </dev/null || fail "cannot resolve the $channel channel from the registry"
+				PATH="$runtime_dir/bin:$PATH" npm_config_update_notifier=false npm_config_fund=false "$node_bin" "$npm_cli" view "$PACKAGE" dist-tags --json --loglevel=error >"$work/dist-tags.json" </dev/null || fail "cannot resolve the $channel channel from the registry"
 				resolved="$("$node_bin" -e '
 const fs=require("node:fs"), semver=require(process.argv[1]+"/node_modules/semver");
 const tags=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), channel=process.argv[3];

@@ -229,7 +229,11 @@ function Install-ClioCoder {
 		$npmCli = Join-Path $runtimeDir "node_modules\npm\bin\npm-cli.js"
 		if (-not $Options.Package -and $spec -in @("latest", "beta", "dev")) {
 			$tagsFile = Join-Path $work "dist-tags.json"
-			$tags = & $node $npmCli view $PackageName dist-tags --json
+			$savedNotifier = $env:npm_config_update_notifier
+			$savedFund = $env:npm_config_fund
+			$env:npm_config_update_notifier = "false"; $env:npm_config_fund = "false"
+			try { $tags = & $node $npmCli view $PackageName dist-tags --json --loglevel=error }
+			finally { $env:npm_config_update_notifier = $savedNotifier; $env:npm_config_fund = $savedFund }
 			if ($LASTEXITCODE -ne 0) { Fail "cannot resolve the $spec channel from the registry" }
 			[IO.File]::WriteAllText($tagsFile, ($tags -join "`n"))
 			$resolve = 'const fs=require("node:fs"),semver=require(process.argv[2]+"/node_modules/semver");const tags=JSON.parse(fs.readFileSync(process.argv[3],"utf8")),c=process.argv[4];const tracks=c==="dev"?["dev","beta","latest"]:c==="beta"?["beta","latest"]:["latest"];const versions=tracks.map(t=>tags[t]).filter(v=>semver.valid(v));if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rcompare)[0]);'

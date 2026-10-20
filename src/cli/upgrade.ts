@@ -5,13 +5,15 @@ import { initializeClioHome } from "../core/init.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../core/xdg.js";
 import { runDoctor } from "../domains/lifecycle/doctor.js";
-import type { Installation } from "../domains/lifecycle/install-method.js";
+import type { Installation, UpgradeInvocation } from "../domains/lifecycle/install-method.js";
 import {
+	formatUpgradeInvocation,
 	inspectInstallation,
 	installationCommand,
 	installerPackageRoot,
 	installerUnpinCommand,
-	npmInstallArgs,
+	installerUpgradeInvocation,
+	npmUpgradeInvocation,
 	readInstallerRecord,
 } from "../domains/lifecycle/install-method.js";
 import { listMigrations, readMigrationManifestResult, runPending } from "../domains/lifecycle/migrations/index.js";
@@ -209,64 +211,21 @@ function nodeFor(installation: Installation): string {
 	return node !== undefined && existsSync(node) ? node : process.execPath;
 }
 
-async function runNpmInstall(channel: Channel, installation: Installation): Promise<void> {
-	const version = channel === "latest" ? "latest" : await fetchReleaseVersion(channel);
-	if (version === null) throw new Error(`Cannot resolve the ${channel} channel; retry when the registry is reachable`);
-	const npmCli = join(
-		dirname(process.execPath),
-		process.platform === "win32" ? "node_modules/npm/bin/npm-cli.js" : "../lib/node_modules/npm/bin/npm-cli.js",
-	);
-	if (process.platform === "win32" && existsSync(npmCli))
-		await runChild(process.execPath, [npmCli, ...npmInstallArgs(installation, version)], "npm install");
-	else if (process.platform === "win32")
-		throw new Error("Cannot locate npm-cli.js beside Node; use npm install -g from your terminal");
-	else await runChild("npm", npmInstallArgs(installation, version), "npm install");
+async function runNpmInstall(installation: Installation, invocation: UpgradeInvocation): Promise<void> {
+	await runChild(invocation.command, invocation.args, `npm install --prefix ${installation.prefix}`, {
+		...process.env,
+		...invocation.env,
+	});
 }
 
-/**
- * Run the installer this package shipped against the install root it came
- * from. The runtime stays the one the manifest names unless --refresh-runtime,
- * so an upgrade does not quietly download a new Node. Post-install checks run
- * afterwards through the new entry, as for npm.
- */
-async function runInstallerUpgrade(opts: UpgradeOptions, installation: Installation): Promise<Installation> {
+async function runInstallerUpgrade(installation: Installation, invocation: UpgradeInvocation): Promise<Installation> {
 	const record = installation.installer;
 	if (installation.kind !== "installer" || record === undefined)
 		throw new Error("installer upgrade needs an install.sh installation");
-	const windows = process.platform === "win32";
-	const args = windows
-		? [
-				"-NoProfile",
-				"-ExecutionPolicy",
-				"Bypass",
-				"-File",
-				join(installation.root, "scripts", "install.ps1"),
-				"-Channel",
-				opts.channel,
-				"-InstallDir",
-				record.root,
-				"-BinDir",
-				dirname(record.launcher),
-				"-NoPostInstall",
-			]
-		: [
-				join(installation.root, "scripts", "install.sh"),
-				"--channel",
-				opts.channel,
-				"--install-dir",
-				record.root,
-				"--bin-dir",
-				dirname(record.launcher),
-				"--no-post-install",
-			];
-	const env: NodeJS.ProcessEnv = { ...process.env };
-	if (record.versionPin && !opts.channelExplicit) args.push(windows ? "-Version" : "--version", record.versionPin);
-	if (record.autoUpdate === false) args.push(windows ? "-NoAutoUpdate" : "--no-auto-update");
-	if (opts.refreshRuntime) {
-		delete env.CLIO_CODER_NODE_VERSION;
-		args.push(windows ? "-RefreshRuntime" : "--refresh-runtime");
-	} else if (record.nodeVersion) env.CLIO_CODER_NODE_VERSION = record.nodeVersion;
-	await runChild(windows ? "powershell.exe" : "sh", args, windows ? "install.ps1" : "install.sh", env);
+	await runChild(invocation.command, invocation.args, process.platform === "win32" ? "install.ps1" : "install.sh", {
+		...process.env,
+		...invocation.env,
+	});
 	const updated = readInstallerRecord(record.root);
 	if (updated === null) throw new Error(`install.sh finished but ${join(record.root, "install.json")} is unreadable`);
 	return inspectInstallation(join(installerPackageRoot(updated.current), "dist", "cli", "index.js"));
@@ -638,10 +597,40 @@ export async function runUpgradeCommand(
 		return finish();
 	}
 
+	const prepareInstall = async (): Promise<{ invocation: UpgradeInvocation; version: string | null }> => {
+		let invocation: UpgradeInvocation;
+		let version: string | null = null;
+		if (method === "installer") invocation = installerUpgradeInvocation(installation, opts, process.platform === "win32");
+		else {
+			version = availableVersion ?? (await fetchReleaseVersion(opts.channel));
+			if (version === null)
+				throw new Error(`Cannot resolve the ${opts.channel} channel; retry when the registry is reachable`);
+			const npmCli = join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js");
+			invocation = npmUpgradeInvocation(installation, version, {
+				windows: process.platform === "win32",
+				node: process.execPath,
+				npmCli: existsSync(npmCli) ? npmCli : null,
+			});
+		}
+		return { invocation, version };
+	};
+
 	if (opts.dryRun) {
 		if (method === "source" && !opts.postInstall) sourceAdvice();
-		else if (!opts.postInstall && (comparison === null || comparison > 0 || leavingPrerelease || channelSelectionNeeded))
-			presenter.note(`Would run: ${updateCommand}`);
+		else if (
+			!opts.postInstall &&
+			(comparison === null || comparison > 0 || leavingPrerelease || channelSelectionNeeded)
+		) {
+			try {
+				const { invocation } = await prepareInstall();
+				presenter.note(`Would run: ${formatUpgradeInvocation(invocation)}`);
+			} catch (err) {
+				presenter.note(`Would run: ${updateCommand}`);
+				presenter.warn(
+					`The ${opts.channel} channel version is unresolved; showing the hand-run plan. ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
 		if (opts.skipMigrations) presenter.note("Would skip migrations (--skip-migrations).");
 		else if (pendingMigrationIds.length === 0) presenter.note("No pending migrations.");
 		else {
@@ -665,10 +654,16 @@ export async function runUpgradeCommand(
 		presenter.note("Source checkout: no npm install to run.");
 	} else if (comparison === null || comparison > 0 || leavingPrerelease || channelSelectionNeeded) {
 		try {
-			presenter.note(`Installing with: ${updateCommand}`);
-			if (method === "installer") activeInstallation = await deps.runInstallerUpgrade(opts, installation);
-			else await deps.runNpmInstall(opts.channel, installation);
-			presenter.completedStep(`Installed @iowarp/clio-coder@${opts.channel}`);
+			const plan = await prepareInstall();
+			presenter.note(`Installing with: ${formatUpgradeInvocation(plan.invocation)}`);
+			let installedVersion = plan.version ?? opts.channel;
+			if (method === "installer") {
+				activeInstallation = await deps.runInstallerUpgrade(installation, plan.invocation);
+				const current = activeInstallation.installer?.current;
+				const version = current ? installedVersionAt(current) : null;
+				installedVersion = version && parseReleaseVersion(version) ? version : opts.channel;
+			} else await deps.runNpmInstall(installation, plan.invocation);
+			presenter.completedStep(`Installed @iowarp/clio-coder@${installedVersion}`);
 		} catch (err) {
 			presenter.fail(
 				method === "installer" ? "install.sh failed" : "npm install failed",
