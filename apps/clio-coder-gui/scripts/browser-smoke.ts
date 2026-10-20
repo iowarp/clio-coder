@@ -30,7 +30,10 @@ assert.ok(
 	widths.length > 0 && widths.every((width) => [1600, 1440, 1050, 400, 390, 320].includes(width)),
 	"widths: 1600, 1440, 1050, 400, 390, 320",
 );
-const scratch = fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
+// Keep browser profiles and failure captures under the caller's private temp root too.
+const scratch = process.env.TMPDIR
+	? join(process.env.TMPDIR, "clio-coder-gui-validation")
+	: fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
 await mkdir(scratch, { recursive: true });
 process.env.TMPDIR ??= scratch;
 const output = await mkdtemp(join(scratch, "browser-"));
