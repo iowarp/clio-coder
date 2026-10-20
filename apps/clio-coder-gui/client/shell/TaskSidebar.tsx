@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router";
 import { routes } from "../../contracts/routes.js";
-import type { SessionSnapshot, Workspace } from "../../contracts/sessions.js";
+import type { SessionOverviewItem } from "../../contracts/session-overview.js";
+import type { Workspace } from "../../contracts/sessions.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
@@ -17,7 +18,7 @@ import { InlineRename } from "./InlineRename.js";
 import { Menu, MenuItem } from "./Menu.js";
 import { SettingsSidebar } from "./SettingsSidebar.js";
 import { isSettingsPath, STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
-import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
+import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask, useSessionOverview } from "./tasks.js";
 import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
 import "./task-sidebar-actions.css";
 
@@ -68,7 +69,7 @@ export function TaskSidebar({
 	const now = useMinuteClock();
 	const [shown, setShown] = useState(PROJECTS_SHOWN);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
+	const overview = useSessionOverview(client);
 	const system = useQuery({
 		queryKey: ["system"],
 		queryFn: () => client.call(routes.system, emptyInput),
@@ -197,7 +198,7 @@ export function TaskSidebar({
 								key={workspace.id}
 								client={client}
 								workspace={workspace}
-								sessions={sessions.data ?? []}
+								sessions={overview.data?.sessions ?? []}
 								current={workspace.id === activeWorkspaceId}
 								activeTask={activeTask}
 								actions={actions}
@@ -263,7 +264,7 @@ function ProjectGroup({
 }: {
 	client: Client;
 	workspace: Workspace;
-	sessions: readonly SessionSnapshot[];
+	sessions: readonly SessionOverviewItem[];
 	current: boolean;
 	activeTask: string | null;
 	actions: TaskActions;
@@ -387,7 +388,7 @@ function TaskItem({
 	const glyph =
 		row.state === "working" || row.state === "starting" || actions.resuming === row.id ? (
 			<ClioPulse size={PULSE_SIZE.row} />
-		) : row.state === "approval" ? (
+		) : row.state === "approval" || row.state === "question" || row.state === "unknown" ? (
 			<span className="wb-dot wb-dot--approval" aria-hidden="true" />
 		) : row.state === "failed" ? (
 			<span className="wb-dot wb-dot--failed" aria-hidden="true" />

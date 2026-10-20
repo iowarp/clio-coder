@@ -46,11 +46,20 @@ export interface TaskActions {
 	readonly error: Error | null;
 }
 
+export function useSessionOverview(client: Client, enabled = true) {
+	return useQuery({
+		queryKey: ["session-overview"],
+		queryFn: ({ signal }) => client.call(routes.sessionOverview, emptyInput, undefined, signal),
+		refetchInterval: 30_000,
+		enabled,
+	});
+}
+
 export function useTaskActions(client: Client, afterNavigate?: () => void): TaskActions {
 	const navigate = useNavigate();
 	const queries = useQueryClient();
 	const launch = useProjectLaunch(client);
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
+	const overview = useSessionOverview(client);
 	const resume = useMutation({
 		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string; window?: boolean }) =>
 			client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
@@ -58,6 +67,7 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, session.id] });
 			queries.setQueryData(["session", session.id], sessionBuffer(session.id).snapshot(session) ?? session);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-overview"] });
 			if (request.window) return openAppWindow(`/sessions/${session.id}`, client.token);
 			afterNavigate?.();
 			void navigate(`/sessions/${session.id}`);
@@ -69,6 +79,7 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 		onSuccess: (snapshot) => {
 			queries.setQueryData(["session", snapshot.id], sessionBuffer(snapshot.id).snapshot(snapshot) ?? snapshot);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-overview"] });
 			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
 		},
 	});
@@ -81,13 +92,13 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 			}
 			const draft =
 				workspaceId && !home.pending && !home.text && !home.textIssue
-					? reusableDraft(sessions.data ?? [], workspaceId, ownDrafts())
+					? reusableDraft(overview.data?.sessions ?? [], workspaceId, ownDrafts())
 					: undefined;
 			afterNavigate?.();
 			if (draft) void navigate(`/sessions/${draft.id}`);
 			else void navigate("/");
 		},
-		[sessions.data, navigate, afterNavigate],
+		[overview.data?.sessions, navigate, afterNavigate],
 	);
 	return {
 		launch,
@@ -125,6 +136,7 @@ export function useRenameTask(client: Client) {
 		onSuccess: (_result, { sessionId, workspaceId }) => {
 			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-overview"] });
 			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
 		},
 	});
@@ -144,6 +156,7 @@ export function useDeleteTask(client: Client) {
 			queries.removeQueries({ queryKey: ["session", sessionId] });
 			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-overview"] });
 			if (sessionIdFromPath(location.pathname) === sessionId) void navigate("/");
 		},
 	});
