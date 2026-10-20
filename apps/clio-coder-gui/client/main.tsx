@@ -17,6 +17,9 @@ const queries = new QueryClient({
 	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
 	queryCache: new QueryCache({
 		onError: (error, query) => {
+			// The project list explains unavailable saved history beside the affected tasks.
+			if (query.queryKey[0] === "session-history" && error instanceof ApiProblem && error.problem.code === "unsupported")
+				return;
 			// A link to a saved task this server has not opened answers not_found on the first read, and
 			// the task page shows that state with its own way to resume. Only that first read is quiet:
 			// a snapshot that was loaded and then goes missing is still reported, as is everything else.

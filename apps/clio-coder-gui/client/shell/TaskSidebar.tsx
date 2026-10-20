@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot, Workspace } from "../../contracts/sessions.js";
-import { type Client, emptyInput } from "../api/client.js";
+import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { Icon } from "../design/icons.js";
@@ -330,7 +330,21 @@ function ProjectGroup({
 					{history.isPending && history.fetchStatus !== "idle" && rows.length === 0 ? (
 						<li className="wb-note">Loading…</li>
 					) : null}
-					{!history.isPending && rows.length === 0 ? <li className="wb-note">No tasks yet.</li> : null}
+					{history.isError ? (
+						<li className="wb-note" role="status">
+							{history.error instanceof ApiProblem && history.error.problem.code === "unsupported" ? (
+								"Saved tasks aren't available with this connection."
+							) : (
+								<>
+									Saved tasks could not be refreshed.{" "}
+									<button type="button" className="wb-link" disabled={history.isFetching} onClick={() => void history.refetch()}>
+										{history.isFetching ? "Checking…" : "Try again"}
+									</button>
+								</>
+							)}
+						</li>
+					) : null}
+					{!history.isPending && !history.isError && rows.length === 0 ? <li className="wb-note">No tasks yet.</li> : null}
 					{rows.length > visible ? (
 						<li>
 							<button type="button" className="wb-more" onClick={() => setLimit(visible + TASKS_PER_PROJECT)}>
