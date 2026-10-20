@@ -26,7 +26,7 @@ const TASK_STARTERS = [
 	{
 		icon: "compose",
 		title: "Build something",
-		detail: "Turn an idea into something real",
+		detail: "Make a tool, workflow or experiment",
 		prompt: "I'd like to build ",
 	},
 	{
@@ -413,7 +413,7 @@ export function Home({ client }: { client: Client }) {
 							<dt>Approvals</dt>
 							<dd>
 								Clio may read, edit and run commands. Approval prompts depend on the effective workspace policy.{" "}
-								<Link to={workspaceId ? `/settings?workspace=${encodeURIComponent(workspaceId)}` : "/settings"}>
+								<Link to={workspaceId ? `/settings/safety?workspace=${encodeURIComponent(workspaceId)}` : "/settings/safety"}>
 									Review policy
 								</Link>
 							</dd>

@@ -17,6 +17,7 @@ const queries = new QueryClient({
 	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
 	queryCache: new QueryCache({
 		onError: (error, query) => {
+			if (query.meta?.errorSurface === "inline") return;
 			// The project list explains unavailable saved history beside the affected tasks.
 			if (query.queryKey[0] === "session-history" && error instanceof ApiProblem && error.problem.code === "unsupported")
 				return;
@@ -33,7 +34,11 @@ const queries = new QueryClient({
 			reportProblem(error, query.queryHash);
 		},
 	}),
-	mutationCache: new MutationCache({ onError: (error) => reportProblem(error) }),
+	mutationCache: new MutationCache({
+		onError: (error, _variables, _context, mutation) => {
+			if (mutation.meta?.errorSurface !== "inline") reportProblem(error);
+		},
+	}),
 });
 function RouteError() {
 	const error = useRouteError();

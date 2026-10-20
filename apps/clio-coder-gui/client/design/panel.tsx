@@ -35,7 +35,12 @@ export function PanelHeading({
 
 /** The closing sentence of a panel, naming what stays on this machine. */
 export function Boundary({ panel }: { panel: PanelCopy }) {
-	return <p className="panel-boundary">{panel.boundary}</p>;
+	return (
+		<details className="panel-boundary">
+			<summary>About this data and its scope</summary>
+			<p>{panel.boundary}</p>
+		</details>
+	);
 }
 
 /** One of the four empty states, or a bounded-view sentence. Always a sentence, never a blank. */

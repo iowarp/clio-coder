@@ -1,32 +1,10 @@
-import { useId } from "react";
+import { useId, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { Icon } from "../design/icons.js";
 import { Dialog } from "../interaction/Dialog.js";
-import { SETTINGS_SECTIONS, settingsDestination, settingsSectionFor } from "./shell-model.js";
+import { exploreGroups } from "./explore-model.js";
+import { settingsDestination } from "./shell-model.js";
 import "./explore-drawer.css";
-
-const GROUPS = [
-	{ label: "Workbench", detail: "Sessions and research machines", sections: ["sessions", "machines"] },
-	{ label: "Library", detail: "What Clio can use", sections: ["library", "toolchain"] },
-	{ label: "Work together", detail: "Work happening together", sections: ["fleet"] },
-	{ label: "Reports & evidence", detail: "Results, checks and usage", sections: ["evidence", "usage"] },
-	{ label: "Activity", detail: "Follow what happened", sections: ["traces"] },
-	{
-		label: "Settings",
-		detail: "Make Clio work for you",
-		sections: ["general", "models", "safety", "context", "all", "system"],
-	},
-];
-
-const LINK_LABELS: Readonly<Record<string, string>> = {
-	fleet: "Teamwork",
-	toolchain: "Tools",
-	evidence: "Reports",
-	traces: "Activity",
-	models: "AI models",
-	safety: "Permissions",
-	all: "Advanced settings",
-};
 
 export function ExploreDrawer({
 	activeWorkspaceId,
@@ -38,33 +16,51 @@ export function ExploreDrawer({
 	onNavigate: () => void;
 }) {
 	const location = useLocation();
-	const current = settingsSectionFor(location.pathname);
+	const [query, setQuery] = useState("");
+	const field = useRef<HTMLInputElement>(null);
+	const groups = exploreGroups(query);
 	const workspaceId = new URLSearchParams(location.search).get("workspace") || activeWorkspaceId;
 	const id = useId();
 	return (
-		<Dialog title="Explore Clio" eyebrow="A place for everything" className="wb-explore" onClose={onClose}>
+		<Dialog
+			title="Explore Clio"
+			eyebrow="A place for everything"
+			className="wb-explore"
+			onClose={onClose}
+			initialFocus={field}
+		>
 			<p className="wb-explore__intro">Find tools, follow your work, or make yourself at home.</p>
+			<label className="wb-explore__search">
+				<Icon name="search" />
+				<span className="sr-only">Find a view</span>
+				<input
+					ref={field}
+					type="search"
+					maxLength={128}
+					value={query}
+					onChange={(event) => setQuery(event.target.value)}
+					placeholder="Try machines, memory, costs or skills…"
+				/>
+			</label>
 			<nav className="wb-explore__groups" aria-label="Explore Clio">
-				{GROUPS.map((group, index) => (
+				{groups.map((group, index) => (
 					<section className="wb-explore__group" key={group.label} aria-labelledby={`${id}-${index}`}>
 						<div className="wb-explore__heading">
 							<h3 id={`${id}-${index}`}>{group.label}</h3>
 							<p>{group.detail}</p>
 						</div>
 						<div className="wb-explore__links">
-							{group.sections.map((sectionId) => {
-								const section = SETTINGS_SECTIONS.find((item) => item.id === sectionId);
-								if (!section) return null;
+							{group.sections.map((section) => {
 								return (
 									<Link
 										key={section.id}
 										className="wb-explore__link"
 										to={settingsDestination(section.path, workspaceId)}
-										aria-current={current?.id === section.id ? "page" : undefined}
+										aria-current={location.pathname === section.path ? "page" : undefined}
 										onClick={onNavigate}
 									>
 										<Icon name={section.icon} />
-										<span>{LINK_LABELS[section.id] ?? section.label}</span>
+										<span>{section.label}</span>
 										<Icon name="chevronRight" />
 									</Link>
 								);
@@ -73,6 +69,27 @@ export function ExploreDrawer({
 					</section>
 				))}
 			</nav>
+			{groups.length === 0 ? (
+				<div className="wb-explore__empty" role="status">
+					<p>No matching views. Try another word.</p>
+					<button
+						type="button"
+						onClick={() => {
+							setQuery("");
+							field.current?.focus();
+						}}
+					>
+						Clear search
+					</button>
+				</div>
+			) : null}
+			<footer className="wb-explore__footer">
+				<Link to="/docs" onClick={onNavigate}>
+					<Icon name="docs" />
+					Help and guides
+					<Icon name="chevronRight" />
+				</Link>
+			</footer>
 		</Dialog>
 	);
 }

@@ -12,7 +12,7 @@ import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
 import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
-import { useSessionOverview } from "../shell/tasks.js";
+import { useSessionOverview, useTaskActions } from "../shell/tasks.js";
 import type { SessionFilter } from "./mission-control-model.js";
 import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
 import "./mission-control.css";
@@ -29,6 +29,8 @@ export function MissionControl({ client }: { client: Client }) {
 	const [search, setSearch] = useSearchParams();
 	const connection = useOutletContext<ConnectionState>();
 	const shell = useShell();
+	const actions = useTaskActions(client);
+	const startTask = () => actions.newTask(project || shell?.activeWorkspaceId || undefined);
 	const selection = search.get("status");
 	const filter = SESSION_FILTERS.find((value) => value === selection) ?? "all";
 	const query = search.get("q") ?? "";
@@ -84,6 +86,10 @@ export function MissionControl({ client }: { client: Client }) {
 				>
 					<Icon name="clock" />
 					<span>{overview.isFetching ? "Updating…" : "Refresh"}</span>
+				</button>
+				<button type="button" className="primary" onClick={startTask}>
+					<Icon name="plus" />
+					Start task
 				</button>
 			</TopBar>
 			<div className="mission">
@@ -211,7 +217,7 @@ export function MissionControl({ client }: { client: Client }) {
 									Clear filters
 								</button>
 							) : (
-								<button type="button" className="primary" onClick={() => shell?.startTask()}>
+								<button type="button" className="primary" onClick={startTask}>
 									Start a task
 									<Icon name="plus" />
 								</button>

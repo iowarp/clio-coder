@@ -1,15 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useSearchParams } from "react-router";
 import type { Machine, MachineAdd, MachineMutation } from "../../contracts/machines.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
+import { clock } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
+import { Dialog } from "../interaction/Dialog.js";
 import type { MachineDraft, MachineRequest } from "./machines-model.js";
 import {
 	acceptMachineRequest,
 	emptyMachineDraft,
+	filterMachines,
+	MACHINE_FILTERS,
 	machineAge,
 	machineCheckLabels,
 	machineDraft,
@@ -60,16 +66,19 @@ function AddMachine({
 	draft,
 	onDraft,
 	onAdd,
-	onClose,
+	inputRef,
 }: {
 	busy: boolean;
 	draft: MachineDraft;
 	onDraft: (draft: MachineDraft) => void;
 	onAdd: (machine: MachineAdd) => void;
-	onClose: () => void;
+	inputRef: RefObject<HTMLInputElement | null>;
 }) {
 	const [error, setError] = useState("");
-	const field = (key: keyof MachineDraft, value: string) => onDraft({ ...draft, [key]: value });
+	const field = (key: keyof MachineDraft, value: string) => {
+		setError("");
+		onDraft({ ...draft, [key]: value });
+	};
 	return (
 		<form
 			className="machines-add"
@@ -84,20 +93,12 @@ function AddMachine({
 				onAdd(result.machine);
 			}}
 		>
-			<div className="machines-section-heading">
-				<div>
-					<span className="machines-kicker">Register an SSH destination</span>
-					<h2>Add machine</h2>
-				</div>
-				<button type="button" onClick={onClose} disabled={busy} aria-label="Close add machine">
-					<Icon name="close" />
-				</button>
-			</div>
 			<p>Use an existing SSH alias or the address of a lab workstation or server. Registration saves user settings.</p>
 			<fieldset disabled={busy} className="machines-fields">
 				<label>
 					Machine ID
 					<input
+						ref={inputRef}
 						required
 						maxLength={64}
 						value={draft.id}
@@ -117,48 +118,53 @@ function AddMachine({
 						autoComplete="off"
 					/>
 				</label>
-				<label>
-					SSH user <span>optional</span>
-					<input
-						maxLength={64}
-						value={draft.user}
-						onChange={(e) => field("user", e.target.value)}
-						placeholder="From SSH configuration"
-						autoComplete="off"
-					/>
-				</label>
-				<label>
-					SSH port <span>optional</span>
-					<input
-						type="number"
-						min={1}
-						max={65535}
-						value={draft.port}
-						onChange={(e) => field("port", e.target.value)}
-						placeholder="From SSH configuration"
-					/>
-				</label>
-				<label>
-					Maximum workers
-					<input
-						required
-						type="number"
-						min={1}
-						max={1024}
-						value={draft.maxWorkers}
-						onChange={(e) => field("maxWorkers", e.target.value)}
-					/>
-				</label>
-				<label>
-					Labels <span>optional, comma separated</span>
-					<input
-						value={draft.labels}
-						onChange={(e) => field("labels", e.target.value)}
-						placeholder="gpu, high-memory"
-						maxLength={2048}
-					/>
-				</label>
 			</fieldset>
+			<details className="machines-advanced">
+				<summary>SSH options and worker capacity</summary>
+				<fieldset disabled={busy} className="machines-fields">
+					<label>
+						SSH user <span>optional</span>
+						<input
+							maxLength={64}
+							value={draft.user}
+							onChange={(e) => field("user", e.target.value)}
+							placeholder="From SSH configuration"
+							autoComplete="off"
+						/>
+					</label>
+					<label>
+						SSH port <span>optional</span>
+						<input
+							type="number"
+							min={1}
+							max={65535}
+							value={draft.port}
+							onChange={(e) => field("port", e.target.value)}
+							placeholder="From SSH configuration"
+						/>
+					</label>
+					<label>
+						Maximum workers
+						<input
+							required
+							type="number"
+							min={1}
+							max={1024}
+							value={draft.maxWorkers}
+							onChange={(e) => field("maxWorkers", e.target.value)}
+						/>
+					</label>
+					<label>
+						Labels <span>optional, comma separated</span>
+						<input
+							value={draft.labels}
+							onChange={(e) => field("labels", e.target.value)}
+							placeholder="gpu, high-memory"
+							maxLength={2048}
+						/>
+					</label>
+				</fieldset>
+			</details>
 			<p className="machines-caption">
 				SSH uses the configuration and available keys on the machine running Clio. Labels are your declarations, not
 				measured hardware. Adding a machine does not connect to it.
@@ -240,8 +246,13 @@ function MachineDetail({
 					These are saved observations, not a live connection. Checks expire after one day; changes to the connection or Clio
 					build can invalidate them sooner.
 				</p>
-				{machine.reason && <p className="machines-reason">{machine.reason}</p>}
-				{machine.note && <p className="machines-caption">{machine.note}</p>}
+				{machine.reason || machine.note ? (
+					<details className="machines-diagnostics">
+						<summary>Readiness details</summary>
+						{machine.reason ? <p className="machines-reason">{machine.reason}</p> : null}
+						{machine.note ? <p className="machines-caption">{machine.note}</p> : null}
+					</details>
+				) : null}
 				{machine.checks && (
 					<dl className="machines-facts">
 						<div>
@@ -261,21 +272,20 @@ function MachineDetail({
 				)}
 				{machine.project?.reason && <p className="machines-caption">{machine.project.reason}</p>}
 			</div>
-			{confirm === null ? (
-				<div className="machines-actions">
-					<button type="button" className="machines-primary" disabled={busy} onClick={() => setConfirm("check")}>
-						<Icon name="play" /> Check readiness
-					</button>
-					<button type="button" disabled={busy} onClick={() => setConfirm("remove")}>
-						Remove machine
-					</button>
-				</div>
-			) : (
-				<section
-					className="machines-confirm"
-					aria-label={confirm === "check" ? "Confirm readiness check" : "Confirm removal"}
+			<div className="machines-actions">
+				<button type="button" className="machines-primary" disabled={busy} onClick={() => setConfirm("check")}>
+					<Icon name="play" /> Check readiness
+				</button>
+				<button type="button" disabled={busy} onClick={() => setConfirm("remove")}>
+					Remove machine
+				</button>
+			</div>
+			{confirm !== null ? (
+				<Dialog
+					title={confirm === "check" ? "Check this project over SSH?" : `Remove ${machine.id}?`}
+					eyebrow="Machine control"
+					onClose={() => setConfirm(null)}
 				>
-					<h3>{confirm === "check" ? "Check this project over SSH?" : `Remove ${machine.id}?`}</h3>
 					{confirm === "check" ? (
 						<>
 							<p>
@@ -310,8 +320,8 @@ function MachineDetail({
 							Cancel
 						</button>
 					</div>
-				</section>
-			)}
+				</Dialog>
+			) : null}
 		</article>
 	);
 }
@@ -320,8 +330,23 @@ export function MachinesPage({ client }: { client: Client }) {
 	const queries = useQueryClient();
 	const selection = useWorkspaceSelection(client);
 	const { id } = selection;
-	const [now, setNow] = useState(Date.now);
-	const [selectedId, setSelectedId] = useState("");
+	const [now, setNow] = useState(() => clock.now());
+	const [search, setSearch] = useSearchParams();
+	const selectedId = search.get("machine") ?? "";
+	const query = search.get("q") ?? "";
+	const filter = MACHINE_FILTERS.find((item) => item === search.get("status")) ?? "all";
+	const set = (key: string, value: string) =>
+		setSearch(
+			(previous) => {
+				const next = new URLSearchParams(previous);
+				if (value) next.set(key, value);
+				else next.delete(key);
+				if (key !== "machine") next.delete("machine");
+				return next;
+			},
+			{ replace: true },
+		);
+	const addField = useRef<HTMLInputElement>(null);
 	const store = useMemo(() => machinesDraft(client), [client]);
 	const saved = useSyncExternalStore(store.subscribe, store.read, store.read);
 	const { adding, request } = saved;
@@ -338,7 +363,7 @@ export function MachinesPage({ client }: { client: Client }) {
 	});
 	const epochChanged = !!request?.epoch && !!meta.data && request.epoch !== meta.data.epoch;
 	useEffect(() => {
-		const timer = setInterval(() => setNow(Date.now()), 30_000);
+		const timer = setInterval(() => setNow(clock.now()), 30_000);
 		return () => clearInterval(timer);
 	}, []);
 	const inventory = useQuery({
@@ -347,6 +372,7 @@ export function MachinesPage({ client }: { client: Client }) {
 		queryFn: ({ signal }) => client.call(routes.machines, { ...emptyInput, params: { id } }, undefined, signal),
 		staleTime: 30_000,
 		retry: false,
+		meta: { errorSurface: "inline" },
 	});
 	const operation = useQuery({
 		queryKey: ["operation", operationScope?.id ?? null],
@@ -363,6 +389,7 @@ export function MachinesPage({ client }: { client: Client }) {
 		retry: false,
 	});
 	const mutation = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: async (sent: MachineRequest) => {
 			try {
 				// Read the epoch for every explicit attempt. A restart loses server idempotency records.
@@ -414,6 +441,7 @@ export function MachinesPage({ client }: { client: Client }) {
 						...current,
 						request: { ...current.request, settled: true },
 						adding: status === "succeeded" && request.body.action === "add" ? false : current.adding,
+						draft: status === "succeeded" && request.body.action === "add" ? emptyMachineDraft : current.draft,
 					}
 				: current,
 		);
@@ -424,7 +452,8 @@ export function MachinesPage({ client }: { client: Client }) {
 	}, [operation.data, request, epochChanged, queries, store]);
 	const busy = saved.sending || (request !== null && !request.settled);
 	const machines = inventory.data?.machines ?? [];
-	const selected = machines.find((machine) => machine.id === selectedId) ?? machines[0];
+	const shown = filterMachines(machines, query, filter, now);
+	const selected = shown.find((machine) => machine.id === selectedId) ?? shown[0];
 	const summary = machineSummary(machines, now);
 	const send = (sent: MachineRequest) => {
 		if (store.read().sending || sent.operationId !== null) return;
@@ -465,7 +494,14 @@ export function MachinesPage({ client }: { client: Client }) {
 				<WorkspacePicker selection={selection} />
 				<p>Registration is shared across projects. Readiness belongs to the selected workspace.</p>
 			</div>
-			{inventory.error && <p role="alert">{inventory.error.message}</p>}
+			{inventory.error && (
+				<div className="machines-operation" role="alert">
+					<p>The saved machine registry could not be read. {inventory.error.message}</p>
+					<button type="button" disabled={inventory.isFetching} onClick={() => void inventory.refetch()}>
+						Retry registry
+					</button>
+				</div>
+			)}
 			{saved.error && <p role="alert">{saved.error}</p>}
 			{request && !request.settled && (
 				<div className="machines-operation" role="status">
@@ -539,6 +575,22 @@ export function MachinesPage({ client }: { client: Client }) {
 			)}
 			{operationScope && (
 				<div className="machines-operation" role="status">
+					{request?.settled ? (
+						<button
+							type="button"
+							className="machines-operation__dismiss"
+							aria-label="Dismiss completed machine operation"
+							onClick={() =>
+								store.update((current) =>
+									current.request?.settled && current.request.key === request.key
+										? { ...current, request: null, error: null }
+										: current,
+								)
+							}
+						>
+							<Icon name="close" />
+						</button>
+					) : null}
 					<strong>
 						Machine {operationScope.action} · {operation.data?.status ?? "awaiting status"}
 					</strong>
@@ -564,13 +616,22 @@ export function MachinesPage({ client }: { client: Client }) {
 				</div>
 			)}
 			{adding && (
-				<AddMachine
-					busy={busy}
-					draft={saved.draft}
-					onDraft={(draft) => store.update((current) => ({ ...current, draft }))}
-					onAdd={(machine) => act({ action: "add", machine })}
+				<Dialog
+					title="Add an SSH machine"
+					eyebrow="Connect your research infrastructure"
+					size="wide"
+					className="machines-add-dialog"
+					initialFocus={addField}
 					onClose={() => setAdding(false)}
-				/>
+				>
+					<AddMachine
+						busy={busy}
+						draft={saved.draft}
+						onDraft={(draft) => store.update((current) => ({ ...current, draft }))}
+						onAdd={(machine) => act({ action: "add", machine })}
+						inputRef={addField}
+					/>
+				</Dialog>
 			)}
 			{!id ? (
 				<div className="machines-empty">
@@ -612,6 +673,33 @@ export function MachinesPage({ client }: { client: Client }) {
 								{inventory.isFetching ? "Refreshing…" : "Refresh records"}
 							</button>
 						</div>
+						{machines.length > 0 ? (
+							<div className="machines-toolbar">
+								<label className="machines-search">
+									<Icon name="search" />
+									<span className="sr-only">Search machines</span>
+									<input
+										type="search"
+										value={query}
+										maxLength={256}
+										onChange={(event) => set("q", event.target.value)}
+										placeholder="Search machine, host or label…"
+									/>
+								</label>
+								<label>
+									<span className="sr-only">Filter machine readiness</span>
+									<select
+										value={filter}
+										onChange={(event) => set("status", event.target.value === "all" ? "" : event.target.value)}
+									>
+										<option value="all">All machines</option>
+										<option value="ready">Project ready</option>
+										<option value="attention">Needs attention</option>
+										<option value="unchecked">Not checked</option>
+									</select>
+								</label>
+							</div>
+						) : null}
 						{machines.length === 0 ? (
 							<div className="machines-empty">
 								<Icon name="system" />
@@ -621,10 +709,31 @@ export function MachinesPage({ client }: { client: Client }) {
 									Add your first machine
 								</button>
 							</div>
+						) : shown.length === 0 ? (
+							<div className="machines-empty">
+								<Icon name="search" />
+								<h2>No machines match this view</h2>
+								<p>Try another name, host, label or readiness filter.</p>
+								<button
+									type="button"
+									onClick={() =>
+										setSearch(
+											(previous) => {
+												const next = new URLSearchParams(previous);
+												for (const key of ["q", "status", "machine"]) next.delete(key);
+												return next;
+											},
+											{ replace: true },
+										)
+									}
+								>
+									Clear filters
+								</button>
+							</div>
 						) : (
 							<div className="machines-workbench">
 								<nav className="machines-list" aria-label="Registered machines">
-									{machines.map((machine) => {
+									{shown.map((machine) => {
 										const status = machineStatus(machine, now);
 										return (
 											<button
@@ -632,12 +741,14 @@ export function MachinesPage({ client }: { client: Client }) {
 												className="machines-row"
 												key={machine.id}
 												aria-current={selected?.id === machine.id ? "true" : undefined}
-												onClick={() => setSelectedId(machine.id)}
+												onClick={() => set("machine", machine.id)}
 											>
 												<span className="machines-row-title">
 													<Icon name="system" />
 													<strong>{machine.id}</strong>
-													<span>{machine.maxWorkers} workers</span>
+													<span>
+														{machine.maxWorkers} {machine.maxWorkers === 1 ? "worker" : "workers"}
+													</span>
 												</span>
 												<span className="machines-row-host">{machine.host}</span>
 												<StatusMark tone={status.tone} label={status.label} />

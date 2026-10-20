@@ -235,6 +235,9 @@ export function TaskSidebar({
 						</span>
 					</span>
 				</Link>
+				<button type="button" className="wb-icon" aria-label="Open help" title="Help and shortcuts" onClick={onHelp}>
+					<Icon name="docs" />
+				</button>
 				<button
 					type="button"
 					className="wb-icon"
@@ -349,6 +352,12 @@ function ProjectGroup({
 							)}
 						</li>
 					) : null}
+					<li>
+						<Link to={`/workspaces/${workspace.id}/sessions`} className="wb-more wb-project__history" onClick={onNavigate}>
+							View project work
+							<Icon name="chevronRight" />
+						</Link>
+					</li>
 					{!history.isPending && !history.isError && rows.length === 0 ? <li className="wb-note">No tasks yet.</li> : null}
 					{rows.length > visible ? (
 						<li>

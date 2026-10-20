@@ -6,7 +6,7 @@ import type { navigation } from "../design/navigation.js";
 import { formatKeybinding, INTERVIEW_KEYBINDING_NAMESPACE, KEYBINDING_ORDER } from "./keybindings.js";
 
 // The task screens are the rail's own and are not in the navigation table, but the reference still explains them.
-type NavPath = (typeof navigation)[number]["path"] | "/" | "/sessions";
+type NavPath = (typeof navigation)[number]["path"] | "/" | "/sessions" | "/machines";
 
 export interface HelpEntry {
 	readonly term: string;
@@ -35,9 +35,14 @@ export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: stri
 		meaning: "Choose a workspace and describe a task. Clio starts when you send your first message.",
 	},
 	"/sessions": {
-		title: "Tasks",
+		title: "Sessions",
 		meaning:
-			"Your conversations, grouped by workspace. Open a task to read messages, inspect tool activity, and see progress, changes, files and commands.",
+			"Follow the sessions held by this Clio server across projects. Filter by activity, review requests for your input, stop a turn or continue a session.",
+	},
+	"/machines": {
+		title: "Machines",
+		meaning:
+			"Register lab workstations and servers for SSH workers. Readiness is recorded separately for each project; checks run only when you request them.",
 	},
 	"/traces": {
 		title: "Traces",

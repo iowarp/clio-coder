@@ -1,7 +1,7 @@
 .machines-page {
 	max-width: 1440px;
 	margin: 0 auto;
-	padding: 24px 28px 56px;
+	padding: 0 0 40px;
 	color: var(--ink);
 }
 
@@ -17,13 +17,13 @@
 }
 
 .machines-heading {
-	padding: 12px 0 28px;
+	padding: 0 0 24px;
 	border-bottom: 2px solid var(--ink);
 }
 
 .machines-heading h1 {
 	font-family: var(--font-editorial);
-	font-size: clamp(42px, 4vw, 64px);
+	font-size: clamp(34px, 3vw, 44px);
 	font-weight: 400;
 	line-height: 1.05;
 	margin: 12px 0;
@@ -32,7 +32,7 @@
 
 .machines-heading p {
 	font-family: var(--font-editorial);
-	font-size: 23px;
+	font-size: 20px;
 	margin: 0;
 	color: var(--ink-muted);
 }
@@ -58,7 +58,7 @@
 	outline-offset: 3px;
 }
 
-.machines-page .machines-primary {
+.machines-primary {
 	background: var(--ink);
 	color: var(--paper);
 	border: 1px solid var(--ink);
@@ -147,8 +147,61 @@
 }
 
 .machines-list {
+	align-content: start;
+	gap: 0;
+	max-block-size: min(70dvh, 900px);
+	overflow-y: auto;
 	border-right: 1px solid var(--line);
 	background: var(--paper);
+}
+.machines-toolbar {
+	display: flex;
+	gap: var(--space-3);
+	margin-bottom: var(--space-4);
+}
+.machines-search {
+	display: flex;
+	align-items: center;
+	flex: 1;
+	gap: var(--space-2);
+	padding-inline: var(--space-3);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--raised);
+}
+.machines-search .icon {
+	flex: none;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	color: var(--ink-muted);
+}
+.machines-search input {
+	width: 100%;
+	min-width: 0;
+	border: 0;
+	background: transparent;
+}
+.machines-search:focus-within {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+.machines-search input:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+.machines-advanced {
+	margin-block: var(--space-3);
+	border-block: 1px solid var(--line);
+	padding-block: var(--space-3);
+}
+.machines-advanced > summary,
+.machines-diagnostics > summary {
+	cursor: pointer;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.machines-diagnostics {
+	margin-block: var(--space-4);
 }
 
 .machines-page .machines-row {
@@ -366,6 +419,13 @@
 	background: var(--accent-soft);
 	font-size: 13px;
 }
+.machines-operation__dismiss {
+	float: inline-end;
+	border: 0;
+	background: transparent;
+	min-width: 32px;
+	padding: var(--space-1);
+}
 
 .machines-operation p:last-child {
 	margin-bottom: 0;
@@ -397,4 +457,14 @@
 	.machines-fields {
 		grid-template-columns: repeat(2, 1fr);
 	}
+}
+
+.machines-add-dialog .machines-add {
+	margin: 0;
+	border: 0;
+	padding: 0;
+	background: transparent;
+}
+.machines-add-dialog .machines-fields {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 }

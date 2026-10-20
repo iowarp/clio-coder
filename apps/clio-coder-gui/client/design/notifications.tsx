@@ -251,10 +251,13 @@ export function NoticeToasts() {
 								</div>
 								{notice.detail ? <p>{notice.detail}</p> : null}
 								{notice.code || notice.reference ? (
-									<div className="notice__meta">
-										{notice.code ? <code>{notice.code}</code> : null}
-										{notice.reference ? <small>Reference: {notice.reference}</small> : null}
-									</div>
+									<details className="notice__meta">
+										<summary>Technical details</summary>
+										<div>
+											{notice.code ? <code>{notice.code}</code> : null}
+											{notice.reference ? <small>Reference: {notice.reference}</small> : null}
+										</div>
+									</details>
 								) : null}
 							</article>
 						))}

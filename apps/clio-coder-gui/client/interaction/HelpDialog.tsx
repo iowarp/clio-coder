@@ -56,7 +56,7 @@ export function HelpReferenceBody({
 	searchRef?: RefObject<HTMLInputElement | null>;
 }) {
 	const [query, setQuery] = useState("");
-	const [view, setView] = useState<HelpView>("shortcuts");
+	const [view, setView] = useState<HelpView>("guide");
 	const inputId = useId();
 	const contentId = useId();
 	const content = helpContent(query, view);
