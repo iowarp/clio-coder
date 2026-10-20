@@ -302,8 +302,8 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 			)}
 			<p className="trace-replay__timing">
 				Ordered by recorded start, then row. Events without a valid start appear last. Idle gaps are capped at 5s; equal or
-				missing times advance every 0.5s before speed adjustment.
-				{reducedMotion ? " Reduced motion limits playback to two events per second." : ""}
+				missing times advance every 0.5s before speed adjustment.{" "}
+				{reducedMotion ? "Reduced motion limits playback to two events per second. " : ""}
 				Live span details may update as capture arrives; earlier span versions are not reconstructed.
 			</p>
 			<p id={`${id}-keys`} className="trace-replay__keys">

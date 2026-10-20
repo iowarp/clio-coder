@@ -204,7 +204,7 @@ function MachineDetail({
 			<dl className="machines-facts">
 				<div>
 					<dt>Registration</dt>
-					<dd>Registered · no enable/disable setting in core</dd>
+					<dd>Saved in your Clio settings</dd>
 				</div>
 				<div>
 					<dt>Worker capacity</dt>
@@ -583,7 +583,7 @@ export function MachinesPage({ client }: { client: Client }) {
 			) : (
 				inventory.data && (
 					<>
-						<div className="machines-summary" aria-label="Recorded fleet readiness">
+						<section className="machines-summary" aria-label="Recorded fleet readiness">
 							<div>
 								<strong>{machines.length}</strong>
 								<span>Registered</span>
@@ -605,7 +605,7 @@ export function MachinesPage({ client }: { client: Client }) {
 								<br />
 								<span>No automatic SSH checks</span>
 							</p>
-						</div>
+						</section>
 						<div className="machines-section-heading machines-registry-heading">
 							<h2>SSH registry</h2>
 							<button type="button" disabled={inventory.isFetching} onClick={() => void inventory.refetch()}>
