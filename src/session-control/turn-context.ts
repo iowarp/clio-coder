@@ -29,11 +29,8 @@ import {
 	type MemoryStepCompletedPayload,
 	type ResidencyMutationPayload,
 } from "../core/bus-events.js";
-import {
-	type BackendCacheVerdict,
-	type BackendCompletionTimings,
-	uncachedPrefillTokens,
-} from "../core/cache-telemetry.js";
+import type { BackendCacheVerdict, BackendCompletionTimings, CacheCallBaseline } from "../core/cache-telemetry.js";
+import { buildCacheCallObservation, uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
@@ -564,11 +561,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const pendingColdReasons = new Set<ExpectedColdReason>();
 	let runExpectedColdReasons: ExpectedColdReason[] = [];
 	let nextAssistantColdReasons: ExpectedColdReason[] = [];
-	// Prefix-byte changes cool every tier. Residency, thinking changes, dispatch
-	// traffic, and compaction keep the local-native gate because they disturb a
-	// local server or its rendered template.
+	let cacheCallBaseline: CacheCallBaseline | null = null;
+	let cacheCallBaselineLoaded = false;
+	const resetCacheCallBaseline = (): void => {
+		cacheCallBaseline = null;
+		// #423: a generation reset must not reload the pre-reduction ledger baseline.
+		cacheCallBaselineLoaded = true;
+	};
+	// #423: prefix-byte and reasoning changes can cool every tier. Residency,
+	// dispatch traffic, and compaction retain the local-native disturbance gate.
 	const TIER_INDEPENDENT_COLD_REASONS: ReadonlySet<ExpectedColdReason> = new Set([
 		"working_set_evict",
+		"thinking_change",
 		"tool_surface_change",
 		"prompt_recompiled",
 	]);
@@ -609,7 +613,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// A completed compaction rebuilds the context, so the next compile takes
 		// the live memory section instead of the frozen one (#423).
 		deps.bus?.on(BusChannels.CompactionEnd, (payload: CompactionPayload) => {
-			if (payload.outcome === "completed") frozenMemorySection = null;
+			if (payload.outcome === "completed") {
+				frozenMemorySection = null;
+				resetCacheCallBaseline();
+			}
 		}) ?? null,
 		deps.bus?.on(BusChannels.ResidencyMutation, (payload: ResidencyMutationPayload) => {
 			const runtime = state.runtime;
@@ -1461,6 +1468,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
 						emitCompactionActivity("started", "compacting context (mask stage)");
 						deps.session.replaceEntries(masked.entries);
+						resetCacheCallBaseline();
 						refreshAgentMessagesFromSession(agentRuntime);
 						// The masked history is not the one the provider counted.
 						reconciledAnchor = null;
@@ -1573,6 +1581,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								deps.session.flushAppends();
 								if (!handoff) notifyMemoryCommit(evictionEntry.turnId, "summary", "evicted");
 							}
+							resetCacheCallBaseline();
 							noteColdReason("working_set_evict");
 							refreshAgentMessagesFromSession(agentRuntime);
 							carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, planned.tokensBefore - planned.tokensAfter);
@@ -1825,6 +1834,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (summary) notifyMemoryCommit(summary.turnId, "summary", "summarized");
 		}
 
+		resetCacheCallBaseline();
 		refreshAgentMessagesFromSession(agentRuntime);
 		// A summary replaces the conversation the attestation described, so no
 		// arithmetic carries it forward; the next call re-anchors it.
@@ -2611,9 +2621,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		consumeExpectedColdReasons(runtimeId: string): void {
 			// Cache-disturbance honesty (T3.3): consume disturbances since
 			// the last settled run. Only single-slot local backends lose their
-			// prefix cache to interleaved work, so residency, thinking changes,
-			// dispatch, and compaction stamp only on local-native targets. Reasons
-			// that change the prefix bytes stamp every tier (see stampsOnTier).
+			// prefix cache to interleaved work, so residency, dispatch, and
+			// compaction stamp only on local-native targets. Prefix-byte and
+			// reasoning changes stamp every tier (#423; see stampsOnTier).
 			runExpectedColdReasons = [];
 			nextAssistantColdReasons = [];
 			if (pendingColdReasons.size > 0) {
@@ -2634,11 +2644,43 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const input = typeof usage.input === "number" ? usage.input : 0;
 			const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
 			const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
+			if (!cacheCallBaselineLoaded) {
+				cacheCallBaselineLoaded = true;
+				// #423: a fresh process resumes only the active branch's last persisted call.
+				const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+				for (let index = entries.length - 1; index >= 0; index -= 1) {
+					const entry = entries[index];
+					if (!entry) continue;
+					if (entry.kind === "compactionSummary" || entry.kind === "contextEviction") break;
+					if (entry.kind !== "message" || entry.role !== "assistant") continue;
+					const payload = entry.payload as {
+						promptCache?: { input?: number; cacheRead?: number; cacheWrite?: number };
+					} | null;
+					const prior = payload?.promptCache;
+					const endedAt = Date.parse(entry.timestamp);
+					if (typeof prior?.input === "number" && Number.isFinite(endedAt)) {
+						cacheCallBaseline = {
+							inclusiveInputTokens: prior.input + (prior.cacheRead ?? 0) + (prior.cacheWrite ?? 0),
+							endedAt,
+						};
+					}
+					break;
+				}
+			}
+			const now = Date.now();
+			const observation = buildCacheCallObservation(
+				{ input, cacheRead, cacheWrite },
+				cacheCallBaseline,
+				nextAssistantColdReasons,
+				now,
+			);
+			cacheCallBaseline = { inclusiveInputTokens: observation.inclusiveInputTokens, endedAt: now };
 			const promptCache: Record<string, unknown> = {
 				input,
 				cacheRead,
 				cacheWrite,
 				backendVerdict: backendCacheVerdict(input, cacheRead, backend, usage.cacheReadReported),
+				observation,
 			};
 			if (backend !== undefined) promptCache.backend = { ...backend };
 			if (nextAssistantColdReasons.length > 0) {
@@ -2679,6 +2721,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		resetForSession(incomingBranchAnchorTurnId: string | null = null): void {
+			cacheCallBaseline = null;
+			cacheCallBaselineLoaded = false;
 			memoryTurn = null;
 			memoryAuthorityEpoch += 1;
 			compactionController?.abort();

@@ -358,11 +358,6 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			payload.continuityDeliveryId = deliveryId;
 			payload.stopReason = message.stopReason;
 		}
-		const usage = (message as { usage?: Usage }).usage;
-		if (usage && typeof usage === "object") {
-			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings);
-		}
 		// A cancelled turn's provider usage is the object the stream started with
 		// and never updated. Record what the call is known to have spent instead of
 		// the zeros, in the shape a completed turn uses and flagged as an estimate.
@@ -384,6 +379,12 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) {
 			if (!turnContinues) closeTracedTurnAtFinalRow(failure ? "fail" : "success", failure?.errorMessage ?? null);
 			return;
+		}
+		// #423: only persisted calls advance the cache comparison baseline.
+		const usage = (message as { usage?: Usage }).usage;
+		if (usage && typeof usage === "object") {
+			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
+			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings);
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = appendTurn(deps.session, {
