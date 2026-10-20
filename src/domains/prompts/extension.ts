@@ -76,6 +76,11 @@ export function createPromptsBundle(
 	let fragmentEpoch = 0;
 	let sessionSourceEpoch = 0;
 	const sessionSourceSnapshots = new Map<string, SessionPromptSourceSnapshot>();
+	// #423: a session's workspace facts are captured once per process. A config
+	// hot reload or handbook edit re-reads the other sources, but re-probed git
+	// state (a tree that turned dirty, a new commit) recompiled the prompt and
+	// re-billed the whole conversation.
+	const pinnedWorkspaceRoots = new Map<string, Pick<SessionPromptSourceSnapshot, "capturedAt" | "workspaceRoot">>();
 	const suppressContextFiles = options.noContextFiles === true;
 
 	function config(): ConfigContract | undefined {
@@ -197,6 +202,7 @@ export function createPromptsBundle(
 		// two byte-identical instead of re-probing a tree turn one may have changed.
 		const pendingKey = sessionSourceKey("", cwd);
 		if (sessionId.length === 0) {
+			pinnedWorkspaceRoots.delete(pendingKey);
 			const captured = await captureSessionSourceSnapshot(sessionId, cwd, sessionStartedAt);
 			sessionSourceSnapshots.set(pendingKey, captured);
 			return captured;
@@ -204,32 +210,37 @@ export function createPromptsBundle(
 		const key = sessionSourceKey(sessionId, cwd);
 		const existing = sessionSourceSnapshots.get(key);
 		if (existing) return existing;
+		const created = sessionStartedAt === undefined ? Number.NaN : Date.parse(sessionStartedAt);
 		const pending = sessionSourceSnapshots.get(pendingKey);
 		if (pending !== undefined) {
 			sessionSourceSnapshots.delete(pendingKey);
-			const created = sessionStartedAt === undefined ? Number.NaN : Date.parse(sessionStartedAt);
 			if (Number.isFinite(created) && created >= pending.capturedAt) {
 				sessionSourceSnapshots.set(key, pending);
 				return pending;
 			}
 		}
-		const captured = await captureSessionSourceSnapshot(sessionId, cwd, sessionStartedAt);
+		const fresh = await captureSessionSourceSnapshot(sessionId, cwd, sessionStartedAt);
+		// A pre-creation pin belongs only to the session created right after it.
+		const pendingPin = pinnedWorkspaceRoots.get(pendingKey);
+		pinnedWorkspaceRoots.delete(pendingKey);
+		const pin =
+			pinnedWorkspaceRoots.get(key) ??
+			(pendingPin !== undefined && Number.isFinite(created) && created >= pendingPin.capturedAt ? pendingPin : undefined);
+		const captured =
+			pin === undefined ? fresh : { ...fresh, capturedAt: pin.capturedAt, workspaceRoot: pin.workspaceRoot };
 		sessionSourceSnapshots.set(key, captured);
 		return captured;
 	}
 
 	function invalidateSessionSources(cwd?: string): void {
-		if (cwd === undefined) {
-			sessionSourceSnapshots.clear();
-		} else {
-			const workspace = resolve(cwd);
-			for (const [key, snapshot] of sessionSourceSnapshots) {
-				// Ancestor handbooks are layered into descendant sessions, including
-				// sessions captured before that ancestor had a handbook at all.
-				const descendant = relative(workspace, snapshot.cwd);
-				if (descendant !== ".." && !descendant.startsWith(`..${sep}`) && !isAbsolute(descendant)) {
-					sessionSourceSnapshots.delete(key);
-				}
+		const workspace = cwd === undefined ? undefined : resolve(cwd);
+		for (const [key, snapshot] of sessionSourceSnapshots) {
+			// Ancestor handbooks are layered into descendant sessions, including
+			// sessions captured before that ancestor had a handbook at all.
+			const descendant = workspace === undefined ? "" : relative(workspace, snapshot.cwd);
+			if (descendant !== ".." && !descendant.startsWith(`..${sep}`) && !isAbsolute(descendant)) {
+				pinnedWorkspaceRoots.set(key, { capturedAt: snapshot.capturedAt, workspaceRoot: snapshot.workspaceRoot });
+				sessionSourceSnapshots.delete(key);
 			}
 		}
 		sessionSourceEpoch += 1;
