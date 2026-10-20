@@ -330,6 +330,12 @@ export interface BudgetAlertPayload {
 	level: "at" | "over";
 	currentUsd: number;
 	ceilingUsd: number;
+	/**
+	 * Estimated input tokens of the paid request that is parked, when the caller
+	 * knows them. Context re-sent per call is what drains a subscription window,
+	 * so the stop names it beside the dollars (#423).
+	 */
+	contextTokens?: number;
 }
 
 /**

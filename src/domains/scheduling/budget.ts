@@ -14,13 +14,23 @@ export class SessionCostCeilingError extends Error {
 		readonly currentUsd: number,
 		readonly ceilingUsd: number,
 		runCap?: RunCostCap,
+		contextTokens?: number,
 	) {
+		// The context each call re-sends is the per-call cost a headless stop
+		// cannot raise past, so the error names it when the caller knows it (#423).
+		const perCall = budgetStopContextClause(contextTokens);
 		super(
 			runCap !== undefined && ceilingUsd >= runCap.ceilingUsd
-				? `${SESSION_COST_CEILING_REASON}: this run's priced spend $${(currentUsd - runCap.startUsd).toFixed(4)} reached its --max-cost-usd $${runCap.maxUsd.toFixed(4)} cap`
-				: `${SESSION_COST_CEILING_REASON}: session priced spend $${currentUsd.toFixed(4)} reached the $${ceilingUsd.toFixed(4)} ceiling; raise safety.limits.sessionCostUsd`,
+				? `${SESSION_COST_CEILING_REASON}: this run's priced spend $${(currentUsd - runCap.startUsd).toFixed(4)} reached its --max-cost-usd $${runCap.maxUsd.toFixed(4)} cap${perCall}`
+				: `${SESSION_COST_CEILING_REASON}: session priced spend $${currentUsd.toFixed(4)} reached the $${ceilingUsd.toFixed(4)} ceiling${perCall}; raise safety.limits.sessionCostUsd`,
 		);
 	}
+}
+
+/** ` with ~N context tokens per call`, or empty when the request size is unknown. */
+function budgetStopContextClause(contextTokens: number | undefined): string {
+	if (contextTokens === undefined || !Number.isFinite(contextTokens) || contextTokens <= 0) return "";
+	return ` with ~${Math.round(contextTokens).toLocaleString("en-US")} context tokens per call`;
 }
 
 /**

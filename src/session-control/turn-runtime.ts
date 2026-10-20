@@ -67,6 +67,34 @@ import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.j
 
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 
+/** The steps a request passes before its stream is invoked (#423). */
+type PreInvocationStage = "transform" | "auth" | "budget admission";
+
+const PRE_INVOCATION_STAGE_LABEL: Readonly<Record<PreInvocationStage, string>> = {
+	transform: "request transform",
+	auth: "authentication",
+	"budget admission": "budget admission",
+};
+
+/**
+ * The stall watchdog's abort text. A silent request that never reached the
+ * provider names the step it was in: the session behind #423 read "no output
+ * from openai-codex" while no request had left the host. Both forms end in a
+ * timeout, so the transient retry ladder treats them as it did before.
+ */
+function stallAbortReason(
+	targetId: string,
+	idleMs: number,
+	stage: PreInvocationStage | null,
+	awaitingFirstToken: boolean,
+): string {
+	const seconds = Math.round(idleMs / 1000);
+	if (stage !== null) {
+		return `request stalled: ${PRE_INVOCATION_STAGE_LABEL[stage]} made no progress for ${seconds}s and nothing was sent to ${targetId}, aborting (pre-invocation timeout)`;
+	}
+	return `stream stalled: no ${awaitingFirstToken ? "first token" : "output"} from ${targetId} for ${seconds}s, aborting (stream timeout)`;
+}
+
 /**
  * A turn that never started, with a machine-readable reason attached. The
  * operator-facing message is unchanged prose; `reason` exists because the ACP
@@ -589,6 +617,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// monotonic anchor before that wait, including custom stream delegates.
 		let apiCallStartedAt: number | null = null;
 		let apiCallFirstDeltaAt: number | null = null;
+		// Where a request is before `onStreamInvocation`. A watchdog abort while
+		// `apiCallStartedAt` is null names this step, because no request has
+		// reached the provider it would otherwise blame (#423).
+		let preInvocationStage: PreInvocationStage = "transform";
 		let unsettledSpendUsd = 0;
 		let admittedMessages: readonly AgentMessage[] = [];
 		let admittedSystemPrompt = "";
@@ -673,16 +705,28 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				) {
 					try {
 						if (deps.scheduling.admitPaidRequest) {
-							await deps.scheduling.admitPaidRequest({
-								waitForRaise: deps.headless !== true,
-								additionalUsd: unsettledSpendUsd,
-								getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
-								...(streamOptions?.signal ? { signal: streamOptions.signal } : {}),
-							});
+							// A ceiling wait is the operator's decision, not a silent provider.
+							// The watchdog re-arms through it as it does through a running
+							// tool, so a budget stop is never aborted and retried as a stream
+							// stall (#423).
+							preInvocationStage = "budget admission";
+							stallSuspendDepth += 1;
+							try {
+								await deps.scheduling.admitPaidRequest({
+									waitForRaise: deps.headless !== true,
+									additionalUsd: unsettledSpendUsd,
+									getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
+									contextTokens: input,
+									...(streamOptions?.signal ? { signal: streamOptions.signal } : {}),
+								});
+							} finally {
+								stallSuspendDepth -= 1;
+								lastActivityAt = performance.now();
+							}
 						} else {
 							const { currentUsd, ceilingUsd } = deps.scheduling.preflight();
 							if (sessionCeilingReached(currentUsd + unsettledSpendUsd, ceilingUsd)) {
-								throw new SessionCostCeilingError(currentUsd + unsettledSpendUsd, ceilingUsd);
+								throw new SessionCostCeilingError(currentUsd + unsettledSpendUsd, ceilingUsd, undefined, input);
 							}
 						}
 					} catch (error) {
@@ -716,6 +760,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (!targetRequiresAuth(target.target, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
+				preInvocationStage = "auth";
 				const signal = getCurrentAgentSignal();
 				const resolved = await deps.providers.auth.resolveForTarget(
 					target.target,
@@ -770,8 +815,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// `toolsInFlight` and `stallSuspendDepth` cover the windows where silence
 		// is expected and the stream is not the thing we are waiting on: a tool
 		// executing (a `npm run ci` that takes ten minutes is not a stalled
-		// stream) and the post-tool continuation guard, whose auto-compaction is
-		// its own model call. The watchdog re-arms instead of firing while either
+		// stream), the post-tool continuation guard, whose auto-compaction is its
+		// own model call, and a paid request parked at the session cost ceiling
+		// (#423). The watchdog re-arms instead of firing while either
 		// is above zero. They are counted apart because only the tool half can
 		// leak: the guard's depth is a try/finally around one await, while a
 		// `tool_execution_end` that never arrives would disable the watchdog for
@@ -815,7 +861,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						armStallTimer(stallMs - idleMs);
 						return;
 					}
-					state.streamStallReason = `stream stalled: no ${awaitingFirstToken ? "first token" : "output"} from ${localRuntime.targetId} for ${Math.round(idleMs / 1000)}s, aborting (stream timeout)`;
+					state.streamStallReason = stallAbortReason(
+						localRuntime.targetId,
+						idleMs,
+						apiCallStartedAt === null ? preInvocationStage : null,
+						awaitingFirstToken,
+					);
 					localRuntime.agent.abort();
 				},
 				Math.max(1, delayMs),
@@ -1100,6 +1151,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				runStartMessageCount = localRuntime.agent.state.messages.length;
 				apiCallStartedAt = null;
 				apiCallFirstDeltaAt = null;
+				preInvocationStage = "transform";
 				runFirstCallVerdict = null;
 				pendingTerminalToolResult = null;
 				clearStallTimer();
@@ -1275,7 +1327,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const persistedId = persistence.appendAssistantTurn(enrichedEvent.message, timing, correlationId);
 				await deps.continuity?.response(persistedId, correlationId);
 				if (!currentRun()) return;
-				if (isAssistant) apiCallStartedAt = null;
+				if (isAssistant) {
+					apiCallStartedAt = null;
+					preInvocationStage = "transform";
+				}
 				const usage = (enrichedEvent.message as { usage?: Usage }).usage;
 				if (isAssistant && usage && typeof usage === "object" && runFirstCallVerdict === null) {
 					const input = typeof usage.input === "number" ? usage.input : 0;

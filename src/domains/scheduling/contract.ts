@@ -24,6 +24,8 @@ export interface SchedulingContract {
 		waitForRaise: boolean;
 		additionalUsd?: number;
 		getCeilingUsd?: () => number;
+		/** Estimated input tokens the parked request sends, so a ceiling stop shows what each call costs (#423). */
+		contextTokens?: number;
 		signal?: AbortSignal;
 	}): Promise<void>;
 	/** Arm a `clio-coder run --max-cost-usd` cap, so a stop at it names the flag. */

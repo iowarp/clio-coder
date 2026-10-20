@@ -42,16 +42,22 @@ function isBudgetAlertPayload(value: unknown): value is BudgetAlertPayload {
 export function budgetAlertNotice(payload: unknown): BusNotice | null {
 	if (!isBudgetAlertPayload(payload)) return null;
 	const spend = `$${payload.currentUsd.toFixed(2)} of $${payload.ceilingUsd.toFixed(2)} ceiling`;
+	// Per-call context is what a raise would keep paying for, so the stop names it (#423).
+	const tokens = payload.contextTokens;
+	const perCall =
+		typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0
+			? ` The next call sends ~${Math.round(tokens).toLocaleString("en-US")} context tokens.`
+			: "";
 	if (payload.level === "over") {
 		return {
 			level: "error",
-			text: `[budget] Session priced spend ${spend} exceeded. Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
+			text: `[budget] Session priced spend ${spend} exceeded.${perCall} Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
 			source: "budget",
 		};
 	}
 	return {
 		level: "warn",
-		text: `[budget] Session priced spend ${spend} reached. Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
+		text: `[budget] Session priced spend ${spend} reached.${perCall} Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
 		source: "budget",
 	};
 }

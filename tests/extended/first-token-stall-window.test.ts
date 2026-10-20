@@ -1,13 +1,18 @@
-import { match, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
+import { type BudgetAlertPayload, BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
+import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
+import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -77,16 +82,42 @@ function transport(mode: "cold" | "wedged", firstTokenDelayMs: number) {
 	return { fetch, calls: () => calls, dispose: () => clearInterval(keepAlive) };
 }
 
-function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0) {
+/** A priced target whose session already spent past its ceiling, so every request waits at budget admission. */
+interface BudgetFixture {
+	spentUsd: number;
+	ceilingUsd: number;
+	headless?: boolean;
+	retry?: boolean;
+}
+
+function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: BudgetFixture) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
 	settings.chat.model = model.id;
 	settings.chat.thinkingLevel = "off";
-	settings.chat.retry = { ...settings.chat.retry, enabled: false, streamStallMs: 150, firstTokenStallMs: 5_000 };
-	settings.targets = [{ ...target, defaultModel: model.id }];
+	settings.chat.retry = {
+		...settings.chat.retry,
+		enabled: budget?.retry === true,
+		baseDelayMs: 1,
+		streamStallMs: 150,
+		firstTokenStallMs: 5_000,
+	};
+	// The budget cases run on a generic route, whose retry ladder reads provider
+	// error text the way the openai-codex route in #423 did; LiteLLM's is narrower.
+	const runtimeId = budget ? "openai-compat" : litellm.id;
+	settings.targets = [
+		{
+			...target,
+			runtime: runtimeId,
+			defaultModel: model.id,
+			...(budget ? { pricing: { input: 1, output: 1 } } : {}),
+		},
+	];
+	if (budget) settings.safety.limits.sessionCostUsd = budget.ceilingUsd;
 	const runtime: RuntimeDescriptor = {
 		...litellm,
+		id: runtimeId,
 		auth: "none",
 		defaultCapabilities: capabilities,
 		synthesizeModel: () => ({ ...model, contextWindow: 131072, maxTokens: 4096 }),
@@ -94,11 +125,28 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0) {
 	const context = dispatchStubContext({ settings, runtime });
 	const wire = transport(mode, firstTokenDelayMs);
 	const events: ChatLoopEvent[] = [];
+	const alerts: BudgetAlertPayload[] = [];
+	context.bus.on(BusChannels.BudgetAlert, (payload) => {
+		alerts.push(payload);
+	});
+	const spent = { sessionCost: () => budget?.spentUsd ?? 0 } as unknown as ObservabilityContract;
+	const scheduling = budget
+		? createSchedulingBundle(
+				{
+					bus: context.bus,
+					getContract: ((name: string) =>
+						name === "observability" ? spent : context.getContract(name)) as DomainContext["getContract"],
+				},
+				{ getSettings: () => settings },
+			).contract
+		: undefined;
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		bus: context.bus,
+		...(scheduling ? { scheduling } : {}),
+		...(budget?.headless ? { headless: true } : {}),
 		createAgent: (options) =>
 			createEngineAgent({
 				...options,
@@ -112,7 +160,7 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0) {
 	});
 	loop.onEvent((event) => events.push(event));
 	const text = (): string => events.map((event) => (event.type === "text_delta" ? event.delta : "")).join("");
-	return { loop, events, wire, text };
+	return { loop, events, wire, text, settings, alerts };
 }
 
 let env: IsolatedClioEnv;
@@ -157,6 +205,56 @@ it("a stream that goes silent after its first token still aborts on the mid-stre
 		strictEqual(f.text(), "PARTIAL", "the mid-stream watchdog follows an actual first token");
 		const failure = JSON.stringify(f.events);
 		match(failure, /stream stalled: no output from stall-fixture/u);
+	} finally {
+		f.loop.dispose();
+		f.wire.dispose();
+		await f.loop.whenSettled();
+	}
+});
+
+it("a request parked at the session cost ceiling outlasts the stall window and runs once the ceiling is raised", {
+	timeout: 20_000,
+}, async () => {
+	// #423: the watchdog aborted this wait as "no output from openai-codex" and
+	// retried it into the same ceiling. Four stall windows pass before the raise.
+	const f = fixture("cold", 0, { spentUsd: 5.01, ceilingUsd: 5, retry: true });
+	const raise = setTimeout(() => {
+		f.settings.safety.limits.sessionCostUsd = 50;
+	}, 600);
+	try {
+		await f.loop.submit("hello");
+		await f.loop.whenSettled();
+		strictEqual(f.text(), "COLD_START_ANSWER");
+		strictEqual(f.wire.calls(), 1, "the parked request was invoked once, after the raise");
+		doesNotMatch(JSON.stringify(f.events), /stalled|aborted before invocation/u);
+		strictEqual(f.alerts.length, 1);
+		ok((f.alerts[0]?.contextTokens ?? 0) > 0, "the stop carries the parked request's context size");
+		match(
+			budgetAlertNotice(f.alerts[0])?.text ?? "",
+			/\$5\.01 of \$5\.00 ceiling exceeded\. The next call sends ~[\d,]+ context tokens\./u,
+		);
+	} finally {
+		clearTimeout(raise);
+		f.loop.dispose();
+		f.wire.dispose();
+		await f.loop.whenSettled();
+	}
+});
+
+it("a headless request at the ceiling ends on the budget error without a retry, even when the spend reads like a 500", {
+	timeout: 20_000,
+}, async () => {
+	const f = fixture("cold", 0, { spentUsd: 1.5003, ceilingUsd: 1.5, headless: true, retry: true });
+	try {
+		await f.loop.submit("hello");
+		await f.loop.whenSettled();
+		strictEqual(f.wire.calls(), 0, "nothing reached the provider");
+		const settled = JSON.stringify(f.events);
+		match(
+			settled,
+			/budget_ceiling: session priced spend \$1\.5003 reached the \$1\.5000 ceiling with ~[\d,]+ context tokens per call/u,
+		);
+		doesNotMatch(settled, /stalled|"type":"retry_status"/u);
 	} finally {
 		f.loop.dispose();
 		f.wire.dispose();

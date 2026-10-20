@@ -586,6 +586,9 @@ export function estimatedUsageForInterruptedTurn(
 ): Record<string, unknown> | null {
 	if ((message as { stopReason?: unknown }).stopReason !== "aborted") return null;
 	const reported = (message as { usage?: Record<string, unknown> }).usage;
+	// A request cancelled before invocation sent no prompt. Estimating one put
+	// the whole context on the meter for each budget-wait abort in #423.
+	if (reported?.callInvoked === false) return null;
 	if (reported && typeof reported === "object" && reported.estimated !== true) {
 		for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
 			const value = reported[key];

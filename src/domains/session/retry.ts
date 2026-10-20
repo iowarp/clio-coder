@@ -30,6 +30,7 @@ import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
 import { isLiteLLMConnectionFailure } from "../../core/gateway-routing.js";
 import { engineRetryDelayMs, isEngineContextOverflow, isEngineRetryableAssistantError } from "../../engine/ai.js";
+import { SESSION_COST_CEILING_REASON } from "../scheduling/budget.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
 
@@ -123,6 +124,10 @@ export interface RecoveryFailureInput {
 export function classifyRecoveryFailure(input: RecoveryFailureInput): RecoveryFailure {
 	let kind: RecoveryFailureKind;
 	if (input.cancelled) kind = "cancelled";
+	// Clio's own ceiling refused the request before any provider saw it. Its
+	// dollar amounts can contain "500", which the provider pattern reads as a
+	// server error, and another attempt meets the same ceiling (#423).
+	else if (input.message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) kind = "terminal-provider";
 	else if (input.contextOverflow ?? isEngineContextOverflow(input.message)) kind = "context-overflow";
 	else if (input.runtimeId === "litellm") {
 		kind = !input.hasAttemptOutput && isLiteLLMConnectionFailure(input.message) ? "connection" : "terminal-provider";
