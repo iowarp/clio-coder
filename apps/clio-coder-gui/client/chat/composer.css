@@ -994,3 +994,39 @@
 	color: var(--status-warn-fg);
 	font-size: var(--text-exact);
 }
+
+.composer__labeled-button {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2);
+	min-height: 34px;
+	padding: 4px var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+	white-space: nowrap;
+}
+.composer__labeled-button:hover:not(:disabled) {
+	background: var(--wb-active);
+	color: var(--ink);
+}
+.composer__labeled-button .icon {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+}
+.composer__actions-button {
+	border-color: var(--line);
+	color: var(--accent);
+}
+@container composer (max-width: 650px) {
+	.composer__actions {
+		flex-wrap: wrap;
+	}
+	.composer__tools {
+		flex-wrap: wrap;
+	}
+}

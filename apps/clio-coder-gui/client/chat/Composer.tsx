@@ -24,6 +24,7 @@ import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { VisualActions } from "./VisualActions.js";
 import { AutonomyPill } from "./AutonomyPill.js";
 import { persistAttachments, savedAttachments } from "./attachment-drafts.js";
 import { readAttachment } from "./attachment-image.js";
@@ -159,6 +160,7 @@ export const Composer = memo(function Composer({
 	const [enterSends, setEnterSends] = useState(initialEnterSends);
 	const options = useRef<HTMLDetailsElement | null>(null);
 	const [optionsOpen, setOptionsOpen] = useState(false);
+	const [actionsOpen, setActionsOpen] = useState(false);
 	useDetailsDismiss(options, optionsOpen);
 	const [attachments, setAttachments] = useState<Attachment[]>(() => savedAttachments(sessionId));
 	const [attachmentsStored, setAttachmentsStored] = useState(true);
@@ -208,13 +210,13 @@ export const Composer = memo(function Composer({
 	const steering = steeringAffordances(capabilities.data);
 	const modes = steerModeOffers(steering);
 
-	// Read only once a draft starts with a slash. The template list changes on a
+	// Read only when Actions opens or a draft starts with a slash. The template list changes on a
 	// library reload, so this observer lets it go stale where the palette does not.
 	const slashDraft = draft.text.trimStart().startsWith("/");
 	const commandCatalog = useQuery({
 		queryKey: ["session-commands", sessionId],
 		queryFn: () => client.call(routes.sessionCommands, params),
-		enabled: slashDraft && sessionState === "open" && !!capabilities.data?.commands,
+		enabled: (actionsOpen || slashDraft) && sessionState === "open" && !!capabilities.data?.commands,
 		staleTime: 30_000,
 		retry: false,
 	});
@@ -237,7 +239,7 @@ export const Composer = memo(function Composer({
 	);
 	const query = sessionState === "open" ? slashQuery(draft.text) : null;
 	const matches = useMemo(() => (query === null ? [] : filterSlashEntries(entries, query)), [entries, query]);
-	const paletteOpen = matches.length > 0 && dismissed !== draft.text && dialog === null;
+	const paletteOpen = matches.length > 0 && dismissed !== draft.text && dialog === null && !actionsOpen;
 	const active = Math.min(activeIndex, Math.max(0, matches.length - 1));
 	const line = slashDraft ? parseSlashLine(draft.text, commandCatalog.data) : null;
 
@@ -290,7 +292,7 @@ export const Composer = memo(function Composer({
 				]
 			: argMatches.map((row) => ({ id: `arg:${row.value}`, label: row.value, summary: row.summary }));
 	const suggestionKey = mention !== null ? mentionKey : argMatches.length > 0 ? draft.text : null;
-	const mentionOpen = suggestions.length > 0 && mentionDismissed !== suggestionKey && dialog === null;
+	const mentionOpen = suggestions.length > 0 && mentionDismissed !== suggestionKey && dialog === null && !actionsOpen;
 	const mentionActive = Math.min(mentionIndex, Math.max(0, suggestions.length - 1));
 	const [steerNote, setSteerNote] = useState<{ tone: "success" | "warn" | "fail"; message: string } | null>(null);
 	// A second Esc within this window stops the turn; the first only says so.
@@ -576,8 +578,6 @@ export const Composer = memo(function Composer({
 	// The delivery switch takes the route's place in the row, and only once there is a message to
 	// deliver: an empty field mid-turn offers Stop alone.
 	const steerChoice = running && modes.length > 1 && draft.text.trim() !== "";
-	// The palette reads the whole draft as its query, so it cannot open over a message in progress.
-	const commandsReachable = sessionState === "open" && (draft.text.trim() === "" || slashDraft);
 	// An image goes as an image when the agent takes them; anything else is offered as text.
 	const readPicked = async (file: File): Promise<Attachment> => {
 		if (file.type.startsWith("image/") && canAttachImages) return readAttachment(file, crypto.randomUUID());
@@ -1106,8 +1106,27 @@ export const Composer = memo(function Composer({
 								}}
 							/>
 						) : null}
-						{/* One menu for everything that adds to a message or changes how it is typed. The file
-						    input stays outside it, so a closed menu never unmounts a picker that is open. */}
+						<button
+							type="button"
+							className="composer__labeled-button"
+							disabled={!canAttach}
+							title={canAttach ? attachLabel : "Attachments are unavailable for this session"}
+							onClick={() => picker.current?.click()}
+						>
+							<Icon name="paperclip" />
+							Attach
+						</button>
+						<button
+							type="button"
+							className="composer__labeled-button composer__actions-button"
+							aria-haspopup="dialog"
+							aria-expanded={actionsOpen}
+							disabled={sessionState !== "open"}
+							onClick={() => setActionsOpen(true)}
+						>
+							<Icon name="overview" />
+							Actions
+						</button>
 						<details
 							className="composer__options"
 							ref={options}
@@ -1118,45 +1137,10 @@ export const Composer = memo(function Composer({
 								closeOptions();
 							}}
 						>
-							<summary aria-label="Add to message" title="Attach files, run a command, keyboard options">
-								<Icon name="plus" />
+							<summary aria-label="Message options" title="Message and keyboard options">
+								<Icon name="more" />
 							</summary>
 							<div className="composer__options-panel">
-								{canAttach ? (
-									<button
-										type="button"
-										className="composer__menu-item"
-										title={`You can also ${canAttachImages ? "paste or " : ""}drop them on the message box.`}
-										onClick={() => {
-											closeOptions();
-											picker.current?.click();
-										}}
-									>
-										<Icon name="paperclip" />
-										{attachLabel}
-									</button>
-								) : null}
-								<button
-									type="button"
-									className="composer__menu-item"
-									disabled={!commandsReachable}
-									title={
-										commandsReachable
-											? "Clio Coder commands and this task's actions"
-											: "A command is a line of its own. Send or clear the draft first."
-									}
-									onClick={() => {
-										if (options.current) options.current.open = false;
-										setDismissed(null);
-										setActiveIndex(0);
-										store.write("/");
-										placeCaretAtEnd();
-									}}
-								>
-									<Icon name="system" />
-									Commands
-									<kbd>/</kbd>
-								</button>
 								{running && steering.interrupt ? (
 									<button
 										type="button"
@@ -1325,6 +1309,34 @@ export const Composer = memo(function Composer({
 			</form>
 			{/* Outside the form: React bubbles a portaled panel's submit through its owner, and the
 		    composer's own submit must never hear it. */}
+			{actionsOpen ? (
+				<VisualActions
+					entries={entries}
+					paneAvailable={pane !== null}
+					loading={capabilities.isPending || (!!capabilities.data?.commands && commandCatalog.isFetching)}
+					error={capabilities.error?.message ?? commandCatalog.error?.message ?? null}
+					onRetry={() => {
+						void capabilities.refetch();
+						if (capabilities.data?.commands) void commandCatalog.refetch();
+					}}
+					busy={command.isPending || contextRunning || sessionState !== "open"}
+					onClose={() => setActionsOpen(false)}
+					onPick={(entry) => {
+						setActionsOpen(false);
+						if (entry.kind === "pane") pane?.show(entry.view);
+						else if (entry.kind === "action") setDialog(entry.action);
+					}}
+					onShowChanges={() => {
+						setActionsOpen(false);
+						pane?.show("changes");
+					}}
+					onRun={(plan) => {
+						if (command.isPending || contextRunning || sessionState !== "open") return;
+						runCommand(plan, null);
+						setActionsOpen(false);
+					}}
+				/>
+			) : null}
 			{dialog !== null ? (
 				<SlashActionDialog
 					action={dialog}
@@ -1334,7 +1346,10 @@ export const Composer = memo(function Composer({
 					capabilities={capabilities.data}
 					running={running}
 					settledTurns={settledTurns}
-					onClose={() => setDialog(null)}
+					onClose={() => {
+						setDialog(null);
+						placeCaretAtEnd();
+					}}
 				/>
 			) : null}
 		</>

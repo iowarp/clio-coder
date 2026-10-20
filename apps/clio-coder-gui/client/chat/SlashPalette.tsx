@@ -87,13 +87,13 @@ export function SlashPalette({
 }
 
 const DIALOG_COPY: Readonly<Record<SlashAction, { title: string; eyebrow: string }>> = {
-	tree: { title: "Branches", eyebrow: "/tree" },
-	fork: { title: "Fork the conversation", eyebrow: "/fork" },
-	handoff: { title: "Hand off to a new conversation", eyebrow: "/handoff" },
-	btw: { title: "Side question", eyebrow: "/btw" },
-	draft: { title: "Drafts", eyebrow: "/draft" },
-	extensions: { title: "Extensions", eyebrow: "/extensions" },
-	"fleet-run": { title: "Run a playbook", eyebrow: "/fleet run" },
+	tree: { title: "Branches", eyebrow: "Conversation" },
+	fork: { title: "Fork the conversation", eyebrow: "Conversation" },
+	handoff: { title: "Hand off to a new conversation", eyebrow: "Continue your work" },
+	btw: { title: "Side question", eyebrow: "Alongside your work" },
+	draft: { title: "Drafts", eyebrow: "Explore a request" },
+	extensions: { title: "Extensions", eyebrow: "Session tools" },
+	"fleet-run": { title: "Run a playbook", eyebrow: "Guided workflow" },
 };
 
 /**
