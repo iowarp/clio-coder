@@ -24,12 +24,14 @@ import type { SessionMeta } from "./contract.js";
  * 3: immutable identity/constitution prefix, separate harness-awareness,
  *    conditional capability guidance and a final typed task-scope layer.
  *
+ * 4: restart-stable orientation with a durable prior-session cutoff (#423).
+ *
  * A record without a `version` field predates the field and is read as 1, so a
  * 0.3.8 manifest still parses. Bump this whenever the compiled text moves for a
  * reason other than its inputs: a resumed session then has the version in hand
  * to explain the one `promptRecompiled` entry its first compile writes.
  */
-export const PROMPT_MANIFEST_VERSION = 3;
+export const PROMPT_MANIFEST_VERSION = 4;
 
 export interface PromptManifestSection {
 	id: string;

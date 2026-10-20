@@ -47,12 +47,15 @@ it("selects a recent closed session with two operator turns, excluding fork ance
 		write("independent", null, 5, 2);
 		write("one-turn", null, 1, 1);
 		write("current", "parent", 0, 0);
+		write("future-closed", null, -5, 2);
 		strictEqual(
 			latestPriorSession(cwd, "", now)?.id,
 			"grandparent",
 			"a closed session is eligible without a ten-minute wait",
 		);
 		strictEqual(latestPriorSession(cwd, "current", now)?.id, "independent", "neither fork ancestor is prior");
+		const facts = sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n");
+		match(facts, new RegExp(at(5).replaceAll(".", "\\.")));
 		match(
 			sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n"),
 			/Answer "last time" from this record; git log is not session history/,

@@ -153,8 +153,16 @@ export function createPromptsBundle(
 		return `${sessionId}\0${cwd}`;
 	}
 
-	async function captureSessionSourceSnapshot(sessionId: string, cwd: string): Promise<SessionPromptSourceSnapshot> {
+	async function captureSessionSourceSnapshot(
+		sessionId: string,
+		cwd: string,
+		sessionStartedAt?: string,
+	): Promise<SessionPromptSourceSnapshot> {
 		const capturedAt = Date.now();
+		// OAI-2a / #423: orientation uses the durable creation cutoff on resume;
+		// pending-snapshot adoption still compares the actual capture instant.
+		const createdAt = sessionStartedAt === undefined ? Number.NaN : Date.parse(sessionStartedAt);
+		const orientationCutoff = Number.isFinite(createdAt) ? createdAt : capturedAt;
 		let projectContext: ProjectPromptContext | null = null;
 		if (!suppressContextFiles) {
 			projectContext = contextDomain()?.renderPromptContext(cwd) ?? null;
@@ -171,7 +179,7 @@ export function createPromptsBundle(
 			capturedAt,
 			projectContext,
 			customization: captureCustomizationSources(cwd),
-			workspaceRoot: workspaceRootFragment(cwd, sessionStartFacts(cwd, sessionId, capturedAt, workspace)),
+			workspaceRoot: workspaceRootFragment(cwd, sessionStartFacts(cwd, sessionId, orientationCutoff, workspace)),
 			clioRepoAwareness: clioRepoAwarenessFragments(cwd),
 			catalogs: captureCatalogs(cwd),
 		};
@@ -189,7 +197,7 @@ export function createPromptsBundle(
 		// two byte-identical instead of re-probing a tree turn one may have changed.
 		const pendingKey = sessionSourceKey("", cwd);
 		if (sessionId.length === 0) {
-			const captured = await captureSessionSourceSnapshot(sessionId, cwd);
+			const captured = await captureSessionSourceSnapshot(sessionId, cwd, sessionStartedAt);
 			sessionSourceSnapshots.set(pendingKey, captured);
 			return captured;
 		}
@@ -205,7 +213,7 @@ export function createPromptsBundle(
 				return pending;
 			}
 		}
-		const captured = await captureSessionSourceSnapshot(sessionId, cwd);
+		const captured = await captureSessionSourceSnapshot(sessionId, cwd, sessionStartedAt);
 		sessionSourceSnapshots.set(key, captured);
 		return captured;
 	}
@@ -481,26 +489,6 @@ function quotedFact(text: string, maxChars: number): string {
 	return JSON.stringify(collapsed.length > maxChars ? `${collapsed.slice(0, maxChars - 1)}…` : collapsed);
 }
 
-function localTime(at: number): string {
-	return new Date(at).toLocaleString("en-US", {
-		weekday: "short",
-		year: "numeric",
-		month: "short",
-		day: "numeric",
-		hour: "2-digit",
-		minute: "2-digit",
-		timeZoneName: "short",
-	});
-}
-
-function elapsed(fromIso: string, to: number): string {
-	const minutes = Math.max(0, Math.round((to - Date.parse(fromIso)) / 60_000));
-	if (minutes < 90) return `${minutes} min ago`;
-	const hours = Math.round(minutes / 60);
-	if (hours < 48) return `${hours} h ago`;
-	return `${Math.round(hours / 24)} days ago`;
-}
-
 /**
  * Facts every session should start with and none had: the tree's git state,
  * the evidence bar this repo declares, the one earlier recorded session in
@@ -513,16 +501,13 @@ function elapsed(fromIso: string, to: number): string {
 export function sessionStartFacts(
 	cwd: string,
 	sessionId: string,
-	capturedAt: number,
+	orientationCutoff: number,
 	workspace: WorkspaceSnapshot | null,
 ): string[] {
-	const facts: string[] = [`Session start, ${localTime(capturedAt)}:`];
+	const facts: string[] = ["Session context:", "- Derive conversation history from this session's record."];
 	let commitFact: string | null = null;
 	let priorFact: string | null = null;
 	let rigorFact: string | null = null;
-	if (sessionId.length === 0) {
-		facts.push("- Before this request, this new conversation contained no assistant messages.");
-	}
 	if (workspace?.isGit === true) {
 		const state = [
 			workspace.dirty === true ? "uncommitted changes" : workspace.dirty === false ? "clean tree" : null,
@@ -545,10 +530,10 @@ export function sessionStartFacts(
 		// Rigor still gates finishing through the finish contract; the fact is orientation only.
 	}
 	try {
-		const prior = latestPriorSession(cwd, sessionId, capturedAt);
+		const prior = latestPriorSession(cwd, sessionId, orientationCutoff);
 		if (prior !== null) {
 			const topic = prior.name ?? prior.firstMessagePreview;
-			priorFact = `- Last recorded session here, ${elapsed(prior.lastActiveAt, capturedAt)}: ${topic ? quotedFact(topic, 64) : prior.id}. Answer "last time" from this record; git log is not session history. /resume opens it.`;
+			priorFact = `- Last recorded session here, ${prior.lastActiveAt}: ${topic ? quotedFact(topic, 64) : prior.id}. Answer "last time" from this record; git log is not session history. /resume opens it.`;
 		}
 	} catch {
 		// Session history is orientation; an unreadable state directory renders no line.

@@ -206,6 +206,8 @@ export function latestPriorSession(
 		const lastActiveAt = meta.endedAt ?? readMtimeIso(currentPath) ?? meta.createdAt ?? null;
 		if (lastActiveAt === null) continue;
 		const quietFor = now - Date.parse(lastActiveAt);
+		// OAI-2a / #423: a closed record after the orientation cutoff is future history.
+		if (!Number.isFinite(quietFor) || quietFor < 0) continue;
 		if (meta.endedAt == null && (!Number.isFinite(quietFor) || quietFor < PRIOR_SESSION_QUIET_MS)) continue;
 		candidates.push({ meta, currentPath, lastActiveAt });
 	}

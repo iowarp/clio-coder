@@ -524,8 +524,8 @@ describe("session replay prefix stability", () => {
 	});
 });
 
-it("prompt layout v3 preserves readable provenance from unversioned and v2 manifests", (t) => {
-	strictEqual(PROMPT_MANIFEST_VERSION, 3);
+it("prompt layout v4 preserves readable provenance from unversioned and v2 manifests", (t) => {
+	strictEqual(PROMPT_MANIFEST_VERSION, 4);
 	const root = mkdtempSync(join(tmpdir(), "clio-prompt-layout-"));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
 	const meta = { id: "layout-compatibility", cwd: root, cwdHash: "fixture" } as SessionMeta;
