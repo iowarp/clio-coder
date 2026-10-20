@@ -2233,6 +2233,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							},
 						];
 			});
+			// Only the bound session ceiling shapes compiled guidance; prompt and
+			// template scope arrives in the current turn reminder (#423).
 			const standingConstraints = deps.standingTurnConstraints?.();
 			const sessionInputs: SessionPromptInputs = {
 				...(standingConstraints ? { turnConstraints: standingConstraints } : {}),

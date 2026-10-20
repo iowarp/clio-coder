@@ -648,14 +648,14 @@ export interface ChatLoop {
 	machineTurnAvailable?(): boolean;
 	currentTurnConstraints?(): TurnConstraints | undefined;
 	/**
-	 * Narrow the standing limits below the operator's `sessionToolLimits` by
-	 * each ceiling in order (an ACP client's session, then prompt ceiling).
-	 * Every later turn, continuation and job holds the result until the next
-	 * call; nothing passed here can widen the operator's limits. Returns the
-	 * effective standing limits.
+	 * Bind a session schema ceiling, or narrow admission for the current prompt
+	 * without changing the standing prompt inputs and schemas (#423).
 	 */
-	setToolCeiling?(ceilings: ReadonlyArray<TurnConstraints | undefined>): TurnConstraints | undefined;
-	/** The standing limits {@link setToolCeiling} last set, for work a command starts outside a turn. */
+	setToolCeiling?(
+		ceilings: ReadonlyArray<TurnConstraints | undefined>,
+		lifetime?: "session" | "prompt",
+	): TurnConstraints | undefined;
+	/** The effective host limits, including a prompt ceiling, for work started outside a turn (#423). */
 	toolLimits?(): TurnConstraints | undefined;
 	/** Effective creating/current task and skill ceiling for session-owned jobs (#411). */
 	jobConstraints?(): TurnConstraints | undefined;
@@ -1141,6 +1141,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const state = createTurnState();
 	const operatorToolLimits = snapshotTurnConstraints(deps.sessionToolLimits);
 	let sessionToolLimits = operatorToolLimits;
+	let promptToolLimits = sessionToolLimits;
 	state.currentTurnConstraints = sessionToolLimits;
 	const eggs = createConversationEggs({
 		identity: () => deps.session?.current()?.id ?? null,
@@ -2135,6 +2136,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				deps.toolRegistry,
 				currentToolInvokeOptions,
 				turnRuntime.toolTelemetry,
+				sessionToolLimits,
 			);
 		},
 		recordUsage: (runtime, usage: Usage | null, origin) => {
@@ -2481,7 +2483,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.currentTurnConstraints =
 					options.requestContinuation === true
 						? state.currentTurnConstraints
-						: snapshotTurnConstraints(narrowTurnConstraints(sessionToolLimits, options.constraints));
+						: snapshotTurnConstraints(narrowTurnConstraints(promptToolLimits, options.constraints));
 				const previousRunSnapshot = state.lastRunSnapshot;
 				let agentRuntime: AgentRuntime | null;
 				try {
@@ -2723,6 +2725,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					deps.toolRegistry,
 					currentToolInvokeOptions,
 					turnRuntime.toolTelemetry,
+					sessionToolLimits,
 				);
 				const toolSignature = toolSignatureFromState(agentRuntime.agent.state.tools);
 				const askUserPolicy = createAskUserToolPolicy(
@@ -3312,7 +3315,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						await queues.resubmitRequestContinuation();
 				}
 			} finally {
-				if (submitOwner === owner) submitOwner = null;
+				if (submitOwner === owner) {
+					submitOwner = null;
+					// Template bounds end with their turn; prewarm and jobs see only
+					// the host's remaining prompt or session ceiling (#423).
+					state.currentTurnConstraints = promptToolLimits;
+				}
 			}
 		},
 
@@ -3406,13 +3414,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		contextUsage: () => context.contextUsage(),
 		currentTurnConstraints: () => state.currentTurnConstraints,
-		setToolCeiling(ceilings) {
-			sessionToolLimits = snapshotTurnConstraints(ceilings.reduce(narrowTurnConstraints, operatorToolLimits));
-			// A run in flight keeps the scope it was admitted under.
-			if (!state.streaming) state.currentTurnConstraints = sessionToolLimits;
-			return sessionToolLimits;
+		setToolCeiling(ceilings, lifetime = "session") {
+			const limits = snapshotTurnConstraints(
+				ceilings.reduce(narrowTurnConstraints, lifetime === "session" ? operatorToolLimits : sessionToolLimits),
+			);
+			if (lifetime === "session") sessionToolLimits = limits;
+			promptToolLimits = limits;
+			// A run in flight keeps the scope it was admitted under (#423).
+			if (!state.streaming) state.currentTurnConstraints = promptToolLimits;
+			return limits;
 		},
-		toolLimits: () => sessionToolLimits,
+		toolLimits: () => promptToolLimits,
 		jobConstraints: () => {
 			const constraints = state.currentTurnConstraints;
 			const policy = state.currentPendingSkillPolicy ?? state.activeSkillSurface;

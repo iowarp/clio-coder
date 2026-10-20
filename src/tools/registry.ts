@@ -17,6 +17,7 @@ import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
+import { toolSurfaceSources, turnAllowsTool } from "../core/turn-constraints.js";
 import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type {
@@ -1649,7 +1650,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 		const effectOutcome = admitHostEffects(call, spec, admission, level);
 		if (effectOutcome?.kind === "terminal") return effectOutcome;
-		if (admission.kind === "deny") return { kind: "terminal", verdict: deniedVerdict(call, admission) };
+		if (admission.kind === "deny")
+			return { kind: "terminal", verdict: deniedVerdict(call, admission, options?.turnConstraints) };
 		if (admission.kind === "allow") {
 			if (effectOutcome !== null) {
 				const decision = sessionConsentParkDecision(call, admission.decision, effectOutcome, dispatchPlan);
@@ -1754,6 +1756,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const deniedVerdict = (
 		call: ClassifierCall,
 		admission: Extract<AdmissionDisposition, { kind: "deny" }>,
+		constraints: TurnConstraints | undefined,
 	): Extract<RegistryVerdict, { kind: "blocked" }> => {
 		const decision = admission.decision;
 		if (admission.code === "read_only") {
@@ -1779,7 +1782,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return verdict;
 		}
 		if (admission.code === "tool_scope" || admission.code === "skills_disabled") {
-			const reason = admission.reason;
+			const sources = toolSurfaceSources(constraints).filter(
+				(source) => !turnAllowsTool({ allowedTools: source.tools }, call.tool),
+			);
+			const allowed = constraints?.allowedTools;
+			const reason =
+				admission.code === "tool_scope"
+					? [
+							admission.reason,
+							...(sources.length > 0 ? [`Scope source: ${sources.map((source) => source.source).join("; ")}.`] : []),
+							...(allowed !== undefined ? [`Allowed tools: ${allowed.length > 0 ? allowed.join(", ") : "none"}.`] : []),
+							"Do not retry this tool within the current scope.",
+						].join(" ")
+					: admission.reason;
 			const blocked: SafetyDecision = {
 				kind: "block",
 				classification: decision.classification,
@@ -1795,7 +1810,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				"clio_policy",
 				admission.code === "skills_disabled"
 					? "the host must allow skills for this task."
-					: `the host's task scope must name ${call.tool} (clio-coder --allow-tools, or the ACP client's task ceiling).`,
+					: sources.length > 0
+						? sources.map((source) => source.remedy).join(" ")
+						: "Ask the submitting operator to widen the task scope, then resubmit. Do not retry in this turn.",
 				"turn_constraint",
 			);
 		}

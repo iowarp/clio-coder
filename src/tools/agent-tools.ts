@@ -188,6 +188,8 @@ export interface ToolFinishEvent {
 export interface ResolveAgentToolsInput {
 	registry: ToolRegistry;
 	turnConstraints?: TurnConstraints;
+	/** Session schema projection must not replace live turn admission (#423). */
+	schemaCeiling?: TurnConstraints;
 	allowedTools?: ReadonlyArray<ToolName>;
 	toolProfile?: ToolProfileName;
 	agentId?: string;
@@ -565,7 +567,7 @@ export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetr
 	const includeInteractiveTools = input.includeInteractiveTools !== false;
 	const names: ToolName[] = [];
 	for (const name of new Set(toolIds)) {
-		if (!turnAllowsTool(input.turnConstraints, name)) continue;
+		if (!turnAllowsTool(input.turnConstraints, name) || !turnAllowsTool(input.schemaCeiling, name)) continue;
 		// Orchestrator-only tools. Workers resolve their full surface once at
 		// admission, so neither operator interviews nor self-activation apply.
 		if (!includeInteractiveTools && name === ToolNames.AskUser) continue;
@@ -612,21 +614,21 @@ export async function invokeRegisteredTool(
 }
 
 /**
- * The orchestrator's session tool surface: the full resolved surface when the
- * resolved runtime mediates tool calls, nothing otherwise. Tool schemas remain
- * stable across task changes so provider prefix caching and prewarm agree. Per-tool gating (pending-skill policy, safety)
- * happens at invoke time, inside the same admission path workers use.
+ * The orchestrator's session tool surface, narrowed only by its bound schema
+ * ceiling when the runtime supports tools. Turn constraints stay in invocation
+ * admission so templates and ACP prompt ceilings preserve the provider prefix
+ * and agree with prewarm (#423).
  */
 export function resolveSessionTools(
 	runtime: { runtimeResolution: ResolvedRuntimeTarget },
 	toolRegistry: ToolRegistry | undefined,
 	invokeOptions?: () => Partial<ToolInvokeOptions>,
 	telemetry?: ToolTelemetry,
+	schemaCeiling?: TurnConstraints,
 ): AgentTool[] {
 	if (!toolRegistry || runtime.runtimeResolution.capabilityDecisions.tools !== true) return [];
 	const input: ResolveAgentToolsInput = { registry: toolRegistry };
-	const constraints = invokeOptions?.().turnConstraints;
-	if (constraints) input.turnConstraints = constraints;
+	if (schemaCeiling) input.schemaCeiling = schemaCeiling;
 	input.invokeOptions = () => {
 		const contextWindow = runtime.runtimeResolution.contextWindowDetails?.effectiveContextWindow;
 		return {

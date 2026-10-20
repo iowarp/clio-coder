@@ -355,11 +355,14 @@ export interface AcpServerChat {
 	isStreaming(): boolean;
 	getSessionId(): string | null;
 	/**
-	 * Narrow the chat's standing tool limits below the operator's by each
-	 * ceiling in order and return the effective limits. Absent means the chat
-	 * cannot enforce a client ceiling, so one is refused.
+	 * Bind a session's schema ceiling or a prompt's admission ceiling and
+	 * return the effective limits (#423). Absent means the chat cannot enforce
+	 * a client ceiling, so one is refused.
 	 */
-	setToolCeiling?(ceilings: ReadonlyArray<TurnConstraints | undefined>): TurnConstraints | undefined;
+	setToolCeiling?(
+		ceilings: ReadonlyArray<TurnConstraints | undefined>,
+		lifetime?: "session" | "prompt",
+	): TurnConstraints | undefined;
 	/** Replace provider context and the next persisted parent for a new or loaded session. */
 	resetForSession?(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
 	/**
@@ -832,7 +835,7 @@ const ACP_CEILING_FIELD_SET: ReadonlySet<string> = new Set(ACP_CEILING_FIELDS);
  * the request carries none. Anything malformed refuses the request: an ignored
  * ceiling would let work run wider than the client asked for (Z1).
  */
-function requestCeiling(params: unknown): TurnConstraints | undefined {
+function requestCeiling(params: unknown, source = "ACP session ceiling"): TurnConstraints | undefined {
 	const meta = isRecord(params) ? params._meta : undefined;
 	// A _meta that is not an object cannot carry a ceiling; whatever else it
 	// means is another extension's to judge, so it fails nothing here.
@@ -842,7 +845,21 @@ function requestCeiling(params: unknown): TurnConstraints | undefined {
 	const unknown = Object.keys(raw).find((key) => !ACP_CEILING_FIELD_SET.has(key));
 	if (unknown !== undefined) throw invalidCeiling(`unknown ceiling field ${JSON.stringify(unknown.slice(0, 64))}`);
 	try {
-		return snapshotTurnConstraints(raw as TurnConstraints);
+		const constraints = snapshotTurnConstraints(raw as TurnConstraints);
+		const surfaceSource = (tools: readonly string[]) => [
+			{
+				tools,
+				source,
+				remedy: `Ask the ACP client to widen its ${source === "ACP prompt ceiling" ? "prompt" : "session"} ceiling, then resubmit.`,
+			},
+		];
+		return snapshotTurnConstraints({
+			...constraints,
+			...(constraints?.allowedTools !== undefined ? { toolSurfaceSources: surfaceSource(constraints.allowedTools) } : {}),
+			...(constraints?.delegatedTools !== undefined
+				? { delegatedToolSurfaceSources: surfaceSource(constraints.delegatedTools) }
+				: {}),
+		});
 	} catch {
 		throw invalidCeiling(
 			"allowedTools and delegatedTools take capability names, delegation takes allowed or forbidden, readOnly takes true",
@@ -4369,8 +4386,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// The limits last applied to the chat. A slash command acts outside the tool
 	// calls these bound, so it is screened against them before it runs (Z1).
 	let standingLimits: TurnConstraints | undefined;
-	const applyCeilings = (ceilings: ReadonlyArray<TurnConstraints | undefined>): TurnConstraints | undefined => {
-		standingLimits = options.chat.setToolCeiling?.(ceilings);
+	const applyCeilings = (
+		ceilings: ReadonlyArray<TurnConstraints | undefined>,
+		lifetime: "session" | "prompt" = "session",
+	): TurnConstraints | undefined => {
+		standingLimits = options.chat.setToolCeiling?.(ceilings, lifetime);
 		return standingLimits;
 	};
 	const assertCommandWithinCeiling = (control: AcpCommandControl, command: unknown, argv: unknown): void => {
@@ -6659,7 +6679,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireInitialized();
 		requireAuthenticated();
 		const session = getSession(params);
-		const promptCeiling = requestCeiling(params);
+		const promptCeiling = requestCeiling(params, "ACP prompt ceiling");
 		assertCeilingEnforceable(promptCeiling);
 		if (contextCommandInFlight !== null || session.activePrompt || options.chat.isStreaming()) {
 			throw new AcpRequestError(-32602, "this session already has an active prompt", { code: "prompt_active" });
@@ -6717,10 +6737,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			settle = resolveSettled;
 		});
 		options.onActiveSessionAutonomyChange?.(session.autonomy);
-		// The standing limits, not one submit's constraints, carry the prompt
-		// ceiling, so a command's injected turn and a send-now resubmit hold it too.
+		// Prompt admission also bounds command-injected turns and resubmits,
+		// while the session schema ceiling stays fixed (#423).
 		const ceilingEcho =
-			options.chat.setToolCeiling !== undefined ? ceilingMeta(applyCeilings([session.ceiling, promptCeiling])) : undefined;
+			options.chat.setToolCeiling !== undefined
+				? ceilingMeta(applyCeilings([session.ceiling, promptCeiling], "prompt"))
+				: undefined;
 		const respond = (stopReason: string): AcpPromptResponse =>
 			promptResponse(stopReason, active, options.usage?.session(), ceilingEcho);
 		telemetry.turnStarted(active.usage);
@@ -6807,7 +6829,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			active.errored = true;
 			active.errorMessage = err instanceof Error ? err.message : String(err);
 		} finally {
-			if (promptCeiling !== undefined) applyCeilings([session.ceiling]);
+			if (promptCeiling !== undefined) applyCeilings([session.ceiling], "prompt");
 			active.acceptsContinuation = false;
 			unsubscribe();
 			// The last meter and plan frames precede the response they total.

@@ -244,6 +244,14 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 			names.length > 0 ? `Allowed capabilities for this turn: ${names.join(", ")}.` : "Use no tools for this turn.",
 		);
 	}
+	if (constraints.delegatedTools) {
+		const names = [...new Set(constraints.delegatedTools)].sort();
+		lines.push(
+			names.length > 0
+				? `Allowed capabilities for delegated workers this turn: ${names.join(", ")}.`
+				: "Delegated workers may use no tools for this turn.",
+		);
+	}
 	return lines.length > 0 ? ["# Current task scope", ...lines].join("\n") : "";
 }
 

@@ -4297,7 +4297,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getReadySkillCount,
 		...(options.headless === undefined ? { getRouteSources: () => routeProvenance().active } : {}),
 		interactiveGuidance: !options.headless && !options.acp,
-		// A headless run scopes its one task through `headless.constraints`.
+		// Headless binds its single task's ceiling after template expansion (#423).
 		...(options.headless === undefined && options.toolLimits !== undefined
 			? { sessionToolLimits: options.toolLimits }
 			: {}),
@@ -5460,6 +5460,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				options.headless.constraints,
 				template?.allowedTools || template?.delegatedTools ? templateToolConstraints(template) : undefined,
 			);
+			// A headless template and its flags bind once for the whole run (#423).
+			chat.setToolCeiling?.([constraints]);
 			const images = [...(options.headless.images ?? []), ...fileExpansion.images];
 			const workingContextPaths = [...(options.headless.workingContextPaths ?? []), ...fileExpansion.referencedPaths];
 			const code = await runHeadlessMainAgent(chat, {

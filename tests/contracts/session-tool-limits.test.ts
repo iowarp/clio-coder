@@ -68,9 +68,9 @@ test("an interactive or ACP session's tool limits bound every turn, before and a
 		assert.deepEqual(loop.currentTurnConstraints?.(), { allowedTools: ["read", "write"], delegatedTools: [] });
 		await loop.submit("typed by the operator");
 		assert.deepEqual(loop.currentTurnConstraints?.(), { allowedTools: ["read", "write"], delegatedTools: [] });
-		// A host-scoped turn narrows further and never widens past the session limit.
+		// The scoped turn restores session limits when it settles (#423).
 		await loop.submit("scoped", { constraints: { allowedTools: ["read", "bash"], delegatedTools: ["bash"] } });
-		assert.deepEqual(loop.currentTurnConstraints?.(), { allowedTools: ["read"], delegatedTools: [] });
+		assert.deepEqual(loop.currentTurnConstraints?.(), { allowedTools: ["read", "write"], delegatedTools: [] });
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();

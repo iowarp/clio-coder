@@ -426,7 +426,18 @@ test("a fleet run under an ACP ceiling is refused when the ceiling is read-only 
 	const refused = (error: unknown) => error instanceof AcpRequestError && error.detail.code === "ceiling_refused";
 	await assert.rejects(runUnder({ readOnly: true }), refused);
 	await assert.rejects(runUnder({ delegation: "forbidden" }), refused);
-	assert.deepEqual(await runUnder({ delegatedTools: ["read"] }), [{ delegatedTools: ["read"] }]);
+	assert.deepEqual(await runUnder({ delegatedTools: ["read"] }), [
+		{
+			delegatedTools: ["read"],
+			delegatedToolSurfaceSources: [
+				{
+					tools: ["read"],
+					source: "ACP session ceiling",
+					remedy: "Ask the ACP client to widen its session ceiling, then resubmit.",
+				},
+			],
+		},
+	]);
 });
 
 test("a read-only ceiling refuses task writes, /oracle, a shell line, a memory proposal and a supersede", async () => {
