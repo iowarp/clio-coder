@@ -66,8 +66,8 @@ export function decodeHomeDraft(raw: string | null): HomeDraft {
 		const validRevision = Number.isSafeInteger(value.revision) && (value.revision ?? -1) >= 0;
 		let revision = validRevision ? (value.revision as number) : 0;
 		// Repaired editor data cannot be treated as the unchanged submitted draft by a later acknowledgement.
-		if (request && (textIssue || !validRevision) && revision === request.draftRevision)
-			revision = request.draftRevision === 0 ? 1 : 0;
+		if (request && (textIssue || !validRevision || revision < request.draftRevision))
+			revision = Math.min(Math.max(revision, request.draftRevision) + 1, Number.MAX_SAFE_INTEGER);
 		return {
 			version: 1,
 			revision,
@@ -95,5 +95,10 @@ export function decodeHomeDraft(raw: string | null): HomeDraft {
 /** Confirmation of an older send must leave subsequent edits and workspace choices intact. */
 export function acknowledgeFirstRequest(draft: HomeDraft, sent: FirstRequest): HomeDraft {
 	if (draft.pending?.turnKey !== sent.turnKey) return draft;
-	return { ...draft, text: draft.revision === sent.draftRevision ? "" : draft.text, pending: null };
+	return {
+		...draft,
+		// A saturated or repaired counter cannot establish that no newer edit occurred.
+		text: draft.revision < Number.MAX_SAFE_INTEGER && draft.revision === sent.draftRevision ? "" : draft.text,
+		pending: null,
+	};
 }

@@ -155,9 +155,9 @@ export function Home({ client }: { client: Client }) {
 	const limitId = `${fieldId}-limit`;
 	const textIssue =
 		draft.textIssue === "too-large"
-			? "Drafts can contain up to 100,000 characters. This edit was not applied; shorten the text and try again."
+			? `Drafts can contain up to ${HOME_DRAFT_TEXT_MAX_CHARACTERS.toLocaleString()} characters. This edit was not applied; shorten the text and try again.`
 			: draft.textIssue === "restored-too-large"
-				? "The saved draft exceeded 100,000 characters. Only its first 100,000 characters were restored."
+				? `The saved draft exceeded ${HOME_DRAFT_TEXT_MAX_CHARACTERS.toLocaleString()} characters. Only its first ${HOME_DRAFT_TEXT_MAX_CHARACTERS.toLocaleString()} characters were restored.`
 				: draft.textIssue === "invalid"
 					? "The saved draft text could not be restored."
 					: text.trim().length > PROMPT_TEXT_MAX_CHARACTERS
@@ -203,7 +203,7 @@ export function Home({ client }: { client: Client }) {
 		field.current?.focus();
 	};
 	const canSend =
-		ready &&
+		(ready || setup.isPending) &&
 		workspaces.isSuccess &&
 		!!workspace &&
 		text.trim() !== "" &&
@@ -309,7 +309,7 @@ export function Home({ client }: { client: Client }) {
 							className="composer__field"
 							rows={1}
 							value={text}
-							aria-describedby={limitId}
+							aria-describedby={textIssue ? limitId : undefined}
 							placeholder="Describe a task or ask a question"
 							{...assist.fieldProps}
 							onChange={(event) => {
@@ -356,11 +356,12 @@ export function Home({ client }: { client: Client }) {
 							</div>
 						</div>
 					</form>
-					<p id={limitId} className={textIssue ? "newtask__error" : "newtask__hint"} role="status">
-						{textIssue ??
-							`Requests up to ${PROMPT_TEXT_MAX_CHARACTERS.toLocaleString()} characters · Drafts up to ${HOME_DRAFT_TEXT_MAX_CHARACTERS.toLocaleString()} characters.`}
-						{textIssue && pending ? " The earlier request is preserved unchanged." : null}
-					</p>
+					{textIssue ? (
+						<p id={limitId} className="newtask__error" role="status">
+							{textIssue}
+							{pending ? " The earlier request is preserved unchanged." : null}
+						</p>
+					) : null}
 					<details className="newtask__context">
 						<summary>
 							<Icon name="models" />

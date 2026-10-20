@@ -40,7 +40,7 @@ export function updateHomeDraft(patch: Partial<HomeDraft>): void {
 	const edited =
 		(patch.text !== undefined && patch.text !== previous.text) ||
 		(patch.workspaceId !== undefined && patch.workspaceId !== previous.workspaceId);
-	state = { ...previous, ...patch, revision: previous.revision + (edited ? 1 : 0) };
+	state = { ...previous, ...patch, revision: Math.min(previous.revision + (edited ? 1 : 0), Number.MAX_SAFE_INTEGER) };
 	try {
 		sessionStorage.setItem(KEY, JSON.stringify(state));
 	} catch {
