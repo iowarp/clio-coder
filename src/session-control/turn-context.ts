@@ -1,4 +1,5 @@
 import { assistantOutputChars } from "../core/assistant-output.js";
+import { semanticUsable } from "../core/config.js";
 import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
@@ -2245,7 +2246,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(deps.getRouteSources ? { routeSources: deps.getRouteSources() } : {}),
 				contextWindow,
 				providerSupportsTools: runtimeSupportsTools(agentRuntime),
-				semanticSearchAvailable: settings.context.semantic.enabled === true,
+				semanticSearchAvailable: semanticUsable(settings.context.semantic),
 				toolNames,
 				// Builtin presence gates prompt guidance. Learning an MCP schema
 				// mid-turn changes discovery results, not the immutable prefix.

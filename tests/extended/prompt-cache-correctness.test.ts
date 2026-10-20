@@ -293,7 +293,7 @@ describe("main compiled-prompt cache identity", () => {
 		const agentRuntime = runtime as unknown as AgentRuntime;
 		const context = createTurnContext({
 			state,
-			getSettings: () => ({ safety: { autonomy: "default" } }) as never,
+			getSettings: () => ({ safety: { autonomy: "default" }, context: { semantic: { enabled: false } } }) as never,
 			providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
 			prompts,
 			toolRegistry: { get: () => undefined, listAll: () => [] } as unknown as ToolRegistry,
@@ -387,7 +387,7 @@ describe("main compiled-prompt cache identity", () => {
 		const cacheNotices: string[][] = [];
 		const context = createTurnContext({
 			state,
-			getSettings: () => ({ safety: { autonomy: "default" } }) as never,
+			getSettings: () => ({ safety: { autonomy: "default" }, context: { semantic: { enabled: false } } }) as never,
 			providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
 			prompts,
 			session: {

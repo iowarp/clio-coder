@@ -1,7 +1,9 @@
 import { settingsChangeKind } from "../domains/config/classify.js";
 import { isOrchestratorEligibleRuntime } from "../domains/providers/eligibility.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
-import { type ClioSettings, SETTINGS_V1_PATH_MOVES, SettingsValidationError, validateSettings } from "./config.js";
+import { findBuiltinRuntimeBootMetadata } from "../domains/providers/runtimes/boot-manifest.js";
+import type { ClioSettings } from "./config.js";
+import { SETTINGS_V1_PATH_MOVES, SettingsValidationError, semanticUsable, validateSettings } from "./config.js";
 import { DEFAULT_SETTINGS, THINKING_LEVELS } from "./defaults.js";
 import { getAtPath, setAtPath } from "./session-routing.js";
 import {
@@ -11,6 +13,25 @@ import {
 	settingsPlacementForRow,
 } from "./settings-areas.js";
 import { type SettingsSectionId, settingsGroupForPath, settingsSectionForPath } from "./settings-navigation.js";
+
+/** Accepted settings can still be inactive on the configured route (#432). */
+export function settingInactiveNote(path: string, settings: Readonly<ClioSettings>): string | null {
+	if (
+		path === "context.semantic.enabled" &&
+		settings.context.semantic.enabled &&
+		!semanticUsable(settings.context.semantic)
+	)
+		return "Inactive until target, model and assetIdentity are pinned with clio-coder semantic configure.";
+	if (path === "chat.prewarm" && settings.chat.prewarm) {
+		const target = settings.targets.find((entry) => entry.id === settings.chat.target);
+		const runtime = target
+			? (getRuntimeRegistry().get(target.runtime) ?? findBuiltinRuntimeBootMetadata(target.runtime))
+			: null;
+		if (runtime?.tier !== "local-native" && !(target?.runtime === "litellm" && target.cache?.deployment))
+			return "Inactive on this chat route; prompt pre-warm requires a local native runtime or a declared LiteLLM cache deployment.";
+	}
+	return null;
+}
 
 export const SETTINGS_LABELS_BY_ID = {
 	autonomy: "Autonomy level",

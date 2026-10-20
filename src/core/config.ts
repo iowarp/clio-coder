@@ -39,6 +39,7 @@ import {
 	WORKING_SET_PROFILE_IDS,
 	WORKSPACE_SNAPSHOT_MODES,
 } from "./defaults.js";
+import { writeDiagnostic } from "./diagnostics.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { SANDBOX_MODES, UNIX_SOCKET_MODES } from "./sandbox/types.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -47,6 +48,30 @@ import { clioConfigDir, resolveClioDirs } from "./xdg.js";
 import { renderYamlPreservingLayout } from "./yaml-preserve.js";
 
 export type ClioSettings = typeof DEFAULT_SETTINGS;
+
+export function semanticUsable(
+	semantic: ClioSettings["context"]["semantic"] | undefined,
+): semantic is ClioSettings["context"]["semantic"] & { target: string; model: string; assetIdentity: string } {
+	return (
+		semantic?.enabled === true &&
+		Boolean(semantic.target?.trim() && semantic.model?.trim() && semantic.assetIdentity?.trim())
+	);
+}
+
+const reportedSettingsWarnings = new Set<string>();
+
+/** Report accepted but inactive configuration once per process (#432). */
+export function reportSettingsWarnings(settings: Readonly<ClioSettings>): void {
+	const semantic = settings.context.semantic;
+	if (!semantic.enabled || semanticUsable(semantic)) return;
+	const missing = (["target", "model", "assetIdentity"] as const)
+		.filter((key) => !semantic[key]?.trim())
+		.map((key) => `context.semantic.${key}`);
+	const warning = `Settings warning: context.semantic.enabled is inactive; missing ${missing.join(", ")}. Run \`clio-coder semantic configure\` to pin them.`;
+	if (reportedSettingsWarnings.has(warning)) return;
+	reportedSettingsWarnings.add(warning);
+	writeDiagnostic(warning, "warning");
+}
 
 export function settingsPath(): string {
 	return join(clioConfigDir(), "settings.yaml");
@@ -2758,6 +2783,7 @@ export function validateSettingsFile(): SettingsValidationResult {
 export function readSettings(): ClioSettings {
 	const result = validateSettingsFile();
 	if (result.issues.length > 0) throw new SettingsValidationError(result.issues);
+	reportSettingsWarnings(result.settings);
 	return result.settings;
 }
 

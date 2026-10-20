@@ -10,6 +10,7 @@ import {
 	SETTINGS_LABELS_BY_ID,
 	SETTINGS_VALUE_HELP_BY_ID,
 	settingControl,
+	settingInactiveNote,
 	settingsV2PathForRow,
 } from "../../core/settings-controls.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
@@ -1836,7 +1837,11 @@ export function buildSettingItems(
 							: String(value);
 			return item;
 		}),
-	];
+	].map((item) => {
+		const note = settingInactiveNote(item.configPath, settings);
+		if (note) item.description += ` ${note}`;
+		return item;
+	});
 }
 
 function fleetProfileRows(

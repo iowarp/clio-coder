@@ -52,7 +52,7 @@ import { runSemanticScope, semanticUnavailable } from "./semantic.js";
 
 export type { ContextSemanticRequest } from "./semantic.js";
 
-import { contextToolSurface } from "./surface.js";
+import { createContextToolSurface } from "./surface.js";
 
 /**
  * The context tool: one OBSERVE entry point for material about the working
@@ -918,9 +918,12 @@ function runBudgetScope(
 	});
 }
 
-export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
+export function createContextTool(
+	deps: ContextToolDeps = {},
+	surface = createContextToolSurface(deps.getSettings?.().context.semantic),
+): ToolSpec {
 	return {
-		...contextToolSurface,
+		...surface,
 		async run(args, options): Promise<ToolResult> {
 			const scope = typeof args.scope === "string" ? args.scope : "";
 			if (scope === "docs" || scope === "library") {

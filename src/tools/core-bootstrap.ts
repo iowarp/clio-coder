@@ -1,6 +1,7 @@
 import { bashShellPath } from "../core/bash-shell.js";
 import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import { semanticUsable } from "../core/config.js";
 import type { RouteProvenance } from "../core/route-provenance.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
@@ -25,7 +26,7 @@ import { codeNavToolSurface } from "./codewiki/code-nav-surface.js";
 import { createConfigureClioTool } from "./configure-clio.js";
 import { type ConsultDeps, createConsultTool } from "./consult.js";
 import type { ContextSemanticDeps } from "./context/semantic.js";
-import { contextToolSurface } from "./context/surface.js";
+import { createContextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { createDecideTool } from "./decide.js";
 import { editTool } from "./edit.js";
@@ -212,7 +213,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		),
 	});
 	const semantic: ContextSemanticDeps = deps.semantic ?? {
-		isEnabled: () => deps.getSettings?.().context.semantic.enabled === true,
+		isEnabled: () => semanticUsable(deps.getSettings?.().context.semantic),
 		loadSearch: async () => {
 			const { searchSemantic } = await import("../domains/semantic-app/index.js");
 			return (request, context) => {
@@ -273,39 +274,44 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	});
 	const session = deps.session;
 	const readSessionEntries = deps.readSessionEntries;
+	// Keep the advertised schema fixed even if settings change before first use (#432).
+	const contextSurface = createContextToolSurface(deps.getSettings?.().context.semantic);
 	registry.register({
 		...builtin(
-			lazyTool(contextToolSurface, async () => {
+			lazyTool(contextSurface, async () => {
 				const { createContextTool } = await import("./context/index.js");
-				if (!session) return createContextTool(skillToolDeps);
+				if (!session) return createContextTool(skillToolDeps, contextSurface);
 				const { probeWorkspace } = await import("../domains/session/workspace/index.js");
-				return createContextTool({
-					...skillToolDeps,
-					...(readSessionEntries
-						? {
-								session: {
-									hasSession: () => session.current() !== null,
-									readEntries: readSessionEntries,
-									activeLeafTurnId: () => {
-										const meta = session.current();
-										return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+				return createContextTool(
+					{
+						...skillToolDeps,
+						...(readSessionEntries
+							? {
+									session: {
+										hasSession: () => session.current() !== null,
+										readEntries: readSessionEntries,
+										activeLeafTurnId: () => {
+											const meta = session.current();
+											return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+										},
+										cwd: () => session.current()?.cwd ?? null,
+										appendEntry: (entry) => session.appendEntry(entry),
+										...(deps.onContextRecalled ? { onRecalled: deps.onContextRecalled } : {}),
 									},
-									cwd: () => session.current()?.cwd ?? null,
-									appendEntry: (entry) => session.appendEntry(entry),
-									...(deps.onContextRecalled ? { onRecalled: deps.onContextRecalled } : {}),
-								},
-							}
-						: {}),
-					workspace: {
-						hasSession: () => session.current() !== null,
-						getSnapshot: () => session.current()?.workspace ?? null,
-						probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
-						saveSnapshot: (snap) => {
-							const meta = session.current();
-							if (meta) meta.workspace = snap;
+								}
+							: {}),
+						workspace: {
+							hasSession: () => session.current() !== null,
+							getSnapshot: () => session.current()?.workspace ?? null,
+							probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
+							saveSnapshot: (snap) => {
+								const meta = session.current();
+								if (meta) meta.workspace = snap;
+							},
 						},
 					},
-				});
+					contextSurface,
+				);
 			}),
 			{ path: "src/tools/context/index.ts", scope: "core" },
 		),

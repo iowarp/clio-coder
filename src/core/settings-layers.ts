@@ -32,6 +32,7 @@ import {
 import {
 	applySettingsDelta,
 	type ClioSettings,
+	reportSettingsWarnings,
 	type SettingsIssue,
 	type SettingsMutator,
 	SettingsValidationError,
@@ -421,6 +422,7 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 	const user = readRawLayer("user", userFile, issues);
 	const prepared = prepareProjectLayers(cwd, issues, user.blob);
 	const { settings, sources } = validateLayerStack(user, prepared, issues);
+	reportSettingsWarnings(settings);
 
 	const strictUserIssues =
 		user.blob === undefined

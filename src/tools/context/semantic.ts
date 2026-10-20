@@ -186,7 +186,7 @@ export async function runSemanticScope(
 	} catch (error) {
 		return {
 			kind: "error",
-			message: `context: semantic search unavailable: ${(error instanceof Error ? error.message : String(error)).slice(0, 256)}. Use code_nav, grep, or evidence to inspect originals.`,
+			message: `context: semantic search unavailable: ${(error instanceof Error ? error.message : String(error)).slice(0, 256).replace(/[.!?]+$/u, "")}. Use code_nav, grep, or evidence to inspect originals.`,
 		};
 	} finally {
 		clearTimeout(timer);

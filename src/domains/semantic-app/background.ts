@@ -1,4 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
+import { semanticUsable } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 
 /**
@@ -15,7 +16,9 @@ export function createSemanticBackgroundRefresh(getSettings: () => Readonly<Clio
 
 	const enabledSettings = (): Readonly<ClioSettings> | undefined => {
 		const settings = getSettings();
-		return settings?.context.semantic.enabled && settings.context.semantic.background ? settings : undefined;
+		return settings && semanticUsable(settings.context.semantic) && settings.context.semantic.background
+			? settings
+			: undefined;
 	};
 	const start = (): void => {
 		if (stopped || active || !pendingRoot) return;

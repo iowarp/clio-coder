@@ -3,7 +3,8 @@
 import { realpathSync } from "node:fs";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
-import { type ClioSettings, readSettings } from "../../core/config.js";
+import type { ClioSettings } from "../../core/config.js";
+import { readSettings, semanticUsable } from "../../core/config.js";
 import { clioCacheDir, clioDataDir } from "../../core/xdg.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/index.js";
 import type { ExtensionEmbeddingRequest } from "../extensions/public-api-v2.js";
@@ -48,9 +49,8 @@ function configured(
 ): ClioSettings["context"]["semantic"] & { target: string; model: string; assetIdentity: string } {
 	const config = settings.context.semantic;
 	if (!config.enabled) throw new Error("Semantic indexing is disabled. Configure it explicitly first.");
-	if (!config.target || !config.model || !config.assetIdentity)
-		throw new Error("Semantic indexing requires a pinned target, model and asset identity.");
-	return config as ClioSettings["context"]["semantic"] & { target: string; model: string; assetIdentity: string };
+	if (!semanticUsable(config)) throw new Error("Semantic indexing requires a pinned target, model and asset identity.");
+	return config;
 }
 
 function within(root: string, path: string): boolean {
