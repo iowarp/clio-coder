@@ -10,6 +10,22 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const engineAi = createEngineAi();
 
+// Inception /v1/models, 2026-10-20: Pi has no Inception catalog.
+const MERCURY_3: Model<"openai-completions"> = {
+	id: "mercury-3",
+	name: "Inception: Mercury 3",
+	api: "openai-completions",
+	provider: "inception",
+	baseUrl: "https://api.inceptionlabs.ai/v1",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 1000000,
+	maxTokens: 131072,
+};
+
+const CLIO_CATALOG_ROWS = new Map<string, Model<Api>>([["inception/mercury-3", MERCURY_3]]);
+
 const CATALOG_PROVIDER_BY_RUNTIME_ID = new Map<string, KnownProvider>([
 	["anthropic", "anthropic"],
 	["anthropic-max", "anthropic"],
@@ -157,6 +173,8 @@ export function resolveCostProvenance(
 }
 
 export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string): Model<Api> | undefined {
+	const clioModel = CLIO_CATALOG_ROWS.get(`${runtimeId}/${wireModelId}`);
+	if (clioModel) return structuredClone(clioModel);
 	const provider = catalogProviderForRuntime(runtimeId);
 	if (!provider) return undefined;
 	try {

@@ -31,10 +31,9 @@ const defaultCapabilities: CapabilityFlags = {
 	chat: true,
 	tools: true,
 	toolCallFormat: "openai",
-	// Mercury accepts reasoning_effort, but its reasoning is not observable over
-	// this API: at any effort above `instant` the response carries
-	// `content: null` with `reasoning_summary: null`, and the streaming path
-	// leaks a raw `<|think_end|>` token into the text. Nothing can be shown to
+	// Legacy Mercury reasoning is not observable over this API: above `instant`,
+	// the response carries `content: null` with `reasoning_summary: null`, and
+	// the streaming path leaks a raw `<|think_end|>` token into the text. Nothing can be shown to
 	// the operator, so the capability is declared false and the effort is
 	// pinned below.
 	reasoning: false,
@@ -44,8 +43,8 @@ const defaultCapabilities: CapabilityFlags = {
 	embeddings: false,
 	rerank: false,
 	fim: true,
-	// mercury-2.5's window. mercury-2 and mercury-edit-2 are 128k; the live
-	// probe corrects per model, this is only the pre-probe placeholder.
+	// /v1/models, 2026-10-20: Mercury 3 has a catalog row; legacy models retain this fallback
+	// until the live probe supplies their individual serving limits.
 	contextWindow: 260000,
 	maxTokens: 65536,
 };
@@ -173,7 +172,8 @@ const inceptionRuntime: RuntimeDescriptor = {
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	credentialsEnvVar: "INCEPTION_API_KEY",
-	knownModels: ["mercury-2.5", "mercury-2", "mercury-edit-2"],
+	knownModels: ["mercury-3", "mercury-2.5", "mercury-2", "mercury-edit-2"],
+	defaultModel: "mercury-3",
 	defaultCapabilities,
 	probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		return fetchModels(target, ctx, "/models");
@@ -199,11 +199,10 @@ const inceptionRuntime: RuntimeDescriptor = {
 				supportsReasoningEffort: false,
 				maxTokensField: "max_tokens",
 			},
-			// Omitting reasoning_effort is not neutral: Mercury then reasons by
-			// default and spends the whole token budget on hidden reasoning,
-			// returning an empty completion with finish_reason "length". Pinning
-			// `instant` is what makes a plain request answer at all.
-			samplingParams: { reasoning_effort: "instant" },
+			// /v1/chat/completions SSE probe, 2026-10-20: Mercury 3 answered "4" with stop
+			// at omitted, instant and medium effort (128-token cap), without a
+			// think_end token. Only legacy Mercury needs the empty-answer workaround.
+			...(wireModelId === "mercury-3" ? {} : { samplingParams: { reasoning_effort: "instant" } }),
 		});
 	},
 	async *infill(target: TargetDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk> {
