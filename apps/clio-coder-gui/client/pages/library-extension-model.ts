@@ -41,3 +41,9 @@ export function terminalSteps(pkg: Package): TerminalStep[] {
 	}
 	return steps;
 }
+
+export function catalogKinds(packages: readonly Package[]): string[] {
+	return [...new Set([...PACKAGE_KINDS, ...packages.map((pkg) => pkg.kind)])].filter((kind) =>
+		packages.some((pkg) => pkg.kind === kind),
+	);
+}

@@ -1,12 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client } from "../api/client.js";
 import { reportProblem } from "../design/notifications.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
-import { desktopManaged, TERMINAL_NOTE, terminalSteps } from "./library-extension-model.js";
+import { catalogKinds, desktopManaged, TERMINAL_NOTE, terminalSteps } from "./library-extension-model.js";
 import {
 	type Applied,
 	componentSentence,
@@ -20,7 +20,6 @@ import {
 	type Operation,
 	originSentence,
 	outcomeHeadline,
-	PACKAGE_KINDS,
 	type Package,
 	type Plan,
 	type Scope,
@@ -230,6 +229,7 @@ function PlanDialog({
 }) {
 	const queries = useQueryClient();
 	const cancel = useRef<HTMLButtonElement>(null);
+	const applyKey = useRef(crypto.randomUUID());
 	const [plan, setPlan] = useState<Plan | null>(null);
 	const started = useRef(false),
 		mounted = useRef(true),
@@ -253,6 +253,7 @@ function PlanDialog({
 		};
 	}, [release]);
 	const planning = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: (input: Request) =>
 			client.call(routes.libraryPlan, { params: { id: workspaceId }, query: {}, body: input }),
 		onSuccess: (value) => {
@@ -262,14 +263,19 @@ function PlanDialog({
 		},
 	});
 	const applying = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: async (planId: string) => {
 			writing.current = true;
 			try {
-				const result = await client.call(routes.libraryPlanApply, {
-					params: { id: workspaceId, planId },
-					query: {},
-					body: {},
-				});
+				const result = await client.call(
+					routes.libraryPlanApply,
+					{
+						params: { id: workspaceId, planId },
+						query: {},
+						body: {},
+					},
+					applyKey.current,
+				);
 				heldPlan.current = null;
 				return result;
 			} finally {
@@ -289,6 +295,7 @@ function PlanDialog({
 		plan0(request);
 	}, [plan0, request]);
 	const releasing = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: async (planId: string) => {
 			const result = await release(planId);
 			heldPlan.current = null;
@@ -324,7 +331,14 @@ function PlanDialog({
 			{planning.isPending && (
 				<p role="status">Staging the source and checking what would change. Nothing is written yet.</p>
 			)}
-			{planning.error && <Failure error={planning.error} />}
+			{planning.error && (
+				<>
+					<Failure error={planning.error} />
+					<button type="button" disabled={busy} onClick={() => planning.mutate(request)}>
+						Retry planning
+					</button>
+				</>
+			)}
 			{plan && !applying.data && (
 				<>
 					<div className="library-plan-summary">
@@ -358,7 +372,15 @@ function PlanDialog({
 			{applying.isPending && <p role="status">Applying the reviewed plan. Keep this review open for the result.</p>}
 			{releasing.isPending && <p role="status">Releasing staged sources…</p>}
 			{releasing.error && <Failure error={releasing.error} />}
-			{applying.error && <Failure error={applying.error} />}
+			{applying.error && (
+				<>
+					<Failure error={applying.error} />
+					<p className="panel-note">
+						The outcome could not be confirmed. Retrying sends the same apply request so an accepted change is not applied
+						twice.
+					</p>
+				</>
+			)}
 			{applying.data && <Outcomes applied={applying.data} />}
 			<div className="actions">
 				{plan && !applying.data && plan.applicable && (
@@ -408,10 +430,12 @@ export function LibraryCatalog({
 	compact?: boolean;
 	onReview?: (() => void) | undefined;
 }) {
+	const detailId = useId();
 	const [search, setSearch] = useSearchParams();
 	const [localDiscovery, setLocalDiscovery] = useState<Record<string, string>>({});
 	const valueFor = (key: string) => (compact ? localDiscovery[key] : search.get(key));
-	const kind = PACKAGE_KINDS.find((candidate) => candidate === valueFor("kind")) ?? "all";
+	const kinds = catalogKinds(packages);
+	const kind = kinds.find((candidate) => candidate === valueFor("kind")) ?? "all";
 	const installedOnly = valueFor("installed") === "true",
 		selected = valueFor("package");
 	const discover = (key: string, value: string | null) => {
@@ -450,7 +474,7 @@ export function LibraryCatalog({
 		<>
 			<fieldset className="library-facets">
 				<legend>Show</legend>
-				{(["all", ...PACKAGE_KINDS] as const)
+				{(["all", ...kinds] as const)
 					.filter((name) => name === "all" || packages.some((pkg) => pkg.kind === name))
 					.map((name) => (
 						<button
@@ -476,6 +500,29 @@ export function LibraryCatalog({
 				>
 					Installed only · {installed}
 				</button>
+				{(kind !== "all" || installedOnly) && (
+					<button
+						type="button"
+						onClick={() => {
+							if (compact)
+								setLocalDiscovery((current) => {
+									const next = { ...current };
+									delete next.kind;
+									delete next.installed;
+									return next;
+								});
+							else
+								setSearch((current) => {
+									const next = new URLSearchParams(current);
+									next.delete("kind");
+									next.delete("installed");
+									return next;
+								});
+						}}
+					>
+						Clear package filters
+					</button>
+				)}
 			</fieldset>
 			{!visible.length && (
 				<p>{packages.length ? "No packages match." : "No catalog is configured and nothing is installed."}</p>
@@ -509,9 +556,10 @@ export function LibraryCatalog({
 								type="button"
 								className="library-inspect"
 								aria-expanded={selected === pkg.ref}
+								aria-controls={selected === pkg.ref ? `${detailId}-${pkg.ref}` : undefined}
 								onClick={() => discover("package", selected === pkg.ref ? null : pkg.ref)}
 							>
-								{compact ? `Inspect ${pkg.name}` : "Inspect package"}
+								{selected === pkg.ref ? "Close package details" : `Inspect ${pkg.name}`}
 							</button>
 						</div>
 						{(!compact || selected === pkg.ref) && (
@@ -543,7 +591,8 @@ export function LibraryCatalog({
 									);
 								})}
 								{!desktopManaged(pkg) && (
-									<div className="library-terminal">
+									<details className="library-terminal">
+										<summary>Manage extension in the terminal</summary>
 										<p className="panel-note">{TERMINAL_NOTE}</p>
 										<ul>
 											{terminalSteps(pkg).map((step) => (
@@ -552,7 +601,7 @@ export function LibraryCatalog({
 												</li>
 											))}
 										</ul>
-									</div>
+									</details>
 								)}
 								{desktopManaged(pkg) && pkg.catalogOrigin !== "installed" && (
 									<span className="library-copy__actions">
@@ -572,7 +621,8 @@ export function LibraryCatalog({
 							</div>
 						)}
 						{selected === pkg.ref && (
-							<div className="library-package__detail">
+							<div className="library-package__detail" id={`${detailId}-${pkg.ref}`}>
+								<p>{pkg.description || "No package description supplied."}</p>
 								<h4>Package source & requirements</h4>
 								<dl className="library-facts">
 									<div>
