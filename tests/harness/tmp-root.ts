@@ -22,7 +22,7 @@
 import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
-import { installTmpGitGuard } from "./tmp-git-guard.js";
+import { isMainThread } from "node:worker_threads";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 
@@ -175,4 +175,13 @@ if (clioRootEnvKeys.every((key) => !process.env[key]?.trim())) {
 // src/tools/ignore-policy.ts does from a mkdtemp scratch, so a `.git` at either
 // level rewrites the answer for every path-walking OBSERVE tool contract. The
 // guard refuses one and names whoever tried. See issue #205.
-installTmpGitGuard({ systemTmp, runRoot: process.env[ROOT_ENV] });
+//
+// A worker thread inherits this preload through execArgv, but on Node 22 not
+// tsx's resolver, so a static `./tmp-git-guard.js` import killed every GUI
+// worker before its entry ran. The guard patches this thread's fs module, so
+// the main thread installs it and a worker, which never had it before the GUI
+// tier gained this preload, skips it.
+if (isMainThread) {
+	const { installTmpGitGuard } = await import("./tmp-git-guard.js");
+	installTmpGitGuard({ systemTmp, runRoot: process.env[ROOT_ENV] });
+}
