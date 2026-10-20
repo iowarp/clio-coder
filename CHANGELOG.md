@@ -2,7 +2,7 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.6.4 - 2026-10-20
 
 Clio Coder 0.6.4 rebuilds autonomy around two levels. At `default`, the main session's shell commands run contained in the OS sandbox, destructive workspace steps run after a workspace snapshot that `/rewind` can restore, and a safety judge reviews what would otherwise ask against the operator's own messages, so Clio asks only when the judge has no verdict or the decision belongs to the operator. `yolo` becomes a true skip-permissions mode: nothing asks, and only a short catastrophe floor, approved project rules and the run's ceilings block. It needs a one-time acceptance and is refused as root outside a container. Approval cards and questions nobody answers resolve after `safety.unattendedAfterSeconds`, so a long job no longer parks while the operator is away (#407, #419, #421). Compaction no longer stalls behind a skill turn (#422), memory lessons rest on exact command receipts, and dispatch admission, worker output and long session histories take bounded, faster paths. Long sessions also cost less: automatic compaction stops at a 200,000-token economic ceiling that stays under long-context price boundaries, a turn's scope, newly approved memory and re-probed workspace facts no longer rewrite the cached system prompt between turns, and a Claude subscription's main thread keeps its prompt cache for an hour (#422, #423).
 
