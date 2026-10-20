@@ -1,4 +1,10 @@
-import { acknowledgeFirstRequest, decodeHomeDraft, type FirstRequest, type HomeDraft } from "./home-draft-model.js";
+import {
+	acknowledgeFirstRequest,
+	decodeHomeDraft,
+	type FirstRequest,
+	HOME_DRAFT_TEXT_MAX_CHARACTERS,
+	type HomeDraft,
+} from "./home-draft-model.js";
 
 // The explicit Forget Browser action already clears this namespace before reloading.
 const KEY = "clio-coder-draft:home-first-task";
@@ -25,6 +31,12 @@ export function subscribeHomeDraft(listener: () => void): () => void {
 
 export function updateHomeDraft(patch: Partial<HomeDraft>): void {
 	const previous = homeDraft();
+	if (patch.text !== undefined) {
+		patch =
+			patch.text.length > HOME_DRAFT_TEXT_MAX_CHARACTERS
+				? { ...patch, text: previous.text, textIssue: "too-large" }
+				: { ...patch, textIssue: patch.textIssue ?? null };
+	}
 	const edited =
 		(patch.text !== undefined && patch.text !== previous.text) ||
 		(patch.workspaceId !== undefined && patch.workspaceId !== previous.workspaceId);

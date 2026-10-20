@@ -57,6 +57,7 @@
 .newtask__composer,
 .newtask__starters,
 .newtask__error,
+.newtask__hint,
 .newtask__discard {
 	grid-column: 1 / -1;
 }

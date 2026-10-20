@@ -5,6 +5,7 @@ import { routes } from "../../contracts/routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
+import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/composer-model.js";
 import { STARTER_PROMPTS } from "../chat/starter-prompts.js";
 import { useFieldAssist } from "../chat/use-field-assist.js";
 import { Icon } from "../design/icons.js";
@@ -16,7 +17,7 @@ import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import { firstRequestBusy, homeDraft, subscribeHomeDraft, updateHomeDraft } from "./home-draft.js";
-import { EMPTY_HOME_DRAFT } from "./home-draft-model.js";
+import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS } from "./home-draft-model.js";
 import { reconcileFirstTask, useFirstTask } from "./use-first-task.js";
 import "../chat/composer-box.css";
 import "./home.css";
@@ -151,6 +152,17 @@ export function Home({ client }: { client: Client }) {
 	const draft = useSyncExternalStore(subscribeHomeDraft, homeDraft);
 	const busy = useSyncExternalStore(subscribeHomeDraft, firstRequestBusy);
 	const { text, pending } = draft;
+	const limitId = `${fieldId}-limit`;
+	const textIssue =
+		draft.textIssue === "too-large"
+			? "Drafts can contain up to 100,000 characters. This edit was not applied; shorten the text and try again."
+			: draft.textIssue === "restored-too-large"
+				? "The saved draft exceeded 100,000 characters. Only its first 100,000 characters were restored."
+				: draft.textIssue === "invalid"
+					? "The saved draft text could not be restored."
+					: text.trim().length > PROMPT_TEXT_MAX_CHARACTERS
+						? "A request can contain up to 32,000 characters. Shorten the draft before starting a task."
+						: null;
 	const setText = (value: string) => updateHomeDraft({ text: value });
 	const setChosen = (workspaceId: string) => {
 		updateHomeDraft({ workspaceId });
@@ -195,7 +207,7 @@ export function Home({ client }: { client: Client }) {
 		workspaces.isSuccess &&
 		!!workspace &&
 		text.trim() !== "" &&
-		text.trim().length <= 32_000 &&
+		text.trim().length <= PROMPT_TEXT_MAX_CHARACTERS &&
 		!busy &&
 		!pending;
 	const submit = () => {
@@ -297,6 +309,7 @@ export function Home({ client }: { client: Client }) {
 							className="composer__field"
 							rows={1}
 							value={text}
+							aria-describedby={limitId}
 							placeholder="Describe a task or ask a question"
 							{...assist.fieldProps}
 							onChange={(event) => {
@@ -343,6 +356,11 @@ export function Home({ client }: { client: Client }) {
 							</div>
 						</div>
 					</form>
+					<p id={limitId} className={textIssue ? "newtask__error" : "newtask__hint"} role="status">
+						{textIssue ??
+							`Requests up to ${PROMPT_TEXT_MAX_CHARACTERS.toLocaleString()} characters · Drafts up to ${HOME_DRAFT_TEXT_MAX_CHARACTERS.toLocaleString()} characters.`}
+						{textIssue && pending ? " The earlier request is preserved unchanged." : null}
+					</p>
 					<details className="newtask__context">
 						<summary>
 							<Icon name="models" />
@@ -362,7 +380,10 @@ export function Home({ client }: { client: Client }) {
 							<dd>{workspace?.path ?? "Choose a workspace above"}</dd>
 							<dt>Connection</dt>
 							<dd>
-								{summary ?? "Not reported"} · <Link to="/settings/models">Change model</Link>
+								{summary ?? "Not reported"} ·{" "}
+								<Link to={workspaceId ? `/settings/models?workspace=${encodeURIComponent(workspaceId)}` : "/settings/models"}>
+									Change model
+								</Link>
 							</dd>
 							<dt>Approvals</dt>
 							<dd>
