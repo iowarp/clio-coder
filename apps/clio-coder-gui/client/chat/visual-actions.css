@@ -30,6 +30,11 @@
 	background: transparent;
 	box-shadow: none;
 }
+@media (forced-colors: none) {
+	.visual-actions__search input:focus-visible {
+		outline: none;
+	}
+}
 .visual-actions__groups {
 	display: grid;
 	gap: var(--space-6);
@@ -46,7 +51,21 @@
 }
 .visual-actions__rows {
 	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	border-top: 1px solid var(--line);
+}
+.visual-actions__more {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
+	padding: var(--space-2) 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	letter-spacing: inherit;
+	text-transform: inherit;
 }
 .visual-actions__row {
 	display: flex;

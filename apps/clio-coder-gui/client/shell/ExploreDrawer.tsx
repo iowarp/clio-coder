@@ -18,6 +18,7 @@ const GROUPS = [
 ];
 
 const LINK_LABELS: Readonly<Record<string, string>> = {
+	fleet: "Teamwork",
 	toolchain: "Tools",
 	evidence: "Reports",
 	traces: "Activity",

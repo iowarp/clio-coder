@@ -4,8 +4,8 @@ import { Dialog } from "../interaction/Dialog.js";
 import type { CommandFields, CommandPlan } from "./command-model.js";
 import { planCommand } from "./command-model.js";
 import type { SlashEntry } from "./slash-model.js";
-import { ACTION_GROUPS, actionLabel, visualActions } from "./visual-actions-model.js";
 import type { VisualAction } from "./visual-actions-model.js";
+import { ACTION_GROUPS, actionLabel, visualActions } from "./visual-actions-model.js";
 import "./visual-actions.css";
 
 export function VisualActions({
@@ -34,6 +34,7 @@ export function VisualActions({
 	const search = useRef<HTMLInputElement>(null);
 	const [query, setQuery] = useState("");
 	const [selected, setSelected] = useState<VisualAction | null>(null);
+	const [moreOpen, setMoreOpen] = useState(false);
 	useEffect(() => {
 		if (selected === null) search.current?.focus();
 	}, [selected]);
@@ -94,36 +95,53 @@ export function VisualActions({
 						{ACTION_GROUPS.map((group) => {
 							const rows = items.filter((item) => item.group === group);
 							if (!rows.length && !(group === "Task details" && showChanges)) return null;
+							const collapsible = group === "More actions" && query.trim() === "";
 							return (
 								<section key={group} className="visual-actions__group" aria-label={group}>
-									<h3>{group}</h3>
-									<div className="visual-actions__rows">
-										{rows.map((item) => (
+									<h3>
+										{collapsible ? (
 											<button
 												type="button"
-												className="visual-actions__row"
-												key={item.entry.id}
-												onClick={() => (item.entry.kind === "command" ? setSelected(item) : onPick(item.entry))}
+												className="visual-actions__more"
+												aria-expanded={moreOpen}
+												onClick={() => setMoreOpen(!moreOpen)}
 											>
-												<Icon name={item.icon} />
-												<span>
-													<strong>{item.title}</strong>
-													<small>{item.description}</small>
-												</span>
-												<Icon name="chevronRight" />
+												{group}
+												<Icon name={moreOpen ? "chevronDown" : "chevronRight"} />
 											</button>
-										))}
-										{group === "Task details" && showChanges ? (
-											<button type="button" className="visual-actions__row" onClick={onShowChanges}>
-												<Icon name="fileDiff" />
-												<span>
-													<strong>Changes and files</strong>
-													<small>Review changed files and paths used in this conversation</small>
-												</span>
-												<Icon name="chevronRight" />
-											</button>
-										) : null}
-									</div>
+										) : (
+											group
+										)}
+									</h3>
+									{!collapsible || moreOpen ? (
+										<div className="visual-actions__rows">
+											{rows.map((item) => (
+												<button
+													type="button"
+													className="visual-actions__row"
+													key={item.entry.id}
+													onClick={() => (item.entry.kind === "command" ? setSelected(item) : onPick(item.entry))}
+												>
+													<Icon name={item.icon} />
+													<span>
+														<strong>{item.title}</strong>
+														<small>{item.description}</small>
+													</span>
+													<Icon name="chevronRight" />
+												</button>
+											))}
+											{group === "Task details" && showChanges ? (
+												<button type="button" className="visual-actions__row" onClick={onShowChanges}>
+													<Icon name="fileDiff" />
+													<span>
+														<strong>Changes and files</strong>
+														<small>Review changed files and paths used in this conversation</small>
+													</span>
+													<Icon name="chevronRight" />
+												</button>
+											) : null}
+										</div>
+									) : null}
 								</section>
 							);
 						})}
