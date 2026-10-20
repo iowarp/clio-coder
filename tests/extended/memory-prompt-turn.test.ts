@@ -96,6 +96,9 @@ test("the real prompt compiler callback preserves attempt/continuation bytes and
 		emitNotice: () => {},
 	});
 	t.after(() => context.dispose());
+	// #423: a record reaches the model through the frozen prompt or the turn's reminder delta.
+	const delivered = async () =>
+		`${(await context.ensureSessionPrompt(runtime))?.systemPrompt}\n${context.sessionPromptDelta()}`;
 	await context.ensureSessionPrompt(runtime); // prewarm only
 	strictEqual(calls.at(-1)?.turnId, null);
 	save(root, "Prepared evidence.");
@@ -118,21 +121,21 @@ test("the real prompt compiler callback preserves attempt/continuation bytes and
 	strictEqual(calls.at(-1)?.taskText, "operator task");
 	deepStrictEqual(calls.at(-1)?.activePaths, ["src/first.ts"]);
 	context.prepareMemoryTurn(runtime, { taskText: "operator task", continuation: false });
-	ok((await context.ensureSessionPrompt(runtime))?.systemPrompt.includes("Modified evidence"));
+	ok((await delivered()).includes("Modified evidence"));
 	notStrictEqual(calls.at(-1)?.turnId, prepared.turnId);
 	strictEqual(reads, 3);
 	save(root, "New runtime evidence.");
 	runtime.runtimeId = "other-runtime";
-	ok((await context.ensureSessionPrompt(runtime))?.systemPrompt.includes("New runtime evidence"));
+	ok((await delivered()).includes("New runtime evidence"));
 	strictEqual(calls.at(-1)?.runtimeId, "other-runtime");
 	save(root, "New session evidence.");
 	sessionId = "other-session";
-	ok((await context.ensureSessionPrompt(runtime))?.systemPrompt.includes("New session evidence"));
+	ok((await delivered()).includes("New session evidence"));
 	strictEqual(calls.at(-1)?.turnId, null);
 	const authority = calls.at(-1)?.sessionAuthority;
 	context.resetForSession();
 	save(root, "New branch evidence.");
-	ok((await context.ensureSessionPrompt(runtime))?.systemPrompt.includes("New branch evidence"));
+	ok((await delivered()).includes("New branch evidence"));
 	notStrictEqual(calls.at(-1)?.sessionAuthority, authority);
 	// The first-session alias is not valid if its actual runtime changed during
 	// preflight; a subsequent compile must read under the new authority.
@@ -145,7 +148,7 @@ test("the real prompt compiler callback preserves attempt/continuation bytes and
 	runtime.runtimeId = "third-runtime";
 	sessionId = "created-on-changed-origin";
 	context.commitMemoryTurn(runtime);
-	ok((await context.ensureSessionPrompt(runtime))?.systemPrompt.includes("Changed origin evidence"));
+	ok((await delivered()).includes("Changed origin evidence"));
 	strictEqual(reads, readsBeforeOriginChange + 1);
 });
 

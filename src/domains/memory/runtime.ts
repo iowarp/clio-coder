@@ -47,6 +47,7 @@ import {
 	reflectionRequest,
 	sourceCoverageDigest,
 } from "./observations.js";
+import { memorySectionBlocks } from "./prompt-section.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import {
@@ -1075,11 +1076,18 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	 */
 	recordSubmittedMemoryContext(framed: readonly string[], systemPrompt?: string): void {
 		const selection = this.#promptSelection;
-		const section = selection?.section && systemPrompt?.includes(selection.section) ? selection.section : "";
+		// #423: the session prompt keeps the memory section it was compiled with,
+		// and later records ride in a host-framed reminder, so a record counts as
+		// submitted when its exact rendered text is in either place.
+		const delivered = new Set(
+			memorySectionBlocks(selection?.section ?? "")
+				.filter((block) => systemPrompt?.includes(block.text) || framed.some((text) => text.includes(block.text)))
+				.map((block) => block.id),
+		);
+		const recordIds =
+			selection?.items.filter((item) => item.reason === "selected" && delivered.has(item.id)).map((item) => item.id) ?? [];
+		const section = recordIds.length > 0 ? (selection?.section ?? "") : "";
 		const at = new Date().toISOString();
-		const recordIds = section
-			? (selection?.items.filter((item) => item.reason === "selected").map((item) => item.id) ?? [])
-			: [];
 		if (selection && section) this.#promptSelection = { ...selection, submittedAt: at };
 		traceObservation("memory-section-submitted", {
 			at,
@@ -1089,7 +1097,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			recordIds,
 		});
 		// Lifecycle rows record a change, not every request that carried the same section again.
-		const sectionKey = recordIds.length ? observationDigest([selection?.turnId ?? null, section]) : null;
+		const sectionKey = recordIds.length ? observationDigest([selection?.turnId ?? null, section, ...recordIds]) : null;
 		if (sectionKey !== null && sectionKey !== this.#submittedSection)
 			this.#event("memory-section-submitted", { ids: recordIds, count: recordIds.length });
 		this.#submittedSection = sectionKey;

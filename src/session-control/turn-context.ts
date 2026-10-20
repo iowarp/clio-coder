@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 import type { ContextActivityPhase } from "../core/bus-events.js";
 import {
 	BusChannels,
+	type CompactionPayload,
 	type ContextActivityStatus,
 	type ContextPrunedPayload,
 	type ContextRecalledPayload,
@@ -36,6 +37,7 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
+import { hostFramedTexts } from "../core/reminder-framing.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
@@ -59,6 +61,7 @@ import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-s
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
+import { memorySectionDelta } from "../domains/memory/prompt-section.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -266,6 +269,11 @@ export interface TurnContext {
 	/** Bind first-session creation after append without rereading the prepared snapshot. */
 	commitMemoryTurn(runtime: AgentRuntime): void;
 	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null>;
+	/**
+	 * Host-framed text the last `ensureSessionPrompt` left for the turn's
+	 * reminder: what changed in frozen prompt inputs since the compile (#423).
+	 */
+	sessionPromptDelta(): string;
 	logPromptCompileIfPending(): void;
 	invalidateSessionPromptCache(): void;
 	addWorkingContextPaths(paths: ReadonlyArray<string>): void;
@@ -483,6 +491,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
+	// #423: the memory section compiled into the live prompt (null until the
+	// first compile, a session switch, or a completed compaction), and the
+	// reminder text carrying what the live section added since.
+	let frozenMemorySection: string | null = null;
+	let frozenMemorySessionId = "";
+	let sessionPromptDelta = "";
 	let announcedProjectPreloadSession: string | null = null;
 	// The hash this process compiled *for the session that is current now*, and
 	// the manifest's `previousHash` whenever it is set. It is not read off
@@ -592,6 +606,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					noteColdReason("compaction");
 				}) ?? null,
 		),
+		// A completed compaction rebuilds the context, so the next compile takes
+		// the live memory section instead of the frozen one (#423).
+		deps.bus?.on(BusChannels.CompactionEnd, (payload: CompactionPayload) => {
+			if (payload.outcome === "completed") frozenMemorySection = null;
+		}) ?? null,
 		deps.bus?.on(BusChannels.ResidencyMutation, (payload: ResidencyMutationPayload) => {
 			const runtime = state.runtime;
 			const model = runtime?.agent.state.model as { baseUrl?: unknown } | undefined;
@@ -2265,33 +2284,70 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 			}
 			sessionInputs.contextOperationUpdate = contextOperationAwareness(deps.readSessionEntries?.() ?? [], sessionId, cwd);
-			const key = mainPromptCacheIdentity({
-				targetId: agentRuntime.targetId,
-				runtimeId: agentRuntime.runtimeId,
-				wireModelId: agentRuntime.wireModelId,
-				autonomy,
-				sessionId,
-				cwd,
-				workingContextPaths: [...sessionWorkingContextPaths],
-				contextWindowSource,
-				promptInputEpoch: deps.prompts.inputEpoch(),
-				sessionInputs,
-				attachedToolSchemas,
-			});
+			// #423: the memory section this session's prompt was compiled with stays
+			// put. A record approved later reaches the model as a reminder on the
+			// next turn; recompiling for it re-billed the whole conversation.
+			const liveMemorySection = sessionInputs.memorySection ?? "";
+			// A first compile runs before its session exists; the session created
+			// next inherits that freeze, any other session starts its own.
+			if (frozenMemorySessionId === "") frozenMemorySessionId = sessionId;
+			else if (frozenMemorySessionId !== sessionId) frozenMemorySection = null;
+			const frozenMemory = frozenMemorySection ?? liveMemorySection;
+			const withMemory = (section: string): SessionPromptInputs => {
+				const inputs = { ...sessionInputs };
+				delete inputs.memorySection;
+				return section.length > 0 ? { ...inputs, memorySection: section } : inputs;
+			};
+			const prompts = deps.prompts;
+			const promptInputEpoch = prompts.inputEpoch();
+			const promptKey = (inputs: SessionPromptInputs): string =>
+				mainPromptCacheIdentity({
+					targetId: agentRuntime.targetId,
+					runtimeId: agentRuntime.runtimeId,
+					wireModelId: agentRuntime.wireModelId,
+					autonomy,
+					sessionId,
+					cwd,
+					workingContextPaths: [...sessionWorkingContextPaths],
+					contextWindowSource,
+					promptInputEpoch,
+					sessionInputs: inputs,
+					attachedToolSchemas,
+				});
+			const memoryDelta = (compiled: string): string =>
+				compiled === liveMemorySection
+					? ""
+					: memorySectionDelta(compiled, liveMemorySection, hostFramedTexts(agentRuntime.agent.state.messages));
+			const frozenInputs = withMemory(frozenMemory);
+			const key = promptKey(frozenInputs);
 			if (sessionPrompt && sessionPromptKey === key) {
 				lastSystemPromptReused = true;
+				sessionPromptDelta = memoryDelta(frozenMemory);
 				return sessionPrompt;
 			}
 			try {
 				const sessionStartedAt = deps.session?.current()?.createdAt;
-				const result = await deps.prompts.compileSessionPrompt({
-					sessionId,
-					sessionInputs,
-					autonomy,
-					cwd,
-					workingContextPaths: [...sessionWorkingContextPaths],
-					...(sessionStartedAt ? { sessionStartedAt } : {}),
-				});
+				const compileWith = (inputs: SessionPromptInputs) =>
+					prompts.compileSessionPrompt({
+						sessionId,
+						sessionInputs: inputs,
+						autonomy,
+						cwd,
+						workingContextPaths: [...sessionWorkingContextPaths],
+						...(sessionStartedAt ? { sessionStartedAt } : {}),
+					});
+				let result = await compileWith(frozenInputs);
+				let compiledKey = key;
+				let compiledMemory = frozenMemory;
+				// A prompt that changes for another reason is cold already, so it
+				// takes the live memory instead of carrying a reminder for it.
+				if (result.systemPrompt !== agentRuntime.agent.state.systemPrompt && frozenMemory !== liveMemorySection) {
+					if (!current()) return null;
+					const liveInputs = withMemory(liveMemorySection);
+					result = await compileWith(liveInputs);
+					compiledKey = promptKey(liveInputs);
+					compiledMemory = liveMemorySection;
+				}
 				if (!current()) return null;
 				const compiledAt = new Date().toISOString();
 				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
@@ -2330,7 +2386,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 				sessionPrompt = result;
 				sessionPromptHash = result.systemPromptHash;
-				sessionPromptKey = key;
+				sessionPromptKey = compiledKey;
+				frozenMemorySection = compiledMemory;
+				frozenMemorySessionId = sessionId;
+				sessionPromptDelta = memoryDelta(compiledMemory);
 				return result;
 			} catch (err) {
 				if (!current()) return null;
@@ -2372,6 +2431,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// Ledger logging is diagnostics, not control flow; never abort a turn.
 			}
 			appendPromptCompileRecord(currentMeta, entry);
+		},
+
+		sessionPromptDelta(): string {
+			return sessionPromptDelta;
 		},
 
 		invalidateSessionPromptCache(): void {
@@ -2628,6 +2691,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// from here. Only when this process had actually applied a prompt:
 			// before the first compile there is nothing in the slot to have lost.
 			if (sessionPromptHash !== null) noteColdReason("prompt_recompiled");
+			frozenMemorySection = null;
+			frozenMemorySessionId = "";
+			sessionPromptDelta = "";
 			lastPromptCache = null;
 			lastPrewarm = null;
 			lastSystemPromptReused = false;

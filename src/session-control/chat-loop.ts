@@ -2746,7 +2746,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// verbatim in history, never a recompile of the system prompt (#422).
 				// Continuations repeat it so a mid-turn compaction cannot drop it.
 				const turnScope = turnScopeGuidance(state.currentTurnConstraints);
-				const reminderProjection = middleware.takePendingReminderProjection(turnScope ? [turnScope] : []);
+				// The prompt delta is read when the text is composed, after
+				// ensureSessionPrompt below has compared the live inputs (#423).
+				const reminderProjection = middleware.takePendingReminderProjection(() =>
+					[turnScope, context.sessionPromptDelta()].filter((part) => part.length > 0),
+				);
 				// Pending skill requests are plain visible text in the user message
 				// itself: persisted in the ledger, no hidden prompt machinery.
 				const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests, agentRuntime.agent.state.tools);

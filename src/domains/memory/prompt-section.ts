@@ -166,6 +166,43 @@ export function renderMemoryPromptSection(records: ReadonlyArray<MemoryRecord>):
 	return lines.join("\n");
 }
 
+/**
+ * One rendered record per entry: its `- [id]` line plus its indented
+ * condition lines, exactly as `renderMemoryPromptSection` wrote them.
+ */
+export function memorySectionBlocks(section: string): Array<{ id: string; text: string }> {
+	const blocks: Array<{ id: string; lines: string[] }> = [];
+	for (const line of section.split("\n")) {
+		const id = /^- \[([^\]]+)\]/u.exec(line)?.[1];
+		if (id !== undefined) blocks.push({ id, lines: [line] });
+		else if (line.startsWith("  ") && blocks.length > 0) blocks.at(-1)?.lines.push(line);
+	}
+	return blocks.map(({ id, lines }) => ({ id, text: lines.join("\n") }));
+}
+
+const MEMORY_UPDATE_HEADING = "# Memory update";
+
+/**
+ * The records a live section carries that the session's frozen `# Memory`
+ * section lacks and no earlier host-framed reminder in the history delivered.
+ * A memory approval between turns then reaches the model as tail text instead
+ * of recompiling the system prompt and re-billing the conversation (#423).
+ * Records that only dropped out of the live selection say nothing: ranking is
+ * not withdrawal.
+ */
+export function memorySectionDelta(frozen: string, live: string, framed: readonly string[]): string {
+	const known = memorySectionBlocks(frozen).map((block) => block.text);
+	const fresh = memorySectionBlocks(live).filter(
+		(block) => !known.includes(block.text) && !framed.some((text) => text.includes(block.text)),
+	);
+	if (fresh.length === 0) return "";
+	return [
+		MEMORY_UPDATE_HEADING,
+		"Records added or revised since this session's # Memory section was compiled. They stand like the records there; a revised record replaces the entry with the same id.",
+		...fresh.map((block) => block.text),
+	].join("\n");
+}
+
 function compactText(value: string): string {
 	return value.replace(/\s+/g, " ").trim();
 }

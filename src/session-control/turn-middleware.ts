@@ -74,8 +74,8 @@ export interface TurnMiddleware {
 		tokensBefore?: number,
 	): void;
 	flushPendingReminders(): string;
-	/** `leading` messages are host-owned turn text that opens the block (the turn scope). */
-	takePendingReminderProjection(leading?: readonly string[]): () => string;
+	/** `leading` yields host-owned turn text that opens the block (turn scope, prompt delta). */
+	takePendingReminderProjection(leading?: () => readonly string[]): () => string;
 	clearPendingReminders(): void;
 	/**
 	 * Deliver a reminder produced after its own turn boundary already closed.
@@ -474,12 +474,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			});
 		},
 
-		takePendingReminderProjection(leading = []): () => string {
+		takePendingReminderProjection(leading = () => []): () => string {
 			const entries = pendingReminders.splice(0);
 			return () => {
 				const messages = [
 					...new Set([
-						...leading,
+						...leading(),
 						...entries.filter((entry) => entry.isCurrent?.() !== false).map((entry) => entry.message),
 					]),
 				];
