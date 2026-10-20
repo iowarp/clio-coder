@@ -279,7 +279,7 @@ export function createCapacityAdmissionController(options: {
 	let draining = false;
 	let stopped = false;
 	const stopSignal = new AbortController();
-	const queue = createAdmissionQueue<() => CapacityLease>({
+	const queue = createAdmissionQueue<(limits: CapacityLimits) => CapacityLease>({
 		maxSize: options.maxQueueSize ?? 256,
 		now,
 		...(options.reservedPlanPeak !== undefined ? { reservedPlanPeak: options.reservedPlanPeak } : {}),
@@ -345,14 +345,12 @@ export function createCapacityAdmissionController(options: {
 	 * one held back by its plan's peak is still refused rather than left to wait
 	 * on a slot that cannot open.
 	 */
-	const refuseForegroundDeadlocks = (): void => {
+	const refuseForegroundDeadlocks = (limits: CapacityLimits): void => {
 		const usage = options.usage?.() ?? capacityLeaseUsageUnsafe({ nowMs: now() });
-		let limits: CapacityLimits | null = null;
 		for (const [requestId, request] of requests) {
 			request.usage = usage;
 			if (request.foregroundChecked) continue;
 			request.foregroundChecked = true;
-			limits ??= options.limits();
 			const block = foregroundEndpointBlock({
 				...(request.endpointKey !== undefined ? { endpointKey: request.endpointKey } : {}),
 				limits,
@@ -361,10 +359,16 @@ export function createCapacityAdmissionController(options: {
 			if (block !== null) queue.fail(requestId, new Error(block));
 		}
 	};
-	/** One admission pass under the held lock. */
-	const admitUnderLock = (): boolean => {
+	/**
+	 * One admission pass under the held lock. `limits` is read before the lock
+	 * is taken: under `auto`, local capacity counts active workers through a
+	 * usage reader that takes this same lock synchronously, which from inside
+	 * the section spins on this process's own pid for the whole acquisition
+	 * budget with the event loop blocked.
+	 */
+	const admitUnderLock = (limits: CapacityLimits): boolean => {
 		if (draining) return false;
-		refuseForegroundDeadlocks();
+		refuseForegroundDeadlocks(limits);
 		const fault = ownershipFault();
 		let progressed = false;
 		for (;;) {
@@ -375,7 +379,7 @@ export function createCapacityAdmissionController(options: {
 					return false;
 				}
 				try {
-					admittedLease = request.value();
+					admittedLease = request.value(limits);
 					return true;
 				} catch (error) {
 					// Saturation at any capacity dimension is transient and keeps its
@@ -431,7 +435,8 @@ export function createCapacityAdmissionController(options: {
 			// unchanged. Only a held lock sends the pass to the owned async pump.
 			let attempt: ReturnType<typeof tryWithStateFileLockSync<boolean>>;
 			try {
-				attempt = tryWithStateFileLockSync(capacityStateLockPath(), admitUnderLock);
+				const limits = options.limits();
+				attempt = tryWithStateFileLockSync(capacityStateLockPath(), () => admitUnderLock(limits));
 			} catch (error) {
 				failCandidates(error);
 				attempt = { held: true, value: false };
@@ -450,7 +455,8 @@ export function createCapacityAdmissionController(options: {
 					if (queue.size() === 0) break;
 					let progressed = false;
 					try {
-						progressed = await transact(admitUnderLock);
+						const limits = options.limits();
+						progressed = await transact(() => admitUnderLock(limits));
 					} catch (error) {
 						if (stopSignal.signal.aborted) return;
 						failCandidates(error);
@@ -559,7 +565,7 @@ export function createCapacityAdmissionController(options: {
 					planId: input.planId ?? null,
 					planOrder: input.planOrder ?? null,
 					// Runs inside admitUnderLock, which already holds the shared lock.
-					value: () =>
+					value: (limits) =>
 						input.reservation
 							? transferDispatchReservationToLeaseUnsafe({
 									ownerId: input.reservation.ownerId,
@@ -567,14 +573,14 @@ export function createCapacityAdmissionController(options: {
 									assignmentId: input.assignmentId,
 									nodeId: input.nodeId,
 									...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
-									limits: options.limits(),
+									limits,
 									nowMs: now(),
 								})
 							: acquireCapacityLeaseUnsafe({
 									assignmentId: input.assignmentId,
 									nodeId: input.nodeId,
 									...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
-									limits: options.limits(),
+									limits,
 									nowMs: now(),
 								}),
 				});
