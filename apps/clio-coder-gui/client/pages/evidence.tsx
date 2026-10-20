@@ -1,10 +1,10 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
-import { useOperation } from "../api/queries.js";
+import { RequestRecovery, useOperationRequest } from "../api/operation-request.js";
 import { Facts } from "../design/facts.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
@@ -12,7 +12,6 @@ import { InspectionError, InspectionSummary } from "../design/run-inspection.js"
 import { StatusMark } from "../design/status.js";
 import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
 import {
-	evidenceRequestIdentity,
 	evidenceVerdictTone,
 	inspectionSort,
 	listDestination,
@@ -93,36 +92,18 @@ function EvidenceActions({
 		maxPages: ARTIFACT_MAX_PAGES,
 		enabled: choosing,
 	});
-	const [operationId, setOperationId] = useState<string | null>(null);
-	const operation = useOperation(client, operationId);
-	const [request, setRequest] = useState<{ signature: string; key: string } | null>(null);
-	const action = useMutation({
-		meta: { errorSurface: "inline" },
-		mutationFn: ({ kind, key }: { kind: "build" | "verify"; key: string }) =>
-			client.call(
-				kind === "build" ? routes.evidenceBuild : routes.receiptVerify,
-				{
-					...emptyInput,
-					params: { id: selection.id, runId: runId.trim() },
-				},
-				key,
-			),
-		onMutate: () => setOperationId(null),
-		onSuccess: (value) => setOperationId(value.operationId),
-	});
-	const submit = (kind: "build" | "verify") => {
-		const signature = evidenceRequestIdentity(selection.id, runId, kind);
-		const key = request?.signature === signature && action.isError ? request.key : crypto.randomUUID();
-		setRequest({ signature, key });
-		action.mutate({ kind, key });
-	};
-	const busy =
-		action.isPending ||
-		(!!operationId && !operation.data) ||
-		operation.data?.status === "queued" ||
-		operation.data?.status === "running";
+	const tracking = useOperationRequest(client, "evidence", (request) =>
+		client.call(
+			request.action === "build" ? routes.evidenceBuild : routes.receiptVerify,
+			{ ...emptyInput, params: { id: request.workspaceId, runId: request.resourceId } },
+			request.key,
+		),
+	);
+	const { operation, busy } = tracking;
+	const submit = (kind: "build" | "verify") =>
+		tracking.start({ workspaceId: selection.id, resourceId: runId.trim(), action: kind });
 	return (
-		<details className="trace-panel evidence-actions" open={initiallyOpen}>
+		<details className="trace-panel evidence-actions" open={initiallyOpen || !!tracking.request}>
 			<summary>Collect evidence or recheck a receipt</summary>
 			<p>
 				Choose a workspace and a dispatch run. Collecting evidence saves a report of the records Clio can find. Rechecking
@@ -200,23 +181,8 @@ function EvidenceActions({
 					</button>
 				</div>
 			</fieldset>
-			{action.error && (
-				<div role="alert">
-					<p>{action.error.message}</p>
-					<p>Choose the dispatch from recent history again if its reference expired, then retry.</p>
-				</div>
-			)}
-			{operation.error && (
-				<InspectionError
-					title="Request status unavailable"
-					error={operation.error}
-					busy={operation.isFetching}
-					retry={() => {
-						void operation.refetch();
-					}}
-				/>
-			)}
-			{operation.data && (
+			<RequestRecovery tracking={tracking} />
+			{operation.data && !tracking.epochChanged && (
 				<div role="status">
 					<p>
 						<StatusMark

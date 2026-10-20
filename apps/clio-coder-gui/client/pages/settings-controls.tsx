@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SettingControl, SettingsControls, SettingWritten } from "../../contracts/settings-controls.js";
 import { STRUCTURED_SETTINGS } from "../../contracts/structured-settings.js";
-import { type Client, emptyInput } from "../api/client.js";
+import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
 import { Switch } from "../design/Switch.js";
@@ -22,6 +22,8 @@ import {
 	type SettingsScopeId,
 	selectOptions,
 	sentence,
+	settingBaselineChanged,
+	settingReviewMatches,
 	sourceLabel,
 	TIMING_PHRASE,
 	TIMING_SENTENCE,
@@ -129,6 +131,8 @@ function ControlRow({
 	workspaceId,
 	draft,
 	expectedValue,
+	refreshCurrent,
+	keepReviewed,
 	onDraft,
 	catalog,
 	showPath = true,
@@ -138,6 +142,8 @@ function ControlRow({
 	workspaceId: string;
 	draft: string | null;
 	expectedValue: string | undefined;
+	refreshCurrent: () => Promise<string>;
+	keepReviewed: (draft: string, current: string) => void;
 	onDraft: (value: string | null, submittedValue?: string) => void;
 	catalog?: ModelCatalog | undefined;
 	/** The dotted setting path, for the Advanced page. The calm pages state the label and nothing else. */
@@ -167,7 +173,17 @@ function ControlRow({
 			submitting.current = false;
 		},
 	});
+	const [review, setReview] = useState<{ draft: string; current: string } | null>(null);
+	const refresh = useMutation({
+		meta: { errorSurface: "inline" },
+		mutationFn: async (reviewedDraft: string) => ({ draft: reviewedDraft, current: await refreshCurrent() }),
+		onSuccess: setReview,
+	});
+	const conflict =
+		settingBaselineChanged(draft, expectedValue, control.value) ||
+		(write.error instanceof ApiProblem && write.error.problem.status === 409);
 	const value = draft ?? control.value;
+	const reviewMatches = settingReviewMatches(review, value, control.value);
 	const dirty = draft !== null && draft !== control.value;
 	const options = selectOptions(control);
 	const edit = (next: string) => {
@@ -208,7 +224,7 @@ function ControlRow({
 					<form
 						onSubmit={(event) => {
 							event.preventDefault();
-							if (dirty && structuredValid && !submitting.current) {
+							if (dirty && structuredValid && !conflict && !refresh.isPending && !submitting.current) {
 								submitting.current = true;
 								write.mutate({
 									path: control.path,
@@ -321,7 +337,9 @@ function ControlRow({
 								<button
 									type="submit"
 									className="primary"
-									disabled={write.isPending || !structuredValid || (!!control.confirm && !confirmed)}
+									disabled={
+										write.isPending || conflict || refresh.isPending || !structuredValid || (!!control.confirm && !confirmed)
+									}
 								>
 									{write.isPaused ? "Waiting…" : write.isPending ? "Saving…" : "Save"}
 								</button>
@@ -341,6 +359,69 @@ function ControlRow({
 							<p className="setting-control__error" role="alert">
 								{write.error.message}
 							</p>
+						)}
+						{conflict && (
+							<section className="trace-panel" aria-label="Review setting conflict">
+								<p role="alert">
+									The saved setting changed after this draft began. Refresh the current value and review both values before
+									saving again.
+								</p>
+								<button
+									type="button"
+									disabled={refresh.isPending || write.isPending}
+									onClick={() => {
+										setReview(null);
+										refresh.mutate(value);
+									}}
+								>
+									{refresh.isPending ? "Refreshing current value…" : "Refresh current value for review"}
+								</button>
+								{refresh.error && <p role="alert">{refresh.error.message} Retry refreshing to review the current value.</p>}
+								{review && (
+									<>
+										<dl>
+											<dt>Current saved value</dt>
+											<dd>
+												<pre>{review.current || "(empty)"}</pre>
+											</dd>
+											<dt>Your draft</dt>
+											<dd>
+												<pre>{review.draft || "(empty)"}</pre>
+											</dd>
+										</dl>
+										{!reviewMatches && (
+											<p role="status">The draft or current value changed during review. Refresh again before choosing.</p>
+										)}
+										<button
+											type="button"
+											disabled={!reviewMatches || refresh.isPending}
+											onClick={() => {
+												keepReviewed(review.draft, review.current);
+												setReview(null);
+												write.reset();
+												setConfirmed(false);
+											}}
+										>
+											Keep my draft against this reviewed value
+										</button>
+										<button
+											type="button"
+											disabled={!reviewMatches || refresh.isPending}
+											onClick={() => {
+												edit(review.current);
+												setReview(null);
+												setEditorRevision((previous) => previous + 1);
+											}}
+										>
+											Use current saved value
+										</button>
+										<p>
+											Keeping your draft updates its comparison baseline. Save remains a separate action; another external change
+											will require a new review.
+										</p>
+									</>
+								)}
+							</section>
 						)}
 						{saved && (
 							<p className="setting-control__saved" role="status">
@@ -393,7 +474,7 @@ export function SettingsControlsView({
 	};
 	const [showDrafts, setShowDrafts] = useState(false);
 	const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-	const [drafts, setDrafts, updateDraft, originalDraftValue] = useSettingsDrafts(client, workspaceId);
+	const [drafts, setDrafts, updateDraft, originalDraftValue, keepReviewedDraft] = useSettingsDrafts(client, workspaceId);
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
 		queryKey: key,
@@ -709,6 +790,16 @@ export function SettingsControlsView({
 								workspaceId={workspaceId}
 								draft={drafts[control.path] ?? null}
 								expectedValue={originalDraftValue(control.path)}
+								refreshCurrent={async () => {
+									const result = await report.refetch({ throwOnError: true });
+									const current = result.data?.controls.find((row) => row.path === control.path);
+									if (!current) throw new Error("This setting is no longer available. Review the current settings list.");
+									return current.value;
+								}}
+								keepReviewed={(draft, current) => {
+									const latest = queries.getQueryData<SettingsControls>(key)?.controls.find((row) => row.path === control.path);
+									if (latest?.value === current) keepReviewedDraft(control.path, draft, current);
+								}}
 								onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue, control.value)}
 								catalog={catalogFor(control)}
 								showPath={scope === undefined || scope === "advanced"}

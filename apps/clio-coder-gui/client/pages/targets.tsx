@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
-import { useOperation } from "../api/queries.js";
+import { RequestRecovery, useOperationRequest } from "../api/operation-request.js";
 import { humanizeKey, reportedCount } from "../design/facts-model.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
@@ -29,51 +29,44 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 		queryFn: () => client.call(routes.routing, { ...emptyInput, params: { id } }),
 		enabled: !!id && view === "routing",
 	});
-	const [operationScope, setOperationScope] = useState<{ id: string; workspaceId: string } | null>(null);
-	const operationId = operationScope?.workspaceId === id ? operationScope.id : null;
-	const operation = useOperation(client, operationId);
-	const mutate = useMutation({
-		mutationFn: ({
-			workspaceId,
-			targetId,
-			action,
-		}: {
-			workspaceId: string;
-			targetId: string;
-			action: "probe" | "use" | "remove" | "signout";
-		}) =>
-			client.call(
-				action === "probe"
-					? routes.targetsProbe
-					: action === "use"
-						? routes.targetsUse
-						: action === "signout"
-							? routes.targetsSignOut
-							: routes.targetsRemove,
-				{ ...emptyInput, params: { id: workspaceId, targetId } },
-			),
-		onSuccess: (value, variables) => setOperationScope({ id: value.operationId, workspaceId: variables.workspaceId }),
-	});
+	const tracking = useOperationRequest(client, "targets", (request) =>
+		client.call(
+			request.action === "probe"
+				? routes.targetsProbe
+				: request.action === "use"
+					? routes.targetsUse
+					: request.action === "signout"
+						? routes.targetsSignOut
+						: routes.targetsRemove,
+			{ ...emptyInput, params: { id: request.workspaceId, targetId: request.resourceId } },
+			request.key,
+		),
+	);
+	const { operation, request, busy } = tracking;
+	const operationId = request?.operationId;
 	const cancel = useMutation({
-		mutationFn: () => client.call(routes.cancel, { ...emptyInput, params: { id: operationId ?? "" } }),
+		meta: { errorSurface: "inline" },
+		mutationFn: async () => {
+			const meta = await client.call(routes.meta, emptyInput);
+			queries.setQueryData(["meta"], meta);
+			if (!operationId || request?.epoch !== meta.epoch)
+				throw new Error("The original operation belongs to another server. Refresh its status before continuing.");
+			return client.call(routes.cancel, { ...emptyInput, params: { id: operationId } });
+		},
 	});
 	useEffect(() => {
 		const result = operation.data?.status === "succeeded" ? operation.data.result : null;
-		if (!result || !("targets" in result) || !operationScope) return;
-		queries.setQueryData(["targets", operationScope.workspaceId], result.targets);
+		if (!result || !("targets" in result) || !request?.settled || tracking.epochChanged) return;
+		queries.setQueryData(["targets", request.workspaceId], result.targets);
 		for (const key of ["routing", "workspace-settings", "config-graph", "settings-controls"])
 			void queries.invalidateQueries({ queryKey: [key] });
-	}, [operation.data, operationScope, queries]);
-	const busy =
-		mutate.isPending ||
-		(!!operationId && operation.isPending) ||
-		operation.data?.status === "queued" ||
-		operation.data?.status === "running";
+	}, [operation.data, request, tracking.epochChanged, queries]);
 	return (
 		<section className="settings-connections">
 			<PanelHeading panel={view === "targets" ? PANELS.targets : PANELS.routing} level={1} />
 			<WorkspacePicker selection={selection} />
 			<ConfigurationTabs id={id} active={view} />
+			<RequestRecovery tracking={tracking} />
 			{view === "targets" ? (
 				<>
 					<p>Use a connection for chat and fleet, inspect its current health, or add a new connection.</p>
@@ -95,12 +88,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 						<PanelEmpty>No model connection is configured yet. Add a connection to start a conversation.</PanelEmpty>
 					)}
 					<ConnectionSetup />
-					{mutate.isPending && <p role="status">Sending connection request…</p>}
-					{operationId && operation.isPending && !mutate.isPending && <p role="status">Checking connection operation…</p>}
-					{operation.error && !mutate.isPending && (
-						<p role="alert">Could not read the connection operation: {operation.error.message}</p>
-					)}
-					{operation.data && !mutate.isPending && (
+					{operation.data && !tracking.sending && !tracking.epochChanged && (
 						<section className="trace-panel" aria-label="Connection operation">
 							{/* aria-live, not role="status": a role on the h2 would replace its heading role. */}
 							<h2 aria-live="polite">
@@ -124,7 +112,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 								</p>
 							)}
 							{operation.data.status === "succeeded" && <p>{operation.data.result.message}</p>}
-							{busy && operation.data.cancellable && (
+							{busy && !operation.error && operation.data.cancellable && (
 								<button type="button" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
 									{cancel.isPending ? "Cancelling…" : "Cancel probe"}
 								</button>
@@ -171,14 +159,14 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 									<button
 										type="button"
 										disabled={busy}
-										onClick={() => mutate.mutate({ workspaceId: id, targetId: target.id, action: "probe" })}
+										onClick={() => tracking.start({ workspaceId: id, resourceId: target.id, action: "probe" })}
 									>
 										Check connection
 									</button>
 									<button
 										type="button"
 										disabled={busy}
-										onClick={() => mutate.mutate({ workspaceId: id, targetId: target.id, action: "use" })}
+										onClick={() => tracking.start({ workspaceId: id, resourceId: target.id, action: "use" })}
 									>
 										Use for chat &amp; fleet
 									</button>
@@ -196,7 +184,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 														`Sign out of ${target.id}? Clio removes the credential it stored for this connection. The connection stays configured.`,
 													)
 												)
-													mutate.mutate({ workspaceId: id, targetId: target.id, action: "signout" });
+													tracking.start({ workspaceId: id, resourceId: target.id, action: "signout" });
 											}}
 										>
 											Sign out
@@ -206,7 +194,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 											disabled={busy}
 											onClick={() => {
 												if (window.confirm(`Remove connection ${target.id} and its routing references from user settings?`))
-													mutate.mutate({ workspaceId: id, targetId: target.id, action: "remove" });
+													tracking.start({ workspaceId: id, resourceId: target.id, action: "remove" });
 											}}
 										>
 											Remove connection
@@ -332,7 +320,6 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 			{!id && !selection.workspaces.isPending && !selection.missing && !selection.workspaces.error && (
 				<PanelEmpty>Open a project to inspect its connections and routing.</PanelEmpty>
 			)}
-			{mutate.error && <p role="alert">{mutate.error.message}</p>}
 		</section>
 	);
 }
