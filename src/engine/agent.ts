@@ -24,6 +24,7 @@ import { omitImageBlocks } from "./image-context.js";
 import type { AgentMessage, AgentOptions, BeforeToolCallContext, StreamFn } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { engineStreamSimple } from "./api-registry.js";
+import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
@@ -206,8 +207,16 @@ export function replaceEngineMessages(
 	agent.state.messages = [...(initial ? [initial] : []), ...messages.filter((message) => message.role !== "system")];
 }
 
-export function setEngineSystemPrompt(agent: Agent, systemPrompt: string): void {
-	replaceEngineMessages(agent, agent.state.messages, systemPrompt);
+const pinnedPrefixes = new WeakMap<Agent, PinnedPromptPrefix>();
+
+export function enginePinnedPrefix(agent: Agent): PinnedPromptPrefix | undefined {
+	return pinnedPrefixes.get(agent);
+}
+
+export function setEngineSystemPrompt(agent: Agent, systemPrompt: string, pinnedPrefix?: PinnedPromptPrefix): void {
+	if (pinnedPrefix) pinnedPrefixes.set(agent, pinnedPrefix);
+	else pinnedPrefixes.delete(agent);
+	if (agent.state.systemPrompt !== systemPrompt) replaceEngineMessages(agent, agent.state.messages, systemPrompt);
 }
 
 /** Explicit host recovery can follow a terminal assistant. Empty input starts

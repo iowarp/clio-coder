@@ -36,6 +36,7 @@ import { SessionCostCeilingError, sessionCeilingReached } from "../domains/sched
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { createEngineAgent } from "../engine/agent.js";
+import { enginePinnedPrefix } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineMainStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
@@ -638,8 +639,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						: undefined,
 				]);
 				delete localRuntime.lastProviderStatus;
+				const pinnedPrefix = enginePinnedPrefix(localRuntime.agent);
 				const requestOptions = {
 					...controlled.options,
+					...(pinnedPrefix ? { clioCoderPinnedPrefix: pinnedPrefix } : {}),
 					onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof controlled.options>["onResponse"]>>) => {
 						// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
 						localRuntime.lastProviderStatus = args[0].status;

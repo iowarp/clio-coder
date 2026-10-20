@@ -2364,8 +2364,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const compiledAt = new Date().toISOString();
 				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
 				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
+				setEngineSystemPrompt(agentRuntime.agent, result.systemPrompt, result.pinnedPrefix);
 				if (changed) {
-					setEngineSystemPrompt(agentRuntime.agent, result.systemPrompt);
 					pendingPromptLogEntry = {
 						version: PROMPT_MANIFEST_VERSION,
 						at: compiledAt,

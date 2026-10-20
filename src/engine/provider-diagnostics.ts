@@ -3,6 +3,8 @@ import { closeSync, constants, fstatSync, openSync, writeFileSync } from "node:f
 import { isAbsolute } from "node:path";
 import type { Api, AssistantMessageEventStream, Model, StreamOptions } from "@earendil-works/pi-ai";
 import type { TargetCacheSettings } from "../domains/providers/types/target-descriptor.js";
+import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
+import { splitAnthropicSystem } from "./apis/anthropic-system-split.js";
 import { findEngineEnvKeys } from "./env-api-keys.js";
 
 /**
@@ -37,6 +39,23 @@ export function instrumentProviderCall<T extends StreamOptions>(
 			effective = { ...options, cacheRetention: retention } as T;
 		} else if (scope === "main" && metadata?.mainThreadCacheRetention !== undefined) {
 			effective = { ...options, cacheRetention: metadata.mainThreadCacheRetention } as T;
+		}
+	}
+	const { clioCoderPinnedPrefix, ...providerOptions } = (effective ?? {}) as T & {
+		clioCoderPinnedPrefix?: PinnedPromptPrefix;
+	};
+	if (clioCoderPinnedPrefix !== undefined) {
+		// Clio's compiler metadata never reaches Pi or a provider option surface (#423).
+		effective = providerOptions as T;
+		if (scope === "main" && model.api === "anthropic-messages") {
+			const onPayload = effective.onPayload;
+			effective = {
+				...effective,
+				onPayload: async (payload: unknown, currentModel: Model<Api>) => {
+					const replacement = await onPayload?.(payload, currentModel);
+					return splitAnthropicSystem(replacement === undefined ? payload : replacement, clioCoderPinnedPrefix);
+				},
+			} as T;
 		}
 	}
 	const path = process.env.CLIO_CODER_PROVIDER_DUMP_PATH;

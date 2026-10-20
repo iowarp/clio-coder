@@ -128,8 +128,8 @@ describe("compact prompt contracts", () => {
 					"skills",
 					"safety",
 					"tool-contract",
-					"retrieval-hints",
 					"harness-awareness",
+					"retrieval-hints",
 					"runtime",
 				],
 			);

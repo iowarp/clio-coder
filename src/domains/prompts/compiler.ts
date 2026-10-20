@@ -181,6 +181,8 @@ export interface CompiledSessionPrompt {
 	fragmentManifest: ReadonlyArray<FragmentManifestEntry>;
 	/** Exact UTF-8 prefix shared across changes to runtime/capability inputs. */
 	stablePrefix?: { bytes: number; hash: string };
+	/** UTF-16 span through harness-awareness, including its separator, for provider slicing (#423). */
+	pinnedPrefix?: { chars: number; hash: string };
 	/**
 	 * How the project context entered this prompt (full preload, partial excerpts, historical synopsis, or
 	 * none). Set by the prompts extension, which owns project-context
@@ -772,7 +774,7 @@ function estimatePromptTokens(text: string): number {
 
 /**
  * Layer order: immutable identity/constitution, conditional role/capabilities,
- * harness paths, captured project context, memory and runtime, then
+ * harness paths, turn retrieval hints, captured project context, memory and runtime, then
  * customization. The current task scope is not compiled; it rides in the
  * turn's reminder (#422). Only identity/constitution are
  * guaranteed stable across every runtime input; stablePrefix measures that
@@ -789,8 +791,8 @@ export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
 	"skills",
 	"safety",
 	"tool-contract",
-	"retrieval-hints",
 	"harness-awareness",
+	"retrieval-hints",
 	"project-context",
 	"memory",
 	"runtime",
@@ -991,13 +993,19 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		["memory", renderMemoryBlock(session.memorySection)],
 		["project-context", renderProjectBlock(session.contextFiles)],
 	]);
-	for (const id of SESSION_PROMPT_SECTION_ORDER) push(id, rendered.get(id) ?? "");
+	let pinnedChars = 0;
+	for (const id of SESSION_PROMPT_SECTION_ORDER) {
+		push(id, rendered.get(id) ?? "");
+		if (id === "harness-awareness") pinnedChars = parts.join("\n\n").length;
+	}
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
 	}
 	push("context-operation-update", session.contextOperationUpdate ?? "");
 
 	const systemPrompt = parts.join("\n\n");
+	// Include the separator only when a session tail exists (#423).
+	if (systemPrompt.length > pinnedChars) pinnedChars += 2;
 	const baseFragments = [
 		identity,
 		...(attendedIdentity ? [attendedIdentity] : []),
@@ -1034,6 +1042,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	return {
 		systemPrompt,
 		stablePrefix: prefixIdentity(identityBody, mainOperatingContract),
+		pinnedPrefix: { chars: pinnedChars, hash: sha256(systemPrompt.slice(0, pinnedChars)) },
 		systemPromptHash: sha256(systemPrompt),
 		tokenEstimate: estimatePromptTokens(systemPrompt),
 		sections,
