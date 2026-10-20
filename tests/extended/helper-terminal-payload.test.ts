@@ -97,7 +97,7 @@ test("terminal handoff overrides work-tool lock with one required tool", async (
 test("Anthropic terminal handoff disables thinking and parallel calls", async () => {
 	for (const id of ["claude-opus-4-8", "claude-opus-5"]) {
 		const body = await wire(catalog("anthropic", id), [handoff]);
-		deepStrictEqual(names(body.tools), [name]);
+		deepStrictEqual(names(body.tools), ["write", name]);
 		deepStrictEqual(body.tool_choice, { type: "tool", name, disable_parallel_tool_use: true });
 		strictEqual(body.thinking, undefined);
 		strictEqual((body.output_config as { effort?: string } | undefined)?.effort, undefined);
@@ -110,7 +110,7 @@ for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "c
 			? { ...catalog("anthropic", "claude-fable-5-1"), id }
 			: catalog("anthropic", id);
 		const body = await wire(anthropic, [handoff]);
-		deepStrictEqual(names(body.tools), [name]);
+		deepStrictEqual(names(body.tools), ["write", name]);
 		deepStrictEqual(body.tool_choice, { type: "auto", disable_parallel_tool_use: true });
 		strictEqual((body.thinking as { type: string }).type, "adaptive");
 		deepStrictEqual(body.output_config, { effort: "high" });

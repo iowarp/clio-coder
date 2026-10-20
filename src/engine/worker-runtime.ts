@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
+import type { AnthropicMessagesCompat, Context, SystemMessage, Tool } from "@earendil-works/pi-ai";
+import { getToolStateChanges } from "@earendil-works/pi-ai";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
@@ -1028,6 +1030,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 	const helperToolAvailable = helperSchema !== null && workerProviderSupportsTools(input);
 	const helperForcedChoiceAvailable = helperToolAvailable && supportsNamedToolChoice(model.api);
+	// The legacy worker stream receives resolved snapshots, so retain native
+	// tool additions here instead of rebuilding Anthropic's cached prefix (#423).
+	let nativeHelperContext:
+		| {
+				initial: SystemMessage;
+				tools: Tool[];
+				protocol: string;
+				updates: Array<{ at: number; message: SystemMessage }>;
+		  }
+		| undefined;
 	// The terminal handoff names its tool in the request, so it keeps the tool
 	// surface that a synthesis lock would otherwise remove.
 	const terminalHandoffActive = (api: string): boolean =>
@@ -1144,29 +1156,44 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		streamFn: (currentModel, transcript, streamOptions) => {
 			const round = ++responseRound;
 			const resolvedContext = resolvedRequestContext(transcript);
+			const anthropicCompat =
+				currentModel.api === "anthropic-messages"
+					? (currentModel.compat as AnthropicMessagesCompat | undefined)
+					: undefined;
+			// Pi needs an active initial tool to anchor native additions (#423).
+			const nativeToolChanges =
+				anthropicCompat?.supportsMidConvoSystemMessages === true &&
+				anthropicCompat.supportsMidConvoToolChanges === true &&
+				(!mutationResult || (resolvedContext.tools ?? []).some((tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL));
+			const helperDeclaredFromStart =
+				helperToolAvailable && currentModel.api === "anthropic-messages" && !nativeToolChanges;
 			helperTerminalRequest = synthesisToolLock || helperTerminalPhase;
 			helperExposedThisRound =
 				helperToolAvailable &&
 				(!mutationResult || synthesisToolLock || helperTerminalPhase) &&
 				(!(synthesisToolLock || helperTerminalPhase) || helperForcedChoiceAvailable);
-			// Attestation includes the registered terminal capability; working requests must carry none of its schema.
+			// Native additions hide the helper until handoff without rewriting the
+			// initial schemas. Older Anthropic models declare it early; the host
+			// still rejects premature submission during the work phase (#423).
 			const currentContext = {
 				...resolvedContext,
 				tools: (resolvedContext.tools ?? []).filter(
-					(tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL || helperExposedThisRound,
+					(tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL || helperExposedThisRound || helperDeclaredFromStart,
 				),
 			};
-			const helperPrompt = helperExposedThisRound
-				? `${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\nReturn the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.${synthesisToolLock || helperTerminalPhase ? " Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence." : ""}`
-				: currentContext.systemPrompt;
-			const systemPrompt = helperExposedThisRound
-				? helperPrompt
-				: synthesisToolLock
-					? lockedSynthesisSystemPrompt(
-							currentContext.systemPrompt ?? "",
-							input.resultContract ? resultContractShape(input.resultContract) : undefined,
-						)
+			const helperPrompt =
+				helperExposedThisRound || helperDeclaredFromStart
+					? `${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\nReturn the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.${!helperDeclaredFromStart && (synthesisToolLock || helperTerminalPhase) ? " Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence." : ""}`
 					: currentContext.systemPrompt;
+			const systemPrompt =
+				helperExposedThisRound || helperDeclaredFromStart
+					? helperPrompt
+					: synthesisToolLock
+						? lockedSynthesisSystemPrompt(
+								currentContext.systemPrompt ?? "",
+								input.resultContract ? resultContractShape(input.resultContract) : undefined,
+							)
+						: currentContext.systemPrompt;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
 			const pressure = {
 				messages: currentContext.messages,
@@ -1239,6 +1266,48 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							: undefined,
 					],
 				);
+				let requestContext: Context = controlled.context;
+				if (helperToolAvailable && nativeToolChanges) {
+					const basePrompt = currentContext.systemPrompt ?? "";
+					const protocol = (systemPrompt ?? "").slice(basePrompt.length);
+					const requestTools = resolvedRequestContext(controlled.context).tools ?? [];
+					if (nativeHelperContext === undefined || nativeHelperContext.initial.content !== basePrompt) {
+						nativeHelperContext = {
+							initial: {
+								role: "system",
+								content: basePrompt,
+								sections: { helper: protocol },
+								toolsAdded: requestTools,
+								timestamp: 0,
+							},
+							tools: requestTools,
+							protocol,
+							updates: [],
+						};
+					} else {
+						const changes = getToolStateChanges(nativeHelperContext.tools, requestTools);
+						if (
+							changes.toolsAdded.length > 0 ||
+							changes.toolsRemoved.length > 0 ||
+							nativeHelperContext.protocol !== protocol
+						) {
+							nativeHelperContext.updates.push({
+								at: projected.length,
+								message: { role: "system", content: "", sections: { helper: protocol }, ...changes, timestamp: 0 },
+							});
+							nativeHelperContext.tools = requestTools;
+							nativeHelperContext.protocol = protocol;
+						}
+					}
+					const nativeMessages: Context["messages"] = [nativeHelperContext.initial];
+					let start = 0;
+					for (const update of nativeHelperContext.updates) {
+						nativeMessages.push(...projected.slice(start, update.at), update.message);
+						start = update.at;
+					}
+					nativeMessages.push(...projected.slice(start));
+					requestContext = { messages: nativeMessages };
+				}
 				// Pi's SDK adapters report onResponse only for a 2xx answer, so the
 				// status is read at the fetch boundary every adapter routes through.
 				const fetchImpl = controlled.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
@@ -1251,7 +1320,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 				return boundWorkerResponse(
 					currentModel,
-					controlled.context,
+					requestContext,
 					lockedRound ? thinkingOffOptions : controlled.options,
 					{
 						locked: lockedRound,
@@ -1263,7 +1332,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						},
 					},
 					(boundedOptions) =>
-						engineStreamSimple(currentModel, controlled.context, {
+						engineStreamSimple(currentModel, requestContext, {
 							...boundedOptions,
 							fetch: async (url, init) => {
 								const response = await fetchImpl(url, init);

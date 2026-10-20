@@ -67,15 +67,18 @@ const FORCED_TOOL_CHOICE_REMOVED_AT: Readonly<Record<string, readonly [number, n
 };
 
 /**
- * Whether the model rejects a forced tool choice. Matches first-party ids
+ * Whether a Claude line has reached a routing-policy threshold. Matches first-party ids
  * (`claude-sonnet-5-5`), dated snapshots and platform-prefixed ids
  * (`anthropic.claude-opus-5-5`, `anthropic/claude-opus-5.5`). The minor version is one or two digits so a
  * date suffix on a whole-number release is never read as a minor version.
  */
-function rejectsForcedToolChoice(model: Pick<EngineModel, "id">): boolean {
-	const match = /claude-(sonnet|opus|fable|mythos)-(\d+)(?:[.-](\d{1,2}))?(?!\d)/u.exec(model.id);
+function claudeVersionAtLeast(
+	model: Pick<EngineModel, "id">,
+	minimumVersions: Readonly<Record<string, readonly [number, number]>>,
+): boolean {
+	const match = /claude-(sonnet|opus|fable|mythos|haiku)-(\d+)(?:[.-](\d{1,2}))?(?!\d)/u.exec(model.id);
 	if (!match) return false;
-	const removedAt = FORCED_TOOL_CHOICE_REMOVED_AT[match[1] ?? ""];
+	const removedAt = minimumVersions[match[1] ?? ""];
 	if (!removedAt) return false;
 	const major = Number(match[2]);
 	const minor = match[3] === undefined ? 0 : Number(match[3]);
@@ -85,8 +88,8 @@ function rejectsForcedToolChoice(model: Pick<EngineModel, "id">): boolean {
 /**
  * One model round's tool routing, derived from the host's lock, middleware and
  * terminal-handoff state. `required` names one declared tool; `handoff` marks
- * the host-owned terminal result tool, whose round drops the work surface and
- * allows at most one call.
+ * the host-owned terminal result tool, whose round allows at most one call.
+ * Anthropic retains the work surface to preserve its cached prefix (#423).
  */
 export type ToolRound =
 	| { kind: "text-only" }
@@ -247,18 +250,19 @@ function toolsRemovedRound(
 }
 
 /**
- * Require one declared tool for this round through the API's own tool-choice
- * option. The request narrows to that tool, so a spelling that cannot name a
- * tool ("any", "required") still picks exactly it. Returns undefined when the
- * API has no spelling for it or the tool is not declared.
+ * Route this round to one declared tool. Anthropic keeps the complete tool
+ * surface, including during terminal handoff, to retain the cached schema
+ * prefix (#423). Other APIs narrow to the required tool, so a spelling that
+ * cannot name one ("any", "required") still picks exactly it. Returns undefined
+ * when the API has no spelling for it or the tool is not declared.
  *
  * Claude models that accept a forced choice cannot think beside it, so the
  * round drops `reasoning`; the next round without one resumes the configured
- * level. On the Anthropic API they keep the full tool array on a work round so
- * the cacheable schema prefix stays intact, and only a terminal handoff drops
- * the work surface. Bedrock Claude always narrows to the one tool. Models that
- * reject a forced choice stay on "auto" over the narrowed surface and keep
- * their thinking.
+ * level. Models rejecting forced choice and Anthropic Haiku 5.5 or later use
+ * "auto" and retain thinking: Haiku's forced handoff missed the full message
+ * cache (#423). The host retains a middleware requirement until its tool starts;
+ * terminal handoffs additionally reject work calls and validate the result.
+ * Bedrock Claude always narrows to the one tool.
  */
 function requiredRound(
 	model: EngineModel,
@@ -272,18 +276,19 @@ function requiredRound(
 	const resolved = resolvedRequestContext(context);
 	const tools = resolved.tools ?? [];
 	if (!tools.some((tool) => tool.name === name)) return undefined;
-	const rejected = rejectsForcedToolChoice(model);
+	const rejected = claudeVersionAtLeast(model, FORCED_TOOL_CHOICE_REMOVED_AT);
+	const automatic = rejected || (api === "anthropic-messages" && claudeVersionAtLeast(model, { haiku: [5, 5] }));
 	// Pi types SimpleStreamOptions.toolChoice as "auto" | "none" yet forwards it
 	// verbatim into each adapter's own option, which NAMED_CHOICE is typed against.
-	const toolChoice = NAMED_CHOICE[api](name, rejected) as NonNullable<SimpleStreamOptions["toolChoice"]>;
+	const toolChoice = NAMED_CHOICE[api](name, automatic) as NonNullable<SimpleStreamOptions["toolChoice"]>;
 	let next: SimpleStreamOptions = { ...options, toolChoice };
-	let narrowed: Context = { ...resolved, tools: tools.filter((tool) => tool.name === name) };
-	if (!rejected && (api === "anthropic-messages" || (api === "bedrock-converse-stream" && /claude/iu.test(model.id)))) {
+	const narrowed: Context =
+		api === "anthropic-messages" ? context : { ...resolved, tools: tools.filter((tool) => tool.name === name) };
+	if (!automatic && (api === "anthropic-messages" || (api === "bedrock-converse-stream" && /claude/iu.test(model.id)))) {
 		const { reasoning: _reasoning, ...withoutReasoning } = next;
 		next = withoutReasoning;
 		if (api === "anthropic-messages") {
 			next = withPayloadEdit(next, withoutThinking);
-			if (round.handoff !== true) narrowed = context;
 		}
 	}
 	if (round.handoff === true) next = withPayloadEdit(next, (payload) => singleCall(api, payload));
