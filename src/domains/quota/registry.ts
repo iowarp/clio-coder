@@ -26,9 +26,9 @@ export function buildQuotaProviders(): QuotaProvider[] {
 }
 
 /**
- * The quota adapter that reads the account a runtime bills against. Codex CLI
- * and Clio's own Codex login spend the same ChatGPT plan windows; Claude Code
- * and the Claude SDK spend the Claude Code credential's.
+ * Quota adapter identity for each runtime. Native Codex uses account-scoped
+ * stream observations for background admission (#423): its login can differ
+ * from the sibling CLI's. Claude Code and the SDK use Claude Code credentials.
  */
 const QUOTA_PROVIDER_BY_RUNTIME: ReadonlyMap<string, string> = new Map([
 	["anthropic-max", ANTHROPIC_MAX_QUOTA_PROVIDER_ID],

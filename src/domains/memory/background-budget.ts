@@ -33,10 +33,17 @@ import { sessionCeilingReached } from "../scheduling/budget.js";
 export type BackgroundRouteKind = "metered" | "quota" | "local" | "unpriced";
 
 /** Why a step was refused before any request left the process. */
-export type BackgroundSkipReason = "cost_ceiling" | "quota_window" | "quota_retry" | "endpoint_busy" | "time_budget";
+export type BackgroundSkipReason =
+	| "cost_ceiling"
+	| "quota_unknown"
+	| "quota_window"
+	| "quota_retry"
+	| "endpoint_busy"
+	| "time_budget";
 
 export const BACKGROUND_SKIP_REASONS: ReadonlySet<BackgroundSkipReason> = new Set([
 	"cost_ceiling",
+	"quota_unknown",
 	"quota_window",
 	"quota_retry",
 	"endpoint_busy",
@@ -115,19 +122,24 @@ export function decideBackgroundStep(facts: BackgroundStepFacts): BackgroundStep
 				: admit(facts.timeoutCapMs);
 		}
 		case "quota": {
-			// Clio never invents a limit: no reading, or one past its freshness window,
-			// admits the step.
+			// OAI-1 / #423: optional work waits for trustworthy subscription evidence.
 			const quota = facts.quota;
 			if (quota?.retryUntil != null && Date.parse(quota.retryUntil) > facts.nowMs) {
 				return skip("quota_retry", quota.retryUntil);
 			}
 			if (quota === null || quota.stale || quota.snapshot === null || quota.snapshot.status !== "ok") {
-				return admit(facts.timeoutCapMs);
+				return skip("quota_unknown");
 			}
-			const binding = primaryWindow(quota.snapshot);
+			const windows = quota.snapshot.windows.filter(
+				(window) =>
+					Number.isFinite(window.usedPct) &&
+					window.usedPct >= 0 &&
+					window.usedPct <= 100 &&
+					(window.resetsAt === null || Date.parse(window.resetsAt) > facts.nowMs),
+			);
+			if (windows.length === 0) return skip("quota_unknown");
+			const binding = primaryWindow({ ...quota.snapshot, windows });
 			if (binding === null || !windowAtWarning(binding)) return admit(facts.timeoutCapMs);
-			// A window whose reset has passed is no longer the window the reading measured.
-			if (binding.resetsAt !== null && Date.parse(binding.resetsAt) <= facts.nowMs) return admit(facts.timeoutCapMs);
 			return skip("quota_window", binding.resetsAt);
 		}
 		case "local":

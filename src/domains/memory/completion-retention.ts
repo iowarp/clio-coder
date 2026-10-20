@@ -288,6 +288,7 @@ async function retainWithinDeadline(
 				"endpoint_busy",
 				"endpoint_preempted",
 				"cost_ceiling",
+				"quota_unknown",
 				"quota_window",
 				"quota_retry",
 				"time_budget",

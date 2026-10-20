@@ -14,12 +14,13 @@ import type { ObservabilityContract } from "../domains/observability/contract.js
 import { aggregateCostAmounts } from "../domains/observability/cost.js";
 import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
 import { normalizeCostProvenance, resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
+import { noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
-import type { AgentEvent, AgentMessage, Usage } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, CodexQuotaObservation, Usage } from "../engine/types.js";
 import {
 	chainStepToolCallId,
 	type DisplayToolCall,
@@ -346,6 +347,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (explainInterruptedAssistant(message, state.activeInterruptReason)) state.interruptedAssistantMessage = message;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		const quota = (message as { codexQuota?: CodexQuotaObservation }).codexQuota;
+		if (quota && state.runtime?.runtimeId === "openai-codex") {
+			noteCodexStreamQuota(state.runtime.targetId, quota);
+			payload.codexQuota = quota;
+		}
 		if (timing) payload.timing = timing;
 		if (deliveryId) {
 			payload.continuityDeliveryId = deliveryId;

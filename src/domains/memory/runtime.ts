@@ -599,6 +599,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				if (
 					[
 						"cost_ceiling",
+						"quota_unknown",
 						"quota_window",
 						"quota_retry",
 						"time_budget",

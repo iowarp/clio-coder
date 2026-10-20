@@ -189,6 +189,7 @@ export type TaskMemoryPolicyReason =
 	/** Session spend plus this step's projected cost would reach `safety.limits.sessionCostUsd`. */
 	| "cost_ceiling"
 	/** The subscription window the route bills against is at or past its warning level. */
+	| "quota_unknown"
 	| "quota_window"
 	/** The provider's usage endpoint answered 429 and its retry interval has not passed. */
 	| "quota_retry"

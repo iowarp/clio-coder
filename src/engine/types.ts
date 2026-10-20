@@ -59,3 +59,14 @@ export type {
 	SettingsListTheme,
 	TUI,
 } from "@earendil-works/pi-tui";
+
+/** Sanitized same-request Codex plan windows. No credential or raw account identity. */
+export interface CodexQuotaObservation {
+	accountScope: string;
+	observedAt: string;
+	windows: Array<{ windowMinutes: number; usedPercent: number; resetsAt: string | null }>;
+	plan: string | null;
+	credits: { hasCredits: boolean; unlimited: boolean; balance: string | null } | null;
+	allowed: boolean | null;
+	limitReached: boolean | null;
+}

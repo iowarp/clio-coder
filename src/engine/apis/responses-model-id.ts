@@ -7,6 +7,8 @@ import {
 	type StreamOptions,
 } from "@earendil-works/pi-ai";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
+import type { CodexQuotaObservation } from "../types.js";
+import { codexAccountScope, parseCodexQuotaEvent } from "./codex-quota.js";
 
 /** APIs whose lifecycle events carry the provider's response object. */
 const RESPONSES_APIS: ReadonlySet<Api> = new Set([
@@ -27,6 +29,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * provider had reported the model (DF-15). The completions path has its own
  * capture in `openai-completions.ts`; this is the Responses counterpart, and
  * it only annotates the terminal message, never the stream's content.
+ * OAI-1 / #423 shares this callback and terminal annotation for sanitized Codex
+ * quota events, preserving the existing transport and caller-owned callback.
  */
 export function observeResponsesModelId<T extends StreamOptions>(
 	model: Model<Api>,
@@ -35,11 +39,14 @@ export function observeResponsesModelId<T extends StreamOptions>(
 ): AssistantMessageEventStream {
 	if (!RESPONSES_APIS.has(model.api)) return invoke(options);
 	let sawResponse = false;
+	let quota: CodexQuotaObservation | null = null;
+	const accountScope = model.api === "openai-codex-responses" ? codexAccountScope(options?.apiKey) : null;
 	let reportedModelId: string | null = null;
 	const onProviderStreamEvent = options?.onProviderStreamEvent;
 	const source = invoke({
 		...options,
 		onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
+			if (model.api === "openai-codex-responses") quota = parseCodexQuotaEvent(data, accountScope) ?? quota;
 			if (isRecord(data) && isRecord(data.response)) {
 				sawResponse = true;
 				const reported = data.response.model;
@@ -60,6 +67,10 @@ export function observeResponsesModelId<T extends StreamOptions>(
 			for await (const event of source) {
 				if (event.type === "done") event.message.responseModelIdObservation = observation();
 				else if (event.type === "error") event.error.responseModelIdObservation = observation();
+				if (quota !== null && (event.type === "done" || event.type === "error")) {
+					const terminal = event.type === "done" ? event.message : event.error;
+					(terminal as AssistantMessage & { codexQuota?: CodexQuotaObservation }).codexQuota = quota;
+				}
 				output.push(event);
 			}
 			// The terminal event already settled the result; ending without one

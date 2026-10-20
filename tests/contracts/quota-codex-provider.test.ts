@@ -3,10 +3,23 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
+import { getCatalogModelForRuntime } from "../../src/domains/providers/catalog.js";
 import type { CodexCredentials } from "../../src/domains/quota/codex-provider.js";
 import { CODEX_USAGE_URL, createCodexQuotaProvider } from "../../src/domains/quota/codex-provider.js";
+import {
+	codexStreamSnapshots,
+	noteCodexStreamQuota,
+	observedCodexQuota,
+	observedQuota,
+} from "../../src/domains/quota/index.js";
 import type { QuotaProvider } from "../../src/domains/quota/types.js";
+import { codexAccountScope, parseCodexQuotaEvent } from "../../src/engine/apis/codex-quota.js";
+import { observeResponsesModelId } from "../../src/engine/apis/responses-model-id.js";
+import type { CodexQuotaObservation } from "../../src/engine/types.js";
+import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
+import { createTurnState } from "../../src/session-control/turn-state.js";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -198,4 +211,137 @@ it("detects Codex's own credential file and ignores an unusable one", async () =
 	assert.equal(await createCodexQuotaProvider({ credentialsPath: good }).detect(), true);
 	assert.equal(await createCodexQuotaProvider({ credentialsPath: bad }).detect(), false);
 	assert.equal(await createCodexQuotaProvider({ credentialsPath: join(dir, "missing.json") }).detect(), false);
+});
+
+it("captures stream quota without a request and keeps target/account evidence distinct", async () => {
+	const token = (account: string) =>
+		`e30.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: account } })).toString("base64url")}.signature`;
+	const account = codexAccountScope(token("account-a"));
+	assert.ok(account);
+	assert.equal(codexAccountScope("not-a-token"), null);
+	const event = {
+		type: "codex.rate_limits",
+		plan_type: "plus",
+		rate_limits: {
+			allowed: false,
+			limit_reached: true,
+			primary: { used_percent: 100, window_minutes: 300, resets_at: NOW.getTime() / 1000 + 3600 },
+			secondary: { used_percent: 16, window_minutes: 10_080, reset_after_seconds: 7200 },
+		},
+		credits: { has_credits: true, unlimited: false },
+	};
+	const parsed = parseCodexQuotaEvent(event, account, NOW.getTime());
+	assert.ok(parsed);
+	assert.deepEqual(
+		parsed.windows.map((w) => [w.windowMinutes, w.usedPercent]),
+		[
+			[300, 100],
+			[10_080, 16],
+		],
+	);
+	assert.equal(parsed.windows[1]?.resetsAt, new Date(NOW.getTime() + 7200000).toISOString());
+	assert.equal(parsed.credits?.balance, null);
+	for (const malformed of [
+		null,
+		{},
+		{ type: "codex.rate_limits", rate_limits: { primary: { used_percent: "10", window_minutes: 300 } } },
+	])
+		assert.equal(parseCodexQuotaEvent(malformed, account), null);
+	const weekly = parseCodexQuotaEvent(
+		{ ...event, credits: undefined, rate_limits: { primary: event.rate_limits.secondary } },
+		account,
+		NOW.getTime(),
+	);
+	assert.ok(weekly);
+	assert.equal(weekly.windows.length, 1);
+	assert.equal(weekly.windows[0]?.windowMinutes, 10_080);
+	assert.equal(weekly.credits, null);
+	const model = getCatalogModelForRuntime("openai-codex", "gpt-6-luna");
+	assert.ok(model);
+	type Stream = ReturnType<typeof observeResponsesModelId>;
+	type Options = Parameters<typeof observeResponsesModelId>[1];
+	const message = {
+		role: "assistant",
+		content: [{ type: "text", text: "completed with credit fallback" }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		stopReason: "stop",
+		timestamp: NOW.getTime(),
+		usage: {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+	};
+	let invocations = 0;
+	const stream = observeResponsesModelId(model, { apiKey: token("account-a") } as Options, (options) => {
+		invocations++;
+		return {
+			async *[Symbol.asyncIterator]() {
+				await options?.onProviderStreamEvent?.(event, model);
+				yield { type: "done", reason: "stop", message };
+			},
+			result: () => Promise.resolve(message),
+		} as unknown as Stream;
+	});
+	const result = await stream.result();
+	assert.equal(result.stopReason, "stop", "included-window flags must not stop a foreground completion");
+	assert.equal(invocations, 1);
+	const quota = (result as typeof result & { codexQuota?: CodexQuotaObservation }).codexQuota;
+	assert.ok(quota);
+	assert.doesNotMatch(JSON.stringify(quota), /account-a|signature/);
+	const state = createTurnState("off");
+	state.runtime = { targetId: "stream-test", runtimeId: "openai-codex" } as never;
+	const persisted: unknown[] = [];
+	const persistence = createTurnPersistence({
+		session: {
+			append: (input: { payload: unknown }) => {
+				persisted.push(input.payload);
+				return { id: "quota-turn" };
+			},
+		} as never,
+		state,
+		getSettings: () => DEFAULT_SETTINGS,
+		middlewareToolChoice: {} as never,
+		consumePersistedEcho: () => false,
+		removeQueuedMirrorEntry: () => undefined,
+		promptCachePayloadForAssistant: () => ({}),
+		promptSideTokens: () => 0,
+	});
+	persistence.appendAssistantTurn(result);
+	const observed = observedCodexQuota("stream-test", account, Date.parse(quota.observedAt));
+	assert.equal(observed?.snapshot?.windows[0]?.usedPct, 100);
+	assert.equal(observed?.stale, false);
+	assert.deepEqual((persisted[0] as { codexQuota: unknown }).codexQuota, quota);
+	assert.equal(observedCodexQuota("other-target", account, Date.parse(quota.observedAt)), null);
+	assert.equal(
+		observedCodexQuota("stream-test", codexAccountScope(token("account-b")), Date.parse(quota.observedAt)),
+		null,
+	);
+	assert.equal(observedCodexQuota("stream-test", account, Date.parse(quota.observedAt) + 300000)?.stale, true);
+	noteCodexStreamQuota("weekly-test", weekly);
+	assert.equal(observedCodexQuota("weekly-test", account, NOW.getTime())?.snapshot?.windows[0]?.key, "weekly");
+	const background = (reading: ReturnType<typeof observedCodexQuota>) =>
+		decideBackgroundStep({
+			route: { provenance: "estimated", rates: null, runtime: { auth: "oauth", tier: "cloud" }, quotaProviderId: "codex" },
+			inputTokens: 100,
+			maxOutputTokens: 10,
+			timeoutCapMs: 1000,
+			nowMs: NOW.getTime(),
+			session: { spendUsd: 0, ceilingUsd: 5 },
+			quota: reading,
+			endpoint: { occupied: 0, admissionLimit: 1, prefillTokensPerSecond: null, generationTokensPerSecond: null },
+		});
+	assert.equal(
+		background(observedCodexQuota("weekly-test", account, NOW.getTime())).admit,
+		true,
+		"a low fresh stream window must enable optional memory on the native Codex route",
+	);
+	assert.deepEqual(background(null), { admit: false, kind: "quota", reason: "quota_unknown" });
+	assert.equal(observedQuota("codex", NOW.getTime()), null, "a Clio stream must not overwrite a sibling CLI reading");
+	assert.ok(codexStreamSnapshots(NOW.getTime()).some((s) => s.providerId === "codex:weekly-test"));
 });

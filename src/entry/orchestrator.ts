@@ -10,6 +10,7 @@ import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import { BusChannels, type PluginsReloadedPayload } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
+import { codexAccountScope } from "../core/codex-account.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
@@ -204,6 +205,7 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
+import { observedCodexQuota } from "../domains/quota/index.js";
 import { observedQuota } from "../domains/quota/observed.js";
 import { quotaProviderIdForRuntime } from "../domains/quota/registry.js";
 import {
@@ -893,6 +895,14 @@ function prepareBackgroundMemoryRoute(
 				// skipped step costs nothing; the next cadence tick decides again.
 				const nowMs = Date.now();
 				const throughput = endpointThroughput(endpointKey);
+				let routeQuota = routeFacts.quotaProviderId === null ? null : observedQuota(routeFacts.quotaProviderId, nowMs);
+				if (initial.refined.runtimeId === "openai-codex") {
+					const status = providers.auth.statusForTarget(initial.refined.target, initial.refined.runtime);
+					const stored = providers.auth.getStored(status.providerId);
+					const scope =
+						status.source === "stored-oauth" && stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
+					routeQuota = observedCodexQuota(targetId, scope, nowMs);
+				}
 				const decision = decideBackgroundStep({
 					route: routeFacts,
 					inputTokens: ceilChars(request.systemPrompt.length + request.userPrompt.length),
@@ -903,7 +913,7 @@ function prepareBackgroundMemoryRoute(
 						spendUsd: budget?.sessionSpendUsd?.() ?? 0,
 						ceilingUsd: budget?.settings.safety.limits.sessionCostUsd ?? 0,
 					},
-					quota: routeFacts.quotaProviderId === null ? null : observedQuota(routeFacts.quotaProviderId, nowMs),
+					quota: routeQuota,
 					endpoint: {
 						occupied: endpointKey === null ? 0 : modelStreamUsage(endpointCapacityUsage(), endpointKey),
 						admissionLimit:

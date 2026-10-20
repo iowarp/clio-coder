@@ -224,7 +224,32 @@ describe("memory guardian gate", () => {
 			[
 				"quota with a stale reading",
 				{ route: quota, quota: { ...window(99), stale: true } },
-				{ admit: true, kind: "quota", timeoutMs: 60_000 },
+				{ admit: false, kind: "quota", reason: "quota_unknown" },
+			],
+			["quota unknown", { route: quota }, { admit: false, kind: "quota", reason: "quota_unknown" }],
+			[
+				"quota error",
+				{ route: quota, quota: { ...window(10), snapshot: { ...window(10).snapshot, status: "error" } } },
+				{ admit: false, kind: "quota", reason: "quota_unknown" },
+			],
+			[
+				"quota no windows",
+				{ route: quota, quota: { ...window(10), snapshot: { ...window(10).snapshot, windows: [] } } },
+				{ admit: false, kind: "quota", reason: "quota_unknown" },
+			],
+			[
+				"quota expired",
+				{
+					route: quota,
+					quota: {
+						...window(99),
+						snapshot: {
+							...window(99).snapshot,
+							windows: [{ key: "weekly", label: "Weekly", usedPct: 99, resetsAt: new Date(nowMs - 1).toISOString() }],
+						},
+					},
+				},
+				{ admit: false, kind: "quota", reason: "quota_unknown" },
 			],
 			["local without a measurement", { route: local }, { admit: true, kind: "local", timeoutMs: 60_000 }],
 			[

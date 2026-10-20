@@ -237,6 +237,7 @@ const UNANSWERED_REASONS: ReadonlySet<TaskMemoryPolicyReason> = new Set([
 	"endpoint_busy",
 	"endpoint_preempted",
 	"cost_ceiling",
+	"quota_unknown",
 	"quota_window",
 	"quota_retry",
 	"time_budget",

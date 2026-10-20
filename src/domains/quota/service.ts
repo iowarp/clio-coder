@@ -15,6 +15,7 @@ import { readSettings } from "../../core/config.js";
 import { getRuntimeRegistry } from "../providers/index.js";
 import type { QuotaCache } from "./cache.js";
 import { createQuotaCache, DEFAULT_QUOTA_CACHE_TTL_MS } from "./cache.js";
+import { codexStreamSnapshots } from "./observed.js";
 import { localQuotaSnapshot } from "./presentation.js";
 import { buildQuotaProviders } from "./registry.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
@@ -45,6 +46,7 @@ export function createQuotaService(options: QuotaServiceOptions = {}): QuotaServ
 		readSettings().targets.some((target) => getRuntimeRegistry().get(target.runtime)?.tier === "local-native");
 
 	const withLocal = (snapshots: UsageSnapshot[]): UsageSnapshot[] => {
+		snapshots = [...snapshots, ...codexStreamSnapshots()];
 		if (!includeLocal) return snapshots;
 		const local = options.localRuntimeLabel
 			? localQuotaSnapshot({ runtimeLabel: options.localRuntimeLabel })
