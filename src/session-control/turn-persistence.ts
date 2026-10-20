@@ -20,7 +20,13 @@ import type { SessionEntry } from "../domains/session/entries.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
-import type { AgentEvent, AgentMessage, CodexQuotaObservation, Usage } from "../engine/types.js";
+import type {
+	AgentEvent,
+	AgentMessage,
+	AnthropicResponseObservation,
+	CodexQuotaObservation,
+	Usage,
+} from "../engine/types.js";
 import {
 	chainStepToolCallId,
 	type DisplayToolCall,
@@ -353,6 +359,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			noteCodexStreamQuota(state.runtime.targetId, quota);
 			payload.codexQuota = quota;
 		}
+		const anthropicResponse = (message as { anthropicResponse?: AnthropicResponseObservation }).anthropicResponse;
+		if (message.api === "anthropic-messages" && anthropicResponse) payload.anthropicResponse = anthropicResponse;
 		if (timing) payload.timing = timing;
 		if (deliveryId) {
 			payload.continuityDeliveryId = deliveryId;

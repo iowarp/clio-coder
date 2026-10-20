@@ -288,9 +288,12 @@ test("provider dump composes async payload mutations and preserves every stream 
 		process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
 		const captured = await run();
 		assert.equal(mutations, 2);
+		// Separate calls have distinct observation times and durations even with identical events (#423).
+		const stableFacts = (key: string, value: unknown) =>
+			key === "observedAt" || key === "durationMs" ? undefined : value;
 		assert.equal(
-			JSON.stringify(captured),
-			JSON.stringify(baseline),
+			JSON.stringify(captured, stableFacts),
+			JSON.stringify(baseline, stableFacts),
 			"diagnostics must not change events persisted by ledger consumers",
 		);
 		const raw = readFileSync(path, "utf8");

@@ -70,3 +70,17 @@ export interface CodexQuotaObservation {
 	allowed: boolean | null;
 	limitReached: boolean | null;
 }
+
+/** Sanitized per-call Anthropic response facts for #423. No credential or raw org/workspace id. */
+export interface AnthropicResponseObservation {
+	observedAt: string;
+	status: number | null;
+	attempts: number;
+	requestId: string | null;
+	accountScope: string | null;
+	retryAfterSeconds: number | null;
+	/** Unified rate-limit headers retain provider extensions for consumers (#423). */
+	rateLimit: Record<string, string>;
+	/** Preserve message_start diagnostics without response content (#423). */
+	messageStart: Record<string, unknown> | null;
+}
