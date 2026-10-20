@@ -394,31 +394,36 @@ export class Supervisor {
 	 */
 	private async restoreChoices(entry: Entry, id: string) {
 		const level = this.parkedAutonomy.get(id);
+		const choices = Object.freeze(
+			(this.snapshots.get(id)?.config?.options ?? []).map(({ id: configId, currentValue }) =>
+				Object.freeze({ configId, value: currentValue }),
+			),
+		);
 		this.parkedAutonomy.delete(id);
-		try {
-			if (level !== undefined && (await entry.client.autonomy(id)).level !== level) await entry.client.autonomy(id, level);
-			for (const kept of this.snapshots.get(id)?.config?.options ?? []) {
-				const offered = entry.client.config?.options.find((option) => option.id === kept.id);
-				if (
-					!offered ||
-					offered.currentValue === kept.currentValue ||
-					!offered.options.some((row) => row.value === kept.currentValue)
-				)
-					continue;
-				const result = record(
-					await entry.client.request("session/set_config_option", {
-						sessionId: id,
-						configId: kept.id,
-						value: kept.currentValue,
-					}),
-				);
-				const options = projectConfigOptions(result.configOptions);
-				if (options !== undefined) entry.client.config = { ...entry.client.config, options };
-			}
-		} catch (error) {
+		const refused = (error: unknown) => {
 			console.error(
-				`[clio-coder:gui] session ${id} resumed on its settings: ${error instanceof Error ? error.message : String(error)}`,
+				`[clio-coder:gui] session ${id} could not restore a choice: ${error instanceof Error ? error.message : String(error)}`,
 			);
+		};
+		if (level !== undefined) {
+			try {
+				if ((await entry.client.autonomy(id)).level !== level) await entry.client.autonomy(id, level);
+			} catch (error) {
+				refused(error);
+			}
+		}
+		// Target and model changes rebuild the offered controls; restore thinking against that final route (GUI-03).
+		for (const configId of ["target", "model", "thinkingLevel"] as const) {
+			const kept = choices.find((choice) => choice.configId === configId);
+			if (!kept) continue;
+			try {
+				const offered = entry.client.config?.options.find((option) => option.id === configId);
+				if (!offered || offered.currentValue === kept.value || !offered.options.some((row) => row.value === kept.value))
+					continue;
+				await entry.client.setConfig(id, { configId, value: kept.value });
+			} catch (error) {
+				refused(error);
+			}
 		}
 	}
 	/** Start a parked session's child again. Its transcript is the kept snapshot, so clients see only the state change. */
@@ -604,10 +609,11 @@ export class Supervisor {
 				type: "session.telemetry",
 				payload: { resource: boundId, revision: this.revision(boundId), telemetry: entry.client.telemetry },
 			});
-			if (entry.client.config)
+			const config = entry.client.config ?? (resume && this.snapshot(boundId).config ? { options: [] } : undefined);
+			if (config)
 				this.publish({
 					type: "session.configured",
-					payload: { resource: boundId, revision: this.revision(boundId), config: entry.client.config },
+					payload: { resource: boundId, revision: this.revision(boundId), config },
 				});
 			if (this.stopping) {
 				await this.retire(entry);
@@ -845,6 +851,13 @@ export class Supervisor {
 		if (params.sessionId !== entry.id)
 			throw new AppProblem("upstream_acp", "ACP update has a different session identity.");
 		if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
+		if (update.sessionUpdate === "current_mode_update") {
+			const autonomy = entry.client.modeUpdate(entry.id, update.currentModeId);
+			this.publish({
+				type: "session.telemetry",
+				payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { autonomy } },
+			});
+		}
 		const telemetry = sessionUpdateTelemetry(update);
 		if (telemetry)
 			this.publish({
@@ -856,10 +869,11 @@ export class Supervisor {
 			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
 			const target = record(meta[ACP_SESSION_META_KEY]).target;
 			const config = {
-				...this.snapshot(entry.id).config,
+				...entry.client.config,
 				options,
 				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
 			};
+			entry.client.config = config;
 			this.publish({
 				type: "session.configured",
 				payload: { resource: entry.id, revision: this.revision(entry.id), config },
@@ -1056,15 +1070,7 @@ export class Supervisor {
 			throw new AppProblem("validation", "Choose a value Clio Coder reports for this conversation.");
 		this.configuring.add(id);
 		try {
-			const result = record(await entry.client.request("session/set_config_option", { sessionId: id, ...body }));
-			const options = projectConfigOptions(result.configOptions);
-			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
-			const target = record(record(result._meta)[ACP_SESSION_META_KEY]).target;
-			const next = {
-				...this.snapshot(id).config,
-				options,
-				...(target === null || typeof target === "string" ? { target } : {}),
-			};
+			const next = await entry.client.setConfig(id, body);
 			this.publish({ type: "session.configured", payload: { resource: id, revision: this.revision(id), config: next } });
 			return next;
 		} finally {
@@ -1090,8 +1096,14 @@ export class Supervisor {
 			throw new AppProblem("unsupported", "This Clio build does not expose target probes.");
 		return this.projected(id, ACP_TARGETS_PROBE_METHOD, { targetId }, TargetProbe);
 	}
-	autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
-		return this.active(id).client.autonomy(id, level);
+	async autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
+		const autonomy = await this.active(id).client.autonomy(id, level);
+		if (level !== undefined && this.snapshot(id).telemetry?.autonomy !== autonomy)
+			this.publish({
+				type: "session.telemetry",
+				payload: { resource: id, revision: this.revision(id), telemetry: { autonomy } },
+			});
+		return autonomy;
 	}
 	capabilities(id: string) {
 		return this.active(id).client.capabilities;
