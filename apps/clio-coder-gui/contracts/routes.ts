@@ -55,6 +55,7 @@ import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
 import { UsageReport } from "./reports.js";
 import { SessionConfig, SetConfigOption } from "./session-config.js";
+import { SessionOverview } from "./session-overview.js";
 import {
 	FileCompletion,
 	PathCompletion,
@@ -890,6 +891,12 @@ export const routes = {
 		path: "/api/sessions",
 		response: Type.Array(SessionSnapshot),
 		summary: "Sessions supervised or recovered by this server",
+	}),
+	sessionOverview: defineRoute({
+		...get,
+		path: "/api/sessions/overview",
+		response: SessionOverview,
+		summary: "Lightweight session control facts without transcripts or runtime reads",
 	}),
 	session: defineRoute({
 		...get,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import type { ArtifactRead } from "../../contracts/artifacts.js";
@@ -127,6 +128,7 @@ import { Interviews } from "./interviews.js";
 import { JOB_QUIET_MS, jobChangeIsStructural, scheduledTurnPrompt } from "./jobs.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
+import { projectSessionOverview, SessionWorkers } from "./session-overview.js";
 import { sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
 
 /**
@@ -184,6 +186,7 @@ type Entry = {
 	jobPending?: Map<string, AcpJob>;
 	jobPublished?: Map<string, number>;
 	jobTimer?: ReturnType<typeof setTimeout>;
+	workers?: SessionWorkers;
 };
 /** A branch change reads and replays a whole session, which a long one makes slow. */
 const BRANCH_TIMEOUT_MS = 60_000;
@@ -259,6 +262,7 @@ export class Supervisor {
 			!entry.drafting &&
 			entry.client.pending === 0 &&
 			!this.liveJobs(entry.id) &&
+			!entry.workers?.hasWork &&
 			entry.client.capabilities.loadSession &&
 			!this.configuring.has(entry.id) &&
 			this.snapshots.get(entry.id)?.state === "open"
@@ -282,6 +286,22 @@ export class Supervisor {
 	}
 	list() {
 		return [...this.snapshots.values()].map((value) => structuredClone(value));
+	}
+	/** Lists control facts without cloning transcripts, tool output, or permission request bodies. */
+	overview() {
+		return {
+			host: hostname(),
+			sessions: [...this.snapshots.values()].map((snapshot) => {
+				const entry = this.entries.get(snapshot.id);
+				const interview = entry?.interviews?.current();
+				return projectSessionOverview(
+					snapshot,
+					interview?.questions.length ?? 0,
+					interview?.requestedAt,
+					entry?.workers?.summary(),
+				);
+			}),
+		};
 	}
 	get hasOpenSessions() {
 		return this.entries.size > 0;
@@ -577,6 +597,8 @@ export class Supervisor {
 						console.error(`[clio-coder:gui] dropped an unrecognized _clio-coder/event kind on session ${owned.id}`);
 						return;
 					}
+					owned.workers ??= new SessionWorkers();
+					owned.workers.observe(projected.item.fact);
 					// The type and the schema the item was checked against both come
 					// from the same `ACP_TO_WEB_EVENT` row, so the pairing cannot
 					// disagree; TypeScript just cannot see that across the call.

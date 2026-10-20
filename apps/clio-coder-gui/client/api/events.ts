@@ -168,10 +168,12 @@ export function subscribe(
 			}
 			if (event.type === "operation.progress") operations.push({ ...event.payload });
 			if (event.type === "interview.changed") {
+				invalidate.add("session-overview");
 				void queries.cancelQueries({ queryKey: ["session-interview", event.payload.resource], exact: true });
 				queries.setQueryData(["session-interview", event.payload.resource], event.payload.round);
 			}
 			if (event.type === "queue.changed") {
+				invalidate.add("session-overview");
 				const { resource, entries } = event.payload;
 				void queries.cancelQueries({ queryKey: ["session-queue", resource], exact: true });
 				queries.setQueryData<QueueSnapshot>(["session-queue", resource], {
@@ -215,6 +217,22 @@ export function subscribe(
 				);
 			else void queries.invalidateQueries({ queryKey: ["operation", entry.resource] });
 		}
+		if (
+			invalidate.has("sessions") ||
+			events.some(
+				(event) =>
+					event.type === "fleet.enqueued" ||
+					event.type === "fleet.started" ||
+					event.type === "fleet.completed" ||
+					event.type === "fleet.failed" ||
+					event.type === "job.changed" ||
+					event.type === "job.listed" ||
+					event.type === "hello",
+			)
+		)
+			invalidate.add("session-overview");
+		// Invalidation alone reuses a pending first read, which may have captured an older attention state.
+		if (invalidate.has("session-overview")) void queries.cancelQueries({ queryKey: ["session-overview"] });
 		for (const key of invalidate) void queries.invalidateQueries({ queryKey: [key] });
 		if (launched !== null) launch(launched);
 	});

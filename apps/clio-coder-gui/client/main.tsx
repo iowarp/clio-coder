@@ -207,8 +207,15 @@ const router = createBrowserRouter([
 			{
 				path: "/sessions",
 				lazy: async () => {
-					const { Workspaces } = await import("./pages/sessions.js");
-					return { element: <Workspaces /> };
+					const { MissionControl } = await import("./pages/mission-control.js");
+					return { element: <MissionControl client={client} /> };
+				},
+			},
+			{
+				path: "/machines",
+				lazy: async () => {
+					const { MachinesPage } = await import("./pages/machines.js");
+					return { element: <MachinesPage client={client} /> };
 				},
 			},
 			{

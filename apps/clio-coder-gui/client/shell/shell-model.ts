@@ -179,6 +179,7 @@ const SETTINGS_SEGMENTS = new Set([
 	"fleet",
 	"evidence",
 	"docs",
+	"machines",
 ]);
 
 export function isSettingsPath(pathname: string): boolean {
@@ -202,7 +203,8 @@ export interface SettingsSection {
 		| "evidence"
 		| "system"
 		| "shield"
-		| "layers";
+		| "layers"
+		| "sessions";
 	readonly group: SettingsGroup;
 	/** First path segments, or full-prefix matches, that keep this section highlighted. */
 	readonly owns: readonly string[];
@@ -279,6 +281,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	{ id: "fleet", label: "Fleet", path: "/fleet", icon: "fleet", group: "activity", owns: ["/fleet"] },
 	{ id: "evidence", label: "Evidence", path: "/evidence", icon: "evidence", group: "activity", owns: ["/evidence"] },
 	{ id: "system", label: "System", path: "/system", icon: "system", group: "capabilities", owns: ["/system"] },
+	{ id: "sessions", label: "Sessions", path: "/sessions", icon: "sessions", group: "activity", owns: ["/sessions"] },
+	{ id: "machines", label: "Machines", path: "/machines", icon: "system", group: "capabilities", owns: ["/machines"] },
 ];
 
 export function settingsDestination(path: string, workspaceId: string | null | undefined): string {

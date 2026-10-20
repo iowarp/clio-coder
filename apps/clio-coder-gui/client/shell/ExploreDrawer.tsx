@@ -6,6 +6,7 @@ import { SETTINGS_SECTIONS, settingsDestination, settingsSectionFor } from "./sh
 import "./explore-drawer.css";
 
 const GROUPS = [
+	{ label: "Workbench", detail: "Sessions and research machines", sections: ["sessions", "machines"] },
 	{ label: "Library", detail: "What Clio can use", sections: ["library", "toolchain"] },
 	{ label: "Work together", detail: "Work happening together", sections: ["fleet"] },
 	{ label: "Reports & evidence", detail: "Results, checks and usage", sections: ["evidence", "usage"] },

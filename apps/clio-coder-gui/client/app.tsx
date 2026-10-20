@@ -128,6 +128,7 @@ function Workbench({ client }: { client: Client }) {
 
 	const sessionId = sessionIdFromPath(location.pathname);
 	const mode = isSettingsPath(location.pathname) ? "settings" : "work";
+	const pageAside = mode === "work" && location.pathname !== "/sessions";
 	// `enabled: false` reads the cache the conversation already filled and re-renders when it
 	// changes, without this component ever fetching a session of its own.
 	const session = useQuery({
@@ -341,7 +342,7 @@ function Workbench({ client }: { client: Client }) {
 			openHelp,
 			activeWorkspaceId,
 			starting: actions.launch.busy,
-			asideSlot: docked && mode === "work" ? asideSlot : null,
+			asideSlot: docked && pageAside ? asideSlot : null,
 		}),
 		[
 			sidebarCollapsed,
@@ -352,7 +353,7 @@ function Workbench({ client }: { client: Client }) {
 			activeWorkspaceId,
 			actions.launch.busy,
 			docked,
-			mode,
+			pageAside,
 			asideSlot,
 		],
 	);
@@ -399,7 +400,7 @@ function Workbench({ client }: { client: Client }) {
 			className="wb"
 			data-sidebar={collapsed ? "collapsed" : "expanded"}
 			data-drawer={drawer ? "open" : "closed"}
-			data-aside={docked && mode === "work" && authed && asideExpanded ? "expanded" : "collapsed"}
+			data-aside={docked && pageAside && authed && asideExpanded ? "expanded" : "collapsed"}
 			data-mode={mode}
 		>
 			<WindowTitlebar />
@@ -483,7 +484,7 @@ function Workbench({ client }: { client: Client }) {
 				) : null}
 			</Suspense>
 			{/* The right sidebar, the left rail's mirror in the same chrome. Pages portal into its body. */}
-			{docked && mode === "work" && authed ? (
+			{docked && pageAside && authed ? (
 				<aside className="wb-aside" aria-label="This task and project" inert={layered} hidden={!asideExpanded}>
 					<Splitter spec={RIGHT_SIDEBAR} edge="start" label="Resize right sidebar" host=".wb" onCollapse={toggleAside} />
 					<div className="wb-aside__slot" ref={setAsideSlot} />

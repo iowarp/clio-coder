@@ -164,6 +164,10 @@ export function TaskSidebar({
 							{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
 							<span>{actions.launch.busy ? "Starting…" : "New task"}</span>
 						</button>
+						<NavLink to="/sessions" className="wb-action" onClick={onNavigate}>
+							<Icon name="sessions" />
+							<span>Sessions</span>
+						</NavLink>
 						<button type="button" className="wb-action" onClick={onOpenWorkspace}>
 							<Icon name="folderOpen" />
 							<span>Open workspace</span>

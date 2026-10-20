@@ -37282,6 +37282,321 @@
 				}
 			}
 		},
+		"/api/sessions/overview": {
+			"get": {
+				"operationId": "sessionOverview",
+				"summary": "Lightweight session control facts without transcripts or runtime reads",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["host", "sessions"],
+									"properties": {
+										"host": {
+											"type": "string",
+											"maxLength": 256
+										},
+										"sessions": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"workspaceId",
+													"revision",
+													"state",
+													"activity",
+													"title",
+													"model",
+													"target",
+													"updatedAt",
+													"turnCount",
+													"currentTurnId",
+													"pendingApprovals",
+													"pendingQuestions",
+													"activeWorkers",
+													"queuedWorkers",
+													"workersComplete",
+													"activeJobs",
+													"nodes",
+													"recoveredOrphan"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"workspaceId": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"revision": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"state": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "starting"
+															},
+															{
+																"type": "string",
+																"const": "open"
+															},
+															{
+																"type": "string",
+																"const": "parked"
+															},
+															{
+																"type": "string",
+																"const": "unknown"
+															},
+															{
+																"type": "string",
+																"const": "closed"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															}
+														]
+													},
+													"activity": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "approval"
+															},
+															{
+																"type": "string",
+																"const": "question"
+															},
+															{
+																"type": "string",
+																"const": "working"
+															},
+															{
+																"type": "string",
+																"const": "queued"
+															},
+															{
+																"type": "string",
+																"const": "ready"
+															},
+															{
+																"type": "string",
+																"const": "parked"
+															},
+															{
+																"type": "string",
+																"const": "closed"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															},
+															{
+																"type": "string",
+																"const": "unknown"
+															},
+															{
+																"type": "string",
+																"const": "starting"
+															}
+														]
+													},
+													"title": {
+														"type": "string",
+														"maxLength": 512
+													},
+													"model": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 512
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"target": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 512
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"updatedAt": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 512
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"turnCount": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"currentTurnId": {
+														"anyOf": [
+															{
+																"type": "string",
+																"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"pendingApprovals": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"pendingQuestions": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"activeWorkers": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"queuedWorkers": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"workersComplete": {
+														"type": "boolean"
+													},
+													"activeJobs": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"nodes": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 256
+														},
+														"maxItems": 128
+													},
+													"recoveredOrphan": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/sessions/{id}/turns": {
 			"post": {
 				"operationId": "turn",
