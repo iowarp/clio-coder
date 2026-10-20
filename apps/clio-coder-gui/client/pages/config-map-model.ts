@@ -176,7 +176,13 @@ export function settingFamilies(rows: ReadonlyArray<SettingRow>, filter = ""): S
 	const needle = filter.trim().toLocaleLowerCase("en-US");
 	const families = new Map<string, SettingRow[]>();
 	for (const row of rows) {
-		if (needle && !row.key.toLocaleLowerCase("en-US").includes(needle)) continue;
+		if (
+			needle &&
+			![row.key, row.source, SETTING_SOURCE_LABELS[row.source], row.redacted ? "" : settingValue(row)].some((value) =>
+				value.toLocaleLowerCase("en-US").includes(needle),
+			)
+		)
+			continue;
 		const family = settingFamily(row.key);
 		families.set(family, [...(families.get(family) ?? []), row]);
 	}
@@ -194,4 +200,32 @@ export function settingValue(row: SettingRow): string {
 	if (row.value === "") return "Empty";
 	if (typeof row.value === "object") return Array.isArray(row.value) ? "Empty list" : "Empty map";
 	return String(row.value);
+}
+
+/** Explicit links keep their project; a stale shell selection may fall back to an opened project. */
+export function settingsWorkspace(
+	requested: string | null,
+	active: string | null | undefined,
+	workspaces: readonly { id: string }[],
+): string {
+	if (requested) return workspaces.some((row) => row.id === requested) ? requested : "";
+	return workspaces.find((row) => row.id === active)?.id ?? workspaces[0]?.id ?? "";
+}
+
+/** Search only facts already exposed by the inspection contract; source contents remain private. */
+export function matchesConfigEntry(entry: Entry, query: string): boolean {
+	const needle = query.trim().toLocaleLowerCase("en-US");
+	return (
+		!needle ||
+		[
+			entry.id,
+			entry.category,
+			CATEGORY_PRESENTATION[entry.category].label,
+			entry.scope,
+			entry.sourcePath ?? "",
+			entry.reloadClass,
+			RELOAD_PRESENTATION[entry.reloadClass].label,
+			entry.trust ?? "",
+		].some((value) => value.toLocaleLowerCase("en-US").includes(needle))
+	);
 }

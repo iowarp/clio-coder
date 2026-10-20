@@ -152,6 +152,7 @@ function ControlRow({
 	const [confirmed, setConfirmed] = useState(false),
 		[saved, setSaved] = useState<{ sentences: string[]; timing: SettingWritten["timing"] } | null>(null);
 	const write = useMutation({
+		meta: { errorSurface: "inline" },
 		scope: { id: `settings-write:${workspaceId}` },
 		mutationFn: save,
 		onSuccess: (result, variables) => {
@@ -178,7 +179,7 @@ function ControlRow({
 	const writable = control.access === "writable";
 	const structured = control.kind === "json" && !!STRUCTURED_SETTINGS[control.path];
 	return (
-		<div className="setting-control" data-access={control.access}>
+		<div className="setting-control" data-access={control.access} data-dirty={dirty} aria-busy={write.isPending}>
 			<div className="setting-control__about">
 				<label id={labelId} htmlFor={writable && !structured ? fieldId : undefined}>
 					{control.label}
@@ -307,6 +308,15 @@ function ControlRow({
 							</label>
 						)}
 						{dirty && (
+							<p className="setting-control__draft" role="status">
+								{write.isPaused
+									? "Waiting for the previous save…"
+									: write.isPending
+										? "Saving to user settings…"
+										: "Unsaved change"}
+							</p>
+						)}
+						{dirty && (
 							<div className="setting-control__actions">
 								<button
 									type="submit"
@@ -382,10 +392,12 @@ export function SettingsControlsView({
 		);
 	};
 	const [showDrafts, setShowDrafts] = useState(false);
+	const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 	const [drafts, setDrafts, updateDraft, originalDraftValue] = useSettingsDrafts(client, workspaceId);
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
 		queryKey: key,
+		meta: { errorSurface: "inline" },
 		queryFn: () => client.call(routes.settingsControls, { ...emptyInput, params: { id: workspaceId } }),
 	});
 	useEffect(() => {
@@ -528,19 +540,17 @@ export function SettingsControlsView({
 					</details>
 				)}
 			</div>
-			{scope === undefined || scope === "advanced" ? (
-				<label className="settings-filter">
-					Find a setting
-					<input
-						type="search"
-						value={filter}
-						onChange={(event) => {
-							discover(section, event.target.value, true);
-							setShowDrafts(false);
-						}}
-					/>
-				</label>
-			) : null}
+			<label className="settings-filter">
+				Find a setting
+				<input
+					type="search"
+					value={filter}
+					onChange={(event) => {
+						discover(section, event.target.value, true);
+						setShowDrafts(false);
+					}}
+				/>
+			</label>
 			{compact ? (
 				<div className="sidebar-settings__selection">
 					<div className="sidebar-settings__field">
@@ -628,7 +638,10 @@ export function SettingsControlsView({
 			{unsaved.length > 0 && (
 				<p className="settings-draft-note" role="status">
 					{unsaved.length} unsaved {unsaved.length === 1 ? "change" : "changes"}. Save each control to apply it; filtering
-					preserves drafts in this workspace.
+					preserves drafts in this workspace.{" "}
+					<button type="button" className="setting-control__check" onClick={() => setShowDrafts(!showDrafts)}>
+						{showDrafts ? "Show all settings" : "Review changes"}
+					</button>
 				</p>
 			)}
 			{startCheck.error && <p role="alert">Could not start the model check: {startCheck.error.message}</p>}
@@ -654,14 +667,39 @@ export function SettingsControlsView({
 				</div>
 			)}
 			{!visible.length && active !== "targets" && active !== "advanced" && (
-				<p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>
+				<div className="settings-empty">
+					<p role="status">{showDrafts ? "No unsaved changes remain." : "No settings match your search."}</p>
+					<button
+						type="button"
+						onClick={() => {
+							discover(null, "");
+							setShowDrafts(false);
+						}}
+					>
+						Show all settings
+					</button>
+				</div>
 			)}
-			{groupControls(editorControls).map(({ group, controls: rows }) => {
+			{groupControls(editorControls).map(({ group, controls: rows }, index) => {
 				const note = groupNote(rows);
 				return (
-					<section key={group} className="setting-group" aria-label={group}>
-						{/* A calm page has only its h1 above, so its groups are the next level down. */}
-						{scope ? <h2 className="setting-group__title">{group}</h2> : <h3>{group}</h3>}
+					<details
+						key={group}
+						className="setting-group"
+						aria-label={group}
+						open={!!filter.trim() || showDrafts || (expanded[group] ?? (compact || scope === "models" || index === 0))}
+						onToggle={(event) => {
+							const open = event.currentTarget.open;
+							setExpanded((current) => (current[group] === open ? current : { ...current, [group]: open }));
+						}}
+					>
+						<summary>
+							<h2>{group}</h2>
+							<small>
+								{rows.length} {rows.length === 1 ? "setting" : "settings"}
+								{rows.some((control) => drafts[control.path] !== undefined) ? " · unsaved" : ""}
+							</small>
+						</summary>
 						{note !== null ? <p className="setting-group__note">{note}</p> : null}
 						{rows.map((control) => (
 							<ControlRow
@@ -676,7 +714,7 @@ export function SettingsControlsView({
 								showPath={scope === undefined || scope === "advanced"}
 							/>
 						))}
-					</section>
+					</details>
 				);
 			})}
 		</>

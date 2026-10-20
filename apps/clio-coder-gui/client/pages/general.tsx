@@ -7,7 +7,9 @@ import { AppPreferencesPanel } from "../design/pwa.js";
 import { KEYBINDINGS } from "../interaction/keybindings.js";
 import { chordHint } from "../shell/chords.js";
 import { useShell } from "../shell/shell-context.js";
+import { settingsDestination } from "../shell/shell-model.js";
 import { setThemeChoice, type ThemeChoice, useTheme } from "../shell/theme.js";
+import { useWorkspaceSelection } from "./settings.js";
 import "./general.css";
 
 const THEME_CHOICES: readonly { id: ThemeChoice; label: string; hint: string }[] = [
@@ -28,6 +30,7 @@ const SHORTCUTS = [
 
 export function GeneralPage({ client }: { client: Client }) {
 	const shell = useShell();
+	const selection = useWorkspaceSelection(client);
 	const theme = useTheme();
 	const meta = useQuery({ queryKey: ["meta"], queryFn: () => client.call(routes.meta, emptyInput) });
 	return (
@@ -35,6 +38,9 @@ export function GeneralPage({ client }: { client: Client }) {
 			<div className="panel-heading">
 				<div>
 					<h1>General</h1>
+					<p className="settings-page__lede">
+						A comfortable place to work. Appearance changes apply immediately in this browser.
+					</p>
 				</div>
 			</div>
 
@@ -63,12 +69,28 @@ export function GeneralPage({ client }: { client: Client }) {
 												? `linear-gradient(135deg, ${THEME_COLORS.light} 50%, ${THEME_COLORS.dark} 50%)`
 												: THEME_COLORS[choice.id],
 									}}
-								/>
+								>
+									<span
+										className="theme-choice__preview"
+										style={{
+											background: THEME_COLORS[choice.id === "system" ? theme.resolved : choice.id],
+											color: THEME_COLORS[(choice.id === "system" ? theme.resolved : choice.id) === "dark" ? "light" : "dark"],
+										}}
+									>
+										<i />
+										<i />
+										<i />
+									</span>
+								</span>
 								<strong>{choice.label}</strong>
 								<small>{choice.hint}</small>
 							</label>
 						))}
 					</div>
+					<p role="status" className="general__applied">
+						{theme.resolved === "light" ? "Light appearance · warm paper" : "Dark appearance · black ground"}
+						{theme.choice === "system" ? " · following this device" : " · selected for this browser"}
+					</p>
 				</div>
 			</section>
 
@@ -78,7 +100,7 @@ export function GeneralPage({ client }: { client: Client }) {
 					<p>Connections, credentials and which model answers by default.</p>
 				</div>
 				<div className="general__control">
-					<Link className="general__link" to="/settings/targets">
+					<Link className="general__link" to={settingsDestination("/settings/models", selection.id)}>
 						Manage models and connections <span aria-hidden="true">→</span>
 					</Link>
 				</div>
@@ -112,6 +134,15 @@ export function GeneralPage({ client }: { client: Client }) {
 					<p>Version, installation and this browser's connection.</p>
 				</div>
 				<div className="general__control">
+					{meta.isPending && <p role="status">Reading app details…</p>}
+					{meta.error && (
+						<p role="alert">
+							App details unavailable.{" "}
+							<button type="button" onClick={() => void meta.refetch()}>
+								Try again
+							</button>
+						</p>
+					)}
 					<AppPreferencesPanel
 						desktopManaged={meta.data?.desktopManaged ?? false}
 						enabled={meta.data?.pwa ?? false}

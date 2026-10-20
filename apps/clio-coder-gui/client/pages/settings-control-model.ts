@@ -157,3 +157,9 @@ export function inScope(scope: SettingsScopeId, control: SettingControl): boolea
 	if (scope !== "advanced") return CALM[scope](control);
 	return !Object.values(CALM).some((claims) => claims(control));
 }
+
+/** Collection keys are trimmed on save, so validation compares the same normalized keys. */
+export function invalidCollectionNames(names: readonly string[]): boolean {
+	const normalized = names.map((name) => name.trim());
+	return normalized.some((name, index) => !name || normalized.indexOf(name) !== index);
+}
