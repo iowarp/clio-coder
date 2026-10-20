@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Activity, memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
@@ -63,10 +63,13 @@ export const SessionPane = memo(function SessionPane({
 	const slot = useShell()?.asideSlot ?? null;
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [wide, setWide] = useState(() => typeof window === "undefined" || matchMedia(ASIDE_DOCK_QUERY).matches);
-	const [visited, setVisited] = useState<ReadonlySet<PaneView>>(() => new Set([view]));
+	const [visited, setVisited] = useState(() => ({ sessionId, views: new Set<PaneView>(open ? [view] : []) }));
 	useEffect(() => {
-		if (open) setVisited((previous) => (previous.has(view) ? previous : new Set([...previous, view])));
-	}, [open, view]);
+		setVisited((previous) => {
+			if (previous.sessionId !== sessionId) return { sessionId, views: new Set<PaneView>(open ? [view] : []) };
+			return !open || previous.views.has(view) ? previous : { sessionId, views: new Set([...previous.views, view]) };
+		});
+	}, [open, view, sessionId]);
 	useEffect(() => {
 		const query = matchMedia(ASIDE_DOCK_QUERY);
 		const change = () => setWide(query.matches);
@@ -93,7 +96,7 @@ export const SessionPane = memo(function SessionPane({
 	const capabilities = useQuery({
 		queryKey: ["session-capabilities", sessionId],
 		queryFn: () => client.call(routes.sessionCapabilities, { params: { id: sessionId }, query: {}, body: {} }),
-		enabled: pane?.state === "open",
+		enabled: open && pane?.state === "open",
 		staleTime: Number.POSITIVE_INFINITY,
 		retry: false,
 	});
@@ -136,12 +139,13 @@ export const SessionPane = memo(function SessionPane({
 		});
 	};
 	const drilled = view !== ROOT_VIEW;
-	const mounted = (id: PaneView) => visited.has(id);
+	const mounted = (id: PaneView) => (open && view === id) || (visited.sessionId === sessionId && visited.views.has(id));
 	const body = (id: PaneView) => {
 		switch (id) {
 			case "session":
 				return (
 					<SessionOverview
+						active={open && view === "session"}
 						client={client}
 						session={pane}
 						title={title}
@@ -227,33 +231,36 @@ export const SessionPane = memo(function SessionPane({
 				{drilled ? (
 					<button
 						type="button"
-						className="wb-icon"
+						className="wb-icon wb-icon--text"
 						onClick={() => onViewChange(ROOT_VIEW)}
-						aria-label="Back to Session"
-						title="Back to Session (Esc)"
+						aria-label="Back to task details"
+						title="Back to task details (Esc)"
 					>
 						<Icon name="arrowLeft" />
+						<span>Back</span>
 					</button>
 				) : null}
 				<h2 className="pane__title" id={`${headId}-title`} tabIndex={-1}>
 					<Icon name={PANE_VIEWS.find((entry) => entry.id === view)?.icon ?? "sessions"} />
-					{paneViewLabel(view)}
+					{view === ROOT_VIEW ? "Task details" : view === "artifacts" ? "Task files" : paneViewLabel(view)}
 				</h2>
 				<button
 					type="button"
 					className="wb-icon"
 					onClick={onClose}
-					aria-label={wide ? "Hide right sidebar" : "Close pane"}
-					title={wide ? "Hide right sidebar (Ctrl/⌘ Shift \\)" : "Close pane"}
+					aria-label="Close task details"
+					title="Close task details"
 				>
 					<Icon name={wide ? "panelRight" : "close"} />
 				</button>
 			</header>
 			<div className="pane__body">
 				{PANE_VIEWS.map(({ id }) => (
-					<section key={id} className="pane__panel" hidden={view !== id} aria-labelledby={`${headId}-title`}>
-						{mounted(id) ? body(id) : null}
-					</section>
+					<Activity key={`${sessionId}-${id}`} mode={open && view === id ? "visible" : "hidden"}>
+						<section className="pane__panel" aria-labelledby={`${headId}-title`}>
+							{mounted(id) ? body(id) : null}
+						</section>
+					</Activity>
 				))}
 			</div>
 		</div>
@@ -261,9 +268,9 @@ export const SessionPane = memo(function SessionPane({
 	if (wide) {
 		// Docked, the pane is the shell's right sidebar. Until the shell's column exists there is
 		// nothing to draw, and never a modal.
-		if (!slot || !open) return null;
+		if (!slot) return null;
 		return createPortal(
-			<aside className="pane" aria-label="Task sidebar" ref={aside}>
+			<aside className="pane" aria-label="Task details" hidden={!open} ref={aside}>
 				{content}
 			</aside>,
 			slot,
@@ -323,7 +330,6 @@ export const PaneToggles = memo(function PaneToggles({
 		[pane, workspaceRoot],
 	);
 	const stat = changeCounts(changes);
-	const docked = useShell()?.asideSlot != null;
 	const trustAttention = needsTrustReview(pane?.telemetry?.trust);
 	return (
 		<>
@@ -332,36 +338,35 @@ export const PaneToggles = memo(function PaneToggles({
 				type="button"
 				className="wb-icon wb-icon--text"
 				aria-pressed={open && view === "changes"}
-				aria-label={stat ? `Changes, ${stat}` : "Changes"}
-				title="Changes"
+				aria-label={stat ? `Review changes, ${stat}` : "Review changes"}
+				title="Review changes"
 				onClick={() => onToggle("changes", ids.changes)}
 			>
 				<Icon name="fileDiff" />
+				<span>Review</span>
 				{changes.applied > 0 ? (
 					<span className="diffstat" aria-hidden="true">
 						<span className="diffstat__add">+{changes.adds}</span> <span className="diffstat__del">−{changes.dels}</span>
 					</span>
 				) : null}
 			</button>
-			{/* Docked and showing, the sidebar carries its own hide control, as the left rail does. */}
-			{docked && open ? null : (
-				<button
-					id={ids.pane}
-					type="button"
-					className="wb-icon"
-					aria-pressed={open}
-					aria-label={`${open ? "Hide" : "Show"} task sidebar${trustAttention ? ", project files need review" : ""}`}
-					title="Task sidebar (Ctrl/⌘ Shift \\)"
-					onClick={() => onToggle(view, ids.pane)}
-				>
-					<Icon name="panelRight" />
-					{trustAttention ? (
-						<span className="pane-attention" aria-hidden="true">
-							•
-						</span>
-					) : null}
-				</button>
-			)}
+			<button
+				id={ids.pane}
+				type="button"
+				className="wb-icon wb-icon--text"
+				aria-expanded={open}
+				aria-label={`${open ? "Hide" : "Show"} task details${trustAttention ? ", project files need review" : ""}`}
+				title="Task details (Ctrl/⌘ Shift \\)"
+				onClick={() => onToggle(view, ids.pane)}
+			>
+				<Icon name="panelRight" />
+				<span>Details</span>
+				{trustAttention ? (
+					<span className="pane-attention" aria-hidden="true">
+						•
+					</span>
+				) : null}
+			</button>
 		</>
 	);
 });

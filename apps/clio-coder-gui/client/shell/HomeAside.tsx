@@ -8,7 +8,7 @@ import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { useSetupStatus } from "../pages/target-onboarding.js";
-import { setAsideExpanded } from "./aside-state.js";
+import { setAsideExpanded, useAsideExpanded } from "./aside-state.js";
 import { useShell } from "./shell-context.js";
 import { isHeld, isUntouched, STATE_LABELS, taskState, taskTitle } from "./shell-model.js";
 import "../chat/pane.css";
@@ -19,10 +19,20 @@ import "../chat/pane.css";
  */
 export function HomeAside({ client, workspace }: { client: Client; workspace: Workspace | null }) {
 	const slot = useShell()?.asideSlot ?? null;
-	const setup = useSetupStatus(client, true, workspace?.id ?? null);
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
-	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
-	if (!slot) return null;
+	const expanded = useAsideExpanded();
+	const visible = !!slot && expanded;
+	const setup = useSetupStatus(client, visible, workspace?.id ?? null);
+	const sessions = useQuery({
+		queryKey: ["sessions"],
+		queryFn: () => client.call(routes.sessions, emptyInput),
+		enabled: visible,
+	});
+	const workspaces = useQuery({
+		queryKey: ["workspaces"],
+		queryFn: () => client.call(routes.workspaces, emptyInput),
+		enabled: visible,
+	});
+	if (!slot || !expanded) return null;
 	const names = new Map((workspaces.data ?? []).map((item) => [item.id, item.name]));
 	const live = (sessions.data ?? []).filter((session) => isHeld(session) && !isUntouched(session));
 	// "Running now" means work in motion or work waiting on the operator. An open task that sits idle
