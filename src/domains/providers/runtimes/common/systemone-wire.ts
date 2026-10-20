@@ -1,6 +1,6 @@
 /**
- * The `POST /v1/systemone` wire every System One server speaks: TypeSafe's
- * hosted Jev, `laya-serve`, `clm-serve`. One parser for all of them, so an
+ * The typed wire at `/v1/systemone` (TypeSafe Jev, laya-serve, clm-serve)
+ * and Inception's `/v1/decisions`. One parser for all of them, so an
  * answer that would mislead a gate is dropped the same way whoever sent it.
  */
 
@@ -125,6 +125,15 @@ export async function postSystemOne(
 	opts: DecideOptions,
 	ctx: ProbeContext,
 ): Promise<DecideResult> {
+	return postTypedDecisions({ ...request, endpoint: "systemone" }, opts, ctx);
+}
+
+/** Inception's /v1/decisions uses the same typed wire and answer validation. */
+export async function postTypedDecisions(
+	request: SystemOneRequest & { readonly endpoint: "systemone" | "decisions" },
+	opts: DecideOptions,
+	ctx: ProbeContext,
+): Promise<DecideResult> {
 	const questionIds = Object.keys(opts.questions);
 	if (questionIds.length === 0) throw new Error("decide() requires at least one question");
 	const signal = opts.signal ?? ctx.signal;
@@ -149,7 +158,7 @@ export async function postSystemOne(
 		questions,
 	};
 	const http = {
-		url: `${request.baseUrl}/systemone`,
+		url: `${request.baseUrl}/${request.endpoint}`,
 		method: "POST" as const,
 		timeoutMs: ctx.httpTimeoutMs,
 		headers: { ...request.headers, "content-type": "application/json" },

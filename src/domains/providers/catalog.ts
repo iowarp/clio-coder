@@ -24,7 +24,30 @@ const MERCURY_3: Model<"openai-completions"> = {
 	maxTokens: 131072,
 };
 
-const CLIO_CATALOG_ROWS = new Map<string, Model<Api>>([["inception/mercury-3", MERCURY_3]]);
+const MERCURY_DECIDE: Model<"openai-completions"> = {
+	...MERCURY_3,
+	id: "mercury-decide",
+	name: "Inception: Mercury Decide",
+	cost: { input: 0.02, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 65536,
+	maxTokens: 0,
+};
+
+interface ClioCatalogRow {
+	model: Model<Api>;
+	capabilities?: Partial<CapabilityFlags>;
+}
+
+const CLIO_CATALOG_ROWS = new Map<string, ClioCatalogRow>([
+	["inception/mercury-3", { model: MERCURY_3 }],
+	[
+		"inception/mercury-decide",
+		{
+			model: MERCURY_DECIDE,
+			capabilities: { chat: false, tools: false, fim: false, structuredOutputs: "none", decisions: true },
+		},
+	],
+]);
 
 const CATALOG_PROVIDER_BY_RUNTIME_ID = new Map<string, KnownProvider>([
 	["anthropic", "anthropic"],
@@ -173,8 +196,8 @@ export function resolveCostProvenance(
 }
 
 export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string): Model<Api> | undefined {
-	const clioModel = CLIO_CATALOG_ROWS.get(`${runtimeId}/${wireModelId}`);
-	if (clioModel) return structuredClone(clioModel);
+	const clioRow = CLIO_CATALOG_ROWS.get(`${runtimeId}/${wireModelId}`);
+	if (clioRow) return structuredClone(clioRow.model);
 	const provider = catalogProviderForRuntime(runtimeId);
 	if (!provider) return undefined;
 	try {
@@ -187,6 +210,7 @@ export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string
 export function capabilitiesFromCatalogModel(
 	defaultCapabilities: CapabilityFlags,
 	model: Model<Api> | undefined,
+	runtimeId?: string,
 ): CapabilityFlags {
 	if (!model) return defaultCapabilities;
 	return {
@@ -195,6 +219,7 @@ export function capabilitiesFromCatalogModel(
 		vision: model.input.includes("image"),
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
+		...(CLIO_CATALOG_ROWS.get(`${runtimeId ?? model.provider}/${model.id}`)?.capabilities ?? {}),
 	};
 }
 
@@ -238,7 +263,7 @@ export interface CatalogBackedSynthesisInput {
 export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput): Model<Api> {
 	const builtin = getCatalogModelForRuntime(input.runtimeId, input.wireModelId);
 	const caps = mergeCapabilities(
-		capabilitiesFromCatalogModel(input.defaultCapabilities, builtin),
+		capabilitiesFromCatalogModel(input.defaultCapabilities, builtin, input.runtimeId),
 		hintCapabilities(input.kb?.entry),
 		null,
 		input.target.capabilities ?? null,

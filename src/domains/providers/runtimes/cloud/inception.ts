@@ -3,12 +3,13 @@
  * tokens in parallel rather than emitting them left to right, which is why it
  * is fast enough to sit in a latency-sensitive slot a frontier model cannot.
  *
- * Two surfaces are wired here:
+ * Three surfaces are wired here:
  *   - chat, at `/v1/chat/completions`, OpenAI-compatible with tools and
  *     structured outputs, driven through the ordinary pi-ai transport.
  *   - fill-in-the-middle, at `/v1/fim/completions`, exposed through the
  *     existing `infill()` verb so callers reach it exactly as they reach
  *     llama.cpp's.
+ *   - typed decisions, at `/v1/decisions`, through the System One verb.
  *
  * `/v1/edit/completions` (Mercury Edit 2's next-edit prediction) is deliberately
  * not implemented: it needs a contract verb of its own and its context-tag
@@ -20,12 +21,14 @@ import type { Api, Model } from "../../../../engine/types.js";
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import { probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { CompletionChunk, InfillOptions } from "../../types/inference.js";
+import type { CompletionChunk, DecideOptions, DecideResult, InfillOptions } from "../../types/inference.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
+import { postTypedDecisions } from "../common/systemone-wire.js";
 
 const INCEPTION_BASE_URL = "https://api.inceptionlabs.ai/v1";
+const DECISION_MODEL = "mercury-decide";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
@@ -50,7 +53,22 @@ const defaultCapabilities: CapabilityFlags = {
 };
 
 interface InceptionModelsResponse {
-	data?: Array<{ id?: unknown; name?: unknown; context_length?: unknown; max_output_length?: unknown }>;
+	data?: Array<{
+		id?: unknown;
+		name?: unknown;
+		context_length?: unknown;
+		max_output_length?: unknown;
+		supported_endpoints?: unknown;
+	}>;
+}
+
+function decisionsOnly(row: NonNullable<InceptionModelsResponse["data"]>[number]): boolean {
+	return (
+		row.id === DECISION_MODEL ||
+		(Array.isArray(row.supported_endpoints) &&
+			row.supported_endpoints.includes("decisions") &&
+			!row.supported_endpoints.includes("chat.completions"))
+	);
 }
 
 interface RawTextCompletionChunk {
@@ -91,6 +109,7 @@ async function fetchModels(target: TargetDescriptor, ctx: ProbeContext, path: st
 	if (!result.ok) return result;
 	const rows = result.data?.data ?? [];
 	const models = rows
+		.filter((row) => !decisionsOnly(row))
 		.map((row) => (typeof row?.id === "string" ? row.id : null))
 		.filter((id): id is string => id !== null);
 	const out: ProbeResult = { ok: true, models };
@@ -104,13 +123,24 @@ async function fetchModels(target: TargetDescriptor, ctx: ProbeContext, path: st
 		const caps: Partial<CapabilityFlags> = {};
 		if (typeof row.context_length === "number") caps.contextWindow = row.context_length;
 		if (typeof row.max_output_length === "number") caps.maxTokens = row.max_output_length;
+		if (decisionsOnly(row)) {
+			Object.assign(caps, {
+				chat: false,
+				tools: false,
+				fim: false,
+				reasoning: false,
+				structuredOutputs: "none",
+				decisions: true,
+				maxTokens: 0,
+			});
+		}
 		if (Object.keys(caps).length > 0) modelCapabilities[row.id] = caps;
 	}
 	if (Object.keys(modelLabels).length > 0) out.modelLabels = modelLabels;
 	if (Object.keys(modelCapabilities).length > 0) out.modelCapabilities = modelCapabilities;
 
 	const configured = target.defaultModel?.trim();
-	if (configured && models.length > 0 && !models.includes(configured)) {
+	if (configured && rows.length > 0 && !rows.some((row) => row.id === configured)) {
 		out.ok = false;
 		out.error = `configured model '${configured}' was not returned by Inception`;
 	}
@@ -183,6 +213,9 @@ const inceptionRuntime: RuntimeDescriptor = {
 		return result.ok && result.models ? [...result.models] : [];
 	},
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+		if (wireModelId === DECISION_MODEL) {
+			throw new Error("mercury-decide supports typed decisions only; use mercury-3 for chat");
+		}
 		return synthesizeCatalogBackedModel({
 			target,
 			wireModelId,
@@ -204,6 +237,24 @@ const inceptionRuntime: RuntimeDescriptor = {
 			// think_end token. Only legacy Mercury needs the empty-answer workaround.
 			...(wireModelId === "mercury-3" ? {} : { samplingParams: { reasoning_effort: "instant" } }),
 		});
+	},
+	decide(target: TargetDescriptor, opts: DecideOptions, ctx: ProbeContext): Promise<DecideResult> {
+		const model = opts.model ?? target.defaultModel ?? DECISION_MODEL;
+		if (model !== DECISION_MODEL) throw new Error(`Inception model '${model}' does not support typed decisions`);
+		// Live POST /v1/decisions, 2026-10-20: {model,state,questions}
+		// accepts noul/choice/score unchanged and returns {model,answers,usage:
+		// {input_tokens,output_tokens}} (229 input tokens, 3 output tokens, 320 ms).
+		return postTypedDecisions(
+			{
+				baseUrl: targetBaseUrl(target),
+				headers: authHeaders(target, ctx),
+				model,
+				label: "Inception",
+				endpoint: "decisions",
+			},
+			opts,
+			ctx,
+		);
 	},
 	async *infill(target: TargetDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk> {
 		// FIM is served by the edit-tuned model, which is not the chat default.
