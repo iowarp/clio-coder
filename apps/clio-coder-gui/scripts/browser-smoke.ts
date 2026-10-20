@@ -18,8 +18,8 @@ import { traceFixture } from "../tests/harness/trace-fixture.js";
 const { values } = parseArgs({
 	options: {
 		chrome: { type: "string", default: "/usr/bin/google-chrome" },
-		// A comma list, for rerunning one breakpoint while fixing it. The final gate includes 320px.
-		widths: { type: "string", default: "1600,1050,390,320" },
+		// The desktop browser and installed app are the active product targets.
+		widths: { type: "string", default: "1600,1050" },
 		"zoom-only": { type: "boolean", default: false },
 		// A private build, so a concurrent `vite build` into dist/client cannot pull pages out from under a run.
 		client: { type: "string", default: fileURLToPath(new URL("../dist/client/", import.meta.url)) },

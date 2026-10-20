@@ -55,7 +55,7 @@ const { values } = parseArgs({
 			default: join(scratch, "visual"),
 		},
 		only: { type: "string", default: "" },
-		views: { type: "string", default: "2000x1040:dark,1440x900:light,390x844:light" },
+		views: { type: "string", default: "2000x1040:dark,1440x900:light,1050x900:light" },
 		state: { type: "string", default: "populated" },
 		route: { type: "boolean", default: false },
 		serve: { type: "boolean", default: false },
