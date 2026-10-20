@@ -15,7 +15,18 @@ import { BranchPanel } from "./BranchPanel.js";
 import { ChangesView } from "./ChangesView.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
-import { PANE_VIEWS, type PaneView, paneViewLabel, ROOT_VIEW, selectPaneSession } from "./pane-model.js";
+import { ExtensionsPanel } from "./ExtensionsPanel.js";
+import { HandoffPanel } from "./HandoffPanel.js";
+import {
+	PANE_DESCRIPTIONS,
+	PANE_GROUPS,
+	PANE_VIEWS,
+	type PaneView,
+	paneGate,
+	paneViewLabel,
+	ROOT_VIEW,
+	selectPaneSession,
+} from "./pane-model.js";
 import { usePaneSection } from "./pane-state.js";
 import { openRoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
@@ -26,6 +37,7 @@ import { selectSessionPanel } from "./session-panel-model.js";
 import { UsagePanel } from "./UsagePanel.js";
 import { WorkerGraph } from "./WorkerGraph.js";
 import "./pane.css";
+import "./pane-inspection.css";
 
 /**
  * The pane beside the conversation. At 1440px and wider it docks and can be resized; narrower, the
@@ -84,7 +96,10 @@ export const SessionPane = memo(function SessionPane({
 	useEffect(() => {
 		if (shownView.current === view) return;
 		shownView.current = view;
-		if (open) document.getElementById(`${headId}-title`)?.focus();
+		if (open) {
+			document.getElementById(`${headId}-title`)?.focus();
+			aside.current?.querySelector(".pane__body")?.scrollTo({ top: 0 });
+		}
 	}, [open, view, headId]);
 
 	const pane = useQuery({
@@ -94,6 +109,7 @@ export const SessionPane = memo(function SessionPane({
 		select: selectPaneSession,
 	}).data;
 	const capabilities = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["session-capabilities", sessionId],
 		queryFn: () => client.call(routes.sessionCapabilities, { params: { id: sessionId }, query: {}, body: {} }),
 		enabled: open && pane?.state === "open",
@@ -141,7 +157,65 @@ export const SessionPane = memo(function SessionPane({
 	const drilled = view !== ROOT_VIEW;
 	const mounted = (id: PaneView) => (open && view === id) || (visited.sessionId === sessionId && visited.views.has(id));
 	const body = (id: PaneView) => {
+		const gate = paneGate(id, pane.state === "open", capabilities.data);
+		if (gate !== "ready")
+			return (
+				<div className="pane-inspection-empty">
+					<Icon name={gate === "checking" ? "layers" : "unverified"} />
+					<h3>
+						{gate === "checking"
+							? capabilities.error
+								? "Task capabilities unavailable"
+								: "Checking this connection"
+							: gate === "closed"
+								? "This task is closed"
+								: `${paneViewLabel(id)} is unavailable`}
+					</h3>
+					<p>
+						{gate === "checking"
+							? capabilities.error
+								? "Retry the capability read to find out which views this connection supports."
+								: "Reading the capabilities reported by this task before requesting its data."
+							: gate === "closed"
+								? "Live details require an open task. Recorded progress and file changes remain in the overview."
+								: id === "artifacts"
+									? "This connection does not expose saved artifacts. You can still review file edits and paths reported in the conversation."
+									: "This connection has not announced support for this view. Return to the task overview to inspect the facts it reports."}
+					</p>
+					{gate !== "checking" || capabilities.error ? (
+						<button type="button" onClick={() => onViewChange(id === "artifacts" ? "changes" : ROOT_VIEW)}>
+							{id === "artifacts" ? "Review file changes" : "Return to overview"}
+						</button>
+					) : (
+						<p role="status">Checking available views…</p>
+					)}
+				</div>
+			);
 		switch (id) {
+			case "handoff":
+				return (
+					<div className="pane-drill">
+						<HandoffPanel
+							client={client}
+							sessionId={pane.id}
+							sessionOpen={open && pane.state === "open" && view === id}
+							capabilities={capabilities.data}
+							running={pane.turns.at(-1)?.status === "running"}
+						/>
+					</div>
+				);
+			case "extensions":
+				return (
+					<div className="pane-drill">
+						<ExtensionsPanel
+							client={client}
+							sessionId={pane.id}
+							sessionOpen={open && pane.state === "open" && view === id}
+							capabilities={capabilities.data}
+							running={pane.turns.at(-1)?.status === "running"}
+						/>
+					</div>
+				);
 			case "session":
 				return (
 					<SessionOverview
@@ -175,7 +249,7 @@ export const SessionPane = memo(function SessionPane({
 						key={pane.id}
 						client={client}
 						sessionId={pane.id}
-						open={pane.state === "open" && view === "artifacts"}
+						open={open && pane.state === "open" && view === "artifacts"}
 						capabilities={capabilities.data}
 						settled={pane.turns.filter((turn) => turn.status !== "running").length}
 					/>
@@ -254,6 +328,35 @@ export const SessionPane = memo(function SessionPane({
 					<Icon name={wide ? "panelRight" : "close"} />
 				</button>
 			</header>
+			<label className="pane-inspection-switcher">
+				<span>Inspect</span>
+				<select aria-label="Inspect task" value={view} onChange={(event) => onViewChange(event.target.value as PaneView)}>
+					{PANE_GROUPS.map((group) => (
+						<optgroup key={group.label} label={group.label}>
+							{group.views.map((id) => (
+								<option key={id} value={id}>
+									{id === ROOT_VIEW ? "Task overview" : id === "artifacts" ? "Task files" : paneViewLabel(id)}
+								</option>
+							))}
+						</optgroup>
+					))}
+				</select>
+			</label>
+			<p className="pane-inspection-description">{PANE_DESCRIPTIONS[view]}</p>
+			{capabilities.error && (
+				<div className="pane-inspection-error" role="alert">
+					<p>{capabilities.error.message}</p>
+					<button
+						type="button"
+						disabled={capabilities.isFetching}
+						onClick={() => {
+							void capabilities.refetch();
+						}}
+					>
+						Retry connection details
+					</button>
+				</div>
+			)}
 			<div className="pane__body">
 				{PANE_VIEWS.map(({ id }) => (
 					<Activity key={`${sessionId}-${id}`} mode={open && view === id ? "visible" : "hidden"}>

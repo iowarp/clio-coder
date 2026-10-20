@@ -10,6 +10,7 @@ import { StatusMark } from "../design/status.js";
 import { quotaCards, quotaTone, usageRows, usageSummary } from "./session-usage-model.js";
 import "./session-board.css";
 import "./usage-panel.css";
+import "./pane-inspection.css";
 
 /**
  * The terminal's /usage for this conversation: what it spent, per provider and model, and what each
@@ -36,6 +37,7 @@ export const UsagePanel = memo(function UsagePanel({
 	const supported = !!capabilities?.usage;
 	const id = useId();
 	const usage = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["session-usage", sessionId, settledTurns],
 		queryFn: () => client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }),
 		enabled: sessionOpen && supported,
@@ -48,12 +50,40 @@ export const UsagePanel = memo(function UsagePanel({
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	return (
 		<div className="pane-drill drill usage-panel">
+			{sessionOpen && supported && (
+				<div className="pane-inspection-toolbar">
+					<p>Session accounting</p>
+					<button
+						type="button"
+						disabled={usage.isFetching}
+						onClick={() => {
+							void usage.refetch();
+						}}
+					>
+						{usage.isFetching ? "Refreshing…" : "Refresh accounting"}
+					</button>
+				</div>
+			)}
+			{usage.isPlaceholderData && (
+				<p className="drill__note" role="status">
+					Showing the previous accounting while this turn's usage is read.
+				</p>
+			)}
 			{!sessionOpen ? <p className="pane-empty">{summary.note}</p> : null}
 			{sessionOpen && !supported ? <p className="pane-empty">Clio does not report usage for this task.</p> : null}
 			{usage.isPending && sessionOpen && supported ? <p className="pane-empty">Reading usage…</p> : null}
 			{sessionOpen && usage.error ? (
 				<p role="alert" className="pane-empty">
-					{usage.error.message}
+					{usage.error.message}{" "}
+					<button
+						type="button"
+						disabled={usage.isFetching}
+						onClick={() => {
+							void usage.refetch();
+						}}
+					>
+						Retry usage
+					</button>
 				</p>
 			) : null}
 			{summary.totals.length > 0 ? (
@@ -88,11 +118,24 @@ export const UsagePanel = memo(function UsagePanel({
 							</ul>
 						</section>
 					) : null}
-					<section className="drill__section" aria-labelledby={`${id}-quota`}>
-						<h3 id={`${id}-quota`}>Provider quota</h3>
+					<details className="pane-inspection-disclosure">
+						<summary id={`${id}-quota`}>
+							Provider quota
+							{quota?.status === "read" ? ` · ${quota.cards.length} ${quota.cards.length === 1 ? "plan" : "plans"}` : ""}
+						</summary>
+
 						{quota?.status === "failed" ? (
 							<p role="alert" className="pane-empty">
-								{quota.reason}
+								{quota.reason}{" "}
+								<button
+									type="button"
+									disabled={usage.isFetching}
+									onClick={() => {
+										void usage.refetch();
+									}}
+								>
+									Refresh reported quota
+								</button>
 							</p>
 						) : null}
 						{quota?.status === "read" && quota.cards.length === 0 ? (
@@ -138,7 +181,7 @@ export const UsagePanel = memo(function UsagePanel({
 						<p className="drill__note">
 							Each provider's report for the signed-in plan. It covers every tool using that plan, not only Clio Coder.
 						</p>
-					</section>
+					</details>
 				</>
 			) : null}
 		</div>
