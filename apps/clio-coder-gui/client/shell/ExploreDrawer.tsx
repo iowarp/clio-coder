@@ -7,15 +7,24 @@ import "./explore-drawer.css";
 
 const GROUPS = [
 	{ label: "Library", detail: "What Clio can use", sections: ["library", "toolchain"] },
-	{ label: "Team & fleet", detail: "Work happening together", sections: ["fleet"] },
+	{ label: "Work together", detail: "Work happening together", sections: ["fleet"] },
 	{ label: "Reports & evidence", detail: "Results, checks and usage", sections: ["evidence", "usage"] },
-	{ label: "Activity & traces", detail: "Follow what happened", sections: ["traces"] },
+	{ label: "Activity", detail: "Follow what happened", sections: ["traces"] },
 	{
 		label: "Settings",
 		detail: "Make Clio work for you",
 		sections: ["general", "models", "safety", "context", "all", "system"],
 	},
 ];
+
+const LINK_LABELS: Readonly<Record<string, string>> = {
+	toolchain: "Tools",
+	evidence: "Reports",
+	traces: "Activity",
+	models: "AI models",
+	safety: "Permissions",
+	all: "Advanced settings",
+};
 
 export function ExploreDrawer({
 	activeWorkspaceId,
@@ -53,7 +62,7 @@ export function ExploreDrawer({
 										onClick={onNavigate}
 									>
 										<Icon name={section.icon} />
-										<span>{section.label}</span>
+										<span>{LINK_LABELS[section.id] ?? section.label}</span>
 										<Icon name="chevronRight" />
 									</Link>
 								);
