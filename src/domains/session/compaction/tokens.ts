@@ -11,7 +11,7 @@
  *     swap for a later phase.
  */
 
-import type { Usage } from "../../../engine/types.js";
+import type { AgentMessage, Usage } from "../../../engine/types.js";
 import { ceilChars, estimateAgentMessageTokens } from "../context-accounting.js";
 import type {
 	BashExecutionEntry,
@@ -42,6 +42,72 @@ function estimateMessage(entry: MessageEntry): number {
 	if (!("contextUsageInvalidated" in payload)) return estimateAgentMessageTokens(entry);
 	const { contextUsageInvalidated: _stamp, ...promptPayload } = payload;
 	return estimateAgentMessageTokens({ ...entry, payload: promptPayload });
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+}
+
+/** Provider deltas price only a single isolated result; ambiguous batches stay estimated (#422). */
+export function createTokenEstimator(
+	entries: ReadonlyArray<SessionEntry>,
+	toReplayMessage?: (entry: MessageEntry) => AgentMessage | null,
+): TokenEstimator {
+	// The composition root supplies the actual replay conversion, including its
+	// caps and legacy decoding. Domains must not import session-control (#422).
+	const replayCost = (entry: SessionEntry): number => {
+		if (entry.kind !== "message" || !toReplayMessage) return estimateTokens(entry);
+		const message = toReplayMessage(entry);
+		return message ? estimateAgentMessageTokens(message) : 0;
+	};
+	const contentIdentity = (entry: MessageEntry): string =>
+		JSON.stringify(toReplayMessage ? toReplayMessage(entry) : entry.payload);
+	const measured = new Map<string, { content: string; tokens: number }>();
+	let previous: MessageEntry | null = null;
+	let result: MessageEntry | null = null;
+	let isolated = false;
+	for (const entry of entries) {
+		if (entry.kind === "message" && entry.role === "assistant") {
+			const usage = extractUsage(entry.payload);
+			const prior = previous && extractUsage(previous.payload);
+			const before = previous && record(previous.payload);
+			const after = record(entry.payload);
+			if (
+				isolated &&
+				result &&
+				usage &&
+				prior &&
+				before &&
+				after &&
+				["model", "provider", "api"].every((key) => before[key] === after[key])
+			) {
+				const tokens = usage.input + (usage.cacheRead || 0) + (usage.cacheWrite || 0) - usageTotalTokens(prior);
+				if (Number.isFinite(tokens) && tokens > 0) {
+					measured.set(result.turnId, { content: contentIdentity(result), tokens });
+				}
+			}
+			previous = usage ? entry : null;
+			result = null;
+			isolated = previous !== null;
+		} else if (entry.kind === "message" && entry.role === "tool_result") {
+			if (result) isolated = false;
+			result = entry;
+		} else if (replayCost(entry) > 0 && !(entry.kind === "message" && entry.role === "tool_call")) {
+			isolated = false;
+		} else if (entry.kind === "contextEviction" || entry.kind === "compactionSummary" || entry.kind === "modelChange") {
+			previous = null;
+			isolated = false;
+		}
+	}
+	return {
+		estimateEntry(entry) {
+			const cost = measured.get(entry.turnId);
+			return cost && entry.kind === "message" && contentIdentity(entry) === cost.content ? cost.tokens : replayCost(entry);
+		},
+		calculateContextTokens,
+	};
 }
 
 function estimateBashExecution(entry: BashExecutionEntry): number {

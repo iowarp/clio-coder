@@ -905,10 +905,11 @@ describe("production compaction controls", () => {
 			attempts++;
 			return f.run(...args);
 		});
-		// The last eviction left more than the ledger projects now, so growth since
-		// it is inside the band.
+		// The request-context baseline holds this checkpoint without starting
+		// another operation (#422).
 		const eviction = appendEntry(f.state, {
 			kind: "contextEviction",
+			basis: "request-context",
 			policyId: "structural-v2",
 			trigger: "pressure",
 			evicted: [],
@@ -1466,6 +1467,7 @@ describe("production compaction controls", () => {
 				},
 				agent: {
 					state: {
+						model: faux.getModel("chat"),
 						systemPrompt: "fixture ".repeat(40000),
 						thinkingLevel: "off",
 						messages: [],

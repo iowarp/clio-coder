@@ -63,7 +63,7 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 			evictionEvents += 1;
 			lastPolicyId = entry.policyId;
 			lastEvictionTurnId = entry.turnId;
-			lastEvictionTokensAfter = entry.tokensAfter;
+			lastEvictionTokensAfter = entry.basis === "request-context" ? entry.tokensAfter : null;
 			for (const item of entry.evicted) {
 				itemsEvicted += 1;
 				evicted.set(refKey(item.ref), {

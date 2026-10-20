@@ -579,6 +579,8 @@ export interface EvictedItem {
 
 export interface ContextEvictionEntry extends BaseSessionEntry {
 	kind: "contextEviction";
+	/** Absent on historical ledger-JSON counts, which cannot anchor request growth (#422). */
+	basis?: "request-context";
 	policyId: string;
 	trigger: EvictionTrigger;
 	evicted: ReadonlyArray<EvictedItem>;

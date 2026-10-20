@@ -96,47 +96,6 @@ function soloView(key: string, state: EvictedState): WorkingSetView {
 	};
 }
 
-function sumTokens(entries: ReadonlyArray<SessionEntry>, estimate: (entry: SessionEntry) => number): number {
-	let total = 0;
-	for (const entry of entries) total += estimate(entry);
-	return total;
-}
-
-/**
- * The projection priced the way `tokensBefore` and `tokensAfter` are recorded:
- * the visible slice with the view applied, chars/4 per entry. The live engine
- * and the replay runner both feed this number to the rearm band, so growth
- * since the last event is measured on the same bytes the event recorded.
- */
-export function projectedWorkingSetTokens(
-	entries: ReadonlyArray<SessionEntry>,
-	view: WorkingSetView,
-	estimateTokens: (entry: SessionEntry) => number,
-): number {
-	return sumTokens(projectWorkingSet(entries, view), estimateTokens);
-}
-
-/**
- * The view this plan would produce. `evictionEvents` and `lastEvictionTurnId`
- * stay where they were on purpose: both totals are then measured under the same
- * usage-invalidation state, so `tokensBefore - tokensAfter` is exactly the
- * bodies this event removes and nothing else.
- */
-function viewWithItems(view: WorkingSetView, items: ReadonlyArray<EvictedItem>, policyId: string): WorkingSetView {
-	const evicted = new Map(view.evicted);
-	for (const item of items) {
-		evicted.set(refKey(item.ref), {
-			reason: item.reason,
-			marker: item.marker,
-			...(item.by === undefined ? {} : { by: item.by }),
-			tokensFreed: item.tokensFreed,
-			evictedAtTurnId: PENDING_EVENT_TURN_ID,
-			policyId,
-		});
-	}
-	return { ...view, evicted, itemsEvicted: view.itemsEvicted + items.length };
-}
-
 /**
  * What one candidate takes out of the working set: the entry as it stands now
  * minus the entry as the projection would render it. Zero when the candidate
@@ -221,12 +180,10 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 	return {
 		policyId: policy.id,
 		items,
-		tokensBefore: projectedWorkingSetTokens(input.entries, input.view, input.estimateTokens),
-		tokensAfter: projectedWorkingSetTokens(
-			input.entries,
-			viewWithItems(input.view, items, policy.id),
-			input.estimateTokens,
-		),
+		// Keep the complete request anchor, including system and tools. Only the
+		// removable bodies change; ledger totals cannot replace this basis (#422).
+		tokensBefore: input.pressure.tokens,
+		tokensAfter: Math.max(0, input.pressure.tokens - items.reduce((sum, item) => sum + item.tokensFreed, 0)),
 	};
 }
 
@@ -236,6 +193,7 @@ export function buildEvictionFields(
 ): ContextEvictionFields {
 	return {
 		kind: "contextEviction",
+		basis: "request-context",
 		policyId: plan.policyId,
 		trigger: meta.trigger,
 		evicted: plan.items,

@@ -64,7 +64,7 @@ import {
 } from "../domains/context/budget/live-view.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
-import { buildEvictionFields, planEviction, projectedWorkingSetTokens } from "../domains/context/working-set/engine.js";
+import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
@@ -92,7 +92,7 @@ import {
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
-import { estimateTokens } from "../domains/session/compaction/tokens.js";
+import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
 import {
 	appendContextSnapshot,
 	type CaptureContextSnapshotInput,
@@ -141,7 +141,7 @@ import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./compactio
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
-import { extractTurnText, truncateReplayText } from "./session-replay-messages.js";
+import { createReplayMessageConverter, extractTurnText, truncateReplayText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
@@ -1463,11 +1463,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
 				resolveWorkingSetPolicy(settings.context.workingSet.policy);
 				held = withinRearmBand({
-					projectedTokens: projectedWorkingSetTokens(
-						selectVisibleEntries(entries, state.lastTurnId ?? undefined),
-						view,
-						estimateTokens,
-					),
+					projectedTokens: pressureEstimate.tokens,
 					contextWindow: economic.budgetWindow,
 					rearmFraction: settings.context.workingSet.rearmFraction,
 					lastEvictionTokensAfter: view.lastEvictionTokensAfter,
@@ -1653,14 +1649,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
 						policyId = policy.id;
 						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
-						const projectedTokens = projectedWorkingSetTokens(visibleEntries, view, estimateTokens);
+						const estimator = createTokenEstimator(
+							visibleEntries,
+							createReplayMessageConverter(entries, {
+								...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+							}),
+						);
 						planned = (deps.planEviction ?? planEviction)(policy, {
 							entries: visibleEntries,
 							view,
 							cwd: deps.session.current()?.cwd ?? null,
 							settings: settings.context.workingSet,
 							pressure: {
-								tokens: projectedTokens,
+								tokens: liveContextEstimate(agentRuntime, pendingUserText).tokens,
 								contextWindow: compactionWindow,
 								threshold: requiredFit
 									? Math.min(
@@ -1675,7 +1676,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 										)
 									: workingSetTarget,
 							},
-							estimateTokens,
+							estimateTokens: estimator.estimateEntry,
 						});
 					} catch (error) {
 						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
@@ -1716,13 +1717,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							currentContextSnapshot = postEvictionSnapshot;
 							persistContextSnapshot(postEvictionSnapshot);
 
-							// Every surface that describes this event (the notice, the toast
-							// ContextPruned feeds, the overlay's last-compaction line, the
-							// ledger entry) quotes the plan: the same chars/4 pricing over the
-							// same visible slice. The live estimate prices the agent message
-							// list and differs by the tool schemas and replay text; it stays
-							// what the meter and the re-check below read, not what the event
-							// reports about itself.
+							// All event surfaces quote the request anchor less the priced
+							// bodies; the live re-check below remains authoritative (#422).
 							lastCompactionEvent = {
 								stage: "working_set",
 								tokensBefore: planned.tokensBefore,

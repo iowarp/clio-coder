@@ -357,6 +357,18 @@ function toolResultMessageFromEntry(entry: MessageEntry, unbounded = false): Age
 	} as AgentMessage;
 }
 
+/** The per-entry conversion shared by replay and injected token pricing (#422). */
+function replayMessageFromEntry(entry: MessageEntry, unbounded = false): AgentMessage | null {
+	if (entry.role === "user" || entry.role === "assistant") {
+		if (entry.role === "assistant" && messageFailure(entry)) return null;
+		return richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS);
+	}
+	if (entry.role === "tool_call") return toolCallMessageFromEntry(entry);
+	if (entry.role === "tool_result") return toolResultMessageFromEntry(entry, unbounded);
+	const text = truncateReplayText(`System note: ${textBlockFromEntry(entry)}`.trim());
+	return text ? makeTextMessage("user", text, entry.timestamp) : null;
+}
+
 export function textBlockFromEntry(entry: MessageEntry): string {
 	const text = extractTurnText(entry.payload);
 	if (text.length > 0) return text;
@@ -670,14 +682,30 @@ function skillActivationContextText(entry: Extract<SessionEntry, { kind: "skillA
 	return `Active skill loaded: ${activation.name} source=${activation.source} hash=${activation.hash} path=${activation.filePath} triggeredBy=${activation.triggeredBy}${turn}. Continue honoring this skill unless the user changes direction.`;
 }
 
+function replaySkillContext(turns: ReadonlyArray<SessionEntry>, options: RehydrateChatPanelOptions) {
+	const activeEntries = activeEntriesBeforeCompactionCut(turns, options);
+	const skillState = latestSkillContextState(activeEntries);
+	const evidence = activeEntriesBeforeCompactionCut(options.skillContextEntries ?? turns, options);
+	return { activeEntries, skillState, verified: captureSkillContext(evidence, skillState) };
+}
+
+/** Share replay's caps, legacy decoding and verified-skill exception with pricing (#422). */
+export function createReplayMessageConverter(
+	turns: ReadonlyArray<SessionEntry>,
+	options: RehydrateChatPanelOptions = {},
+): (entry: MessageEntry) => AgentMessage | null {
+	const { verified } = replaySkillContext(turns, options);
+	const wholeSkillResults = new Set(verified?.skills.map((skill) => skill.resultRef) ?? []);
+	return (entry) => replayMessageFromEntry(entry, wholeSkillResults.has(entry.turnId));
+}
+
 export function buildReplayAgentMessagesFromTurns(
 	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): AgentMessage[] {
 	const out = createOrderedReplaySink();
 	const seenToolCalls = new Set<string>();
-	const activeEntries = activeEntriesBeforeCompactionCut(turns, options);
-	const skillState = latestSkillContextState(activeEntries);
+	const { activeEntries, skillState, verified } = replaySkillContext(turns, options);
 	// One emission point for the continuity blocks, tracked by a flag rather than
 	// by counting occurrences: the note has to appear exactly once whether the
 	// replay window holds a carrying summary, an eviction-only commit, or
@@ -692,8 +720,6 @@ export function buildReplayAgentMessagesFromTurns(
 		// passes through the trimming/truncating context helper.
 		for (const block of options.continuityBlocks ?? []) out.push(makeTextMessage("user", block, timestamp));
 	};
-	const evidence = activeEntriesBeforeCompactionCut(options.skillContextEntries ?? turns, options);
-	const verified = captureSkillContext(evidence, skillState);
 	// A selected skill whose load verifies whole replays whole. Its result is
 	// the instructions the session still stands on, and the live model read
 	// them uncut; the replay cap would drop their tail on every rebuild after
@@ -715,7 +741,7 @@ export function buildReplayAgentMessagesFromTurns(
 				const text = textBlockFromEntry(entry);
 				if (entry.role === "user" || entry.role === "assistant") {
 					if (entry.role === "assistant" && messageFailure(entry)) break;
-					const message = richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS);
+					const message = replayMessageFromEntry(entry);
 					if (message) {
 						out.push(message);
 						recordToolCallsFromMessage(message, seenToolCalls);
@@ -723,7 +749,8 @@ export function buildReplayAgentMessagesFromTurns(
 				} else if (entry.role === "tool_call") {
 					const call = extractToolCall(entry);
 					if (!seenToolCalls.has(call.id)) {
-						const message = toolCallMessageFromEntry(entry);
+						const message = replayMessageFromEntry(entry);
+						if (!message) break;
 						out.push(message);
 						recordToolCallsFromMessage(message, seenToolCalls);
 					}

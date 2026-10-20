@@ -21,9 +21,9 @@
  * expensive way to save the fewest tokens. `withinRearmBand` says whether the
  * projection has grown by `rearmFraction` of the window since the last event;
  * until it has, an automatic checkpoint does nothing, the overflow path excepted.
- * Both callers price the projection the same way (`projectedWorkingSetTokens`
- * in engine.ts), so the band compares like with like: the recorded
- * `tokensAfter` of the last event and the same slice priced now.
+ * Live checkpoints compare the complete request estimate with the recorded
+ * request-context `tokensAfter`. Historical events without that basis do not
+ * establish a band; their ledger-JSON totals priced different material (#422).
  */
 
 import type { SessionEntry } from "../../session/entries.js";

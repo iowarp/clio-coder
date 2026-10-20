@@ -368,7 +368,7 @@ describe("live budget adapter", () => {
 		return f;
 	}
 
-	it("prices eviction selection from the ledger slice while admission includes fixed prompt costs", async () => {
+	it("prices eviction selection from the same complete request as admission", async () => {
 		let selectedTokens: number | undefined;
 		const f = reconciledFixture({
 			planEviction: (_policy, input) => {
@@ -379,7 +379,7 @@ describe("live budget adapter", () => {
 		f.context.reconcileUsage(usage(29_000, 100));
 		ok(f.context.liveContextEstimate(f.runtime).tokens > WINDOW * 0.85);
 		await f.context.runAutoCompact(f.runtime, false);
-		strictEqual(selectedTokens, 0, "the empty ledger has no age-rung headroom to reclaim");
+		strictEqual(selectedTokens, f.context.liveContextEstimate(f.runtime).tokens);
 	});
 
 	it("budgets against the same live estimate admission uses, with truthful anchored provenance", () => {

@@ -84,7 +84,8 @@ export interface WorkingSetView {
 	/**
 	 * `tokensAfter` recorded by the most recent eviction event, the baseline
 	 * the rearm band measures growth from. Null when there is no event, and
-	 * null again once a compaction summary follows the event on the active
+	 * null for old events without a request-context basis, and again once a
+	 * compaction summary follows the event on the active
 	 * path, because the summary moved the baseline.
 	 */
 	lastEvictionTokensAfter: number | null;
@@ -128,7 +129,7 @@ export interface PolicyInput {
 	cwd: string | null;
 	settings: WorkingSetSettings;
 	pressure: PressureInput;
-	/** chars/4 estimator shared with `context-accounting.ts`, so replay and live agree. */
+	/** Replay-content estimator, using isolated provider measurements when available (#422). */
 	estimateTokens: (entry: SessionEntry) => number;
 }
 
