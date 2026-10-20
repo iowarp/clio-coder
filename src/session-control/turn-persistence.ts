@@ -43,6 +43,7 @@ import {
 	sumRunUsage,
 	terminalFailureFromAssistantMessage,
 	toolResultSummary,
+	unmeteredInvokedUsage,
 } from "./chat-loop-messages.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
@@ -366,7 +367,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		// and never updated. Record what the call is known to have spent instead of
 		// the zeros, in the shape a completed turn uses and flagged as an estimate.
 		const interruptedUsage = estimatedUsageForInterruptedTurn(message, deps.promptSideTokens());
-		if (interruptedUsage !== null) payload.usage = interruptedUsage;
+		// A call that reached the provider and failed unmetered is recorded as
+		// unknown, not as the zeros its stream started with (#423).
+		const recordedUsage = interruptedUsage ?? unmeteredInvokedUsage(message);
+		if (recordedUsage !== null) payload.usage = recordedUsage;
 		if (isLengthStopAssistantMessage(message) && state.runtime) {
 			const contextExhaustion = recordValue(payload.contextExhaustion);
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;

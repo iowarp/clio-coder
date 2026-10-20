@@ -39,6 +39,7 @@
  * The frame types these rules produce are declared in `run-json-schema.ts`.
  */
 
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
 import { sumRunUsage } from "../../session-control/chat-loop-messages.js";
@@ -206,6 +207,15 @@ export function projectDispatchJsonEvent(
 	return { ...rest, ...segmentSummary(event.messages as AgentMessage[]) };
 }
 
+/** An assistant call that reached the provider and came back without usage (#423). */
+function unmeteredCall(message: AgentMessage): boolean {
+	if (message.role !== "assistant") return false;
+	const usage = (message as { usage?: unknown }).usage;
+	if (typeof usage !== "object" || usage === null) return false;
+	const raw = usage as Record<string, unknown>;
+	return raw.callInvoked !== false && !normalizeTokenUsage(raw).observed;
+}
+
 function segmentSummary(messages: ReadonlyArray<AgentMessage>): RunJsonAgentEndFrame {
 	const usage = sumRunUsage(messages);
 	return {
@@ -220,7 +230,9 @@ function segmentSummary(messages: ReadonlyArray<AgentMessage>): RunJsonAgentEndF
 			totalTokens: usage.tokens,
 			costUsd: usage.costUsd,
 			apiCalls: usage.apiCalls,
-			measured: usage.hadUsage && usage.estimated !== true,
+			// A call that failed before reporting usage leaves zeros, which are not
+			// a measurement of it.
+			measured: usage.hadUsage && usage.estimated !== true && !messages.some(unmeteredCall),
 			...(usage.estimated === true ? { estimated: true as const } : {}),
 		},
 	};

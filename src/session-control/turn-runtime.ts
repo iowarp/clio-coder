@@ -1096,7 +1096,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						(usage.clioExternal as { cost?: string } | undefined)?.cost === "provider-reported"
 							? "known"
 							: localRuntime.runtimeResolution.costProvenance;
-					usage.callInvoked = apiCallStartedAt !== null || normalizeTokenUsage(usage).observed;
+					// A response id proves the provider took the request even when the
+					// stream failed before reporting usage (#423).
+					const responseId = (enrichedEvent.message as { responseId?: unknown }).responseId;
+					usage.callInvoked =
+						apiCallStartedAt !== null ||
+						normalizeTokenUsage(usage).observed ||
+						(typeof responseId === "string" && responseId.length > 0);
 					usage.targetId = localRuntime.targetId;
 				}
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
@@ -1191,7 +1197,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const summary = sumRunUsage([enrichedEvent.message]);
 				const rawUsage = enrichedEvent.message.usage as unknown as Record<string, unknown>;
 				const reported = normalizeTokenUsage(rawUsage ?? {});
-				if (summary.hadUsage && (apiCallStartedAt !== null || reported.observed)) {
+				if (summary.hadUsage && rawUsage.callInvoked === true) {
 					deps.observability.recordTokens(
 						localRuntime.targetId,
 						attributedModelId(

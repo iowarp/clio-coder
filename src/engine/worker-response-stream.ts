@@ -44,6 +44,17 @@ export function boundWorkerResponse<T extends StreamOptions>(
 		clearTimeout(timer);
 		signal.removeEventListener("abort", cancel);
 	};
+	// A failed call keeps the usage its provider streamed, or says it is unknown;
+	// the stream's initial zeros read as a free call (#423).
+	const settleUsage = (message: AssistantMessage): void => {
+		if (normalizeCallUsage({ ...message.usage }).observed) return;
+		if (reportedUsage) {
+			message.usage = { ...reportedUsage, cost: message.usage.cost };
+			calculateCost(model, message.usage);
+		} else {
+			message.usage = { ...message.usage, observed: false } as AssistantMessage["usage"];
+		}
+	};
 	const stop = (detail: string, code?: WorkerResponseLimitCode, reason: "aborted" | "error" = "aborted"): void => {
 		if (settled) return;
 		settled = true;
@@ -71,15 +82,7 @@ export function boundWorkerResponse<T extends StreamOptions>(
 			...(code ? { clioCoderAbortReason: code } : {}),
 			errorMessage: detail,
 		};
-		if (!normalizeCallUsage({ ...message.usage }).observed) {
-			if (reportedUsage) {
-				message.usage = { ...reportedUsage, cost: message.usage.cost };
-				calculateCost(model, message.usage);
-			} else {
-				const unknownUsage = { ...message.usage, observed: false };
-				message.usage = unknownUsage;
-			}
-		}
+		settleUsage(message);
 		if (code) limits.onLimit(code, detail);
 		// An aborted terminal message bypasses Pi tool execution and transient retries.
 		output.push({ type: "error", reason, error: message });
@@ -150,6 +153,7 @@ export function boundWorkerResponse<T extends StreamOptions>(
 						);
 						return;
 					}
+					if (event.type === "error") settleUsage(event.error);
 					settled = true;
 					cleanup();
 					output.push(event);

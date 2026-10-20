@@ -611,6 +611,35 @@ export function estimatedUsageForInterruptedTurn(
 	};
 }
 
+/**
+ * Usage for a call that reached the provider and failed before the provider
+ * reported any, or null when it reported some or never ran.
+ *
+ * The stream's initial zeros said such a call was free. In #423 a 326K-token
+ * Codex request ran 119 s on the server, ended on a WebSocket error and was
+ * recorded with zero usage. Its spend is unknown, so the token and cost fields
+ * are null, the shape the out-of-turn ledger writes for missing usage, and the
+ * readers that fold the ledger count it under `missingTokenCalls`.
+ */
+export function unmeteredInvokedUsage(message: AgentMessage): Record<string, unknown> | null {
+	const stopReason = (message as { stopReason?: unknown }).stopReason;
+	if (stopReason !== "error" && stopReason !== "aborted") return null;
+	const usage = (message as { usage?: Record<string, unknown> }).usage;
+	if (!usage || typeof usage !== "object" || usage.callInvoked !== true || usage.estimated === true) return null;
+	if (normalizeTokenUsage(usage).observed) return null;
+	return {
+		...usage,
+		input: null,
+		output: null,
+		cacheRead: null,
+		cacheWrite: null,
+		...("reasoning" in usage ? { reasoning: null } : {}),
+		totalTokens: null,
+		cost: { input: null, output: null, cacheRead: null, cacheWrite: null, total: null },
+		missingTokenCalls: 1,
+	};
+}
+
 export function hasPersistableAssistantContent(
 	payload: Record<string, unknown>,
 	failure: TerminalAssistantFailure | null,
