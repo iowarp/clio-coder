@@ -10,11 +10,12 @@ import { emptyState } from "../../design/panel-model.js";
 import { StatusMark } from "../../design/status.js";
 import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
-import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
+import { CostPanel, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import "../run-inspection.css";
 import type { TraceLiveState } from "./trace-live-model.js";
 import { detailRefetchMs, liveLabel, mergeTraceEvents } from "./trace-live-model.js";
 import { captureCoverageLabel, histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
+import { TraceReplay } from "./trace-replay.js";
 import { useTraceLive } from "./use-trace-live.js";
 export function TraceRunPage({ client }: { client: Client }) {
 	const { runId = "" } = useParams();
@@ -90,8 +91,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 	if (!detail.data || !events.data) return <p>Loading run…</p>;
 	const { run, gates, processes, receipt } = detail.data,
 		phases = orderedPhases(detail.data.phases),
-		phase = selected === "all" ? undefined : (phases.find((item) => item.phase_id === selected) ?? phases[0]),
-		phaseEvents = events.data.filter((event) => !phase || event.phase_id === phase.phase_id),
+		phase = phases.find((item) => item.phase_id === selected),
 		eventKinds = histogram(events.data.map((event) => event.type)),
 		processKinds = histogram(processes.map((process) => process.kind));
 	return (
@@ -131,9 +131,18 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					Refresh failed: {detail.error?.message ?? events.error?.message}. Showing the last loaded record.
 				</p>
 			)}
+			<TraceReplay
+				key={phase?.phase_id ?? "all"}
+				run={run}
+				events={events.data}
+				phases={phases}
+				phaseId={phase?.phase_id ?? null}
+				selectPhase={select}
+				live={live}
+			/>
 			<div className="inspection-heading">
 				<h2>Execution sequence</h2>
-				<button type="button" aria-pressed={selected === "all"} onClick={() => select("all")}>
+				<button type="button" aria-pressed={!phase} onClick={() => select("all")}>
 					All phases
 				</button>
 			</div>
@@ -181,18 +190,6 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 						</div>
 					))}
 				</div>
-			</section>
-			<section className="trace-panel">
-				<h2>
-					{phase ? `${phase.name} · event log` : "Event log"} <small>({phaseEvents.length})</small>
-				</h2>
-				{/* biome-ignore lint/a11y/noNoninteractiveTabindex: The bounded event log is a keyboard-scrollable region. */}
-				<section className="inspection-log" tabIndex={0} aria-label={phase ? `${phase.name} events` : "All run events"}>
-					{phaseEvents.map((event) => (
-						<EventRow key={event.event_id} event={event} start={run.started_at} />
-					))}
-				</section>
-				{!phaseEvents.length ? <PanelEmpty>{emptyState.emptyStore("event", "for this phase")}</PanelEmpty> : null}
 			</section>
 			<Gates gates={gates.filter((gate) => !phase || gate.phase_id === phase.phase_id)} />
 			<details className="trace-panel">
