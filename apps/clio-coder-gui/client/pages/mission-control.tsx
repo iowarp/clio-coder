@@ -12,6 +12,7 @@ import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
 import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
+import { useSessionOverview } from "../shell/tasks.js";
 import type { SessionFilter } from "./mission-control-model.js";
 import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
 import "./mission-control.css";
@@ -42,11 +43,7 @@ export function MissionControl({ client }: { client: Client }) {
 			},
 			{ replace: true },
 		);
-	const overview = useQuery({
-		queryKey: ["session-overview"],
-		queryFn: ({ signal }) => client.call(routes.sessionOverview, emptyInput, undefined, signal),
-		refetchInterval: 30_000,
-	});
+	const overview = useSessionOverview(client);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const items = overview.data?.sessions;
 	const projects = workspaces.data;

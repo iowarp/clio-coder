@@ -235,7 +235,7 @@ export function usageView(report: UsageReport): UsageView {
 		const value = number(sessionTokens[key]);
 		return [{ label, value: value === null ? "Not recorded" : value.toLocaleString("en-US") }];
 	});
-	if (!hasOriginSplit && first("tokens")) {
+	if (!hasOriginSplit && first("tokens") && workers) {
 		const calls = number(sessionTokens.apiCalls);
 		origins.push({
 			label: "Session and side calls",
@@ -260,7 +260,9 @@ export function usageView(report: UsageReport): UsageView {
 		origins,
 		originsNote: origins.length
 			? "Session and side-call counts come from session usage; worker calls come from disjoint receipt totals, including shadow and internal helpers. A tool loop can make several conversation calls."
-			: "Call origins were not recorded in this window.",
+			: first("tokens")
+				? "No origin split was recorded. The total alone does not establish that every recorded call belongs to a turn."
+				: "Call origins were not recorded in this window.",
 		missingStores,
 		models: [...all("model-usage"), ...all("worker-model-usage")],
 		skillsActivated: all("skill-activated"),

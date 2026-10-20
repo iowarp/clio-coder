@@ -38,6 +38,7 @@ export const SessionOverviewItem = Type.Object(
 		activeJobs: Type.Integer({ minimum: 0 }),
 		nodes: Type.Array(Type.String({ maxLength: 256 }), { maxItems: 128 }),
 		recoveredOrphan: Type.Boolean(),
+		untouched: Type.Boolean(),
 	},
 	closed,
 );

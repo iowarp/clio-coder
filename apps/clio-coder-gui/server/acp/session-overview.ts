@@ -109,5 +109,18 @@ export function projectSessionOverview(
 		activeJobs,
 		nodes: held ? workers.nodes : [],
 		recoveredOrphan: snapshot.recoveredOrphan,
+		untouched:
+			snapshot.state === "open" &&
+			snapshot.turns.length === 0 &&
+			snapshot.timeline.length === 0 &&
+			!snapshot.contextWork?.active &&
+			!snapshot.contextWork?.latest &&
+			pendingApprovals === 0 &&
+			pendingQuestions === 0 &&
+			workers.active === 0 &&
+			workers.queued === 0 &&
+			workers.complete &&
+			activeJobs === 0 &&
+			!snapshot.recoveredOrphan,
 	};
 }

@@ -89,6 +89,7 @@ export function isUntouched(
 ): boolean {
 	if ("turnCount" in session)
 		return (
+			session.untouched &&
 			session.state === "open" &&
 			session.turnCount === 0 &&
 			session.activity === "ready" &&

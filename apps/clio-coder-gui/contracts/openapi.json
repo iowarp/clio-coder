@@ -37328,7 +37328,8 @@
 													"workersComplete",
 													"activeJobs",
 													"nodes",
-													"recoveredOrphan"
+													"recoveredOrphan",
+													"untouched"
 												],
 												"properties": {
 													"id": {
@@ -37499,6 +37500,9 @@
 														"maxItems": 128
 													},
 													"recoveredOrphan": {
+														"type": "boolean"
+													},
+													"untouched": {
 														"type": "boolean"
 													}
 												},
