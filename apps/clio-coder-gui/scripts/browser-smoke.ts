@@ -23,6 +23,8 @@ const { values } = parseArgs({
 		"zoom-only": { type: "boolean", default: false },
 		// A private build, so a concurrent `vite build` into dist/client cannot pull pages out from under a run.
 		client: { type: "string", default: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
+		// Keep durable review captures separate from temporary browser profiles and fixture homes.
+		out: { type: "string" },
 	},
 });
 const widths = values.widths.split(",").map(Number);
@@ -36,7 +38,8 @@ const scratch = process.env.TMPDIR
 	: fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
 await mkdir(scratch, { recursive: true });
 process.env.TMPDIR ??= scratch;
-const output = await mkdtemp(join(scratch, "browser-"));
+const output = values.out ?? (await mkdtemp(join(scratch, "browser-")));
+await mkdir(output, { recursive: true });
 let origin = "http://127.0.0.1:0";
 const h = await harness(
 	{ installDelayMs: 150 },
