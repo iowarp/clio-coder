@@ -93,7 +93,7 @@ export function VisualActions({
 					<div className="visual-actions__groups">
 						{ACTION_GROUPS.map((group) => {
 							const rows = items.filter((item) => item.group === group);
-							if (!rows.length && !(group === "Explore this session" && showChanges)) return null;
+							if (!rows.length && !(group === "Task details" && showChanges)) return null;
 							return (
 								<section key={group} className="visual-actions__group" aria-label={group}>
 									<h3>{group}</h3>
@@ -113,7 +113,7 @@ export function VisualActions({
 												<Icon name="chevronRight" />
 											</button>
 										))}
-										{group === "Explore this session" && showChanges ? (
+										{group === "Task details" && showChanges ? (
 											<button type="button" className="visual-actions__row" onClick={onShowChanges}>
 												<Icon name="fileDiff" />
 												<span>

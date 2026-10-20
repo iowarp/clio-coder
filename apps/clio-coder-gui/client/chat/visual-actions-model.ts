@@ -1,7 +1,7 @@
 import type { IconName } from "../design/icons.js";
 import type { SlashEntry } from "./slash-model.js";
 
-export const ACTION_GROUPS = ["Conversation", "Explore this session", "More actions"] as const;
+export const ACTION_GROUPS = ["Conversation", "Task details", "More actions"] as const;
 export type ActionGroup = (typeof ACTION_GROUPS)[number];
 export interface VisualAction {
 	readonly entry: SlashEntry;
@@ -42,7 +42,7 @@ export function visualActions(entries: readonly SlashEntry[], query: string): re
 				title: entry.kind === "action" ? entry.title : (pane?.title ?? actionLabel(entry.name)),
 				description: entry.summary,
 				icon: entry.kind === "action" ? (ACTION_ICONS[entry.action] ?? "overview") : (pane?.icon ?? "bolt"),
-				group: entry.kind === "action" ? "Conversation" : entry.kind === "pane" ? "Explore this session" : "More actions",
+				group: entry.kind === "action" ? "Conversation" : entry.kind === "pane" ? "Task details" : "More actions",
 			};
 		})
 		.filter((item) =>
