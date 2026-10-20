@@ -188,8 +188,10 @@ export function usageView(report: UsageReport): UsageView {
 		return { label, value: count.toLocaleString("en-US") };
 	};
 
-	const totalTokens = number(overall?.knownSubtotal ?? tokens.totalTokens);
 	const apiCalls = number(tokens.apiCalls);
+	const measuredTokens = number(overall?.knownSubtotal ?? tokens.totalTokens);
+	const totalTokens =
+		measuredTokens === 0 && missing > 0 && apiCalls !== null && missing >= apiCalls ? null : measuredTokens;
 	const headline: UsageFigure[] = [
 		{
 			label: "Tokens",
@@ -215,11 +217,15 @@ export function usageView(report: UsageReport): UsageView {
 		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
 	];
 
-	const measured = TOKEN_BARS.map(([key, label]) => ({ label, tokens: number(tokens[key]) }));
+	const partialBreakdown = missing > 0 || (number(workers?.missingBreakdownRuns) ?? 0) > 0;
+	const measured = TOKEN_BARS.map(([key, label]) => {
+		const value = number(tokens[key]);
+		return { label, tokens: value === 0 && partialBreakdown ? null : value };
+	});
 	const widest = Math.max(0, ...measured.map((bar) => bar.tokens ?? 0));
 	const bars: UsageBar[] = measured.map((bar) => ({
 		label: bar.label,
-		value: formatTokens(bar.tokens),
+		value: `${formatTokens(bar.tokens)}${bar.tokens !== null && partialBreakdown ? " +?" : ""}`,
 		share: bar.tokens && widest > 0 ? bar.tokens / widest : 0,
 	}));
 
@@ -228,11 +234,10 @@ export function usageView(report: UsageReport): UsageView {
 		return value === null ? [] : [{ label, value: value.toLocaleString("en-US") }];
 	});
 
-	if (workers)
-		origins.push({
-			label: "Worker calls",
-			value: (number(workers.apiCalls) ?? number(workers.runs) ?? 0).toLocaleString("en-US"),
-		});
+	if (workers) {
+		const calls = number(workers.apiCalls);
+		origins.push({ label: "Worker calls", value: calls === null ? "Not recorded" : calls.toLocaleString("en-US") });
+	}
 	const leftover = tablesOf(rows.filter((row) => !CLAIMED.has(row.name)));
 	return {
 		window: `from ${formatDay(report.from)} through ${formatDay(report.to)}`,
@@ -246,7 +251,9 @@ export function usageView(report: UsageReport): UsageView {
 		origins,
 		originsNote: origins.length
 			? "Calls are split by what asked for them; a tool loop can make several conversation calls. Worker calls include shadow and internal helpers."
-			: "No side question, handoff, pre-warm or background memory step was recorded in this window, so every recorded call belongs to a turn.",
+			: first("tokens")
+				? "No side question, handoff, pre-warm or background memory step was recorded in this window, so every recorded call belongs to a turn."
+				: "Call origins were not recorded in this window.",
 		missingStores,
 		models: [...all("model-usage"), ...all("worker-model-usage")],
 		skillsActivated: all("skill-activated"),
