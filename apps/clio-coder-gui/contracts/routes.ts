@@ -49,6 +49,7 @@ import {
 	LibraryPlanRequest,
 	LibraryVerifiers,
 } from "./library.js";
+import { MachineMutation, Machines } from "./machines.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
@@ -138,6 +139,21 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	machines: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/machines",
+		params: Type.Object({ id: Id }, { additionalProperties: false }),
+		response: Machines,
+		summary: "Read registered SSH nodes and recorded project readiness without probing hosts.",
+	}),
+	machineMutation: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/machines",
+		params: Type.Object({ id: Id }, { additionalProperties: false }),
+		body: MachineMutation,
+		response: Accepted,
+		summary: "Register, remove, or explicitly check an SSH node through a serial operation.",
+	}),
 	setupStatus: defineRoute({
 		...get,
 		path: "/api/setup",

@@ -3,6 +3,7 @@ import type { Problem } from "../../contracts/common.js";
 import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
 import type { LibraryPlanRequest } from "../../contracts/library.js";
+import type { Machine, MachineMutation } from "../../contracts/machines.js";
 import type { SettingWrite } from "../../contracts/settings-controls.js";
 import type { Tool } from "../../contracts/toolchain.js";
 import type { TraceRequest } from "../../contracts/traces.js";
@@ -21,6 +22,8 @@ export type WorkerSettings = {
 export type RawTool = Tool;
 export type RuntimeInfo = { entry: string; packageRoot: string; execArgv: string[]; threadId: number };
 export interface Methods {
+	"machines.list": { params: { cwd: string }; result: Machine[] };
+	"machines.mutate": { params: { cwd: string; mutation: MachineMutation }; result: { id: string; message: string } };
 	"setup.status": { params: { cwd?: string }; result: unknown };
 	"runtime.info": { params: Record<string, never>; result: RuntimeInfo };
 	"system.read": { params: Record<string, never>; result: unknown };

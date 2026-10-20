@@ -188,6 +188,24 @@ export class WorkerHost {
 		this.pending.clear();
 		const lanes = this.lanes;
 		this.lanes = [];
-		await Promise.all(lanes.map((lane) => lane.worker.terminate()));
+		await Promise.all(
+			lanes.map(async (lane) => {
+				// Let worker-owned CLI children stop before terminating their parent thread.
+				await new Promise<void>((resolve) => {
+					const done = () => {
+						clearTimeout(timer);
+						lane.worker.off("message", reply);
+						resolve();
+					};
+					const reply = (message: unknown) => {
+						if (message && typeof message === "object" && "shutdown" in message) done();
+					};
+					const timer = setTimeout(done, 3000);
+					lane.worker.on("message", reply);
+					lane.worker.postMessage({ shutdown: true });
+				});
+				await lane.worker.terminate();
+			}),
+		);
 	}
 }
