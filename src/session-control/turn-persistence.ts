@@ -18,7 +18,7 @@ import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
-import { replaceEngineMessages } from "../engine/agent.js";
+import { replaceEngineMessages, setEngineCodexUserTurn } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
 import type {
 	AgentEvent,
@@ -139,7 +139,7 @@ export interface TurnPersistence {
 	): string | null;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
-	appendThinkingLevelChangeEntry(thinkingLevel: string): void;
+	appendThinkingLevelChangeEntry(thinkingLevel: string, effectiveEffort?: string): void;
 }
 
 /**
@@ -459,8 +459,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			// payload with edge whitespace is recognized as the echo it is instead
 			// of being persisted a second time.
 			const text = extractUserText(message);
+			if (deps.consumePersistedEcho(text)) {
+				if (state.activeUserTurnId) setEngineCodexUserTurn(message, state.activeUserTurnId);
+				return;
+			}
 			if (text.trim().length === 0) return;
-			if (deps.consumePersistedEcho(text)) return;
 			const origin = deps.removeQueuedMirrorEntry(text);
 			if (!deps.session) return;
 			if (!deps.session.current()) {
@@ -476,6 +479,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			});
 			state.lastTurnId = userTurn.id;
 			state.activeUserTurnId = userTurn.id;
+			setEngineCodexUserTurn(message, userTurn.id);
 			if (state.runtime && deps.readSessionEntries) {
 				const prior = state.runtime.agent.state.messages;
 				const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
@@ -726,11 +730,17 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		 * domains/session/resumed-route.ts). Same best-effort contract as
 		 * appendModelChangeEntry.
 		 */
-		appendThinkingLevelChangeEntry(thinkingLevel): void {
+		appendThinkingLevelChangeEntry(thinkingLevel, effectiveEffort): void {
+			const model = state.runtime?.agent.state.model;
+			if (effectiveEffort !== undefined && model?.api === "openai-codex-responses") {
+				const map = model.thinkingLevelMap as Record<string, string | null> | undefined;
+				effectiveEffort = map?.[effectiveEffort] ?? (effectiveEffort === "off" ? "none" : effectiveEffort);
+			}
 			if (!deps.session?.current()) return;
 			try {
 				deps.session.appendEntry({
 					kind: "thinkingLevelChange",
+					...(effectiveEffort !== undefined ? { effectiveEffort } : {}),
 					parentTurnId: state.lastTurnId,
 					thinkingLevel,
 				});

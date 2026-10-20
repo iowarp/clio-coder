@@ -4015,7 +4015,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 			const level = effective.thinkingLevel ?? "off";
 			if (pinned?.thinking === true && level !== recorded.thinkingLevel) {
-				session.appendEntry({ kind: "thinkingLevelChange", parentTurnId, thinkingLevel: level });
+				const resolved =
+					effective.target && effective.model
+						? resolveRuntimeTarget(providers, {
+								targetId: effective.target,
+								wireModelId: effective.model,
+								requestedThinkingLevel: level,
+								use: "orchestrator",
+								requireTools: false,
+							})
+						: null;
+				const effectiveEffort = resolved?.ok
+					? (resolved.target.modelRuntime.thinking.effort ??
+						(resolved.target.effectiveThinkingLevel === "off" ? "none" : resolved.target.effectiveThinkingLevel))
+					: undefined;
+				session.appendEntry({
+					kind: "thinkingLevelChange",
+					parentTurnId,
+					thinkingLevel: level,
+					...(effectiveEffort !== undefined ? { effectiveEffort } : {}),
+				});
 			}
 		} catch {
 			// Best effort, like the chat loop's own markers: a lost row only means

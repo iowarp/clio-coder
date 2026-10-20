@@ -26,6 +26,7 @@ import {
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
 import { observeAnthropicResponse } from "./apis/anthropic-response.js";
+import { withCodexConfiguration } from "./apis/codex-configuration.js";
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
 import { observeResponsesModelId } from "./apis/responses-model-id.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
@@ -138,10 +139,13 @@ export function engineStream(
 ): AssistantMessageEventStream {
 	return filterAssistantProseStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
-			instrumentProviderCall(model, withCodexPromptItems(model, guarded), (effective) =>
-				observeAnthropicResponse(model, effective, (anthropic) =>
-					observeResponsesModelId(model, anthropic, (observed) => dispatchEngineStream(model, context, observed)),
-				),
+			instrumentProviderCall(
+				model,
+				withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
+				(effective) =>
+					observeAnthropicResponse(model, effective, (anthropic) =>
+						observeResponsesModelId(model, anthropic, (observed) => dispatchEngineStream(model, context, observed)),
+					),
 			),
 		),
 		model,
@@ -179,7 +183,7 @@ function scopedEngineStreamSimple(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(
 				model,
-				withCodexPromptItems(model, guarded),
+				withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
 						observeResponsesModelId(model, anthropic, (observed) => dispatchEngineStreamSimple(model, context, observed)),

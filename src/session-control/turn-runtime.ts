@@ -539,7 +539,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		}
 		const requestedThinkingLevel = target.runtimeResolution.requestedThinkingLevel;
 		if (lastRequestedThinkingLevel !== null && lastRequestedThinkingLevel !== requestedThinkingLevel) {
-			persistence.appendThinkingLevelChangeEntry(requestedThinkingLevel);
+			persistence.appendThinkingLevelChangeEntry(
+				requestedThinkingLevel,
+				target.runtimeResolution.modelRuntime.thinking.effort ?? target.runtimeResolution.effectiveThinkingLevel,
+			);
 		}
 		lastRequestedThinkingLevel = requestedThinkingLevel;
 		if (

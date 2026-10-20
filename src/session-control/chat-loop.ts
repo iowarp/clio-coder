@@ -2954,7 +2954,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
 				if (
 					previousThinkingLevel !== undefined &&
-					previousThinkingLevel !== agentRuntime.runtimeResolution.effectiveThinkingLevel
+					previousThinkingLevel !== agentRuntime.runtimeResolution.effectiveThinkingLevel &&
+					!context.thinkingUsesConfigurationUpdate()
 				) {
 					context.noteColdReason("thinking_change");
 				}

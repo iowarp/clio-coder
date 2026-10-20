@@ -7,6 +7,7 @@ import {
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { resolvedRequestContext } from "./context.js";
 import { omitImageBlocks } from "./image-context.js";
+import type { CodexConfiguration } from "./types.js";
 
 /**
  * Thin wrapper over Clio's engine Agent class.
@@ -23,6 +24,12 @@ import { omitImageBlocks } from "./image-context.js";
 
 import type { AgentMessage, AgentOptions, BeforeToolCallContext, StreamFn } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
+
+export {
+	bindCodexUserTurn as setEngineCodexUserTurn,
+	codexUserTurn as engineCodexUserTurn,
+} from "./apis/codex-configuration.js";
+
 import { engineStreamSimple } from "./api-registry.js";
 import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
@@ -111,6 +118,14 @@ function refusedStream(request: EngineStreamRequest, reason: string, aborted = f
 	return stream;
 }
 
+const codexConfigurations = new WeakMap<Agent, CodexConfiguration>();
+
+/** Session-control owns durable effort history; the engine only serializes it (#423). */
+export function setEngineCodexConfiguration(agent: Agent, configuration: CodexConfiguration | undefined): void {
+	if (configuration) codexConfigurations.set(agent, configuration);
+	else codexConfigurations.delete(agent);
+}
+
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
 	const {
 		streamFn,
@@ -124,6 +139,8 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	let activeCorrelationId: string | undefined;
 	const invoke: StreamFn = async (model, context, streamOptions) => {
 		onStreamInvocation?.();
+		const configuration = codexConfigurations.get(agent);
+		if (configuration) streamOptions = { ...streamOptions, codexConfiguration: configuration } as typeof streamOptions;
 		const delegate = (guarded: typeof streamOptions) =>
 			streamFn ? streamFn(model, resolvedRequestContext(context), guarded) : transcriptStreamFn(model, context, guarded);
 		const source = await (streamFn || transcriptStreamFn !== engineStreamSimple

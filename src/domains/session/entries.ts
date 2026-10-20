@@ -94,6 +94,8 @@ export interface ModelChangeEntry extends BaseSessionEntry {
 export interface ThinkingLevelChangeEntry extends BaseSessionEntry {
 	kind: "thinkingLevelChange";
 	thinkingLevel: string;
+	effectiveEffort?: string;
+	configurationInitial?: boolean;
 }
 
 export interface FileEntryEntry extends BaseSessionEntry {
@@ -863,7 +865,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 		case "modelChange":
 			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.target);
 		case "thinkingLevelChange":
-			return isString(v.thinkingLevel);
+			return isString(v.thinkingLevel) && isOptionalString(v.effectiveEffort) && isOptionalBoolean(v.configurationInitial);
 		case "fileEntry":
 			return (
 				isString(v.path) && isOneOf(v.operation, FILE_OPERATIONS) && isOptionalNumber(v.bytes) && isOptionalString(v.hash)

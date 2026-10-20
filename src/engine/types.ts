@@ -84,3 +84,9 @@ export interface AnthropicResponseObservation {
 	/** Preserve message_start diagnostics without response content (#423). */
 	messageStart: Record<string, unknown> | null;
 }
+
+/** Codex context generation; positions are durable ledger user-turn ids (#423). */
+export interface CodexConfiguration {
+	initialEffort: string;
+	updates: ReadonlyArray<{ position: string; effort: string }>;
+}

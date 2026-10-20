@@ -5,7 +5,13 @@ import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/c
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
-import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
+import {
+	engineCodexUserTurn,
+	replaceEngineMessages,
+	setEngineCodexConfiguration,
+	setEngineCodexUserTurn,
+	setEngineSystemPrompt,
+} from "../engine/agent.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
@@ -112,7 +118,7 @@ import {
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import type { AgentMessage, Usage } from "../engine/types.js";
+import type { AgentMessage, CodexConfiguration, Usage } from "../engine/types.js";
 import { capabilityArgumentShape, capabilityStarterArgs } from "../tools/gateway/guidance.js";
 import { TOOL_PLANES } from "../tools/policy.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -129,6 +135,7 @@ import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./compactio
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
+import { extractTurnText, truncateReplayText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
@@ -267,6 +274,7 @@ export interface TurnContext {
 	/** Bind first-session creation after append without rereading the prepared snapshot. */
 	commitMemoryTurn(runtime: AgentRuntime): void;
 	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null>;
+	thinkingUsesConfigurationUpdate(): boolean;
 	/**
 	 * Host-framed text the last `ensureSessionPrompt` left for the turn's
 	 * reminder: what changed in frozen prompt inputs since the compile (#423).
@@ -493,6 +501,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// first compile, a session switch, or a completed compaction), and the
 	// reminder text carrying what the live section added since.
 	let frozenMemorySection: string | null = null;
+	let frozenRouteSources: SessionPromptInputs["routeSources"];
+	let frozenRouteIdentity = "";
+	let thinkingUsesConfigurationUpdate = false;
 	let frozenMemorySessionId = "";
 	let sessionPromptDelta = "";
 	let announcedProjectPreloadSession: string | null = null;
@@ -617,6 +628,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (payload.outcome === "completed") {
 				frozenMemorySection = null;
 				resetCacheCallBaseline();
+				frozenRouteSources = undefined;
 			}
 		}) ?? null,
 		deps.bus?.on(BusChannels.ResidencyMutation, (payload: ResidencyMutationPayload) => {
@@ -1189,6 +1201,92 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 	};
 
+	// Ledger boundaries, rather than request retries, own Codex effort changes (#423).
+	const syncCodexConfiguration = (runtime: AgentRuntime): void => {
+		const model = runtime.agent.state.model;
+		thinkingUsesConfigurationUpdate = false;
+		if (model.api !== "openai-codex-responses") {
+			setEngineCodexConfiguration(runtime.agent, undefined);
+			return;
+		}
+		const effortFor = (level: string): string => {
+			const map = model.thinkingLevelMap as Record<string, string | null> | undefined;
+			return map?.[level] ?? (level === "off" ? "none" : level);
+		};
+		const currentEffort = effortFor(runtime.runtimeResolution.effectiveThinkingLevel);
+		const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+		let start = 0;
+		for (let index = 0; index < entries.length; index += 1) {
+			const entry = entries[index];
+			if (entry?.kind === "compactionSummary" || entry?.kind === "contextEviction" || entry?.kind === "modelChange")
+				start = index + 1;
+		}
+		const generation = entries.slice(start);
+		const baseline = generation.find((entry) => entry.kind === "thinkingLevelChange" && entry.configurationInitial);
+		let initialEffort = baseline?.kind === "thinkingLevelChange" ? baseline.effectiveEffort : undefined;
+		if (initialEffort === undefined) {
+			const meta = deps.session?.current();
+			const firstCompile = start === 0 && meta ? readPromptCompileRecords(meta)[0] : undefined;
+			initialEffort = firstCompile?.thinkingLevel ? effortFor(firstCompile.thinkingLevel) : currentEffort;
+			if (meta) {
+				deps.session?.appendEntry({
+					kind: "thinkingLevelChange",
+					parentTurnId: state.lastTurnId,
+					thinkingLevel: runtime.runtimeResolution.effectiveThinkingLevel,
+					effectiveEffort: initialEffort,
+					configurationInitial: true,
+				});
+			}
+		}
+		const available = new Set<string>();
+		const usersByTime = new Map<number, Array<SessionEntry>>();
+		for (const entry of entries) {
+			if (entry.kind !== "message" || entry.role !== "user") continue;
+			const time = Date.parse(entry.timestamp);
+			const group = usersByTime.get(time) ?? [];
+			group.push(entry);
+			usersByTime.set(time, group);
+		}
+		// Resume/refresh already built these messages; never construct another replay (#423).
+		for (const message of runtime.agent.state.messages) {
+			if (message.role !== "user") continue;
+			const bound = engineCodexUserTurn(message);
+			if (bound) {
+				available.add(bound);
+				continue;
+			}
+			const text = extractUserText(message);
+			const entry = usersByTime.get(message.timestamp)?.find((candidate) => {
+				if (candidate.kind !== "message" || available.has(candidate.turnId)) return false;
+				const original = extractTurnText(candidate.payload);
+				return text === original || text === truncateReplayText(original);
+			});
+			if (entry) {
+				setEngineCodexUserTurn(message, entry.turnId);
+				available.add(entry.turnId);
+			}
+		}
+		// The admitted user is appended to Pi after commitMemoryTurn; message_end binds it (#423).
+		if (state.activeUserTurnId) available.add(state.activeUserTurnId);
+		const updates: Array<{ position: string; effort: string }> = [];
+		let desired = initialEffort;
+		let effective = initialEffort;
+		for (const entry of generation) {
+			if (entry.kind === "thinkingLevelChange" && !entry.configurationInitial) {
+				desired = entry.effectiveEffort ?? effortFor(entry.thinkingLevel);
+			}
+			if (entry.kind !== "message" || entry.role !== "user") continue;
+			if (!available.has(entry.turnId)) continue;
+			const position = entry.turnId;
+			if (desired === effective) continue;
+			updates.push({ position, effort: desired });
+			effective = desired;
+		}
+		const configuration: CodexConfiguration = { initialEffort, updates };
+		setEngineCodexConfiguration(runtime.agent, configuration);
+		thinkingUsesConfigurationUpdate = updates.at(-1)?.position === state.activeUserTurnId;
+	};
+
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
 		const refreshedEntries = deps.readSessionEntries?.() ?? [];
 		replaceEngineMessages(
@@ -1202,6 +1300,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}),
 		);
 		state.replayedContextMessages = [];
+		syncCodexConfiguration(agentRuntime);
 		return refreshedEntries;
 	};
 
@@ -2018,6 +2117,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	});
 
 	return {
+		thinkingUsesConfigurationUpdate: () => thinkingUsesConfigurationUpdate,
 		notifyMemoryCommit,
 		installMemoryRestoration,
 		prepareMemoryTurn(runtime, input): void {
@@ -2054,6 +2154,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		commitMemoryTurn(runtime): void {
+			syncCodexConfiguration(runtime);
 			pendingUserImages = [];
 			// appendSubmittedUserTurn creates the first session synchronously.
 			// Only that null -> bound transition with unchanged origin can alias
@@ -2237,13 +2338,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Only the bound session ceiling shapes compiled guidance; prompt and
 			// template scope arrives in the current turn reminder (#423).
 			const standingConstraints = deps.standingTurnConstraints?.();
+			const routeIdentity = JSON.stringify([agentRuntime.targetId, agentRuntime.runtimeId, agentRuntime.wireModelId]);
+			if (frozenRouteIdentity !== routeIdentity || (frozenMemorySessionId !== "" && frozenMemorySessionId !== sessionId)) {
+				frozenRouteSources = undefined;
+			}
+			// A thinking-only override must not rewrite the cached Routes line (#423).
+			frozenRouteSources ??= deps.getRouteSources?.();
+			frozenRouteIdentity = routeIdentity;
 			const sessionInputs: SessionPromptInputs = {
 				...(standingConstraints ? { turnConstraints: standingConstraints } : {}),
 				...(deps.getReadySkillCount ? { readySkillCount: deps.getReadySkillCount() } : {}),
 				demo: deps.interactiveGuidance === true && settings.interface.demo,
 				provider: agentRuntime.targetId,
 				model: agentRuntime.wireModelId,
-				...(deps.getRouteSources ? { routeSources: deps.getRouteSources() } : {}),
+				...(frozenRouteSources ? { routeSources: frozenRouteSources } : {}),
 				contextWindow,
 				providerSupportsTools: runtimeSupportsTools(agentRuntime),
 				semanticSearchAvailable: semanticUsable(settings.context.semantic),
@@ -2726,6 +2834,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		resetForSession(incomingBranchAnchorTurnId: string | null = null): void {
 			cacheCallBaseline = null;
 			cacheCallBaselineLoaded = false;
+			if (state.runtime) setEngineCodexConfiguration(state.runtime.agent, undefined);
+			thinkingUsesConfigurationUpdate = false;
 			memoryTurn = null;
 			memoryAuthorityEpoch += 1;
 			compactionController?.abort();
@@ -2739,6 +2849,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// before the first compile there is nothing in the slot to have lost.
 			if (sessionPromptHash !== null) noteColdReason("prompt_recompiled");
 			frozenMemorySection = null;
+			frozenRouteSources = undefined;
+			frozenRouteIdentity = "";
 			frozenMemorySessionId = "";
 			sessionPromptDelta = "";
 			lastPromptCache = null;
