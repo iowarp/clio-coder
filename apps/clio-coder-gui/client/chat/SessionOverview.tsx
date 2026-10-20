@@ -316,7 +316,7 @@ export function SessionOverview({
 						{changes.pending > 0 ? `${changes.applied > 0 ? " · " : ""}${changes.pending} waiting for approval` : null}
 					</p>
 				) : (
-					<p className="pane-empty">No files changed yet.</p>
+					<p className="pane-empty">No edits reported here yet.</p>
 				)}
 			</Section>
 
