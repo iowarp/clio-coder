@@ -880,7 +880,7 @@ export function resolveContextWindowDetails(
 	const warning: string | null = null;
 	const provenanceNotice =
 		effective === 0
-			? "Serving context window is unknown. Probe the target or configure its deployment limit; threshold compaction is disabled until a limit is known."
+			? "Serving context window is unknown. Compaction is bounded by the economic token ceiling; probe the target or configure its deployment limit for request-fit accounting."
 			: null;
 	const servingLimit: ResolvedNumericField = {
 		value: effective > 0 ? effective : null,

@@ -1279,12 +1279,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			agentRuntime.agent.state.model,
 		);
 		const compactionThreshold = economic.threshold;
+		const compactionWindow = economic.triggerWindow;
 		const workingSetTarget = settings.context.workingSet.target * economic.fractionScale;
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (
 			pressureEstimate &&
 			!requiredFit &&
-			!shouldCompact(pressureEstimate.tokens, compactionThreshold, pressureEstimate.contextWindow).shouldCompact
+			!shouldCompact(pressureEstimate.tokens, compactionThreshold, compactionWindow).shouldCompact
 		)
 			return false;
 		// The hysteresis band. A checkpoint runs before every request, so without
@@ -1412,7 +1413,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		if (pressureEstimate) {
 			const estimate = pressureEstimate;
-			const verdict = shouldCompact(estimate.tokens, compactionThreshold, estimate.contextWindow);
+			const verdict = shouldCompact(estimate.tokens, compactionThreshold, compactionWindow);
 
 			// One-release compatibility escape hatch. This is the destructive
 			// pre-stage that working-set eviction replaces; keep it byte-for-byte
@@ -1482,7 +1483,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						if (
 							requiredFit
 								? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-								: !shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact
+								: !shouldCompact(after.tokens, compactionThreshold, compactionWindow).shouldCompact
 						)
 							return true;
 					}
@@ -1504,7 +1505,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							settings: settings.context.workingSet,
 							pressure: {
 								tokens: projectedTokens,
-								contextWindow: estimate.contextWindow,
+								contextWindow: compactionWindow,
 								threshold: requiredFit
 									? Math.min(
 											compactionThreshold,
@@ -1601,7 +1602,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							if (
 								requiredFit
 									? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-									: !shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact
+									: !shouldCompact(after.tokens, compactionThreshold, compactionWindow).shouldCompact
 							)
 								return true;
 						} catch (error) {
@@ -1675,7 +1676,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = resolveTurnOutputReserve(agentRuntime, estimate.tokens);
-			const inputTarget = Math.min(estimate.contextWindow * compactionThreshold, estimate.contextWindow - output);
+			const inputTarget = knownWindow
+				? Math.min(compactionWindow * compactionThreshold, estimate.contextWindow - output)
+				: economic.ceilingTokens;
 			const staticTokens = estimate.breakdown.systemPromptTokens + estimate.breakdown.toolSchemaTokens;
 			const calibration = Math.max(
 				0,
@@ -2383,16 +2386,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const beforeView = refreshLiveBudget();
 			const before = liveContextEstimate(agentRuntime);
 			const settings = deps.getSettings();
-			const threshold = compactionBudget(
+			const economic = compactionBudget(
 				before.contextWindow,
 				settings.context.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD,
 				settings.context.compaction?.maxTokens,
 				agentRuntime.agent.state.model,
-			).threshold;
+			);
 			const knownWindow = before.contextWindow > 0;
-			const verdict = knownWindow
-				? shouldCompact(before.tokens, threshold, before.contextWindow)
-				: { shouldCompact: false };
+			const verdict = shouldCompact(before.tokens, economic.threshold, economic.triggerWindow);
 			let compacted = false;
 			const mustFit =
 				knownWindow && !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
@@ -2460,7 +2461,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					}
 				: windowWithoutRuntime();
 			const compactionThreshold = window.contextWindow > 0 ? (settings.context.compaction?.threshold ?? null) : null;
-			const compactionAuto = settings.context.compaction?.auto !== false && window.contextWindow > 0;
+			const compactionAuto = settings.context.compaction?.auto !== false;
 			const economic = compactionBudget(
 				window.contextWindow,
 				compactionThreshold ?? DEFAULT_COMPACTION_THRESHOLD,

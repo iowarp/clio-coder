@@ -85,7 +85,7 @@ export function compactionBudget(
 	threshold: number,
 	maxTokens = 200_000,
 	model?: Pick<Model<Api>, "id" | "cost"> | null,
-): { ceilingTokens: number; threshold: number; fractionScale: number; budgetWindow: number } {
+): { ceilingTokens: number; threshold: number; fractionScale: number; budgetWindow: number; triggerWindow: number } {
 	const boundaries = (model?.cost?.tiers ?? [])
 		.filter((tier) => tier.inputTokensAbove > 0 && tier.input > (model?.cost?.input ?? 0))
 		.map((tier) => tier.inputTokensAbove);
@@ -98,12 +98,15 @@ export function compactionBudget(
 	const tierCeiling = boundaries.length > 0 ? Math.floor(Math.min(...boundaries) * 0.98) : Infinity;
 	const ceilingTokens = Math.min(maxTokens, tierCeiling);
 	// Working-set fractions use min(window, ceiling); the trigger keeps min(threshold × window, ceiling).
-	const fractionScale = contextWindow > 0 ? Math.min(1, ceilingTokens / contextWindow) : 1;
+	const knownWindow = Number.isFinite(contextWindow) && contextWindow > 0;
+	const fractionScale = knownWindow ? Math.min(1, ceilingTokens / contextWindow) : 1;
 	return {
 		ceilingTokens,
-		threshold: Math.min(threshold, fractionScale),
+		threshold: knownWindow ? Math.min(threshold, fractionScale) : 1,
 		fractionScale,
-		budgetWindow: contextWindow * fractionScale,
+		budgetWindow: knownWindow ? contextWindow * fractionScale : ceilingTokens,
+		// #423: this denominator drives reduction only, never request-fit admission.
+		triggerWindow: knownWindow ? contextWindow : ceilingTokens,
 	};
 }
 

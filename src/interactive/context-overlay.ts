@@ -207,9 +207,11 @@ function renderContextLedgerLines(
 		lines.push(theme.fg("annotation", handbookLine));
 	}
 	const compaction =
-		ledger.compactionThreshold !== null
-			? `autocompact at ${Math.round(ledger.compactionThreshold * 100)}% (${ledger.compactionAuto ? "auto" : "manual"})`
-			: "autocompact off";
+		ledger.contextWindow <= 0 && ledger.compactionCeilingTokens
+			? `autocompact at ceiling (${ledger.compactionAuto ? "auto" : "manual"}; serving window unknown)`
+			: ledger.compactionThreshold !== null
+				? `autocompact at ${Math.round(ledger.compactionThreshold * 100)}% (${ledger.compactionAuto ? "auto" : "manual"})`
+				: "autocompact off";
 	const toolsLabel = ledger.toolCount > 0 ? `${ledger.toolCount} active tool${ledger.toolCount === 1 ? "" : "s"}` : null;
 	const ceiling = ledger.compactionCeilingTokens
 		? ` · ceiling ${formatTokens(ledger.compactionCeilingTokens)} tokens`
