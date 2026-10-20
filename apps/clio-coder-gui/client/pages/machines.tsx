@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { Machine, MachineAdd, MachineMutation } from "../../contracts/machines.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
-import type { MachineDraft } from "./machines-model.js";
+import type { MachineDraft, MachineRequest } from "./machines-model.js";
 import {
+	acceptMachineRequest,
 	emptyMachineDraft,
 	machineAge,
 	machineCheckLabels,
@@ -18,18 +19,57 @@ import {
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import "./machines.css";
 
+type MachinesDraft = {
+	draft: MachineDraft;
+	adding: boolean;
+	request: MachineRequest | null;
+	sending: boolean;
+	error: string | null;
+};
+const machineDrafts = new WeakMap<Client, ReturnType<typeof createMachinesDraft>>();
+function createMachinesDraft() {
+	let value: MachinesDraft = { draft: emptyMachineDraft, adding: false, request: null, sending: false, error: null };
+	const listeners = new Set<() => void>();
+	return {
+		read: () => value,
+		subscribe: (listener: () => void) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+		update: (change: (current: MachinesDraft) => MachinesDraft) => {
+			value = change(value);
+			for (const listener of listeners) listener();
+		},
+	};
+}
+// Like settings drafts, this safe editor state belongs to the client across route remounts.
+// Requests stay in memory, including while an unmounted page awaits its acknowledgement.
+function machinesDraft(client: Client) {
+	let draft = machineDrafts.get(client);
+	if (!draft) {
+		draft = createMachinesDraft();
+		machineDrafts.set(client, draft);
+	}
+	return draft;
+}
+
 function AddMachine({
 	busy,
+	draft,
+	onDraft,
 	onAdd,
 	onClose,
 }: {
 	busy: boolean;
+	draft: MachineDraft;
+	onDraft: (draft: MachineDraft) => void;
 	onAdd: (machine: MachineAdd) => void;
 	onClose: () => void;
 }) {
-	const [draft, setDraft] = useState<MachineDraft>(emptyMachineDraft);
 	const [error, setError] = useState("");
-	const field = (key: keyof MachineDraft, value: string) => setDraft((current) => ({ ...current, [key]: value }));
+	const field = (key: keyof MachineDraft, value: string) => onDraft({ ...draft, [key]: value });
 	return (
 		<form
 			className="machines-add"
@@ -282,8 +322,21 @@ export function MachinesPage({ client }: { client: Client }) {
 	const { id } = selection;
 	const [now, setNow] = useState(Date.now);
 	const [selectedId, setSelectedId] = useState("");
-	const [adding, setAdding] = useState(false);
-	const [operationScope, setOperationScope] = useState<{ id: string; workspaceId: string; action: string } | null>(null);
+	const store = useMemo(() => machinesDraft(client), [client]);
+	const saved = useSyncExternalStore(store.subscribe, store.read, store.read);
+	const { adding, request } = saved;
+	const setAdding = (adding: boolean) => store.update((current) => ({ ...current, adding }));
+	const [forgetConfirm, setForgetConfirm] = useState(false);
+	const operationScope = request?.operationId
+		? { id: request.operationId, workspaceId: request.workspaceId, action: request.body.action }
+		: null;
+	const meta = useQuery({
+		queryKey: ["meta"],
+		queryFn: ({ signal }) => client.call(routes.meta, emptyInput, undefined, signal),
+		refetchOnMount: "always",
+		retry: false,
+	});
+	const epochChanged = !!request?.epoch && !!meta.data && request.epoch !== meta.data.epoch;
 	useEffect(() => {
 		const timer = setInterval(() => setNow(Date.now()), 30_000);
 		return () => clearInterval(timer);
@@ -297,10 +350,11 @@ export function MachinesPage({ client }: { client: Client }) {
 	});
 	const operation = useQuery({
 		queryKey: ["operation", operationScope?.id ?? null],
-		enabled: operationScope !== null,
+		enabled: operationScope !== null && !epochChanged,
 		queryFn: ({ signal }) =>
 			client.call(routes.operation, { ...emptyInput, params: { id: operationScope?.id ?? "" } }, undefined, signal),
 		refetchInterval: (query) =>
+			epochChanged ||
 			query.state.data?.status === "succeeded" ||
 			query.state.data?.status === "failed" ||
 			query.state.data?.status === "cancelled"
@@ -309,31 +363,86 @@ export function MachinesPage({ client }: { client: Client }) {
 		retry: false,
 	});
 	const mutation = useMutation({
-		mutationFn: ({ workspaceId, body }: { workspaceId: string; body: MachineMutation }) =>
-			client.call(routes.machineMutation, { ...emptyInput, params: { id: workspaceId }, body }),
-		onSuccess: (value, variables) => {
-			setOperationScope({ id: value.operationId, workspaceId: variables.workspaceId, action: variables.body.action });
+		mutationFn: async (sent: MachineRequest) => {
+			try {
+				// Read the epoch for every explicit attempt. A restart loses server idempotency records.
+				const currentMeta = await client.call(routes.meta, emptyInput);
+				queries.setQueryData(["meta"], currentMeta);
+				if (sent.epoch !== null && sent.epoch !== currentMeta.epoch)
+					throw new Error("Clio restarted. Review the original workspace's records before making a new request.");
+				store.update((current) => ({
+					...current,
+					request: current.request?.key === sent.key ? { ...current.request, epoch: currentMeta.epoch } : current.request,
+				}));
+				const accepted = await client.call(
+					routes.machineMutation,
+					{ ...emptyInput, params: { id: sent.workspaceId }, body: sent.body },
+					sent.key,
+				);
+				store.update((current) => ({
+					...current,
+					request: acceptMachineRequest(current.request, sent.key, accepted.operationId),
+				}));
+			} catch (error) {
+				store.update((current) => ({
+					...current,
+					error:
+						current.request?.key === sent.key ? (error instanceof Error ? error.message : String(error)) : current.error,
+				}));
+				throw error;
+			} finally {
+				store.update((current) => ({ ...current, sending: false }));
+			}
 		},
+		retry: false,
 	});
 	useEffect(() => {
 		const status = operation.data?.status;
-		if (!operationScope || (status !== "succeeded" && status !== "failed" && status !== "cancelled")) return;
+		if (
+			!request ||
+			request.settled ||
+			epochChanged ||
+			operation.data?.id !== request.operationId ||
+			(status !== "succeeded" && status !== "failed" && status !== "cancelled")
+		)
+			return;
 		// Registration is user-wide; readiness is scoped to the checked workspace.
 		void queries.invalidateQueries({ queryKey: ["machines"] });
-		if (status === "succeeded" && operationScope.action === "add") setAdding(false);
-		if (status === "succeeded" && operationScope.action !== "check") {
+		store.update((current) =>
+			current.request?.key === request.key
+				? {
+						...current,
+						request: { ...current.request, settled: true },
+						adding: status === "succeeded" && request.body.action === "add" ? false : current.adding,
+					}
+				: current,
+		);
+		if (status === "succeeded" && request.body.action !== "check") {
 			for (const key of ["workspace-settings", "settings-controls", "config-graph"])
 				void queries.invalidateQueries({ queryKey: [key] });
 		}
-	}, [operation.data?.status, operationScope, queries]);
-	const busy =
-		mutation.isPending ||
-		(operationScope !== null &&
-			(!operation.data || operation.data.status === "queued" || operation.data.status === "running"));
+	}, [operation.data, request, epochChanged, queries, store]);
+	const busy = saved.sending || (request !== null && !request.settled);
 	const machines = inventory.data?.machines ?? [];
 	const selected = machines.find((machine) => machine.id === selectedId) ?? machines[0];
 	const summary = machineSummary(machines, now);
-	const act = (body: MachineMutation) => mutation.mutate({ workspaceId: id, body });
+	const send = (sent: MachineRequest) => {
+		if (store.read().sending || sent.operationId !== null) return;
+		store.update((current) => ({ ...current, request: sent, sending: true, error: null }));
+		mutation.mutate(sent);
+	};
+	const act = (body: MachineMutation) => {
+		const current = store.read();
+		if (!id || current.sending || (current.request && !current.request.settled)) return;
+		send({
+			workspaceId: id,
+			body: structuredClone(body),
+			key: crypto.randomUUID(),
+			epoch: null,
+			operationId: null,
+			settled: false,
+		});
+	};
 	return (
 		<section className="machines-page">
 			<header className="machines-heading">
@@ -357,7 +466,77 @@ export function MachinesPage({ client }: { client: Client }) {
 				<p>Registration is shared across projects. Readiness belongs to the selected workspace.</p>
 			</div>
 			{inventory.error && <p role="alert">{inventory.error.message}</p>}
-			{mutation.error && <p role="alert">{mutation.error.message}</p>}
+			{saved.error && <p role="alert">{saved.error}</p>}
+			{request && !request.settled && (
+				<div className="machines-operation" role="status">
+					<strong>
+						Original request: {request.body.action}{" "}
+						{request.body.action === "add" ? request.body.machine.id : request.body.id}
+					</strong>
+					<p>
+						Workspace:{" "}
+						{selection.workspaces.data?.find((workspace) => workspace.id === request.workspaceId)?.path ??
+							request.workspaceId}
+					</p>
+					{epochChanged ? (
+						<p>
+							Clio restarted. This request will not be replayed. Its earlier outcome may be unknown; review the original
+							workspace's records.
+						</p>
+					) : request.operationId ? (
+						<p>
+							Accepted operation: {request.operationId}. Status recovery uses this operation; it does not submit another
+							request.
+						</p>
+					) : (
+						<p>
+							{saved.sending
+								? "Submitting the saved request…"
+								: "No acceptance was confirmed. An explicit retry uses the original workspace, body and request key."}
+						</p>
+					)}
+					{!request.operationId && !epochChanged && (
+						<button type="button" disabled={saved.sending || meta.isPending || meta.isError} onClick={() => send(request)}>
+							Retry original request
+						</button>
+					)}
+					{meta.error && (
+						<button type="button" onClick={() => void meta.refetch()}>
+							Refresh server status
+						</button>
+					)}
+					{!saved.sending &&
+						(saved.error || operation.error || epochChanged) &&
+						(forgetConfirm ? (
+							<>
+								<p>
+									Only forget tracking after reviewing the saved machine records. The earlier operation may have run; a new
+									request can repeat its effects.
+								</p>
+								<button
+									type="button"
+									onClick={() => {
+										store.update((current) =>
+											current.request?.key === request.key && !current.sending
+												? { ...current, request: null, error: null }
+												: current,
+										);
+										setForgetConfirm(false);
+									}}
+								>
+									I reviewed the records; forget tracking
+								</button>
+								<button type="button" onClick={() => setForgetConfirm(false)}>
+									Keep tracking
+								</button>
+							</>
+						) : (
+							<button type="button" onClick={() => setForgetConfirm(true)}>
+								Review forgetting this request
+							</button>
+						))}
+				</div>
+			)}
 			{operationScope && (
 				<div className="machines-operation" role="status">
 					<strong>
@@ -377,7 +556,7 @@ export function MachinesPage({ client }: { client: Client }) {
 					{operation.error && (
 						<p>
 							Operation status is unavailable: {operation.error.message}{" "}
-							<button type="button" onClick={() => void operation.refetch()}>
+							<button type="button" disabled={epochChanged} onClick={() => void operation.refetch()}>
 								Retry status
 							</button>
 						</p>
@@ -385,7 +564,13 @@ export function MachinesPage({ client }: { client: Client }) {
 				</div>
 			)}
 			{adding && (
-				<AddMachine busy={busy} onAdd={(machine) => act({ action: "add", machine })} onClose={() => setAdding(false)} />
+				<AddMachine
+					busy={busy}
+					draft={saved.draft}
+					onDraft={(draft) => store.update((current) => ({ ...current, draft }))}
+					onAdd={(machine) => act({ action: "add", machine })}
+					onClose={() => setAdding(false)}
+				/>
 			)}
 			{!id ? (
 				<div className="machines-empty">

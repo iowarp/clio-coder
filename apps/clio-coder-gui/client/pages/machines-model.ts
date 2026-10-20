@@ -1,4 +1,21 @@
-import type { Machine, MachineAdd } from "../../contracts/machines.js";
+import type { Machine, MachineAdd, MachineMutation } from "../../contracts/machines.js";
+
+export type MachineRequest = {
+	readonly key: string;
+	readonly workspaceId: string;
+	readonly body: MachineMutation;
+	readonly epoch: string | null;
+	readonly operationId: string | null;
+	readonly settled: boolean;
+};
+
+export function acceptMachineRequest(
+	current: MachineRequest | null,
+	key: string,
+	operationId: string,
+): MachineRequest | null {
+	return current?.key === key ? { ...current, operationId } : current;
+}
 
 export type MachineDraft = {
 	id: string;
