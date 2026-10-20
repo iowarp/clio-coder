@@ -1,5 +1,7 @@
 import type {
 	AnthropicOptions,
+	AssistantMessageEvent,
+	AssistantMessageEventStream,
 	AzureOpenAIResponsesOptions,
 	BedrockOptions,
 	Context,
@@ -11,8 +13,9 @@ import type {
 	OpenAIResponsesOptions,
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { resolvedRequestContext } from "./context.js";
-import type { EngineModel } from "./types.js";
+import type { EngineModel, ToolRoundRecord } from "./types.js";
 
 type Choice<T extends { toolChoice?: unknown }> = NonNullable<T["toolChoice"]>;
 
@@ -30,18 +33,22 @@ const NAMED_CHOICE = {
 		rejected ? "auto" : { type: "tool", name },
 	"bedrock-converse-stream": (name: string, rejected: boolean): Choice<BedrockOptions> =>
 		rejected ? "auto" : { type: "tool", name },
-	"google-generative-ai": (): Choice<GoogleOptions> => "any",
-	"google-vertex": (): Choice<GoogleVertexOptions> => "any",
-	"mistral-conversations": (name: string): Choice<MistralOptions> => ({ type: "function", function: { name } }),
-	"openai-responses": (name: string): Choice<OpenAIResponsesOptions> => ({ type: "function", name }),
-	"azure-openai-responses": (name: string): Choice<AzureOpenAIResponsesOptions> => ({ type: "function", name }),
-	// The ChatGPT Codex backend refuses a forced choice, named or "required":
-	// "Unsupported parameter: 'tool_choice' is not supported by rustponsesapi"
-	// failed a coder worker's terminal handoff in #423, and Codex CLI itself only
-	// sends "auto". Over the one narrowed tool, "auto" is the closest round, as on
-	// Claude models that reject a forced choice. A text-only round keeps "none".
+	"google-generative-ai": (_name: string, rejected: boolean): Choice<GoogleOptions> => (rejected ? "auto" : "any"),
+	"google-vertex": (_name: string, rejected: boolean): Choice<GoogleVertexOptions> => (rejected ? "auto" : "any"),
+	"mistral-conversations": (name: string, rejected: boolean): Choice<MistralOptions> =>
+		rejected ? "auto" : { type: "function", function: { name } },
+	"openai-responses": (name: string, rejected: boolean): Choice<OpenAIResponsesOptions> =>
+		rejected ? "auto" : { type: "function", name },
+	"azure-openai-responses": (name: string, rejected: boolean): Choice<AzureOpenAIResponsesOptions> =>
+		rejected ? "auto" : { type: "function", name },
+	// Codex previously rejected forcing with "Unsupported parameter: 'tool_choice'
+	// is not supported by rustponsesapi" (#426). Live full requests now accept
+	// required/named, but Pi's delta omits tools and then Codex rejects it:
+	// "Tool choice 'required' must be specified with 'tools' parameter."
+	// Keep auto over the narrowed tool; live text-only "none" is accepted (#426).
 	"openai-codex-responses": (): Choice<OpenAICodexResponsesOptions> => "auto",
-	"openai-completions": (): Choice<OpenAICompletionsOptions> => "required",
+	"openai-completions": (_name: string, rejected: boolean): Choice<OpenAICompletionsOptions> =>
+		rejected ? "auto" : "required",
 } as const;
 
 function isOpenAIResponsesApi(api: string): boolean {
@@ -97,6 +104,7 @@ export type ToolRound =
 	| { kind: "required"; toolName: string; handoff?: boolean };
 
 export interface ControlledRequest {
+	toolRounds?: ToolRoundRecord[];
 	context: Context;
 	options: SimpleStreamOptions | undefined;
 }
@@ -269,6 +277,7 @@ function requiredRound(
 	context: Context,
 	options: SimpleStreamOptions | undefined,
 	round: Extract<ToolRound, { kind: "required" }>,
+	rejection?: string,
 ): ControlledRequest | undefined {
 	const api = model.api;
 	const name = round.toolName;
@@ -276,7 +285,7 @@ function requiredRound(
 	const resolved = resolvedRequestContext(context);
 	const tools = resolved.tools ?? [];
 	if (!tools.some((tool) => tool.name === name)) return undefined;
-	const rejected = claudeVersionAtLeast(model, FORCED_TOOL_CHOICE_REMOVED_AT);
+	const rejected = rejection !== undefined || claudeVersionAtLeast(model, FORCED_TOOL_CHOICE_REMOVED_AT);
 	const automatic = rejected || (api === "anthropic-messages" && claudeVersionAtLeast(model, { haiku: [5, 5] }));
 	// Pi types SimpleStreamOptions.toolChoice as "auto" | "none" yet forwards it
 	// verbatim into each adapter's own option, which NAMED_CHOICE is typed against.
@@ -300,6 +309,7 @@ function applyToolRound(
 	context: Context,
 	options: SimpleStreamOptions | undefined,
 	round: ToolRound,
+	rejection?: string,
 ): ControlledRequest | undefined {
 	switch (round.kind) {
 		case "text-only":
@@ -307,8 +317,16 @@ function applyToolRound(
 		case "tools-removed":
 			return toolsRemovedRound(model, context, options);
 		case "required":
-			return requiredRound(model, context, options, round);
+			return requiredRound(model, context, options, round, rejection);
 	}
+}
+
+// A rejected required/named choice says nothing about none. Keep those
+// capabilities separate within each target and model so text locks survive (#426).
+const rejectedChoices = new Map<string, string>();
+
+function choiceKey(model: EngineModel, targetId: string, kind: "forced" | "none"): string {
+	return JSON.stringify([targetId, model.api, model.provider, model.baseUrl, model.id, kind]);
 }
 
 /** Apply the first round that changes this request; later rounds are fallbacks. */
@@ -317,12 +335,128 @@ export function applyToolRounds(
 	context: Context,
 	options: SimpleStreamOptions | undefined,
 	rounds: readonly (ToolRound | undefined)[],
+	targetId = model.provider,
 ): ControlledRequest {
 	for (const round of rounds) {
-		const controlled = round === undefined ? undefined : applyToolRound(model, context, options, round);
-		if (controlled !== undefined) return controlled;
+		if (round === undefined) continue;
+		const rejection = rejectedChoices.get(choiceKey(model, targetId, round.kind === "required" ? "forced" : "none"));
+		let controlled = applyToolRound(model, context, options, round, rejection);
+		if (controlled === undefined) continue;
+		if (rejection !== undefined && controlled.options?.toolChoice === "none") {
+			controlled = { ...controlled, options: { ...controlled.options, toolChoice: "auto" } };
+		}
+		const choice =
+			round.kind === "tools-removed" && (resolvedRequestContext(controlled.context).tools?.length ?? 0) === 0
+				? null
+				: (controlled.options?.toolChoice ?? null);
+		const downgradeReason =
+			rejection ??
+			(round.kind === "required" && choice === "auto"
+				? model.api === "openai-codex-responses"
+					? "Codex forced tool_choice is unsafe with tool-less WS deltas (#426)"
+					: model.api === "anthropic-messages" && claudeVersionAtLeast(model, { haiku: [5, 5] })
+						? "Anthropic cache-preserving tool routing (#423)"
+						: "Model does not support forced tool_choice"
+				: undefined);
+		return {
+			...controlled,
+			toolRounds: [
+				{
+					kind: round.kind,
+					...(round.kind === "required" ? { toolName: round.toolName } : {}),
+					choice,
+					attempt: 0,
+					...(downgradeReason !== undefined ? { downgradeReason } : {}),
+				},
+			],
+		};
 	}
 	return { context, options };
+}
+
+/** Retry only a rejected routing parameter before output, with one auto attempt (#426). */
+export function streamToolRound(
+	model: EngineModel,
+	controlled: ControlledRequest,
+	invoke: (request: ControlledRequest) => AssistantMessageEventStream,
+	targetId = model.provider,
+): AssistantMessageEventStream {
+	const initial = controlled.toolRounds?.[0];
+	if (!initial) return invoke(controlled);
+	const output = createAssistantMessageEventStream();
+	const records = [initial];
+	const annotate = (event: AssistantMessageEvent): AssistantMessageEvent => {
+		if ("partial" in event) Object.assign(event.partial, { toolRounds: records });
+		if (event.type === "done") Object.assign(event.message, { toolRounds: records });
+		if (event.type === "error") Object.assign(event.error, { toolRounds: records });
+		return event;
+	};
+	void (async () => {
+		let source: AssistantMessageEventStream | undefined;
+		try {
+			source = invoke(controlled);
+			let held: AssistantMessageEvent[] | null = [];
+			for await (const event of source) {
+				if (held !== null && event.type === "start") {
+					held.push(annotate(event));
+					continue;
+				}
+				const message = event.type === "error" ? (event.error.errorMessage ?? "") : "";
+				const choice = controlled.options?.toolChoice;
+				// Pi serializes some HTTP 400s as bare parameter errors. Match that
+				// spelling as well, but never retry auth/rate/server failures (#426).
+				const status = /\b[45]\d\d\b/u.exec(message)?.[0];
+				const rejected =
+					/tool[_ ]choice/iu.test(message) &&
+					(status === "400" ||
+						(status === undefined &&
+							/unsupported parameter|not supported|invalid.*tool_choice|must be specified with.*tools|not found in.*tools.*parameter/iu.test(
+								message,
+							)));
+				if (held !== null && rejected && choice !== undefined && choice !== "auto") {
+					const reason = (message.split("\n\n")[0] ?? message).slice(0, 512);
+					rejectedChoices.set(choiceKey(model, targetId, choice === "none" ? "none" : "forced"), reason);
+					records.push({ ...initial, choice: "auto", attempt: 1, downgradeReason: reason });
+					source = invoke({ ...controlled, options: { ...controlled.options, toolChoice: "auto" } });
+					for await (const retryEvent of source) output.push(annotate(retryEvent));
+					output.end(Object.assign(await source.result(), { toolRounds: records }));
+					return;
+				}
+				if (held !== null) for (const pending of held) output.push(pending);
+				held = null;
+				output.push(annotate(event));
+			}
+			if (held !== null) for (const pending of held) output.push(pending);
+			output.end(Object.assign(await source.result(), { toolRounds: records }));
+		} catch (error) {
+			// A thrown delegate must settle the stream too, including the retry;
+			// preserve the provider fault instead of leaving the agent waiting (#426).
+			const message = {
+				role: "assistant" as const,
+				content: [],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: {
+					// This synthetic fault has no metered provider usage (#423).
+					callInvoked: false,
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "error" as const,
+				errorMessage: error instanceof Error ? error.message : String(error),
+				timestamp: Date.now(),
+				toolRounds: records,
+			};
+			output.push({ type: "error", reason: "error", error: message });
+			output.end(message);
+		}
+	})();
+	return output;
 }
 
 // Identical local handbook runs shared few rules when servers sampled at their defaults.

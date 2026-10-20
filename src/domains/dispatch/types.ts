@@ -1,3 +1,4 @@
+import type { ToolRoundRecord } from "../../engine/types.js";
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
 import type { CostAggregate } from "../observability/cost.js";
 import type { FlowRestrictionSet } from "../safety/information-flow.js";
@@ -559,6 +560,8 @@ export interface RunEnvelope {
 	cwd: string;
 	tokenCount: number;
 	apiCalls?: number;
+	/** Effective forced routing attempts, including any recovery (#426). */
+	toolRounds?: ToolRoundRecord[];
 	missingTokenCalls?: number;
 	costSummary?: CostAggregate;
 	/** Input/output token split; written at finalization, absent on pre-split ledgers. */
@@ -1097,6 +1100,8 @@ export interface RunReceipt {
 	failureMessage?: string;
 	tokenCount: number;
 	apiCalls?: number;
+	/** Effective forced routing attempts, including any recovery (#426). */
+	toolRounds?: ToolRoundRecord[];
 	missingTokenCalls?: number;
 	costSummary?: CostAggregate;
 	inputTokenCount?: number;
@@ -1223,3 +1228,38 @@ export interface RunReceipt {
 
 export type RunReceiptDraft = Omit<RunReceipt, "integrity" | "routingIntent"> &
 	Partial<Pick<RunReceipt, "routingIntent">>;
+
+/** Keep routing evidence bounded when it crosses the worker IPC boundary (#426). */
+export function readToolRounds(record: unknown): ToolRoundRecord[] {
+	if (typeof record !== "object" || record === null || !("toolRounds" in record) || !Array.isArray(record.toolRounds))
+		return [];
+	return record.toolRounds.slice(0, 2).flatMap((value: unknown): ToolRoundRecord[] => {
+		if (typeof value !== "object" || value === null) return [];
+		const row = value as Record<string, unknown>;
+		if (row.kind !== "required" && row.kind !== "text-only" && row.kind !== "tools-removed") return [];
+		if (row.attempt !== 0 && row.attempt !== 1) return [];
+		let choice = row.choice;
+		if (choice !== null && typeof choice !== "string" && (typeof choice !== "object" || Array.isArray(choice))) return [];
+		if (typeof choice === "string") choice = choice.slice(0, 256);
+		else if (choice !== null && typeof choice === "object") {
+			const named = choice as Record<string, unknown>;
+			if (typeof named.type !== "string") return [];
+			const fn =
+				typeof named.function === "object" && named.function !== null ? (named.function as Record<string, unknown>) : {};
+			choice = {
+				type: named.type.slice(0, 64),
+				...(typeof named.name === "string" ? { name: named.name.slice(0, 256) } : {}),
+				...(typeof fn.name === "string" ? { function: { name: fn.name.slice(0, 256) } } : {}),
+			};
+		}
+		return [
+			{
+				kind: row.kind,
+				choice,
+				attempt: row.attempt,
+				...(typeof row.toolName === "string" ? { toolName: row.toolName.slice(0, 256) } : {}),
+				...(typeof row.downgradeReason === "string" ? { downgradeReason: row.downgradeReason.slice(0, 512) } : {}),
+			},
+		];
+	});
+}

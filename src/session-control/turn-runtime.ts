@@ -46,7 +46,7 @@ import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineMainStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
-import { applyToolRounds } from "../engine/provider-payload.js";
+import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -638,31 +638,46 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			transcriptStreamFn: (currentModel, currentContext, options) => {
 				const middlewareChoice = middlewareToolChoice.current();
 				// A locked round has no named tool to require; it is text-only.
-				const controlled = applyToolRounds(currentModel, currentContext, options, [
-					state.synthesisToolLock || middlewareChoice.kind === "none" ? { kind: "text-only" } : undefined,
-					middlewareChoice.kind === "required" && !state.synthesisToolLock
-						? { kind: "required", toolName: middlewareChoice.toolName }
-						: undefined,
-				]);
-				// #423: fingerprint the control applied to this call before middleware can change it.
-				context.noteCacheRequestToolChoice?.(JSON.stringify(controlled.options?.toolChoice ?? "auto"));
+				const controlled = applyToolRounds(
+					currentModel,
+					currentContext,
+					options,
+					[
+						state.synthesisToolLock || middlewareChoice.kind === "none" ? { kind: "text-only" } : undefined,
+						middlewareChoice.kind === "required" && !state.synthesisToolLock
+							? { kind: "required", toolName: middlewareChoice.toolName }
+							: undefined,
+					],
+					target.target.id,
+				);
 				delete localRuntime.lastProviderStatus;
 				const pinnedPrefix = enginePinnedPrefix(localRuntime.agent);
-				const requestOptions = {
-					...controlled.options,
-					...(pinnedPrefix ? { clioCoderPinnedPrefix: pinnedPrefix } : {}),
-					onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof controlled.options>["onResponse"]>>) => {
-						// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
-						localRuntime.lastProviderStatus = args[0].status;
-						await controlled.options?.onResponse?.(...args);
-					},
-				};
-				if (!state.synthesisToolLock) return engineMainStreamSimple(currentModel, controlled.context, requestOptions);
-				const request = resolvedRequestContext(controlled.context);
-				return engineMainStreamSimple(
+				return streamToolRound(
 					currentModel,
-					{ ...request, systemPrompt: lockedSynthesisSystemPrompt(request.systemPrompt ?? "") },
-					requestOptions,
+					controlled,
+					(request) => {
+						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
+						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"));
+						delete localRuntime.lastProviderStatus;
+						const requestOptions = {
+							...request.options,
+							...(pinnedPrefix ? { clioCoderPinnedPrefix: pinnedPrefix } : {}),
+							onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof request.options>["onResponse"]>>) => {
+								// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
+								localRuntime.lastProviderStatus = args[0].status;
+								await request.options?.onResponse?.(...args);
+							},
+						};
+						if (!state.synthesisToolLock && !(middlewareChoice.kind === "none" && request.options?.toolChoice === "auto"))
+							return engineMainStreamSimple(currentModel, request.context, requestOptions);
+						const resolved = resolvedRequestContext(request.context);
+						return engineMainStreamSimple(
+							currentModel,
+							{ ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") },
+							requestOptions,
+						);
+					},
+					target.target.id,
 				);
 			},
 			initialState: {

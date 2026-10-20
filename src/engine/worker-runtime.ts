@@ -144,7 +144,12 @@ import {
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
 import { registerClioOAuthProviders } from "./oauth.js";
-import { applyToolRounds, deterministicSampling, supportsNamedToolChoice } from "./provider-payload.js";
+import {
+	applyToolRounds,
+	deterministicSampling,
+	streamToolRound,
+	supportsNamedToolChoice,
+} from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerExtensionHookRegistrations, type WorkerHookTransport } from "./worker-extension-hooks.js";
@@ -1267,6 +1272,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							? { kind: "required", toolName: middlewareChoice.toolName }
 							: undefined,
 					],
+					input.target.id,
 				);
 				let requestContext: Context = controlled.context;
 				if (helperToolAvailable && nativeToolChanges) {
@@ -1312,36 +1318,44 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 				// Pi's SDK adapters report onResponse only for a 2xx answer, so the
 				// status is read at the fetch boundary every adapter routes through.
-				const fetchImpl = controlled.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
-				const lockedRound = synthesisToolLock || helperTerminalPhase;
-				const {
-					reasoning: _reasoning,
-					thinkingBudgets: _thinkingBudgets,
-					...thinkingOffOptions
-				} = controlled.options ?? {};
-
-				return boundWorkerResponse(
+				return streamToolRound(
 					currentModel,
-					requestContext,
-					lockedRound ? thinkingOffOptions : controlled.options,
-					{
-						locked: lockedRound,
-						responseSeconds: workerSettings.safety.limits.workerResponseSeconds,
-						round,
-						onLimit: (outcomeCode, detail) => {
-							workerBoundFailure ??= detail;
-							emit({ type: "clio_coder_run_outcome", payload: { outcomeCode, detail } });
-						},
-					},
-					(boundedOptions) =>
-						engineStreamSimple(currentModel, requestContext, {
-							...boundedOptions,
-							fetch: async (url, init) => {
-								const response = await fetchImpl(url, init);
-								lastProviderHttpStatus = response.status;
-								return response;
+					{ ...controlled, context: requestContext },
+					(attempt) => {
+						const resolvedAttempt = resolvedRequestContext(attempt.context);
+						const attemptContext =
+							middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
+								? { ...resolvedAttempt, systemPrompt: lockedSynthesisSystemPrompt(resolvedAttempt.systemPrompt ?? "") }
+								: attempt.context;
+						const fetchImpl = attempt.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
+						const lockedRound = synthesisToolLock || helperTerminalPhase;
+						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attempt.options ?? {};
+
+						return boundWorkerResponse(
+							currentModel,
+							attemptContext,
+							lockedRound ? thinkingOffOptions : attempt.options,
+							{
+								locked: lockedRound,
+								responseSeconds: workerSettings.safety.limits.workerResponseSeconds,
+								round,
+								onLimit: (outcomeCode, detail) => {
+									workerBoundFailure ??= detail;
+									emit({ type: "clio_coder_run_outcome", payload: { outcomeCode, detail } });
+								},
 							},
-						}),
+							(boundedOptions) =>
+								engineStreamSimple(currentModel, attemptContext, {
+									...boundedOptions,
+									fetch: async (url, init) => {
+										const response = await fetchImpl(url, init);
+										lastProviderHttpStatus = response.status;
+										return response;
+									},
+								}),
+						);
+					},
+					input.target.id,
 				);
 			};
 			const first = request(messages);

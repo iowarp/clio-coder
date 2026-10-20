@@ -112,6 +112,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	failureMessage: true,
 	tokenCount: true,
 	apiCalls: true,
+	toolRounds: true,
 	missingTokenCalls: true,
 	costSummary: true,
 	inputTokenCount: true,

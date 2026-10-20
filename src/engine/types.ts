@@ -90,3 +90,12 @@ export interface CodexConfiguration {
 	initialEffort: string;
 	updates: ReadonlyArray<{ position: string; effort: string }>;
 }
+
+/** Effective routing attempts retained in existing run records and receipts (#426). */
+export interface ToolRoundRecord {
+	kind: "required" | "text-only" | "tools-removed";
+	toolName?: string;
+	choice: unknown;
+	attempt: 0 | 1;
+	downgradeReason?: string;
+}

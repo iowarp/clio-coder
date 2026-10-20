@@ -3,6 +3,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { normalizeCallUsage, normalizeTokenUsage } from "../../core/token-split.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
+import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
@@ -20,6 +21,7 @@ import {
 	resolveModelDestination,
 } from "../safety/information-flow.js";
 import { assertTurnConstraintCompatibility } from "./tool-constraints.js";
+import { readToolRounds } from "./types.js";
 /**
  * Dispatch domain wire-up (post-W5).
  *
@@ -478,6 +480,7 @@ import {
 import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from "./write-boundary.js";
 
 interface RunTokenMeter {
+	toolRounds?: ToolRoundRecord[];
 	apiCalls?: number;
 	missingTokenCalls?: number;
 	totalTokens?: number;
@@ -5915,6 +5918,11 @@ export function createDispatchBundle(
 				);
 			}
 			if (event.type === "message_end" && event.message?.role === "assistant") {
+				const toolRounds = readToolRounds(event.message);
+				if (toolRounds.length > 0) {
+					tokenMeter.toolRounds ??= [];
+					tokenMeter.toolRounds.push(...toolRounds);
+				}
 				// A final ACP reply can omit usage, and an ACP delegation fault never has any. Only the metering and the
 				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
 				// usage as missing, while its failure text and served-model observations remain real.
@@ -6227,6 +6235,7 @@ export function createDispatchBundle(
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
 				apiCalls: (adapterReportedUsage ? usage.apiCalls : tokenMeter.apiCalls) ?? 1,
+				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
 				missingTokenCalls:
 					(adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? (tokenCount === 0 ? 1 : 0),
 				inputTokenCount: tokenMeter.inputTokens,
@@ -7495,6 +7504,11 @@ export function createDispatchBundle(
 				);
 			}
 			if (event.type === "message_end" && event.message?.role === "assistant") {
+				const toolRounds = readToolRounds(event.message);
+				if (toolRounds.length > 0) {
+					tokenMeter.toolRounds ??= [];
+					tokenMeter.toolRounds.push(...toolRounds);
+				}
 				// A final ACP reply can omit usage, and an ACP delegation fault never has any. Only the metering and the
 				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
 				// usage as missing, while its failure text and served-model observations remain real.
@@ -8010,6 +8024,7 @@ export function createDispatchBundle(
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
 				apiCalls: tokenMeter.apiCalls ?? 1,
+				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
 				missingTokenCalls: tokenMeter.missingTokenCalls ?? (tokenCount === 0 ? 1 : 0),
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,

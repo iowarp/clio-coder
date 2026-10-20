@@ -35,13 +35,14 @@ import type {
 	SafetyBlockedAttempt,
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
+import { readToolRounds } from "../../domains/dispatch/types.js";
 import type { CostAmount, CostEntry } from "../../domains/observability/cost.js";
 import { aggregateCostAmounts } from "../../domains/observability/cost.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
-import type { AgentMessage, ImageContent } from "../../engine/types.js";
+import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
 import { type RunUsageSummary, sumRunUsage } from "../../session-control/chat-loop-messages.js";
@@ -240,6 +241,7 @@ interface HeadlessMainAgentResult {
 }
 
 interface HeadlessMainAgentReceiptStats {
+	toolRounds: ToolRoundRecord[];
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
 	pendingVerifyCalls: Map<string, string | null>;
@@ -745,6 +747,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		exitCode,
 		tokenCount,
 		apiCalls: usage?.apiCalls ?? 0,
+		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
 		missingTokenCalls: usage?.missingTokenCalls ?? 0,
 		costSummary: cost,
 		inputTokenCount,
@@ -793,6 +796,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
 		tokenCount,
 		apiCalls: usage?.apiCalls ?? 0,
+		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
 		missingTokenCalls: usage?.missingTokenCalls ?? 0,
 		costSummary: cost,
 		inputTokenCount,
@@ -858,6 +862,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		admissionRefused: false,
 	};
 	const receiptStats: HeadlessMainAgentReceiptStats = {
+		toolRounds: [],
 		toolStats: new Map<string, ToolCallStat>(),
 		pendingCapabilities: new Map(),
 		pendingVerifyCalls: new Map(),
@@ -1012,6 +1017,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		}
 		recordToolEnd(receiptStats, event);
 		if (event.type === "message_end") {
+			if (event.message.role === "assistant") receiptStats.toolRounds.push(...readToolRounds(event.message));
 			// Usage is accrued per completed assistant message, the one place a
 			// token count appears exactly once. Accruing at `agent_end` instead
 			// loses everything the process was told when a run is interrupted
@@ -1224,6 +1230,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// and which calls a headless run refused, without parsing prose.
 			outcome: terminal.outcome,
 			...(terminal.outcomeDetail !== undefined ? { outcomeDetail: terminal.outcomeDetail } : {}),
+			...(receiptStats.toolRounds.length > 0 ? { toolRounds: receiptStats.toolRounds } : {}),
 			safety: {
 				decisions: { ...receiptStats.decisions },
 				blockedAttempts: [...receiptStats.blockedAttempts],

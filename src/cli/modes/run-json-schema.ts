@@ -1,3 +1,4 @@
+import type { ToolRoundRecord } from "../../engine/types.js";
 /**
  * The `clio-coder run --json` wire schema.
  *
@@ -97,6 +98,7 @@ type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
 type AssistantContentBlock = AssistantMessage["content"][number];
 
 export type RunJsonAssistantMessage = Omit<AssistantMessage, "content"> & {
+	toolRounds?: ToolRoundRecord[];
 	content: Array<
 		| RunJsonStreamedTextBlock
 		| RunJsonStreamedThinkingBlock
@@ -217,6 +219,7 @@ export interface RunJsonTerminalTurnStartFrame {
  * terminal mode withholds the streamed one. `exitCode` tells them apart.
  */
 export interface RunJsonTerminalTurnEndFrame {
+	toolRounds?: ToolRoundRecord[];
 	type: "turn_end";
 	startedAt: string;
 	endedAt: string;

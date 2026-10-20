@@ -546,6 +546,7 @@ export function assistantSessionPayload(
 		"providerThinkingLevel",
 		"gatewayRouting",
 		"diagnostics",
+		"toolRounds",
 		"clioCoderAbortReason",
 	]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];

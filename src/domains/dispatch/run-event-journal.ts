@@ -1,3 +1,5 @@
+import type { ToolRoundRecord } from "../../engine/types.js";
+import { readToolRounds } from "./types.js";
 /**
  * Append-only run event journal.
  *
@@ -74,6 +76,7 @@ export interface RunEventJournalFacts {
 	audit?: ToolAuditFacts;
 	callIndex?: number;
 	usage?: CallUsage;
+	toolRounds?: ToolRoundRecord[];
 	usageScope?: "call" | "run-aggregate";
 	tool?: string;
 	/** Pairs a tool start with its finish when the producer carried an id. */
@@ -523,6 +526,7 @@ function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
 	const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 	const count = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 	const outcome = record.outcome;
+	const toolRounds = readToolRounds(record);
 	const audit = parseToolAuditFacts(record.audit);
 	const usage =
 		record.usage && typeof record.usage === "object" && !Array.isArray(record.usage)
@@ -530,6 +534,7 @@ function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
 			: undefined;
 	return {
 		...(audit ? { audit } : {}),
+		...(toolRounds.length > 0 ? { toolRounds } : {}),
 		...(count(record.callIndex) && Number.isSafeInteger(record.callIndex) && record.callIndex > 0
 			? { callIndex: record.callIndex }
 			: {}),

@@ -1,3 +1,4 @@
+import { readToolRounds } from "./types.js";
 /**
  * Domain-owned writer for the run event journal.
  *
@@ -199,6 +200,7 @@ function runFeedEntryFromEvent(
 		const message = isRecord(normalized.message) ? normalized.message : {};
 		const rawUsage = isRecord(message.usage) ? message.usage : {};
 		const aggregate = rawUsage.clioSdkAggregate === true;
+		const toolRounds = readToolRounds(message);
 		const usage =
 			callIndex !== undefined || aggregate
 				? normalizeCallUsage({ ...rawUsage, estimated: rawUsage.estimated === true || rawUsage.observed === false })
@@ -211,6 +213,7 @@ function runFeedEntryFromEvent(
 			type,
 			...(tail?.detail !== undefined ? { detail: tail.detail } : {}),
 			...(tokens !== undefined ? { tokens } : {}),
+			...(toolRounds.length > 0 ? { toolRounds } : {}),
 			...(usage ? { usage, usageScope: aggregate ? ("run-aggregate" as const) : ("call" as const) } : {}),
 			...(callIndex !== undefined ? { callIndex } : {}),
 		};
