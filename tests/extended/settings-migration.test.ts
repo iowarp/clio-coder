@@ -31,6 +31,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 const PLAYBOOKS_MIGRATION_ID = "2026-10-06-playbooks-and-packages";
 const ACP_ADAPTERS_MIGRATION_ID = "2026-10-07-acp-adapters";
 const CLAUDE_SUBSCRIPTION_MIGRATION_ID = "2026-10-07-claude-subscription";
+const FLEET_JUDGE_MIGRATION_ID = "2026-10-20-fleet-permissions-judge";
 const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..", "..");
 
 describe("settings and migration boundary", () => {
@@ -351,6 +352,7 @@ targets:
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
 			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
+			FLEET_JUDGE_MIGRATION_ID,
 		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
@@ -361,9 +363,27 @@ targets:
 		deepStrictEqual((await runPending(stateDir)).applied, []);
 	});
 
+	it("moves a user-layer worker deny to judge once and leaves every other byte as written", async () => {
+		const others = listMigrations()
+			.map((migration) => migration.id)
+			.filter((id) => id !== FLEET_JUDGE_MIGRATION_ID);
+		writeFileSync(join(stateDir, "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const written =
+			"version: 2\n# operator notes\nfleet:\n  permissions:\n    mode: 'deny' # kept\n    escalation: { timeoutMs: 120000, fallback: deny }\n";
+		writeFileSync(settingsFile, written, "utf8");
+		const first = await runPending(stateDir);
+		deepStrictEqual(first.applied, [FLEET_JUDGE_MIGRATION_ID]);
+		strictEqual(first.reports?.[FLEET_JUDGE_MIGRATION_ID]?.changed.length, 1);
+		strictEqual(readFileSync(settingsFile, "utf8"), written.replace("'deny' # kept", "'judge' # kept"));
+		// A deny the operator sets afterwards is theirs: the manifest keeps the migration from running again.
+		writeFileSync(settingsFile, written, "utf8");
+		deepStrictEqual((await runPending(stateDir)).applied, []);
+		strictEqual(readFileSync(settingsFile, "utf8"), written);
+	});
+
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(stateDir, "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
