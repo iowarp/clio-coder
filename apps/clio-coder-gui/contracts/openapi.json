@@ -21518,6 +21518,29 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"autonomy": {
+													"type": "object",
+													"required": ["level", "source"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "default"
+																},
+																{
+																	"type": "string",
+																	"const": "yolo"
+																}
+															]
+														},
+														"source": {
+															"type": "string",
+															"maxLength": 64
+														}
+													},
+													"additionalProperties": false
+												},
 												"eggs": {
 													"type": "array",
 													"items": {
@@ -26523,6 +26546,29 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"autonomy": {
+													"type": "object",
+													"required": ["level", "source"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "default"
+																},
+																{
+																	"type": "string",
+																	"const": "yolo"
+																}
+															]
+														},
+														"source": {
+															"type": "string",
+															"maxLength": 64
+														}
+													},
+													"additionalProperties": false
+												},
 												"eggs": {
 													"type": "array",
 													"items": {
@@ -30113,6 +30159,29 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"autonomy": {
+													"type": "object",
+													"required": ["level", "source"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "default"
+																},
+																{
+																	"type": "string",
+																	"const": "yolo"
+																}
+															]
+														},
+														"source": {
+															"type": "string",
+															"maxLength": 64
+														}
+													},
+													"additionalProperties": false
+												},
 												"eggs": {
 													"type": "array",
 													"items": {
@@ -33667,6 +33736,29 @@
 											"telemetry": {
 												"type": "object",
 												"properties": {
+													"autonomy": {
+														"type": "object",
+														"required": ["level", "source"],
+														"properties": {
+															"level": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "default"
+																	},
+																	{
+																		"type": "string",
+																		"const": "yolo"
+																	}
+																]
+															},
+															"source": {
+																"type": "string",
+																"maxLength": 64
+															}
+														},
+														"additionalProperties": false
+													},
 													"eggs": {
 														"type": "array",
 														"items": {
@@ -37468,6 +37560,29 @@
 										"telemetry": {
 											"type": "object",
 											"properties": {
+												"autonomy": {
+													"type": "object",
+													"required": ["level", "source"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "default"
+																},
+																{
+																	"type": "string",
+																	"const": "yolo"
+																}
+															]
+														},
+														"source": {
+															"type": "string",
+															"maxLength": 64
+														}
+													},
+													"additionalProperties": false
+												},
 												"eggs": {
 													"type": "array",
 													"items": {
@@ -47225,6 +47340,29 @@
 									"telemetry": {
 										"type": "object",
 										"properties": {
+											"autonomy": {
+												"type": "object",
+												"required": ["level", "source"],
+												"properties": {
+													"level": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "default"
+															},
+															{
+																"type": "string",
+																"const": "yolo"
+															}
+														]
+													},
+													"source": {
+														"type": "string",
+														"maxLength": 64
+													}
+												},
+												"additionalProperties": false
+											},
 											"eggs": {
 												"type": "array",
 												"items": {
