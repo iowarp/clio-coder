@@ -347,6 +347,8 @@ export function MachinesPage({ client }: { client: Client }) {
 			{ replace: true },
 		);
 	const addField = useRef<HTMLInputElement>(null);
+	const recovery = useRef<HTMLDivElement>(null);
+	const operationResult = useRef<HTMLDivElement>(null);
 	const store = useMemo(() => machinesDraft(client), [client]);
 	const saved = useSyncExternalStore(store.subscribe, store.read, store.read);
 	const { adding, request } = saved;
@@ -388,6 +390,25 @@ export function MachinesPage({ client }: { client: Client }) {
 				: 1000,
 		retry: false,
 	});
+	useEffect(() => {
+		if (adding) return;
+		const target = saved.error
+			? recovery
+			: operation.data?.status === "failed" || operation.data?.status === "cancelled"
+				? operationResult
+				: null;
+		if (!target) return;
+		// The dialog first restores its opener and the shell removes inert. Land on the recovery
+		// message after that handoff, so the disabled opener cannot swallow the failure feedback.
+		let landing = 0;
+		const frame = requestAnimationFrame(() => {
+			landing = requestAnimationFrame(() => target.current?.focus());
+		});
+		return () => {
+			cancelAnimationFrame(frame);
+			cancelAnimationFrame(landing);
+		};
+	}, [adding, saved.error, operation.data?.status]);
 	const mutation = useMutation({
 		meta: { errorSurface: "inline" },
 		mutationFn: async (sent: MachineRequest) => {
@@ -413,6 +434,7 @@ export function MachinesPage({ client }: { client: Client }) {
 			} catch (error) {
 				store.update((current) => ({
 					...current,
+					adding: current.request?.key === sent.key && sent.body.action === "add" ? false : current.adding,
 					error:
 						current.request?.key === sent.key ? (error instanceof Error ? error.message : String(error)) : current.error,
 				}));
@@ -440,7 +462,7 @@ export function MachinesPage({ client }: { client: Client }) {
 				? {
 						...current,
 						request: { ...current.request, settled: true },
-						adding: status === "succeeded" && request.body.action === "add" ? false : current.adding,
+						adding: request.body.action === "add" ? false : current.adding,
 						draft: status === "succeeded" && request.body.action === "add" ? emptyMachineDraft : current.draft,
 					}
 				: current,
@@ -502,9 +524,10 @@ export function MachinesPage({ client }: { client: Client }) {
 					</button>
 				</div>
 			)}
-			{saved.error && <p role="alert">{saved.error}</p>}
+			{saved.error && (!request || request.settled) && <p role="alert">{saved.error}</p>}
 			{request && !request.settled && (
-				<div className="machines-operation" role="status">
+				<div className="machines-operation" role="status" ref={recovery} tabIndex={-1}>
+					{saved.error ? <p role="alert">{saved.error}</p> : null}
 					<strong>
 						Original request: {request.body.action}{" "}
 						{request.body.action === "add" ? request.body.machine.id : request.body.id}
@@ -574,7 +597,7 @@ export function MachinesPage({ client }: { client: Client }) {
 				</div>
 			)}
 			{operationScope && (
-				<div className="machines-operation" role="status">
+				<div className="machines-operation" role="status" ref={operationResult} tabIndex={-1}>
 					{request?.settled ? (
 						<button
 							type="button"
