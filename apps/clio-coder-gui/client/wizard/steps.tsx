@@ -155,7 +155,7 @@ export function WelcomeStep({
 						<strong>Connect and choose a model.</strong> Clio checks the address and reads the model list.
 					</li>
 					<li>
-						<strong>Open a folder.</strong> Clio works inside it and asks before it changes anything.
+						<strong>Open a folder.</strong> Clio works inside it. Your approval policy controls which actions ask first.
 					</li>
 				</ol>
 			) : null}

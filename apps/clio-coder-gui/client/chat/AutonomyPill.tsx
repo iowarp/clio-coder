@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
@@ -43,7 +43,6 @@ export function AutonomyPill({
 	/** A turn is running, so the level cannot change under it. */
 	locked: boolean;
 }) {
-	const queries = useQueryClient();
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	const [confirming, setConfirming] = useState(false);
@@ -58,8 +57,8 @@ export function AutonomyPill({
 	const set = useMutation({
 		mutationFn: (level: AutonomyLevel) =>
 			client.call(routes.setSessionAutonomy, { params: { id: sessionId }, query: {}, body: { level } }),
-		onSuccess: (value) => {
-			queries.setQueryData(["session-autonomy", sessionId], value);
+		onSuccess: () => {
+			// Runtime notifications may already report a newer choice than this delayed acknowledgement.
 			setConfirming(false);
 			if (panel.current) panel.current.open = false;
 		},
