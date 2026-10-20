@@ -205,13 +205,16 @@ export function usageView(report: UsageReport): UsageView {
 					? "—"
 					: `${cost.hasEstimated ? "~" : ""}${formatCost(number(cost.knownUsd))}${cost.hasUnknown ? " +?" : ""}`
 				: formatCost(number(tokens.costUsd)),
-			note: cost?.hasUnknown
-				? "Known subtotal; some calls are unpriced"
-				: cost?.hasEstimated
-					? "Includes estimated prices"
-					: cost
-						? "Recorded prices"
-						: "Historical cost; pricing provenance unavailable",
+			note:
+				cost?.calls === 0
+					? "No priced calls recorded in this window"
+					: cost?.hasUnknown
+						? "Known subtotal; some calls are unpriced"
+						: cost?.hasEstimated
+							? "Includes estimated prices"
+							: cost
+								? "Recorded prices"
+								: "Historical cost; pricing provenance unavailable",
 		},
 		store("sessions", "session-store-missing", "Sessions"),
 		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
@@ -273,4 +276,12 @@ export function usageView(report: UsageReport): UsageView {
 		rest: leftover.singles,
 		tables: leftover.tables,
 	};
+}
+
+export function filterUsageFacts(facts: UsageReport["facts"], query: string): UsageReport["facts"] {
+	const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+	return facts.filter((fact) => {
+		const text = `${usageLabel(fact.name)} ${JSON.stringify(fact.values)}`.toLocaleLowerCase();
+		return terms.every((term) => text.includes(term));
+	});
 }

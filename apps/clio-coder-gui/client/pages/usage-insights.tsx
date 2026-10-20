@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UsageReport } from "../../contracts/reports.js";
 import { Facts } from "../design/facts.js";
 import { Icon } from "../design/icons.js";
 import type { UsageMetric } from "./usage-insights-model.js";
 import {
 	compareUsageModels,
+	filterUsageModels,
 	USAGE_METRICS,
 	usageAmountText,
 	usageCallShares,
@@ -14,12 +15,24 @@ import {
 export function UsageInsights({ report }: { report: UsageReport }) {
 	const [metric, setMetric] = useState<UsageMetric>("calls");
 	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [query, setQuery] = useState("");
+	const [coverage, setCoverage] = useState("");
+	const inspector = useRef<HTMLHeadingElement>(null);
+	const opener = useRef<HTMLButtonElement>(null);
 	const models = usageModelInsights(report);
-	const rows = compareUsageModels(models, metric);
+	const matching = filterUsageModels(models, query, coverage);
+	const rows = compareUsageModels(matching, metric);
 	const selected = models.find((row) => row.id === selectedId);
 	const shares = usageCallShares(models);
 	const activeMetric = USAGE_METRICS.find((item) => item.id === metric);
 	const missing = rows.filter((row) => row[metric].value === null || row[metric].partial).length;
+	useEffect(() => {
+		if (selectedId) inspector.current?.focus();
+	}, [selectedId]);
+	const closeInspector = () => {
+		setSelectedId(null);
+		opener.current?.focus();
+	};
 	return (
 		<div className="usage-analysis">
 			<section className="usage-comparison" aria-labelledby="usage-comparison-title">
@@ -32,6 +45,36 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 						<Icon name="models" /> {models.length} model / target pairs
 					</span>
 				</header>
+				<div className="usage-explore-controls">
+					<label>
+						Find a model or target
+						<input
+							type="search"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+							maxLength={256}
+							placeholder="Model, target or source"
+						/>
+					</label>
+					<label>
+						Accounting coverage
+						<select value={coverage} onChange={(event) => setCoverage(event.target.value)}>
+							<option value="">All accounting</option>
+							<option value="incomplete">Incomplete amounts</option>
+						</select>
+					</label>
+					{(query || coverage) && (
+						<button
+							type="button"
+							onClick={() => {
+								setQuery("");
+								setCoverage("");
+							}}
+						>
+							Reset filters
+						</button>
+					)}
+				</div>
 				<fieldset className="usage-metric-selector">
 					<legend className="sr-only">Compare models by</legend>
 					{USAGE_METRICS.map((item) => (
@@ -41,11 +84,13 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 					))}
 				</fieldset>
 				<p className="usage-chart-caption" aria-live="polite">
-					{activeMetric?.description}
+					{activeMetric?.description} {rows.length} of {models.length} recorded model / target pairs shown.
 				</p>
 				{!rows.length ? (
 					<p className="panel-empty">
-						No model usage was recorded in this window. Choose another workspace to inspect its retained records.
+						{models.length
+							? "No model or target matches these filters. Reset the filters to see all recorded pairs."
+							: "No model usage was recorded in this window. Choose another workspace to inspect its retained records."}
 					</p>
 				) : (
 					<ol className="usage-model-bars" aria-label={`Models ranked by ${activeMetric?.label.toLowerCase()}`}>
@@ -55,7 +100,12 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 									className="usage-model-row"
 									type="button"
 									aria-pressed={selectedId === row.id}
-									onClick={() => setSelectedId(selectedId === row.id ? null : row.id)}
+									aria-controls="usage-model-accounting"
+									onClick={(event) => {
+										opener.current = event.currentTarget;
+										if (selectedId === row.id) closeInspector();
+										else setSelectedId(row.id);
+									}}
 								>
 									<span className="usage-model-rank" aria-hidden="true">
 										{String(index + 1).padStart(2, "0")}
@@ -87,10 +137,16 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 					Select a row to inspect its accounting. ~ marks estimates; +? marks an incomplete amount.
 				</p>
 				{selected && (
-					<section className="usage-model-inspector" aria-label={`Accounting for ${selected.model}`}>
+					<section
+						id="usage-model-accounting"
+						className="usage-model-inspector"
+						aria-label={`Accounting for ${selected.model}`}
+					>
 						<header>
-							<h3>{selected.model}</h3>
-							<button type="button" onClick={() => setSelectedId(null)} aria-label="Close model accounting">
+							<h3 ref={inspector} tabIndex={-1}>
+								{selected.model}
+							</h3>
+							<button type="button" onClick={closeInspector} aria-label="Close model accounting">
 								<Icon name="close" />
 							</button>
 						</header>
@@ -159,7 +215,16 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 						<ul className="usage-share-legend">
 							{shares.segments.map((segment, index) => (
 								<li key={segment.id}>
-									<button type="button" aria-pressed={selectedId === segment.id} onClick={() => setSelectedId(segment.id)}>
+									<button
+										type="button"
+										aria-pressed={selectedId === segment.id}
+										aria-controls="usage-model-accounting"
+										onClick={(event) => {
+											opener.current = event.currentTarget;
+											setSelectedId(segment.id);
+											inspector.current?.focus();
+										}}
+									>
 										<span className={`usage-share-dot usage-tone-${index % 5}`} aria-hidden="true" />
 										<span>
 											<strong>{segment.model}</strong>
@@ -173,8 +238,8 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 							))}
 						</ul>
 						<p className="usage-chart-footnote">
-							Shares of calls in the model rows above. Each call belongs to one target and model; token categories are never
-							used as pie slices.
+							Shares of calls across all recorded model pairs, independent of comparison filters. Each call belongs to one
+							target and model; token categories are never used as pie slices.
 						</p>
 					</>
 				) : (

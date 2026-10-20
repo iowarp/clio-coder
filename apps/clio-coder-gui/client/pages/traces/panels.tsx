@@ -228,10 +228,12 @@ export function ReceiptPanel({
 	data,
 	loadFull,
 	full,
+	loading = false,
 }: {
 	data: Static<typeof TraceReceipt>;
 	loadFull: () => void;
 	full: boolean;
+	loading?: boolean;
 }) {
 	const r = data.receipt;
 	const costSummary = object(r?.costSummary);
@@ -240,8 +242,8 @@ export function ReceiptPanel({
 			<div className="page-heading">
 				<h2>Receipt</h2>
 				{r && !full ? (
-					<button type="button" onClick={loadFull}>
-						Load full receipt
+					<button type="button" disabled={loading} onClick={loadFull}>
+						{loading ? "Reading receipt…" : "Load full receipt"}
 					</button>
 				) : null}
 			</div>
@@ -330,11 +332,17 @@ export function ReceiptPanel({
 					</div>
 					<div>
 						<h3>Safety</h3>
-						<Facts entries={Object.entries(object(r.safety))} />
+						{Object.keys(object(r.safety)).length ? (
+							<Facts entries={Object.entries(object(r.safety))} />
+						) : (
+							<p>No safety facts were recorded in this receipt.</p>
+						)}
 					</div>
 					<div>
-						<h3>Provenance</h3>
-						<Facts entries={provenanceFacts(r)} />
+						<details>
+							<summary>Execution provenance & runtime facts</summary>
+							<Facts entries={provenanceFacts(r)} />
+						</details>
 					</div>
 				</div>
 			) : null}

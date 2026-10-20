@@ -7,10 +7,12 @@ import { Icon } from "../../design/icons.js";
 import { EventRow, Facts, Json, parseJson } from "./panels.js";
 import type { TraceLiveState } from "./trace-live-model.js";
 import {
+	filterReplayEvents,
 	latestReplayEvent,
 	REPLAY_SPEEDS,
 	replayDelay,
 	replayEntries,
+	replayEventKinds,
 	replayIndex,
 	replayWindow,
 } from "./trace-replay-model.js";
@@ -28,7 +30,13 @@ interface TraceReplayProps {
 export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }: TraceReplayProps) {
 	const id = useId();
 	const root = useRef<HTMLElement>(null);
-	const entries = useMemo(() => replayEntries(events, run.started_at, phaseId), [events, run.started_at, phaseId]);
+	const [query, setQuery] = useState("");
+	const [kind, setKind] = useState("");
+	const kinds = useMemo(() => replayEventKinds(events), [events]);
+	const entries = useMemo(
+		() => replayEntries(filterReplayEvents(events, query, kind), run.started_at, phaseId),
+		[events, run.started_at, phaseId, query, kind],
+	);
 	const latestId = useMemo(() => latestReplayEvent(entries), [entries]);
 	const phaseNames = useMemo(() => new Map(phases.map((phase) => [phase.phase_id, phase.name])), [phases]);
 	const phaseCounts = useMemo(() => {
@@ -243,6 +251,54 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 					</button>
 				))}
 			</section>
+			<div className="trace-filters trace-replay__filters">
+				<label>
+					Find recorded events
+					<input
+						type="search"
+						value={query}
+						maxLength={256}
+						placeholder="Event name, ID or payload text"
+						onChange={(event) => {
+							setPlaying(false);
+							setFollowing(false);
+							setEventId(null);
+							setQuery(event.target.value);
+						}}
+					/>
+				</label>
+				<label>
+					Event kind
+					<select
+						value={kind}
+						onChange={(event) => {
+							setPlaying(false);
+							setFollowing(false);
+							setEventId(null);
+							setKind(event.target.value);
+						}}
+					>
+						<option value="">All kinds</option>
+						{kinds.map((value) => (
+							<option key={value}>{value}</option>
+						))}
+					</select>
+				</label>
+				{(query || kind) && (
+					<button
+						type="button"
+						onClick={() => {
+							setPlaying(false);
+							setFollowing(false);
+							setQuery("");
+							setKind("");
+							setEventId(null);
+						}}
+					>
+						Reset event filters
+					</button>
+				)}
+			</div>
 			{current ? (
 				<div className="trace-replay__workspace">
 					<div className="trace-replay__sequence">
@@ -297,7 +353,11 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 				</div>
 			) : (
 				<p className="trace-replay__empty">
-					{phaseId ? "No events were recorded for this phase." : "No events have been recorded for this run."}
+					{query || kind
+						? "No recorded event matches these filters. Reset event filters to restore the sequence."
+						: phaseId
+							? "No events were recorded for this phase."
+							: "No events have been recorded for this run."}
 				</p>
 			)}
 			<p className="trace-replay__timing">

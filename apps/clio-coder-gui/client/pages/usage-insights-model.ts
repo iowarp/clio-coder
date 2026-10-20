@@ -142,3 +142,16 @@ export function usageCallShares(models: UsageModelInsight[]) {
 			}),
 	};
 }
+
+export function filterUsageModels(
+	models: readonly UsageModelInsight[],
+	query: string,
+	coverage: string,
+): UsageModelInsight[] {
+	const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+	return models.filter((row) => {
+		const text = [row.model, row.target, ...row.sources].join(" ").toLocaleLowerCase();
+		const incomplete = [row.calls, row.tokens, row.cost].some((amount) => amount.value === null || amount.partial);
+		return terms.every((term) => text.includes(term)) && (coverage !== "incomplete" || incomplete);
+	});
+}

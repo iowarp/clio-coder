@@ -1,4 +1,5 @@
 import type { TraceEvent } from "../../../contracts/traces.js";
+import { matchesText } from "../run-inspection-model.js";
 
 export const REPLAY_SPEEDS = [0.5, 1, 2, 4, 8] as const;
 export const REPLAY_WINDOW = 9;
@@ -59,4 +60,14 @@ export function replayDelay(current: ReplayEntry, next: ReplayEntry, speed: numb
 	const gap = current.startedMs !== null && next.startedMs !== null ? next.startedMs - current.startedMs : 0;
 	const rate = REPLAY_SPEEDS.some((candidate) => candidate === speed) ? speed : 1;
 	return Math.max(reducedMotion ? 500 : 80, (gap > 0 ? Math.min(gap, 5000) : 500) / rate);
+}
+
+export function filterReplayEvents(events: readonly TraceEvent[], query: string, kind: string): TraceEvent[] {
+	return events.filter(
+		(event) =>
+			(!kind || event.type === kind) && matchesText(query, [event.name, event.type, event.event_id, event.payload_json]),
+	);
+}
+export function replayEventKinds(events: readonly TraceEvent[]): string[] {
+	return [...new Set(events.map((event) => event.type))].sort();
 }

@@ -1,24 +1,30 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
+import { InspectionError } from "../design/run-inspection.js";
+import "./run-inspection.css";
 import { Facts } from "../design/facts.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import { UsageInsights } from "./usage-insights.js";
-import { usageLabel, usageView } from "./usage-model.js";
+import { filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
 import "./usage.css";
 
 export function UsagePage({ client }: { client: Client }) {
 	const selection = useWorkspaceSelection(client);
+	const [factQuery, setFactQuery] = useState("");
 	const query = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["usage", selection.id],
 		enabled: !!selection.id,
 		queryFn: () => client.call(routes.usage, { ...emptyInput, params: { id: selection.id } }),
 	});
 	const view = query.data ? usageView(query.data) : null;
+	const facts = query.data ? filterUsageFacts(query.data.facts, factQuery) : [];
 	return (
 		<section className="usage-page">
 			<PanelHeading
@@ -34,11 +40,29 @@ export function UsagePage({ client }: { client: Client }) {
 			<div className="usage-scope">
 				<WorkspacePicker selection={selection} />
 				{view && <span>{view.window}</span>}
+				<button
+					type="button"
+					disabled={!selection.id || query.isFetching}
+					onClick={() => {
+						void query.refetch();
+					}}
+				>
+					{query.isFetching ? "Refreshing usage…" : "Refresh usage"}
+				</button>
 			</div>
 			<p className="usage-introduction">A research ledger for your models, calls, and computational spend.</p>
 			{!selection.id && <PanelEmpty>{emptyState.unread("usage ledger for this workspace")}</PanelEmpty>}
 			{selection.id && query.isPending && <p role="status">Reading usage records…</p>}
-			{query.error && <p role="alert">{query.error.message}</p>}
+			{query.error && (
+				<InspectionError
+					title="Usage report unavailable"
+					error={query.error}
+					busy={query.isFetching}
+					retry={() => {
+						void query.refetch();
+					}}
+				/>
+			)}
 			{view && query.data && (
 				<>
 					<section className="usage-totals" aria-label="Window totals">
@@ -113,8 +137,33 @@ export function UsagePage({ client }: { client: Client }) {
 							installation records. Model rows combine disjoint session and worker sources; aggregate totals are never added
 							again.
 						</p>
+						<div className="usage-explore-controls">
+							<label>
+								Search recorded facts
+								<input
+									type="search"
+									value={factQuery}
+									onChange={(event) => setFactQuery(event.target.value)}
+									maxLength={256}
+									placeholder="Fact name, model, session or recorded value"
+								/>
+							</label>
+							{factQuery && (
+								<button type="button" onClick={() => setFactQuery("")}>
+									Reset fact search
+								</button>
+							)}
+						</div>
+						<p className="usage-chart-footnote" role="status">
+							{facts.length} of {query.data.facts.length} recorded facts shown.
+						</p>
+						{!facts.length && (
+							<PanelEmpty>
+								{factQuery ? "No recorded fact matches this search." : "No source facts were retained for this window."}
+							</PanelEmpty>
+						)}
 						<div className="usage-fact-list">
-							{query.data.facts.map((fact) => (
+							{facts.map((fact) => (
 								<details key={JSON.stringify(fact)}>
 									<summary>
 										{usageLabel(fact.name)}
