@@ -30,7 +30,7 @@ import { observeResponsesModelId } from "./apis/responses-model-id.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
-import { instrumentProviderCall } from "./provider-diagnostics.js";
+import { instrumentProviderCall, type ProviderCallScope } from "./provider-diagnostics.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
 export interface EngineRegisteredApiProvider extends ProviderStreams {
@@ -150,10 +150,36 @@ export function engineStreamSimple(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
+	return scopedEngineStreamSimple(model, context, options, "side");
+}
+
+/**
+ * The session's own turn requests, and the prewarm that replays them through
+ * the agent's stream function. Only these take a runtime's main-thread cache
+ * retention, so prewarm and turn send the same cache_control (#422).
+ */
+export function engineMainStreamSimple(
+	model: Model<Api>,
+	context: Context,
+	options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+	return scopedEngineStreamSimple(model, context, options, "main");
+}
+
+function scopedEngineStreamSimple(
+	model: Model<Api>,
+	context: Context,
+	options: SimpleStreamOptions | undefined,
+	scope: ProviderCallScope,
+): AssistantMessageEventStream {
 	return filterAssistantProseStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
-			instrumentProviderCall(model, withCodexPromptItems(model, guarded), (effective) =>
-				observeResponsesModelId(model, effective, (observed) => dispatchEngineStreamSimple(model, context, observed)),
+			instrumentProviderCall(
+				model,
+				withCodexPromptItems(model, guarded),
+				(effective) =>
+					observeResponsesModelId(model, effective, (observed) => dispatchEngineStreamSimple(model, context, observed)),
+				scope,
 			),
 		),
 		model,

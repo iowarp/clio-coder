@@ -5,14 +5,26 @@ import type { Api, AssistantMessageEventStream, Model, StreamOptions } from "@ea
 import type { TargetCacheSettings } from "../domains/providers/types/target-descriptor.js";
 import { findEngineEnvKeys } from "./env-api-keys.js";
 
+/**
+ * Which caller a provider call serves. A subscription runtime may give the
+ * session's own turn requests a longer cache lifetime; workers and side calls
+ * (compaction, memory, judges, side questions) keep the provider default, as
+ * Claude Code does for its subagents and side requests (#422).
+ */
+export type ProviderCallScope = "main" | "side";
+
+type ClioCoderCacheMetadata = { clioCoder?: { cache?: TargetCacheSettings; mainThreadCacheRetention?: "long" } };
+
 /** Process-owned opt-in reaches every native engine call, including prewarm and workers. */
 export function instrumentProviderCall<T extends StreamOptions>(
 	model: Model<Api>,
 	options: T | undefined,
 	invoke: (options: T | undefined) => AssistantMessageEventStream,
+	scope: ProviderCallScope = "side",
 ): AssistantMessageEventStream {
 	let effective = options;
-	const configured = (model as Model<Api> & { clioCoder?: { cache?: TargetCacheSettings } }).clioCoder?.cache?.retention;
+	const metadata = (model as Model<Api> & ClioCoderCacheMetadata).clioCoder;
+	const configured = metadata?.cache?.retention;
 	if (options?.cacheRetention === undefined && configured !== undefined) {
 		effective = { ...options, cacheRetention: configured } as T;
 	}
@@ -23,6 +35,8 @@ export function instrumentProviderCall<T extends StreamOptions>(
 				throw new Error("CLIO_CODER_ANTHROPIC_CACHE_RETENTION must be none, short, or long");
 			}
 			effective = { ...options, cacheRetention: retention } as T;
+		} else if (scope === "main" && metadata?.mainThreadCacheRetention !== undefined) {
+			effective = { ...options, cacheRetention: metadata.mainThreadCacheRetention } as T;
 		}
 	}
 	const path = process.env.CLIO_CODER_PROVIDER_DUMP_PATH;

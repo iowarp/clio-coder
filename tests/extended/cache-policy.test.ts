@@ -2,12 +2,14 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
+import anthropicMax from "../../src/domains/providers/runtimes/cloud/anthropic-max.js";
 import openai from "../../src/domains/providers/runtimes/cloud/openai.js";
 import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetCacheSettings } from "../../src/domains/providers/types/target-descriptor.js";
 import { streamSimple } from "../../src/engine/ai.js";
+import { engineMainStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 
 registerClioApiProviders();
@@ -17,6 +19,7 @@ async function request(
 	id: string,
 	retention?: TargetCacheSettings["retention"],
 	callRetention?: TargetCacheSettings["retention"],
+	send: typeof streamSimple = streamSimple,
 ) {
 	const model = runtime.synthesizeModel(
 		{
@@ -29,7 +32,7 @@ async function request(
 		null,
 	);
 	let captured: Record<string, unknown> | undefined;
-	const stream = streamSimple(
+	const stream = send(
 		model,
 		{
 			systemPrompt: "Authorized instructions.",
@@ -87,6 +90,24 @@ test("Anthropic call and target retention override the existing environment fall
 		strictEqual(short.includes('"ttl":"1h"'), false);
 		const disabled = JSON.stringify(await request(anthropic, "claude-sonnet-4-5", "long", "none"));
 		strictEqual(disabled.includes("cache_control"), false);
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
+		else process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION = previous;
+	}
+});
+
+test("only the subscription main thread defaults Anthropic to the 1h TTL (#422)", async () => {
+	const previous = process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
+	delete process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
+	const ttl1h = async (...args: Parameters<typeof request>) =>
+		JSON.stringify(await request(...args)).includes('"ttl":"1h"');
+	try {
+		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5", undefined, undefined, engineMainStreamSimple), true);
+		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5"), false);
+		strictEqual(await ttl1h(anthropic, "claude-haiku-5-5", undefined, undefined, engineMainStreamSimple), false);
+		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5", "short", undefined, engineMainStreamSimple), false);
+		process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION = "short";
+		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5", undefined, undefined, engineMainStreamSimple), false);
 	} finally {
 		if (previous === undefined) delete process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
 		else process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION = previous;

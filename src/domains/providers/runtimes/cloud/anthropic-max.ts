@@ -142,6 +142,10 @@ const anthropicMaxRuntime = {
 			api: "anthropic-messages",
 			provider: "anthropic",
 			defaultBaseUrl: "https://api.anthropic.com",
+			// Claude Code writes its main thread with the 1-hour TTL on this
+			// subscription; at 5 minutes every approval wait or long tool run
+			// between requests rewrote the whole prefix (#422).
+			mainThreadCacheRetention: "long",
 		});
 	},
 } satisfies RuntimeDescriptor;

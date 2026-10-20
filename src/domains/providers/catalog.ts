@@ -209,6 +209,12 @@ export interface CatalogBackedSynthesisInput {
 	compat?: Model<"openai-completions">["compat"];
 	/** Default request-body params for every call to this runtime; per-request keys still win. */
 	samplingParams?: Record<string, unknown>;
+	/**
+	 * Cache retention for the session's own turn requests when neither the
+	 * target nor CLIO_CODER_ANTHROPIC_CACHE_RETENTION names one. Workers and
+	 * side calls keep the provider default (#422).
+	 */
+	mainThreadCacheRetention?: "long";
 }
 
 export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput): Model<Api> {
@@ -231,7 +237,9 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 	}
 	const pricing = input.target.pricing === "free" ? FREE_RATES : input.target.pricing;
 	const targetHeaders = input.target.auth?.headers;
-	const model: Model<Api> & { clioCoder?: { cache: NonNullable<TargetDescriptor["cache"]> } } = {
+	const model: Model<Api> & {
+		clioCoder?: { cache?: NonNullable<TargetDescriptor["cache"]>; mainThreadCacheRetention?: "long" };
+	} = {
 		...catalogFields,
 		id: input.wireModelId,
 		name: `${input.wireModelId} (${input.target.id})`,
@@ -259,7 +267,16 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 			: structuredClone(builtin?.cost ?? FREE_RATES),
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
-		...(input.target.cache === undefined ? {} : { clioCoder: { cache: structuredClone(input.target.cache) } }),
+		...(input.target.cache === undefined && input.mainThreadCacheRetention === undefined
+			? {}
+			: {
+					clioCoder: {
+						...(input.target.cache === undefined ? {} : { cache: structuredClone(input.target.cache) }),
+						...(input.mainThreadCacheRetention === undefined
+							? {}
+							: { mainThreadCacheRetention: input.mainThreadCacheRetention }),
+					},
+				}),
 	};
 	const headers = { ...(input.defaultHeaders ?? {}), ...(builtin?.headers ?? {}), ...(targetHeaders ?? {}) };
 	if (Object.keys(headers).length > 0) {

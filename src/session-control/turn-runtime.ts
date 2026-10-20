@@ -37,7 +37,7 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
-import { engineStreamSimple } from "../engine/api-registry.js";
+import { engineMainStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
 import { applyToolRounds } from "../engine/provider-payload.js";
@@ -637,9 +637,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						? { kind: "required", toolName: middlewareChoice.toolName }
 						: undefined,
 				]);
-				if (!state.synthesisToolLock) return engineStreamSimple(currentModel, controlled.context, controlled.options);
+				if (!state.synthesisToolLock) return engineMainStreamSimple(currentModel, controlled.context, controlled.options);
 				const request = resolvedRequestContext(controlled.context);
-				return engineStreamSimple(
+				return engineMainStreamSimple(
 					currentModel,
 					{ ...request, systemPrompt: lockedSynthesisSystemPrompt(request.systemPrompt ?? "") },
 					controlled.options,
