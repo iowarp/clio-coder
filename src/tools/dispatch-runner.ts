@@ -2449,9 +2449,11 @@ export async function runDispatchTool(
 	// admission bounds. Keep these off the serializable approved request.
 	const dispatch = deps.dispatch;
 	const preparation = {
+		...(snapshot.detach ? { detached: true } : {}),
 		...(options?.turnConstraints === undefined ? {} : { turnConstraints: structuredClone(options.turnConstraints) }),
 		...(options?.hostRun === undefined ? {} : { hostRun: structuredClone(options.hostRun) }),
-		...(options?.signal === undefined ? {} : { signal: options.signal }),
+		// #425: detached admission and its retries belong to the batch, beyond the main turn's signal.
+		...(snapshot.detach || options?.signal === undefined ? {} : { signal: options.signal }),
 		...(timeoutMs === undefined ? {} : { deadlineAt: Date.now() + timeoutMs }),
 	};
 	deps.dispatch = {

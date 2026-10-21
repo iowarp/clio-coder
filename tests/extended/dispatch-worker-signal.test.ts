@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { afterEach, beforeEach, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import {
@@ -90,6 +91,8 @@ for (const scenario of [
 			strictEqual(owned.attestation()?.pid, owned.pid);
 			ok(owned.send?.(scenario));
 			const observed = await owned.promise;
+			strictEqual(owned.send?.({ type: "ledger_delta", entries: [] }), false);
+			strictEqual(owned.lastChannelFailure?.(), null);
 			strictEqual(observed.signal, scenario.signal);
 			if (scenario.stderrChars > 0) ok((observed.stderrTail?.length ?? 0) > 2_048);
 			const receipt = await run.finalPromise;
@@ -102,10 +105,11 @@ for (const scenario of [
 			// contract as a finished run.
 			const sealedCause =
 				scenario.signal === null
-					? /result contract failed: missing final result/u
+					? /worker loop ended without a receipt-sealed final assistant output/u
 					: /terminated by SIGKILL before it finished its output/u;
 			strictEqual(receipt.exitCode, 1);
-			strictEqual(receipt.outcomeCode, scenario.signal === null ? "result_contract_exhausted" : null);
+			strictEqual(receipt.outcomeCode, scenario.signal === null ? "worker_final_output_missing" : null);
+			strictEqual(isDeterministicOutcomeCode(receipt.outcomeCode), false);
 			match(receipt.outcomeDetail ?? "", sealedCause);
 			match(receipt.failureMessage ?? "", sealedCause);
 			strictEqual(envelope.outcomeDetail, receipt.outcomeDetail);
@@ -139,9 +143,6 @@ for (const scenario of [
 					false,
 					"removing the observed cause must invalidate the receipt seal",
 				);
-			} else {
-				strictEqual(receipt.outcomeDetail, "result contract failed: missing final result");
-				strictEqual(receipt.failureMessage, "result contract failed: missing final result");
 			}
 		} finally {
 			worker?.abort();

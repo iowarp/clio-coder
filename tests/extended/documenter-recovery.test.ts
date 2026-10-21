@@ -261,7 +261,7 @@ it("keeps failed Coder JSON sealed failed independently of terminal dispatch lif
 		const original = readFileSync(run.receiptPath, "utf8");
 		const receipt = JSON.parse(original) as RunReceipt;
 		strictEqual(receipt.outcome, "failed");
-		strictEqual(receipt.outcomeCode, "result_contract_exhausted");
+		strictEqual(receipt.outcomeCode, "result_contract_invalid");
 		strictEqual(receipt.quality.resultContract?.conformance, "fail");
 		ok(verifyReceiptIntegrity(receipt, run).ok);
 		await monitor.run({ mode: "collect", run_ids: [run.id] }, {});

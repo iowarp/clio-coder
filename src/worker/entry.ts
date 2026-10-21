@@ -391,7 +391,11 @@ async function main(): Promise<number> {
 	// through the same owner as a cancel and exitAfterDrain refuses a clean code.
 	// The failure surfaces inside an event sink; abort after it unwinds.
 	onStdoutFailure(() => queueMicrotask(abortOnce));
-	const onSignal = abortOnce;
+	const onSignal = (signal: NodeJS.Signals): void => {
+		// #425: a signal abort must leave its route in the worker's own diagnostics.
+		process.stderr.write(`[worker] ${signal} received; aborting run\n`);
+		abortOnce();
+	};
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
 	try {

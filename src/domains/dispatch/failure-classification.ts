@@ -120,6 +120,8 @@ export function classifyFailure(
 	if (evidence.policyDenied !== null || outcome === "denied_by_policy") return "policy";
 	if (evidence.permissionFailure || evidence.exitCode === WORKER_EXIT_PERMISSION_REQUIRED) return "permission";
 	if (isDeterministicOutcomeCode(code)) return "deterministic-task";
+	// #425: an unrepaired result can be retried, but its shape says nothing about endpoint health.
+	if (code === "result_contract_invalid") return "model-quality";
 	if (evidence.qualityGateFailure === true) return "model-quality";
 	// A node whose worker does not read this spec's version runs another
 	// build. The spec is sound and another node may read it, so the attempt

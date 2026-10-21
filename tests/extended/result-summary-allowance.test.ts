@@ -378,7 +378,7 @@ it("applies a per-dispatch allowance to the worker spec, the seal, and its ident
 		deepStrictEqual(specs[0]?.resultContract, narrow);
 		const failedReceipt = sealedReceipt(bundle, over);
 		strictEqual(failedReceipt.outcome, "failed");
-		strictEqual(failedReceipt.outcomeCode, "result_contract_exhausted");
+		strictEqual(failedReceipt.outcomeCode, "result_contract_invalid");
 		match(failedReceipt.outcomeDetail ?? "", /summary must be at most 512 UTF-8 bytes \(600 given\)/u);
 		strictEqual(failedReceipt.quality.resultContract?.conformance, "fail");
 		strictEqual(failedReceipt.quality.resultContract?.sourceId, resultContractSourceId(narrow));

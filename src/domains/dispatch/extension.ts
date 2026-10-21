@@ -510,6 +510,7 @@ function meterCostProvenance(
 
 interface ActiveRun {
 	runId: string;
+	detached?: boolean;
 	/** Original request, kept verbatim so a retry re-passes the full admission chain. */
 	req: DispatchRequest;
 	abort: () => void;
@@ -1091,9 +1092,10 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
 	"worker_no_work",
+	"worker_final_output_missing",
 ];
 
-const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker exited successfully without a receipt-sealed final assistant output";
+const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker loop ended without a receipt-sealed final assistant output";
 
 function hasDurableFinalOutput(output: RunReceiptOutput | undefined): boolean {
 	return output?.state === "final" && output.text.trim().length > 0;
@@ -7353,7 +7355,7 @@ export function createDispatchBundle(
 			if (
 				event.type === "clio_coder_run_outcome" &&
 				isRunOutcomeCode(event.payload?.outcomeCode) &&
-				event.payload.outcomeCode !== "worker_final_output_missing" &&
+				event.payload.outcomeCode !== "result_contract_invalid" &&
 				event.payload.outcomeCode !== "host_verification_rejected" &&
 				event.payload.outcomeCode !== "merge_withheld"
 			) {
@@ -7879,6 +7881,7 @@ export function createDispatchBundle(
 			),
 			recipe: lifecycle.recipe,
 			permit: lifecycle.permit,
+			...(preparation?.detached ? { detached: true } : {}),
 			startedAt,
 			timing,
 			targetId: lifecycle.target.target.id,
@@ -8184,6 +8187,9 @@ export function createDispatchBundle(
 		(async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
+				// #425: stop board traffic as soon as the process settles, before receipt work awaits.
+				unsubscribeAgentLedger?.();
+				unsubscribeAgentLedger = null;
 				recordingJournal.gap(envelope.id, result.droppedDisplayFrames ?? 0);
 				// The receipt reads meters the domain pump fills. Finalization
 				// always waits (bounded by the drain grace) for the pump to finish
@@ -8257,7 +8263,10 @@ export function createDispatchBundle(
 					failureMessage = finalDetail;
 				}
 				const resolvedOutcomeCode = resolveTrustedOutcomeCodes(trustedOutcomeCodes);
-				outcomeCode = resolvedOutcomeCode.code;
+				outcomeCode =
+					finalOutcome === "canceled" && resolvedOutcomeCode.code === "worker_final_output_missing"
+						? null
+						: resolvedOutcomeCode.code;
 				if (resolvedOutcomeCode.conflict !== null) {
 					reportDispatchDiagnostic(`run ${envelope.id}`, new Error(resolvedOutcomeCode.conflict));
 					finalDetail = [finalDetail, resolvedOutcomeCode.conflict].filter(Boolean).join("; ");
@@ -8323,6 +8332,17 @@ export function createDispatchBundle(
 				const capturedOutput = outputCapture.snapshot();
 				const observedRunEffects = runEffects.snapshot();
 				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
+				// #425: a cut-off loop never reached contract repair, even if its process exited zero.
+				if (
+					finalOutcome === "succeeded" &&
+					!hasDurableFinalOutput(capturedOutput) &&
+					appliedResultContract?.kind !== "architect-plan"
+				) {
+					finalOutcome = "failed";
+					outcomeCode = "worker_final_output_missing";
+					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
+					failureMessage = finalDetail;
+				}
 				const resultContract = validateRecipeResult({
 					contract: appliedResultContract,
 					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode),
@@ -8339,12 +8359,8 @@ export function createDispatchBundle(
 				const resultValidation = resultContract?.applicable === true ? resultContract.validation : null;
 				if (finalOutcome === "succeeded" && resultValidation?.conformance === "fail") {
 					finalOutcome = "failed";
-					// Deterministic: the worker already spent its bounded repair rounds
-					// on this exact validator reason. Re-running the assignment
-					// unchanged reproduces the same non-conforming result, so this has
-					// to carry an outcome code or retry policy reads it as transient
-					// and burns the fleet on identical attempts.
-					outcomeCode = "result_contract_exhausted";
+					// #425: only the worker's repair loop can attest that repair rounds were exhausted.
+					outcomeCode = "result_contract_invalid";
 					finalDetail = `result contract failed: ${resultValidation.reason ?? "invalid result"}`;
 					failureMessage = finalDetail;
 				}
@@ -9830,7 +9846,17 @@ export function createDispatchBundle(
 				context.bus.on(BusChannels.RunAborted, (payload) => {
 					if (payload.runId !== null) return;
 					if (payload.source !== "stream_cancel" && payload.source !== "loop_guard") return;
-					grantBroker.revokeSession(options?.getSessionId?.() ?? null, "the owning main turn was canceled");
+					const sessionId = options?.getSessionId?.() ?? null;
+					const batches = listDetachedBatches().filter(
+						(batch) => batch.sessionId === sessionId && (sessionId !== null || batch.cwd === process.cwd()),
+					);
+					const detachedAssignments = new Set(batches.flatMap((batch) => batch.runs.map((run) => run.assignmentId)));
+					// #425: detached permission requests belong to their assignments, beyond a foreground cancel.
+					for (const grant of grantBroker.list({ sessionId, state: "pending" })) {
+						if (!detachedAssignments.has(grant.rootRunId) && active.get(grant.runId)?.detached !== true) {
+							grantBroker.revokeRun(grant.runId, "the owning main turn was canceled");
+						}
+					}
 				}),
 			);
 			// No in-memory executor survives a process restart, so every active

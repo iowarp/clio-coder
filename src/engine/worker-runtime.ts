@@ -814,6 +814,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
+	let resultContractRepairsStarted = 0;
 	let toolExecutionsStarted = 0;
 	let zeroToolRepairQueued = false;
 	let resultContractRevisionActive = false;
@@ -1154,6 +1155,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				: undefined;
 		},
 		streamFn: (currentModel, transcript, streamOptions) => {
+			if (resultContractRepairsQueued > resultContractRepairsStarted) resultContractRepairsStarted += 1;
 			const round = ++responseRound;
 			const resolvedContext = resolvedRequestContext(transcript);
 			const anthropicCompat =
@@ -1404,7 +1406,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (!input.resultContract || acceptedHelperResult !== null || workerBoundFailure !== null) return;
 		helperTerminalPhase = true;
 		synthesisToolLock = true;
-		if (resultContractRepairsQueued >= RESULT_CONTRACT_REPAIR_LIMIT) {
+		if (resultContractRepairsStarted >= RESULT_CONTRACT_REPAIR_LIMIT) {
 			workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${reason}`;
 			emit({
 				type: "clio_coder_run_outcome",
@@ -1412,6 +1414,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			});
 			return;
 		}
+		// #425: rejected sibling handoffs share one repair request; queuing it is not running it.
+		if (resultContractRepairsQueued > resultContractRepairsStarted) return;
 		resultContractRepairsQueued += 1;
 		// Only semantic failures may spend the preauthorized revision allowance after terminal lock.
 		if (helperSemanticFailure && !resultContractRevisionActive && workerBudget.revision !== undefined) {
@@ -1620,7 +1624,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			} else if (violation !== null && formatFailure) {
 				repairHelperResult(violation);
 			} else if (violation !== null) {
-				if (zeroToolViolation !== null || resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT) {
+				if (zeroToolViolation !== null || resultContractRepairsStarted < RESULT_CONTRACT_REPAIR_LIMIT) {
 					if (zeroToolViolation !== null) zeroToolRepairQueued = true;
 					else resultContractRepairsQueued += 1;
 					if (zeroToolViolation === null && !resultContractRevisionActive && workerBudget.revision !== undefined) {
@@ -2167,6 +2171,27 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				if (errorMessage.length > 0) {
 					process.stderr.write(`[worker] agent ended with stopReason=error: ${errorMessage}\n`);
 				}
+				return { messages, exitCode: 1 };
+			}
+			const hasTerminalArtifact =
+				input.resultContract?.kind === "architect-plan" &&
+				validateResultContract({
+					contract: input.resultContract,
+					output: null,
+					cwd: contractCwd,
+					networkAllowed: true,
+					filesystem: nodeResultContractFilesystem(),
+				}).conformance === "pass";
+			// #425: an idle loop after a tool result or aborted/empty response never delivered a final answer.
+			if (
+				acceptedHelperResult === null &&
+				!hasTerminalArtifact &&
+				(!isTerminalAssistantMessage(messages.at(-1)) || !assistantMessageText(messages.at(-1)))
+			) {
+				const lastAssistant = [...messages].reverse().find(isAssistantMessage);
+				const detail = `worker loop ended without a final assistant output (last role=${messages.at(-1)?.role ?? "none"}, stopReason=${lastAssistant?.stopReason ?? "none"})`;
+				emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_final_output_missing", detail } });
+				process.stderr.write(`[worker] ${detail}\n`);
 				return { messages, exitCode: 1 };
 			}
 			if (helperSchema !== null && acceptedHelperResult === null) {

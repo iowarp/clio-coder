@@ -459,7 +459,8 @@ function attachWorkerChannel(
 	}
 
 	function diagnostics(): Omit<SpawnedWorkerResult, "exitCode" | "signal"> {
-		const stderrText = stderrTail.toString("utf8").trim();
+		// #425: control-pipe diagnostics must never displace the worker's own stderr.
+		const stderrText = stderrTail.toString("utf8").trim() || channelFailure?.message || "";
 		const dropped = queue.stats().droppedDisplayFrames + preAnnounce.stats().droppedDisplayFrames;
 		return {
 			...(stderrText.length > 0 ? { stderrTail: stderrText } : {}),
@@ -621,11 +622,12 @@ function attachWorkerChannel(
 		// A worker that closes or never drains its stdin makes every subsequent
 		// write raise EPIPE asynchronously. Without a listener that is an unhandled
 		// stream error; with one it is what it actually is, a channel failure.
-		child.stdin.on("error", (err) => {
-			channelFailure = new WorkerChannelFailure("spec", err instanceof Error ? err.message : String(err));
-			appendStderr(`[worker] ${channelFailure.message}\n`);
+		child.stdin.on("error", () => {
+			// #425: each write callback owns its frame type; the stream event has no frame identity.
 		});
-		child.stdin.write(`${JSON.stringify(spec)}\n`);
+		child.stdin.write(`${JSON.stringify(spec)}\n`, (error) => {
+			if (error) failChannel("spec", error.message);
+		});
 		startAnnounceDeadline();
 	}
 
@@ -986,11 +988,11 @@ function attachWorkerChannel(
 	 */
 	let queuedStdinBytes = 0;
 
-	function failChannel(operation: Exclude<WorkerChannelFailure["operation"], "spec">, detail: string): false {
+	function failChannel(operation: WorkerChannelFailure["operation"], detail: string): false {
+		if (!isAlive() || settled || abortStarted) return false;
 		const failure = new WorkerChannelFailure(operation, detail);
 		// A lost hook answer never hides the failure of a frame the run depends on.
 		if (operation !== "hook_result" || channelFailure === null) channelFailure = failure;
-		appendStderr(`[worker] ${failure.message}\n`);
 		return false;
 	}
 
@@ -1006,7 +1008,8 @@ function attachWorkerChannel(
 						: frameType === "hook_result"
 							? "hook_result"
 							: "steer";
-		if (!isAlive()) return failChannel(operation, "worker has exited");
+		// #425: receipt finalization can outlive process exit; late board updates are harmless no-ops.
+		if (!isAlive() || settled || abortStarted || leaderExit !== null) return false;
 		const stdin = child.stdin;
 		if (!stdin || stdin.destroyed || !stdin.writable) return failChannel(operation, "worker stdin is not writable");
 		const line = `${JSON.stringify(value)}\n`;

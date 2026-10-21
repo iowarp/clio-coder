@@ -240,6 +240,8 @@ export interface DispatchAdmissionObserver {
 /** Invocation-owned admission bounds; never serialized into model-authored requests. */
 export interface DispatchPreparationOptions {
 	turnConstraints?: TurnConstraints;
+	/** #425: a detached invocation owns its pending grants even before its batch record is durable. */
+	detached?: boolean;
 	/** Host ancestry for publication; kept separate from logical assignment/retry identity. */
 	hostRun?: { readonly runId: string; readonly lineage: Readonly<RunLineage> };
 	signal?: AbortSignal;

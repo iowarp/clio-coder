@@ -3391,6 +3391,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			pendingVisionSidecar?.abort();
 			pendingCompactionPaint?.abort();
 			const wasStreaming = state.streaming;
+			const wasCanceledByOperator = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
 			// Settle the queue before the abort settles the in-flight prompt: a
@@ -3414,6 +3415,32 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					emitFooterNotice("warning", state.activeInterruptReason, "turn.interrupted");
 			}
 			state.runtime?.agent.abort();
+			if (wasStreaming && !wasCanceledByOperator && (options?.source ?? "stream_cancel") === "stream_cancel") {
+				const sessionId = api.getSessionId();
+				const settled = api.whenSettled();
+				// #425: publish after stream closure so the notice cannot split the aborted assistant entry.
+				void import("../domains/dispatch/batch-store.js")
+					.then(async ({ listDetachedBatches }) => {
+						await settled;
+						if (disposed || api.getSessionId() !== sessionId) return;
+						const batches = listDetachedBatches().filter(
+							(batch) => batch.sessionId === sessionId && (sessionId !== null || batch.cwd === process.cwd()),
+						);
+						if (batches.length === 0) return;
+						emitNotice(
+							`Main turn canceled. Detached batches continue independently: ${batches.map((batch) => batch.id).join(", ")}. ` +
+								'Collect with monitor(mode="collect", batch_id="<batch-id>"); abort a worker with steer(action="cancel", run_id="<run-id>"). ' +
+								"Collect existing results or explicitly re-run failed assignments before replacing their work.",
+							"info",
+							"dispatch.detached-continues",
+						);
+					})
+					.catch((error: unknown) => {
+						process.stderr.write(
+							`[dispatch] cancel notice failed: ${error instanceof Error ? error.message : String(error)}\n`,
+						);
+					});
+			}
 			if (wasStreaming && deps.bus) {
 				deps.bus.emit(BusChannels.RunAborted, {
 					source: options?.source ?? "stream_cancel",

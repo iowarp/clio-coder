@@ -69,6 +69,7 @@ export type RunOutcomeCode =
 	| "worker_output_cap_exhausted"
 	| "loop_guard_tools_disabled_exhausted"
 	| "result_contract_exhausted"
+	| "result_contract_invalid"
 	| "worker_final_output_missing"
 	| "host_verification_rejected"
 	| "worker_no_work"
@@ -86,6 +87,7 @@ export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 		value === "worker_output_cap_exhausted" ||
 		value === "loop_guard_tools_disabled_exhausted" ||
 		value === "result_contract_exhausted" ||
+		value === "result_contract_invalid" ||
 		value === "worker_final_output_missing" ||
 		value === "host_verification_rejected" ||
 		value === "worker_no_work" ||
