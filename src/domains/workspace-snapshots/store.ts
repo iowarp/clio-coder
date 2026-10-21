@@ -593,15 +593,19 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		const diff = parseRawDiff(
 			(await runGit(["diff-tree", "-r", "-z", "--no-renames", target.tree, current], { cwd: repo.root, deadline })).stdout,
 		);
-		const restore: string[] = [];
-		const remove: string[] = [];
+		let restore: string[] = [];
+		let remove: string[] = [];
 		const kept: RewindKept[] = [];
 		for (const entry of diff) {
 			if (entry.fromMode === GITLINK_MODE || entry.toMode === GITLINK_MODE) {
 				kept.push({ path: entry.path, why: "nested repository" });
 			} else if (entry.status === "A") {
 				remove.push(entry.path);
-			} else if (entry.status === "D" && occupied(repo.root, entry.path)) {
+			} else if (
+				entry.status === "D" &&
+				occupied(repo.root, entry.path) &&
+				!lstatSync(insideRoot(repo.root, entry.path)).isDirectory()
+			) {
 				kept.push({ path: entry.path, why: "an ignored or untracked file is in the way" });
 			} else {
 				restore.push(entry.path);
@@ -629,14 +633,39 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 				kept.push({ path: rel, why: "ignored by .gitignore" });
 				return false;
 			};
-			return {
-				n: target.n,
-				restore: restore.filter(keepIgnored),
-				remove: remove.filter(keepIgnored),
-				kept,
-			};
+			restore = restore.filter(keepIgnored);
+			remove = remove.filter(keepIgnored);
 		}
-		return { n: target.n, restore, remove, kept };
+		// Audit finding 2: inspect replacement directories before deleting their
+		// children, or planning can then refuse to restore the original file.
+		const removable = new Set(remove);
+		const outsideRemoval = (rel: string): string | null => {
+			try {
+				const stat = lstatSync(insideRoot(repo.root, rel));
+				if (!stat.isDirectory()) return removable.has(rel) ? null : rel;
+				for (const name of readdirSync(insideRoot(repo.root, rel))) {
+					const blocker = outsideRemoval(`${rel}/${name}`);
+					if (blocker !== null) return blocker;
+				}
+				return null;
+			} catch {
+				return rel;
+			}
+		};
+		const blocked = kept.map((entry) => entry.path);
+		for (const rel of restore) {
+			if (!occupied(repo.root, rel) || !lstatSync(insideRoot(repo.root, rel)).isDirectory()) continue;
+			const blocker = outsideRemoval(rel);
+			if (blocker === null) continue;
+			blocked.push(rel);
+			kept.push({ path: rel, why: `directory contains ${blocker} outside the rewind removal plan` });
+		}
+		return {
+			n: target.n,
+			restore: restore.filter((rel) => !blocked.includes(rel)),
+			remove: remove.filter((rel) => !blocked.some((parent) => rel.startsWith(`${parent}/`))),
+			kept,
+		};
 	};
 
 	/** The target's pins placed against the refs as they stand; unreadable refs leave each pin `unknown`. */
@@ -673,7 +702,20 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			if (!stat.isDirectory()) return "a file outside the snapshot is in the way";
 		}
 		try {
-			if (lstatSync(path.join(root, rel)).isDirectory()) return "a directory is in the way";
+			if (lstatSync(path.join(root, rel)).isDirectory()) {
+				const pruneEmpty = (abs: string): void => {
+					for (const name of readdirSync(abs)) {
+						const child = path.join(abs, name);
+						if (lstatSync(child).isDirectory()) pruneEmpty(child);
+					}
+					rmdirSync(abs);
+				};
+				try {
+					pruneEmpty(insideRoot(root, rel));
+				} catch {
+					return "a directory is in the way";
+				}
+			}
 		} catch {
 			// Nothing there: Git creates it.
 		}
