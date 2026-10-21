@@ -17,6 +17,7 @@ export interface Edit {
  */
 const MAX_DIFF_LINE_CHARS = 500;
 const MAX_DIFF_BYTES = 32_768;
+const FUZZY_GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 function capDiffLine(text: string): string {
 	if (text.length <= MAX_DIFF_LINE_CHARS) return text;
@@ -55,16 +56,20 @@ export function stripBom(content: string): { bom: string; text: string } {
 	return content.startsWith("\uFEFF") ? { bom: "\uFEFF", text: content.slice(1) } : { bom: "", text: content };
 }
 
-function normalizeForFuzzyMatch(text: string): string {
+function normalizeFuzzyCharacters(text: string): string {
 	return text
 		.normalize("NFKC")
-		.split("\n")
-		.map((line) => line.trimEnd())
-		.join("\n")
 		.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
 		.replace(/[\u201C\u201D\u201E\u201F]/g, '"')
 		.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
 		.replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
+}
+
+function normalizeForFuzzyMatch(text: string): string {
+	return normalizeFuzzyCharacters(text)
+		.split("\n")
+		.map((line) => line.trimEnd())
+		.join("\n");
 }
 
 interface FuzzyMatchResult {
@@ -131,17 +136,50 @@ function lineIndexAtOffset(lines: ReadonlyArray<LineBounds>, offset: number): nu
 	return Math.max(0, lines.length - 1);
 }
 
-function lineSpanForFuzzyMatch(content: string, fuzzyContent: string, match: FuzzyMatchResult): FuzzyMatchResult {
+function originalOffsetForFuzzyLine(line: string, fuzzyLine: string, offset: number): number | null {
+	const segments = FUZZY_GRAPHEME_SEGMENTER.segment(line);
+	let normalized = "";
+	let originalOffset: number | null = offset === 0 ? 0 : null;
+	for (const { segment, index } of segments) {
+		normalized += normalizeFuzzyCharacters(segment);
+		if (normalized.length === offset) {
+			if (originalOffset !== null) return null;
+			originalOffset = index + segment.length;
+		}
+	}
+	return normalized.trimEnd() === fuzzyLine ? originalOffset : null;
+}
+
+// Map offsets exactly, never widening substring matches to whole lines: in audit finding 1,
+// replacing a widened span with newText alone deleted the rest of the line.
+function originalSpanForFuzzyMatch(content: string, fuzzyContent: string, match: FuzzyMatchResult): FuzzyMatchResult {
 	const originalLines = splitLineBounds(content);
 	const fuzzyLines = splitLineBounds(fuzzyContent);
 	const startLine = lineIndexAtOffset(fuzzyLines, match.index);
 	const endLine = lineIndexAtOffset(fuzzyLines, match.index + match.matchLength - 1);
-	const originalStart = originalLines[startLine]?.contentStart ?? 0;
-	const fallbackEndLine = originalLines[originalLines.length - 1];
-	if (!fallbackEndLine) return { found: false, index: -1, matchLength: 0 };
-	const originalEndLine = originalLines[endLine] ?? fallbackEndLine;
-	const includeTrailingLineEnding = fuzzyContent[match.index + match.matchLength - 1] === "\n";
-	const originalEnd = includeTrailingLineEnding ? originalEndLine.terminatorEnd : originalEndLine.contentEnd;
+	const originalStartLine = originalLines[startLine];
+	const originalEndLine = originalLines[endLine];
+	const fuzzyStartLine = fuzzyLines[startLine];
+	const fuzzyEndLine = fuzzyLines[endLine];
+	if (!originalStartLine || !originalEndLine || !fuzzyStartLine || !fuzzyEndLine) {
+		return { found: false, index: -1, matchLength: 0 };
+	}
+	const startOffset = match.index - fuzzyStartLine.contentStart;
+	const endOffset = match.index + match.matchLength - fuzzyEndLine.contentStart;
+	const originalStartOffset =
+		startOffset === fuzzyStartLine.text.length
+			? originalStartLine.text.length
+			: originalOffsetForFuzzyLine(originalStartLine.text, fuzzyStartLine.text, startOffset);
+	const originalEndOffset =
+		endOffset > fuzzyEndLine.text.length
+			? originalEndLine.terminatorEnd - originalEndLine.contentStart
+			: originalOffsetForFuzzyLine(originalEndLine.text, fuzzyEndLine.text, endOffset);
+	if (originalStartOffset === null || originalEndOffset === null) {
+		return { found: false, index: -1, matchLength: 0 };
+	}
+	const originalStart = originalStartLine.contentStart + originalStartOffset;
+	const coversWholeLines = startOffset === 0 && endOffset === fuzzyEndLine.text.length;
+	const originalEnd = coversWholeLines ? originalEndLine.contentEnd : originalEndLine.contentStart + originalEndOffset;
 	return { found: true, index: originalStart, matchLength: originalEnd - originalStart };
 }
 
@@ -275,7 +313,7 @@ function findFuzzyMatch(content: string, oldText: string, newText: string): Reso
 	const indexes = findNonOverlappingOccurrences(fuzzyContent, fuzzyOldText);
 	if (indexes.length === 0) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
 	const fuzzyMatch = { found: true, index: indexes[0] ?? -1, matchLength: fuzzyOldText.length };
-	const originalMatch = lineSpanForFuzzyMatch(content, fuzzyContent, fuzzyMatch);
+	const originalMatch = originalSpanForFuzzyMatch(content, fuzzyContent, fuzzyMatch);
 	if (!originalMatch.found) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
 	const matchedOriginal = content.slice(originalMatch.index, originalMatch.index + originalMatch.matchLength);
 	return {
