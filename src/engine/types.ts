@@ -98,6 +98,8 @@ export interface ToolRoundRecord {
 	choice: unknown;
 	attempt: 0 | 1;
 	downgradeReason?: string;
+	/** Host enforcement of an auto-routed requirement, separate from routing retries (#423). */
+	enforcement?: "follow-up" | "unmet";
 }
 
 /** #423: physical WebSocket sends, not provider usage or SSE HTTP retry counts. */

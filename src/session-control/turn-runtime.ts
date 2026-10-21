@@ -631,6 +631,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let unsettledSpendUsd = 0;
 		let admittedMessages: readonly AgentMessage[] = [];
 		let admittedSystemPrompt = "";
+		let requiredToolReminder: string | null = null;
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
 		const currentRun = (): boolean => runIdentity === deps.turnIdentity?.();
@@ -936,8 +937,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const handoffChanged = (await deps.continuity?.settle(signal)) ?? false;
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				const continued = await deliverInRunContinuation(signal);
+				const requirementChanged = requiredToolReminder !== null;
+				if (requiredToolReminder !== null) {
+					// Context-only host tails preserve task authority and the cached prefix (#423).
+					localRuntime.agent.state.messages.push({ role: "user", content: requiredToolReminder, timestamp: Date.now() });
+					requiredToolReminder = null;
+				}
 				const contextChanged =
-					(await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged || continued;
+					(await middleware.prepareToolContinuation(localRuntime, signal)) ||
+					handoffChanged ||
+					continued ||
+					requirementChanged;
 				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				const restored = context.installMemoryRestoration(localRuntime);
@@ -989,6 +999,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				deps.queueHandOver?.atFinishTurn(final);
 			}
 			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
+			if (requiredToolReminder !== null && currentRun() && state.activeInterruptReason === null) {
+				persistence.continueTracedTurn();
+				return { action: "continue" };
+			}
 			const terminal = pendingTerminalToolResult;
 			pendingTerminalToolResult = null;
 			if (terminal) persistence.appendTerminalToolAssistantTurn(terminal);
@@ -1069,6 +1083,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const eventClock = performance.now();
 			lastActivityAt = eventClock;
 			let enrichedEvent = event;
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				requiredToolReminder = middlewareToolChoice.completeRound(event.message);
+			}
 			if (event.type === "tool_execution_start") {
 				toolsInFlight += 1;
 				middlewareToolChoice.toolStarted(event.toolName);

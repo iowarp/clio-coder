@@ -1472,6 +1472,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		}
 	};
 	const unsubscribe = agent.subscribe(async (event) => {
+		if (
+			event.type === "message_end" &&
+			isAssistantMessage(event.message) &&
+			!synthesisToolLock &&
+			workerBoundFailure === null
+		) {
+			const reminder = middlewareToolChoice.completeRound(event.message);
+			if (reminder !== null) {
+				// The middleware round must run before this answer can seal a terminal result (#423).
+				const tail: AgentMessage = { role: "user", content: reminder, timestamp: Date.now() };
+				if (event.message.content.some((block) => block.type === "toolCall")) agent.steer(tail);
+				else agent.followUp(tail);
+				emit(event);
+				return;
+			}
+		}
 		if (event.type === "turn_start") {
 			workerModelRound += 1;
 			helperTurnFailure = null;

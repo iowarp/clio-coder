@@ -1259,6 +1259,7 @@ export function readToolRounds(record: unknown): ToolRoundRecord[] {
 				attempt: row.attempt,
 				...(typeof row.toolName === "string" ? { toolName: row.toolName.slice(0, 256) } : {}),
 				...(typeof row.downgradeReason === "string" ? { downgradeReason: row.downgradeReason.slice(0, 512) } : {}),
+				...(row.enforcement === "follow-up" || row.enforcement === "unmet" ? { enforcement: row.enforcement } : {}),
 			},
 		];
 	});
