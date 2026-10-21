@@ -71,7 +71,7 @@ function readObserved(key: string, nowMs: number): ObservedQuota | null {
 const codexTargets = new Map<string, string>();
 const STREAM_QUOTA_TTL_MS = 5 * 60_000;
 
-const anthropicTargets = new Map<string, string>();
+const anthropicTargets = new Map<string, { key: string; authProfile: string | null }>();
 const anthropicListeners = new Set<(targetId: string, snapshot: UsageSnapshot) => void>();
 
 /** #423: consumers share observations without coupling quota storage to an operator surface. */
@@ -83,13 +83,17 @@ export function onAnthropicQuotaChange(listener: (targetId: string, snapshot: Us
 }
 
 /** #423: scope inference quota to the target and sanitized account, independently of sibling CLI logins. */
-export function noteAnthropicStreamQuota(targetId: string, observation: AnthropicResponseObservation): void {
+export function noteAnthropicStreamQuota(
+	targetId: string,
+	observation: AnthropicResponseObservation,
+	authProfile: string | null,
+): void {
 	const snapshot = parseAnthropicHeaders(observation);
 	const storedAtMs = Date.parse(observation.observedAt);
 	if (snapshot === null || !Number.isFinite(storedAtMs)) return;
-	const key = JSON.stringify(["anthropic-stream", targetId, observation.accountScope]);
+	const key = JSON.stringify(["anthropic-stream", targetId, authProfile, observation.accountScope]);
 	const previous = observed.get(key);
-	const previousTarget = observed.get(anthropicTargets.get(targetId) ?? "");
+	const previousTarget = observed.get(anthropicTargets.get(targetId)?.key ?? "");
 	if (previous !== undefined && previous.storedAtMs > storedAtMs) return;
 	observed.set(key, {
 		snapshot,
@@ -101,7 +105,7 @@ export function noteAnthropicStreamQuota(targetId: string, observation: Anthropi
 				: null,
 	});
 	if (previousTarget !== undefined && previousTarget.storedAtMs > storedAtMs) return;
-	anthropicTargets.set(targetId, key);
+	anthropicTargets.set(targetId, { key, authProfile });
 	if (previousTarget?.snapshot?.rateLimit?.status === snapshot.rateLimit?.status) return;
 	for (const listener of anthropicListeners) {
 		try {
@@ -112,18 +116,27 @@ export function noteAnthropicStreamQuota(targetId: string, observation: Anthropi
 	}
 }
 
-export function observedAnthropicQuota(targetId: string, nowMs: number, accountScope?: string): ObservedQuota | null {
+export function observedAnthropicQuota(
+	targetId: string,
+	nowMs: number,
+	authProfile: string | null,
+	accountScope?: string,
+): ObservedQuota | null {
+	const target = anthropicTargets.get(targetId);
 	const key =
 		accountScope === undefined
-			? anthropicTargets.get(targetId)
-			: JSON.stringify(["anthropic-stream", targetId, accountScope]);
+			? target?.authProfile === authProfile
+				? target.key
+				: undefined
+			: JSON.stringify(["anthropic-stream", targetId, authProfile, accountScope]);
 	return key === undefined ? null : readObserved(key, nowMs);
 }
 
-/** #423: a fresh inference reading supersedes any surface's older poll cache. */
-export function anthropicStreamSnapshot(nowMs = Date.now()): UsageSnapshot | null {
+/** #423: only inference using the polled OAuth profile may supersede its cached usage. */
+export function anthropicStreamSnapshot(nowMs = Date.now(), authProfile = "anthropic-max"): UsageSnapshot | null {
 	let newest: UsageSnapshot | null = null;
-	for (const key of anthropicTargets.values()) {
+	for (const { key, authProfile: observedProfile } of anthropicTargets.values()) {
+		if (observedProfile !== authProfile) continue;
 		const reading = readObserved(key, nowMs);
 		if (reading?.stale || !reading?.snapshot) continue;
 		if (newest === null || Date.parse(reading.snapshot.fetchedAt ?? "") > Date.parse(newest.fetchedAt ?? ""))

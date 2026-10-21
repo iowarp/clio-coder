@@ -913,7 +913,11 @@ function prepareBackgroundMemoryRoute(
 							status.source === "stored-oauth" && stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
 						routeQuota = observedCodexQuota(targetId, scope, nowMs);
 					} else if (initial.refined.runtimeId === "anthropic-max") {
-						const streamed = observedAnthropicQuota(targetId, nowMs);
+						const status = providers.auth.statusForTarget(initial.refined.target, initial.refined.runtime);
+						const profile = status.source === "stored-oauth" ? status.providerId : null;
+						// #423: the provider-wide poll belongs only to Clio's default OAuth profile.
+						if (profile !== "anthropic-max") routeQuota = null;
+						const streamed = observedAnthropicQuota(targetId, nowMs, profile);
 						if (streamed !== null && !streamed.stale) routeQuota = streamed;
 					}
 					const decision = decideBackgroundStep({

@@ -371,7 +371,12 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const anthropicResponse = (message as { anthropicResponse?: AnthropicResponseObservation }).anthropicResponse;
 		if (message.api === "anthropic-messages" && anthropicResponse) payload.anthropicResponse = anthropicResponse;
 		if (anthropicResponse && state.runtime?.runtimeId === "anthropic-max") {
-			noteAnthropicStreamQuota(state.runtime.targetId, anthropicResponse);
+			const auth = state.runtime.lastAuthResolution;
+			noteAnthropicStreamQuota(
+				state.runtime.targetId,
+				anthropicResponse,
+				auth?.source === "stored-oauth" ? auth.providerId : null,
+			);
 		}
 		if (timing) payload.timing = timing;
 		if (deliveryId) {
