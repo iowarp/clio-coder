@@ -3571,6 +3571,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			continuity.cancel();
 			void continuity.pause();
 			state.currentTurnConstraints = sessionToolLimits;
+			state.activeSkillSurface = undefined;
+			state.currentPendingSkillPolicy = undefined;
 			if (state.runtime) {
 				state.runtime.agent.abort();
 				(state.runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
