@@ -707,6 +707,7 @@ export function buildReplayAgentMessagesFromTurns(
 ): AgentMessage[] {
 	const out = createOrderedReplaySink();
 	const seenToolCalls = new Set<string>();
+	const failedToolCalls = new Set<string>();
 	const { activeEntries, skillState, verified } = replaySkillContext(turns, options);
 	const postureEntries = activeEntriesBeforeCompactionCut(turns, options, false);
 	const postureGeneration = readPostureGeneration(postureEntries);
@@ -753,7 +754,11 @@ export function buildReplayAgentMessagesFromTurns(
 			case "message": {
 				const text = textBlockFromEntry(entry);
 				if (entry.role === "user" || entry.role === "assistant") {
-					if (entry.role === "assistant" && messageFailure(entry)) break;
+					if (entry.role === "assistant" && messageFailure(entry)) {
+						const message = richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS);
+						if (message) recordToolCallsFromMessage(message, failedToolCalls);
+						break;
+					}
 					const message = replayMessageFromEntry(entry);
 					if (message) {
 						out.push(message);
@@ -761,14 +766,17 @@ export function buildReplayAgentMessagesFromTurns(
 					}
 				} else if (entry.role === "tool_call") {
 					const call = extractToolCall(entry);
-					if (!seenToolCalls.has(call.id)) {
+					if (!seenToolCalls.has(call.id) && !failedToolCalls.has(call.id)) {
 						const message = replayMessageFromEntry(entry);
 						if (!message) break;
 						out.push(message);
 						recordToolCallsFromMessage(message, seenToolCalls);
 					}
 				} else if (entry.role === "tool_result") {
-					out.stageToolResult(toolResultMessageFromEntry(entry, wholeSkillResults.has(entry.turnId)));
+					const result = extractToolResult(entry);
+					if (seenToolCalls.has(result.id ?? entry.turnId)) {
+						out.stageToolResult(toolResultMessageFromEntry(entry, wholeSkillResults.has(entry.turnId)));
+					}
 				} else if (entry.role === "system") {
 					appendContextMessage(out, "user", `System note: ${text}`, entry.timestamp);
 				}

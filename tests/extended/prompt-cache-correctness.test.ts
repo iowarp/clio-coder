@@ -503,8 +503,8 @@ describe("session replay prefix stability", () => {
 			["user", "assistant", "toolResult", "toolResult", "toolResult", "assistant"],
 		);
 		deepStrictEqual(toolCallIds(messages), ["call-a", "call-b", "call-c"]);
-		// A result the batch never issued keeps its ledger position after the
-		// known ones; the batch boundary is the next non-result message.
+		// Finding 5: a result the batch never issued has no provider call to pair
+		// with. Drop it while preserving each batch's known result order.
 		const orphaned: SessionEntry[] = [
 			entries[0] as SessionEntry,
 			entries[1] as SessionEntry,
@@ -516,13 +516,7 @@ describe("session replay prefix stability", () => {
 			ledgerEntry(7, "assistant", { role: "assistant", content: [toolCall("call-d", "d.ts")], stopReason: "toolUse" }),
 			ledgerEntry(8, "tool_result", toolResult("call-d", "d body")),
 		];
-		deepStrictEqual(toolCallIds(buildReplayAgentMessagesFromTurns(orphaned)), [
-			"call-a",
-			"call-b",
-			"call-c",
-			"call-x",
-			"call-d",
-		]);
+		deepStrictEqual(toolCallIds(buildReplayAgentMessagesFromTurns(orphaned)), ["call-a", "call-b", "call-c", "call-d"]);
 	});
 });
 
