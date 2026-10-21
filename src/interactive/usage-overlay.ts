@@ -134,6 +134,12 @@ function summaryBlock(
 						promptCache.uncachedPrefillTokens === null ? "not reported" : formatTokens(promptCache.uncachedPrefillTokens),
 					] as const,
 					[
+						"re-prefilled (estimate)",
+						promptCache.reprefilledTokens == null
+							? "not reported"
+							: `${formatTokens(promptCache.reprefilledTokens)} · ${promptCache.cacheBreakCalls} breaks`,
+					] as const,
+					[
 						"cache verdicts",
 						`hot ${promptCache.verdictCounts.hot} · partial ${promptCache.verdictCounts.partial} · cold ${promptCache.verdictCounts.cold} · small ${promptCache.verdictCounts.small} · unknown ${promptCache.verdictCounts.unknown}`,
 					] as const,

@@ -641,6 +641,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						? { kind: "required", toolName: middlewareChoice.toolName }
 						: undefined,
 				]);
+				// #423: fingerprint the control applied to this call before middleware can change it.
+				context.noteCacheRequestToolChoice?.(JSON.stringify(controlled.options?.toolChoice ?? "auto"));
 				delete localRuntime.lastProviderStatus;
 				const pinnedPrefix = enginePinnedPrefix(localRuntime.agent);
 				const requestOptions = {

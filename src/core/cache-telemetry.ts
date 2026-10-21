@@ -43,6 +43,8 @@ export function uncachedPrefillTokens(backend: BackendCompletionTimings | null |
 }
 
 export type CacheBreakCause =
+	| "none"
+	| "tool_choice_changed"
 	| "prompt_recompiled"
 	| "reasoning_changed"
 	| "tools_changed"
@@ -60,19 +62,30 @@ export interface CacheCallObservation {
 	cacheWriteTokens: number;
 	inclusiveInputTokens: number;
 	shortfallTokens: number | null;
-	/** #423: unknown also represents calls with no attributed break; inspect shortfall first. */
+	/** #423: none is within the reuse band; unknown is an unattributed break. */
 	cause: CacheBreakCause;
 	causeBasis: "provider" | "host" | "inferred";
 	idleMs: number | null;
 	ttl: { ms: number | null; source: "declared" | "unknown" };
 	providerDiagnostic?: { provider: string; type: string; missedInputTokens?: number };
 	comparisonId?: string;
+	changedSection?: string;
+	requestFingerprint?: CacheRequestFingerprint;
 	transport?: { mode: "websocket" | "sse" | "http"; request: "full" | "delta" | "unknown"; reason?: string };
+}
+
+export interface CacheRequestFingerprint {
+	targetId: string;
+	modelId: string;
+	thinkingLevel: string;
+	toolChoice: string;
+	replayTruncationHash?: string;
 }
 
 export interface CacheCallBaseline {
 	inclusiveInputTokens: number;
 	endedAt: number;
+	requestFingerprint?: CacheRequestFingerprint;
 }
 
 /** #423: keep provider usage unchanged and compare only within one context generation. */
@@ -81,23 +94,47 @@ export function buildCacheCallObservation(
 	previous: CacheCallBaseline | null,
 	hostColdReasons: readonly string[],
 	now: number,
+	requestFingerprint?: CacheRequestFingerprint,
 ): CacheCallObservation {
 	const hostCauses: Readonly<Record<string, CacheBreakCause>> = {
+		model_changed: "model_changed",
+		tool_choice_change: "tool_choice_changed",
+		input_changed: "input_changed",
 		thinking_change: "reasoning_changed",
 		tool_surface_change: "tools_changed",
 		prompt_recompiled: "prompt_recompiled",
 		compaction: "compaction",
 		working_set_evict: "working_set_evict",
 	};
-	const reason = hostColdReasons[0];
+	const expected = previous?.inclusiveInputTokens ?? null;
+	const shortfall = expected === null ? null : Math.max(0, expected - usage.cacheRead);
+	// #423: healthy appends lost 91–849 tokens at the provider's 128-token boundaries.
+	// Require both >1,024 lost tokens and >10% loss before declaring a break.
+	const broke = expected !== null && shortfall !== null && shortfall > 1_024 && usage.cacheRead < 0.9 * expected;
+	const prior = previous?.requestFingerprint;
+	const fingerprintCause =
+		prior && requestFingerprint
+			? prior.targetId !== requestFingerprint.targetId || prior.modelId !== requestFingerprint.modelId
+				? "model_changed"
+				: prior.thinkingLevel !== requestFingerprint.thinkingLevel
+					? "reasoning_changed"
+					: prior.replayTruncationHash !== requestFingerprint.replayTruncationHash
+						? "input_changed"
+						: prior.toolChoice !== requestFingerprint.toolChoice
+							? "tool_choice_changed"
+							: undefined
+			: undefined;
+	const reason = hostColdReasons.find((candidate) => hostCauses[candidate] !== undefined);
+	const cause = fingerprintCause ?? (reason === undefined ? undefined : hostCauses[reason]);
 	return {
-		expectedCachedTokens: previous?.inclusiveInputTokens ?? null,
+		expectedCachedTokens: expected,
 		cacheReadTokens: usage.cacheRead,
 		cacheWriteTokens: usage.cacheWrite,
 		inclusiveInputTokens: usage.input + usage.cacheRead + usage.cacheWrite,
-		shortfallTokens: previous === null ? null : Math.max(0, previous.inclusiveInputTokens - usage.cacheRead),
-		cause: reason === undefined ? "unknown" : (hostCauses[reason] ?? "unknown"),
-		causeBasis: reason === undefined ? "inferred" : "host",
+		shortfallTokens: shortfall,
+		cause: broke ? (cause ?? "unknown") : "none",
+		causeBasis: broke && cause !== undefined ? "host" : "inferred",
+		...(requestFingerprint ? { requestFingerprint } : {}),
 		idleMs: previous === null ? null : Math.max(0, now - previous.endedAt),
 		ttl: { ms: null, source: "unknown" },
 	};

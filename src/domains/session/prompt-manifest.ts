@@ -36,6 +36,7 @@ export const PROMPT_MANIFEST_VERSION = 4;
 export interface PromptManifestSection {
 	id: string;
 	tokenEstimate: number;
+	contentHash?: string;
 }
 
 export interface PromptManifestFragment {
@@ -106,7 +107,12 @@ function isSha256(value: unknown): value is string {
 }
 
 function isPromptManifestSection(value: unknown): value is PromptManifestSection {
-	return isRecord(value) && typeof value.id === "string" && isNonNegativeInteger(value.tokenEstimate);
+	return (
+		isRecord(value) &&
+		typeof value.id === "string" &&
+		isNonNegativeInteger(value.tokenEstimate) &&
+		(value.contentHash === undefined || isSha256(value.contentHash))
+	);
 }
 
 function isPromptManifestFragment(value: unknown): value is PromptManifestFragment {

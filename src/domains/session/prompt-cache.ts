@@ -13,6 +13,10 @@ export interface PromptCacheTelemetry {
 	uncachedPrefillTokens: number | null;
 	/** Calls contributing to `uncachedPrefillTokens`; distinguishes no evidence from a measured zero. */
 	uncachedPrefillCalls: number;
+	/** #423: estimated old-prefix tokens evaluated again on measured break calls. */
+	reprefilledTokens: number | null;
+	cacheObservationCalls: number;
+	cacheBreakCalls: number;
 	/** Counts of the verdict persisted on each assistant call. */
 	verdictCounts: CacheVerdictCounts;
 	/** Number of assistant calls carrying a recognized persisted verdict. */
@@ -74,6 +78,7 @@ function cacheVerdict(value: unknown): BackendCacheVerdict | null {
 /** True when the fold contains at least one durable cache fact. */
 export function hasPromptCacheTelemetry(telemetry: PromptCacheTelemetry): boolean {
 	return (
+		telemetry.cacheObservationCalls > 0 ||
 		telemetry.verdictCalls > 0 ||
 		telemetry.uncachedPrefillCalls > 0 ||
 		Object.keys(telemetry.expectedColdReasonCounts).length > 0
@@ -101,11 +106,34 @@ export function foldPromptCacheTelemetry(entries: ReadonlyArray<SessionEntry>): 
 	let verdictCalls = 0;
 	let uncachedTotal = 0;
 	let uncachedPrefillCalls = 0;
+	let reprefilledTokens = 0;
+	let cacheObservationCalls = 0;
+	let cacheBreakCalls = 0;
 
 	for (const entry of entries) {
 		if (entry.kind !== "message" || entry.role !== "assistant" || !isRecord(entry.payload)) continue;
 		const promptCache = entry.payload.promptCache;
 		if (!isRecord(promptCache)) continue;
+
+		const observation = promptCache.observation;
+		if (
+			isRecord(observation) &&
+			typeof observation.cause === "string" &&
+			finiteNonNegative(observation.shortfallTokens)
+		) {
+			cacheObservationCalls += 1;
+			// #423: historical unknown calls also include healthy appends, so apply the same calibrated band.
+			if (
+				observation.cause !== "none" &&
+				observation.shortfallTokens > 1_024 &&
+				finiteNonNegative(observation.expectedCachedTokens) &&
+				finiteNonNegative(observation.cacheReadTokens) &&
+				observation.cacheReadTokens < 0.9 * observation.expectedCachedTokens
+			) {
+				reprefilledTokens += observation.shortfallTokens;
+				cacheBreakCalls += 1;
+			}
+		}
 
 		const verdict = cacheVerdict(promptCache.backendVerdict);
 		if (verdict !== null) {
@@ -134,6 +162,9 @@ export function foldPromptCacheTelemetry(entries: ReadonlyArray<SessionEntry>): 
 	return {
 		uncachedPrefillTokens: uncachedPrefillCalls > 0 ? uncachedTotal : null,
 		uncachedPrefillCalls,
+		reprefilledTokens: cacheObservationCalls > 0 ? reprefilledTokens : null,
+		cacheObservationCalls,
+		cacheBreakCalls,
 		verdictCounts,
 		verdictCalls,
 		expectedColdReasonCounts,

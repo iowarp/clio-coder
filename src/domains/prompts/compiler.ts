@@ -171,6 +171,7 @@ export interface RenderedPromptFragment {
 export interface PromptSection {
 	id: string;
 	tokenEstimate: number;
+	contentHash?: string;
 }
 
 export interface CompiledSessionPrompt {
@@ -857,7 +858,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		const trimmed = body.trim();
 		if (trimmed.length === 0) return;
 		parts.push(trimmed);
-		sections.push({ id, tokenEstimate: estimatePromptTokens(trimmed) });
+		sections.push({ id, tokenEstimate: estimatePromptTokens(trimmed), contentHash: sha256(trimmed) });
 	};
 
 	let harnessAwareness = "";
@@ -1096,7 +1097,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 		const trimmed = body.trim();
 		if (trimmed.length === 0) return;
 		parts.push(trimmed);
-		sections.push({ id, tokenEstimate: estimatePromptTokens(trimmed) });
+		sections.push({ id, tokenEstimate: estimatePromptTokens(trimmed), contentHash: sha256(trimmed) });
 	};
 
 	push("identity", identity.body);

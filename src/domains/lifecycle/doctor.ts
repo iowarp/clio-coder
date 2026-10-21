@@ -301,7 +301,7 @@ function latestSessionCacheFinding(stateDir: string): DoctorFinding | null {
 	return {
 		ok: true,
 		name: "cache telemetry",
-		detail: `last session ${latest.sessionId}: hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; top expected reason ${topReason === null ? "none" : `${topReason.reason} (${topReason.count})`}`,
+		detail: `last session ${latest.sessionId}: hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; re-prefilled ${telemetry.reprefilledTokens === null ? "not reported" : `${telemetry.reprefilledTokens} tokens (estimate), ${telemetry.cacheBreakCalls} breaks`}; top expected reason ${topReason === null ? "none" : `${topReason.reason} (${topReason.count})`}`,
 	};
 }
 

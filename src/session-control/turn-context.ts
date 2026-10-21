@@ -36,7 +36,12 @@ import {
 	type MemoryStepCompletedPayload,
 	type ResidencyMutationPayload,
 } from "../core/bus-events.js";
-import type { BackendCacheVerdict, BackendCompletionTimings, CacheCallBaseline } from "../core/cache-telemetry.js";
+import type {
+	BackendCacheVerdict,
+	BackendCompletionTimings,
+	CacheCallBaseline,
+	CacheRequestFingerprint,
+} from "../core/cache-telemetry.js";
 import { buildCacheCallObservation, uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -246,6 +251,9 @@ export type ExpectedColdReason =
 	| "working_set_evict"
 	| "residency"
 	| "thinking_change"
+	| "input_changed"
+	| "model_changed"
+	| "tool_choice_change"
 	| "tool_surface_change"
 	| "prompt_recompiled"
 	/**
@@ -353,6 +361,7 @@ export interface TurnContext {
 	emitContextWindowWarningTransition(warning: string | null): void;
 	/** Record one known cache disturbance for the current or next call. */
 	noteColdReason(reason: ExpectedColdReason): void;
+	noteCacheRequestToolChoice(toolChoice: string): void;
 	/** Consume disturbances since the last settled run (T3.3 honesty). */
 	consumeExpectedColdReasons(runtimeId: string): void;
 	/** Prompt-cache record for one persisted assistant call, with cold-reason stamp. */
@@ -575,6 +584,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let nextAssistantColdReasons: ExpectedColdReason[] = [];
 	let cacheCallBaseline: CacheCallBaseline | null = null;
 	let cacheCallBaselineLoaded = false;
+	let cacheRequestToolChoice = "auto";
+	let nextChangedSection: string | undefined;
+	let previousPromptSections: SessionPromptCompileRecord["sections"] | null = null;
 	const resetCacheCallBaseline = (): void => {
 		cacheCallBaseline = null;
 		// #423: a generation reset must not reload the pre-reduction ledger baseline.
@@ -585,6 +597,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const TIER_INDEPENDENT_COLD_REASONS: ReadonlySet<ExpectedColdReason> = new Set([
 		"working_set_evict",
 		"thinking_change",
+		"model_changed",
+		"input_changed",
+		"tool_choice_change",
 		"tool_surface_change",
 		"prompt_recompiled",
 	]);
@@ -769,7 +784,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return null;
 		}
 		const records = readPromptCompileRecords(currentSession);
-		resumedPromptHash = records[records.length - 1]?.systemPromptHash ?? null;
+		const previous = records[records.length - 1];
+		resumedPromptHash = previous?.systemPromptHash ?? null;
+		previousPromptSections = previous?.sections ?? null;
 		return resumedPromptHash;
 	};
 
@@ -2485,7 +2502,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						contextWindow,
 						contextWindowSource,
 						projectPreload: result.projectPreload ?? null,
-						sections: result.sections.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate })),
+						sections: result.sections.map((s) => ({
+							id: s.id,
+							tokenEstimate: s.tokenEstimate,
+							...(s.contentHash === undefined ? {} : { contentHash: s.contentHash }),
+						})),
 						fragments: result.fragmentManifest.map((f) => ({
 							id: f.id,
 							relPath: f.relPath,
@@ -2547,10 +2568,23 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// the stamp requires the hash to have moved, not merely to have a predecessor.
 				if (entry.previousHash !== null && entry.previousHash !== entry.systemPromptHash) {
 					noteColdReason("prompt_recompiled");
+					// #423: compare exact ordered sections; old manifests without hashes cannot attribute bytes.
+					if (previousPromptSections?.every((section) => section.contentHash !== undefined)) {
+						const count = Math.max(previousPromptSections.length, entry.sections.length);
+						for (let index = 0; index < count; index += 1) {
+							const before = previousPromptSections[index];
+							const after = entry.sections[index];
+							if (before?.id !== after?.id || before?.contentHash !== after?.contentHash) {
+								nextChangedSection ??= after?.id ?? before?.id;
+								break;
+							}
+						}
+					}
 				}
 			} catch {
 				// Ledger logging is diagnostics, not control flow; never abort a turn.
 			}
+			previousPromptSections = entry.sections;
 			appendPromptCompileRecord(currentMeta, entry);
 		},
 
@@ -2748,6 +2782,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		},
 
+		noteCacheRequestToolChoice(toolChoice): void {
+			cacheRequestToolChoice = toolChoice;
+		},
+
 		promptCachePayloadForAssistant(usage: Usage, backend?: BackendCompletionTimings): Record<string, unknown> {
 			// Per-call prompt-cache record (T3.2) keeps normalized provider usage
 			// beside any timings captured from the server response. The run's first
@@ -2765,7 +2803,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					if (entry.kind === "compactionSummary" || entry.kind === "contextEviction") break;
 					if (entry.kind !== "message" || entry.role !== "assistant") continue;
 					const payload = entry.payload as {
-						promptCache?: { input?: number; cacheRead?: number; cacheWrite?: number };
+						promptCache?: {
+							input?: number;
+							cacheRead?: number;
+							cacheWrite?: number;
+							observation?: { requestFingerprint?: CacheRequestFingerprint };
+						};
 					} | null;
 					const prior = payload?.promptCache;
 					const endedAt = Date.parse(entry.timestamp);
@@ -2773,19 +2816,55 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						cacheCallBaseline = {
 							inclusiveInputTokens: prior.input + (prior.cacheRead ?? 0) + (prior.cacheWrite ?? 0),
 							endedAt,
+							...(prior.observation?.requestFingerprint ? { requestFingerprint: prior.observation.requestFingerprint } : {}),
 						};
 					}
 					break;
 				}
 			}
+			// #423: fingerprint only truncations verified against their durable operator text.
+			// A later fresh connection with the same replayed bytes is not another rewrite.
+			const truncated: string[] = [];
+			for (const message of state.runtime?.agent.state.messages ?? []) {
+				if (message.role !== "user") continue;
+				const text = extractUserText(message);
+				const marker = /\n\n\[\.\.\. (\d+) more characters truncated from replay context\]$/.exec(text);
+				if (!marker) continue;
+				const prefix = text.slice(0, marker.index);
+				const original = (deps.readSessionEntries?.() ?? []).find(
+					(entry) => entry.kind === "message" && entry.role === "user" && Date.parse(entry.timestamp) === message.timestamp,
+				);
+				if (original?.kind !== "message") continue;
+				const source = extractTurnText(original.payload);
+				if (source.startsWith(prefix) && source.length === prefix.length + Number(marker[1])) truncated.push(text);
+			}
+			const replayTruncationHash =
+				truncated.length > 0 ? createHash("sha256").update(JSON.stringify(truncated)).digest("hex") : undefined;
 			const now = Date.now();
 			const observation = buildCacheCallObservation(
 				{ input, cacheRead, cacheWrite },
 				cacheCallBaseline,
 				nextAssistantColdReasons,
 				now,
+				state.runtime
+					? {
+							targetId: state.runtime.targetId,
+							modelId: state.runtime.wireModelId,
+							thinkingLevel: state.runtime.runtimeResolution.effectiveThinkingLevel,
+							toolChoice: cacheRequestToolChoice,
+							...(replayTruncationHash === undefined ? {} : { replayTruncationHash }),
+						}
+					: undefined,
 			);
-			cacheCallBaseline = { inclusiveInputTokens: observation.inclusiveInputTokens, endedAt: now };
+			if (observation.cause === "prompt_recompiled" && nextChangedSection !== undefined) {
+				observation.changedSection = nextChangedSection;
+			}
+			nextChangedSection = undefined;
+			cacheCallBaseline = {
+				inclusiveInputTokens: observation.inclusiveInputTokens,
+				endedAt: now,
+				...(observation.requestFingerprint ? { requestFingerprint: observation.requestFingerprint } : {}),
+			};
 			const promptCache: Record<string, unknown> = {
 				input,
 				cacheRead,
@@ -2836,6 +2915,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			cacheCallBaselineLoaded = false;
 			if (state.runtime) setEngineCodexConfiguration(state.runtime.agent, undefined);
 			thinkingUsesConfigurationUpdate = false;
+			cacheRequestToolChoice = "auto";
+			nextChangedSection = undefined;
+			previousPromptSections = null;
 			memoryTurn = null;
 			memoryAuthorityEpoch += 1;
 			compactionController?.abort();

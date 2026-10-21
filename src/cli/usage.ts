@@ -772,6 +772,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 					fact: "session-cache",
 					sessionId: session.sessionId,
 					uncachedPrefillTokens: session.promptCache.uncachedPrefillTokens,
+					reprefilledTokens: session.promptCache.reprefilledTokens,
+					cacheBreakCalls: session.promptCache.cacheBreakCalls,
 					verdictCounts: session.promptCache.verdictCounts,
 				});
 			}
@@ -970,10 +972,11 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		process.stdout.write(
 			indent(
 				formatColumns([
-					["session", "uncached prefill", "hot/partial/cold/small/unknown"],
+					["session", "uncached prefill", "re-prefilled (estimate)", "hot/partial/cold/small/unknown"],
 					...cacheSessions.map((session) => [
 						session.sessionId,
 						session.promptCache.uncachedPrefillTokens === null ? "n/a" : String(session.promptCache.uncachedPrefillTokens),
+						session.promptCache.reprefilledTokens === null ? "n/a" : String(session.promptCache.reprefilledTokens),
 						[
 							session.promptCache.verdictCounts.hot,
 							session.promptCache.verdictCounts.partial,

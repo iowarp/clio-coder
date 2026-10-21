@@ -111,6 +111,7 @@ import {
 	SKILL_CONTEXT_STATE,
 } from "../domains/session/entries.js";
 import { operatorTextOfUserPayload } from "../domains/session/history.js";
+import { readPromptCompileRecords } from "../domains/session/prompt-manifest.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
@@ -2486,6 +2487,36 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						? state.currentTurnConstraints
 						: snapshotTurnConstraints(narrowTurnConstraints(promptToolLimits, options.constraints));
 				const previousRunSnapshot = state.lastRunSnapshot;
+				let previousThinkingLevel: string | undefined = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
+				if (previousThinkingLevel === undefined) {
+					// #423: resume can append the newly requested dial before this loop boots.
+					// Recover what the last call used, ignoring changes after that call.
+					const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+					const entry = [...entries].reverse().find((row) => row.kind === "message" && row.role === "assistant");
+					const lastCall = entry ? entries.indexOf(entry) : -1;
+					if (entry?.kind === "message") {
+						const payload = entry.payload as {
+							promptCache?: { observation?: { requestFingerprint?: { thinkingLevel?: string } } };
+						} | null;
+						previousThinkingLevel = payload?.promptCache?.observation?.requestFingerprint?.thinkingLevel;
+						if (previousThinkingLevel === undefined) {
+							const meta = deps.session?.current();
+							const compile = meta
+								? readPromptCompileRecords(meta)
+										.reverse()
+										.find((record) => record.at <= entry.timestamp)
+								: undefined;
+							previousThinkingLevel = compile?.thinkingLevel ?? undefined;
+							const change = entries
+								.slice(0, lastCall)
+								.reverse()
+								.find((row) => row.kind === "thinkingLevelChange");
+							if (change?.kind === "thinkingLevelChange" && (!compile || change.timestamp > compile.at)) {
+								previousThinkingLevel = change.thinkingLevel;
+							}
+						}
+					}
+				}
 				let agentRuntime: AgentRuntime | null;
 				try {
 					await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
@@ -2954,7 +2985,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						}
 					}
 				}
-				const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
 				if (
 					previousThinkingLevel !== undefined &&
 					previousThinkingLevel !== agentRuntime.runtimeResolution.effectiveThinkingLevel &&
