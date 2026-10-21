@@ -224,6 +224,7 @@ export interface TurnContextDeps {
 	 * the provider reported. A host without it gets the old transcript notice.
 	 */
 	emitCacheNotice?: (reasons: ReadonlyArray<string>) => void;
+	emitCacheReuseNotice?: (text: string) => void;
 }
 
 export interface LiveContextEstimate {
@@ -284,7 +285,7 @@ export interface TurnContext {
 	): void;
 	/** Bind first-session creation after append without rereading the prepared snapshot. */
 	commitMemoryTurn(runtime: AgentRuntime): void;
-	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null>;
+	ensureSessionPrompt(agentRuntime: AgentRuntime, beforeSend?: boolean): Promise<CompiledSessionPrompt | null>;
 	thinkingUsesConfigurationUpdate(): boolean;
 	/**
 	 * Host-framed text the last `ensureSessionPrompt` left for the turn's
@@ -454,6 +455,9 @@ function messageListDigest(messages: ReadonlyArray<AgentMessage>): string {
 	return createHash("sha256").update(JSON.stringify(messages)).digest("hex");
 }
 
+// #423: five idle minutes warrants a reminder, without claiming a provider cache lifetime.
+const CACHE_REUSE_IDLE_NOTICE_MS = 5 * 60 * 1000;
+
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
@@ -513,6 +517,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
+	let sessionPromptInvalidated = false;
 	// #423: the memory section compiled into the live prompt (null until the
 	// first compile, a session switch, or a completed compaction), and the
 	// reminder text carrying what the live section added since.
@@ -594,6 +599,39 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let cacheRequestToolChoice = "auto";
 	let nextChangedSection: string | undefined;
 	let previousPromptSections: SessionPromptCompileRecord["sections"] | null = null;
+	let idleReuseNoticeStamp: string | null = null;
+	let recompileReuseNoticeStamp: string | null = null;
+	const loadCacheCallBaseline = (): void => {
+		if (!cacheCallBaselineLoaded) {
+			cacheCallBaselineLoaded = true;
+			// #423: a fresh process resumes only the active branch's last persisted call.
+			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			for (let index = entries.length - 1; index >= 0; index -= 1) {
+				const entry = entries[index];
+				if (!entry) continue;
+				if (entry.kind === "compactionSummary" || entry.kind === "contextEviction") break;
+				if (entry.kind !== "message" || entry.role !== "assistant") continue;
+				const payload = entry.payload as {
+					promptCache?: {
+						input?: number;
+						cacheRead?: number;
+						cacheWrite?: number;
+						observation?: { requestFingerprint?: CacheRequestFingerprint };
+					};
+				} | null;
+				const prior = payload?.promptCache;
+				const endedAt = Date.parse(entry.timestamp);
+				if (typeof prior?.input === "number" && Number.isFinite(endedAt)) {
+					cacheCallBaseline = {
+						inclusiveInputTokens: prior.input + (prior.cacheRead ?? 0) + (prior.cacheWrite ?? 0),
+						endedAt,
+						...(prior.observation?.requestFingerprint ? { requestFingerprint: prior.observation.requestFingerprint } : {}),
+					};
+				}
+				break;
+			}
+		}
+	};
 	const resetCacheCallBaseline = (): void => {
 		cacheCallBaseline = null;
 		// #423: a generation reset must not reload the pre-reduction ledger baseline.
@@ -2296,7 +2334,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		 * compile whose text differs from the previous prompt queues a
 		 * "promptRecompiled" ledger entry (written once the session exists).
 		 */
-		async ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null> {
+		async ensureSessionPrompt(agentRuntime: AgentRuntime, beforeSend = false): Promise<CompiledSessionPrompt | null> {
 			const signal = deps.turnSignal?.();
 			const originNavigation = navigationEpoch;
 			const current = (): boolean => !disposed && !signal?.aborted && originNavigation === navigationEpoch;
@@ -2469,7 +2507,32 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 			const frozenInputs = withMemory(frozenMemory);
 			const key = promptKey(frozenInputs);
-			if (sessionPrompt && sessionPromptKey === key) {
+			// #423: compare the already-resolved key before compiling; this query makes no provider call.
+			if (beforeSend) {
+				loadCacheCallBaseline();
+				if (cacheCallBaseline) {
+					const { endedAt, inclusiveInputTokens } = cacheCallBaseline;
+					const elapsedMs = Math.max(0, Date.now() - endedAt);
+					const idleStamp = JSON.stringify([navigationEpoch, sessionId, endedAt]);
+					const recompileStamp = JSON.stringify([navigationEpoch, sessionId, endedAt, key]);
+					const idle = elapsedMs >= CACHE_REUSE_IDLE_NOTICE_MS && idleReuseNoticeStamp !== idleStamp;
+					// #423: a resumed process has no prior key to compare; unknown is not changed.
+					const pendingRecompile =
+						sessionPromptKey !== null && sessionPromptKey !== key && recompileReuseNoticeStamp !== recompileStamp;
+					if (idle || pendingRecompile) {
+						if (idle) idleReuseNoticeStamp = idleStamp;
+						if (pendingRecompile) recompileReuseNoticeStamp = recompileStamp;
+						const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s` : `${Math.floor(elapsedMs / 60_000)}m`;
+						const reason = [idle ? "idle" : "", pendingRecompile ? "prompt recompile pending" : ""]
+							.filter(Boolean)
+							.join(", ");
+						const text = `reuse uncertain: last use ${elapsed} ago; estimated re-prefill ${inclusiveInputTokens.toLocaleString("en-US")} tokens (previous call input; ${reason})`;
+						if (deps.emitCacheReuseNotice) deps.emitCacheReuseNotice(text);
+						else deps.emitNotice(text);
+					}
+				}
+			}
+			if (sessionPrompt && !sessionPromptInvalidated && sessionPromptKey === key) {
 				lastSystemPromptReused = true;
 				sessionPromptDelta = memoryDelta(frozenMemory);
 				return sessionPrompt;
@@ -2540,6 +2603,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				sessionPrompt = result;
 				sessionPromptHash = result.systemPromptHash;
 				sessionPromptKey = compiledKey;
+				sessionPromptInvalidated = false;
 				frozenMemorySection = compiledMemory;
 				frozenMemorySessionId = sessionId;
 				sessionPromptDelta = memoryDelta(compiledMemory);
@@ -2604,7 +2668,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		invalidateSessionPromptCache(): void {
-			sessionPromptKey = null;
+			// #423: retain the known key for the dry comparison while forcing a fresh compile.
+			sessionPromptInvalidated = true;
 		},
 
 		addWorkingContextPaths(paths: ReadonlyArray<string>): void {
@@ -2808,35 +2873,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const input = typeof usage.input === "number" ? usage.input : 0;
 			const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
 			const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
-			if (!cacheCallBaselineLoaded) {
-				cacheCallBaselineLoaded = true;
-				// #423: a fresh process resumes only the active branch's last persisted call.
-				const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
-				for (let index = entries.length - 1; index >= 0; index -= 1) {
-					const entry = entries[index];
-					if (!entry) continue;
-					if (entry.kind === "compactionSummary" || entry.kind === "contextEviction") break;
-					if (entry.kind !== "message" || entry.role !== "assistant") continue;
-					const payload = entry.payload as {
-						promptCache?: {
-							input?: number;
-							cacheRead?: number;
-							cacheWrite?: number;
-							observation?: { requestFingerprint?: CacheRequestFingerprint };
-						};
-					} | null;
-					const prior = payload?.promptCache;
-					const endedAt = Date.parse(entry.timestamp);
-					if (typeof prior?.input === "number" && Number.isFinite(endedAt)) {
-						cacheCallBaseline = {
-							inclusiveInputTokens: prior.input + (prior.cacheRead ?? 0) + (prior.cacheWrite ?? 0),
-							endedAt,
-							...(prior.observation?.requestFingerprint ? { requestFingerprint: prior.observation.requestFingerprint } : {}),
-						};
-					}
-					break;
-				}
-			}
+			loadCacheCallBaseline();
 			// #423: fingerprint only truncations verified against their durable operator text.
 			// A later fresh connection with the same replayed bytes is not another rewrite.
 			const truncated: string[] = [];
@@ -2985,6 +3022,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			lastSystemPromptReused = false;
 			sessionPromptHash = null;
 			sessionPromptKey = null;
+			sessionPromptInvalidated = false;
 			resumedPromptHashRead = false;
 			resumedPromptHash = null;
 			sessionWorkingContextPaths.clear();

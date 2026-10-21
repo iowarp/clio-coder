@@ -1505,6 +1505,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		middleware,
 		emitNotice,
+		// #423: keep the pre-send estimate visible when a later cold-cache info notice arrives.
+		emitCacheReuseNotice: (text) =>
+			emit({ type: "notice", level: "warning", surface: "footer", text, key: "context.cache.reuse-uncertain" }),
 		emitCacheNotice: (reasons) =>
 			emit({
 				type: "notice",
@@ -2857,7 +2860,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (!admissionCurrent()) return;
 
 				// 3. Ensure the session prompt (compiles only on explicit events)
-				const compiledPrompt = await context.ensureSessionPrompt(agentRuntime);
+				const compiledPrompt = await context.ensureSessionPrompt(agentRuntime, true);
 				if (!admissionCurrent()) return;
 				submittedText = composeSubmittedText();
 
