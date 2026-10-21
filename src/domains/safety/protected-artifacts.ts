@@ -272,7 +272,7 @@ export function detectValidationCommand(
  */
 export function extractCommandWriteTargets(command: string): string[] {
 	const targets: string[] = [];
-	for (const segment of expandedShellSegments(command)) {
+	for (const segment of expandedShellSegments(command, 0, true)) {
 		collectRedirectTargets(segment, targets);
 		const argv = shellCommandArguments(segment);
 		collectInvokedWriteTargets(argv, targets);
@@ -509,14 +509,14 @@ export function hasUnparsedShellScript(command: string, depth = 0): boolean {
  * segments of the script it runs. The wrapper segment itself is kept: a
  * scanner that reads its operands (`cp`, `tee`) must still see them.
  */
-function expandedShellSegments(command: string, depth = 0): ShellToken[][] {
-	const segments = splitSegments(scanShellLike(command));
+function expandedShellSegments(command: string, depth = 0, skipHeredocBodies = false): ShellToken[][] {
+	const segments = splitSegments(scanShellLike(skipHeredocBodies ? withoutHeredocBodies(command, true) : command));
 	if (depth >= INNER_SHELL_MAX_DEPTH) return segments;
 	const out: ShellToken[][] = [];
 	for (const segment of segments) {
-		out.push(segment, ...substitutionSegments(segment, depth));
+		out.push(segment, ...substitutionSegments(segment, depth, skipHeredocBodies));
 		const script = segmentShellScript(shellCommandArguments(segment));
-		if (typeof script === "string") out.push(...expandedShellSegments(script, depth + 1));
+		if (typeof script === "string") out.push(...expandedShellSegments(script, depth + 1, skipHeredocBodies));
 	}
 	return out;
 }
@@ -685,7 +685,7 @@ const MAX_HEREDOCS = 64;
  * (tabs stripped first for `<<-`), or at the end of the command, as in bash.
  * Several here-documents on one line take their bodies in order.
  */
-function withoutHeredocBodies(command: string): string {
+function withoutHeredocBodies(command: string, keepSubstitutions = false): string {
 	let text = command;
 	for (let pass = 0; pass < MAX_HEREDOCS; pass += 1) {
 		const tokens = scanShellLike(text);
@@ -694,7 +694,7 @@ function withoutHeredocBodies(command: string): string {
 		const lineEnd = tokens.findIndex(
 			(token, index) => index > first && token.operator && token.value === ";" && text[token.start] === "\n",
 		);
-		const docs: Array<{ start: number; end: number; word: string; stripTabs: boolean }> = [];
+		const docs: Array<{ start: number; end: number; word: string; stripTabs: boolean; quoted: boolean }> = [];
 		for (let index = first; index < (lineEnd === -1 ? tokens.length : lineEnd); index += 1) {
 			const operator = tokens[index];
 			if (operator === undefined || !operator.operator || operator.value !== "<<") continue;
@@ -707,7 +707,7 @@ function withoutHeredocBodies(command: string): string {
 			// `<<` with no word is a syntax error: bash runs nothing, so leave it as written.
 			if (word === undefined || word.operator) return text;
 			const delimiter = stripTabs && text[word.start] === "-" ? word.value.slice(1) : word.value;
-			docs.push({ start: operator.start, end: word.end, word: delimiter, stripTabs });
+			docs.push({ start: operator.start, end: word.end, word: delimiter, stripTabs, quoted: word.quoted });
 		}
 		let head = text;
 		for (const doc of [...docs].reverse()) {
@@ -719,17 +719,44 @@ function withoutHeredocBodies(command: string): string {
 		}
 		const bodyStart = (tokens[lineEnd]?.start ?? text.length) + 1;
 		let cursor = bodyStart;
+		const substitutions: string[] = [];
 		for (const doc of docs) {
+			const start = cursor;
+			let bodyEnd = cursor;
 			while (cursor < text.length) {
+				bodyEnd = cursor;
 				const newline = text.indexOf("\n", cursor);
 				const line = text.slice(cursor, newline === -1 ? text.length : newline);
 				cursor = newline === -1 ? text.length : newline + 1;
 				if ((doc.stripTabs ? line.replace(/^\t+/u, "") : line) === doc.word) break;
+				bodyEnd = cursor;
 			}
+			if (keepSubstitutions && !doc.quoted) substitutions.push(...heredocSubstitutions(text.slice(start, bodyEnd)));
 		}
-		text = `${head.slice(0, bodyStart)}${text.slice(cursor)}`;
+		text = `${head.slice(0, bodyStart)}${substitutions.length > 0 ? `${substitutions.join("\n")}\n` : ""}${text.slice(cursor)}`;
 	}
 	return text;
+}
+
+function heredocSubstitutions(body: string): string[] {
+	const substitutions: string[] = [];
+	for (let index = 0; index < body.length; index += 1) {
+		const char = body[index];
+		if (char === "\\" && /[$`\\\n]/u.test(body[index + 1] ?? "")) {
+			index += 1;
+			continue;
+		}
+		const close =
+			char === "$" && body[index + 1] === "("
+				? matchingParen(body, index + 1)
+				: char === "`"
+					? matchingBacktick(body, index)
+					: null;
+		if (close === null) continue;
+		substitutions.push(body.slice(index, close + 1));
+		index = close;
+	}
+	return substitutions;
 }
 
 function collectPathWalk(command: string, depth: number, walk: CommandPathWalkState): void {
@@ -1982,10 +2009,14 @@ function matchingParen(command: string, open: number): number {
  * The segments of the substitutions a segment's words carry, read as child
  * commands; they run before the segment's own command does.
  */
-function substitutionSegments(tokens: ReadonlyArray<ShellToken>, depth: number): ShellToken[][] {
+function substitutionSegments(
+	tokens: ReadonlyArray<ShellToken>,
+	depth: number,
+	skipHeredocBodies = false,
+): ShellToken[][] {
 	if (depth >= INNER_SHELL_MAX_DEPTH) return [];
 	return tokens.flatMap((token) =>
-		(token.substitutions ?? []).flatMap((script) => expandedShellSegments(script, depth + 1)),
+		(token.substitutions ?? []).flatMap((script) => expandedShellSegments(script, depth + 1, skipHeredocBodies)),
 	);
 }
 
