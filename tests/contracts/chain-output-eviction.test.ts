@@ -263,8 +263,8 @@ describe("chain aggregate output", () => {
 		deepStrictEqual(captured.skills[0]?.content, [{ type: "text", text: body }]);
 		strictEqual(captured.skills[0]?.resultRef, "result");
 
-		// Replay parity: the verified, selected load is rebuilt whole for the
-		// model, past the ordinary replay cap; unselected, it keeps the cap.
+		// Replay parity: model replay sends the stored tool bytes whole, so the
+		// load replays exactly as first sent, selected or not (#423).
 		const replayedLoad = (ledger: SessionEntry[]) => {
 			const message = buildModelReplayAgentMessagesFromTurns(ledger).find(
 				(candidate) => candidate.role === "toolResult" && candidate.toolCallId === "load",
@@ -284,7 +284,7 @@ describe("chain aggregate output", () => {
 			},
 		];
 		strictEqual(replayedLoad(selected), text, "a verified selected skill load replays whole");
-		match(replayedLoad(entries), /more characters truncated from replay context\]$/u, "no selection, no exemption");
+		strictEqual(replayedLoad(entries), text, "an unselected load also replays its stored bytes");
 
 		const steps = aggregate.details.steps as Array<{ truncated: boolean }>;
 		ok(steps[0]);
