@@ -2440,6 +2440,28 @@ interface AcpPermissionQueue {
 	cancelWorkers: (() => void) | null;
 }
 
+function enqueuePermissionRequest(
+	queue: AcpPermissionQueue,
+	run: () => Promise<void>,
+	refuse: (reason: string) => Promise<void> | void,
+	diagnostics: ((line: string) => void) | undefined,
+): void {
+	queue.chain = queue.chain
+		.then(run, run)
+		.catch(async (err: unknown) => {
+			const reason = `ACP permission request failed: ${err instanceof Error ? err.message : String(err)}`;
+			try {
+				await refuse(reason);
+			} finally {
+				diagnostics?.(reason);
+			}
+		})
+		.catch(() => {
+			// ACP audit finding 1: even a failed refusal or diagnostic must not
+			// reject the detached queue and terminate the protocol connection.
+		});
+}
+
 /** How often a worker ask retries binding to an open tool call while the model is between calls. */
 const ACP_WORKER_ASK_BIND_POLL_MS = 200;
 const ACP_MAX_WORKER_ASK_ID_BYTES = 128;
@@ -2686,7 +2708,7 @@ function installWorkerAskBridge(
 				waiting.delete(ask.requestId);
 			}
 		};
-		queue.chain = queue.chain.then(run, run);
+		enqueuePermissionRequest(queue, run, () => answerWorker("deny"), input.diagnostics);
 	});
 	// Any resolution of an ask this bridge has not answered itself means the
 	// person's card is stale: the worker timed out, the run ended, or the owner revoked it.
@@ -2947,7 +2969,7 @@ function installPermissionBridge(input: {
 			try {
 				const answered = Promise.resolve()
 					.then(() =>
-						input.transport.request<AcpRequestPermissionResponse>(
+						input.transport.request<unknown>(
 							"session/request_permission",
 							{
 								sessionId,
@@ -3016,7 +3038,17 @@ function installPermissionBridge(input: {
 					// Exactly one option grants. `startsWith("allow")` would let a
 					// client mint `allow-always` and get a grant this server never
 					// offered as an option.
-					const answer = outcome.response.outcome;
+					const response = outcome.response;
+					const answer = isRecord(response) && isRecord(response.outcome) ? response.outcome : null;
+					if (
+						answer === null ||
+						(answer.outcome !== "cancelled" &&
+							(answer.outcome !== "selected" ||
+								typeof answer.optionId !== "string" ||
+								!ACP_PERMISSION_OPTION_IDS.some((id) => id === answer.optionId)))
+					) {
+						throw new Error("malformed ACP permission response: expected cancellation or an offered optionId");
+					}
 					if (answer.outcome === "cancelled") {
 						const reason = "ACP client cancelled permission";
 						// Abort before releasing the parked tools so their results cannot
@@ -3072,7 +3104,19 @@ function installPermissionBridge(input: {
 				queuedRequestDetails.delete(meta.requestId);
 			}
 		};
-		queue.chain = queue.chain.then(run, run);
+		enqueuePermissionRequest(
+			queue,
+			run,
+			(reason) => {
+				queue.cancel = null;
+				return resolve({ status: "denied", decidedBy: "error", reason }, "stop", () => {
+					emitQueuedErrorResolutions(meta.requestId, reason);
+					queuedRequestIds.clear();
+					queuedRequestDetails.clear();
+				});
+			},
+			input.diagnostics,
+		);
 	});
 	return {
 		unregister: () => {
