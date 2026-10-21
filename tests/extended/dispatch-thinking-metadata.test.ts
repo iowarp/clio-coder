@@ -55,6 +55,7 @@ async function setup(beforeMetadata?: () => Promise<void>) {
 	const reservations = dispatch.contract.reservations;
 	ok(reservations);
 	const tool = createDispatchTool({
+		getWorkspaceRoot: () => env.dir,
 		dispatch: {
 			...dispatch.contract,
 			reservations: {

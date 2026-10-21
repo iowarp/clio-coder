@@ -14,7 +14,7 @@ import type { AgentMessage } from "../../src/engine/types.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { resolvedDispatchPlanFromArgs } from "../../src/tools/dispatch-plan.js";
-import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
+import { parseWorkerSpec, WORKER_SPEC_VERSION_SKEW } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
@@ -58,6 +58,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			await providers.extension.start();
 			await bundle.extension.start();
 			const tool = createDispatchTool({
+				getWorkspaceRoot: () => env.dir,
 				dispatch: bundle.contract,
 				getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
 				getAutonomy: () => "yolo",
@@ -143,7 +144,10 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 				match(JSON.stringify(exhausted), /worker_context_exhausted/);
 				equal(fixture.requests.length, 1, "oversize context fails before a provider call");
 				ok(isDeterministicOutcomeCode("worker_context_exhausted"));
-				throws(() => parseWorkerSpec({ ...spec, specVersion: 3 }), /unsupported/);
+				throws(
+					() => parseWorkerSpec({ ...spec, specVersion: 3 }),
+					(error: unknown) => error instanceof Error && WORKER_SPEC_VERSION_SKEW.test(error.message.toLowerCase()),
+				);
 			}
 		} finally {
 			await bundle.extension.stop?.();

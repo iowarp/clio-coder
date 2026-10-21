@@ -10,21 +10,22 @@ function record(value: unknown): value is Record<string, unknown> {
 export function scoutReadWorkspace(input: {
 	agentId: string;
 	readOnlyScout: boolean;
+	workspaceRoot: string;
 	cwd?: string;
 	intent: unknown;
 	worktree: boolean;
 	writeRoots: unknown;
 }):
-	| { ok: true; cwd?: string; intent: unknown; externalReadRoot?: string }
+	| { ok: true; cwd: string; intent: unknown; externalReadRoot?: string }
 	| { ok: false; reason: string; message: string } {
 	const raw = input.intent;
 	const roots = record(raw) && Array.isArray(raw.read_roots) ? raw.read_roots : [];
 	const absolute = roots.filter((root): root is string => typeof root === "string" && path.isAbsolute(root.trim()));
-	const requested = input.cwd === undefined ? process.cwd() : path.resolve(input.cwd);
-	const workspace = canonicalizeExistingPath(process.cwd());
+	const requested = path.resolve(input.workspaceRoot, input.cwd ?? ".");
+	const workspace = canonicalizeExistingPath(input.workspaceRoot);
 	const relative = path.relative(workspace, canonicalizeExistingPath(requested));
 	const outsideCwd = relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
-	if (absolute.length === 0 && !outsideCwd) return { ok: true, ...(input.cwd ? { cwd: input.cwd } : {}), intent: raw };
+	if (absolute.length === 0 && !outsideCwd) return { ok: true, cwd: requested, intent: raw };
 	const refuse = (reason: string, message: string) => ({ ok: false as const, reason, message: `${reason}: ${message}` });
 	if (!input.readOnlyScout || input.agentId !== "scout") {
 		return refuse(

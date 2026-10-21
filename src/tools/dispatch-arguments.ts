@@ -79,6 +79,8 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 
 export interface DispatchArgumentParserOptions {
+	/** Host workspace used for repository-relative intent and Scout admission (#433). */
+	workspaceRoot?: string;
 	isReadOnlyScout?: (id: string) => boolean;
 	resolveFacts?: AgentRoleFactsResolver;
 	/** Installed recipe ids, so an `auto` baseline never names an agent this install lacks. */
@@ -232,6 +234,7 @@ function dispatchRequestFromArgs(
 	}
 	const workspace = scoutReadWorkspace({
 		agentId,
+		workspaceRoot: options.workspaceRoot ?? process.cwd(),
 		readOnlyScout: options.isReadOnlyScout?.(agentId) === true,
 		...(cwd ? { cwd } : {}),
 		intent: args.intent,
@@ -239,6 +242,8 @@ function dispatchRequestFromArgs(
 		writeRoots: args.writeRoots,
 	});
 	if (!workspace.ok) return workspace;
+	cwd = workspace.cwd;
+	request.cwd = cwd;
 	let rawIntent = workspace.intent;
 	if (workspace.externalReadRoot !== undefined) {
 		if (args.detach === true)
@@ -248,9 +253,7 @@ function dispatchRequestFromArgs(
 				message: "external_read_mode_unsupported: External Scout approval requires an attached parallel dispatch.",
 			};
 		request.externalReadRoot = workspace.externalReadRoot;
-		request.cwd = workspace.externalReadRoot;
 		request.readOnly = true;
-		cwd = workspace.externalReadRoot;
 		if (Object.hasOwn(args, "gate"))
 			return {
 				ok: false,
@@ -389,6 +392,7 @@ export function dispatchRequestsFromArgs(
 			}
 			const sharedWorkspace = scoutReadWorkspace({
 				agentId: parsed.request.agentId,
+				workspaceRoot: options.workspaceRoot ?? process.cwd(),
 				readOnlyScout: options.isReadOnlyScout?.(parsed.request.agentId) === true,
 				...(parsed.request.cwd ? { cwd: parsed.request.cwd } : {}),
 				intent: sharedIntent,

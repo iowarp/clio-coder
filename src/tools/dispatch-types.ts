@@ -88,6 +88,8 @@ export type DispatchExecutionSnapshot =
 	| DispatchListExecutionSnapshot;
 
 export interface DispatchToolDeps {
+	/** Active session workspace for external Scout admission (#433). */
+	getWorkspaceRoot?: () => string | undefined;
 	approveExternalRead?: (
 		root: string,
 		options?: ToolInvokeOptions,

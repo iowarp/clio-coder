@@ -272,8 +272,11 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		}
 	};
 
-	const parseRequests = (args: Record<string, unknown>) =>
-		dispatchRequestsFromArgs(args, {
+	const parseRequests = (args: Record<string, unknown>) => {
+		// A task cwd cannot supply its own approval boundary; only the host chooses the workspace (#433).
+		const sessionWorkspace = deps.getWorkspaceRoot?.() ?? deps.dispatch.owner?.().cwd ?? process.cwd();
+		return dispatchRequestsFromArgs(args, {
+			workspaceRoot: sessionWorkspace,
 			isReadOnlyScout: (id) =>
 				deps.getAgentSpecs().some((spec) => spec.id === id && id === "scout" && spec.capabilityClass === "read-only"),
 			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
@@ -285,7 +288,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			resolveIntent(rawIntent, cwd, externalReadRoot) {
 				// One root for discovery and for every sealed path, read once, so the
 				// check the host later runs is the check the catalog declared there (F6).
-				const workspaceRoot = externalReadRoot ?? process.cwd();
+				const workspaceRoot = externalReadRoot ?? sessionWorkspace;
 				// External Scouts cannot verify; do not inspect their project catalog before consent (#433).
 				const discovery =
 					externalReadRoot === undefined
@@ -335,6 +338,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				};
 			},
 		});
+	};
 	const trustExecution = (args: Record<string, unknown>, snapshot: DispatchExecutionSnapshot) => {
 		state.trustedExecutionSnapshots.set(args, deepFreeze(structuredClone(snapshot)));
 		return args;
