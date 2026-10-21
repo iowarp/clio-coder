@@ -288,6 +288,7 @@ import {
 import { sessionLedgersForRoots } from "../domains/session/related-ledgers.js";
 import { resumedSessionRoute } from "../domains/session/resumed-route.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
+import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js";
@@ -3373,6 +3374,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		cachedSettingsView = view;
 		return view;
 	};
+	const persistCurrentThinkingLevel = (): void => {
+		const meta = session?.current();
+		if (!session || !meta) return;
+		const chat = getCurrentSettings().chat;
+		const level = chat.thinkingLevel ?? "off";
+		const resolved =
+			chat.target && chat.model
+				? resolveRuntimeTarget(providers, {
+						targetId: chat.target,
+						wireModelId: chat.model,
+						requestedThinkingLevel: level,
+						use: "orchestrator",
+						requireTools: false,
+					})
+				: null;
+		const effort = resolved?.ok
+			? (resolved.target.modelRuntime.thinking.effort ??
+				(resolved.target.effectiveThinkingLevel === "off" ? "none" : resolved.target.effectiveThinkingLevel))
+			: undefined;
+		appendSessionThinkingLevel(session, level, effort, session.tree(meta.id).leafId);
+	};
+
 	effectiveSettingsForDispatch = getCurrentSettings;
 	// Recomputed on every read from live state, so a compaction summary that
 	// dropped a session-only route cannot change what Clio says about it (DF-7).
@@ -3654,6 +3677,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(settings.chat.target ? { target: settings.chat.target } : {}),
 				...(settings.chat.model ? { model: settings.chat.model } : {}),
 			});
+			persistCurrentThinkingLevel();
 		},
 		notice: (text) => {
 			if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(text);
@@ -3872,6 +3896,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}),
 			bumpSessionState,
 		);
+		persistCurrentThinkingLevel();
 	};
 	/**
 	 * A routing change at the scope the operator chose. "session" moves the live
@@ -3889,6 +3914,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 		applyRoutingPatch(sessionRouting, patch);
 		bumpSessionState();
+		persistCurrentThinkingLevel();
 	};
 	const readAcpSafeSettings = (): AcpSafeSettingsSnapshot => {
 		const settings = getCurrentSettings();
@@ -3920,6 +3946,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			applyRoutingPatch(sessionRouting, routingPatch);
 			bumpSessionState();
 		}
+		persistCurrentThinkingLevel();
 		return readAcpSafeSettings();
 	};
 	/**
@@ -3946,6 +3973,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}),
 			bumpSessionState,
 		);
+		persistCurrentThinkingLevel();
 	};
 	/**
 	 * Commit a single /settings edit, keyed by its config-path id. `next` is the
@@ -4022,9 +4050,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * ran on (planResumedRouting), at session scope: settings.yaml keeps
 	 * whatever default some session saved, possibly in another project. When
 	 * the session is going to run on a different route anyway (an explicit CLI
-	 * flag, a recorded target that is gone), that route is appended as the
-	 * session's newest, because the first runtime this process builds records
-	 * nothing and the next resume would otherwise go back to the old one.
+	 * flag, a recorded target that is gone), record that route immediately so
+	 * the next resume keeps the accepted choice (AUD-3 findings 2 and 3).
 	 * Returns the operator notice, if any; the caller knows where it can go.
 	 */
 	const restoreResumedSessionRoute = (pinned?: { route?: boolean; thinking?: boolean }): string | null => {
@@ -4038,8 +4065,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// current one, which is what resume did before it looked.
 			return null;
 		}
-		const plan = planResumedRouting(recorded, getCurrentSettings(), pinned);
-		if (plan.patch) applyRoutingAtScope(plan.patch, "session");
+		const plan = planResumedRouting(
+			recorded,
+			getCurrentSettings(),
+			pinned,
+			(config?.get() ?? readSettings()).chat.thinkingLevel ?? "off",
+		);
+		if (plan.patch) {
+			applyRoutingPatch(sessionRouting, plan.patch);
+			bumpSessionState();
+		}
 		const effective = getCurrentSettings().chat;
 		const parentTurnId = (() => {
 			try {
@@ -4064,29 +4099,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					target: effective.target,
 				});
 			}
-			const level = effective.thinkingLevel ?? "off";
-			if (pinned?.thinking === true && level !== recorded.thinkingLevel) {
-				const resolved =
-					effective.target && effective.model
-						? resolveRuntimeTarget(providers, {
-								targetId: effective.target,
-								wireModelId: effective.model,
-								requestedThinkingLevel: level,
-								use: "orchestrator",
-								requireTools: false,
-							})
-						: null;
-				const effectiveEffort = resolved?.ok
-					? (resolved.target.modelRuntime.thinking.effort ??
-						(resolved.target.effectiveThinkingLevel === "off" ? "none" : resolved.target.effectiveThinkingLevel))
-					: undefined;
-				session.appendEntry({
-					kind: "thinkingLevelChange",
-					parentTurnId,
-					thinkingLevel: level,
-					...(effectiveEffort !== undefined ? { effectiveEffort } : {}),
-				});
-			}
+			persistCurrentThinkingLevel();
 		} catch {
 			// Best effort, like the chat loop's own markers: a lost row only means
 			// the next resume restores the older route.
@@ -4867,7 +4880,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				chat,
-				...(session ? { session } : {}),
+				...(session
+					? {
+							session: {
+								...session,
+								create(input) {
+									const meta = session.create(input);
+									persistCurrentThinkingLevel();
+									return meta;
+								},
+							},
+						}
+					: {}),
 				...(session
 					? {
 							readSessionEntries: readSessionEntriesForCompact,
@@ -5015,6 +5039,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										...(settings.chat.target ? { target: settings.chat.target } : {}),
 										...(settings.chat.model ? { model: settings.chat.model } : {}),
 									});
+									persistCurrentThinkingLevel();
 									observability?.resetSession(session.current()?.id ?? null);
 									taskBoard.snapshot();
 								},
@@ -5777,6 +5802,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						applyRoutingPatch(sessionRouting, patch);
 					}
 					bumpSessionState();
+					persistCurrentThinkingLevel();
 					config?.reload?.();
 				} finally {
 					config?.releaseReloads?.();
@@ -5851,6 +5877,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						if (settings.chat.target) input.target = settings.chat.target;
 						if (settings.chat.model) input.model = settings.chat.model;
 						session.create(input);
+						persistCurrentThinkingLevel();
 						observability?.resetSession(session.current()?.id ?? null);
 						taskBoard.snapshot();
 					},

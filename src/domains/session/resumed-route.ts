@@ -11,9 +11,8 @@ import type { SessionEntry } from "./entries.js";
  *
  * A `modelChange` row without a target predates the field and names only a
  * runtime, which cannot say which target the model belonged to; it is skipped
- * rather than paired with a guess. The thinking level is present only when the
- * session recorded a change, because the level a session started at was never
- * written down.
+ * rather than paired with a guess. Legacy sessions without a thinking row leave
+ * that field unset so the caller can use the configured default (AUD-3 finding 2).
  */
 export function resumedSessionRoute(
 	meta: { target: string | null; model: string | null },

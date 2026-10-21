@@ -18,6 +18,7 @@ import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.js";
 import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
+import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { replaceEngineMessages, setEngineCodexUserTurn } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
@@ -506,6 +507,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				if (settings.chat.model) input.model = settings.chat.model;
 				deps.session.create(input);
 			}
+			this.appendThinkingLevelChangeEntry(
+				deps.getSettings().chat.thinkingLevel ?? "off",
+				state.runtime?.runtimeResolution.modelRuntime.thinking.effort ??
+					state.runtime?.runtimeResolution.effectiveThinkingLevel,
+			);
 			const userTurn = appendTurn(deps.session, {
 				kind: "user",
 				payload: origin === undefined ? { text } : { text, origin },
@@ -695,6 +701,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 					model: agentRuntime.wireModelId,
 				});
 			}
+			this.appendThinkingLevelChangeEntry(
+				agentRuntime.runtimeResolution.requestedThinkingLevel,
+				agentRuntime.runtimeResolution.modelRuntime.thinking.effort ??
+					agentRuntime.runtimeResolution.effectiveThinkingLevel,
+			);
 			const payload: Record<string, unknown> = images ? { content: [{ type: "text", text }, ...images] } : { text };
 			if (operatorText !== undefined && operatorText !== text) payload.operatorText = operatorText;
 			if (displayText !== undefined && displayText !== (operatorText ?? text)) payload.displayText = displayText;
@@ -782,15 +793,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			}
 			if (!deps.session?.current()) return;
 			try {
-				deps.session.appendEntry({
-					kind: "thinkingLevelChange",
-					...(effectiveEffort !== undefined ? { effectiveEffort } : {}),
-					parentTurnId: state.lastTurnId,
-					thinkingLevel,
-				});
+				appendSessionThinkingLevel(deps.session, thinkingLevel, effectiveEffort, state.lastTurnId);
 			} catch {
 				// Same as appendModelChangeEntry: a lost marker only means resume
-				// falls back to the current thinking level.
+				// falls back to its recorded level or configured default.
 			}
 		},
 	};

@@ -211,6 +211,7 @@ test("a thinking change is recorded in the session it took effect in", async () 
 			return current;
 		},
 		append: (turn: Record<string, unknown>) => ({ ...turn, id: `turn-${++turns}`, at: "2026-09-23T00:00:00.000Z" }),
+		readEntries: () => appended,
 		appendEntry: (entry: Record<string, unknown>) => {
 			appended.push(entry);
 			return entry;
@@ -238,14 +239,12 @@ test("a thinking change is recorded in the session it took effect in", async () 
 		appended.filter((row) => row.kind === "thinkingLevelChange").map((row) => row.thinkingLevel);
 	try {
 		await loop.submit("first");
-		// The level a session started at is the one it was created under; only a
-		// change needs a row, exactly like modelChange.
-		assert.deepEqual(thinkingRows(), []);
+		assert.deepEqual(thinkingRows(), ["off"]);
 		settings.chat.thinkingLevel = "high";
 		await loop.submit("second");
-		assert.deepEqual(thinkingRows(), ["high"]);
+		assert.deepEqual(thinkingRows(), ["off", "high"]);
 		await loop.submit("third");
-		assert.deepEqual(thinkingRows(), ["high"]);
+		assert.deepEqual(thinkingRows(), ["off", "high"]);
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();

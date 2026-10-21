@@ -172,7 +172,7 @@ export function createRoutingGestures(deps: RoutingGestureDeps): RoutingGestures
 export interface ResumedRoute {
 	target: string | null;
 	model: string | null;
-	/** Present only when the session recorded a thinking change. */
+	/** Present when the session recorded its initial thinking level or a change. */
 	thinkingLevel?: SessionThinkingLevel;
 }
 
@@ -196,6 +196,7 @@ export function planResumedRouting(
 	route: ResumedRoute,
 	settings: Readonly<ClioSettings>,
 	pinned: { route?: boolean; thinking?: boolean } = {},
+	defaultThinkingLevel: SessionThinkingLevel = settings.chat.thinkingLevel ?? "off",
 ): ResumedRoutingPlan {
 	const orchestrator: Partial<SessionRoutingTarget> = {};
 	let notice: string | null = null;
@@ -209,12 +210,11 @@ export function planResumedRouting(
 			orchestrator.model = route.model;
 		}
 	}
-	if (
-		pinned.thinking !== true &&
-		route.thinkingLevel !== undefined &&
-		route.thinkingLevel !== (settings.chat.thinkingLevel ?? "off")
-	) {
-		orchestrator.thinkingLevel = route.thinkingLevel;
+	// Legacy ledgers cannot recover their initial intent; use the configured default,
+	// never the thinking level of the conversation being left (AUD-3 finding 2).
+	const thinkingLevel = route.thinkingLevel ?? defaultThinkingLevel;
+	if (pinned.thinking !== true && thinkingLevel !== (settings.chat.thinkingLevel ?? "off")) {
+		orchestrator.thinkingLevel = thinkingLevel;
 	}
 	return { patch: Object.keys(orchestrator).length > 0 ? { orchestrator } : null, notice };
 }
