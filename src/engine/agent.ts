@@ -2,8 +2,10 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	createAssistantMessageEventStream,
 	createInitialSystemMessage,
+	getSystemMessageText,
 	toToolDeclaration,
 } from "@earendil-works/pi-ai";
+import { createHostPolicyMessage, isHostPolicyMessage } from "../core/host-policy-message.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { resolvedRequestContext } from "./context.js";
 import { omitImageBlocks } from "./image-context.js";
@@ -215,13 +217,39 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 }
 
 /** Clio persists conversation and compiled prompt separately; Pi receives one complete transcript. */
+export function engineInitialSystemPrompt(agent: Agent): string {
+	const initial = agent.state.messages[0];
+	// Pi's state.systemPrompt folds later policies into its text. Reusing that
+	// projection as the baseline would duplicate updates and rewrite the prefix (#423).
+	return initial?.role === "system"
+		? isHostPolicyMessage(initial)
+			? ""
+			: getSystemMessageText(initial)
+		: agent.state.systemPrompt;
+}
+
 export function replaceEngineMessages(
 	agent: Agent,
 	messages: Agent["state"]["messages"],
-	systemPrompt = agent.state.systemPrompt,
+	systemPrompt = engineInitialSystemPrompt(agent),
 ): void {
 	const initial = createInitialSystemMessage(systemPrompt, agent.state.tools.map(toToolDeclaration));
-	agent.state.messages = [...(initial ? [initial] : []), ...messages.filter((message) => message.role !== "system")];
+	agent.state.messages = [
+		...(initial ? [initial] : []),
+		...messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
+	];
+}
+
+export function appendEnginePolicyMessage(agent: Agent, id: string, content: string, timestamp: number): void {
+	if (
+		agent.state.messages.some(
+			(message) =>
+				isHostPolicyMessage(message) &&
+				(message as AgentMessage & { clio_coder_policy: { id: string } }).clio_coder_policy.id === id,
+		)
+	)
+		return;
+	agent.state.messages = [...agent.state.messages, createHostPolicyMessage(id, content, timestamp)];
 }
 
 const pinnedPrefixes = new WeakMap<Agent, PinnedPromptPrefix>();
@@ -233,7 +261,8 @@ export function enginePinnedPrefix(agent: Agent): PinnedPromptPrefix | undefined
 export function setEngineSystemPrompt(agent: Agent, systemPrompt: string, pinnedPrefix?: PinnedPromptPrefix): void {
 	if (pinnedPrefix) pinnedPrefixes.set(agent, pinnedPrefix);
 	else pinnedPrefixes.delete(agent);
-	if (agent.state.systemPrompt !== systemPrompt) replaceEngineMessages(agent, agent.state.messages, systemPrompt);
+	if (engineInitialSystemPrompt(agent) !== systemPrompt)
+		replaceEngineMessages(agent, agent.state.messages, systemPrompt);
 }
 
 /** Explicit host recovery can follow a terminal assistant. Empty input starts

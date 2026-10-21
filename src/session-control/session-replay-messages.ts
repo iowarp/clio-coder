@@ -7,6 +7,7 @@
  * names and shares the entry-decoding helpers.
  */
 
+import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
 import { captureSkillContext } from "../domains/session/compaction/compact.js";
 import type {
@@ -31,6 +32,7 @@ import {
 } from "../engine/messages.js";
 import type { AgentMessage } from "../engine/types.js";
 import { isSelfExplainingAbort } from "./chat-loop-messages.js";
+import { readPostureGeneration, readPostureUpdate } from "./posture-policy.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
 
 const MAX_REPLAY_TEXT_CHARS = 20_000;
@@ -706,6 +708,14 @@ export function buildReplayAgentMessagesFromTurns(
 	const out = createOrderedReplaySink();
 	const seenToolCalls = new Set<string>();
 	const { activeEntries, skillState, verified } = replaySkillContext(turns, options);
+	const postureEntries = activeEntriesBeforeCompactionCut(turns, options, false);
+	const postureGeneration = readPostureGeneration(postureEntries);
+	const postureUpdates = new Map<string, { entry: SessionEntry; text: string }>();
+	for (const entry of postureEntries) {
+		const update = readPostureUpdate(entry);
+		if (update && update.generationId === postureGeneration?.id)
+			postureUpdates.set(update.userTurnId, { entry, text: update.text });
+	}
 	// One emission point for the continuity blocks, tracked by a flag rather than
 	// by counting occurrences: the note has to appear exactly once whether the
 	// replay window holds a carrying summary, an eviction-only commit, or
@@ -736,6 +746,9 @@ export function buildReplayAgentMessagesFromTurns(
 				(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
 		);
 	for (const entry of replayEntries) {
+		const policy = postureUpdates.get(entry.turnId);
+		if (entry.kind === "message" && entry.role === "user" && policy)
+			out.push(createHostPolicyMessage(policy.entry.turnId, policy.text, timestampMillis(policy.entry.timestamp)));
 		switch (entry.kind) {
 			case "message": {
 				const text = textBlockFromEntry(entry);

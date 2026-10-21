@@ -1465,6 +1465,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		...(deps.liveSteering === false ? { liveSteering: false } : {}),
 		state,
 		getSettings: deps.getSettings,
+		...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
 		providers: deps.providers,
 		session: deps.session,
 		prompts: deps.prompts,
@@ -3082,6 +3083,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// A flushed queue rides Pi's opening poll, so it lands with this
 						// prompt's first model call; a held queue waits for the first slot.
 						queues.handOverBeforePrompt(agentRuntime.agent);
+						if (userTurnId) context.commitSessionPosture(agentRuntime, userTurnId);
 						return agentRuntime.agent.prompt(runtimePromptText, images);
 					});
 					if (

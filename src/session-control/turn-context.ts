@@ -2,11 +2,14 @@ import { assistantOutputChars } from "../core/assistant-output.js";
 import { semanticUsable } from "../core/config.js";
 import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import {
+	appendEnginePolicyMessage,
 	engineCodexUserTurn,
+	engineInitialSystemPrompt,
 	replaceEngineMessages,
 	setEngineCodexConfiguration,
 	setEngineCodexUserTurn,
@@ -16,6 +19,14 @@ import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
 import { createMessageListDigests } from "./message-list-digest.js";
+import {
+	effectivePosture,
+	POSTURE_GENERATION,
+	POSTURE_UPDATE,
+	type PostureGeneration,
+	postureCheckpoint,
+	readPostureGeneration,
+} from "./posture-policy.js";
 /**
  * Turn context ownership: the session-prompt compile cache, context-snapshot
  * accounting, prompt-cache honesty, and compaction. `runAutoCompact` is the
@@ -24,7 +35,7 @@ import { createMessageListDigests } from "./message-list-digest.js";
  * all flow through it.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ContextActivityPhase } from "../core/bus-events.js";
 import {
 	BusChannels,
@@ -85,6 +96,7 @@ import {
 	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import {
 	AutoCompactionTrigger,
 	DEFAULT_COMPACTION_THRESHOLD,
@@ -149,6 +161,7 @@ import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 const AUTO_COMPACT_FAILURE_LIMIT = 3;
 
 export interface TurnContextDeps {
+	getAutonomy?: () => AutonomyLevel;
 	turnSignal?: () => AbortSignal | undefined;
 	/**
 	 * The session's standing tool limits (operator flags, an ACP ceiling). The
@@ -287,6 +300,7 @@ export interface TurnContext {
 	commitMemoryTurn(runtime: AgentRuntime): void;
 	ensureSessionPrompt(agentRuntime: AgentRuntime, beforeSend?: boolean): Promise<CompiledSessionPrompt | null>;
 	thinkingUsesConfigurationUpdate(): boolean;
+	commitSessionPosture(agentRuntime: AgentRuntime, userTurnId: string): void;
 	/**
 	 * Host-framed text the last `ensureSessionPrompt` left for the turn's
 	 * reminder: what changed in frozen prompt inputs since the compile (#423).
@@ -518,6 +532,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
 	let sessionPromptInvalidated = false;
+	let postureGeneration: PostureGeneration | null = null;
+	let postureGenerationPersisted = false;
+	let pendingPosture: { inputs: SessionPromptInputs; effectiveAutonomy: string; rendered: Map<string, string> } | null =
+		null;
+	const pendingPolicyText = (): string | null => {
+		if (!pendingPosture || !deps.prompts?.renderSessionPostureUpdate) return null;
+		const autonomy = deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy ?? "default";
+		if (autonomy === pendingPosture.effectiveAutonomy) return null;
+		let text = pendingPosture.rendered.get(autonomy);
+		if (text === undefined) {
+			text = deps.prompts.renderSessionPostureUpdate(autonomy, pendingPosture.inputs);
+			pendingPosture.rendered.set(autonomy, text);
+		}
+		return text;
+	};
 	// #423: the memory section compiled into the live prompt (null until the
 	// first compile, a session switch, or a completed compaction), and the
 	// reminder text carrying what the live section added since.
@@ -755,8 +784,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			providerId: agentRuntime.targetId,
 			runtimeId: agentRuntime.runtimeId,
 			modelId: agentRuntime.wireModelId,
-			systemPrompt: agentRuntime.agent.state.systemPrompt,
-			conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
+			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
+			conversationMessages: agentRuntime.agent.state.messages.filter(
+				(message) => message.role !== "system" || isHostPolicyMessage(message),
+			),
 			activeToolSchemas: agentRuntime.agent.state.tools,
 			desiredContextWindow: details.desiredContextWindow,
 			effectiveContextWindow: details.effectiveContextWindow,
@@ -898,7 +929,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
 		const messages =
-			history?.messages ?? agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
+			history?.messages ??
+			agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message));
 		// The identity, route, and length checks are cheap and run first; `||`
 		// short-circuits, so the content digest is only computed for a prefix that
 		// still looks like the attested one. The digest covers the attested prefix
@@ -938,15 +970,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const estimateInput = {
-			systemPrompt: agentRuntime.agent.state.systemPrompt,
+			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
 			messages:
 				replayMessages === undefined && history
 					? history.messages
-					: (replayMessages ?? agentRuntime.agent.state.messages).filter((message) => message.role !== "system"),
+					: (replayMessages ?? agentRuntime.agent.state.messages).filter(
+							(message) => message.role !== "system" || isHostPolicyMessage(message),
+						),
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText, pendingUserImages } : {}),
 		};
 		const breakdown = estimateAgentContextBreakdown(estimateInput);
+		const policyText = pendingUserText === undefined ? null : pendingPolicyText();
+		const pendingPolicyTokens =
+			policyText === null ? 0 : estimateAgentMessageTokens({ role: "system", content: policyText });
+		breakdown.pendingUserTokens += pendingPolicyTokens;
 		const historyTokens = replayMessages === undefined ? reconciledHistoryTokens(agentRuntime, history) : null;
 		const anchor = reconciledAnchor;
 		// Provider usage already includes the old system prompt and schemas.
@@ -961,7 +999,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				: null;
 		const estimatedTokens =
 			reconciledTokens === null
-				? estimateAgentContextTokens(estimateInput)
+				? estimateAgentContextTokens(estimateInput) + pendingPolicyTokens
 				: breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 		return {
 			// The estimate is a floor, not a competing verdict: it prices material
@@ -1030,7 +1068,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Same serialization the anchor validates its attested prefix with, so
 			// the two cannot disagree about whether the conversation changed.
 			history?.digest() ??
-				messageListDigest(agentRuntime.agent.state.messages.filter((message) => message.role !== "system")),
+				messageListDigest(
+					agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
+				),
 			pendingUserText ?? null,
 			pendingUserText === undefined ? null : pendingUserImages,
 			eligibility,
@@ -1140,11 +1180,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const agentRuntime = state.runtime;
 		const history = agentRuntime
 			? (capturedHistory ??
-				createMessageListDigests(agentRuntime.agent.state.messages.filter((message) => message.role !== "system")))
+				createMessageListDigests(
+					agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
+				))
 			: undefined;
 		const snapshot = currentContextSnapshot;
 		const promptFingerprint = agentRuntime
-			? sha256Json(agentRuntime.agent.state.systemPrompt ?? null)
+			? sha256Json(engineInitialSystemPrompt(agentRuntime.agent) ?? null)
 			: (snapshot?.promptHash ?? null);
 		const toolSignature = agentRuntime
 			? toolSignatureFromState(agentRuntime.agent.state.tools)
@@ -1251,7 +1293,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		tokensRemoved: number,
 	): void => {
 		if (!reconciledAnchor || historyTokens === null) return;
-		const anchoredMessages = [...agentRuntime.agent.state.messages.filter((message) => message.role !== "system")];
+		const anchoredMessages = [
+			...agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
+		];
 		reconciledAnchor = {
 			...reconciledAnchor,
 			tokens: Math.max(0, historyTokens - Math.max(0, tokensRemoved)),
@@ -1267,7 +1311,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const syncCodexConfiguration = (runtime: AgentRuntime): void => {
 		const model = runtime.agent.state.model;
 		thinkingUsesConfigurationUpdate = false;
-		if (model.api !== "openai-codex-responses") {
+		if (model?.api !== "openai-codex-responses") {
 			setEngineCodexConfiguration(runtime.agent, undefined);
 			return;
 		}
@@ -1527,8 +1571,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 									.readSessionEntries()
 									.filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
 								context: {
-									systemPrompt: agentRuntime.agent.state.systemPrompt,
-									messages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
+									systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
+									messages: agentRuntime.agent.state.messages.filter(
+										(message) => message.role !== "system" || isHostPolicyMessage(message),
+									),
 									tools: agentRuntime.agent.state.tools,
 									model: agentRuntime.agent.state.model,
 									thinkingLevel: agentRuntime.agent.state.thinkingLevel,
@@ -1838,7 +1884,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// Compare full runtime estimates on both sides. The current snapshot and
 		// result.tokensBefore may instead carry provider-calibrated history usage.
 		const snapshotMetadata =
-			currentContextSnapshot && currentContextSnapshot.systemPrompt === agentRuntime.agent.state.systemPrompt
+			currentContextSnapshot && currentContextSnapshot.systemPrompt === engineInitialSystemPrompt(agentRuntime.agent)
 				? { promptSegments: currentContextSnapshot.promptSegments, promptHash: currentContextSnapshot.promptHash }
 				: {};
 		const preCompactSnapshot = captureRuntimeContextSnapshot(
@@ -1994,6 +2040,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		resetCacheCallBaseline();
 		refreshAgentMessagesFromSession(agentRuntime);
+		if (postureGeneration) {
+			await controller.ensureSessionPrompt(agentRuntime);
+			controller.logPromptCompileIfPending();
+		}
 		// A summary replaces the conversation the attestation described, so no
 		// arithmetic carries it forward; the next call re-anchors it.
 		reconciledAnchor = null;
@@ -2160,7 +2210,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	const toolResultTail = (agentRuntime: AgentRuntime): boolean => {
-		const messages = agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
+		const messages = agentRuntime.agent.state.messages.filter(
+			(message) => message.role !== "system" || isHostPolicyMessage(message),
+		);
 		const tail = messages[messages.length - 1] as AgentMessage | undefined;
 		return !!tail && typeof tail === "object" && tail !== null && "role" in tail && tail.role === "toolResult";
 	};
@@ -2174,7 +2226,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		thinkingLevel: agentRuntime.agent.state.thinkingLevel,
 	});
 
-	return {
+	const controller: TurnContext = {
 		thinkingUsesConfigurationUpdate: () => thinkingUsesConfigurationUpdate,
 		notifyMemoryCommit,
 		installMemoryRestoration,
@@ -2199,6 +2251,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			pendingUserImages = [...(input.images ?? [])];
 			if (input.continuation && memoryTurn !== null) return;
+			// A prewarm has not chosen the first operator turn's memory. Freeze
+			// only after preparation has loaded that turn's evidence (#423).
+			if (
+				!input.continuation &&
+				state.lastTurnId === null &&
+				!(deps.readSessionEntries?.() ?? []).some((entry) => entry.kind === "message" && entry.role === "user")
+			) {
+				frozenMemorySection = null;
+				sessionPromptKey = null;
+				if (!postureGenerationPersisted) postureGeneration = null;
+			}
 			const sessionId = deps.session?.current()?.id ?? null;
 			memoryTurnSequence += 1;
 			memoryTurn = {
@@ -2270,7 +2333,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
 			const runtime = state.runtime;
 			const history = runtime
-				? createMessageListDigests(runtime.agent.state.messages.filter((message) => message.role !== "system"))
+				? createMessageListDigests(
+						runtime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
+					)
 				: undefined;
 			if (promptTokens > 0 && runtime) {
 				const breakdown = estimateAgentContextBreakdown({ ...runtime.agent.state, messages: [] });
@@ -2300,7 +2365,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Reconcile in memory on every API call so the live meters
 			// track usage; persistence waits for the run to settle.
 			if (runtime) {
-				const messages = runtime.agent.state.messages.filter((message) => message.role !== "system");
+				const messages = runtime.agent.state.messages.filter(
+					(message) => message.role !== "system" || isHostPolicyMessage(message),
+				);
 				// The just-completed response is output, not part of its own prompt.
 				const promptMessages = messages.at(-1)?.role === "assistant" ? messages.slice(0, -1) : messages;
 				currentContextSnapshot = captureRuntimeContextSnapshot(
@@ -2341,8 +2408,50 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (!current()) return null;
 			if (!deps.prompts) return null;
 			const settings = deps.getSettings();
-			const autonomy = settings.safety.autonomy ?? "default";
+			const autonomy = deps.getAutonomy?.() ?? settings.safety.autonomy ?? "default";
 			const sessionId = deps.session?.current()?.id ?? "";
+			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const checkpointId = postureCheckpoint(entries);
+			const supportsPolicyUpdates =
+				deps.prompts.renderSessionPostureUpdate !== undefined &&
+				(agentRuntime.agent.state.model?.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)
+					?.supportsMidConvoSystemMessages === true;
+			const routeKey = createHash("sha256")
+				.update(
+					JSON.stringify([
+						agentRuntime.targetId,
+						agentRuntime.runtimeId,
+						agentRuntime.wireModelId,
+						attachedToolSchemasFromState(agentRuntime.agent.state.tools),
+					]),
+				)
+				.digest("hex");
+			if (
+				postureGeneration &&
+				(postureGeneration.checkpointId !== checkpointId || postureGeneration.routeKey !== routeKey)
+			) {
+				postureGeneration = null;
+				postureGenerationPersisted = false;
+				sessionPromptKey = null;
+			}
+			if (!supportsPolicyUpdates) {
+				postureGeneration = null;
+				pendingPosture = null;
+				if (agentRuntime.agent.state.messages.some(isHostPolicyMessage))
+					replaceEngineMessages(
+						agentRuntime.agent,
+						agentRuntime.agent.state.messages.filter((message) => !isHostPolicyMessage(message)),
+					);
+			}
+			const recordedGeneration = supportsPolicyUpdates ? readPostureGeneration(entries) : null;
+			const restoringGeneration = !postureGeneration && recordedGeneration?.routeKey === routeKey;
+			if (restoringGeneration) {
+				postureGeneration = recordedGeneration;
+				postureGenerationPersisted = true;
+				frozenMemorySection = recordedGeneration.memorySection;
+				frozenMemorySessionId = sessionId;
+			}
+			const compiledAutonomy = supportsPolicyUpdates ? (postureGeneration?.compiledAutonomy ?? autonomy) : autonomy;
 			const cwd = process.cwd();
 			const modelState = agentRuntime.agent.state.model as
 				| (typeof agentRuntime.agent.state.model & { clioCoder?: { quirks?: LocalModelQuirks } })
@@ -2484,7 +2593,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					targetId: agentRuntime.targetId,
 					runtimeId: agentRuntime.runtimeId,
 					wireModelId: agentRuntime.wireModelId,
-					autonomy,
+					autonomy: compiledAutonomy,
 					sessionId,
 					cwd,
 					workingContextPaths: [...sessionWorkingContextPaths],
@@ -2532,9 +2641,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					}
 				}
 			}
+			const preparePosture = (): void => {
+				pendingPosture =
+					supportsPolicyUpdates && postureGeneration
+						? { inputs: sessionInputs, effectiveAutonomy: effectivePosture(entries, postureGeneration), rendered: new Map() }
+						: null;
+			};
 			if (sessionPrompt && !sessionPromptInvalidated && sessionPromptKey === key) {
 				lastSystemPromptReused = true;
 				sessionPromptDelta = memoryDelta(frozenMemory);
+				preparePosture();
 				return sessionPrompt;
 			}
 			try {
@@ -2543,17 +2659,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					prompts.compileSessionPrompt({
 						sessionId,
 						sessionInputs: inputs,
-						autonomy,
+						autonomy: compiledAutonomy,
 						cwd,
 						workingContextPaths: [...sessionWorkingContextPaths],
 						...(sessionStartedAt ? { sessionStartedAt } : {}),
 					});
 				let result = await compileWith(frozenInputs);
-				let compiledKey = key;
+				let compiledKey = promptKey(frozenInputs);
 				let compiledMemory = frozenMemory;
+				const previousHash = postureGeneration?.promptHash ?? sessionPromptHash ?? lastRecordedPromptHash();
 				// A prompt that changes for another reason is cold already, so it
 				// takes the live memory instead of carrying a reminder for it.
-				if (result.systemPrompt !== agentRuntime.agent.state.systemPrompt && frozenMemory !== liveMemorySection) {
+				if (previousHash !== null && result.systemPromptHash !== previousHash && frozenMemory !== liveMemorySection) {
 					if (!current()) return null;
 					const liveInputs = withMemory(liveMemorySection);
 					result = await compileWith(liveInputs);
@@ -2562,8 +2679,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 				if (!current()) return null;
 				const compiledAt = new Date().toISOString();
-				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
-				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
+				const changed = engineInitialSystemPrompt(agentRuntime.agent) !== result.systemPrompt;
+				if (supportsPolicyUpdates && (!postureGeneration || result.systemPromptHash !== postureGeneration.promptHash)) {
+					postureGeneration = {
+						version: 1,
+						origin: "host",
+						id: randomUUID(),
+						checkpointId,
+						routeKey,
+						compiledAutonomy,
+						memorySection: compiledMemory,
+						promptHash: result.systemPromptHash,
+					};
+					postureGenerationPersisted = false;
+					replaceEngineMessages(
+						agentRuntime.agent,
+						agentRuntime.agent.state.messages.filter((message) => !isHostPolicyMessage(message)),
+					);
+				}
 				setEngineSystemPrompt(agentRuntime.agent, result.systemPrompt, result.pinnedPrefix);
 				if (changed) {
 					pendingPromptLogEntry = {
@@ -2607,6 +2740,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				frozenMemorySection = compiledMemory;
 				frozenMemorySessionId = sessionId;
 				sessionPromptDelta = memoryDelta(compiledMemory);
+				preparePosture();
 				return result;
 			} catch (err) {
 				if (!current()) return null;
@@ -2617,6 +2751,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		},
 
+		commitSessionPosture(agentRuntime, userTurnId): void {
+			const pending = pendingPosture;
+			pendingPosture = null;
+			if (!pending || !postureGeneration || !deps.session?.current() || !deps.prompts?.renderSessionPostureUpdate) return;
+			const autonomy = deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy ?? "default";
+			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], userTurnId);
+			if (effectivePosture(entries, postureGeneration) === autonomy) return;
+			const text = deps.prompts.renderSessionPostureUpdate(autonomy, pending.inputs);
+			const entry = deps.session.appendEntry({
+				kind: "custom",
+				customType: POSTURE_UPDATE,
+				parentTurnId: userTurnId,
+				data: { version: 1, origin: "host", generationId: postureGeneration.id, userTurnId, autonomy, text },
+			});
+			deps.session.flushAppends?.();
+			appendEnginePolicyMessage(agentRuntime.agent, entry.turnId, text, Date.parse(entry.timestamp));
+		},
+
 		/**
 		 * Write the queued prompt-compile ledger entry and its full manifest
 		 * record. Deferred until after the user turn is appended so the session
@@ -2625,6 +2777,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		 */
 		logPromptCompileIfPending(): void {
 			const currentMeta = deps.session?.current();
+			if (currentMeta && postureGeneration && !postureGenerationPersisted) {
+				deps.session?.appendEntry({
+					kind: "custom",
+					customType: POSTURE_GENERATION,
+					parentTurnId: state.lastTurnId,
+					data: postureGeneration,
+				});
+				deps.session?.flushAppends?.();
+				postureGenerationPersisted = true;
+			}
 			if (!pendingPromptLogEntry || !currentMeta) return;
 			const entry = pendingPromptLogEntry;
 			pendingPromptLogEntry = null;
@@ -3000,6 +3162,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			cacheRequestToolChoice = "auto";
 			nextChangedSection = undefined;
 			previousPromptSections = null;
+			postureGeneration = null;
+			postureGenerationPersisted = false;
+			pendingPosture = null;
 			memoryTurn = null;
 			memoryAuthorityEpoch += 1;
 			compactionController?.abort();
@@ -3049,4 +3214,5 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			for (const unsubscribe of unsubscribeColdReasonSources) unsubscribe?.();
 		},
 	};
+	return controller;
 }

@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isHostPolicyMessage } from "../../core/host-policy-message.js";
 import { cwdHash, sessionPaths } from "../../engine/session.js";
 import type { AgentMessage, Usage } from "../../engine/types.js";
 import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
@@ -251,7 +252,8 @@ export function estimateAgentContextBreakdown(input: AgentContextEstimateInput):
 	return {
 		systemPromptTokens: input.systemPrompt ? ceilChars(input.systemPrompt.length) : 0,
 		messageTokens: input.messages.reduce(
-			(sum, message) => sum + (message.role === "system" ? 0 : estimateAgentMessageTokens(message)),
+			(sum, message) =>
+				sum + (message.role === "system" && !isHostPolicyMessage(message) ? 0 : estimateAgentMessageTokens(message)),
 			0,
 		),
 		pendingUserTokens:
@@ -274,7 +276,11 @@ export function estimateAgentContextTokens(input: AgentContextEstimateInput): nu
 	if (!usage) return projection;
 	const trailingTokens = input.messages
 		.slice(usage.index + 1)
-		.reduce((sum, message) => sum + (message.role === "system" ? 0 : estimateAgentMessageTokens(message)), 0);
+		.reduce(
+			(sum, message) =>
+				sum + (message.role === "system" && !isHostPolicyMessage(message) ? 0 : estimateAgentMessageTokens(message)),
+			0,
+		);
 	const anchored = usage.tokens + trailingTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 	return Math.max(projection, anchored);
 }

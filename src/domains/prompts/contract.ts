@@ -50,6 +50,8 @@ export interface PromptsContract {
 	 * another identity input causes a recompile.
 	 */
 	compileSessionPrompt(input: CompileSessionPromptInput): Promise<CompiledSessionPrompt>;
+	/** Use the session compiler's loaded fragment table for host policy changes (#423). */
+	renderSessionPostureUpdate?(level: string, inputs: SessionPromptInputs): string;
 
 	/**
 	 * Compile the canonical stable harness for one mediated fleet worker. The

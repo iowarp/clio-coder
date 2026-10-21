@@ -275,6 +275,25 @@ function renderSafetySection(safetyFragment: LoadedFragment, level: string, head
 	return approval === null ? `${oneLine}\n\n${body}` : `${oneLine}\n${approval}\n\n${body}`;
 }
 
+/** A host policy transition replaces every posture-dependent clause together (#423). */
+export function renderSessionPostureUpdate(table: FragmentTable, level: string, inputs: SessionPromptInputs): string {
+	if (!isAutonomyLevel(level)) throw new Error("Invalid session posture");
+	const safety = lookupFragment(table, `safety.${level}`, "safety");
+	const contract = renderToolContractBlock(inputs, level);
+	const hasEnding = contract.includes("## Ending a turn");
+	return [
+		"[Clio Coder host policy update]",
+		"Effective for the following turn and subsequent turns. This supersedes the compiled # Safety posture, all earlier posture updates, and the posture-dependent turn-ending and settings-change guidance. Other instructions still apply.",
+		"# Safety",
+		renderSafetySection(safety, level, inputs.headless === true),
+		...(hasEnding
+			? [renderTurnEndingContract((inputs.toolNames ?? []).includes("ask_user"), level === "yolo").join("\n")]
+			: []),
+		"## Settings changes",
+		settingsChangePolicy(inputs, level),
+	].join("\n\n");
+}
+
 function renderRuntimeBlock(inputs: SessionPromptInputs): string {
 	const lines: string[] = ["# Runtime"];
 	const provider = inputs.provider ?? "";

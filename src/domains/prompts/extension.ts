@@ -32,6 +32,7 @@ import {
 	compile,
 	compileWorker,
 	type RenderedPromptFragment,
+	renderSessionPostureUpdate,
 	type SessionPromptInputs,
 	sessionCanUseSkills,
 	sessionHasContext,
@@ -259,6 +260,10 @@ export function createPromptsBundle(
 					)
 				: "";
 			return `${fragmentEpoch}:${agentsDomain()?.revision() ?? 0}:${sessionSourceEpoch}:${sha256(inventory)}`;
+		},
+		renderSessionPostureUpdate(level, inputs) {
+			if (!table) throw new Error("prompts domain not started");
+			return renderSessionPostureUpdate(table, level, inputs);
 		},
 		async compileSessionPrompt(input: CompileSessionPromptInput) {
 			if (!table) throw new Error("prompts domain not started");
