@@ -2278,10 +2278,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (!session) {
 			headlessResumeFailure = "session continuation requires the session domain, which is not loaded";
 		} else if (requestedResume.kind === "id") {
-			resolvedResumeId = requestedResume.id;
+			const ids = session.history().map((meta) => meta.id);
+			const matches = ids.filter((id) => id.startsWith(requestedResume.id));
+			if (ids.includes(requestedResume.id) || matches.length === 0) {
+				resolvedResumeId = requestedResume.id;
+			} else if (matches.length === 1) {
+				resolvedResumeId = matches[0];
+			} else {
+				headlessResumeFailure = `session prefix ${requestedResume.id} is ambiguous; matches: ${matches.join(", ")}`;
+			}
 		} else {
-			const latest = session.history()[0];
-			if (latest === undefined) headlessResumeFailure = `no previous session recorded for ${process.cwd()}`;
+			const latest = session.history().find((meta) => meta.hasModelTurn !== false);
+			if (latest === undefined)
+				headlessResumeFailure = `no previous session with a model turn recorded for ${process.cwd()}`;
 			else resolvedResumeId = latest.id;
 		}
 	}

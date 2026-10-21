@@ -15,6 +15,7 @@ import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { isSessionEntry, type SessionEntry } from "./entries.js";
 import { SessionEntriesIndex } from "./entries-index.js";
+import { liveSessionOwner } from "./live-owner.js";
 import { runMigrations } from "./migrations/index.js";
 
 /**
@@ -73,6 +74,13 @@ export function resumeSessionState(sessionId: string): {
 	nodes: ReadonlyArray<SessionTreeNode>;
 } {
 	const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
+	// Refuse before migration or reopening can write another process's ledger (#420).
+	const owner = liveSessionOwner(persistedMeta);
+	if (owner && owner.pid !== process.pid) {
+		throw new Error(
+			`session ${sessionId} is open in another process (pid ${owner.pid} on ${owner.host}); end it there first`,
+		);
+	}
 	const paths = sessionPaths(persistedMeta);
 	const migration = runMigrations(persistedMeta, paths.meta);
 	const candidate = openSession(sessionId);
