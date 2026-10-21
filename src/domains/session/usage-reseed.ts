@@ -19,7 +19,7 @@ import {
 	emptyResponseModelIdObservationCounts,
 	type ResponseModelIdObservationCounts,
 } from "../../core/response-model-id.js";
-import type { CostEntryLabel } from "../observability/cost.js";
+import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
@@ -50,6 +50,8 @@ export interface SessionUsageSink {
 			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
 		},
 		label?: CostEntryLabel,
+		costSummary?: CostAggregate,
+		replayed?: boolean,
 	): void;
 }
 
@@ -104,6 +106,8 @@ export function reseedSessionUsageFromLedger(
 				responseModelIdObservationCounts,
 			},
 			call.label,
+			undefined,
+			true,
 		);
 	}
 }

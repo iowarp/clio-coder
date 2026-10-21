@@ -169,6 +169,7 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 		/** Marks a priced call that was not an ordinary turn, such as a `/btw` side question. */
 		label?: CostEntryLabel,
 		costSummary?: CostAggregate,
+		replayed?: boolean,
 	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;

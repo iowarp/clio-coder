@@ -4,6 +4,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
+import { aggregateCostAmounts } from "../domains/observability/cost.js";
 import type { CostRow } from "../domains/observability/cost-rows.js";
 import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { CostAggregate, ObservabilityContract } from "../domains/observability/index.js";
@@ -109,8 +110,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	let modelMs = 0;
 	let timedCalls = 0;
 	let compactions = 0;
-	let usage = aggregateCostEntries(deps.observability.costEntries());
-	let cost = deps.observability.sessionCostSummary();
+	let usageBaseline = new Set(deps.observability.costEntries());
+	let usage = aggregateCostEntries([]);
+	let cost = aggregateCostAmounts([]);
 	const models = new Map<string, { target: string; model: string }>();
 	const files = new Map<string, number>();
 	const workerPaths = new Map<string, Set<string>>();
@@ -138,8 +140,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		if (target && model) models.set(`${target}\0${model}`, { target, model });
 	};
 	const refreshUsage = (): void => {
-		usage = aggregateCostEntries(deps.observability.costEntries());
-		cost = deps.observability.sessionCostSummary();
+		const entries = deps.observability.costEntries().filter((entry) => !entry.replayed && !usageBaseline.has(entry));
+		usage = aggregateCostEntries(entries);
+		cost = aggregateCostAmounts(entries);
 	};
 	const noteFiles = (paths: ReadonlyArray<string>, cwd = process.cwd(), seen?: Set<string>): void => {
 		for (const path of paths) {
@@ -153,6 +156,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		}
 	};
 	const reset = (): void => {
+		usageBaseline = new Set(deps.observability.costEntries());
 		startedAt = now();
 		baseTurns = deps.getTurns() ?? 0;
 		priorTurns = 0;

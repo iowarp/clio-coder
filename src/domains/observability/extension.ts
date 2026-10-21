@@ -46,7 +46,11 @@ export function dispatchHasEvidenceLedger(payload: DispatchTerminalLike): boolea
 	return payload.lineage !== undefined;
 }
 
-function recordDispatchCost(cost: ReturnType<typeof createCostTracker>, payload: DispatchTerminalLike): void {
+function recordDispatchCost(
+	cost: ReturnType<typeof createCostTracker>,
+	payload: DispatchTerminalLike,
+	replayed = false,
+): void {
 	if (!payload.targetId || !payload.wireModelId || typeof payload.tokenCount !== "number") {
 		return;
 	}
@@ -73,6 +77,7 @@ function recordDispatchCost(cost: ReturnType<typeof createCostTracker>, payload:
 		undefined,
 		"worker",
 		payload.costSummary,
+		replayed,
 	);
 }
 
@@ -156,12 +161,12 @@ export function createObservabilityBundle(
 	const cost = createCostTracker();
 	let sessionId: string | null | undefined;
 	const recordedRuns = new Set<string>();
-	const recordRun = (payload: DispatchTerminalLike): void => {
+	const recordRun = (payload: DispatchTerminalLike, replayed = false): void => {
 		if (sessionId !== undefined && payload.sessionId !== undefined && payload.sessionId !== sessionId) return;
 		if (payload.runId && recordedRuns.has(payload.runId)) return;
 		if (!payload.lineage) return;
 		if (payload.runId) recordedRuns.add(payload.runId);
-		recordDispatchCost(cost, payload);
+		recordDispatchCost(cost, payload, replayed);
 	};
 	const trace: DispatchTraceMirror =
 		options.dispatchTrace === false
@@ -281,6 +286,8 @@ export function createObservabilityBundle(
 						row.usage.costProvenance,
 						undefined,
 						row.label,
+						undefined,
+						true,
 					);
 				}
 				const receiptsDir = join(clioStateDir(), "receipts");
@@ -295,25 +302,28 @@ export function createObservabilityBundle(
 					}
 					if (!run || run.sessionId !== sessionId || run.agentId === "main-agent") continue;
 					const unverifiedTokens = run.externalTelemetry && run.externalTelemetry.tokenUsage !== "provider-reported";
-					recordRun({
-						runId: run.runId,
-						sessionId: run.sessionId,
-						lineage: run.lineage,
-						targetId: run.targetId,
-						wireModelId: run.wireModelId,
-						tokenCount: unverifiedTokens ? 0 : run.tokenCount,
-						inputTokenCount: unverifiedTokens ? 0 : run.inputTokenCount,
-						outputTokenCount: unverifiedTokens ? 0 : run.outputTokenCount,
-						cacheReadTokenCount: unverifiedTokens ? 0 : run.cacheReadTokenCount,
-						cacheWriteTokenCount: unverifiedTokens ? 0 : run.cacheWriteTokenCount,
-						cacheWrite1hTokenCount: unverifiedTokens ? 0 : run.cacheWrite1hTokenCount,
-						reasoningTokenCount: unverifiedTokens ? 0 : run.reasoningTokenCount,
-						apiCalls: run.apiCalls,
-						missingTokenCalls: run.missingTokenCalls,
-						costUsd: run.costUsd,
-						costProvenance: run.costProvenance,
-						costSummary: run.costSummary,
-					});
+					recordRun(
+						{
+							runId: run.runId,
+							sessionId: run.sessionId,
+							lineage: run.lineage,
+							targetId: run.targetId,
+							wireModelId: run.wireModelId,
+							tokenCount: unverifiedTokens ? 0 : run.tokenCount,
+							inputTokenCount: unverifiedTokens ? 0 : run.inputTokenCount,
+							outputTokenCount: unverifiedTokens ? 0 : run.outputTokenCount,
+							cacheReadTokenCount: unverifiedTokens ? 0 : run.cacheReadTokenCount,
+							cacheWriteTokenCount: unverifiedTokens ? 0 : run.cacheWriteTokenCount,
+							cacheWrite1hTokenCount: unverifiedTokens ? 0 : run.cacheWrite1hTokenCount,
+							reasoningTokenCount: unverifiedTokens ? 0 : run.reasoningTokenCount,
+							apiCalls: run.apiCalls,
+							missingTokenCalls: run.missingTokenCalls,
+							costUsd: run.costUsd,
+							costProvenance: run.costProvenance,
+							costSummary: run.costSummary,
+						},
+						true,
+					);
 				}
 			}
 			latestThroughput = null;
@@ -329,6 +339,7 @@ export function createObservabilityBundle(
 			modelIdFacts,
 			label,
 			costSummary,
+			replayed,
 		) {
 			cost.accumulate(
 				providerId,
@@ -340,6 +351,7 @@ export function createObservabilityBundle(
 				modelIdFacts,
 				label,
 				costSummary,
+				replayed,
 			);
 			projection.refresh();
 		},
