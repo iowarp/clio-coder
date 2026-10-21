@@ -217,7 +217,7 @@ function unmeteredCall(message: AgentMessage): boolean {
 }
 
 function segmentSummary(messages: ReadonlyArray<AgentMessage>): RunJsonAgentEndFrame {
-	const usage = sumRunUsage(messages);
+	const usage = sumRunUsage(messages, { includeEstimates: true });
 	return {
 		type: "agent_end",
 		messageCount: messages.length,

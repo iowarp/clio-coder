@@ -135,7 +135,7 @@ export function ledgerUsageCalls(
 		const rawUsage = record.usage;
 		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) continue;
 		const usage = rawUsage as Record<string, unknown>;
-		if (usage.callInvoked === false) continue;
+		if (usage.callInvoked === false || (record.failure as { invoked?: boolean } | undefined)?.invoked === false) continue;
 		const { input, output, cacheRead, cacheWrite, totalTokens, reasoning, observed } = normalizeTokenUsage(usage);
 		const cost = usage.cost;
 		const costUsd =
@@ -166,4 +166,18 @@ export function ledgerUsageCalls(
 		});
 	}
 	return calls;
+}
+
+/** Never-sent rows stay outside spending, but remain visible in coverage (#430). */
+export function ledgerCallFailureCounts(entries: ReadonlyArray<SessionEntry>) {
+	let invokedUnknownCalls = 0;
+	let neverInvokedCalls = 0;
+	for (const entry of entries) {
+		if (entry.kind !== "message" || entry.role !== "assistant") continue;
+		const payload = entry.payload as { usage?: Record<string, unknown>; failure?: { invoked?: boolean } } | null;
+		const usage = payload?.usage;
+		if (usage?.callInvoked === false || payload?.failure?.invoked === false) neverInvokedCalls += 1;
+		else if (usage && !normalizeTokenUsage(usage).observed) invokedUnknownCalls += 1;
+	}
+	return { invokedUnknownCalls, neverInvokedCalls };
 }

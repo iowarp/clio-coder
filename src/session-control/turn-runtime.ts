@@ -1,4 +1,5 @@
 import type { BudgetAlertPayload } from "../core/bus-events.js";
+import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { traceObservation } from "../domains/memory/observation-trace.js";
@@ -62,6 +63,7 @@ import {
 	hasStructuredToolCall,
 	isEmptyAbortedAssistantMessage,
 	sumRunUsage,
+	terminalFailureFromAssistantMessage,
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
@@ -623,6 +625,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// message_start can follow response headers. Keep each invocation's
 		// monotonic anchor before that wait, including custom stream delegates.
 		let apiCallStartedAt: number | null = null;
+		let callTracking: ReturnType<typeof trackCallFetch> | null = null;
 		let apiCallFirstDeltaAt: number | null = null;
 		// Where a request is before `onStreamInvocation`. A watchdog abort while
 		// `apiCallStartedAt` is null names this step, because no request has
@@ -652,6 +655,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					target.target.id,
 				);
 				delete localRuntime.lastProviderStatus;
+				const tracking = trackCallFetch(controlled.options?.fetch);
+				callTracking = tracking;
+				tracking.start(currentModel.api, controlled.options?.transport);
 				const pinnedPrefix = enginePinnedPrefix(localRuntime.agent);
 				return streamToolRound(
 					currentModel,
@@ -662,6 +668,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						delete localRuntime.lastProviderStatus;
 						const requestOptions = {
 							...request.options,
+							fetch: tracking.fetch,
 							...(pinnedPrefix ? { clioCoderPinnedPrefix: pinnedPrefix } : {}),
 							onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof request.options>["onResponse"]>>) => {
 								// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
@@ -706,6 +713,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			},
 			beforeStreamRequest: async ({ context: request, options: streamOptions }) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
+				callTracking = null;
+				delete localRuntime.lastProviderStatus;
 				if (!currentRun() || state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed before invocation." };
 				}
@@ -1159,21 +1168,42 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			let publicEvent = enrichedEvent;
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
-				const usage = enrichedEvent.message.usage as unknown as Record<string, unknown> | undefined;
-				if (usage) {
-					usage.costProvenance =
-						(usage.clioExternal as { cost?: string } | undefined)?.cost === "provider-reported"
-							? "known"
-							: localRuntime.runtimeResolution.costProvenance;
-					// A response id proves the provider took the request even when the
-					// stream failed before reporting usage (#423).
-					const responseId = (enrichedEvent.message as { responseId?: unknown }).responseId;
-					usage.callInvoked =
-						apiCallStartedAt !== null ||
-						normalizeTokenUsage(usage).observed ||
-						(typeof responseId === "string" && responseId.length > 0);
-					usage.targetId = localRuntime.targetId;
+				const message = enrichedEvent.message;
+				const usage = (message.usage ?? {}) as unknown as Record<string, unknown>;
+				if (!message.usage) Object.assign(message, { usage });
+				const observed = normalizeTokenUsage(usage).observed;
+				const responseId = (message as { responseId?: unknown }).responseId;
+				const responseObserved = observed || (typeof responseId === "string" && responseId.length > 0);
+				const terminal = terminalFailureFromAssistantMessage(message);
+				if (terminal) {
+					const tracked = callTracking?.failure(terminal.errorMessage, terminal.stopReason === "aborted", responseObserved);
+					const status =
+						(message as unknown as { anthropicResponse?: { status?: number } }).anthropicResponse?.status ??
+						localRuntime.lastProviderStatus;
+					const failure = classifyCallFailure(state.streamStallReason ?? terminal.errorMessage, {
+						invoked: responseObserved || (tracked?.invoked ?? apiCallStartedAt !== null),
+						httpStatus: status !== undefined && status >= 400 ? status : (tracked?.httpStatus ?? null),
+						retryAttempts: tracked?.retryAttempts ?? 0,
+						aborted: terminal.stopReason === "aborted" && state.streamStallReason === null,
+						transportFailed: tracked?.stage === "transport",
+					});
+					Object.assign(message, {
+						failure:
+							!failure.invoked && preInvocationStage === "budget admission"
+								? { ...failure, stage: "budget", errorClass: "budget_wait" }
+								: failure,
+					});
+					usage.callInvoked = failure.invoked;
+				} else {
+					usage.callInvoked = apiCallStartedAt !== null || responseObserved;
 				}
+				usage.usageObserved = observed;
+				usage.costProvenance = !observed
+					? "unknown"
+					: (usage.clioExternal as { cost?: string } | undefined)?.cost === "provider-reported"
+						? "known"
+						: localRuntime.runtimeResolution.costProvenance;
+				usage.targetId = localRuntime.targetId;
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
 					enrichedEvent.message as unknown as Record<string, unknown>,
 				);
@@ -1185,32 +1215,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				const interruptedUsage = estimatedUsageForInterruptedTurn(enrichedEvent.message, context.promptSideTokens());
 				if (interruptedUsage !== null) {
-					// Persistence records the same estimate, but it does so after the
-					// public event has already fed status. Copy it onto the public event
-					// only: the raw engine message and observability/cost path must remain
-					// provider-reported. Remember it by message identity so the public
-					// agent_end window below reports the same figure.
+					// Preserve the display estimate without replacing provider usage (#423, #430).
 					interruptedUsageByMessage.set(enrichedEvent.message as object, interruptedUsage);
-					publicEvent = {
-						...enrichedEvent,
-						message: { ...enrichedEvent.message, usage: interruptedUsage as unknown as Usage },
-					} as typeof enrichedEvent;
+					Object.assign(enrichedEvent.message, { estimatedUsage: interruptedUsage });
 				}
 			}
-			if (enrichedEvent.type === "agent_end") {
-				// The aborted message in the run window still carries the provider's
-				// untouched zeros. The footer's settled summary and the transcript's
-				// `turn · in/out` receipt both rebuild from this window, so give them
-				// the estimate the message_end published; the raw window feeds
-				// observability and the cache summary below unchanged.
-				const reported = enrichedEvent.messages.map((message) => {
-					const estimate = interruptedUsageByMessage.get(message as object);
-					return estimate === undefined ? message : ({ ...message, usage: estimate as unknown as Usage } as typeof message);
-				});
-				if (reported.some((message, index) => message !== enrichedEvent.messages[index])) {
-					publicEvent = { ...enrichedEvent, messages: reported } as typeof enrichedEvent;
-				}
-			}
+
 			if (publicEvent?.type === "message_end" && publicEvent.message.role === "assistant" && apiCallStartedAt !== null) {
 				publicEvent = {
 					...publicEvent,
@@ -1320,7 +1330,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (
 				state.activeInterruptReason !== null &&
 				enrichedEvent.type === "message_end" &&
-				isEmptyAbortedAssistantMessage(enrichedEvent.message)
+				isEmptyAbortedAssistantMessage(enrichedEvent.message) &&
+				// Interrupt notices cannot replace the failed call's accounting (#430).
+				(enrichedEvent.message as { usage?: { callInvoked?: boolean } }).usage?.callInvoked === undefined
 			) {
 				// The ledger drops this message too, so the spend the cancelled call
 				// streamed as thinking would otherwise vanish from the durable record.

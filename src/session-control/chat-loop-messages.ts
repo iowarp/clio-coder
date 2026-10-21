@@ -1,3 +1,5 @@
+import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
+import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 /**
  * Pure helpers over agent messages, tool policies, and session payload
  * shaping for the chat loop. Everything here is stateless: functions take
@@ -112,6 +114,7 @@ export function extractThinking(message: AgentMessage | undefined): string {
 export interface TerminalAssistantFailure {
 	stopReason: "error" | "aborted";
 	errorMessage: string;
+	failure?: TurnFailureRecord;
 	message?: AgentMessage;
 }
 
@@ -136,7 +139,28 @@ export function terminalFailureFromAssistantMessage(
 			: stopReason === "aborted"
 				? "request aborted"
 				: "model target returned an error";
-	return { stopReason, errorMessage, message };
+	const rawFailure = (message as unknown as { failure?: TurnFailureRecord }).failure;
+	const observedFailure = readCallFailure(
+		rawFailure?.stage === "budget" ? { ...rawFailure, stage: "admission" } : rawFailure,
+	);
+	const usage = (message as unknown as { usage?: Record<string, unknown> }).usage;
+	const failure =
+		observedFailure ??
+		(usage
+			? classifyCallFailure(errorMessage, {
+					invoked: usage.callInvoked !== false,
+					aborted: stopReason === "aborted",
+					retryAttempts: 0,
+				})
+			: undefined);
+	return {
+		stopReason,
+		errorMessage,
+		message,
+		...(failure
+			? { failure: { ...failure, ...(rawFailure?.stage === "budget" ? { stage: "budget" as const } : {}) } }
+			: {}),
+	};
 }
 
 /**
@@ -422,7 +446,10 @@ export interface RunUsageSummary {
  * actually billed and keeps the `/usage` overlay and footer counters
  * aligned across tool-heavy runs.
  */
-export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
+export function sumRunUsage(
+	messages: ReadonlyArray<AgentMessage>,
+	options: { includeEstimates?: boolean } = {},
+): RunUsageSummary {
 	const summary: RunUsageSummary = {
 		tokens: 0,
 		costUsd: 0,
@@ -456,8 +483,18 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		if (!message || typeof message !== "object") continue;
 		if (message.role !== "assistant") continue;
 		const record = message as unknown as Record<string, unknown>;
-		const usage = message.usage;
-		if (!usage || typeof usage !== "object") continue;
+		const providerUsage = message.usage as unknown as Record<string, unknown> | undefined;
+		if (!providerUsage || typeof providerUsage !== "object" || providerUsage.callInvoked === false) continue;
+		const estimate = record.estimatedUsage as Record<string, unknown> | undefined;
+		// Display estimates must never enter provider accounting by default (#423, #430).
+		const usage =
+			options.includeEstimates &&
+			providerUsage.callInvoked === true &&
+			record.stopReason === "aborted" &&
+			!normalizeTokenUsage(providerUsage).observed &&
+			estimate?.estimated === true
+				? estimate
+				: providerUsage;
 		if ((usage as { estimated?: unknown }).estimated === true) summary.estimated = true;
 		summary.lastResponseModelIdObservation = responseModelIdObservationFromRecord(record, "not-observed");
 		addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, summary.lastResponseModelIdObservation);
@@ -467,7 +504,9 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 				: null;
 		summary.hadUsage = true;
 		summary.apiCalls += 1;
-		const reported = normalizeTokenUsage(usage as unknown as Record<string, unknown>);
+		const reported = normalizeTokenUsage(
+			options.includeEstimates && usage.estimated === true ? { ...usage, estimated: false } : usage,
+		);
 		summary.input += reported.input;
 		summary.output += reported.output;
 		summary.cacheRead += reported.cacheRead;
@@ -475,9 +514,9 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		if (reported.observed && typeof usage.cacheWrite1h === "number")
 			summary.cacheWrite1h = (summary.cacheWrite1h ?? 0) + usage.cacheWrite1h;
 		summary.reasoning += reported.reasoning;
-		summary.hadReasoning ||= reported.observed && extractReasoningTokens(usage) !== null;
+		summary.hadReasoning ||= usage.estimated !== true && reported.observed && extractReasoningTokens(usage) !== null;
 		summary.tokens += reported.totalTokens;
-		const total = usage.cost?.total;
+		const total = usage.cost && typeof usage.cost === "object" ? (usage.cost as { total?: unknown }).total : undefined;
 		if ((usage as { estimated?: unknown }).estimated !== true && typeof total === "number" && Number.isFinite(total))
 			summary.costUsd += total;
 	}
@@ -538,6 +577,8 @@ export function assistantSessionPayload(
 	payload.responseModelIdObservation = responseModelIdObservationFromRecord(raw, "not-observed");
 	for (const key of [
 		"usage",
+		"estimatedUsage",
+		"failure",
 		"api",
 		"provider",
 		"model",
@@ -550,6 +591,12 @@ export function assistantSessionPayload(
 		"clioCoderAbortReason",
 	]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
+	}
+	if (failure?.failure) payload.failure = failure.failure;
+	if (failure && raw.usage && typeof raw.usage === "object") {
+		const usage = raw.usage as Record<string, unknown>;
+		const observed = normalizeTokenUsage(usage).observed;
+		payload.usage = { ...usage, usageObserved: observed, ...(!observed ? { costProvenance: "unknown" } : {}) };
 	}
 	if (failure && !isSelfExplainingAbort({ stopReason: raw.stopReason, errorMessage: raw.errorMessage, text })) {
 		payload.stopReason = failure.stopReason;
@@ -578,8 +625,7 @@ export function assistantSessionPayload(
  * authoritative usage paths.
  *
  * Returns null when the provider did report usage (there is nothing to fill in)
- * or when nothing streamed (an empty abort spent only the prompt, which the
- * caller's snapshot already carries).
+ * or when nothing streamed. A never-sent request has no display estimate (#430).
  */
 export function estimatedUsageForInterruptedTurn(
 	message: AgentMessage,
@@ -597,7 +643,7 @@ export function estimatedUsageForInterruptedTurn(
 		}
 	}
 	const streamedChars = assistantOutputChars(message);
-	if (streamedChars === 0 && promptSideTokens <= 0) return null;
+	if (streamedChars === 0) return null;
 	const input = Math.max(0, Math.round(promptSideTokens));
 	const output = streamedChars > 0 ? Math.max(1, ceilChars(streamedChars)) : 0;
 	return {
@@ -625,8 +671,8 @@ export function estimatedUsageForInterruptedTurn(
 export function unmeteredInvokedUsage(message: AgentMessage): Record<string, unknown> | null {
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
 	if (stopReason !== "error" && stopReason !== "aborted") return null;
-	const usage = (message as { usage?: Record<string, unknown> }).usage;
-	if (!usage || typeof usage !== "object" || usage.callInvoked !== true || usage.estimated === true) return null;
+	const usage = (message as unknown as { usage?: Record<string, unknown> }).usage;
+	if (!usage || typeof usage !== "object" || usage.callInvoked !== true) return null;
 	if (normalizeTokenUsage(usage).observed) return null;
 	return {
 		...usage,
@@ -634,9 +680,12 @@ export function unmeteredInvokedUsage(message: AgentMessage): Record<string, unk
 		output: null,
 		cacheRead: null,
 		cacheWrite: null,
+		...("cacheWrite1h" in usage ? { cacheWrite1h: null } : {}),
 		...("reasoning" in usage ? { reasoning: null } : {}),
 		totalTokens: null,
 		cost: { input: null, output: null, cacheRead: null, cacheWrite: null, total: null },
+		costProvenance: "unknown",
+		usageObserved: false,
 		missingTokenCalls: 1,
 	};
 }

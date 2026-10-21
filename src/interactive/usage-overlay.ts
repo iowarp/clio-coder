@@ -1,6 +1,7 @@
 import { responseModelIdObservationCountsLabel } from "../core/response-model-id.js";
 import { aggregateCostEntries, type CostRow } from "../domains/observability/cost-rows.js";
 import type { CostAggregate, ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
+import { ledgerCallFailureCounts } from "../domains/session/usage.js";
 
 // The fold moved to the observability domain so the ACP host can report the same rows without this overlay.
 export { aggregateCostEntries, type CostRow };
@@ -115,6 +116,7 @@ function summaryBlock(
 	totalTokens: number,
 	rows: ReadonlyArray<CostRow>,
 	promptCache: PromptCacheTelemetry | null,
+	neverSentCalls = 0,
 ): string[] {
 	const totals = sumRows(rows);
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
@@ -163,11 +165,11 @@ function summaryBlock(
 		["model calls", formatTokens(totals.apiCalls)],
 		...((totals.workers ?? 0) > 0 ? [["worker calls", formatTokens(totals.workers ?? 0)] as const] : []),
 		...((totals.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(totals.compactions ?? 0)] as const] : []),
-		...((totals.missingTokenCalls ?? 0) > 0
+		...((totals.missingTokenCalls ?? 0) > 0 || neverSentCalls > 0
 			? [
 					[
 						"missing token usage",
-						`${formatTokens(totals.missingTokenCalls ?? 0)} call${totals.missingTokenCalls === 1 ? "" : "s"}; token amounts are known subtotals`,
+						`${formatTokens(totals.missingTokenCalls ?? 0)} calls with unknown usage; ${neverSentCalls} never sent`,
 					] as const,
 				]
 			: []),
@@ -222,7 +224,7 @@ function modelBlock(row: CostRow): string[] {
 			? [
 					[
 						"missing token usage",
-						`${formatTokens(row.missingTokenCalls ?? 0)} call${row.missingTokenCalls === 1 ? "" : "s"}; token amounts are known subtotals`,
+						`${formatTokens(row.missingTokenCalls ?? 0)} calls with unknown usage; token amounts are known subtotals`,
 					] as const,
 				]
 			: []),
@@ -267,6 +269,7 @@ export interface CostSnapshot {
 	totalTokens: number;
 	rows: CostRow[];
 	promptCache: PromptCacheTelemetry | null;
+	neverSentCalls?: number;
 }
 
 // Session totals come from the observability projection: when a snapshot is
@@ -288,6 +291,7 @@ function buildCostSnapshot(
 		totalTokens,
 		rows,
 		promptCache: getSessionEntries ? foldPromptCacheTelemetry(getSessionEntries()) : null,
+		neverSentCalls: getSessionEntries ? ledgerCallFailureCounts(getSessionEntries()).neverInvokedCalls : 0,
 	};
 }
 
@@ -345,6 +349,11 @@ function renderActivity(
 	lines.push(
 		`${label("Session")}${cost ? `${cost} · ` : ""}${theme.fg("counter", `${formatTokens(snapshot.totalTokens)} tokens`)}${elapsed}`,
 	);
+	const missing = sumRows(snapshot.rows).missingTokenCalls;
+	if (missing > 0 || (snapshot.neverSentCalls ?? 0) > 0)
+		lines.push(
+			`${label("Usage")}${theme.fg("annotation", `${missing} calls with unknown usage; ${snapshot.neverSentCalls ?? 0} never sent`)}`,
+		);
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
 		const pct = Math.max(0, Math.min(100, window.item.usedPct));
@@ -439,7 +448,13 @@ class UsageOverlayBody implements Component {
 				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
 				theme.fg("annotation", "Recorded calls in this session · estimates are marked in the cost totals"),
 				"",
-				...summaryBlock(snapshot.totalCost, snapshot.totalTokens, snapshot.rows, snapshot.promptCache),
+				...summaryBlock(
+					snapshot.totalCost,
+					snapshot.totalTokens,
+					snapshot.rows,
+					snapshot.promptCache,
+					snapshot.neverSentCalls,
+				),
 				"",
 				rule(theme, contentWidth),
 				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),

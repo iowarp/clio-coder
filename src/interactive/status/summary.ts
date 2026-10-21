@@ -1,4 +1,5 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import { estimateReasoningTextTokens, extractReasoningTokens } from "../../domains/session/context-accounting.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type {
@@ -92,8 +93,17 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 		};
 	}
 	if (message.role !== "assistant") return tally;
-	const usage = (message as { usage?: UsageLike }).usage;
 	const record = message as unknown as Record<string, unknown>;
+	const providerUsage = record.usage as (UsageLike & { callInvoked?: boolean }) | undefined;
+	const estimate = record.estimatedUsage as UsageLike | undefined;
+	// This tally is for display; spending reads only the provider's usage (#423, #430).
+	const usage =
+		providerUsage?.callInvoked === true &&
+		record.stopReason === "aborted" &&
+		!normalizeTokenUsage(providerUsage as Record<string, unknown>).observed &&
+		estimate?.estimated === true
+			? estimate
+			: providerUsage;
 	const next: RunTally = {
 		...tally,
 		...(usage?.estimated === true ? { estimated: true } : {}),

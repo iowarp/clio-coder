@@ -1,5 +1,11 @@
+import type { CallFailureRecord } from "../../core/call-failure.js";
 import type { TokenSplit } from "../../core/token-split.js";
 import type { WorkflowDecision } from "./decide.js";
+
+/** Budget admission can fail before a provider call exists (#430). */
+export interface TurnFailureRecord extends Omit<CallFailureRecord, "stage"> {
+	stage: CallFailureRecord["stage"] | "budget";
+}
 
 export interface TurnOutcomeRecord {
 	readonly version: 1;
@@ -51,6 +57,7 @@ export interface TurnOutcomeRecord {
 		readonly decisionModel: TokenSplit;
 		readonly workers: TokenSplit;
 	};
+	readonly failure?: TurnFailureRecord;
 	readonly stopReason: string;
 	readonly durationMs: number;
 }
@@ -79,6 +86,7 @@ export interface TurnOutcomeInput {
 	 */
 	readonly interviewDismissed?: boolean;
 	readonly tokens: TurnOutcomeRecord["tokens"];
+	readonly failure?: TurnFailureRecord;
 	readonly stopReason: string;
 	readonly durationMs: number;
 }
@@ -179,6 +187,7 @@ export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 			decisionModel: { ...input.tokens.decisionModel },
 			workers: { ...input.tokens.workers },
 		},
+		...(input.failure ? { failure: { ...input.failure } } : {}),
 		stopReason: input.stopReason,
 		durationMs: input.durationMs,
 	};

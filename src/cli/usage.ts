@@ -27,6 +27,7 @@ import {
 	parseSessionEntries,
 	readAuditRows,
 } from "../domains/session/index.js";
+import { ledgerCallFailureCounts } from "../domains/session/usage.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
 import { expandChainMessages } from "../tools/surface.js";
@@ -163,6 +164,7 @@ interface SessionUsage {
 	entriesInWindow: number;
 	/** Completed API calls this session recorded in the window, one per call. */
 	usageCalls: LedgerUsageCall[];
+	failureCounts: ReturnType<typeof ledgerCallFailureCounts>;
 	/** Backend prompt-cache facts persisted on assistant calls in the window. */
 	promptCache: PromptCacheTelemetry;
 }
@@ -651,6 +653,13 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			.length,
 		neverInvokedCalls: outOfTurnRows.filter((row) => row.failure?.invoked === false).length,
 	};
+	const sessionFailureCounts = sessions.reduce(
+		(counts, session) => ({
+			invokedUnknownCalls: counts.invokedUnknownCalls + session.failureCounts.invokedUnknownCalls,
+			neverInvokedCalls: counts.neverInvokedCalls + session.failureCounts.neverInvokedCalls,
+		}),
+		{ invokedUnknownCalls: 0, neverInvokedCalls: 0 },
+	);
 	const allCost: CostAggregate = {
 		knownUsd: usageTotals.cost.knownUsd + workerUsage.cost.knownUsd,
 		calls: usageTotals.cost.calls + workerUsage.cost.calls,
@@ -804,6 +813,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				kind: "fact",
 				fact: "all-recorded-tokens",
 				outOfTurnFailureCounts,
+				sessionFailureCounts,
 				knownSubtotal: allRecordedTokens,
 				input: usageTotals.input + workerUsage.input,
 				output: usageTotals.output + workerUsage.output,
@@ -886,6 +896,10 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		);
 	}
 	if (usageMeasurable) {
+		if (sessionFailureCounts.invokedUnknownCalls > 0 || sessionFailureCounts.neverInvokedCalls > 0)
+			console.log(
+				`  session failures: ${sessionFailureCounts.invokedUnknownCalls} calls with unknown usage; ${sessionFailureCounts.neverInvokedCalls} never sent (excluded from spending)`,
+			);
 		if (outOfTurnFailureCounts.invokedUnknownCalls > 0 || outOfTurnFailureCounts.neverInvokedCalls > 0)
 			out(
 				`  out-of-turn failures: ${outOfTurnFailureCounts.invokedUnknownCalls} invoked calls with unknown usage; ${outOfTurnFailureCounts.neverInvokedCalls} never-sent calls (excluded from spending)`,
@@ -1295,6 +1309,7 @@ async function readSessions(
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
 			usageCalls: ledgerUsageCalls(accountingEntries),
+			failureCounts: ledgerCallFailureCounts(accountingEntries),
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
 		};
 		for (const entry of parsedEntries.entries) {

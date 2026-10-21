@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { CallObservation } from "../core/call-failure.js";
+import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
+import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type {
 	MachineTurnProjectionAdmission,
@@ -150,6 +152,7 @@ import {
 	OPERATOR_CANCEL_REASON,
 	pendingSkillRequestPreamble,
 	sumRunUsage,
+	terminalFailureFromAssistantMessage,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
@@ -1638,6 +1641,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middleware?.registerHook(outcomeCollector);
 
+	let terminalTurnFailure: TurnFailureRecord | undefined;
+	const currentTurnFailure = (): TurnFailureRecord | undefined => terminalTurnFailure;
+	let turnRetryAttempts = 0;
+	let providerRetryAttempts = 0;
 	const recovery = createTurnRecovery({
 		auth: deps.providers.auth,
 		turnSignal: () => submitOwner?.signal,
@@ -1647,12 +1654,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		context,
 		retrySettings,
 		markPersistedUserEcho: (text, prompt) => queues.markPersistedUserEcho(text, prompt),
-		emitRetryStatus: (status) => emit({ type: "retry_status", status }),
+		emitRetryStatus: (status) => {
+			if (status.phase === "retrying") turnRetryAttempts += 1;
+			emit({ type: "retry_status", status });
+		},
 		emitFailureMessage: (message) => emit({ type: "message_end", message }),
 		emitNotice,
 	});
 	const emitRuntimeEvent = (event: AgentEvent | AssistantDeltaEvent): void => {
 		if (event.type === "message_end") {
+			if (event.message.role === "assistant") {
+				const terminal = terminalFailureFromAssistantMessage(event.message);
+				if (terminal?.failure) {
+					terminalTurnFailure = terminal.failure;
+					providerRetryAttempts += terminal.failure.retryAttempts ?? 0;
+				} else if (!terminal) terminalTurnFailure = undefined;
+			}
 			rewriteStallAbortMessage(state, event.message);
 			explainInterruptedAssistant(event.message, state.activeInterruptReason);
 			if (state.currentAskUserPolicy?.planOnly && event.message.role === "assistant") {
@@ -2102,6 +2119,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					decisionModel: deps.getDecisionUsage?.(input.userTurnId) ?? noOutcomeUsage(),
 					workers: workerOutcomeUsage(collected.harness.runIds, deps.outcomeDispatch),
 				},
+				failure: classifyCallFailure("Canceled before admission", { invoked: false, aborted: true, retryAttempts: 0 }),
 				stopReason: "aborted",
 				durationMs: Math.max(0, performance.now() - input.submittedAt),
 			});
@@ -3086,6 +3104,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					});
 					if (retired.length < prior.length) replaceEngineMessages(agentRuntime.agent, retired);
 				}
+				terminalTurnFailure = undefined;
+				turnRetryAttempts = 0;
+				providerRetryAttempts = 0;
 				const machineMessageStart = agentRuntime.agent.state.messages.length;
 				const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 				const priorAskUserPolicy = state.currentAskUserPolicy;
@@ -3284,6 +3305,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							const missingReceipts = canceled ? await awaitWorkerReceipts(workerRunIds, deps.outcomeDispatch) : [];
 							// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 							if (generation !== submitGeneration) return;
+							const failure = terminalFailureFromAssistantMessage(finalMessage)?.failure ?? currentTurnFailure();
 							const record = reduceTurnOutcome({
 								...collected,
 								turnId: userTurnId,
@@ -3293,6 +3315,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								taskEstablished: deps.getTaskEstablished?.() ?? false,
 								canceled,
 								interviewDismissed,
+								...(failure ? { failure: { ...failure, retryAttempts: turnRetryAttempts + providerRetryAttempts } } : {}),
 								tokens: {
 									coordinator: matchesTrace ? persistence.currentTurnUsage() : noOutcomeUsage(),
 									decisionModel: deps.getDecisionUsage?.(userTurnId) ?? noOutcomeUsage(),

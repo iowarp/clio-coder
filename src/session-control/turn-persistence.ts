@@ -357,7 +357,13 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		// A loop-guard interrupt already persisted a durable closing turn with the
 		// stop reason; drop the empty aborted message the abort leaves behind so
 		// the operator does not see a hollow "request aborted" turn after it.
-		if (state.activeInterruptReason !== null && isEmptyAbortedAssistantMessage(message)) return;
+		// Stamped calls still need a ledger row when an interrupt supplies the notice (#430).
+		if (
+			state.activeInterruptReason !== null &&
+			isEmptyAbortedAssistantMessage(message) &&
+			(message as { usage?: { callInvoked?: boolean } }).usage?.callInvoked === undefined
+		)
+			return;
 		if (explainInterruptedAssistant(message, state.activeInterruptReason)) state.interruptedAssistantMessage = message;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
@@ -378,19 +384,23 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				auth?.source === "stored-oauth" ? auth.providerId : null,
 			);
 		}
-		if (timing) payload.timing = timing;
+		if (timing) {
+			payload.timing = timing;
+			payload.apiMs = timing.apiMs;
+		} else if ((message as { usage?: { callInvoked?: boolean } }).usage?.callInvoked === false) {
+			payload.apiMs = 0;
+		}
 		if (deliveryId) {
 			payload.continuityDeliveryId = deliveryId;
 			payload.stopReason = message.stopReason;
 		}
-		// A cancelled turn's provider usage is the object the stream started with
-		// and never updated. Record what the call is known to have spent instead of
-		// the zeros, in the shape a completed turn uses and flagged as an estimate.
+		// Keep the interrupted display estimate beside unknown provider usage (#423, #430).
 		const interruptedUsage = estimatedUsageForInterruptedTurn(message, deps.promptSideTokens());
 		// A call that reached the provider and failed unmetered is recorded as
 		// unknown, not as the zeros its stream started with (#423).
-		const recordedUsage = interruptedUsage ?? unmeteredInvokedUsage(message);
+		const recordedUsage = unmeteredInvokedUsage(message);
 		if (recordedUsage !== null) payload.usage = recordedUsage;
+		if (interruptedUsage !== null) payload.estimatedUsage = interruptedUsage;
 		if (isLengthStopAssistantMessage(message) && state.runtime) {
 			const contextExhaustion = recordValue(payload.contextExhaustion);
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;

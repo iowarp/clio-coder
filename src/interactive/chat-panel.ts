@@ -151,6 +151,8 @@ export interface ChatPanelTurnUsage {
 	costSummary?: CostAggregate;
 	/** Model calls the totals were summed over; absent when the count is unknown. */
 	modelCalls?: number;
+	unknownUsageCalls?: number;
+	neverSentCalls?: number;
 	/** Why the run's prompt cache was expected to be cold (`prompt_recompiled`, …). */
 	coldReasons?: ReadonlyArray<string>;
 	/** Settled speculative workers, shown only on the Detailed receipt. */
@@ -531,11 +533,18 @@ function extractAssistantThinking(message: unknown): string {
  */
 function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
+	const recordedUsage = (message as { usage?: unknown }).usage;
+	if (!recordedUsage || typeof recordedUsage !== "object") return undefined;
+	const rawUsage = recordedUsage as Record<string, unknown>;
+	const neverSent = rawUsage.callInvoked === false;
+	const unknownUsage = !neverSent && !normalizeTokenUsage(rawUsage).observed;
 	const tally = foldMessageIntoRunTally(emptyRunTally(), message as AgentMessage);
 	const reasoning = reasoningFromTally(tally);
 	if (
 		tally.inputTokens + tally.outputTokens + tally.cacheReadTokens + tally.cacheWriteTokens === 0 &&
-		reasoning.provenance === "unmeasured"
+		reasoning.provenance === "unmeasured" &&
+		!neverSent &&
+		!unknownUsage
 	) {
 		return undefined;
 	}
@@ -545,13 +554,14 @@ function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 		outputTokens: tally.outputTokens,
 		cacheReadTokens: tally.cacheReadTokens,
 		cacheWriteTokens: tally.cacheWriteTokens,
-		modelCalls: 1,
+		modelCalls: neverSent ? 0 : 1,
+		...(neverSent ? { neverSentCalls: 1 } : {}),
+		...(unknownUsage ? { unknownUsageCalls: 1 } : {}),
 	};
 	if (reasoning.provenance !== "unmeasured") {
 		turnUsage.reasoningTokens = reasoning.tokens;
 		turnUsage.reasoningTokenProvenance = reasoning.provenance;
 	}
-	const rawUsage = ((message as { usage?: unknown }).usage ?? {}) as Record<string, unknown>;
 	if (rawUsage.callInvoked !== false) {
 		turnUsage.costSummary = aggregateCostAmounts([
 			{
@@ -584,6 +594,8 @@ function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefi
 		found = true;
 		if (usage.costSummary !== undefined) costs.push(usage.costSummary);
 		total.modelCalls = (total.modelCalls ?? 0) + (usage.modelCalls ?? 1);
+		total.unknownUsageCalls = (total.unknownUsageCalls ?? 0) + (usage.unknownUsageCalls ?? 0);
+		total.neverSentCalls = (total.neverSentCalls ?? 0) + (usage.neverSentCalls ?? 0);
 		total.inputTokens += usage.inputTokens;
 		total.outputTokens += usage.outputTokens;
 		if (usage.estimated) total.estimated = true;
@@ -1057,7 +1069,11 @@ function renderTurnUsageLine(
 ): string[] {
 	if (receipt === "none") return [];
 	const outcome = usage.outcome ?? "Done";
-	const settled = `${outcome}${usage.elapsedMs === undefined ? "" : ` · ${formatCompactMs(usage.elapsedMs)}`}`;
+	const coverage =
+		(usage.unknownUsageCalls ?? 0) > 0 || (usage.neverSentCalls ?? 0) > 0
+			? ` · ${usage.unknownUsageCalls ?? 0} calls with unknown usage; ${usage.neverSentCalls ?? 0} never sent`
+			: "";
+	const settled = `${outcome}${coverage}${usage.elapsedMs === undefined ? "" : ` · ${formatCompactMs(usage.elapsedMs)}`}`;
 	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
 		return [`${glyph}${dimLine(settled, Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
