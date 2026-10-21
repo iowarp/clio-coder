@@ -188,7 +188,22 @@ export function createDispatchTool(
 						`dispatch: implementation unavailable: ${error instanceof Error ? error.message : String(error)}`,
 				};
 			}
-			return runner.runDispatchTool(deps, admission.state, args, options);
+			const result = await runner.runDispatchTool(deps, admission.state, args, options);
+			const snapshot = admission.state.trustedExecutionSnapshots.get(args);
+			const rejected = snapshot?.kind === "dispatch" ? snapshot.rejectedTasks : undefined;
+			if (rejected === undefined || rejected.length === 0) return result;
+			const failures = rejected.map((task) => `task ${task.position} rejected: ${task.message}`).join("\n");
+			return {
+				kind: "error",
+				message: `${failures}\n\n${result.kind === "ok" ? result.output : result.message}`,
+				details: {
+					...result.details,
+					rejectedTasks: [
+						...structuredClone(rejected),
+						...(Array.isArray(result.details?.rejectedTasks) ? result.details.rejectedTasks : []),
+					],
+				},
+			};
 		},
 	};
 }

@@ -57,6 +57,7 @@ import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownershi
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
+import { newRunId } from "../domains/dispatch/state.js";
 import type {
 	RunEnvelope,
 	RunGateProvenance,
@@ -2615,6 +2616,30 @@ export async function runDispatchTool(
 			: {}),
 	}));
 	const background = createBackgroundSwitch();
+	const rejectedExternal: Array<{ position: number; reason: string; message: string }> = [];
+	const permitted: DispatchRequest[] = [];
+	for (const [index, request] of requests.entries()) {
+		const root = request.externalReadRoot;
+		if (root === undefined) {
+			permitted.push(request);
+			continue;
+		}
+		const approval = await deps.approveExternalRead?.(root, options);
+		if (approval == null) {
+			rejectedExternal.push({
+				position: snapshot.positions?.[index] ?? index + 1,
+				reason: "external_read_approval_required",
+				message: `external_read_approval_required: Scout root ${root} was not approved for this run; approve it in the TUI or ACP permission request. Headless runs cannot approve external roots.`,
+			});
+			continue;
+		}
+		const runId = newRunId();
+		permitted.push({ ...request, runIdHint: runId, externalReadApproval: { root, ...approval, runId } });
+	}
+	requests = permitted;
+	const externalFailures = rejectedExternal.map((task) => `task ${task.position} rejected: ${task.message}`).join("\n");
+	if (requests.length === 0)
+		return { kind: "error", message: externalFailures, details: { rejectedTasks: rejectedExternal } };
 	// Review and Scout both execute under mode=parallel, so the operator-facing
 	// label names the topology they actually asked for.
 	const backgroundLabel = resolvedPlan?.topology === "fleet" ? "fleet" : review !== undefined ? "review" : mode;
@@ -2775,10 +2800,15 @@ export async function runDispatchTool(
 				runs = batch.runs;
 				board = batch.board;
 			}
-			const output = formatDispatchOutput(mode, runs, maxOutputBytes, board);
-			const details = dispatchDetails(deps, mode, runs, board);
+			const output = [externalFailures, formatDispatchOutput(mode, runs, maxOutputBytes, board)]
+				.filter(Boolean)
+				.join("\n\n");
+			const details = {
+				...dispatchDetails(deps, mode, runs, board),
+				...(rejectedExternal.length > 0 ? { rejectedTasks: rejectedExternal } : {}),
+			};
 			const failed = runs.filter((run) => run.receipt.exitCode !== 0);
-			if (failed.length > 0) return { kind: "error", message: output, details };
+			if (failed.length > 0 || rejectedExternal.length > 0) return { kind: "error", message: output, details };
 			return { kind: "ok", output, details };
 		} catch (err) {
 			if (err instanceof DispatchBackgroundedError) {

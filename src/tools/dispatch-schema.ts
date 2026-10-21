@@ -50,7 +50,12 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 /** Ordinary delegation on the permanent surface. Advanced composition is described on demand. */
 export function coordinatorDispatchParameters() {
 	const intent = Type.Object({
-		read_roots: Type.Optional(Type.Array(Type.String())),
+		read_roots: Type.Optional(
+			Type.Array(Type.String(), {
+				description:
+					"Workspace-relative reads, or one absolute checkout directory for Scout; outside reads ask once per run and headless refuses only that task.",
+			}),
+		),
 		write_roots: Type.Optional(
 			Type.Array(Type.String(), {
 				description: "Allowed output paths; confines writes and disables worker bash/verify.",
@@ -157,7 +162,13 @@ const DispatchVerificationSchema = Type.Array(
 // Inline objects cost more prompt tokens but preserve the actual provider contract.
 const DispatchIntentSchema = Type.Object(
 	{
-		read_roots: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+		read_roots: Type.Optional(
+			Type.Array(Type.String(), {
+				maxItems: 32,
+				description:
+					"Workspace-relative reads, or one absolute checkout directory for read-only Scout with per-run operator approval. Headless refuses that task.",
+			}),
+		),
 		write_roots: Type.Optional(
 			Type.Array(Type.String(), {
 				maxItems: 32,

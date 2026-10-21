@@ -60,6 +60,10 @@ function fail(reason: string, message: string): DispatchIntentNormalizationResul
 	return { ok: false, reason, message: admissionDiagnostic(message) };
 }
 
+function absolutePathMessage(field: string, index: number): string {
+	return `${field}[${index}] must be a repository-relative POSIX path. Use paths such as src/ or index.ts. For an outside checkout, dispatch the read-only scout with one absolute intent.read_roots directory and empty write_roots and expected_outputs; the host asks for that root once per run. Headless runs refuse that task while independent siblings continue.`;
+}
+
 function checkedPathText(value: unknown, field: string, index: number): string | DispatchIntentNormalizationResult {
 	if (typeof value !== "string" || value.trim().length === 0) {
 		return fail("intent_path_malformed", `${field}[${index}] must be a non-empty repository-relative POSIX path`);
@@ -86,7 +90,7 @@ function normalizeScopePathEntry(
 	} catch (error) {
 		if (error instanceof PathBoundaryError) {
 			if (error.code === "absolute") {
-				return fail("intent_path_absolute", `${field}[${index}] must be a repository-relative POSIX path`);
+				return fail("intent_path_absolute", absolutePathMessage(field, index));
 			}
 			if (error.code === "parent") {
 				return fail("intent_path_escapes_root", `${field}[${index}] escapes the repository root`);
@@ -108,7 +112,7 @@ function normalizeExpectedOutputEntry(
 	if (typeof checked !== "string") return checked;
 	const trimmed = checked;
 	if (trimmed.includes("\\") || path.posix.isAbsolute(trimmed) || path.win32.isAbsolute(trimmed)) {
-		return fail("intent_path_absolute", `${field}[${index}] must be a repository-relative POSIX path`);
+		return fail("intent_path_absolute", absolutePathMessage(field, index));
 	}
 	const normalized = path.posix.normalize(trimmed.replace(/^\.\//u, "").replace(/\/{2,}/gu, "/"));
 	if (normalized === "." || normalized.length === 0) {

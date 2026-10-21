@@ -65,6 +65,8 @@ it("CLI --record is opt-in, parses beside --agent, and refuses a main-agent run 
 });
 
 it("binds recording into approval plans and returns the manifest reference from the real dispatch tool", async () => {
+	const originalCwd = process.cwd();
+	process.chdir(env.dir);
 	writeFileSync(join(env.dir, "input.txt"), "fixture evidence\n");
 	const context = dispatchStubContext();
 	const bundle = makeDispatchBundle(context, {
@@ -154,5 +156,6 @@ it("binds recording into approval plans and returns the manifest reference from 
 		tool.disposeAdmissionArguments?.(review);
 	} finally {
 		await bundle.extension.stop?.();
+		process.chdir(originalCwd);
 	}
 });

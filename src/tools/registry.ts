@@ -770,6 +770,11 @@ export interface HostEffectCall {
 }
 
 export interface ToolRegistry {
+	/** Host-only, one-shot consent for one external Scout root (#433). */
+	requestReadRootApproval?(
+		root: string,
+		options?: ToolInvokeOptions,
+	): Promise<{ requestId: string; requestedBy: string } | null>;
 	register(spec: ToolSpec): void;
 	/** Remove a session scoped dynamic capability after its owner closes. */
 	unregister?(name: ToolName): void;
@@ -878,6 +883,7 @@ export type RegistryVerdict =
 	| { kind: "not_visible"; reason: string };
 
 interface ParkedCall {
+	readRootApproval?: true;
 	call: ClassifierCall;
 	decision: SafetyDecision;
 	meta: PermissionRequiredMeta;
@@ -2407,6 +2413,78 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			}
 			return verdict;
 		},
+		async requestReadRootApproval(root, options) {
+			if ((deps.principal ?? "main") !== "main" || options?.signal?.aborted || permissionListeners.size === 0) return null;
+			const call: ClassifierCall = Object.freeze({ tool: ToolNames.Read, args: Object.freeze({ path: root }) });
+			const admission = evaluateAdmission({
+				principal: "main",
+				effects: [call],
+				safety: deps.safety,
+				autonomy: "default",
+				confirmationRuleId: "dispatch-external-read",
+				confirmationText: {
+					detail: `Allow one read-only Scout run to inspect external root ${JSON.stringify(root)}? This grants no writes, commands, or access to other external roots.`,
+					hints: ["This approval expires with this Scout run."],
+				},
+			});
+			if (admission.kind !== "ask") return null;
+			const decision: SafetyDecision = {
+				...admission.decision,
+				kind: "ask",
+				confirmationRuleId: "dispatch-external-read",
+				rejection: {
+					short: `Scout external read root needs approval: ${root}`,
+					detail: `Allow one read-only Scout run to inspect external root ${JSON.stringify(root)}? No writes or commands are granted.`,
+					hints: ["One approval covers only this run and root."],
+				},
+			};
+			const meta: PermissionRequiredMeta = {
+				requestId: nextApprovalRequestId(),
+				axis: "net:dispatch-external-read",
+				approvalAuthority: "operator",
+				...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+				...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
+				...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
+			};
+			return await new Promise((resolve) => {
+				const started = performance.now();
+				let reported = false;
+				const closePark = () => {
+					if (!reported) {
+						reported = true;
+						options?.onParked?.(Math.round(performance.now() - started));
+					}
+				};
+				const entry: ParkedCall = {
+					call,
+					decision,
+					meta,
+					readRootApproval: true,
+					closePark,
+					...(options !== undefined ? { options } : {}),
+					resolve(verdict) {
+						closePark();
+						const details = verdict.kind === "ok" ? verdict.result.details : undefined;
+						resolve(
+							details && typeof details.requestId === "string" && typeof details.requestedBy === "string"
+								? { requestId: details.requestId, requestedBy: details.requestedBy }
+								: null,
+						);
+					},
+				};
+				if (options?.signal) {
+					const abort = () => cancelParkedCallById(meta.requestId, PARK_ABORT_REASON);
+					options.signal.addEventListener("abort", abort, { once: true });
+					entry.abortCleanup = () => options.signal?.removeEventListener("abort", abort);
+				}
+				parked.push(entry);
+				recordRegistryDisposition(call, decision, "permission_requested", {
+					requestId: meta.requestId,
+					reasonCode: "confirmation:dispatch-external-read",
+				});
+				notifyPermissionRequired(call, decision, meta);
+			});
+		},
 		hasParkedCalls: () => parked.length > 0,
 		parkedCount: () => parked.length,
 		renotifyHead() {
@@ -2435,6 +2513,43 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (entry) pending.push({ entry });
 			}
 			for (const { entry, reparkIndex } of pending) {
+				if (entry.readRootApproval === true) {
+					if (grant === undefined || grant.actionClass !== "read" || (grant.issuer ?? "operator") !== "operator") {
+						reparkEntry(entry, reparkIndex);
+						continue;
+					}
+					cleanupParkedEntry(entry);
+					const disposition = evaluateAdmission({
+						principal: "main",
+						effects: [entry.call],
+						safety: deps.safety,
+						autonomy: "default",
+						authorization: { actionClass: "read", issuer: "operator" },
+					});
+					entry.closePark();
+					if (disposition.kind !== "allow") {
+						entry.resolve({
+							kind: "blocked",
+							reason: "External read root no longer passes safety admission",
+							decision: disposition.decision,
+						});
+						continue;
+					}
+					recordRegistryDisposition(entry.call, disposition.decision, "allowed", {
+						requestId: entry.meta.requestId,
+						reasonCode: "confirmation:dispatch-external-read",
+					});
+					entry.resolve({
+						kind: "ok",
+						decision: disposition.decision,
+						result: {
+							kind: "ok",
+							output: "External Scout read approved for one run.",
+							details: { requestId: entry.meta.requestId, requestedBy: grant.requestedBy },
+						},
+					});
+					continue;
+				}
 				// A one-shot grant covers only the parked call it selected. Calls
 				// that parked while the overlay was already open remain queued and
 				// need their own confirmation, so a concurrent privileged call

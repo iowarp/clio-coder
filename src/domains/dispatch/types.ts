@@ -720,6 +720,8 @@ export interface RunReceiptSafetySummary {
 	 * opened at least one, so other receipts keep their exact shape.
 	 */
 	grants?: RunGrantAudit[];
+	/** One operator/client approval, bound to this external read-only Scout run (#433). */
+	externalReadApproval?: { root: string; requestId: string; requestedBy: string; runId: string };
 	/**
 	 * Blocked attempts left out of `blockedAttempts` by the main agent's receipt
 	 * bound (50 entries, each reason clipped to 500 characters; see

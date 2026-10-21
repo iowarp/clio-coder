@@ -6689,6 +6689,20 @@ export function createDispatchBundle(
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
 		req = validation.restore(validated.spec);
+		if (req.externalReadRoot !== undefined) {
+			const approval = req.externalReadApproval;
+			if (
+				req.agentId !== "scout" ||
+				req.readOnly !== true ||
+				approval === undefined ||
+				approval.root !== req.externalReadRoot ||
+				approval.runId !== req.runIdHint ||
+				canonicalizeExistingPath(req.cwd ?? "") !== approval.root
+			)
+				throw new Error(
+					"external_read_approval_required: Outside Scout reads require approval bound to this run and canonical root.",
+				);
+		}
 		// Admission never awaits a decision model. Routing classifies the task
 		// with the rules, always: a dispatch is the main agent's call, and a
 		// decision model that could delay it by up to 3s, or change its route,
@@ -8116,6 +8130,7 @@ export function createDispatchBundle(
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					...(lifecycle.readOnly ? { readOnly: true as const } : {}),
+					...(req.externalReadApproval !== undefined ? { externalReadApproval: { ...req.externalReadApproval } } : {}),
 					permit: receiptPermitSummary(lifecycle.permit, lifecycle.admission.mcpNetworkWithheld),
 					toolTelemetry: {
 						coverage: toolTelemetryCoverage,

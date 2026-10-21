@@ -25,6 +25,8 @@ export function routeValidationProjection(
 	allowUnenvelopedApproval = false,
 ): { jobSpec: JobSpec; restore(validated: JobSpec): DispatchRequest } {
 	const {
+		externalReadRoot,
+		externalReadApproval,
 		record,
 		// Generated-context sampling and its synthesis deadline are host-owned, outside model-authored job arguments.
 		sampling,
@@ -75,6 +77,8 @@ export function routeValidationProjection(
 		restore: (validated) => ({
 			...request,
 			...validated,
+			...(externalReadRoot !== undefined ? { externalReadRoot } : {}),
+			...(externalReadApproval !== undefined ? { externalReadApproval } : {}),
 			...(record !== undefined ? { record } : {}),
 			...(sampling !== undefined ? { sampling } : {}),
 			...(synthesisAt !== undefined ? { synthesisAt } : {}),

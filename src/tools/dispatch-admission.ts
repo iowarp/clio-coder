@@ -274,22 +274,29 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 
 	const parseRequests = (args: Record<string, unknown>) =>
 		dispatchRequestsFromArgs(args, {
+			isReadOnlyScout: (id) =>
+				deps.getAgentSpecs().some((spec) => spec.id === id && id === "scout" && spec.capabilityClass === "read-only"),
 			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
 			hasAgent: (id) => deps.getAgentSpecs().some((spec) => spec.id === id),
 			auto: {
 				approvedAuthorities: ["read-only", "verification", "artifact-write", "workspace-edit"],
 				authorityBasis: deps.getAutonomy?.() === "yolo" ? "yolo-policy" : "operator-plan-approval",
 			},
-			resolveIntent(rawIntent, cwd) {
+			resolveIntent(rawIntent, cwd, externalReadRoot) {
 				// One root for discovery and for every sealed path, read once, so the
 				// check the host later runs is the check the catalog declared there (F6).
-				const workspaceRoot = process.cwd();
-				const discovery = discoverDeclaredChecksAtRoot(workspaceRoot, cwd);
+				const workspaceRoot = externalReadRoot ?? process.cwd();
+				// External Scouts cannot verify; do not inspect their project catalog before consent (#433).
+				const discovery =
+					externalReadRoot === undefined
+						? discoverDeclaredChecksAtRoot(workspaceRoot, cwd)
+						: { ok: true as const, sources: [] };
 				if (!discovery.ok) return { ok: false, message: `verification_catalog_invalid: ${discovery.reason}` };
 				const declared = discovery.sources.flatMap((source) => source.checks);
 				const byId = new Map(declared.map((check) => [check.id, check]));
 				const normalized = normalizeDispatchIntent(rawIntent, byId);
-				if (!normalized.ok) return { ok: false, message: `${normalized.reason}: ${normalized.message}` };
+				if (!normalized.ok)
+					return { ok: false, reason: normalized.reason, message: `${normalized.reason}: ${normalized.message}` };
 				announceDotWriteRoot(deps, rawIntent);
 				return {
 					ok: true,
@@ -336,11 +343,21 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		args: Record<string, unknown>,
 		fields: Pick<
 			DispatchExecutionSnapshot & { kind: "dispatch" },
-			"requests" | "mode" | "review" | "compete" | "council"
+			"requests" | "positions" | "rejectedTasks" | "mode" | "review" | "compete" | "council"
 		>,
 	): DispatchExecutionSnapshot => ({
 		kind: "dispatch",
-		planView: describeDispatchPlan(args),
+		planView: {
+			...describeDispatchPlan(args),
+			...(fields.requests.some((request) => request.externalReadRoot !== undefined) &&
+			fields.requests.every(
+				(request) =>
+					request.agentId === "scout" &&
+					deps.getAgentSpecs().some((spec) => spec.id === request.agentId && spec.capabilityClass === "read-only"),
+			)
+				? { planScale: false }
+				: {}),
+		},
 		...fields,
 		writers: args.writers === 1 ? 1 : undefined,
 		detach: args.detach === true,
@@ -678,11 +695,21 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		}
 		const snapshotFields = {
 			requests: parsed.requests,
+			positions: parsed.positions,
+			...(parsed.rejectedTasks.length > 0 ? { rejectedTasks: parsed.rejectedTasks } : {}),
 			mode,
 			review: reviewResult.review,
 			compete: competeResult?.ok === true ? competeResult.compete : undefined,
 			council: councilResult?.ok === true ? councilResult.council : undefined,
 		};
+		if (
+			parsed.requests.some((request) => request.externalReadRoot !== undefined) &&
+			(mode !== "parallel" || args.review !== undefined)
+		)
+			return shapeRejection(
+				args,
+				"external_read_mode_unsupported: Outside Scouts require independent parallel tasks without review.",
+			);
 		if (deps.dispatch.preview === undefined) {
 			const marked = markPrepared(args);
 			return trustExecution(marked, dispatchExecutionSnapshot(marked, snapshotFields));
@@ -841,7 +868,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					tasks.push(judgeTask);
 				}
 			} else {
-				for (const [index, request] of parsed.requests.entries()) tasks.push(resolveTask(request, "task", index + 1));
+				for (const [index, request] of parsed.requests.entries())
+					tasks.push(resolveTask(request, "task", parsed.positions[index] ?? index + 1));
 			}
 
 			// Scope has already been resolved on tasks. Rendering the raw call here
@@ -896,6 +924,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		},
 		prepareArguments,
 		describeDispatchPlan(args) {
+			const snapshot = state.trustedExecutionSnapshots.get(args);
+			if (snapshot?.kind === "dispatch") return snapshot.planView;
 			const trusted = state.trustedResolvedPlans.get(args);
 			return describeDispatchPlan(trusted === undefined ? args : { ...args, [RESOLVED_DISPATCH_PLAN_ARGUMENT]: trusted });
 		},

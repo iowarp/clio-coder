@@ -14,6 +14,7 @@ import {
 	dispatchIntentScopeWidening,
 } from "../domains/dispatch/intent-compatibility.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
+import { scoutReadWorkspace } from "../domains/dispatch/scout-workspace.js";
 import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 
@@ -78,6 +79,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 
 export interface DispatchArgumentParserOptions {
+	isReadOnlyScout?: (id: string) => boolean;
 	resolveFacts?: AgentRoleFactsResolver;
 	/** Installed recipe ids, so an `auto` baseline never names an agent this install lacks. */
 	hasAgent?: (id: string) => boolean;
@@ -88,9 +90,16 @@ export interface DispatchArgumentParserOptions {
 	resolveIntent?: (
 		rawIntent: unknown,
 		cwd: string | undefined,
+		externalReadRoot?: string,
 	) =>
 		| { ok: true; intent: DispatchIntent; resolvedVerification: NonNullable<DispatchRequest["resolvedVerification"]> }
-		| { ok: false; message: string };
+		| { ok: false; message: string; reason?: string };
+}
+
+export interface DispatchRejectedTask {
+	position: number;
+	reason: string;
+	message: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -142,7 +151,7 @@ function dispatchRequestFromArgs(
 	args: Record<string, unknown>,
 	options: DispatchArgumentParserOptions,
 	resultSummaryScope: "task" | "batch" = "task",
-): { ok: true; request: DispatchRequest } | { ok: false; message: string } {
+): { ok: true; request: DispatchRequest } | { ok: false; message: string; reason?: string } {
 	const task = stringArg(args, "task");
 	if (!task) return { ok: false, message: "missing task (pass list:true to see available agents)" };
 	if (Object.hasOwn(args, "agent_id")) return { ok: false, message: "agent_id is unsupported; use agent" };
@@ -206,7 +215,7 @@ function dispatchRequestFromArgs(
 	request.routingIntent = routing.intent;
 	request.failover = routing.intent.failover;
 	request.requiredCapabilities = routing.intent.requiredCapabilities;
-	const cwd = stringArg(args, "cwd");
+	let cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
 	if (args.worktree !== undefined) {
 		if (args.worktree !== true) return { ok: false, message: "worktree must be true when present" };
@@ -221,7 +230,34 @@ function dispatchRequestFromArgs(
 	if (Object.hasOwn(args, "gate") && isRecord(args.intent) && Object.hasOwn(args.intent, "verification")) {
 		return { ok: false, message: "gate_and_intent_verification_conflict: gate cannot combine with intent.verification" };
 	}
-	let rawIntent = args.intent;
+	const workspace = scoutReadWorkspace({
+		agentId,
+		readOnlyScout: options.isReadOnlyScout?.(agentId) === true,
+		...(cwd ? { cwd } : {}),
+		intent: args.intent,
+		worktree: request.worktree === true,
+		writeRoots: args.writeRoots,
+	});
+	if (!workspace.ok) return workspace;
+	let rawIntent = workspace.intent;
+	if (workspace.externalReadRoot !== undefined) {
+		if (args.detach === true)
+			return {
+				ok: false,
+				reason: "external_read_mode_unsupported",
+				message: "external_read_mode_unsupported: External Scout approval requires an attached parallel dispatch.",
+			};
+		request.externalReadRoot = workspace.externalReadRoot;
+		request.cwd = workspace.externalReadRoot;
+		request.readOnly = true;
+		cwd = workspace.externalReadRoot;
+		if (Object.hasOwn(args, "gate"))
+			return {
+				ok: false,
+				reason: "external_read_write_scope",
+				message: "external_read_write_scope: External Scouts cannot run verification gates.",
+			};
+	}
 	if (Object.hasOwn(args, "gate")) {
 		if (typeof args.gate !== "string" || args.gate.trim().length === 0) {
 			return {
@@ -234,7 +270,7 @@ function dispatchRequestFromArgs(
 	}
 	if (rawIntent !== undefined) {
 		if (options.resolveIntent === undefined) return { ok: false, message: "intent resolver is unavailable" };
-		const resolved = options.resolveIntent(rawIntent, cwd);
+		const resolved = options.resolveIntent(rawIntent, cwd, workspace.externalReadRoot);
 		if (!resolved.ok) return resolved;
 		request.intent = resolved.intent;
 		if (resolved.resolvedVerification.length > 0) request.resolvedVerification = resolved.resolvedVerification;
@@ -298,7 +334,9 @@ function dispatchRequestFromArgs(
 export function dispatchRequestsFromArgs(
 	args: Record<string, unknown>,
 	options: DispatchArgumentParserOptions,
-): { ok: true; requests: DispatchRequest[] } | { ok: false; message: string } {
+):
+	| { ok: true; requests: DispatchRequest[]; positions: number[]; rejectedTasks: DispatchRejectedTask[] }
+	| { ok: false; message: string } {
 	if (Object.hasOwn(args, "task") && Object.hasOwn(args, "tasks")) {
 		return { ok: false, message: "dispatch: pass either task for one run or tasks for a batch, not both" };
 	}
@@ -317,6 +355,11 @@ export function dispatchRequestsFromArgs(
 	const shared = { ...args };
 	Reflect.deleteProperty(shared, "tasks");
 	const requests: DispatchRequest[] = [];
+	const positions: number[] = [];
+	const rejectedTasks: DispatchRejectedTask[] = [];
+	// Independent intent failures cannot strand valid siblings (#433). Coupled
+	// modes retain atomic admission because removing a step changes their work.
+	const isolateIntentFailures = (args.mode === undefined || args.mode === "parallel") && args.review === undefined;
 	for (let index = 0; index < tasks.length; index += 1) {
 		const item = tasks[index];
 		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
@@ -333,13 +376,35 @@ export function dispatchRequestsFromArgs(
 		const itemIntent = isRecord(item) && Object.hasOwn(item, "intent") && isRecord(item.intent) ? item.intent : null;
 		if (sharedIntent !== null && itemIntent !== null) itemArgs.intent = { ...sharedIntent, ...itemIntent };
 		const parsed = dispatchRequestFromArgs(itemArgs, options, resultSummaryScope);
-		if (!parsed.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${parsed.message}` };
+		if (!parsed.ok) {
+			if (isolateIntentFailures && parsed.reason !== undefined) {
+				rejectedTasks.push({ position: index + 1, reason: parsed.reason, message: parsed.message });
+				continue;
+			}
+			return { ok: false, message: `dispatch: whole batch rejected; task ${index + 1}: ${parsed.message}` };
+		}
 		if (sharedIntent !== null && itemIntent !== null) {
 			if (options.resolveIntent === undefined) {
 				return { ok: false, message: `dispatch: task ${index + 1}: intent resolver is unavailable` };
 			}
-			const ceiling = options.resolveIntent(sharedIntent, parsed.request.cwd);
-			if (!ceiling.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${ceiling.message}` };
+			const sharedWorkspace = scoutReadWorkspace({
+				agentId: parsed.request.agentId,
+				readOnlyScout: options.isReadOnlyScout?.(parsed.request.agentId) === true,
+				...(parsed.request.cwd ? { cwd: parsed.request.cwd } : {}),
+				intent: sharedIntent,
+				worktree: parsed.request.worktree === true,
+				writeRoots: shared.writeRoots,
+			});
+			const ceiling = sharedWorkspace.ok
+				? options.resolveIntent(sharedWorkspace.intent, parsed.request.cwd, parsed.request.externalReadRoot)
+				: sharedWorkspace;
+			if (!ceiling.ok) {
+				if (isolateIntentFailures && ceiling.reason !== undefined) {
+					rejectedTasks.push({ position: index + 1, reason: ceiling.reason, message: ceiling.message });
+					continue;
+				}
+				return { ok: false, message: `dispatch: whole batch rejected; task ${index + 1}: ${ceiling.message}` };
+			}
 			const widening =
 				parsed.request.intent === undefined ? null : dispatchIntentScopeWidening(ceiling.intent, parsed.request.intent);
 			if (widening !== null) {
@@ -347,8 +412,15 @@ export function dispatchRequestsFromArgs(
 			}
 		}
 		requests.push(parsed.request);
+		positions.push(index + 1);
 	}
-	return { ok: true, requests };
+	if (requests.length === 0) {
+		return {
+			ok: false,
+			message: `dispatch: no tasks admitted; ${rejectedTasks.map((task) => `task ${task.position}: ${task.message}`).join("; ")}`,
+		};
+	}
+	return { ok: true, requests, positions, rejectedTasks };
 }
 
 /** Normalize weak-model task containers. Pure and idempotent. */

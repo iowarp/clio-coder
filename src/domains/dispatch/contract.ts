@@ -46,6 +46,10 @@ export interface ResolvedVerificationCheck {
 }
 
 export interface DispatchRequest extends JobSpec {
+	/** Canonical outside Scout workspace, derived by admission rather than model-authored (#433). */
+	externalReadRoot?: string;
+	/** One-shot host approval; validation strips it from model-authored job fields (#433). */
+	externalReadApproval?: { root: string; requestId: string; requestedBy: string; runId: string };
 	/** Opt-in bounded redacted display-event asciicast; never a PTY around worker NDJSON. */
 	record?: boolean;
 	/** Generated context needs stable local sampling across identical runs. */

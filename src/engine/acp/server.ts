@@ -2953,7 +2953,12 @@ function installPermissionBridge(input: {
 								sessionId,
 								toolCall: {
 									toolCallId,
-									title: boundString(call.tool, ACP_MAX_TOOL_TITLE_BYTES),
+									title: boundString(
+										decision.kind === "ask" && decision.confirmationRuleId === "dispatch-external-read"
+											? `Scout read-only root: ${describeCallTarget(call.tool, call.args)}`
+											: call.tool,
+										ACP_MAX_TOOL_TITLE_BYTES,
+									),
 									kind: toolKind(call.tool),
 									status: "pending",
 									rawInput: snapshot.rawInput,

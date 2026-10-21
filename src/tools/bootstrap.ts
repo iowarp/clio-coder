@@ -165,6 +165,8 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		const dispatchRunEvents = createDispatchRunEventRegistry({ journal: null });
 		const dispatchToolDeps = {
 			dispatch,
+			approveExternalRead: (root: string, options?: import("./registry.js").ToolInvokeOptions) =>
+				registry.requestReadRootApproval?.(root, options) ?? Promise.resolve(null),
 			...(deps.captureWorkerContext ? { captureWorkerContext: deps.captureWorkerContext } : {}),
 			runEvents: dispatchRunEvents,
 			getAgentSpecs: deps.getAgentSpecs ?? (() => []),

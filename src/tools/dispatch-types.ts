@@ -12,10 +12,12 @@ import type {
 	cleanupCompeteGroup,
 	mergeWinnerBranch,
 } from "./compete-worktrees.js";
+import type { DispatchRejectedTask } from "./dispatch-arguments.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchPlanView, ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 import type { DispatchRunEventRegistry } from "./dispatch-run-events.js";
 import type { DispatchSchemaComposition } from "./dispatch-schema.js";
+import type { ToolInvokeOptions } from "./registry.js";
 
 export type DispatchMode = "parallel" | "sequential" | "pipeline" | "compete" | "council";
 
@@ -57,6 +59,8 @@ export interface DispatchRunExecutionSnapshot {
 	readonly kind: "dispatch";
 	readonly planView: DispatchPlanView;
 	readonly requests: ReadonlyArray<DispatchRequest>;
+	readonly positions?: ReadonlyArray<number>;
+	readonly rejectedTasks?: ReadonlyArray<DispatchRejectedTask>;
 	readonly mode: DispatchMode;
 	readonly writers: 1 | undefined;
 	readonly review: DispatchReviewSettings | undefined;
@@ -84,6 +88,10 @@ export type DispatchExecutionSnapshot =
 	| DispatchListExecutionSnapshot;
 
 export interface DispatchToolDeps {
+	approveExternalRead?: (
+		root: string,
+		options?: ToolInvokeOptions,
+	) => Promise<{ requestId: string; requestedBy: string } | null>;
 	/** Synchronous read of the active model-visible history, before admission can park. */
 	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch: DispatchContract;
