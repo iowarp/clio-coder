@@ -35,7 +35,8 @@ export function withAnthropicDiagnostics<T extends StreamOptions>(
 				...base,
 				// #423: opt into comparisons without replacing Pi's OAuth and model beta headers.
 				betas: [...new Set([...betas, "cache-diagnosis-2026-04-07"])],
-				...(previousMessageId ? { diagnostics: { previous_message_id: previousMessageId } } : {}),
+				// #423: first requests must opt in so later diagnostics can find them for comparison.
+				diagnostics: previousMessageId ? { previous_message_id: previousMessageId } : {},
 			};
 		},
 	} as T;
