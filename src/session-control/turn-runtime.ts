@@ -1,3 +1,4 @@
+import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { traceObservation } from "../domains/memory/observation-trace.js";
@@ -32,7 +33,11 @@ import {
 	type TargetStatus,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
-import { SessionCostCeilingError, sessionCeilingReached } from "../domains/scheduling/budget.js";
+import {
+	SessionCostCeilingError,
+	sessionCeilingReached,
+	suggestedSessionCostCeilingUsd,
+} from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { createEngineAgent } from "../engine/agent.js";
@@ -64,24 +69,22 @@ import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } 
 import type { TurnContext } from "./turn-context.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { TurnPersistence } from "./turn-persistence.js";
-import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, ChatLoopTarget, ChatTurnState, PreInvocationStage } from "./turn-state.js";
 
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
-
-/** The steps a request passes before its stream is invoked (#423). */
-type PreInvocationStage = "transform" | "auth" | "budget admission";
 
 const PRE_INVOCATION_STAGE_LABEL: Readonly<Record<PreInvocationStage, string>> = {
 	transform: "request transform",
 	auth: "authentication",
 	"budget admission": "budget admission",
+	admission: "request admission",
 };
 
 /**
  * The stall watchdog's abort text. A silent request that never reached the
  * provider names the step it was in: the session behind #423 read "no output
  * from openai-codex" while no request had left the host. Both forms end in a
- * timeout, so the transient retry ladder treats them as it did before.
+ * timeout; only an invoked stream belongs on the transient retry ladder (#424).
  */
 function stallAbortReason(
 	targetId: string,
@@ -720,6 +723,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					(localRuntime.runtimeResolution.costProvenance === "known" ||
 						localRuntime.runtimeResolution.costProvenance === "estimated")
 				) {
+					const recordBlock = (block: BudgetAlertPayload): void => {
+						persistence.appendBudgetBlock({
+							...block,
+							raiseToUsd: suggestedSessionCostCeilingUsd(block.currentUsd, block.ceilingUsd),
+							setting: "safety.limits.sessionCostUsd",
+						});
+					};
 					try {
 						if (deps.scheduling.admitPaidRequest) {
 							// A ceiling wait is the operator's decision, not a silent provider.
@@ -734,6 +744,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 									additionalUsd: unsettledSpendUsd,
 									getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
 									contextTokens: input,
+									onBlocked: recordBlock,
 									...(streamOptions?.signal ? { signal: streamOptions.signal } : {}),
 								});
 							} finally {
@@ -743,6 +754,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						} else {
 							const { currentUsd, ceilingUsd } = deps.scheduling.preflight();
 							if (sessionCeilingReached(currentUsd + unsettledSpendUsd, ceilingUsd)) {
+								recordBlock({
+									level: currentUsd + unsettledSpendUsd > ceilingUsd ? "over" : "at",
+									currentUsd: currentUsd + unsettledSpendUsd,
+									ceilingUsd,
+									contextTokens: input,
+								});
 								throw new SessionCostCeilingError(currentUsd + unsettledSpendUsd, ceilingUsd, undefined, input);
 							}
 						}
@@ -762,6 +779,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					outputTokens: output,
 					context: resolved,
 				});
+				preInvocationStage = "admission";
 				const admission = deps.continuity?.admission() ?? { block: false };
 				admittedMessages = admission.block ? [] : resolved.messages;
 				admittedSystemPrompt = admission.block ? "" : (resolved.systemPrompt ?? "");
@@ -879,10 +897,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						armStallTimer(stallMs - idleMs);
 						return;
 					}
+					state.streamStallStage = apiCallStartedAt === null ? preInvocationStage : null;
 					state.streamStallReason = stallAbortReason(
 						localRuntime.targetId,
 						idleMs,
-						apiCallStartedAt === null ? preInvocationStage : null,
+						state.streamStallStage,
 						awaitingFirstToken,
 					);
 					localRuntime.agent.abort();
@@ -1182,6 +1201,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				toolsInFlight = 0;
 				stallSuspendDepth = 0;
 				state.streamStallReason = null;
+				state.streamStallStage = null;
 				const stallMs = deps.retrySettings().streamStallMs;
 				if (stallMs > 0) armStallTimer(stallMs);
 			}

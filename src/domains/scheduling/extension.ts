@@ -93,24 +93,26 @@ export function createSchedulingBundle(
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
 		},
-		admitPaidRequest: async ({ waitForRaise, additionalUsd = 0, getCeilingUsd, contextTokens, signal }) => {
+		admitPaidRequest: async ({ waitForRaise, additionalUsd = 0, getCeilingUsd, contextTokens, onBlocked, signal }) => {
 			let alerted = false;
 			for (;;) {
 				const { currentUsd } = evaluate();
 				const spend = currentUsd + additionalUsd;
 				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
 				if (!sessionCeilingReached(spend, ceilingUsd)) return;
-				if (!waitForRaise) throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined, contextTokens);
 				if (signal?.aborted) throw signal.reason ?? new Error("budget wait aborted");
 				if (!alerted) {
 					alerted = true;
-					context.bus.emit(BusChannels.BudgetAlert, {
+					const block: BudgetAlertPayload = {
 						level: spend > ceilingUsd ? "over" : "at",
 						currentUsd: spend,
 						ceilingUsd,
 						...(contextTokens !== undefined ? { contextTokens } : {}),
-					} satisfies BudgetAlertPayload);
+					};
+					onBlocked?.(block);
+					context.bus.emit(BusChannels.BudgetAlert, block);
 				}
+				if (!waitForRaise) throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined, contextTokens);
 				await new Promise<void>((resolve, reject) => {
 					const onAbort = (): void => {
 						clearTimeout(timer);

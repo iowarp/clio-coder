@@ -68,6 +68,9 @@ export interface ChatLoopRunSnapshot {
  */
 export type TurnPreparationPhase = "idle" | "preparing" | "compacting";
 
+/** A local request stage must stay distinct from an invoked stream stall (#424). */
+export type PreInvocationStage = "transform" | "auth" | "budget admission" | "admission";
+
 export interface ChatTurnState {
 	/** Live agent runtime; built or hot-swapped by turn-runtime. */
 	runtime: AgentRuntime | null;
@@ -131,6 +134,8 @@ export interface ChatTurnState {
 	toolProseAbortReason: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
 	streamStallReason: string | null;
+	/** Local stage held at a watchdog abort; null once invoked or after recovery (#424). */
+	streamStallStage: PreInvocationStage | null;
 	/** Answer length at the last tool-prose scan, so the scan samples instead of running per delta. */
 	toolProseAssessedChars: number;
 	/** Tool calls observed in the current turn; feeds turn_end metadata. */
@@ -179,6 +184,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		toolBudgetLock: false,
 		toolProseAbortReason: null,
 		streamStallReason: null,
+		streamStallStage: null,
 		toolProseAssessedChars: 0,
 		turnToolCalls: 0,
 		turnToolNames: [],

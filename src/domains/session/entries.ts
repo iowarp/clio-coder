@@ -84,6 +84,18 @@ export interface CustomEntry<T = unknown> extends BaseSessionEntry {
 	display?: boolean;
 }
 
+/** Durable admission stop, including the setting needed to resume paid calls (#424). */
+export const BUDGET_BLOCK_ENTRY = "budgetBlock";
+
+export interface BudgetBlockData {
+	level: "at" | "over";
+	currentUsd: number;
+	ceilingUsd: number;
+	contextTokens?: number;
+	raiseToUsd: number;
+	setting: "safety.limits.sessionCostUsd";
+}
+
 export interface ModelChangeEntry extends BaseSessionEntry {
 	kind: "modelChange";
 	provider: string;

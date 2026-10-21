@@ -16,7 +16,8 @@ import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
 import { normalizeCostProvenance, resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
-import type { SessionEntry } from "../domains/session/entries.js";
+import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.js";
+import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { replaceEngineMessages, setEngineCodexUserTurn } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
@@ -141,6 +142,7 @@ export interface TurnPersistence {
 		/** Machine provenance, persisted as `origin` so a replay attributes the turn. */
 		origin?: string,
 	): string | null;
+	appendBudgetBlock(block: BudgetBlockData): void;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
 	appendThinkingLevelChangeEntry(thinkingLevel: string, effectiveEffort?: string): void;
@@ -692,6 +694,17 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			// before it.
 			startTracedTurn(userTurn.id, text, agentRuntime);
 			return userTurn.id;
+		},
+
+		appendBudgetBlock(block): void {
+			if (!deps.session?.current()) return;
+			deps.session.appendEntry({
+				kind: "custom",
+				parentTurnId: state.lastTurnId,
+				customType: BUDGET_BLOCK_ENTRY,
+				display: true,
+				data: block,
+			});
 		},
 
 		appendRetryStatus(status): void {

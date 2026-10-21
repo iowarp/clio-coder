@@ -1,3 +1,4 @@
+import type { BudgetAlertPayload } from "../../core/bus-events.js";
 import type { BudgetVerdict, RunCostCap } from "./budget.js";
 import type { FleetRegistry } from "./cluster.js";
 import type { LocalCapacity } from "./local-capacity.js";
@@ -26,6 +27,8 @@ export interface SchedulingContract {
 		getCeilingUsd?: () => number;
 		/** Estimated input tokens the parked request sends, so a ceiling stop shows what each call costs (#423). */
 		contextTokens?: number;
+		/** Record the first block before either waiting or rejecting (#424). */
+		onBlocked?: (block: BudgetAlertPayload) => void;
 		signal?: AbortSignal;
 	}): Promise<void>;
 	/** Arm a `clio-coder run --max-cost-usd` cap, so a stop at it names the flag. */

@@ -32,6 +32,7 @@ import type {
 	ThinkingLevelChangeEntry,
 	WorkerRunEntry,
 } from "../domains/session/entries.js";
+import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
 import {
 	HANDOFF_NOTE_CUSTOM_TYPE,
 	HANDOFF_SEED_CUSTOM_TYPE,
@@ -63,6 +64,7 @@ import {
 } from "../session-control/session-replay-messages.js";
 import { readWorkerReceiptFactsForReplay } from "../session-control/worker-receipts.js";
 import { toolResultPresentationText } from "../tools/result-disposition.js";
+import { budgetAlertNotice } from "./bus-notices.js";
 import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
 import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows } from "./command-output.js";
 import { showsContextResult } from "./context-operation-view.js";
@@ -509,6 +511,7 @@ function rendersCustomEntry(entry: CustomEntry): boolean {
 		return operation !== null && showsContextResult(operation);
 	}
 	if (entry.display === false) return false;
+	if (entry.customType === BUDGET_BLOCK_ENTRY) return budgetAlertNotice(entry.data) !== null;
 	if (entry.customType === "retryStatus") return true;
 	if (entry.customType === SKILL_SURFACE_ENTRY) return isSkillSurfaceChange(entry.data) && entry.data.state !== "loaded";
 	if (entry.customType === OPERATOR_COMMAND_ENTRY) return operatorCommandText(entry.data) !== null;
@@ -532,6 +535,12 @@ function renderCustomEntry(
 		const activity = entry.data as PackageActivity | null;
 		return activity && isPackageIdentity(activity.owner) && typeof activity.kind === "string"
 			? renderNoticeRow(packageActivityText(activity), "info", width)
+			: [];
+	}
+	if (entry.customType === BUDGET_BLOCK_ENTRY) {
+		const notice = budgetAlertNotice(entry.data);
+		return notice
+			? renderNoticeRow(notice.text, notice.level === "warn" ? "warning" : "error", width, notice.source)
 			: [];
 	}
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width, detail, unbounded, terminalRows);

@@ -8,6 +8,11 @@ export type BudgetVerdict = "under" | "at" | "over";
 export const SESSION_COST_CEILING_REASON = "budget_ceiling";
 export const SESSION_COST_CEILING_EXIT_CODE = 4;
 
+/** Keep live and replayed ceiling remedies consistent with the durable block (#424). */
+export function suggestedSessionCostCeilingUsd(currentUsd: number, ceilingUsd: number): number {
+	return Math.ceil(Math.max(currentUsd * 1.1, ceilingUsd + 0.01) * 10_000) / 10_000;
+}
+
 export class SessionCostCeilingError extends Error {
 	override readonly name = "SessionCostCeilingError";
 	constructor(

@@ -76,10 +76,13 @@ export interface TurnRecovery {
 }
 
 /**
- * Rewrite a stall-driven abort as a transient error so the retry ladder takes
- * it. `agent.abort()` always settles the run as `stopReason: "aborted"`, and
- * both gates below refuse that on purpose: an operator who pressed Esc must
- * never have the turn restarted under them. The stall watchdog in
+ * Rewrite an invoked stream stall as a transient error for provider recovery.
+ * A pre-invocation timeout keeps its aborted stop reason and names the local
+ * stage without consuming a transient retry (#424).
+ *
+ * `agent.abort()` always settles the run as `stopReason: "aborted"`, and both
+ * gates below refuse that on purpose: an operator who pressed Esc must never
+ * have the turn restarted under them. The stall watchdog in
  * `turn-runtime.ts` is the one caller that aborts with no operator behind it,
  * and `state.streamStallReason` is the flag that says so. An operator cancel
  * that landed in the same window wins: `activeInterruptReason` is set only by
@@ -95,10 +98,17 @@ export function reclassifyStallAbort(
 	failure: TerminalAssistantFailure,
 ): TerminalAssistantFailure {
 	const reason = state.streamStallReason;
+	const stage = state.streamStallStage;
 	state.streamStallReason = null;
+	state.streamStallStage = null;
 	if (reason === null || failure.stopReason !== "aborted" || state.activeInterruptReason !== null) return failure;
-	if (failure.message) rewriteStallAbortMessage(state, failure.message, reason);
-	return { ...failure, stopReason: "error", errorMessage: reason };
+	if (failure.message) rewriteStallAbortMessage(state, failure.message, reason, stage);
+	// Local preparation timeouts must not consume provider retries (#424).
+	return {
+		...failure,
+		stopReason: stage !== null ? "aborted" : "error",
+		errorMessage: reason,
+	};
 }
 
 /** Rewrite the provider's terminal abort object before its event is emitted and persisted. */
@@ -106,6 +116,7 @@ export function rewriteStallAbortMessage(
 	state: ChatTurnState,
 	message: AgentMessage,
 	reason = state.streamStallReason,
+	stage = state.streamStallStage,
 ): boolean {
 	if (
 		reason === null ||
@@ -116,7 +127,7 @@ export function rewriteStallAbortMessage(
 		return false;
 	}
 	const failure = message as { stopReason?: unknown; errorMessage?: unknown };
-	failure.stopReason = "error";
+	failure.stopReason = stage !== null ? "aborted" : "error";
 	failure.errorMessage = reason;
 	return true;
 }

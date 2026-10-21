@@ -13,6 +13,7 @@ import type {
 } from "../core/bus-events.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { safetyNetRailText } from "../domains/safety/decision-presentation.js";
+import { suggestedSessionCostCeilingUsd } from "../domains/scheduling/budget.js";
 import type { NoticeSource } from "../session-control/notice-source.js";
 import { askAxis } from "./permission-overlay.js";
 
@@ -41,23 +42,30 @@ function isBudgetAlertPayload(value: unknown): value is BudgetAlertPayload {
 
 export function budgetAlertNotice(payload: unknown): BusNotice | null {
 	if (!isBudgetAlertPayload(payload)) return null;
-	const spend = `$${payload.currentUsd.toFixed(2)} of $${payload.ceilingUsd.toFixed(2)} ceiling`;
+	const digits = payload.ceilingUsd < 0.01 ? Math.min(8, Math.max(4, Math.ceil(-Math.log10(payload.ceilingUsd)))) : 2;
+	const spend = `$${payload.currentUsd.toFixed(digits)} of $${payload.ceilingUsd.toFixed(digits)} ceiling`;
 	// Per-call context is what a raise would keep paying for, so the stop names it (#423).
 	const tokens = payload.contextTokens;
 	const perCall =
 		typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0
 			? ` The next call sends ~${Math.round(tokens).toLocaleString("en-US")} context tokens.`
 			: "";
+	const suggested = (payload as { raiseToUsd?: unknown }).raiseToUsd;
+	const raiseToUsd =
+		typeof suggested === "number" && Number.isFinite(suggested) && suggested > payload.currentUsd
+			? suggested
+			: suggestedSessionCostCeilingUsd(payload.currentUsd, payload.ceilingUsd);
+	const remedy = `raise safety.limits.sessionCostUsd to ${raiseToUsd} to resume.`;
 	if (payload.level === "over") {
 		return {
 			level: "error",
-			text: `[budget] Session priced spend ${spend} exceeded.${perCall} Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
+			text: `[budget] Session priced spend ${spend} exceeded.${perCall} Paid requests are paused; ${remedy}`,
 			source: "budget",
 		};
 	}
 	return {
 		level: "warn",
-		text: `[budget] Session priced spend ${spend} reached.${perCall} Paid requests are paused; raise safety.limits.sessionCostUsd to resume.`,
+		text: `[budget] Session priced spend ${spend} reached.${perCall} Paid requests are paused; ${remedy}`,
 		source: "budget",
 	};
 }
