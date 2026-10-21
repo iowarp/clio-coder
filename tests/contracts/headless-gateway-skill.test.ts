@@ -171,9 +171,10 @@ for (const autonomy of ["yolo", "default"]) {
 			(message) => message.role === "toolResult",
 		);
 		ok(alteredReplay);
-		ok(
-			!textOf(alteredReplay).includes("FULL_SKILL_END"),
-			"altered evidence never gains unbounded replay from skill metadata alone",
+		strictEqual(
+			textOf(alteredReplay),
+			alteredPayload.result.content[0]?.text,
+			"model replay preserves stored tool bytes independently of skill verification",
 		);
 	});
 }

@@ -154,7 +154,7 @@ import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./compactio
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
-import { createReplayMessageConverter, extractTurnText, truncateReplayText } from "./session-replay-messages.js";
+import { createReplayMessageConverter, extractTurnText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
@@ -1365,7 +1365,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const entry = usersByTime.get(message.timestamp)?.find((candidate) => {
 				if (candidate.kind !== "message" || available.has(candidate.turnId)) return false;
 				const original = extractTurnText(candidate.payload);
-				return text === original || text === truncateReplayText(original);
+				return text === original;
 			});
 			if (entry) {
 				setEngineCodexUserTurn(message, entry.turnId);

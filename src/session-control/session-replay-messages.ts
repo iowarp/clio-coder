@@ -182,7 +182,8 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 	if (entry.role !== "user" && entry.role !== "assistant") return null;
 	const obj = payloadObject(entry.payload);
 	const content = cloneContentBlocks(obj?.content, maxTextChars);
-	const text = truncateReplayText(extractTurnText(entry.payload), maxTextChars);
+	const original = extractTurnText(entry.payload);
+	const text = maxTextChars === undefined ? original : truncateReplayText(original, maxTextChars);
 	const stopReason = typeof obj?.stopReason === "string" ? obj.stopReason : undefined;
 	if (!content && text.length === 0 && !messageFailure(entry) && stopReason !== "length") return null;
 	const message: Record<string, unknown> = {
@@ -347,11 +348,12 @@ function isTextResult(value: unknown): value is { text: string } {
 	return payloadObject(value)?.text !== undefined && typeof (value as { text?: unknown }).text === "string";
 }
 
-function toolResultMessageFromEntry(entry: MessageEntry, unbounded = false): AgentMessage {
+function toolResultMessageFromEntry(entry: MessageEntry): AgentMessage {
 	const result = extractToolResult(entry);
 	return {
 		role: "toolResult",
-		content: toolResultContent(result.result, unbounded),
+		// The ledger stores the finalized content Pi sent, including tool-side caps (#423).
+		content: toolResultContent(result.result, true),
 		toolCallId: result.id ?? entry.turnId,
 		toolName: result.name,
 		isError: result.isError,
@@ -360,13 +362,14 @@ function toolResultMessageFromEntry(entry: MessageEntry, unbounded = false): Age
 }
 
 /** The per-entry conversion shared by replay and injected token pricing (#422). */
-function replayMessageFromEntry(entry: MessageEntry, unbounded = false): AgentMessage | null {
+function replayMessageFromEntry(entry: MessageEntry): AgentMessage | null {
 	if (entry.role === "user" || entry.role === "assistant") {
 		if (entry.role === "assistant" && messageFailure(entry)) return null;
-		return richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS);
+		// Replay must preserve the original provider prefix, even for long operator turns (#423).
+		return richMessageFromEntry(entry);
 	}
 	if (entry.role === "tool_call") return toolCallMessageFromEntry(entry);
-	if (entry.role === "tool_result") return toolResultMessageFromEntry(entry, unbounded);
+	if (entry.role === "tool_result") return toolResultMessageFromEntry(entry);
 	const text = truncateReplayText(`System note: ${textBlockFromEntry(entry)}`.trim());
 	return text ? makeTextMessage("user", text, entry.timestamp) : null;
 }
@@ -691,14 +694,12 @@ function replaySkillContext(turns: ReadonlyArray<SessionEntry>, options: Rehydra
 	return { activeEntries, skillState, verified: captureSkillContext(evidence, skillState) };
 }
 
-/** Share replay's caps, legacy decoding and verified-skill exception with pricing (#422). */
+/** Price the same complete message bodies that model replay sends (#422, #423). */
 export function createReplayMessageConverter(
-	turns: ReadonlyArray<SessionEntry>,
-	options: RehydrateChatPanelOptions = {},
+	_turns: ReadonlyArray<SessionEntry>,
+	_options: RehydrateChatPanelOptions = {},
 ): (entry: MessageEntry) => AgentMessage | null {
-	const { verified } = replaySkillContext(turns, options);
-	const wholeSkillResults = new Set(verified?.skills.map((skill) => skill.resultRef) ?? []);
-	return (entry) => replayMessageFromEntry(entry, wholeSkillResults.has(entry.turnId));
+	return replayMessageFromEntry;
 }
 
 export function buildReplayAgentMessagesFromTurns(
@@ -731,12 +732,6 @@ export function buildReplayAgentMessagesFromTurns(
 		// passes through the trimming/truncating context helper.
 		for (const block of options.continuityBlocks ?? []) out.push(makeTextMessage("user", block, timestamp));
 	};
-	// A selected skill whose load verifies whole replays whole. Its result is
-	// the instructions the session still stands on, and the live model read
-	// them uncut; the replay cap would drop their tail on every rebuild after
-	// eviction, compaction, resume or fork. Unverified, deselected and
-	// ordinary results keep the cap.
-	const wholeSkillResults = new Set(verified?.skills.map((skill) => skill.resultRef) ?? []);
 	const replayEntries = selectReplayEntries(turns, options);
 	const latestOperator = [...replayEntries]
 		.reverse()
@@ -775,7 +770,7 @@ export function buildReplayAgentMessagesFromTurns(
 				} else if (entry.role === "tool_result") {
 					const result = extractToolResult(entry);
 					if (seenToolCalls.has(result.id ?? entry.turnId)) {
-						out.stageToolResult(toolResultMessageFromEntry(entry, wholeSkillResults.has(entry.turnId)));
+						out.stageToolResult(toolResultMessageFromEntry(entry));
 					}
 				} else if (entry.role === "system") {
 					appendContextMessage(out, "user", `System note: ${text}`, entry.timestamp);
