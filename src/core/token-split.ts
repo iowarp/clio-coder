@@ -7,10 +7,10 @@ export interface TokenSplit {
 	readonly provenance: "reported" | "partial" | "none";
 }
 
-export function normalizeTokenUsage(raw: Record<string, unknown>) {
+function tokenUsageCounts(raw: Record<string, unknown>) {
 	const first = (...values: unknown[]): number | undefined =>
 		values.find((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
-	const count = (...values: unknown[]): number => first(...values) ?? 0;
+	const count = first;
 	const input = count(raw.input, raw.inputTokens, raw.input_tokens, raw.prompt_tokens);
 	const output = count(raw.output, raw.outputTokens, raw.output_tokens, raw.completion_tokens);
 	const cacheRead = count(raw.cacheRead, raw.cacheReadTokens, raw.cache_read_tokens);
@@ -34,7 +34,22 @@ export function normalizeTokenUsage(raw: Record<string, unknown>) {
 				: [],
 		),
 	);
-	const totalTokens = first(raw.totalTokens, raw.total_tokens) ?? input + output + cacheRead + cacheWrite;
+	return { input, output, cacheRead, cacheWrite, reasoning, totalTokens: first(raw.totalTokens, raw.total_tokens) };
+}
+
+/** Count-field presence includes reported zero; observed retains its historical positive-usage semantics (#434). */
+export function hasTokenUsageCounts(raw: Record<string, unknown>): boolean {
+	return Object.values(tokenUsageCounts(raw)).some((value) => value !== undefined);
+}
+
+export function normalizeTokenUsage(raw: Record<string, unknown>) {
+	const counts = tokenUsageCounts(raw);
+	const input = counts.input ?? 0;
+	const output = counts.output ?? 0;
+	const cacheRead = counts.cacheRead ?? 0;
+	const cacheWrite = counts.cacheWrite ?? 0;
+	const reasoning = counts.reasoning ?? 0;
+	const totalTokens = counts.totalTokens ?? input + output + cacheRead + cacheWrite;
 	const external = raw.clioExternal as { tokenUsage?: string } | undefined;
 	const observed =
 		raw.estimated !== true &&

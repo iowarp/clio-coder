@@ -42,6 +42,12 @@ import { type RouteObservation, routeObservationFromHistory } from "./route-poli
 import { type RouteQualityReduction, receiptSourceAuthenticated, reduceRouteQuality } from "./route-quality.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 
+function receiptHasUnknownCost(receipt: RunReceipt): boolean {
+	return (
+		receipt.costSummary?.hasUnknown ?? (receipt.costProvenance === undefined || receipt.costProvenance === "unknown")
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Route-history projection
 // ---------------------------------------------------------------------------
@@ -335,7 +341,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				// Records settled before the label existed take it from their receipt.
 				settled: record.settled ?? routeSettledLabel(subject.receipt),
 				qualityLabel: quality.label,
-				completedCostUsd: completed ? record.completedCostUsd : null,
+				completedCostUsd: completed && !receiptHasUnknownCost(subject.receipt) ? record.completedCostUsd : null,
 				completedPhaseTiming: completed ? record.completedPhaseTiming : null,
 				sourceDigests: quality.sourceDigests,
 			};
@@ -455,13 +461,15 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				// quality waits on independent evidence; the receipt's own verdict is
 				// always available.
 				const settled = routeSettledLabel(outcome.receipt);
+				const unpriced = receiptHasUnknownCost(outcome.receipt);
+				const cacheRead = (outcome.receipt.cacheReadTokenCount ?? 0) > 0;
 				const sample: RouteObservation = {
 					qualityLabel: outcome.quality.label,
 					reliability,
 					firstPass: realized.firstPass,
-					completedCostUsd: completed ? realized.costUsd : null,
+					completedCostUsd: completed && !unpriced ? realized.costUsd : null,
 					completedEndToEndMs: completed ? realized.endToEndMs : null,
-					cacheRead: false,
+					cacheRead,
 					queueWaitMs: completed ? (outcome.phaseTiming?.queueWaitMs ?? null) : null,
 				};
 				samples?.record(realized.route, sample);
@@ -490,7 +498,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 									totalEndToEndMs: outcome.phaseTiming.totalEndToEndMs,
 								}
 							: null,
-					cacheRead: completed && (outcome.receipt.cacheReadTokenCount ?? 0) > 0,
+					cacheRead: sample.cacheRead,
 					sourceDigests: outcome.quality.sourceDigests,
 					settledAt: outcome.receipt.endedAt,
 				});

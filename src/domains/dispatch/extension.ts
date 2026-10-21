@@ -1,7 +1,9 @@
+import type { CallFailureRecord } from "../../core/call-failure.js";
+import { readCallFailure } from "../../core/call-failure.js";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
-import { normalizeCallUsage, normalizeTokenUsage } from "../../core/token-split.js";
+import { hasTokenUsageCounts, normalizeCallUsage, normalizeTokenUsage } from "../../core/token-split.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
@@ -724,15 +726,29 @@ function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): R
 }
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
+function workerUsageReported(usage: Record<string, unknown>): boolean {
+	const external = isRecord(usage.clioExternal) ? usage.clioExternal : null;
+	// Zero is a valid provider count; only explicit per-call evidence marks missing usage (#434).
+	return (
+		usage.estimated !== true &&
+		(external === null || external.tokenUsage === "provider-reported") &&
+		(usage.usageReported === true ||
+			(usage.usageReported !== false && usage.observed !== false && hasTokenUsageCounts(usage)))
+	);
+}
+
 function accumulateNativeUsage(
 	meter: RunTokenMeter,
 	usage: Record<string, unknown>,
 	pricing: EffectivePricing["rates"],
+	failure?: CallFailureRecord,
 ): void {
+	if (usage.callInvoked === false || failure?.invoked === false) return;
 	const external = isRecord(usage.clioExternal) ? usage.clioExternal : null;
+	const usageReported = workerUsageReported(usage);
 	const normalized = normalizeTokenUsage({
 		...usage,
-		estimated: usage.estimated === true || (external !== null && external.tokenUsage !== "provider-reported"),
+		estimated: !usageReported,
 	});
 	const call: RunTokenMeter = {
 		inputTokens: normalized.input,
@@ -745,7 +761,7 @@ function accumulateNativeUsage(
 		call.cacheWrite1hTokens = usage.cacheWrite1h;
 	meter.apiCalls = (meter.apiCalls ?? 0) + 1;
 	meter.totalTokens = (meter.totalTokens ?? 0) + normalized.totalTokens;
-	if (!normalized.observed) {
+	if (!usageReported) {
 		meter.missingTokenCalls = (meter.missingTokenCalls ?? 0) + 1;
 		meter.tokenUsageMissing = true;
 	}
@@ -862,10 +878,16 @@ function upstreamResponse(
 	usageScope: "call" | "run-aggregate",
 ): RunReceiptUpstreamResponse {
 	const usage = isRecord(message.usage) ? message.usage : {};
+	const reported = workerUsageReported(usage);
+	const normalized = normalizeCallUsage({ ...usage, estimated: !reported });
 	const gatewayRouting = gatewayRoutingObservationFromRecord(message);
 	return {
 		...(usageScope === "call" ? { callIndex } : {}),
-		usage: normalizeCallUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }),
+		usage: {
+			...normalized,
+			observed: reported,
+			...(reported && typeof usage.cacheReadReported === "boolean" ? { cacheReadReported: usage.cacheReadReported } : {}),
+		},
 		usageScope,
 		requestedModelId: readStringOrNull(message.model),
 		responseModelIdObservation: responseModelIdObservationFromRecord(message, "not-observed"),
@@ -4305,7 +4327,7 @@ export function createDispatchBundle(
 		finalizedCosts.push({
 			usd: receipt.costUsd,
 			provenance: receipt.costProvenance ?? "unknown",
-			apiCalls: receipt.apiCalls ?? 1,
+			apiCalls: receipt.apiCalls ?? (receipt.tokenCount > 0 ? 1 : 0),
 			missingTokenCalls: receipt.missingTokenCalls ?? 0,
 			...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
 		});
@@ -5859,6 +5881,7 @@ export function createDispatchBundle(
 				message?: {
 					role?: string;
 					usage?: unknown;
+					failure?: unknown;
 					model?: unknown;
 					responseModelIdObservation?: unknown;
 					responseModel?: unknown;
@@ -5927,11 +5950,12 @@ export function createDispatchBundle(
 				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
 				// usage as missing, while its failure text and served-model observations remain real.
 				const u = isRecord(event.message.usage) ? event.message.usage : null;
-				if (u !== null && u.callInvoked === false) {
+				const failure = readCallFailure(event.message.failure);
+				if (failure?.invoked === false || (u !== null && u.callInvoked === false)) {
 					// A message Clio wrote into the loop (a result-contract repair, a
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
-					accumulateNativeUsage(tokenMeter, u, null);
+					accumulateNativeUsage(tokenMeter, u, null, failure);
 					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
@@ -5941,6 +5965,7 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
+					if (failure?.invoked === true) accumulateNativeUsage(tokenMeter, { usageReported: false }, null, failure);
 					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, null);
 					if (row !== null) upstreamResponses.push(row);
 				}
@@ -6234,10 +6259,9 @@ export function createDispatchBundle(
 						: result.exitCode,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
-				apiCalls: (adapterReportedUsage ? usage.apiCalls : tokenMeter.apiCalls) ?? 1,
+				apiCalls: adapterReportedUsage ? (usage.apiCalls ?? 1) : (tokenMeter.apiCalls ?? 0),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
-				missingTokenCalls:
-					(adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? (tokenCount === 0 ? 1 : 0),
+				missingTokenCalls: (adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? 0,
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
 				cacheReadTokenCount: tokenMeter.cacheReadTokens,
@@ -7306,6 +7330,7 @@ export function createDispatchBundle(
 				message?: {
 					role?: string;
 					usage?: unknown;
+					failure?: unknown;
 					model?: unknown;
 					responseModelIdObservation?: unknown;
 					responseModel?: unknown;
@@ -7527,11 +7552,12 @@ export function createDispatchBundle(
 						toolObservability: "unavailable",
 					};
 				}
-				if (u !== null && u.callInvoked === false) {
+				const failure = readCallFailure(event.message.failure);
+				if (failure?.invoked === false || (u !== null && u.callInvoked === false)) {
 					// A message Clio wrote into the loop (a result-contract repair, a
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
-					accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
+					accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates, failure);
 					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
@@ -7541,6 +7567,8 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
+					if (failure?.invoked === true)
+						accumulateNativeUsage(tokenMeter, { usageReported: false }, lifecycle.target.effectivePricing.rates, failure);
 					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, lifecycle.target.wireModelId);
 					if (row !== null) upstreamResponses.push(row);
 				}
@@ -8023,9 +8051,9 @@ export function createDispatchBundle(
 				outcomeDetail: finalOutcomeDetail,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
-				apiCalls: tokenMeter.apiCalls ?? 1,
+				apiCalls: tokenMeter.apiCalls ?? (tokenCount > 0 ? 1 : 0),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
-				missingTokenCalls: tokenMeter.missingTokenCalls ?? (tokenCount === 0 ? 1 : 0),
+				missingTokenCalls: tokenMeter.missingTokenCalls ?? 0,
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
 				cacheReadTokenCount: tokenMeter.cacheReadTokens,
@@ -10053,7 +10081,7 @@ export function createDispatchBundle(
 			costAmounts.push({
 				usd: costUsd,
 				provenance: costProvenance,
-				apiCalls: meter.apiCalls ?? 1,
+				apiCalls: meter.apiCalls ?? (totalTokens > 0 ? 1 : 0),
 				missingTokenCalls: meter.missingTokenCalls ?? 0,
 			});
 			totals.runtimeSeconds += elapsedMs / 1000;

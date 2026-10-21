@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import type { AnthropicMessagesCompat, Context, SystemMessage, Tool } from "@earendil-works/pi-ai";
 import { getToolStateChanges } from "@earendil-works/pi-ai";
+import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
+import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
@@ -656,6 +658,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// none instead; see toolsRemovedRound).
 	let synthesisToolLock = false;
 	let responseRound = 0;
+	let callTracking: ReturnType<typeof trackCallFetch> | null = null;
+	let callUsageReported = false;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
 	// Last HTTP status a provider answered. Pi's error messages drop it on some
@@ -1328,6 +1332,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 								? { ...resolvedAttempt, systemPrompt: lockedSynthesisSystemPrompt(resolvedAttempt.systemPrompt ?? "") }
 								: attempt.context;
 						const fetchImpl = attempt.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
+						const tracking = trackCallFetch(fetchImpl);
+						callTracking = tracking;
+						callUsageReported = false;
+						tracking.start(currentModel.api, attempt.options?.transport);
 						const lockedRound = synthesisToolLock || helperTerminalPhase;
 						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attempt.options ?? {};
 
@@ -1348,9 +1356,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 								engineStreamSimple(currentModel, attemptContext, {
 									...boundedOptions,
 									fetch: async (url, init) => {
-										const response = await fetchImpl(url, init);
+										const response = await tracking.fetch(url, init);
 										lastProviderHttpStatus = response.status;
 										return response;
+									},
+									onProviderStreamEvent: async (data, eventModel) => {
+										// Wire-field presence distinguishes reported zero from SDK placeholders (#434).
+										if (data !== null && typeof data === "object") {
+											const frame = data as Record<string, unknown>;
+											for (const value of [frame, frame.message, frame.response]) {
+												if (value === null || typeof value !== "object") continue;
+												const usage = (value as Record<string, unknown>).usage;
+												if (usage === null || typeof usage !== "object") continue;
+												callUsageReported ||= hasTokenUsageCounts(usage as Record<string, unknown>);
+											}
+										}
+										await boundedOptions?.onProviderStreamEvent?.(data, eventModel);
 									},
 								}),
 						);
@@ -1489,9 +1510,28 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 		}
 		if (event.type === "turn_start") {
+			callTracking = null;
+			callUsageReported = false;
 			workerModelRound += 1;
 			helperTurnFailure = null;
 			helperSemanticFailure = false;
+		}
+		if (
+			event.type === "message_end" &&
+			isAssistantMessage(event.message) &&
+			(event.message.usage as unknown as Record<string, unknown>).callInvoked !== false
+		) {
+			const message = event.message as unknown as Record<string, unknown>;
+			const usage = event.message.usage as unknown as Record<string, unknown>;
+			const reported = callUsageReported || normalizeTokenUsage(usage).observed;
+			const failed = event.message.stopReason === "error" || event.message.stopReason === "aborted";
+			const failure = failed
+				? (callTracking?.failure(event.message, event.message.stopReason === "aborted", reported) ??
+					classifyCallFailure(event.message, { invoked: false }))
+				: undefined;
+			if (failure !== undefined) message.failure = failure;
+			usage.callInvoked = failure?.invoked ?? true;
+			usage.usageReported = reported;
 		}
 		// Detect the whole terminal batch before any call is prepared/executed.
 		// beforeToolCall rejects every sibling, regardless of ordering or parallelism.
