@@ -6,6 +6,7 @@ import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import type { RunJsonMainSessionFrame } from "../cli/modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
+import { startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import { BusChannels, type PluginsReloadedPayload } from "../core/bus-events.js";
@@ -2308,7 +2309,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 	if (headlessResumeFailure !== null) {
-		bootStderr(`clio-coder run: ${headlessResumeFailure}\n`);
+		writeRunDiagnostic(`clio-coder run: ${headlessResumeFailure}\n`);
 		await termination.shutdown(2);
 		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
 	}
@@ -3277,10 +3278,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				initialRoutingSettings.chat.thinkingLevel = selected.ref.thinkingLevel;
 			}
 			if (selected.warning) bootStderr(`Clio Coder: ${selected.warning}\n`);
-		} else if (options.apiKey || selected.error?.includes("not chat-eligible")) {
-			bootStderr(`Clio Coder: ${selected.error ?? "--api-key supplied but the model target could not be resolved"}\n`);
-			await termination.shutdown(2);
-			return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
+		} else if (selected.error || options.apiKey) {
+			const exitCode = options.apiKey || selected.error?.includes("not chat-eligible") ? 2 : 1;
+			writeRunDiagnostic(
+				`Clio Coder: ${selected.error ?? "--api-key supplied but the model target could not be resolved"}\n`,
+			);
+			await termination.shutdown(exitCode);
+			return { exitCode, bootTimeMs: timer.snapshot().totalMs };
 		}
 	}
 	const sessionRouting = seedSessionRouting(initialRoutingSettings);
@@ -5545,7 +5549,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// `/name` on to the model spends a turn answering a command it cannot
 			// run, and the operator never sees the refusal.
 			if (promptExpansion?.expanded === false && promptExpansion.refusal) {
-				process.stderr.write(`clio-coder: ${promptExpansion.refusal.message}\n`);
+				writeRunDiagnostic(`clio-coder: ${promptExpansion.refusal.message}\n`);
 				await termination.shutdown(1);
 				return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 			}
@@ -5583,6 +5587,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			chat.setToolCeiling?.([constraints]);
 			const images = [...(options.headless.images ?? []), ...fileExpansion.images];
 			const workingContextPaths = [...(options.headless.workingContextPaths ?? []), ...fileExpansion.referencedPaths];
+			startRunOutput();
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
 				...(constraints ? { constraints } : {}),

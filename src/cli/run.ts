@@ -44,12 +44,13 @@ import { isToolProfileName } from "../tools/profiles.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
-import { buildInitialMessage, readPipedStdin, shouldReadPipedStdin } from "./initial-message.js";
+import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
 import { projectDispatchJsonEvent } from "./modes/json-stream.js";
 import { writeFrame } from "./modes/jsonl.js";
 import type { RunJsonAgentFrame } from "./modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
+import { startRunOutput, withRunFailureReporting, writeRunDiagnostic } from "./run-failure.js";
 import { formatDispatchHumanOutput } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
@@ -194,7 +195,7 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 		() => {
 			if (coordinator.getPhase() !== "idle") return;
 			expired = true;
-			process.stderr.write(`clio-coder run: timed out after ${seconds}s (--timeout)\n`);
+			writeRunDiagnostic(`clio-coder run: timed out after ${seconds}s (--timeout)\n`);
 			void coordinator.shutdown(RUN_TIMEOUT_EXIT_CODE);
 		},
 		Math.ceil(seconds * 1000),
@@ -241,10 +242,10 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<{
 	workingContextPaths?: ReadonlyArray<string>;
 } | null> {
 	const messages = parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [];
-	const stdinContent = shouldReadPipedStdin(messages) ? await readPipedStdin() : undefined;
+	const stdinContent = await readPipedStdin(messages.length > 0 || parsed.fileArgs.length > 0);
 	const fileRefs = await readFileArgsAsync(parsed.fileArgs, { cwd: process.cwd(), missing: "error" });
 	for (const diagnostic of fileRefs.diagnostics) {
-		process.stderr.write(`error: ${diagnostic.message}\n`);
+		writeRunDiagnostic(`error: ${diagnostic.message}\n`);
 	}
 	if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return null;
 	const initial = buildInitialMessage({
@@ -254,7 +255,7 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<{
 		...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
 	});
 	if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
-		process.stderr.write("clio-coder run: empty task\n");
+		writeRunDiagnostic("clio-coder run: empty task\n");
 		process.stderr.write(USAGE);
 		return null;
 	}
@@ -313,11 +314,25 @@ function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
  */
 type HeadlessSlashPreflight = { refusal: string } | { display: string } | null;
 
-async function headlessSlashPreflight(task: string): Promise<HeadlessSlashPreflight> {
+async function headlessSlashPreflight(
+	task: string,
+	skillOptions: { disableDiscovery: boolean; explicitSkillPaths: ReadonlyArray<string> },
+): Promise<HeadlessSlashPreflight> {
 	if (!task.trim().startsWith("/")) return null;
 	const { parseSlashCommand } = await import("../session-control/slash-commands.js");
 	const command = parseSlashCommand(task);
-	if (command.kind === "skill-invocation" || command.kind === "unknown" || command.kind === "empty") return null;
+	if (command.kind === "skill-invocation") {
+		const { expandPromptTemplateInput, loadPromptTemplates, parsePendingSkillRequests } = await import(
+			"../domains/resources/index.js"
+		);
+		const skillRequest = parsePendingSkillRequests(task, loadSkills({ cwd: process.cwd(), ...skillOptions }), {
+			cwd: process.cwd(),
+		});
+		const expansion = expandPromptTemplateInput(skillRequest.text, loadPromptTemplates({ cwd: process.cwd() }));
+		if (expansion.expanded === false && expansion.display) return { display: expansion.display.text };
+		return null;
+	}
+	if (command.kind === "unknown" || command.kind === "empty") return null;
 	if (command.kind !== "unknown-command") {
 		return {
 			refusal:
@@ -342,6 +357,13 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
+	return withRunFailureReporting(parsed.json, () => executeRunCommand(parsed, options));
+}
+
+async function executeRunCommand(
+	parsed: RunCliArgs,
+	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> },
+): Promise<number> {
 	// One-run overrides ride the scoped run-overrides transport (restored on
 	// exit) so dispatched worker subprocesses inherit them; see
 	// core/run-overrides.ts. The main agent applies its sampling flags per turn
@@ -358,14 +380,14 @@ export async function runClioRun(
 				return 0;
 			}
 			for (const diagnostic of parsed.diagnostics) {
-				process.stderr.write(`clio-coder run: ${diagnostic.message}\n`);
+				writeRunDiagnostic(`clio-coder run: ${diagnostic.message}\n`);
 			}
 			if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
-				process.stderr.write("clio-coder run: fleet dispatch flags require --agent <recipe-id>\n");
+				writeRunDiagnostic("clio-coder run: fleet dispatch flags require --agent <recipe-id>\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -373,20 +395,20 @@ export async function runClioRun(
 			// carried in the task scope so every continuation keeps it.
 			if (parsed.readOnly && parsed.agentId === undefined) parsed.constraints = { ...parsed.constraints, readOnly: true };
 			if (parsed.constraints && parsed.agentId !== undefined) {
-				process.stderr.write(
+				writeRunDiagnostic(
 					"clio-coder run: --turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task\n",
 				);
 				return 2;
 			}
 			if (parsed.sessionId !== undefined && parsed.continueSession) {
-				process.stderr.write("clio-coder run: --session and --continue name different sessions; pass one\n");
+				writeRunDiagnostic("clio-coder run: --session and --continue name different sessions; pass one\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			// A dispatched agent runs in its own worker with its own transcript,
 			// so there is no main-agent session for it to continue.
 			if ((parsed.sessionId !== undefined || parsed.continueSession) && parsed.agentId !== undefined) {
-				process.stderr.write("clio-coder run: --session and --continue apply to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic("clio-coder run: --session and --continue apply to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -394,12 +416,12 @@ export async function runClioRun(
 			// failed outcome also feeds retry policy, so the no-op verdict stays a
 			// main-agent contract rather than a flag --agent would silently ignore.
 			if (parsed.maxCostUsd !== undefined && parsed.agentId !== undefined) {
-				process.stderr.write("clio-coder run: --max-cost-usd applies to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic("clio-coder run: --max-cost-usd applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			if (parsed.failOnNoop && parsed.agentId !== undefined) {
-				process.stderr.write("clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic("clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -407,7 +429,7 @@ export async function runClioRun(
 			// timeout abort seals "canceled" by design (DispatchContract.abort), so
 			// --timeout is a main-agent contract for now.
 			if (parsed.timeoutSeconds !== undefined && parsed.agentId !== undefined) {
-				process.stderr.write("clio-coder run: --timeout applies to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic("clio-coder run: --timeout applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -415,7 +437,7 @@ export async function runClioRun(
 			if (parsed.autonomy === "yolo") {
 				const refusal = yoloRootRefusal();
 				if (refusal !== null) {
-					process.stderr.write(`clio-coder run: ${refusal}\n`);
+					writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
 					return 2;
 				}
 			}
@@ -429,7 +451,7 @@ export async function runClioRun(
 				if (parsed.cwd !== undefined) {
 					const unusable = enterRunCwd(parsed.cwd);
 					if (unusable !== null) {
-						process.stderr.write(`clio-coder run: --cwd is not a directory this process can enter: ${unusable}\n`);
+						writeRunDiagnostic(`clio-coder run: --cwd is not a directory this process can enter: ${unusable}\n`);
 						return 2;
 					}
 				}
@@ -442,7 +464,7 @@ export async function runClioRun(
 				const skillPathErrors = explicitSkillPathErrors(skillPaths);
 				if (skillPathErrors.length > 0) {
 					for (const message of skillPathErrors) {
-						process.stderr.write(`clio-coder run: --skill ${message}\n`);
+						writeRunDiagnostic(`clio-coder run: --skill ${message}\n`);
 					}
 					return 2;
 				}
@@ -453,9 +475,12 @@ export async function runClioRun(
 				if (parsed.agentId === undefined) {
 					// Reject unknown and unsupported interactive commands before boot;
 					// neither has a headless handler that could honor the request.
-					const preflight = await headlessSlashPreflight(assembled.prompt);
+					const preflight = await headlessSlashPreflight(assembled.prompt, {
+						disableDiscovery: noSkills,
+						explicitSkillPaths: skillPaths,
+					});
 					if (preflight !== null && "refusal" in preflight) {
-						process.stderr.write(`clio-coder run: ${preflight.refusal}\n`);
+						writeRunDiagnostic(`clio-coder run: ${preflight.refusal}\n`);
 						return 2;
 					}
 					if (preflight !== null) {
@@ -467,7 +492,7 @@ export async function runClioRun(
 					// headless turn so the resolver diagnostic never streams to stdout as a
 					// message_end/agent_end assistant turn.
 					if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
-						process.stderr.write(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
+						writeRunDiagnostic(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
 						return 2;
 					}
 					takeOverStdout();
@@ -536,7 +561,7 @@ async function runDispatch(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> },
 ): Promise<number> {
 	if (parsed.toolProfile !== undefined && !isToolProfileName(parsed.toolProfile)) {
-		process.stderr.write("clio-coder run: --tool-profile must be one of: minimal-local|science-local|full-agent\n");
+		writeRunDiagnostic("clio-coder run: --tool-profile must be one of: minimal-local|science-local|full-agent\n");
 		process.stderr.write(USAGE);
 		return 2;
 	}
@@ -598,7 +623,7 @@ async function runDispatch(
 	effectiveSettings.safety.autonomy = "default";
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
-		process.stderr.write("dispatch domain unavailable\n");
+		writeRunDiagnostic("dispatch domain unavailable\n");
 		await loaded.stop();
 		return 1;
 	}
@@ -606,7 +631,7 @@ async function runDispatch(
 	if (options.apiKey) {
 		const providers = loaded.getContract<ProvidersContract>("providers");
 		if (!providers) {
-			process.stderr.write("clio-coder run: --api-key supplied but providers domain unavailable\n");
+			writeRunDiagnostic("clio-coder run: --api-key supplied but providers domain unavailable\n");
 			await loaded.stop();
 			return 1;
 		}
@@ -623,7 +648,7 @@ async function runDispatch(
 		const target = targetId ? providers.getTarget(targetId) : null;
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		if (!target || !runtime) {
-			process.stderr.write("clio-coder run: --api-key supplied but no target resolved; pass --target <id>\n");
+			writeRunDiagnostic("clio-coder run: --api-key supplied but no target resolved; pass --target <id>\n");
 			await loaded.stop();
 			return 2;
 		}
@@ -725,10 +750,11 @@ async function runDispatch(
 			unsubscribeScopeNotices();
 			await workerHooks.dispose();
 			await loaded.stop();
-			process.stderr.write(`clio-coder run: ${hookRefusal}\n`);
+			writeRunDiagnostic(`clio-coder run: ${hookRefusal}\n`);
 			return 1;
 		}
 		const handle = await dispatch.dispatch(dispatchReq);
+		startRunOutput();
 		writeJsonHeader(handle.runId);
 		if (parsed.steerChannel) {
 			cleanupSteer = setupSteerChannel(parsed.steerChannel, (line) => {
@@ -803,7 +829,7 @@ async function runDispatch(
 		await workerHooks.drain();
 		await workerHooks.dispose();
 		const msg = err instanceof Error ? err.message : String(err);
-		process.stderr.write(`clio-coder run failed: ${msg}\n`);
+		writeRunDiagnostic(`clio-coder run failed: ${msg}\n`);
 		const failedSpec = runAgents?.getSpec(parsed.agentId);
 		if (failedSpec?.audience === "shadow") {
 			process.stderr.write(`clio-coder run: instead run: ${shadowStandInCommand(parsed)}\n`);
