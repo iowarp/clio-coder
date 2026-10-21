@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { BackendCompletionTimings } from "../../core/cache-telemetry.js";
+import type { CallFailureRecord } from "../../core/call-failure.js";
 import type { ToolResultDigestProvenance } from "../../tools/result-disposition.js";
 import {
 	buildMemoryInterventionUserPrompt,
@@ -96,6 +97,7 @@ export interface TaskMemoryStepUsage {
 	reasoning: number;
 	totalTokens: number;
 	missingTokenCalls?: number;
+	failure?: CallFailureRecord;
 	costUsd: number;
 	costProvenance: CostProvenance;
 	/** Wall time of the model call itself, measured by the client. */

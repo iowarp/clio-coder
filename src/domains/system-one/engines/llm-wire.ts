@@ -1,3 +1,4 @@
+import { trackCallFetch } from "../../../core/call-failure.js";
 /**
  * How an LLM engine talks to a model: direct chat-completions HTTP for the
  * OpenAI-compatible runtimes, or an injected one-shot port for the runtimes
@@ -233,7 +234,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			"content-type": "application/json",
 			...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
 		};
-		let recordUsage: ((usage: LlmRequestUsage | null) => void) | undefined;
+		let recordUsage: Awaited<ReturnType<NonNullable<EngineHost["admitLlmRequest"]>>> | undefined;
 		try {
 			recordUsage = await host.admitLlmRequest?.({ targetId: target.id, model, signal });
 		} catch (error) {
@@ -241,7 +242,9 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			throw error;
 		}
 		signal.throwIfAborted();
+		const tracking = trackCallFetch();
 		const response = await probeJson<ChatCompletion>({
+			fetch: tracking.fetch,
 			url: `${baseUrl}/chat/completions`,
 			method: "POST",
 			timeoutMs: HTTP_CEILING_MS,
@@ -250,10 +253,18 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			signal,
 			readErrorBody: true,
 		}).catch((error: unknown) => {
-			recordUsage?.(null);
+			recordUsage?.(null, {
+				callOutcome: signal.aborted ? "aborted" : "error",
+				failure: tracking.failure(error, signal.aborted),
+			});
 			throw error;
 		});
-		recordUsage?.(response.data ? (usageOf(response.data) ?? null) : null);
+		recordUsage?.(
+			response.data ? (usageOf(response.data) ?? null) : null,
+			response.ok
+				? { callOutcome: "success" }
+				: { callOutcome: signal.aborted ? "aborted" : "error", failure: tracking.failure(response.error, signal.aborted) },
+		);
 		if (!response.ok || !response.data) {
 			const cause = response.errorBody === undefined ? "" : `: ${response.errorBody.replace(/\s+/gu, " ").slice(0, 300)}`;
 			throw new ChatHttpError(

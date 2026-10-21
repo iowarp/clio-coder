@@ -162,6 +162,7 @@ export type CostEntryLabel =
 	| "background-memory"
 	| "failed-compaction"
 	| "system-one"
+	| "safety-judge"
 	| "worker"
 	| "compaction";
 

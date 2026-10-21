@@ -1,3 +1,5 @@
+import type { CallObservation } from "../core/call-failure.js";
+import { trackCallFetch } from "../core/call-failure.js";
 /**
  * `/btw`: one model round beside the session, never inside it.
  *
@@ -73,7 +75,7 @@ export interface SideQuestionInput {
 	thinkingLevel: ThinkingLevel;
 	/** Streamed answer text, delivered as the provider produces it. */
 	onDelta?: (partialText: string) => void;
-	onUsage?: (usage: SideQuestionUsage | null) => void;
+	onUsage?: (usage: SideQuestionUsage | null, observation?: CallObservation) => void;
 	/**
 	 * Information-flow admission of this send: the block reason, or null. The
 	 * round sends the session's history, so it is judged like a turn would be.
@@ -256,37 +258,43 @@ export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<Sid
 }
 
 async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | null): Promise<SideQuestionResult> {
-	const flowRefusal = input.admitFlow?.() ?? null;
-	if (flowRefusal !== null) throw new Error(flowRefusal);
-	await input.beforeRequest?.();
-	input.signal?.throwIfAborted();
-	const options: Record<string, unknown> = { maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS };
-	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
-	if (input.signal !== undefined) options.signal = input.signal;
-	if (input.temperature !== undefined) options.temperature = input.temperature;
-	// The agent loop's convention: "off" sends no reasoning option, which the
-	// simple-stream seam resolves to thinking off for every provider.
-	if (input.thinkingLevel !== "off") options.reasoning = input.thinkingLevel;
-	if (binding !== null) {
-		options.samplingParams = { response_format: responseFormatFor(binding.dialect, binding.schema, binding.name) };
-	}
-
-	const context = {
-		systemPrompt: input.systemPrompt,
-		messages: [
-			// Pi 0.86 stores prompt/tool declarations in history. This tool-free
-			// round has its own prompt and must not inherit those declarations.
-			...closePendingToolCalls(
-				input.messages.filter((message) => message.role !== "system"),
-				input.midTurn === true,
-			),
-			{ role: "user", content: [{ type: "text", text: input.userText }], timestamp: Date.now() },
-		],
-	};
-
-	let text = "";
+	const tracking = trackCallFetch();
 	let observed = false;
+	let terminalError: unknown;
+	let text = "";
 	try {
+		const flowRefusal = input.admitFlow?.() ?? null;
+		if (flowRefusal !== null) throw new Error(flowRefusal);
+		await input.beforeRequest?.();
+		input.signal?.throwIfAborted();
+		const options: Record<string, unknown> = {
+			maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS,
+			fetch: tracking.fetch,
+		};
+		if (input.apiKey !== undefined) options.apiKey = input.apiKey;
+		if (input.signal !== undefined) options.signal = input.signal;
+		if (input.temperature !== undefined) options.temperature = input.temperature;
+		// The agent loop's convention: "off" sends no reasoning option, which the
+		// simple-stream seam resolves to thinking off for every provider.
+		if (input.thinkingLevel !== "off") options.reasoning = input.thinkingLevel;
+		if (binding !== null) {
+			options.samplingParams = { response_format: responseFormatFor(binding.dialect, binding.schema, binding.name) };
+		}
+
+		const context = {
+			systemPrompt: input.systemPrompt,
+			messages: [
+				// Pi 0.86 stores prompt/tool declarations in history. This tool-free
+				// round has its own prompt and must not inherit those declarations.
+				...closePendingToolCalls(
+					input.messages.filter((message) => message.role !== "system"),
+					input.midTurn === true,
+				),
+				{ role: "user", content: [{ type: "text", text: input.userText }], timestamp: Date.now() },
+			],
+		};
+
+		tracking.start(input.model.api);
 		const events = streamSimple(
 			input.model,
 			context as unknown as Parameters<typeof streamSimple>[1],
@@ -308,22 +316,33 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 				const answer = textFromMessage(event.message).trim();
 				const usage = sideQuestionUsage((event.message as { usage?: unknown }).usage);
 				observed = true;
-				input.onUsage?.(usage);
+				input.onUsage?.(usage, { callOutcome: "success" });
 				return { text: answer, usage, aborted: false };
 			}
 			if (event.type === "error") {
 				const failed = event.error as { stopReason?: unknown; usage?: unknown; errorMessage?: unknown };
 				const usage = sideQuestionUsage(failed.usage);
 				observed = true;
-				input.onUsage?.(usage);
+				const aborted = event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true;
+				input.onUsage?.(usage, {
+					callOutcome: aborted ? "aborted" : "error",
+					failure: tracking.failure(failed, aborted, usage !== null),
+				});
 				if (event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true) {
 					return { text: text.trim(), usage, aborted: true };
 				}
 				throw new Error(typeof failed.errorMessage === "string" ? failed.errorMessage : "side question failed");
 			}
 		}
+		throw new Error("side question stream ended without a terminal response");
+	} catch (error) {
+		terminalError = error;
+		throw error;
 	} finally {
-		if (!observed) input.onUsage?.(null);
+		if (!observed)
+			input.onUsage?.(null, {
+				callOutcome: input.signal?.aborted ? "aborted" : "error",
+				failure: tracking.failure(terminalError, input.signal?.aborted),
+			});
 	}
-	return { text: text.trim(), usage: null, aborted: input.signal?.aborted === true };
 }

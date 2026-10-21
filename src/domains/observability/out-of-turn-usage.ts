@@ -1,3 +1,5 @@
+import type { CallFailureRecord } from "../../core/call-failure.js";
+import { readCallFailure } from "../../core/call-failure.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
  * Durable record of the model calls that were billed beside a session rather
@@ -70,6 +72,7 @@ export interface OutOfTurnUsageRow {
 	 * Legacy rows without it are unchanged.
 	 */
 	callOutcome?: "success" | "error" | "aborted";
+	failure?: CallFailureRecord;
 }
 
 export interface OutOfTurnUsageReadResult {
@@ -159,7 +162,8 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 		label !== "prewarm" &&
 		label !== "background-memory" &&
 		label !== "failed-compaction" &&
-		label !== "system-one"
+		label !== "system-one" &&
+		label !== "safety-judge"
 	)
 		return null;
 	if (typeof value.timestamp !== "string" || value.timestamp.length === 0) return null;
@@ -174,6 +178,7 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 	// Coercing both away read a failed or aborted prewarm back as a completed
 	// call that cost nothing. Rows written before either field keep reading as
 	// they always did, because a number parses the same either way.
+	const failure = readCallFailure(value.failure);
 	const reading = nullableNumber;
 	return {
 		label,
@@ -200,6 +205,7 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 			costUsd: reading(usage.costUsd),
 		},
 		...(callOutcome !== undefined ? { callOutcome } : {}),
+		...(failure === undefined ? {} : { failure }),
 	};
 }
 

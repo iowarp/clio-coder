@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { CallFailureRecord } from "../../../core/call-failure.js";
+import { trackCallFetch } from "../../../core/call-failure.js";
 // Direct modules, not the memory barrel: entries and compaction sit in the
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
@@ -95,6 +97,7 @@ function validateHistorySummary(text: string): void {
 
 /** One invoked summary stream, including failed calls that produce no checkpoint. */
 export interface CompactionCallObservation {
+	failure?: CallFailureRecord;
 	outcome: "success" | "error" | "aborted";
 	usage: unknown;
 	timestamp: string;
@@ -908,7 +911,12 @@ async function runSummaryStream(
 	let usage: unknown;
 	let reported: Record<string, unknown> = {};
 	let outcome: CompactionCallObservation["outcome"] = "error";
+	let failure: CallFailureRecord | undefined;
+	const tracking = trackCallFetch();
+	options.fetch = tracking.fetch;
 	try {
+		input.signal?.throwIfAborted();
+		tracking.start(input.summarize ? undefined : input.model.api);
 		if (input.summarize) {
 			const response = await input.summarize({
 				systemPrompt,
@@ -953,8 +961,12 @@ async function runSummaryStream(
 			}
 		}
 		throw new Error("compaction stream ended without a terminal response");
+	} catch (error) {
+		failure = tracking.failure(error, input.signal?.aborted || outcome === "aborted", Object.keys(reported).length > 0);
+		throw error;
 	} finally {
 		input.onCall?.({
+			...(failure === undefined ? {} : { failure }),
 			outcome: outcome === "error" && input.signal?.aborted ? "aborted" : outcome,
 			usage: outcome === "success" ? usage : reported,
 			timestamp,

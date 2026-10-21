@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { CallObservation } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
@@ -1888,6 +1889,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		usage: SideQuestionResult["usage"],
 		label: CostEntryLabel,
 		origin: ReturnType<SessionContract["current"]> = deps.session?.current() ?? null,
+		observation?: CallObservation,
 	): void =>
 		recordOutOfTurnUsageFor(
 			{
@@ -1898,6 +1900,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			usage,
 			label,
 			origin,
+			observation,
 		);
 
 	const recordOutOfTurnUsageFor = (
@@ -1909,9 +1912,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		usage: SideQuestionResult["usage"],
 		label: CostEntryLabel,
 		origin: ReturnType<SessionContract["current"]> = deps.session?.current() ?? null,
+		observation?: CallObservation,
 	): void => {
 		const costProvenance = usage ? runtime.costProvenance : "unknown";
-		if ((deps.session?.current()?.id ?? null) === (origin?.id ?? null))
+		if (observation?.failure?.invoked !== false && (deps.session?.current()?.id ?? null) === (origin?.id ?? null))
 			deps.observability?.recordTokens(
 				runtime.targetId,
 				runtime.wireModelId,
@@ -1935,6 +1939,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const meta = origin;
 		writeOutOfTurnUsageRow({
 			label,
+			...(observation ?? { callOutcome: usage === null ? ("error" as const) : ("success" as const) }),
 			sessionId: meta?.id ?? null,
 			// The identity the session ledger is filed under, so `usage report
 			// --repo` selects these rows with the same hash it selects ledgers with.
@@ -2262,7 +2267,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			let result: SideQuestionResult;
 			try {
 				result = await draftRound({
-					onUsage: (usage) => recordOutOfTurnUsageFor(resolved, usage, "side-question", origin),
+					onUsage: (usage, observation) => recordOutOfTurnUsageFor(resolved, usage, "side-question", origin, observation),
 					admitFlow: () => deps.admitRuntimeFlow?.(destination) ?? null,
 					model: resolved.model,
 					messages: [],
@@ -3607,7 +3612,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					sideQuestionRound({
-						onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin),
+						onUsage: (usage, observation) =>
+							recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only: the round appends its own message to this copy, so
@@ -3651,7 +3657,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								samplingTemperature,
 								(sampling) =>
 									draftRound({
-										onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin),
+										onUsage: (usage, observation) =>
+											recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,
 										// One snapshot for every candidate, read-only as the side question's is.
@@ -3695,7 +3702,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					handoffRound({
-						onUsage: (usage) => recordOutOfTurnUsage(prepared.runtime, usage, "handoff", prepared.origin),
+						onUsage: (usage, observation) =>
+							recordOutOfTurnUsage(prepared.runtime, usage, "handoff", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only, exactly as the side-question round treats it.

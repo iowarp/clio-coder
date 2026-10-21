@@ -10,6 +10,7 @@ import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import { BusChannels, type PluginsReloadedPayload } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
+import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
@@ -790,7 +791,7 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 			beforeRequest: async () => {
 				recordUsage = await admitRequest({ targetId: request.targetId, model: wireModelId, signal: request.signal });
 			},
-			onUsage: (usage) => recordUsage?.(usage),
+			onUsage: (usage, observation) => recordUsage?.(usage, observation),
 			...(apiKey !== undefined ? { apiKey } : {}),
 			...(request.schema !== undefined
 				? { responseSchema: { name: "system_one_vote", schema: request.schema as Record<string, unknown> } }
@@ -896,128 +897,158 @@ function prepareBackgroundMemoryRoute(
 			// holds endpoint capacity while it is out and publishes the cache
 			// disturbance even when a timeout means the usage sink never sees it.
 			complete: async (request) => {
-				// Decided before the metadata probe, auth or any byte leaves, so a
-				// skipped step costs nothing; the next cadence tick decides again.
-				const nowMs = Date.now();
-				const throughput = endpointThroughput(endpointKey);
-				let routeQuota = routeFacts.quotaProviderId === null ? null : observedQuota(routeFacts.quotaProviderId, nowMs);
-				if (initial.refined.runtimeId === "openai-codex") {
-					const status = providers.auth.statusForTarget(initial.refined.target, initial.refined.runtime);
-					const stored = providers.auth.getStored(status.providerId);
-					const scope =
-						status.source === "stored-oauth" && stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
-					routeQuota = observedCodexQuota(targetId, scope, nowMs);
-				} else if (initial.refined.runtimeId === "anthropic-max") {
-					const streamed = observedAnthropicQuota(targetId, nowMs);
-					if (streamed !== null && !streamed.stale) routeQuota = streamed;
-				}
-				const decision = decideBackgroundStep({
-					route: routeFacts,
-					inputTokens: ceilChars(request.systemPrompt.length + request.userPrompt.length),
-					maxOutputTokens: budget?.settings.context.memory.maxOutputTokens ?? request.maxTokens,
-					timeoutCapMs: timeoutMs,
-					nowMs,
-					session: {
-						spendUsd: budget?.sessionSpendUsd?.() ?? 0,
-						ceilingUsd: budget?.settings.safety.limits.sessionCostUsd ?? 0,
-					},
-					quota: routeQuota,
-					endpoint: {
-						occupied: endpointKey === null ? 0 : modelStreamUsage(endpointCapacityUsage(), endpointKey),
-						admissionLimit:
-							endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets),
-						prefillTokensPerSecond: throughput?.prefillTokensPerSecond ?? null,
-						generationTokensPerSecond: throughput?.generationTokensPerSecond ?? null,
-					},
-				});
-				if (!decision.admit) {
-					if (decision.reason === "endpoint_busy") {
-						throw new TaskMemoryEndpointBusyError("endpoint occupancy exhausts the background memory slot bound");
+				let usageObserved = false;
+				try {
+					// Decided before the metadata probe, auth or any byte leaves, so a
+					// skipped step costs nothing; the next cadence tick decides again.
+					const nowMs = Date.now();
+					const throughput = endpointThroughput(endpointKey);
+					let routeQuota = routeFacts.quotaProviderId === null ? null : observedQuota(routeFacts.quotaProviderId, nowMs);
+					if (initial.refined.runtimeId === "openai-codex") {
+						const status = providers.auth.statusForTarget(initial.refined.target, initial.refined.runtime);
+						const stored = providers.auth.getStored(status.providerId);
+						const scope =
+							status.source === "stored-oauth" && stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
+						routeQuota = observedCodexQuota(targetId, scope, nowMs);
+					} else if (initial.refined.runtimeId === "anthropic-max") {
+						const streamed = observedAnthropicQuota(targetId, nowMs);
+						if (streamed !== null && !streamed.stale) routeQuota = streamed;
 					}
-					throw new TaskMemoryBudgetSkipError(decision.reason, decision.resumeAt);
-				}
-				await prepareBackgroundModelMetadata(providers, targetId, request.signal);
-				const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
-				if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
-					throw new Error("background memory target changed during preparation");
-				}
-				if (request.purpose) {
-					const inputTokens = estimateAgentContextTokens({
-						systemPrompt: request.systemPrompt,
-						messages: [{ role: "user", content: [{ type: "text", text: request.userPrompt }], timestamp: Date.now() }],
+					const decision = decideBackgroundStep({
+						route: routeFacts,
+						inputTokens: ceilChars(request.systemPrompt.length + request.userPrompt.length),
+						maxOutputTokens: budget?.settings.context.memory.maxOutputTokens ?? request.maxTokens,
+						timeoutCapMs: timeoutMs,
+						nowMs,
+						session: {
+							spendUsd: budget?.sessionSpendUsd?.() ?? 0,
+							ceilingUsd: budget?.settings.safety.limits.sessionCostUsd ?? 0,
+						},
+						quota: routeQuota,
+						endpoint: {
+							occupied: endpointKey === null ? 0 : modelStreamUsage(endpointCapacityUsage(), endpointKey),
+							admissionLimit:
+								endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets),
+							prefillTokensPerSecond: throughput?.prefillTokensPerSecond ?? null,
+							generationTokensPerSecond: throughput?.generationTokensPerSecond ?? null,
+						},
 					});
-					if (!(model.contextWindow > 0) || inputTokens + request.maxTokens + 64 > model.contextWindow)
-						throw new TaskMemoryBudgetSkipError("time_budget");
-				}
-				const costProvenance = normalizeCostProvenance(refined.costProvenance);
-				const apiKey = targetRequiresAuth(refined.target, refined.runtime)
-					? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
-					: LOCAL_API_KEY_FALLBACK;
-				request.signal.throwIfAborted();
-				const refusal =
-					admitModelFlow?.({ targetId, runtimeId: refined.runtimeId, wireModelId: refined.wireModelId }) ?? null;
-				if (refusal !== null) throw new TaskMemoryInformationFlowBlockedError(refusal);
-				// Preparation yielded after the middleware's first check. The wrapper
-				// rechecks occupancy and registers the preemptible hold in one
-				// synchronous step, so no local request can take the last slot between.
-				const admissionLimit =
-					endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets);
-				return announceMemoryStepEndpoint(
-					{
-						bus,
-						endpointKey,
-						targetId,
-						admissionLimit,
-						admit: () => endpointKey === null || modelStreamUsage(endpointCapacityUsage(), endpointKey) < admissionLimit,
-					},
-					async (request: TaskMemoryModelRequest) => {
-						const startedAt = performance.now();
-						let observedUsage: TaskMemoryStepUsage | undefined;
-						const mapUsage = (completion: Pick<EngineTextCompletionResult, "usage" | "backend">): TaskMemoryStepUsage => ({
-							...completion.usage,
-							targetId,
-							attributedModelId: refined.wireModelId,
-							costProvenance: completion.usage.missingTokenCalls ? "unknown" : costProvenance,
-							durationMs: performance.now() - startedAt,
-							backend: completion.backend,
-						});
-						const completion = await completeEngineText({
-							model,
+					if (!decision.admit) {
+						if (decision.reason === "endpoint_busy") {
+							throw new TaskMemoryEndpointBusyError("endpoint occupancy exhausts the background memory slot bound");
+						}
+						throw new TaskMemoryBudgetSkipError(decision.reason, decision.resumeAt);
+					}
+					await prepareBackgroundModelMetadata(providers, targetId, request.signal);
+					const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
+					if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
+						throw new Error("background memory target changed during preparation");
+					}
+					if (request.purpose) {
+						const inputTokens = estimateAgentContextTokens({
 							systemPrompt: request.systemPrompt,
-							userPrompt: request.userPrompt,
-							maxTokens:
-								refined.capabilityDecisions.maxTokens > 0
-									? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
-									: request.maxTokens,
-							// Always off, never the operator's chat thinking level. A model that
-							// reasons anyway still works: `completeEngineText` keeps only text
-							// blocks, and the memory output budget leaves room for the preamble.
-							thinkingLevel: "off",
-							// Memory decides what to keep; the same completed task must get the same answer.
-							// A live Ornith review retained a validator recipe in one run and abstained on
-							// the identical trajectory in the next, at the server's default temperature.
-							deterministicRuntimeId: refined.runtimeId,
-							signal: request.signal,
-							timeoutMs: decision.timeoutMs,
-							onUsage: (observation) => {
-								observedUsage = mapUsage(observation);
-								request.onUsage?.(observedUsage);
-							},
-							...(apiKey === undefined ? {} : { apiKey }),
-							...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
+							messages: [{ role: "user", content: [{ type: "text", text: request.userPrompt }], timestamp: Date.now() }],
 						});
-						recordEndpointThroughput(endpointKey, completion.backend);
-						// The step is billed here whatever the policy later decides about the
-						// answer. A model that read a trajectory and chose silence spent the
-						// same prefill as one that produced a reminder.
-						return {
-							text: completion.text,
-							inputTokens: completion.inputTokens,
-							outputTokens: completion.outputTokens,
-							usage: observedUsage ?? mapUsage(completion),
-						};
-					},
-				)(request);
+						if (!(model.contextWindow > 0) || inputTokens + request.maxTokens + 64 > model.contextWindow)
+							throw new TaskMemoryBudgetSkipError("time_budget");
+					}
+					const costProvenance = normalizeCostProvenance(refined.costProvenance);
+					const apiKey = targetRequiresAuth(refined.target, refined.runtime)
+						? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
+						: LOCAL_API_KEY_FALLBACK;
+					request.signal.throwIfAborted();
+					const refusal =
+						admitModelFlow?.({ targetId, runtimeId: refined.runtimeId, wireModelId: refined.wireModelId }) ?? null;
+					if (refusal !== null) throw new TaskMemoryInformationFlowBlockedError(refusal);
+					// Preparation yielded after the middleware's first check. The wrapper
+					// rechecks occupancy and registers the preemptible hold in one
+					// synchronous step, so no local request can take the last slot between.
+					const admissionLimit =
+						endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets);
+					return await announceMemoryStepEndpoint(
+						{
+							bus,
+							endpointKey,
+							targetId,
+							admissionLimit,
+							admit: () => endpointKey === null || modelStreamUsage(endpointCapacityUsage(), endpointKey) < admissionLimit,
+						},
+						async (request: TaskMemoryModelRequest) => {
+							const startedAt = performance.now();
+							let observedUsage: TaskMemoryStepUsage | undefined;
+							const mapUsage = (
+								completion: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">,
+							): TaskMemoryStepUsage => ({
+								...completion.usage,
+								...(completion.failure === undefined ? {} : { failure: completion.failure }),
+								targetId,
+								attributedModelId: refined.wireModelId,
+								costProvenance: completion.usage.missingTokenCalls ? "unknown" : costProvenance,
+								durationMs: performance.now() - startedAt,
+								backend: completion.backend,
+							});
+							const completion = await completeEngineText({
+								model,
+								systemPrompt: request.systemPrompt,
+								userPrompt: request.userPrompt,
+								maxTokens:
+									refined.capabilityDecisions.maxTokens > 0
+										? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
+										: request.maxTokens,
+								// Always off, never the operator's chat thinking level. A model that
+								// reasons anyway still works: `completeEngineText` keeps only text
+								// blocks, and the memory output budget leaves room for the preamble.
+								thinkingLevel: "off",
+								// Memory decides what to keep; the same completed task must get the same answer.
+								// A live Ornith review retained a validator recipe in one run and abstained on
+								// the identical trajectory in the next, at the server's default temperature.
+								deterministicRuntimeId: refined.runtimeId,
+								signal: request.signal,
+								timeoutMs: decision.timeoutMs,
+								onUsage: (observation) => {
+									usageObserved = true;
+									observedUsage = mapUsage(observation);
+									request.onUsage?.(observedUsage);
+								},
+								...(apiKey === undefined ? {} : { apiKey }),
+								...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
+							});
+							recordEndpointThroughput(endpointKey, completion.backend);
+							// The step is billed here whatever the policy later decides about the
+							// answer. A model that read a trajectory and chose silence spent the
+							// same prefill as one that produced a reminder.
+							return {
+								text: completion.text,
+								inputTokens: completion.inputTokens,
+								outputTokens: completion.outputTokens,
+								usage: observedUsage ?? mapUsage(completion),
+							};
+						},
+					)(request);
+				} catch (error) {
+					if (
+						!usageObserved &&
+						!(error instanceof TaskMemoryBudgetSkipError) &&
+						!(error instanceof TaskMemoryEndpointBusyError) &&
+						!(error instanceof TaskMemoryInformationFlowBlockedError)
+					)
+						request.onUsage?.({
+							targetId,
+							attributedModelId: initial.refined.wireModelId,
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							reasoning: 0,
+							totalTokens: 0,
+							costUsd: 0,
+							costProvenance: "unknown",
+							durationMs: 0,
+							backend: null,
+							failure: classifyCallFailure(error, { invoked: false, aborted: request.signal.aborted }),
+						});
+					throw error;
+				}
 			},
 		},
 	};
@@ -3360,7 +3391,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	const decisionUsage = createDecisionUsageTally(systemOneRecorder);
 	const sessionScheduling = result.getContract<SchedulingContract>("scheduling");
-	const admitSystemOneRequest = createSystemOneRequestAdmission({
+	const systemOneAdmissionDeps = {
 		providers,
 		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
 		...(observability ? { observability } : {}),
@@ -3371,8 +3402,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null;
 		},
 		stateDir: clioStateDir(),
-	});
-	const safetyJudgeOneShot = createSystemOneOneShot(providers, admitSystemOneRequest);
+	};
+	const admitSystemOneRequest = createSystemOneRequestAdmission(systemOneAdmissionDeps);
+	const safetyJudgeOneShot = createSystemOneOneShot(
+		providers,
+		createSystemOneRequestAdmission({ ...systemOneAdmissionDeps, label: "safety-judge" }),
+	);
 	const systemOneEndpointCapacity = (targetId: string): number => {
 		const target = providers.getTarget(targetId);
 		const key = target === null ? null : canonicalEndpointKey(target);

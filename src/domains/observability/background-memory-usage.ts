@@ -1,3 +1,4 @@
+import type { CallFailureRecord } from "../../core/call-failure.js";
 /**
  * Accounting for one proactive-memory step.
  *
@@ -30,6 +31,7 @@ export interface BackgroundMemoryStepUsage {
 	reasoning: number;
 	totalTokens: number;
 	missingTokenCalls?: number;
+	failure?: CallFailureRecord;
 	costUsd: number;
 	costProvenance: CostProvenance;
 }
@@ -67,6 +69,12 @@ export function backgroundMemoryUsageRow(
 ): OutOfTurnUsageRow {
 	return {
 		label: "background-memory",
+		callOutcome: usage.failure
+			? usage.failure.errorClass === "aborted" || usage.failure.errorClass === "timeout"
+				? "aborted"
+				: "error"
+			: "success",
+		...(usage.failure === undefined ? {} : { failure: usage.failure }),
 		...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
 		repoIdentity: options.repoIdentity,
 		timestamp: (options.now ?? new Date()).toISOString(),
@@ -74,40 +82,41 @@ export function backgroundMemoryUsageRow(
 		attributedModelId: usage.attributedModelId,
 		usage: {
 			costProvenance: usage.costProvenance,
-			input: usage.missingTokenCalls ? null : usage.input,
-			output: usage.missingTokenCalls ? null : usage.output,
-			cacheRead: usage.missingTokenCalls ? null : usage.cacheRead,
-			cacheWrite: usage.missingTokenCalls ? null : usage.cacheWrite,
+			input: usage.missingTokenCalls || usage.failure?.invoked === false ? null : usage.input,
+			output: usage.missingTokenCalls || usage.failure?.invoked === false ? null : usage.output,
+			cacheRead: usage.missingTokenCalls || usage.failure?.invoked === false ? null : usage.cacheRead,
+			cacheWrite: usage.missingTokenCalls || usage.failure?.invoked === false ? null : usage.cacheWrite,
 			...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-			reasoning: usage.missingTokenCalls ? null : usage.reasoning,
-			totalTokens: usage.missingTokenCalls ? null : usage.totalTokens,
-			costUsd: usage.missingTokenCalls ? null : usage.costUsd,
+			reasoning: usage.missingTokenCalls || usage.failure?.invoked === false ? null : usage.reasoning,
+			totalTokens: usage.missingTokenCalls || usage.failure?.invoked === false ? null : usage.totalTokens,
+			costUsd: usage.missingTokenCalls || usage.failure?.invoked === false ? null : usage.costUsd,
 		},
 	};
 }
 
 /** Record one memory step in the session's cost totals and in the durable store. */
 export function recordBackgroundMemoryStep(input: RecordBackgroundMemoryStepInput): OutOfTurnUsageRow {
-	input.observability?.recordTokens(
-		input.usage.targetId,
-		input.usage.attributedModelId,
-		input.usage.totalTokens,
-		input.usage.costUsd,
-		{
-			input: input.usage.input,
-			output: input.usage.output,
-			cacheRead: input.usage.cacheRead,
-			cacheWrite: input.usage.cacheWrite,
-			...(input.usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: input.usage.cacheWrite1h }),
-			reasoningTokens: input.usage.reasoning,
-			totalTokens: input.usage.totalTokens,
-			apiCalls: 1,
-			...(input.usage.missingTokenCalls ? { missingTokenCalls: input.usage.missingTokenCalls } : {}),
-		},
-		input.usage.costProvenance,
-		undefined,
-		"background-memory",
-	);
+	if (input.usage.failure?.invoked !== false)
+		input.observability?.recordTokens(
+			input.usage.targetId,
+			input.usage.attributedModelId,
+			input.usage.totalTokens,
+			input.usage.costUsd,
+			{
+				input: input.usage.input,
+				output: input.usage.output,
+				cacheRead: input.usage.cacheRead,
+				cacheWrite: input.usage.cacheWrite,
+				...(input.usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: input.usage.cacheWrite1h }),
+				reasoningTokens: input.usage.reasoning,
+				totalTokens: input.usage.totalTokens,
+				apiCalls: 1,
+				...(input.usage.missingTokenCalls ? { missingTokenCalls: input.usage.missingTokenCalls } : {}),
+			},
+			input.usage.costProvenance,
+			undefined,
+			"background-memory",
+		);
 	const row = backgroundMemoryUsageRow(input.usage, {
 		repoIdentity: input.repoIdentity,
 		...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),

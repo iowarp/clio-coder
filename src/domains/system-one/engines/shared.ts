@@ -1,3 +1,4 @@
+import type { CallObservation } from "../../../core/call-failure.js";
 /**
  * What both engine kinds need from the providers domain: a credential and a
  * readable failure.
@@ -25,7 +26,7 @@ export type LlmRequestAdmission = (request: {
 	readonly targetId: string;
 	readonly model: string;
 	readonly signal: AbortSignal;
-}) => Promise<(usage: LlmRequestUsage | null) => void>;
+}) => Promise<(usage: LlmRequestUsage | null, observation?: CallObservation) => void>;
 
 /** A refused request invalidates the whole decision, including answers from earlier requests. */
 export class LlmAdmissionRefused extends Error {}

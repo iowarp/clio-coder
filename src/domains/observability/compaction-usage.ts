@@ -54,6 +54,7 @@ export function recordFailedCompactionCalls(
 			label: "failed-compaction",
 			...(origin.sessionId === undefined ? {} : { sessionId: origin.sessionId }),
 			callOutcome: call.outcome,
+			...(call.failure === undefined ? {} : { failure: call.failure }),
 			repoIdentity: origin.repoIdentity,
 			timestamp: call.timestamp,
 			target: origin.target,
@@ -61,26 +62,27 @@ export function recordFailedCompactionCalls(
 			usage,
 		};
 		appendOutOfTurnUsageRow(origin.stateDir, row, { required: true });
-		observability?.recordTokens(
-			origin.target,
-			origin.model,
-			usage.totalTokens ?? 0,
-			usage.costUsd ?? 0,
-			{
-				input: usage.input ?? 0,
-				output: usage.output ?? 0,
-				cacheRead: usage.cacheRead ?? 0,
-				cacheWrite: usage.cacheWrite ?? 0,
-				...(typeof usage.cacheWrite1h === "number" ? { cacheWrite1h: usage.cacheWrite1h } : {}),
-				reasoningTokens: usage.reasoning ?? 0,
-				totalTokens: usage.totalTokens ?? 0,
-				apiCalls: 1,
-				...(usage.totalTokens === null ? { missingTokenCalls: 1 } : {}),
-			},
-			usage.costProvenance,
-			undefined,
-			"failed-compaction",
-		);
+		if (call.failure?.invoked !== false)
+			observability?.recordTokens(
+				origin.target,
+				origin.model,
+				usage.totalTokens ?? 0,
+				usage.costUsd ?? 0,
+				{
+					input: usage.input ?? 0,
+					output: usage.output ?? 0,
+					cacheRead: usage.cacheRead ?? 0,
+					cacheWrite: usage.cacheWrite ?? 0,
+					...(typeof usage.cacheWrite1h === "number" ? { cacheWrite1h: usage.cacheWrite1h } : {}),
+					reasoningTokens: usage.reasoning ?? 0,
+					totalTokens: usage.totalTokens ?? 0,
+					apiCalls: 1,
+					...(usage.totalTokens === null ? { missingTokenCalls: 1 } : {}),
+				},
+				usage.costProvenance,
+				undefined,
+				"failed-compaction",
+			);
 	}
 }
 

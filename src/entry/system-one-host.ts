@@ -1,3 +1,4 @@
+import type { CostEntryLabel } from "../domains/observability/cost.js";
 /**
  * What the composition root keeps between System One calls.
  *
@@ -58,7 +59,9 @@ export function createSystemOneRequestAdmission(deps: {
 	currentSession: () => string | null;
 	repoIdentity: () => string | null;
 	stateDir: string;
+	label?: Extract<CostEntryLabel, "system-one" | "safety-judge">;
 }): LlmRequestAdmission {
+	const label = deps.label ?? "system-one";
 	return async ({ targetId, model, signal }) => {
 		const session = deps.currentSession();
 		const repoIdentity = deps.repoIdentity();
@@ -85,7 +88,12 @@ export function createSystemOneRequestAdmission(deps: {
 		} catch (error) {
 			throw new LlmAdmissionRefused(error instanceof Error ? error.message : String(error), { cause: error });
 		}
-		return (usage) => {
+		return (usage, observation) => {
+			// Admission alone is not evidence of spending when the deadline wins (#429).
+			if (observation?.failure?.invoked === false) return;
+			const outcome = observation ?? {
+				callOutcome: signal.aborted ? ("aborted" as const) : usage === null ? ("error" as const) : ("success" as const),
+			};
 			if (usage === null) {
 				if (deps.currentSession() === session) {
 					deps.observability?.recordTokens(
@@ -96,11 +104,12 @@ export function createSystemOneRequestAdmission(deps: {
 						{ apiCalls: 1, missingTokenCalls: 1 },
 						"unknown",
 						undefined,
-						"system-one",
+						label,
 					);
 				}
 				appendOutOfTurnUsageRow(deps.stateDir, {
-					label: "system-one",
+					label,
+					...outcome,
 					sessionId: session,
 					repoIdentity,
 					timestamp: new Date().toISOString(),
@@ -151,11 +160,12 @@ export function createSystemOneRequestAdmission(deps: {
 					},
 					pricing.provenance,
 					undefined,
-					"system-one",
+					label,
 				);
 			}
 			appendOutOfTurnUsageRow(deps.stateDir, {
-				label: "system-one",
+				label,
+				...outcome,
 				sessionId: session,
 				repoIdentity,
 				timestamp: new Date().toISOString(),

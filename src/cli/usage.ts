@@ -215,10 +215,20 @@ interface CallOrigins {
 	backgroundMemory: number;
 	failedCompaction: number;
 	systemOne: number;
+	safetyJudge: number;
 }
 
 function emptyCallOrigins(): CallOrigins {
-	return { rows: 0, sideQuestions: 0, handoffs: 0, prewarms: 0, backgroundMemory: 0, failedCompaction: 0, systemOne: 0 };
+	return {
+		rows: 0,
+		sideQuestions: 0,
+		handoffs: 0,
+		prewarms: 0,
+		backgroundMemory: 0,
+		failedCompaction: 0,
+		systemOne: 0,
+		safetyJudge: 0,
+	};
 }
 
 function turnsOf(origins: CallOrigins): number {
@@ -229,7 +239,8 @@ function turnsOf(origins: CallOrigins): number {
 		origins.prewarms -
 		origins.backgroundMemory -
 		origins.failedCompaction -
-		origins.systemOne
+		origins.systemOne -
+		origins.safetyJudge
 	);
 }
 
@@ -240,7 +251,8 @@ function hasLabelledCall(origins: CallOrigins): boolean {
 		origins.prewarms > 0 ||
 		origins.backgroundMemory > 0 ||
 		origins.failedCompaction > 0 ||
-		origins.systemOne > 0
+		origins.systemOne > 0 ||
+		origins.safetyJudge > 0
 	);
 }
 
@@ -251,6 +263,7 @@ function addOutOfTurnRow(origins: CallOrigins, row: OutOfTurnUsageRow): void {
 	else if (row.label === "background-memory") origins.backgroundMemory += 1;
 	else if (row.label === "failed-compaction") origins.failedCompaction += 1;
 	else if (row.label === "system-one") origins.systemOne += 1;
+	else if (row.label === "safety-judge") origins.safetyJudge += 1;
 	else origins.handoffs += 1;
 }
 
@@ -270,14 +283,15 @@ function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
 		totalTokens: row.usage.totalTokens ?? 0,
 		costUsd: row.usage.costUsd ?? 0,
 		costProvenance: row.usage.costProvenance ?? "unknown",
-		missingTokenCalls: row.usage.totalTokens === null ? 1 : 0,
+		missingTokenCalls: row.usage.totalTokens === null && row.failure?.invoked !== false ? 1 : 0,
 	};
 }
 
 /** Existing numeric accumulators sum known contributions; the report retains missing coverage. */
 function reportedUsageTotals(totals: UsageTotals, rows: ReadonlyArray<OutOfTurnUsageRow>, missingSessionCalls = 0) {
 	const failedCompaction = summarizeFailedCompactionUsage(rows);
-	const missingTokenCalls = rows.filter((row) => row.usage.totalTokens === null).length + missingSessionCalls;
+	const missingTokenCalls =
+		rows.filter((row) => row.usage.totalTokens === null && row.failure?.invoked !== false).length + missingSessionCalls;
 	if (failedCompaction.calls === 0 && missingTokenCalls === 0) return totals;
 	const reported: Record<string, unknown> = {
 		...totals,
@@ -613,6 +627,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	}
 	for (const row of outOfTurnRows) {
+		if (row.failure?.invoked === false) continue;
 		foldCall(outOfTurnUsageCall(row));
 		addOutOfTurnRow(callOrigins, row);
 	}
@@ -629,8 +644,13 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const allRecordedTokens = usageTotals.totalTokens + workerUsage.totalTokens;
 	const missingTokenCalls =
 		missingSessionCalls +
-		outOfTurnRows.filter((row) => row.usage.totalTokens === null).length +
+		outOfTurnRows.filter((row) => row.usage.totalTokens === null && row.failure?.invoked !== false).length +
 		workerUsage.missingTokenCalls;
+	const outOfTurnFailureCounts = {
+		invokedUnknownCalls: outOfTurnRows.filter((row) => row.failure?.invoked === true && row.usage.totalTokens === null)
+			.length,
+		neverInvokedCalls: outOfTurnRows.filter((row) => row.failure?.invoked === false).length,
+	};
 	const allCost: CostAggregate = {
 		knownUsd: usageTotals.cost.knownUsd + workerUsage.cost.knownUsd,
 		calls: usageTotals.cost.calls + workerUsage.cost.calls,
@@ -747,6 +767,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							backgroundMemorySteps: callOrigins.backgroundMemory,
 							...(callOrigins.failedCompaction > 0 ? { failedCompactionCalls: callOrigins.failedCompaction } : {}),
 							...(callOrigins.systemOne > 0 ? { systemOneCalls: callOrigins.systemOne } : {}),
+							...(callOrigins.safetyJudge > 0 ? { safetyJudgeCalls: callOrigins.safetyJudge } : {}),
 						}
 					: {}),
 			});
@@ -782,6 +803,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			emit({
 				kind: "fact",
 				fact: "all-recorded-tokens",
+				outOfTurnFailureCounts,
 				knownSubtotal: allRecordedTokens,
 				input: usageTotals.input + workerUsage.input,
 				output: usageTotals.output + workerUsage.output,
@@ -864,6 +886,10 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		);
 	}
 	if (usageMeasurable) {
+		if (outOfTurnFailureCounts.invokedUnknownCalls > 0 || outOfTurnFailureCounts.neverInvokedCalls > 0)
+			out(
+				`  out-of-turn failures: ${outOfTurnFailureCounts.invokedUnknownCalls} invoked calls with unknown usage; ${outOfTurnFailureCounts.neverInvokedCalls} never-sent calls (excluded from spending)`,
+			);
 		out(
 			`  session and side-call tokens in window: ${usageAmount(reportedTotals.totalTokens)} over ${usageTotals.apiCalls} model calls (input ${usageAmount(reportedTotals.input)}, output ${usageAmount(reportedTotals.output)}, cache read ${usageAmount(reportedTotals.cacheRead)}, cache write ${usageAmount(reportedTotals.cacheWrite)}, reasoning ${usageAmount(reportedTotals.reasoningTokens)})`,
 		);
@@ -878,6 +904,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			if (callOrigins.backgroundMemory > 0) {
 				out(`  background memory steps in window: ${callOrigins.backgroundMemory}`);
 			}
+			if (callOrigins.safetyJudge > 0) out(`  safety judge calls in window: ${callOrigins.safetyJudge}`);
 			if (callOrigins.systemOne > 0) out(`  System One calls in window: ${callOrigins.systemOne}`);
 		}
 		if (failedCompaction.calls > 0) {

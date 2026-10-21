@@ -28,6 +28,8 @@ import {
 	type Usage,
 } from "@earendil-works/pi-ai";
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
+import type { CallFailureRecord } from "../core/call-failure.js";
+import { trackCallFetch } from "../core/call-failure.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import type { ProbeContext } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
@@ -69,6 +71,9 @@ export interface EngineTextCompletionInput {
 	signal: AbortSignal;
 	timeoutMs: number;
 	apiKey?: string;
+	headers?: Record<string, string>;
+	fetch?: typeof globalThis.fetch;
+	transport?: "auto" | "sse" | "websocket" | "websocket-cached";
 	/**
 	 * Runtime id to request reproducible sampling for (temperature 0, fixed
 	 * seed) where that runtime accepts it. A judgment call that flips on the
@@ -76,10 +81,11 @@ export interface EngineTextCompletionInput {
 	 */
 	deterministicRuntimeId?: string;
 	/** Accounting only: observed before terminal errors throw, never carries response content. */
-	onUsage?: (observation: Pick<EngineTextCompletionResult, "usage" | "backend">) => void;
+	onUsage?: (observation: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">) => void;
 }
 
 export interface EngineTextCompletionResult {
+	failure?: CallFailureRecord;
 	text: string;
 	inputTokens: number;
 	outputTokens: number;
@@ -104,24 +110,41 @@ export interface EngineTextCompletionResult {
 
 /** Run one tool-free completion while keeping pi message types at the engine boundary. */
 export async function completeEngineText(input: EngineTextCompletionInput): Promise<EngineTextCompletionResult> {
-	const response = await completeEngineSimple(
-		input.model,
-		{
-			systemPrompt: input.systemPrompt,
-			messages: [{ role: "user", content: input.userPrompt, timestamp: Date.now() }],
-		},
-		{
-			maxTokens: input.maxTokens,
-			signal: input.signal,
-			timeoutMs: input.timeoutMs,
-			...(input.thinkingLevel === "off" ? {} : { reasoning: input.thinkingLevel }),
-			...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
-			...(input.deterministicRuntimeId === undefined
-				? {}
-				: deterministicSampling(input.model, input.deterministicRuntimeId)),
-		},
-	).catch((error: unknown) => {
-		input.onUsage?.({
+	const tracking = trackCallFetch(input.fetch);
+	const observe = (observation: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">): void => {
+		try {
+			input.onUsage?.(observation);
+		} catch {
+			// Accounting must not replace the completion outcome (#430).
+		}
+	};
+	const response = await (async () => {
+		input.signal.throwIfAborted();
+		tracking.start(input.model.api, input.transport);
+		return completeEngineSimple(
+			input.model,
+			{
+				systemPrompt: input.systemPrompt,
+				messages: [{ role: "user", content: input.userPrompt, timestamp: Date.now() }],
+			},
+			{
+				fetch: tracking.fetch,
+				...(input.transport === undefined ? {} : { transport: input.transport }),
+				...(input.headers === undefined ? {} : { headers: input.headers }),
+				maxTokens: input.maxTokens,
+				signal: input.signal,
+				timeoutMs: input.timeoutMs,
+				...(input.thinkingLevel === "off" ? {} : { reasoning: input.thinkingLevel }),
+				...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+				...(input.deterministicRuntimeId === undefined
+					? {}
+					: deterministicSampling(input.model, input.deterministicRuntimeId)),
+			},
+		);
+	})().catch((error: unknown) => {
+		const failure = tracking.failure(error, input.signal.aborted);
+		observe({
+			failure,
 			usage: {
 				input: 0,
 				output: 0,
@@ -130,7 +153,7 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 				reasoning: 0,
 				totalTokens: 0,
 				costUsd: 0,
-				missingTokenCalls: 1,
+				...(failure.invoked ? { missingTokenCalls: 1 } : {}),
 			},
 			backend: null,
 		});
@@ -138,7 +161,15 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 	});
 	const failed = response.stopReason === "error" || response.stopReason === "aborted";
 	const usage = response.usage ?? emptyUsage();
-	const observation: Pick<EngineTextCompletionResult, "usage" | "backend"> = {
+	const failure = failed
+		? tracking.failure(
+				response,
+				response.stopReason === "aborted",
+				normalizeTokenUsage(usage as unknown as Record<string, unknown>).observed,
+			)
+		: undefined;
+	const observation: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure"> = {
+		...(failure === undefined ? {} : { failure }),
 		usage: {
 			input: usage.input,
 			output: usage.output,
@@ -148,15 +179,13 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			reasoning: usage.reasoning ?? 0,
 			totalTokens: usage.totalTokens,
 			costUsd: usage.cost.total,
-			...(!normalizeTokenUsage(usage as unknown as Record<string, unknown>).observed ? { missingTokenCalls: 1 } : {}),
+			...(!normalizeTokenUsage(usage as unknown as Record<string, unknown>).observed && failure?.invoked !== false
+				? { missingTokenCalls: 1 }
+				: {}),
 		},
 		backend: response.backendTimings ?? null,
 	};
-	try {
-		input.onUsage?.(observation);
-	} catch {
-		// Accounting observers cannot change completion success/error behavior.
-	}
+	observe(observation);
 	if (failed) {
 		throw new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
 	}

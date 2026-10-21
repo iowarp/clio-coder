@@ -1,3 +1,4 @@
+import type { SideQuestionInput } from "./side-question.js";
 /**
  * The `/handoff` extraction round: one model call beside the session, no tools.
  *
@@ -51,7 +52,7 @@ export interface HandoffRepairInput {
 }
 
 export interface HandoffRoundInput {
-	onUsage?: (usage: SideQuestionResult["usage"]) => void;
+	onUsage?: NonNullable<SideQuestionInput["onUsage"]>;
 	model: EngineModel;
 	/** Read-only. The round copies before appending its own message. */
 	messages: ReadonlyArray<AgentMessage>;

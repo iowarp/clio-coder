@@ -32,6 +32,7 @@ export interface CostRow {
 	backgroundMemory: number;
 	failedCompaction: number;
 	systemOne?: number;
+	safetyJudge?: number;
 	workers?: number;
 	compactions?: number;
 	missingTokenCalls?: number;
@@ -67,6 +68,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 			if (entry.label === "background-memory") existing.row.backgroundMemory += calls;
 			if (entry.label === "failed-compaction") existing.row.failedCompaction += calls;
 			if (entry.label === "system-one") existing.row.systemOne = (existing.row.systemOne ?? 0) + calls;
+			if (entry.label === "safety-judge") existing.row.safetyJudge = (existing.row.safetyJudge ?? 0) + calls;
 			if (entry.label === "worker") existing.row.workers = (existing.row.workers ?? 0) + calls;
 			if (entry.label === "compaction") existing.row.compactions = (existing.row.compactions ?? 0) + calls;
 			if (entry.missingTokenCalls)
@@ -97,6 +99,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				backgroundMemory: entry.label === "background-memory" ? calls : 0,
 				failedCompaction: entry.label === "failed-compaction" ? calls : 0,
 				...(entry.label === "system-one" ? { systemOne: calls } : {}),
+				...(entry.label === "safety-judge" ? { safetyJudge: calls } : {}),
 				...(entry.label === "worker" ? { workers: calls } : {}),
 				...(entry.label === "compaction" ? { compactions: calls } : {}),
 				...(entry.missingTokenCalls ? { missingTokenCalls: entry.missingTokenCalls } : {}),
