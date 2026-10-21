@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { CallFailureRecord } from "../../../core/call-failure.js";
 import { trackCallFetch } from "../../../core/call-failure.js";
+import type { SideCallAuth } from "../../../core/oauth-retry.js";
+import { rememberOAuthCallFailure, withOAuthRefresh } from "../../../core/oauth-retry.js";
 // Direct modules, not the memory barrel: entries and compaction sit in the
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
@@ -103,7 +105,7 @@ export interface CompactionCallObservation {
 	timestamp: string;
 }
 
-export interface CompactInput {
+export interface CompactInput extends SideCallAuth {
 	/**
 	 * Memory's substitute for one history slice. `slice` holds the raw ledger
 	 * entries the slice covers, which is what observation batches were prepared
@@ -862,6 +864,15 @@ async function runSummaryStream(
 	systemPrompt: string,
 	maxTokens: number | undefined,
 ): Promise<{ text: string; usage: unknown }> {
+	return withOAuthRefresh(input, (auth) => runSummaryAttempt({ ...input, ...auth }, userText, systemPrompt, maxTokens));
+}
+
+async function runSummaryAttempt(
+	input: CompactInput,
+	userText: string,
+	systemPrompt: string,
+	maxTokens: number | undefined,
+): Promise<{ text: string; usage: unknown }> {
 	const options: Record<string, unknown> = {};
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.headers !== undefined) options.headers = input.headers;
@@ -963,6 +974,7 @@ async function runSummaryStream(
 		throw new Error("compaction stream ended without a terminal response");
 	} catch (error) {
 		failure = tracking.failure(error, input.signal?.aborted || outcome === "aborted", Object.keys(reported).length > 0);
+		rememberOAuthCallFailure(error, failure);
 		throw error;
 	} finally {
 		input.onCall?.({

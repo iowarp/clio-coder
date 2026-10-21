@@ -22,6 +22,7 @@ import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from ".
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { installInternalGitPolicy } from "../core/internal-git.js";
+import type { SideCallAuth } from "../core/oauth-retry.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
@@ -207,6 +208,7 @@ import { memoryInterventionModelMaxTokens } from "../domains/providers/model-run
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import {
 	anthropicQuotaNotice,
@@ -471,7 +473,7 @@ function applyHeadlessSettingsOverlay(
 	return next;
 }
 
-interface CompactionResolution {
+interface CompactionResolution extends SideCallAuth {
 	model: EngineModel;
 	costProvenance: CostProvenance;
 	targetId: string;
@@ -775,9 +777,13 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 			throw new Error(`target '${request.targetId}' names no model to ask`);
 		}
 		const { model, refined } = prepareBackgroundMemoryModel(providers, request.targetId, wireModelId);
-		const apiKey = targetRequiresAuth(refined.target, refined.runtime)
-			? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
-			: LOCAL_API_KEY_FALLBACK;
+		const sideAuth = await resolveSideCallAuth(
+			providers.auth,
+			refined.target,
+			refined.runtime,
+			LOCAL_API_KEY_FALLBACK,
+			request.signal,
+		);
 		let recordUsage: Awaited<ReturnType<LlmRequestAdmission>> | undefined;
 		const result = await runOutOfTurnRound({
 			model,
@@ -794,7 +800,7 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 				recordUsage = await admitRequest({ targetId: request.targetId, model: wireModelId, signal: request.signal });
 			},
 			onUsage: (usage, observation) => recordUsage?.(usage, observation),
-			...(apiKey !== undefined ? { apiKey } : {}),
+			...sideAuth,
 			...(request.schema !== undefined
 				? { responseSchema: { name: "system_one_vote", schema: request.schema as Record<string, unknown> } }
 				: {}),
@@ -959,9 +965,13 @@ function prepareBackgroundMemoryRoute(
 							throw new TaskMemoryBudgetSkipError("time_budget");
 					}
 					const costProvenance = normalizeCostProvenance(refined.costProvenance);
-					const apiKey = targetRequiresAuth(refined.target, refined.runtime)
-						? (await providers.auth.resolveForTarget(refined.target, refined.runtime, { signal: request.signal })).apiKey
-						: LOCAL_API_KEY_FALLBACK;
+					const sideAuth = await resolveSideCallAuth(
+						providers.auth,
+						refined.target,
+						refined.runtime,
+						LOCAL_API_KEY_FALLBACK,
+						request.signal,
+					);
 					request.signal.throwIfAborted();
 					const refusal =
 						admitModelFlow?.({ targetId, runtimeId: refined.runtimeId, wireModelId: refined.wireModelId }) ?? null;
@@ -1016,7 +1026,7 @@ function prepareBackgroundMemoryRoute(
 									observedUsage = mapUsage(observation);
 									request.onUsage?.(observedUsage);
 								},
-								...(apiKey === undefined ? {} : { apiKey }),
+								...sideAuth,
 								...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
 							});
 							recordEndpointThroughput(endpointKey, completion.backend);
@@ -1266,15 +1276,17 @@ async function resolveCompactionModel(
 	}
 	const refined = refineRuntimeTargetWithModelHints(route, model, providers.knowledgeBase);
 	applyModelCapabilityPatch(model, refined.capabilities);
-	let apiKey: string | undefined = LOCAL_API_KEY_FALLBACK;
-	if (targetRequiresAuth(route.target, route.runtime)) {
-		const auth = await providers.auth.resolveForTarget(route.target, route.runtime, signal ? { signal } : undefined);
-		if (!auth.available || !auth.apiKey) {
-			throw new Error(
-				"context.compaction.model authentication is unavailable; authenticate the selected target with clio-coder auth",
-			);
-		}
-		apiKey = auth.apiKey;
+	const sideAuth = await resolveSideCallAuth(
+		providers.auth,
+		route.target,
+		route.runtime,
+		LOCAL_API_KEY_FALLBACK,
+		signal,
+	);
+	if (targetRequiresAuth(route.target, route.runtime) && !sideAuth.apiKey) {
+		throw new Error(
+			"context.compaction.model authentication is unavailable; authenticate the selected target with clio-coder auth",
+		);
 	}
 	return {
 		model,
@@ -1283,7 +1295,7 @@ async function resolveCompactionModel(
 		runtimeId: route.runtime.id,
 		wireModelId: route.wireModelId,
 		endpointKey: modelEndpointKey(route.target, route.wireModelId),
-		apiKey,
+		...sideAuth,
 		...(route.target.auth?.headers ? { headers: route.target.auth.headers } : {}),
 	};
 }
@@ -1558,6 +1570,7 @@ async function runCompactionFlow(
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),
 			...(resolved.headers !== undefined ? { headers: resolved.headers } : {}),
 			...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
+			...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
 			...(instructions !== undefined ? { instructions } : {}),
 		});
 	} catch (error) {

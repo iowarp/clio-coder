@@ -30,6 +30,8 @@ import {
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { CallFailureRecord } from "../core/call-failure.js";
 import { trackCallFetch } from "../core/call-failure.js";
+import type { SideCallAuth } from "../core/oauth-retry.js";
+import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import type { ProbeContext } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
@@ -62,7 +64,7 @@ export const stream = engineStream;
  */
 export const streamSimple = engineStreamSimple;
 
-export interface EngineTextCompletionInput {
+export interface EngineTextCompletionInput extends SideCallAuth {
 	model: EngineModel;
 	systemPrompt: string;
 	userPrompt: string;
@@ -110,6 +112,10 @@ export interface EngineTextCompletionResult {
 
 /** Run one tool-free completion while keeping pi message types at the engine boundary. */
 export async function completeEngineText(input: EngineTextCompletionInput): Promise<EngineTextCompletionResult> {
+	return withOAuthRefresh(input, (auth) => completeEngineTextAttempt({ ...input, ...auth }));
+}
+
+async function completeEngineTextAttempt(input: EngineTextCompletionInput): Promise<EngineTextCompletionResult> {
 	const tracking = trackCallFetch(input.fetch);
 	const observe = (observation: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">): void => {
 		try {
@@ -157,6 +163,7 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			},
 			backend: null,
 		});
+		rememberOAuthCallFailure(error, failure);
 		throw error;
 	});
 	const failed = response.stopReason === "error" || response.stopReason === "aborted";
@@ -187,7 +194,9 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 	};
 	observe(observation);
 	if (failed) {
-		throw new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
+		const error = new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
+		rememberOAuthCallFailure(error, failure);
+		throw error;
 	}
 	return {
 		text: response.content

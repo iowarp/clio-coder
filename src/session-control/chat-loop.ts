@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { CallObservation } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import type { SideCallAuth } from "../core/oauth-retry.js";
+import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -94,7 +96,6 @@ import {
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
 	runtimeTargetSnapshot,
-	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import { type VisionSidecar, visionObservationText } from "../domains/providers/vision-sidecar.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
@@ -1824,6 +1825,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				ok: true;
 				runtime: AgentRuntime;
 				apiKey: string | undefined;
+				refreshApiKey?: SideCallAuth["refreshApiKey"];
 				origin: ReturnType<SessionContract["current"]>;
 				inFlight: boolean;
 		  }
@@ -1854,14 +1856,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					...(signal ? { signal } : {}),
 				});
 			}
-			const apiKey = targetRequiresAuth(resolution.target, resolution.runtime)
-				? (
-						await deps.providers.auth.resolveForTarget(resolution.target, resolution.runtime, signal ? { signal } : undefined)
-					).apiKey
-				: LOCAL_SIDE_QUESTION_API_KEY;
+			const sideAuth = await resolveSideCallAuth(
+				deps.providers.auth,
+				resolution.target,
+				resolution.runtime,
+				LOCAL_SIDE_QUESTION_API_KEY,
+				signal,
+			);
 			if ((deps.session?.current()?.id ?? null) !== (origin?.id ?? null))
 				return { ok: false, reason: "session changed before the request" };
-			return { ok: true, runtime: agentRuntime, apiKey, origin, inFlight };
+			return { ok: true, runtime: agentRuntime, apiKey: sideAuth.apiKey, ...sideAuth, origin, inFlight };
 		} catch (err) {
 			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 		}
@@ -2200,7 +2204,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		triageTimer.unref?.();
 	};
 
-	type TriageModel = {
+	type TriageModel = Omit<SideCallAuth, "apiKey"> & {
 		model: EngineModel;
 		target: AgentRuntime["runtimeResolution"]["target"];
 		targetId: string;
@@ -2217,9 +2221,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!runtime) return null;
 		if (!triage.target) {
 			const resolution = runtime.runtimeResolution;
-			const apiKey = targetRequiresAuth(resolution.target, resolution.runtime)
-				? (await deps.providers.auth.resolveForTarget(resolution.target, resolution.runtime, { signal })).apiKey
-				: LOCAL_SIDE_QUESTION_API_KEY;
+			const sideAuth = await resolveSideCallAuth(
+				deps.providers.auth,
+				resolution.target,
+				resolution.runtime,
+				LOCAL_SIDE_QUESTION_API_KEY,
+				signal,
+			);
 			return {
 				model: runtime.agent.state.model,
 				target: resolution.target,
@@ -2227,7 +2235,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtimeId: resolution.runtime.id,
 				wireModelId: runtime.wireModelId,
 				costProvenance: resolution.costProvenance,
-				apiKey,
+				apiKey: sideAuth.apiKey,
+				...sideAuth,
 			};
 		}
 		const resolved = resolveRuntimeTarget(deps.providers, {
@@ -2241,9 +2250,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!resolved.ok) return null;
 		const route = resolved.target;
 		const kbHit = deps.providers.knowledgeBase?.lookup(route.wireModelId, route.runtime.id) ?? null;
-		const apiKey = targetRequiresAuth(route.target, route.runtime)
-			? (await deps.providers.auth.resolveForTarget(route.target, route.runtime, { signal })).apiKey
-			: LOCAL_SIDE_QUESTION_API_KEY;
+		const sideAuth = await resolveSideCallAuth(
+			deps.providers.auth,
+			route.target,
+			route.runtime,
+			LOCAL_SIDE_QUESTION_API_KEY,
+			signal,
+		);
 		return {
 			model: route.runtime.synthesizeModel(route.target, route.wireModelId, kbHit),
 			target: route.target,
@@ -2251,7 +2264,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtimeId: route.runtimeId,
 			wireModelId: route.wireModelId,
 			costProvenance: route.costProvenance,
-			apiKey,
+			apiKey: sideAuth.apiKey,
+			...sideAuth,
 		};
 	};
 
@@ -2298,6 +2312,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					runtimeId: resolved.runtimeId,
 					signal: controller.signal,
 					...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
+					...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
 				});
 			} finally {
 				release();
@@ -3677,6 +3692,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// The level the session's own next turn would use.
 						thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+						...(prepared.refreshApiKey ? { refreshApiKey: prepared.refreshApiKey } : {}),
 						...(options.signal ? { signal: options.signal } : {}),
 						...(options.onDelta ? { onDelta: options.onDelta } : {}),
 					}),
@@ -3723,6 +3739,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 										thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 										...(sampling.temperature === undefined ? {} : { temperature: sampling.temperature }),
 										...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+										...(prepared.refreshApiKey ? { refreshApiKey: prepared.refreshApiKey } : {}),
 										...(options.signal ? { signal: options.signal } : {}),
 										...(options.onCandidate ? { onDelta: (partial: string) => options.onCandidate?.(index, partial) } : {}),
 									}),
@@ -3766,6 +3783,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// on the wire rather than only stated in the prompt.
 						runtimeId: prepared.runtime.runtimeResolution.runtime.id,
 						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+						...(prepared.refreshApiKey ? { refreshApiKey: prepared.refreshApiKey } : {}),
 						...(options.signal ? { signal: options.signal } : {}),
 						...(options.repair ? { repair: options.repair } : {}),
 					}),

@@ -1,3 +1,4 @@
+import type { SideCallAuth } from "../core/oauth-retry.js";
 import type { SideQuestionInput } from "./side-question.js";
 /**
  * The `/handoff` extraction round: one model call beside the session, no tools.
@@ -51,7 +52,7 @@ export interface HandoffRepairInput {
 	previous: string;
 }
 
-export interface HandoffRoundInput {
+export interface HandoffRoundInput extends SideCallAuth {
 	onUsage?: NonNullable<SideQuestionInput["onUsage"]>;
 	model: EngineModel;
 	/** Read-only. The round copies before appending its own message. */

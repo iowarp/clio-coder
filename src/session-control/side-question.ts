@@ -1,5 +1,7 @@
 import type { CallObservation } from "../core/call-failure.js";
 import { trackCallFetch } from "../core/call-failure.js";
+import type { SideCallAuth } from "../core/oauth-retry.js";
+import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.js";
 /**
  * `/btw`: one model round beside the session, never inside it.
  *
@@ -53,7 +55,7 @@ export interface SideQuestionUsage {
 	costUsd: number;
 }
 
-export interface SideQuestionInput {
+export interface SideQuestionInput extends SideCallAuth {
 	/** Live model the next turn would use, taken from the session's active runtime. */
 	model: EngineModel;
 	/**
@@ -241,6 +243,10 @@ function schemaBindingFor(input: OutOfTurnRoundInput): SchemaBinding | null {
 
 /** The shared round. See {@link OutOfTurnRoundInput}. */
 export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
+	return withOAuthRefresh(input, (auth) => runOutOfTurnAttempt({ ...input, ...auth }));
+}
+
+async function runOutOfTurnAttempt(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
 	const binding = schemaBindingFor(input);
 	if (binding === null) return runRound(input, null);
 	try {
@@ -337,6 +343,7 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 		throw new Error("side question stream ended without a terminal response");
 	} catch (error) {
 		terminalError = error;
+		rememberOAuthCallFailure(error, tracking.failure(error, input.signal?.aborted));
 		throw error;
 	} finally {
 		if (!observed)
