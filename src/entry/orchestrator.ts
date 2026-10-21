@@ -2158,22 +2158,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const providers = result.getContract<ProvidersContract>("providers");
 	timer.mark("providers resolved");
 
-	if (options.apiKey) {
-		if (!providers) {
-			bootStderr("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
-		} else {
-			const settingsNow = applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
-			const activeTargetId = settingsNow.chat?.target;
-			const target = resolveTarget(providers, activeTargetId);
-			const runtime = target ? providers.getRuntime(target.runtime) : null;
-			if (target && runtime) {
-				providers.auth.setRuntimeOverrideForTarget(target, runtime, options.apiKey);
-			} else {
-				bootStderr("Clio Coder: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
-			}
-		}
-	}
-
 	if (!interactive && !options.headless && !acpMode) {
 		bootStdout(`${chalk.dim("  (non-interactive boot. pass CLIO_CODER_INTERACTIVE=1 to launch the TUI.)")}\n`);
 		await termination.shutdown(0);
@@ -3276,8 +3260,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				initialRoutingSettings.chat.thinkingLevel = selected.ref.thinkingLevel;
 			}
 			if (selected.warning) bootStderr(`Clio Coder: ${selected.warning}\n`);
-		} else if (selected.error?.includes("not chat-eligible")) {
-			bootStderr(`Clio Coder: ${selected.error}\n`);
+		} else if (options.apiKey || selected.error?.includes("not chat-eligible")) {
+			bootStderr(`Clio Coder: ${selected.error ?? "--api-key supplied but the model target could not be resolved"}\n`);
 			await termination.shutdown(2);
 			return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
 		}
@@ -4096,6 +4080,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			thinking: options.headless?.thinking !== undefined,
 		});
 		if (notice !== null) bootStderr(`Clio Coder: ${notice}\n`);
+	}
+	if (options.apiKey) {
+		const target = resolveTarget(providers, getCurrentSettings().chat.target);
+		const runtime = target ? providers.getRuntime(target.runtime) : null;
+		if (!target || !runtime) {
+			bootStderr("Clio Coder: --api-key supplied but no active orchestrator target could be resolved; refusing.\n");
+			await termination.shutdown(2);
+			return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
+		}
+		providers.auth.setRuntimeOverrideForTarget(target, runtime, options.apiKey);
 	}
 	// Every later resume (/resume, ACP session/load) goes through the session
 	// domain, which announces it synchronously before the caller replays the
