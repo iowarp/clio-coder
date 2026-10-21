@@ -122,7 +122,14 @@ import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { countImageBlocks } from "../engine/image-context.js";
 import { cwdHash } from "../engine/session.js";
-import type { AgentEvent, AgentMessage, EngineModel, ImageContent, Usage } from "../engine/types.js";
+import type {
+	AgentEvent,
+	AgentMessage,
+	AnthropicMessagesCompat,
+	EngineModel,
+	ImageContent,
+	Usage,
+} from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
@@ -1616,7 +1623,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		middlewareToolChoice,
 		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
 		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
-		promptCachePayloadForAssistant: (usage, backend) => context.promptCachePayloadForAssistant(usage, backend),
+		promptCachePayloadForAssistant: (usage, backend, anthropicResponse) =>
+			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse),
 		promptSideTokens: () => context.promptSideTokens(),
 		observability: deps.observability,
 	});
@@ -2990,14 +2998,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						}
 					}
 				}
+				// #423: Pi's native effort and tool updates preserve the cached prefix on capable models.
+				const cacheModel = agentRuntime.agent.state.model;
+				const cacheCompat =
+					cacheModel.api === "anthropic-messages" ? (cacheModel.compat as AnthropicMessagesCompat | undefined) : undefined;
 				if (
 					previousThinkingLevel !== undefined &&
 					previousThinkingLevel !== agentRuntime.runtimeResolution.effectiveThinkingLevel &&
-					!context.thinkingUsesConfigurationUpdate()
+					!context.thinkingUsesConfigurationUpdate() &&
+					cacheCompat?.supportsMidConvoEffort !== true
 				) {
 					context.noteColdReason("thinking_change");
 				}
-				if (typeof previousRunSnapshot?.toolSignature === "string" && previousRunSnapshot.toolSignature !== toolSignature) {
+				if (
+					typeof previousRunSnapshot?.toolSignature === "string" &&
+					previousRunSnapshot.toolSignature !== toolSignature &&
+					!(cacheCompat?.supportsMidConvoToolChanges === true && cacheCompat.supportsMidConvoSystemMessages === true)
+				) {
 					context.noteColdReason("tool_surface_change");
 				}
 				turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };

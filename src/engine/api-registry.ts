@@ -25,6 +25,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
+import { withAnthropicDiagnostics } from "./apis/anthropic-diagnostics.js";
 import { observeAnthropicResponse } from "./apis/anthropic-response.js";
 import { withCodexConfiguration } from "./apis/codex-configuration.js";
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
@@ -141,7 +142,11 @@ export function engineStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(
 				model,
-				withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
+				withAnthropicDiagnostics(
+					model,
+					context,
+					withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
+				),
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
 						observeResponsesModelId(model, anthropic, (observed) => dispatchEngineStream(model, context, observed)),
@@ -183,7 +188,11 @@ function scopedEngineStreamSimple(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(
 				model,
-				withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
+				withAnthropicDiagnostics(
+					model,
+					context,
+					withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
+				),
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
 						observeResponsesModelId(model, anthropic, (observed) => dispatchEngineStreamSimple(model, context, observed)),

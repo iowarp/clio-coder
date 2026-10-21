@@ -123,13 +123,14 @@ import {
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import type { AgentMessage, CodexConfiguration, Usage } from "../engine/types.js";
+import type { AgentMessage, AnthropicResponseObservation, CodexConfiguration, Usage } from "../engine/types.js";
 import { capabilityArgumentShape, capabilityStarterArgs } from "../tools/gateway/guidance.js";
 import { TOOL_PLANES } from "../tools/policy.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
 	backendCacheVerdict,
 	extractUserText,
+	recordValue,
 	runtimeSupportsTools,
 	sumRunUsage,
 	toolNamesFromAgentState,
@@ -365,7 +366,11 @@ export interface TurnContext {
 	/** Consume disturbances since the last settled run (T3.3 honesty). */
 	consumeExpectedColdReasons(runtimeId: string): void;
 	/** Prompt-cache record for one persisted assistant call, with cold-reason stamp. */
-	promptCachePayloadForAssistant(usage: Usage, backend?: BackendCompletionTimings): Record<string, unknown>;
+	promptCachePayloadForAssistant(
+		usage: Usage,
+		backend?: BackendCompletionTimings,
+		anthropicResponse?: AnthropicResponseObservation,
+	): Record<string, unknown>;
 	/** Record the settled run's cache summary for /context. */
 	noteRunCacheSummary(messages: ReadonlyArray<AgentMessage>, runFirstCallVerdict: BackendCacheVerdict | null): void;
 	/**
@@ -2786,7 +2791,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			cacheRequestToolChoice = toolChoice;
 		},
 
-		promptCachePayloadForAssistant(usage: Usage, backend?: BackendCompletionTimings): Record<string, unknown> {
+		promptCachePayloadForAssistant(
+			usage: Usage,
+			backend?: BackendCompletionTimings,
+			anthropicResponse?: AnthropicResponseObservation,
+		): Record<string, unknown> {
 			// Per-call prompt-cache record (T3.2) keeps normalized provider usage
 			// beside any timings captured from the server response. The run's first
 			// persisted call also carries any expected-cold reasons.
@@ -2856,6 +2865,36 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						}
 					: undefined,
 			);
+			// #423: named provider misses outrank host attribution; pending diagnostics preserve no-break.
+			const messageStart = anthropicResponse?.messageStart;
+			const miss = recordValue(
+				recordValue(messageStart?.diagnostics)?.cache_miss_reason ?? messageStart?.cache_miss_reason,
+			);
+			if (typeof miss?.type === "string") {
+				observation.providerDiagnostic = {
+					provider: "anthropic",
+					type: miss.type,
+					...(typeof miss.cache_missed_input_tokens === "number"
+						? { missedInputTokens: miss.cache_missed_input_tokens }
+						: {}),
+				};
+				const causes = {
+					model_changed: "model_changed",
+					system_changed: "prompt_recompiled",
+					tools_changed: "tools_changed",
+					messages_changed: "input_changed",
+				} as const;
+				if (Object.hasOwn(causes, miss.type)) {
+					observation.cause = causes[miss.type as keyof typeof causes];
+					observation.causeBasis = "provider";
+				}
+			} else if (Array.isArray(messageStart?.input_transformations) && messageStart.input_transformations.length > 0) {
+				const types = messageStart.input_transformations.flatMap((value) => {
+					const transformation = recordValue(value);
+					return typeof transformation?.type === "string" ? [transformation.type] : [];
+				});
+				observation.providerDiagnostic = { provider: "anthropic", type: `input_transformations:${types.join(",")}` };
+			}
 			if (observation.cause === "prompt_recompiled" && nextChangedSection !== undefined) {
 				observation.changedSection = nextChangedSection;
 			}

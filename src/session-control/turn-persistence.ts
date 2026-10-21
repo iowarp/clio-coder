@@ -68,7 +68,11 @@ export interface TurnPersistenceDeps {
 	/** Returns the machine origin of the queued entry this text was, when it had one. */
 	removeQueuedMirrorEntry: (text: string) => string | undefined;
 	/** Prompt-cache record for a persisted assistant call (T3.2 + cold stamp). */
-	promptCachePayloadForAssistant: (usage: Usage, backend?: BackendCompletionTimings) => Record<string, unknown>;
+	promptCachePayloadForAssistant: (
+		usage: Usage,
+		backend?: BackendCompletionTimings,
+		anthropicResponse?: AnthropicResponseObservation,
+	) => Record<string, unknown>;
 	/**
 	 * Prompt-side tokens the live context accounting holds for the turn in
 	 * flight. Used only to record what an interrupted call is known to have
@@ -395,7 +399,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
 			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings);
+			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse);
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = appendTurn(deps.session, {
