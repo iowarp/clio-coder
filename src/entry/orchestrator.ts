@@ -5438,6 +5438,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							(selected) => applyRoutingAtScope({ orchestrator: selected }, "session"),
 							current.chat.modelPicker.recentLimit,
 						);
+						// ACP acknowledges choices before a turn; resume must see them even without inference (Y4 finding 4).
+						const meta = session?.current();
+						if (session && meta) {
+							const recorded = resumedSessionRoute(meta, session.readEntries());
+							if (recorded.target !== target || recorded.model !== model) {
+								session.appendEntry({
+									kind: "modelChange",
+									parentTurnId: session.tree(meta.id).leafId,
+									provider: providers.getTarget(target)?.runtime ?? target,
+									target,
+									modelId: model,
+								});
+								session.flushAppends?.();
+							}
+						}
 					} else {
 						applyRoutingAtScope(
 							{

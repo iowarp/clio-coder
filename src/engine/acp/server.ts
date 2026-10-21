@@ -96,6 +96,7 @@ import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { BashExecutionEntry, MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { OPERATOR_SHELL_TIMEOUT_MS, runOperatorShellLine } from "../../domains/session/operator-shell.js";
+import { resumedSessionRoute } from "../../domains/session/resumed-route.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
@@ -998,6 +999,76 @@ function withResources(text: string, resources: { rendered: string }): string {
 /** At most this many image blocks ride one prompt; the stdio line bounds their bytes. */
 export const ACP_MAX_PROMPT_IMAGES = 4;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/u;
+
+/** Refuse the whole prompt before extraction can silently drop client content (Y4 finding 5). */
+function validatePromptBlocks(params: unknown): void {
+	if (!isRecord(params) || !Array.isArray(params.prompt))
+		throw new AcpRequestError(-32602, "prompt text is required as an array of content blocks", {
+			code: "invalid_params",
+		});
+	let images = 0;
+	let resources = 0;
+	for (const [index, block] of params.prompt.entries()) {
+		const invalid = (message: string): never => {
+			throw new AcpRequestError(-32602, `prompt block ${index}: ${message}`, { code: "invalid_params" });
+		};
+		if (!isRecord(block)) {
+			invalid("a content block must be an object");
+			continue;
+		}
+		const stringKeys =
+			block.type === "resource_link" ? ["uri", "mimeType", "title", "description"] : block.type === "image" ? ["uri"] : [];
+		for (const key of stringKeys) {
+			if (block[key] != null && typeof block[key] !== "string") invalid(`${key} must be a string`);
+		}
+		if (block._meta !== undefined && !isRecord(block._meta)) invalid("_meta must be an object");
+		if (block.annotations != null) {
+			const annotations = block.annotations;
+			if (!isRecord(annotations)) invalid("annotations must be an object");
+			if (isRecord(annotations)) {
+				if (
+					annotations.audience != null &&
+					(!Array.isArray(annotations.audience) ||
+						annotations.audience.some((role) => role !== "user" && role !== "assistant"))
+				)
+					invalid("annotations.audience must contain user or assistant roles");
+				if (annotations.priority != null && typeof annotations.priority !== "number")
+					invalid("annotations.priority must be a number");
+				if (annotations.lastModified != null && typeof annotations.lastModified !== "string")
+					invalid("annotations.lastModified must be a string");
+			}
+		}
+		try {
+			switch (block.type) {
+				case "text":
+					if (typeof block.text !== "string") invalid("a text block needs string text");
+					break;
+				case "resource_link":
+					if (typeof block.name !== "string" || typeof block.uri !== "string")
+						invalid("a resource link needs a name and uri");
+					if (block.size != null && (typeof block.size !== "number" || !Number.isSafeInteger(block.size) || block.size < 0))
+						invalid("resource size must be a non-negative integer");
+					break;
+				case "image":
+					promptImages({ prompt: [block] });
+					if (++images > ACP_MAX_PROMPT_IMAGES) invalid(`a prompt carries at most ${ACP_MAX_PROMPT_IMAGES} images`);
+					break;
+				case "resource":
+					promptResources({ prompt: [block] });
+					if (isRecord(block.resource) && block.resource.mimeType != null && typeof block.resource.mimeType !== "string")
+						invalid("resource mimeType must be a string");
+					if (++resources > ACP_MAX_PROMPT_RESOURCES)
+						invalid(`a prompt carries at most ${ACP_MAX_PROMPT_RESOURCES} embedded resources`);
+					break;
+				default:
+					invalid("unsupported content type; expected text, image, resource or resource_link");
+			}
+		} catch (error) {
+			if (error instanceof AcpRequestError && !error.message.startsWith(`prompt block ${index}:`)) invalid(error.message);
+			throw error;
+		}
+	}
+}
 
 /**
  * The image blocks of one `session/prompt`, checked for shape only. The host's
@@ -4801,8 +4872,6 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (stored.endedAt === null) {
 				throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 			}
-			const storedTarget = safeConfiguredIdentifier(stored.target, ACP_MAX_TARGET_ID_BYTES);
-			const storedModel = safeConfiguredIdentifier(stored.model, ACP_MAX_MODEL_ID_BYTES);
 			if (
 				options.session === undefined ||
 				options.readSessionEntries === undefined ||
@@ -4822,6 +4891,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			} catch {
 				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 			}
+			const recordedRoute = resumedSessionRoute(stored, entries);
 			await attachClientMcpServers(clientMcpServers);
 			try {
 				const restored = restoreControlledSession(
@@ -4852,8 +4922,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				cwd: canonicalCwd,
 				autonomy,
 				autonomySource: "settings",
-				target: storedTarget,
-				model: storedModel,
+				target: safeConfiguredIdentifier(recordedRoute.target, ACP_MAX_TARGET_ID_BYTES),
+				model: safeConfiguredIdentifier(recordedRoute.model, ACP_MAX_MODEL_ID_BYTES),
 				thinkingLevel: options.settings?.read().thinkingLevel ?? "off",
 				createdAt: stored.createdAt,
 				activePrompt: null,
@@ -6765,6 +6835,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				code: "shell_active",
 			});
 		}
+		validatePromptBlocks(params);
 		const text = promptText(params);
 		const resources = promptResources(params);
 		if (text.length === 0 && resources.names.length === 0)
