@@ -13,10 +13,10 @@
 
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { ClioSettings } from "../core/config.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { formatSettingsLayerIssue } from "../core/settings-layer-diagnostics.js";
-import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../core/settings-layers.js";
+import type { SettingsOrigin } from "../core/settings-layers.js";
+import { readLayeredSettings, settingsSourceFor, settingsValueFor } from "../core/settings-layers.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 // C-3: domain barrels also load execution and indexing code. Keep inspection
 // on the readers so source clients do not wait for that unrelated module graph.
@@ -80,15 +80,6 @@ export interface CustomizationGraph {
 	issues: string[];
 }
 
-function getByPath(root: ClioSettings, dotted: string): unknown {
-	let current: unknown = root;
-	for (const key of dotted.split(".")) {
-		if (current === null || typeof current !== "object") return undefined;
-		current = (current as Record<string, unknown>)[key];
-	}
-	return current;
-}
-
 function shortHash(text: string): string {
 	let hash = 0;
 	for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0;
@@ -100,12 +91,12 @@ function inspectSettings(cwd: string, graph: CustomizationGraph): void {
 		const layered = readLayeredSettings(cwd);
 		for (const issue of layered.issues)
 			graph.issues.push(`settings ${issue.origin}: ${formatSettingsLayerIssue(layered, issue)}`);
-		// Report only the keys a layer explicitly set; built-in defaults are implicit.
+		// AUD-2 finding 4: include the defaults restored after a rejected setting.
 		const keys = Object.keys(layered.sources).sort();
 		for (const key of keys) {
 			graph.settings.push({
 				key,
-				value: getByPath(layered.settings, key),
+				value: settingsValueFor(layered.settings, key),
 				source: settingsSourceFor(layered.sources, key),
 			});
 		}

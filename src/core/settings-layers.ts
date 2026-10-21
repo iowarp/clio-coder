@@ -67,7 +67,7 @@ export interface SettingsLayerInfo {
 
 export interface LayeredSettings {
 	settings: ClioSettings;
-	/** Dotted leaf path to the origin that set it. Keys not present here are built-in defaults. */
+	/** Setting path with JSON brackets for literal map keys. Missing keys are built-in defaults. */
 	sources: Record<string, SettingsOrigin>;
 	issues: SettingsLayerIssue[];
 	layers: SettingsLayerInfo[];
@@ -95,6 +95,47 @@ function deepEquals(a: unknown, b: unknown): boolean {
 	const keys = Object.keys(a);
 	if (keys.length !== Object.keys(b).length) return false;
 	return keys.every((key) => key in b && deepEquals(a[key], b[key]));
+}
+
+function settingPath(segments: readonly string[]): string {
+	return segments.reduce(
+		(path, key) => (/^[\w-]+$/u.test(key) ? `${path ? `${path}.` : ""}${key}` : `${path}[${JSON.stringify(key)}]`),
+		"",
+	);
+}
+
+function settingPathSegments(path: string): string[] {
+	return Array.from(
+		path.matchAll(/([^.[\]]+)|\[("(?:[^"\\]|\\.)*"|\d+)\]/gu),
+		(match) => match[1] ?? (JSON.parse(match[2] ?? '""') as string | number).toString(),
+	);
+}
+
+export function settingsValueFor(root: unknown, path: string): unknown {
+	let current = root;
+	for (const key of settingPathSegments(path)) {
+		if (current === null || typeof current !== "object") return undefined;
+		current = (current as Record<string, unknown>)[key];
+	}
+	return current;
+}
+
+function pruneSources(sources: Record<string, SettingsOrigin>, path: string): void {
+	for (const key of Object.keys(sources)) {
+		if (key === path || key.startsWith(`${path}.`) || key.startsWith(`${path}[`)) delete sources[key];
+	}
+}
+
+function recordSources(
+	value: unknown,
+	path: readonly string[],
+	origin: SettingsOrigin,
+	sources: Record<string, SettingsOrigin>,
+): void {
+	sources[settingPath(path)] = origin;
+	if (isRecord(value)) {
+		for (const [key, child] of Object.entries(value)) recordSources(child, [...path, key], origin, sources);
+	}
 }
 
 interface RawLayer {
@@ -335,7 +376,7 @@ function mergeLayersWithSources(layers: ReadonlyArray<RawLayer>): {
 	const sources: Record<string, SettingsOrigin> = {};
 	for (const layer of layers) {
 		if (layer.blob === undefined) continue;
-		mergeInto(merged, layer.blob, layer.origin, "", sources);
+		mergeInto(merged, layer.blob, layer.origin, [], sources);
 	}
 	return { merged, sources };
 }
@@ -344,18 +385,20 @@ function mergeInto(
 	target: Record<string, unknown>,
 	source: Record<string, unknown>,
 	origin: SettingsOrigin,
-	prefix: string,
+	prefix: readonly string[],
 	sources: Record<string, SettingsOrigin>,
 ): void {
 	for (const [key, value] of Object.entries(source)) {
-		const path = prefix ? `${prefix}.${key}` : key;
+		const segments = [...prefix, key];
+		const path = settingPath(segments);
 		if (isRecord(value)) {
 			const existing = target[key];
 			const nested = isRecord(existing) ? existing : {};
-			mergeInto(nested, value, origin, path, sources);
+			mergeInto(nested, value, origin, segments, sources);
 			target[key] = nested;
 			sources[path] = origin;
 		} else {
+			if (isRecord(target[key])) pruneSources(sources, path);
 			target[key] = Array.isArray(value) ? [...value] : value;
 			sources[path] = origin;
 		}
@@ -431,6 +474,22 @@ function validateLayerStack(
 	const validation = validateSettings(merged);
 	for (const issue of validation.issues) {
 		issues.push({ origin: settingsSourceFor(sources, issue.path), path: issue.path, message: issue.message });
+	}
+	// AUD-2 finding 4: keep rejected input in diagnostics before attributing its fallback.
+	for (const path of Object.keys(sources)) {
+		const effective = settingsValueFor(validation.settings, path);
+		const raw = settingsValueFor(merged, path);
+		if (effective === undefined) {
+			delete sources[path];
+		} else if (
+			!deepEquals(raw, effective) &&
+			(!isRecord(effective) || !isRecord(raw)) &&
+			(!Array.isArray(effective) || !Array.isArray(raw)) &&
+			validation.issues.some((issue) => issue.path === settingPathSegments(path).join("."))
+		) {
+			pruneSources(sources, path);
+			recordSources(effective, settingPathSegments(path), "built-in", sources);
+		}
 	}
 	return { settings: validation.settings, sources };
 }
@@ -623,19 +682,14 @@ export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator)
  * individually tracked.
  */
 export function settingsSourceFor(sources: Record<string, SettingsOrigin>, keyPath: string): SettingsOrigin {
-	let prefix = keyPath;
-	while (prefix.length > 0) {
-		const direct = sources[prefix];
+	const path = sources[keyPath]
+		? keyPath
+		: (Object.keys(sources).find((path) => settingPathSegments(path).join(".") === keyPath) ?? keyPath);
+	const segments = settingPathSegments(path);
+	while (segments.length > 0) {
+		const direct = sources[settingPath(segments)];
 		if (direct) return direct;
-		const bracket = prefix.lastIndexOf("[");
-		if (bracket >= 0) {
-			const arrayKey = prefix.slice(0, bracket);
-			const hit = sources[arrayKey];
-			if (hit) return hit;
-		}
-		const dot = prefix.lastIndexOf(".");
-		if (dot < 0) break;
-		prefix = prefix.slice(0, dot);
+		segments.pop();
 	}
 	return "built-in";
 }
