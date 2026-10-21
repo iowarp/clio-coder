@@ -1066,6 +1066,8 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 			? { firstKeptEntryIndex: protectedStart, turnStartIndex: -1, isSplitTurn: false }
 			: rawCut;
 	const historyEnd = cut.isSplitTurn ? cut.turnStartIndex : cut.firstKeptEntryIndex;
+	const splitTurnStart = cut.isSplitTurn ? entries[cut.turnStartIndex] : undefined;
+	const activeRequest = splitTurnStart === undefined ? undefined : (operatorMessageText(splitTurnStart) ?? undefined);
 	const preRange = [boundaryStart, Math.max(boundaryStart, historyEnd)] as const;
 	const prefixRange = [Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex] as const;
 	// A slice of bookkeeping alone counts as empty, so no call is paid for it.
@@ -1141,7 +1143,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 		const build = (text: string) =>
 			split
 				? buildTurnPrefixUserText(text, input.instructions, previous)
-				: buildUserText(text, input.instructions, previous);
+				: buildUserText(text, input.instructions, previous, activeRequest);
 		const raw = build(ordinary);
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
 		const offer = input.offerMemory(rawSlice, ordinary, slice);

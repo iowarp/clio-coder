@@ -79,8 +79,16 @@ function buildOperatorInstructions(instructions?: string): string {
 	return `\n\n<operator-instructions>\n${focus}\n</operator-instructions>\nThe operator wrote these instructions for this checkpoint. They override the default scope above: keep every fact, value and decision they name in the checkpoint, even when the conversation does not show it.`;
 }
 
-export function buildUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
-	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
+export function buildUserText(
+	conversationText: string,
+	instructions?: string,
+	previousContextText = "",
+	activeRequest?: string,
+): string {
+	const activeRequestPrefix = activeRequest?.trim()
+		? `<active-request>\n${activeRequest}\n</active-request>\nThis is the operator's active request in the split turn. The ## Goal section must state this request, even when the earlier conversation has no goal or a different goal.\n\n`
+		: "";
+	return `${buildPreviousContextPrefix(previousContextText)}${activeRequestPrefix}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
 }
 
 export function buildTurnPrefixUserText(
