@@ -3770,6 +3770,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	/** The newest record seen per job, so a turn bracket reuses the controller's own figures. Bounded. */
 	const lastJobs = new Map<string, JobRecord>();
 	let sessionCreated = false;
+	let sessionSlotReserved = false;
+	const withSessionSlot = async <T>(bind: () => Promise<T>): Promise<T> => {
+		if (sessionCreated || sessionSlotReserved) {
+			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
+		}
+		sessionSlotReserved = true;
+		try {
+			return await bind();
+		} finally {
+			sessionSlotReserved = false;
+		}
+	};
 	/** The one document awaiting review, keyed by the id its client holds. */
 	let pendingHandoff: { handoffId: string; sessionId: string; draft: AcpHandoffDraft } | null = null;
 	let handoffPreparing = false;
@@ -4598,67 +4610,64 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	options.transport.onRequest("session/new", async (params) => {
 		requireInitialized();
 		requireAuthenticated();
-		// The chat instance can bind only one session at a time. Closing that
-		// session releases the slot; the next creation resets its conversation.
-		if (sessionCreated) {
-			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
-		}
-		const request = assertParamKeys(params, new Set(["cwd", "mcpServers", "additionalDirectories"]));
-		const ceiling = requestCeiling(request);
-		assertCeilingEnforceable(ceiling);
-		assertNoAdditionalDirectories(request.additionalDirectories);
-		const sessionCwd = canonicalSessionCwd(request.cwd);
-		const clientMcpServers = parseClientMcpServers(request.mcpServers, false);
-		const route = routingSnapshot();
-		const createInput: { cwd: string; target?: string; model?: string } = { cwd: sessionCwd };
-		if (route.target !== null) createInput.target = route.target;
-		if (route.model !== null) createInput.model = route.model;
-		await attachClientMcpServers(clientMcpServers);
-		let meta: SessionMeta | undefined;
-		try {
-			meta = options.session?.create(createInput);
-		} catch (error) {
-			await options.mcpCapabilities?.detachClientServers();
-			throw error;
-		}
-		const id = meta?.id ?? randomUUID();
-		options.usage?.resetSession?.(id);
-		if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
-			await options.mcpCapabilities?.detachClientServers();
-			throw new AcpRequestError(-32603, "session creation failed", { code: "internal_error" });
-		}
-		options.chat.resetForSession?.(null);
-		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-		const boundTarget = safeConfiguredIdentifier(meta?.target ?? route.target, ACP_MAX_TARGET_ID_BYTES);
-		const boundModel = safeConfiguredIdentifier(meta?.model ?? route.model, ACP_MAX_MODEL_ID_BYTES);
-		const session: AcpServerSession = {
-			id,
-			cwd: sessionCwd,
-			autonomy,
-			autonomySource: "settings",
-			target: boundTarget,
-			model: boundModel,
-			thinkingLevel: options.settings?.read().thinkingLevel ?? "off",
-			createdAt: meta?.createdAt ?? new Date().toISOString(),
-			activePrompt: null,
-			...(ceiling !== undefined ? { ceiling } : {}),
-		};
-		sessionCreated = true;
-		sessions.set(id, session);
-		boundSessionId = id;
-		const ceilingEcho = applySessionCeiling(session);
-		announceCommands(id);
-		telemetry.bind(false);
-		return {
-			sessionId: id,
-			...sessionConfig(session),
-			_meta: {
-				...ceilingEcho,
-				[ACP_SESSION_META_KEY]: sessionResultMeta(session, false),
-				...(await workspaceResultMeta()),
-				...trustResultMeta(session.cwd),
-			},
-		};
+		return withSessionSlot(async () => {
+			const request = assertParamKeys(params, new Set(["cwd", "mcpServers", "additionalDirectories"]));
+			const ceiling = requestCeiling(request);
+			assertCeilingEnforceable(ceiling);
+			assertNoAdditionalDirectories(request.additionalDirectories);
+			const sessionCwd = canonicalSessionCwd(request.cwd);
+			const clientMcpServers = parseClientMcpServers(request.mcpServers, false);
+			const route = routingSnapshot();
+			const createInput: { cwd: string; target?: string; model?: string } = { cwd: sessionCwd };
+			if (route.target !== null) createInput.target = route.target;
+			if (route.model !== null) createInput.model = route.model;
+			await attachClientMcpServers(clientMcpServers);
+			let meta: SessionMeta | undefined;
+			try {
+				meta = options.session?.create(createInput);
+			} catch (error) {
+				await options.mcpCapabilities?.detachClientServers();
+				throw error;
+			}
+			const id = meta?.id ?? randomUUID();
+			options.usage?.resetSession?.(id);
+			if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
+				await options.mcpCapabilities?.detachClientServers();
+				throw new AcpRequestError(-32603, "session creation failed", { code: "internal_error" });
+			}
+			options.chat.resetForSession?.(null);
+			const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+			const boundTarget = safeConfiguredIdentifier(meta?.target ?? route.target, ACP_MAX_TARGET_ID_BYTES);
+			const boundModel = safeConfiguredIdentifier(meta?.model ?? route.model, ACP_MAX_MODEL_ID_BYTES);
+			const session: AcpServerSession = {
+				id,
+				cwd: sessionCwd,
+				autonomy,
+				autonomySource: "settings",
+				target: boundTarget,
+				model: boundModel,
+				thinkingLevel: options.settings?.read().thinkingLevel ?? "off",
+				createdAt: meta?.createdAt ?? new Date().toISOString(),
+				activePrompt: null,
+				...(ceiling !== undefined ? { ceiling } : {}),
+			};
+			sessionCreated = true;
+			sessions.set(id, session);
+			boundSessionId = id;
+			const ceilingEcho = applySessionCeiling(session);
+			announceCommands(id);
+			telemetry.bind(false);
+			return {
+				sessionId: id,
+				...sessionConfig(session),
+				_meta: {
+					...ceilingEcho,
+					[ACP_SESSION_META_KEY]: sessionResultMeta(session, false),
+					...(await workspaceResultMeta()),
+					...trustResultMeta(session.cwd),
+				},
+			};
+		});
 	});
 
 	interface PreparedRestore {
@@ -4735,95 +4744,94 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	const restoreSession = async (params: unknown, replayToClient: boolean) => {
 		requireInitialized();
 		requireAuthenticated();
-		if (sessionCreated) {
-			throw new AcpRequestError(-32602, "this server hosts one session per process", { code: "session_limit" });
-		}
-		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
-		// Composed exactly like session/new; without one the operator's limits apply.
-		const ceiling = requestCeiling(request);
-		assertCeilingEnforceable(ceiling);
-		assertNoAdditionalDirectories(request.additionalDirectories);
-		const id = sessionIdOf(request);
-		canonicalSessionCwd(request.cwd);
-		const clientMcpServers = parseClientMcpServers(request.mcpServers, replayToClient);
-		const stored = workspaceMeta(id);
-		if (stored.endedAt === null) {
-			throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
-		}
-		const storedTarget = safeConfiguredIdentifier(stored.target, ACP_MAX_TARGET_ID_BYTES);
-		const storedModel = safeConfiguredIdentifier(stored.model, ACP_MAX_MODEL_ID_BYTES);
-		if (
-			options.session === undefined ||
-			options.readSessionEntries === undefined ||
-			options.buildReplayMessages === undefined ||
-			options.chat.resetForSession === undefined
-		) {
-			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
-		}
-
-		// Read and validate the client replay before MCP or session ownership changes.
-		let entries: ReadonlyArray<SessionEntry>;
-		let replay: PreparedAcpReplay | undefined;
-		try {
-			entries = options.readSessionEntries(id);
-			const leaf = options.session.tree(id).leafId;
-			replay = replayToClient ? prepareAcpReplay(entries, leaf, id) : undefined;
-		} catch {
-			throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
-		}
-		await attachClientMcpServers(clientMcpServers);
-		try {
-			const restored = restoreControlledSession(
-				{
-					session: options.session,
-					chat: { resetForSession: options.chat.resetForSession },
-					readEntries: options.readSessionEntries,
-					buildMessages: options.buildReplayMessages,
-				},
-				id,
-			);
-			replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id) : undefined;
-		} catch {
-			await options.mcpCapabilities?.detachClientServers();
-			if (options.session.current()?.id === id) {
-				try {
-					await options.session.close();
-				} catch {
-					// Best effort: no replay has been emitted and the slot remains unused.
-				}
+		return withSessionSlot(async () => {
+			const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
+			// Composed exactly like session/new; without one the operator's limits apply.
+			const ceiling = requestCeiling(request);
+			assertCeilingEnforceable(ceiling);
+			assertNoAdditionalDirectories(request.additionalDirectories);
+			const id = sessionIdOf(request);
+			canonicalSessionCwd(request.cwd);
+			const clientMcpServers = parseClientMcpServers(request.mcpServers, replayToClient);
+			const stored = workspaceMeta(id);
+			if (stored.endedAt === null) {
+				throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 			}
-			throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
-		}
+			const storedTarget = safeConfiguredIdentifier(stored.target, ACP_MAX_TARGET_ID_BYTES);
+			const storedModel = safeConfiguredIdentifier(stored.model, ACP_MAX_MODEL_ID_BYTES);
+			if (
+				options.session === undefined ||
+				options.readSessionEntries === undefined ||
+				options.buildReplayMessages === undefined ||
+				options.chat.resetForSession === undefined
+			) {
+				throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+			}
 
-		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-		const session: AcpServerSession = {
-			id,
-			cwd: canonicalCwd,
-			autonomy,
-			autonomySource: "settings",
-			target: storedTarget,
-			model: storedModel,
-			thinkingLevel: options.settings?.read().thinkingLevel ?? "off",
-			createdAt: stored.createdAt,
-			activePrompt: null,
-			...(ceiling !== undefined ? { ceiling } : {}),
-		};
-		sessionCreated = true;
-		const ceilingEcho = applySessionCeiling(session);
-		bindRestored(session, replay);
-		return {
-			...sessionConfig(session),
-			_meta: {
-				...ceilingEcho,
-				[ACP_SESSION_META_KEY]: sessionResultMeta(
-					session,
-					true,
-					replay !== undefined ? { turns: replay.turns, truncated: replay.truncated } : undefined,
-				),
-				...(await workspaceResultMeta()),
-				...trustResultMeta(session.cwd),
-			},
-		};
+			// Read and validate the client replay before MCP or session ownership changes.
+			let entries: ReadonlyArray<SessionEntry>;
+			let replay: PreparedAcpReplay | undefined;
+			try {
+				entries = options.readSessionEntries(id);
+				const leaf = options.session.tree(id).leafId;
+				replay = replayToClient ? prepareAcpReplay(entries, leaf, id) : undefined;
+			} catch {
+				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
+			}
+			await attachClientMcpServers(clientMcpServers);
+			try {
+				const restored = restoreControlledSession(
+					{
+						session: options.session,
+						chat: { resetForSession: options.chat.resetForSession },
+						readEntries: options.readSessionEntries,
+						buildMessages: options.buildReplayMessages,
+					},
+					id,
+				);
+				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id) : undefined;
+			} catch {
+				await options.mcpCapabilities?.detachClientServers();
+				if (options.session.current()?.id === id) {
+					try {
+						await options.session.close();
+					} catch {
+						// Best effort: no replay has been emitted and the slot remains unused.
+					}
+				}
+				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
+			}
+
+			const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+			const session: AcpServerSession = {
+				id,
+				cwd: canonicalCwd,
+				autonomy,
+				autonomySource: "settings",
+				target: storedTarget,
+				model: storedModel,
+				thinkingLevel: options.settings?.read().thinkingLevel ?? "off",
+				createdAt: stored.createdAt,
+				activePrompt: null,
+				...(ceiling !== undefined ? { ceiling } : {}),
+			};
+			sessionCreated = true;
+			const ceilingEcho = applySessionCeiling(session);
+			bindRestored(session, replay);
+			return {
+				...sessionConfig(session),
+				_meta: {
+					...ceilingEcho,
+					[ACP_SESSION_META_KEY]: sessionResultMeta(
+						session,
+						true,
+						replay !== undefined ? { turns: replay.turns, truncated: replay.truncated } : undefined,
+					),
+					...(await workspaceResultMeta()),
+					...trustResultMeta(session.cwd),
+				},
+			};
+		});
 	};
 	options.transport.onRequest("session/load", (params) => restoreSession(params, true));
 	options.transport.onRequest("session/resume", (params) => restoreSession(params, false));
