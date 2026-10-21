@@ -103,6 +103,26 @@ interface RawLayer {
 	blob: Record<string, unknown> | undefined;
 }
 
+function rawLayerGraphIssue(value: unknown): { path: string; message: string } | undefined {
+	const ancestors = new Set<object>();
+	let remaining = 100_000;
+	const visit = (node: unknown, path: string, depth: number): ReturnType<typeof rawLayerGraphIssue> => {
+		if (--remaining < 0) return { path, message: "settings graph exceeds 100000 expanded values" };
+		if (node === null || typeof node !== "object") return undefined;
+		if (ancestors.has(node)) return { path, message: "cyclic YAML alias is not allowed in settings" };
+		if (depth > 100) return { path, message: "settings graph exceeds 100 nested collections" };
+		ancestors.add(node);
+		for (const [key, child] of Object.entries(node)) {
+			const childPath = Array.isArray(node) ? `${path}[${key}]` : path ? `${path}.${key}` : key;
+			const issue = visit(child, childPath, depth + 1);
+			if (issue) return issue;
+		}
+		ancestors.delete(node);
+		return undefined;
+	};
+	return visit(value, "", 0);
+}
+
 function readRawLayer(
 	origin: SettingsOrigin,
 	path: string,
@@ -124,12 +144,12 @@ function readRawLayer(
 	}
 	let parsed: unknown;
 	try {
-		parsed = parseYaml(text);
+		parsed = parseYaml(text, { maxAliasCount: 100 });
 	} catch (err) {
 		issues.push({
 			origin,
 			path: "(root)",
-			message: `invalid YAML: ${err instanceof Error ? err.message : String(err)}`,
+			message: `${path}: invalid YAML: ${err instanceof Error ? err.message : String(err)}`,
 			kind: "syntax",
 		});
 		return { origin, path, blob: undefined };
@@ -137,6 +157,11 @@ function readRawLayer(
 	if (parsed === null || parsed === undefined) return { origin, path, blob: {} };
 	if (!isRecord(parsed)) {
 		issues.push({ origin, path: "(root)", message: "settings file must be a mapping at the root" });
+		return { origin, path, blob: undefined };
+	}
+	const graphIssue = rawLayerGraphIssue(parsed);
+	if (graphIssue) {
+		issues.push({ origin, path: graphIssue.path || "(root)", message: `${path}: ${graphIssue.message}`, kind: "syntax" });
 		return { origin, path, blob: undefined };
 	}
 	return { origin, path, blob: parsed };
