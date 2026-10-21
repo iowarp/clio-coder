@@ -1271,6 +1271,13 @@ export interface AcpErrorDetail {
 	code: string;
 	reason?: string;
 	supported?: number[];
+	modelSelection?: {
+		code: "model_not_declared";
+		targetId: string | null;
+		requestedModel: string | null;
+		availableModels: string[];
+		remedy: string;
+	};
 }
 
 export interface AcpInstalledExtension {

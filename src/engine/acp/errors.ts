@@ -111,6 +111,9 @@ export function acpErrorData(detail: AcpErrorDetail): { _meta: Record<string, un
 				code: detail.code,
 				...(detail.reason !== undefined ? { reason: detail.reason } : {}),
 				...(detail.supported !== undefined ? { supported: [...detail.supported] } : {}),
+				...(detail.modelSelection !== undefined
+					? { modelSelection: { ...detail.modelSelection, availableModels: [...detail.modelSelection.availableModels] } }
+					: {}),
 			},
 		},
 	};

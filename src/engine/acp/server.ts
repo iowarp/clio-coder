@@ -91,6 +91,7 @@ import {
 	decisionActionClass,
 	decisionFactsForPermission,
 } from "../../domains/safety/decision-presentation.js";
+import { redactSecretString } from "../../domains/safety/redaction.js";
 import { jobIsComplete } from "../../domains/scheduling/index.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
@@ -2427,6 +2428,34 @@ function safeTargetModels(status: ReturnType<ProvidersContract["list"]>[number])
 		if (models.length === ACP_TARGET_MODEL_LIMIT) break;
 	}
 	return models;
+}
+
+function modelSelectionErrorText(value: string, maxBytes: number): string {
+	return boundString(redactSecretString(sanitizeCallTargetText(value)), maxBytes);
+}
+
+function modelNotDeclared(
+	target: string | null,
+	model: string | undefined,
+	models: readonly string[],
+): AcpRequestError {
+	return new AcpRequestError(
+		-32602,
+		"model is not declared for this target; choose an available model or update targets[].wireModels in settings.yaml and restart the ACP session",
+		{
+			code: "invalid_params",
+			modelSelection: {
+				code: "model_not_declared",
+				targetId: target === null ? null : modelSelectionErrorText(target, ACP_MAX_TARGET_ID_BYTES),
+				requestedModel: model === undefined ? null : modelSelectionErrorText(model, ACP_MAX_MODEL_ID_BYTES),
+				availableModels: models
+					.slice(0, ACP_TARGET_MODEL_LIMIT)
+					.map((choice) => modelSelectionErrorText(choice, ACP_MAX_MODEL_ID_BYTES)),
+				remedy:
+					"Add the requested model to targets[].wireModels for this target in settings.yaml, then restart the ACP session.",
+			},
+		},
+	);
 }
 
 type AcpSafeTargetProjection = AcpTarget;
@@ -5888,12 +5917,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			case "model": {
 				if (request.configId === "model" && options.providers === undefined) {
 					const modelOption = configOptions(session).find((option) => option.id === "model");
-					if (
-						!modelOption ||
-						!Array.isArray(modelOption.options) ||
-						!modelOption.options.some((option) => isRecord(option) && option.value === value)
-					)
-						throw new AcpRequestError(-32602, "model is not available", { code: "invalid_params" });
+					const models =
+						modelOption && Array.isArray(modelOption.options)
+							? modelOption.options.flatMap((option) =>
+									isRecord(option) && typeof option.value === "string" ? [option.value] : [],
+								)
+							: [];
+					if (!models.includes(value)) throw modelNotDeclared(session.target, value, models);
 					if (session.model !== value) {
 						if (!options.setSessionRouting)
 							throw new AcpRequestError(-32601, "model selection is unavailable", { code: "method_not_found" });
@@ -5912,7 +5942,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				const model =
 					request.configId === "model" ? value : session.model && models.includes(session.model) ? session.model : models[0];
 				if (!model || (!models.includes(model) && !(target === session.target && model === session.model)))
-					throw new AcpRequestError(-32602, "model is not available", { code: "invalid_params" });
+					throw modelNotDeclared(target, model, models);
 				try {
 					const selected = selectModel(
 						options.providers,
@@ -5922,8 +5952,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					session.target = selected.target;
 					session.model = selected.model;
 					session.thinkingLevel = selected.thinkingLevel;
-				} catch {
-					throw new AcpRequestError(-32602, "target cannot host this session model", { code: "invalid_params" });
+				} catch (error) {
+					throw new AcpRequestError(-32602, "target cannot host this session model", {
+						code: "invalid_params",
+						reason: modelSelectionErrorText(error instanceof Error ? error.message : String(error), 1024),
+					});
 				}
 				notifyConfigOptions(session);
 				break;
