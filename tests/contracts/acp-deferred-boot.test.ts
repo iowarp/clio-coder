@@ -207,7 +207,7 @@ test("ACP first unfiltered session list binds the launch directory", async () =>
 		},
 	});
 	try {
-		input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
+		input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } })}\n`);
 		input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/list", params: {} })}\n`);
 		for (let tries = 0; tries < 300 && !observed.includes('"id":2'); tries += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 10));
@@ -252,7 +252,7 @@ test("ACP preboot logout keeps the workspace unbound", async () => {
 	});
 	try {
 		for (const [id, method, params] of [
-			[1, "initialize", {}],
+			[1, "initialize", { protocolVersion: 1 }],
 			[2, "authenticate", { methodId: "unknown" }],
 			[3, "logout", {}],
 			[4, "session/new", { cwd: process.cwd(), mcpServers: [] }],
@@ -307,7 +307,7 @@ test("ACP failed deferred boot answers the first and subsequent workspace reques
 		const settled = done.catch(() => 1);
 		try {
 			for (const [id, method, params] of [
-				[1, "initialize", {}],
+				[1, "initialize", { protocolVersion: 1 }],
 				[2, "session/new", { cwd: process.cwd(), mcpServers: [] }],
 				[3, "session/new", { cwd: process.cwd(), mcpServers: [] }],
 			] as const) {

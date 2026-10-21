@@ -774,12 +774,16 @@ class StreamJsonRpcPeerTransport implements AcpBootablePeerTransport {
 			this.write(jsonRpcError(null, -32600, "invalid JSON-RPC message", acpErrorData({ code: "invalid_request" })));
 			return;
 		}
+		const id = "id" in parsed ? parsed.id : undefined;
+		if (id !== undefined && id !== null && typeof id !== "string" && (typeof id !== "number" || !Number.isFinite(id))) {
+			this.write(jsonRpcError(null, -32600, "invalid request id", acpErrorData({ code: "invalid_request_id" })));
+			return;
+		}
 		if (isSuccess(parsed) || isFailure(parsed)) {
 			this.handleResponse(parsed);
 			return;
 		}
 		const method = typeof parsed.method === "string" ? parsed.method : "";
-		const id = "id" in parsed ? (parsed.id as string | number | null) : undefined;
 		if (!method) {
 			if (id !== undefined) {
 				this.write(

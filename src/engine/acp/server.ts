@@ -3361,6 +3361,14 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 		workspaceInstanceId,
 		initialize(params) {
 			if (initialized) throw new AcpRequestError(-32600, "already initialized", { code: "already_initialized" });
+			if (
+				!isRecord(params) ||
+				typeof params.protocolVersion !== "number" ||
+				!Number.isSafeInteger(params.protocolVersion) ||
+				params.protocolVersion < 0
+			) {
+				throw new AcpRequestError(-32602, "protocolVersion must be a non-negative integer", { code: "invalid_params" });
+			}
 			const clientCapabilities =
 				isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
 			const clientMeta =
