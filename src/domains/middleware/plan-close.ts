@@ -3,12 +3,32 @@ import { ToolNames } from "../../core/tool-names.js";
 import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 
-/**
- * The operator asked for a plan in words. Only the operator's own request is
- * read, never the model's reply. A match that was not a plan request costs one
- * "Carry out this plan?" card on a turn that already changed nothing.
- */
+// Pasted documents are evidence, not operator intent (#431).
 const PLAN_REQUEST = /\bplan(?:s|ning)?\b/iu;
+const DISCUSSION_REQUEST =
+	/^\s*(?:(?:let['’]s|let us|please|(?:can|could|would) (?:we|you)|i want to)\s+)?discuss\b|^\s*(?:(?:this is|for|just|only|continue the)\s+)?discussion\b|^\s*.{0,100}\b(?:me|i(?:['’]m| am))\s+sharing\b/iu;
+const LONG_MESSAGE_CHARS = 4_000;
+// A full 128K request is too expensive to repeat solely for a closing card (#431).
+const PLAN_CLOSE_CONTEXT_THRESHOLD = 128_000;
+
+function operatorRequest(text: string, promptChars: unknown): string {
+	const long = typeof promptChars === "number" ? promptChars > LONG_MESSAGE_CHARS : text.length > LONG_MESSAGE_CHARS;
+	const prose =
+		text
+			.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[^\n]*(?:\n|$)|$)/gmu, "\n")
+			.replace(/<file\b[^>]*>[\s\S]*?(?:<\/file>|$)/giu, "\n")
+			.replace(/<(?:paste|pasted|attachment)\b[^>]*>[\s\S]*?(?:<\/(?:paste|pasted|attachment)>|$)/giu, "\n")
+			.replace(/^[ \t]*>[^\n]*/gmu, "")
+			.split(/\[paste #\d+(?: (?:\+\d+ lines|\d+ chars))?\]/iu)[0] ?? "";
+	// Pi expands its visible paste tokens before submit. Headless input has no
+	// provenance either, so a long unmarked tail belongs to the document (#431).
+	return long
+		? (prose
+				.trimStart()
+				.split(/\n[ \t]*\n/u)[0]
+				?.slice(0, LONG_MESSAGE_CHARS) ?? "")
+		: prose;
+}
 
 /**
  * Close a requested plan through ask_user once. Proposal mode arms it; so does
@@ -38,11 +58,10 @@ export function createPlanCloseRegistration(deps: {
 				asked = false;
 				closed = false;
 				if (input.metadata?.requestContinuation !== true && deps.canAsk()) {
-					planOnly = isPlanOnlyRequest(input.text ?? "");
-					armed =
-						planOnly ||
-						input.metadata?.turnMode === "proposal" ||
-						(deps.isPlan() ?? (typeof input.text === "string" && PLAN_REQUEST.test(input.text)));
+					const request = operatorRequest(input.text ?? "", input.metadata?.promptChars);
+					const wantsPlan = PLAN_REQUEST.test(request) && !DISCUSSION_REQUEST.test(request);
+					planOnly = wantsPlan && isPlanOnlyRequest(request);
+					armed = planOnly || input.metadata?.turnMode === "proposal" || (deps.isPlan() ?? wantsPlan);
 				}
 				return armed
 					? [
@@ -85,18 +104,15 @@ export function createPlanCloseRegistration(deps: {
 			armed = false;
 			if (changed || closed || (asked && !input.text?.trim()) || !deps.canAsk() || input.metadata?.stopReason !== "stop")
 				return [];
-			return [
-				{
-					kind: "request_continuation",
-					// The "Carry out this plan?" card is the notice.
-					note: "",
-					message:
-						(planOnly
-							? 'This request is plan-only. Offer "Keep the plan (Recommended)" first; implementation is optional and is not recommended. '
-							: "") +
-						'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first, and end with "Revise the plan first" so the operator can decline. Do not restate the plan.',
-				},
-			];
+			const message =
+				(planOnly
+					? 'This request is plan-only. Offer "Keep the plan (Recommended)" first; implementation is optional and is not recommended. '
+					: "") +
+				'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first, and end with "Revise the plan first" so the operator can decline. Do not restate the plan.';
+			const contextTokens = input.metadata?.contextTokens;
+			return typeof contextTokens === "number" && contextTokens >= PLAN_CLOSE_CONTEXT_THRESHOLD
+				? [{ kind: "inject_reminder", audience: "model", message }]
+				: [{ kind: "request_continuation", note: "", message }];
 		},
 	};
 }

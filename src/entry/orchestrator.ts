@@ -4133,7 +4133,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	const explorationNudge = createReadOnlyExplorationNudgeRegistration();
+	const explorationNudge = createReadOnlyExplorationNudgeRegistration({ workspaceRoot: memoryWorkspaceRoot });
 	middleware.registerHook(explorationNudge.registration);
 	middleware.registerHook(createUnbackedWorkerClaimRegistration());
 	middleware.registerHook(

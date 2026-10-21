@@ -1,8 +1,12 @@
+import { isAbsolute, relative, sep } from "node:path";
+import { canonicalizeRawPath } from "../../core/path-canonical.js";
 import { dispatchTargetsScout, isReadOnlyCall } from "../../core/read-only-calls.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { expandPath } from "../../tools/path-utils.js";
 import type { DispatchContract } from "../dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../dispatch/ownership.js";
 import { isTerminalRunEnvelope, type RunOutcome } from "../dispatch/types.js";
+import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
 
@@ -31,9 +35,14 @@ export const UNBACKED_WORKER_CLAIM_REGISTRATION_ID = "rail.unbacked-worker-claim
 
 const EXPLORATION_NUDGE_TURN_LIMIT = 32;
 const NO_TURN = "no-turn";
+// A short follow-up may reuse exploration; five idle minutes end that scope.
+// The stale advice in #431 survived 45 minutes and crossed into a new task.
+const EXPLORATION_ADVISORY_IDLE_MS = 5 * 60_000;
+const EXPLORATION_FOLLOW_UP = /^(?:continue|go on|keep going|carry on|proceed)(?:[.!]|\s+please[.!]?)?$/iu;
 
 interface ExplorationTurnState {
 	readOnlyCalls: number;
+	mutated: boolean;
 	scoutSucceeded: boolean;
 	/** The advisory was already issued for this user turn. */
 	advised: boolean;
@@ -49,9 +58,25 @@ function isNonRepositoryContextCall(input: MiddlewareHookInput): boolean {
 	return scope !== null && scope !== "workspace";
 }
 
-function isReadOnlyExplorationCall(input: MiddlewareHookInput): boolean {
-	if (isNonRepositoryContextCall(input)) return false;
-	return isReadOnlyCall(input.toolName ?? "", input.toolArgs);
+function isReadOnlyExplorationCall(input: MiddlewareHookInput, workspaceRoot: string): boolean {
+	if (isNonRepositoryContextCall(input) || !isReadOnlyCall(input.toolName ?? "", input.toolArgs)) return false;
+	// A shell command can read several roots and hide them behind variables.
+	// Count only tools whose repository scope can be established (#431).
+	if (input.toolName === ToolNames.Bash) return false;
+	return isWorkspaceCall(input, workspaceRoot);
+}
+
+function isWorkspaceCall(input: MiddlewareHookInput, workspaceRoot: string): boolean {
+	const raw = input.toolArgs?.path ?? ".";
+	const cwd = input.toolArgs?.cwd ?? workspaceRoot;
+	if (typeof raw !== "string" || typeof cwd !== "string") return false;
+	const root = canonicalizeRawPath(workspaceRoot, process.cwd());
+	const base = canonicalizeRawPath(expandPath(cwd), workspaceRoot);
+	if (root === null || base === null) return false;
+	const target = canonicalizeRawPath(expandPath(raw), base);
+	if (target === null) return false;
+	const within = relative(root, target);
+	return within === "" || (!isAbsolute(within) && within !== ".." && !within.startsWith(`..${sep}`));
 }
 
 function hasActiveTool(input: MiddlewareHookInput, toolName: string): boolean {
@@ -68,6 +93,7 @@ function hasActiveTool(input: MiddlewareHookInput, toolName: string): boolean {
 function newExplorationTurnState(advised = false): ExplorationTurnState {
 	return {
 		readOnlyCalls: 0,
+		mutated: false,
 		scoutSucceeded: false,
 		advised,
 	};
@@ -78,22 +104,15 @@ function markScoutSuccess(state: ExplorationTurnState): void {
 }
 
 /**
- * Advises the main agent to use Scout after a long read-only exploration turn.
- * Only a successful Scout dispatch suppresses the advisory for that turn.
- *
- * The advisory is a reminder, never a `request_continuation`. Reading is the
- * work the operator asked for, so the finding rides the next request's
- * reminder block, not a forced extra model round that spends a full context
- * window to be told the reads were intended. It is advice to the model about
- * how to work, so it is model-only: shown to the operator after a finished
- * answer, it read as an alarm about a turn that had gone fine. One advisory
- * per user turn: a later model round of the same turn re-counts its own calls
- * but stays silent once the advisory is spent.
+ * Advise Scout for repository exploration without successful mutation or Scout.
+ * Keep a completed turn's advice pending until a short, explicit continuation;
+ * a fresh task must never inherit it (#431).
  */
-export function createReadOnlyExplorationNudgeRegistration(): {
+export function createReadOnlyExplorationNudgeRegistration(deps: { workspaceRoot?: () => string } = {}): {
 	registration: MiddlewareHookRegistration;
 	rememberHarnessScout(turnId: string): void;
 } {
+	let pending: { at: number; sessionId: string | undefined } | null = null;
 	const byTurn = new Map<string, ExplorationTurnState>();
 	const turnKey = (input: MiddlewareHookInput): string => {
 		const userTurnId = input.hook === "turn_end" ? input.metadata?.userTurnId : undefined;
@@ -118,6 +137,7 @@ export function createReadOnlyExplorationNudgeRegistration(): {
 		if (bound === undefined) return null;
 		const carried = newExplorationTurnState(bound.advised);
 		carried.scoutSucceeded = bound.scoutSucceeded;
+		carried.mutated = bound.mutated;
 		byTurn.set(key, carried);
 		return bound;
 	};
@@ -132,19 +152,44 @@ export function createReadOnlyExplorationNudgeRegistration(): {
 		registration: {
 			id: READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
 			description: "advise Scout delegation after prolonged read-only repository exploration",
-			hooks: ["before_tool", "after_tool", "turn_end"],
+			hooks: ["turn_start", "before_tool", "after_tool", "turn_end"],
 			evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
+				if (input.hook === "turn_start") {
+					const advice = pending;
+					pending = null;
+					if (
+						advice === null ||
+						advice.sessionId !== input.sessionId ||
+						performance.now() - advice.at >= EXPLORATION_ADVISORY_IDLE_MS ||
+						(input.metadata?.requestContinuation !== true && !EXPLORATION_FOLLOW_UP.test(input.text?.trim() ?? ""))
+					)
+						return [];
+					return [
+						{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info", audience: "model" },
+					];
+				}
 				const key = turnKey(input);
 				if (input.hook === "before_tool" || input.hook === "after_tool") {
 					if (input.metadata?.origin === "harness") return [];
 					const state = stateForTool(key);
+					if (
+						input.hook === "after_tool" &&
+						input.metadata?.resultKind === "ok" &&
+						(((input.toolName === ToolNames.Edit || input.toolName === ToolNames.Write || input.toolName === "apply_patch") &&
+							isWorkspaceCall(input, deps.workspaceRoot?.() ?? process.cwd())) ||
+							(input.toolName === ToolNames.Dispatch && dispatchMutatedParentWorkspace(input.toolResultDetails)))
+					) {
+						state.mutated = true;
+						state.readOnlyCalls = 0;
+					}
 					if (input.toolName === ToolNames.Dispatch) {
 						if (input.hook === "after_tool" && dispatchTargetsScout(input.toolArgs)) {
 							if (input.metadata?.resultKind === "ok") markScoutSuccess(state);
 						}
 						return [];
 					}
-					if (input.hook === "after_tool" || !isReadOnlyExplorationCall(input)) return [];
+					if (input.hook === "after_tool" || !isReadOnlyExplorationCall(input, deps.workspaceRoot?.() ?? process.cwd()))
+						return [];
 					state.readOnlyCalls += 1;
 					return [];
 				}
@@ -156,15 +201,15 @@ export function createReadOnlyExplorationNudgeRegistration(): {
 				if (
 					!state ||
 					state.advised ||
+					state.mutated ||
 					state.scoutSucceeded ||
 					state.readOnlyCalls < READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD
 				) {
 					return [];
 				}
 				markAdvised(key);
-				return [
-					{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info", audience: "model" },
-				];
+				pending = { at: performance.now(), sessionId: input.sessionId };
+				return [];
 			},
 		},
 	};

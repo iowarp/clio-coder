@@ -6,6 +6,7 @@
  */
 
 import { systemReminderBlock } from "../core/reminder-framing.js";
+import { normalizeTokenUsage } from "../core/token-split.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
 import {
@@ -408,6 +409,13 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				turnMode: state.currentTurnConstraints?.mode ?? "",
 				toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
 			};
+			// The final call's input includes cache tokens and measures the context
+			// a plan-close continuation would repeat (#431).
+			const contextMessage = message ?? lastAssistantMessage(messages);
+			if (contextMessage !== null && "usage" in contextMessage && contextMessage.usage) {
+				const usage = normalizeTokenUsage(contextMessage.usage as unknown as Record<string, unknown>);
+				if (usage.observed) metadata.contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+			}
 			if (terminalToolResult !== undefined) {
 				metadata.terminalToolResult = true;
 				metadata.terminalToolCallId = terminalToolResult.toolCallId;
