@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { resolvePackageRoot } from "../core/package-root.js";
+import { formatSettingsLayerIssue } from "../core/settings-layer-diagnostics.js";
 import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../core/settings-layers.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 // C-3: domain barrels also load execution and indexing code. Keep inspection
@@ -97,7 +98,8 @@ function shortHash(text: string): string {
 function inspectSettings(cwd: string, graph: CustomizationGraph): void {
 	try {
 		const layered = readLayeredSettings(cwd);
-		for (const issue of layered.issues) graph.issues.push(`settings ${issue.origin}: ${issue.path}: ${issue.message}`);
+		for (const issue of layered.issues)
+			graph.issues.push(`settings ${issue.origin}: ${formatSettingsLayerIssue(layered, issue)}`);
 		// Report only the keys a layer explicitly set; built-in defaults are implicit.
 		const keys = Object.keys(layered.sources).sort();
 		for (const key of keys) {

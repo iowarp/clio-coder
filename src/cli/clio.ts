@@ -1,6 +1,8 @@
 import { formatBootTrace } from "../core/boot-trace.js";
+import { writeDiagnostic } from "../core/diagnostics.js";
 import { initializeClioHome } from "../core/init.js";
 import { isRestartHandoff } from "../core/restart-status.js";
+import { formatSettingsLayerWarning } from "../core/settings-layer-diagnostics.js";
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
 import type { BootOptions } from "../entry/boot-options.js";
 import { classifyDefaultTarget, describeKeptChatRoute, describeVerdict, homeIsReturning } from "./default-target.js";
@@ -51,7 +53,10 @@ export async function runClioCommand(
 		// The user file remains a strict gate. Project layers retain their
 		// established best-effort diagnostics, but every subsequent boot phase
 		// consumes this same effective snapshot.
-		startupSettings = readStrictLayeredSettings(process.cwd()).settings;
+		const layered = readStrictLayeredSettings(process.cwd());
+		const projectWarning = formatSettingsLayerWarning(layered);
+		if (projectWarning !== null) writeDiagnostic(projectWarning);
+		startupSettings = layered.settings;
 		const verdict = classifyDefaultTarget(startupSettings);
 		let detected = false;
 		// A saved chat route stays the user's choice when it cannot be used: no
@@ -81,7 +86,10 @@ export async function runClioCommand(
 			const { runConfigureCommand } = await import("./configure.js");
 			const configured = await runConfigureCommand([], process.stdin, process.stdout, true);
 			if (configured !== 0) return configured;
-			startupSettings = readStrictLayeredSettings(process.cwd()).settings;
+			const configuredLayers = readStrictLayeredSettings(process.cwd());
+			const configuredWarning = formatSettingsLayerWarning(configuredLayers);
+			if (configuredWarning !== null && configuredWarning !== projectWarning) writeDiagnostic(configuredWarning);
+			startupSettings = configuredLayers.settings;
 			const configuredVerdict = classifyDefaultTarget(startupSettings);
 			if (configuredVerdict.kind !== "usable" && configuredVerdict.kind !== "missing-credential") {
 				process.stderr.write(`${describeVerdict(configuredVerdict)} Configuration did not complete; startup cancelled.\n`);

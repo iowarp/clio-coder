@@ -3,6 +3,7 @@ import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { setGitCommitAttributionEnabled } from "../../core/git-commit-attribution.js";
+import { formatSettingsLayerWarning } from "../../core/settings-layer-diagnostics.js";
 import {
 	readLayeredSettings,
 	readStrictLayeredSettings,
@@ -39,6 +40,7 @@ export function createConfigBundle(
 	let watcher: ConfigWatcher | null = null;
 	let snapshot: ClioSettings | null = null;
 	let reloadFailure: string | null = null;
+	let projectWarning: string | null = null;
 	let reloadsHeld = options.holdReloads === true;
 	let reloadPending = false;
 	const sessionTargets = new Map<string, ClioSettings["targets"][number]>();
@@ -103,7 +105,11 @@ export function createConfigBundle(
 		try {
 			// One file read keeps the strict user-settings gate while workspace
 			// overlays retain their established best-effort diagnostics.
-			next = readStrictLayeredSettings(process.cwd()).settings;
+			const layered = readStrictLayeredSettings(process.cwd());
+			const warning = formatSettingsLayerWarning(layered);
+			if (warning !== null && warning !== projectWarning) writeDiagnostic(warning);
+			projectWarning = warning;
+			next = layered.settings;
 		} catch (err) {
 			// The rejection is the whole effect: `snapshot` is untouched, so the
 			// session keeps running on the last good settings.
@@ -129,8 +135,15 @@ export function createConfigBundle(
 
 	const extension: DomainExtension = {
 		async start() {
-			if (initialSettings) snapshot = structuredClone(initialSettings);
-			else snapshot = readStrictLayeredSettings(process.cwd()).settings;
+			if (initialSettings) {
+				snapshot = structuredClone(initialSettings);
+				projectWarning = formatSettingsLayerWarning(readLayeredSettings(process.cwd()));
+			} else {
+				const layered = readStrictLayeredSettings(process.cwd());
+				projectWarning = formatSettingsLayerWarning(layered);
+				if (projectWarning !== null) writeDiagnostic(projectWarning);
+				snapshot = layered.settings;
+			}
 			setGitCommitAttributionEnabled(snapshot.integrations.git.commitAttribution);
 			watcher = startConfigWatcher(() => onWatcherFire());
 		},

@@ -1,4 +1,4 @@
-import { existsSync, type FSWatcher, realpathSync, watch } from "node:fs";
+import { type FSWatcher, realpathSync, statSync, watch } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { settingsPath } from "../../core/config.js";
 
@@ -8,10 +8,6 @@ export interface ConfigWatcher {
 	stop(): void;
 }
 
-// How often a session without a project settings directory re-checks for one.
-// fs.watch cannot be trusted to deliver the first event for a directory that
-// appears right after the watch starts (macOS FSEvents starts its stream
-// asynchronously), so correctness rests on this poll, not on the event.
 const PROJECT_DIR_POLL_MS = 250;
 
 // FSEvents reports paths in their resolved form, so watch the resolved path.
@@ -31,11 +27,13 @@ export function startConfigWatcher(cb: WatcherCallback, workspaceRoot = process.
 
 	let userWatcher: FSWatcher | null = null;
 	let projectWatcher: FSWatcher | null = null;
+	let projectIdentity: string | null = null;
 	let workspaceWatcher: FSWatcher | null = null;
 	let projectPoll: NodeJS.Timeout | null = null;
 	let debounceTimer: NodeJS.Timeout | null = null;
 	let stopped = false;
 	const schedule = (): void => {
+		if (stopped) return;
 		if (debounceTimer) clearTimeout(debounceTimer);
 		debounceTimer = setTimeout(() => cb({ at: Date.now() }), 80);
 	};
@@ -43,22 +41,39 @@ export function startConfigWatcher(cb: WatcherCallback, workspaceRoot = process.
 		if (projectPoll) clearInterval(projectPoll);
 		projectPoll = null;
 	};
-	// A watcher that attaches after startup may have missed the write that
-	// created the directory, so it reports one change when notify is set.
 	const attachProjectWatcher = (notify: boolean): void => {
-		if (stopped || projectWatcher || !existsSync(projectDir)) return;
+		if (stopped) return;
+		let identity: string | null = null;
 		try {
-			projectWatcher = watch(projectDir, { persistent: false }, (_event, filename) => {
+			const stat = statSync(projectDir);
+			if (stat.isDirectory()) identity = `${stat.dev}:${stat.ino}`;
+		} catch {
+			// Y7: a directory replacement can briefly leave no path to watch.
+		}
+		if (identity !== projectIdentity) {
+			projectWatcher?.close();
+			projectWatcher = null;
+			projectIdentity = identity;
+			if (notify) schedule();
+		}
+		if (projectWatcher || identity === null) return;
+		try {
+			const attachedWatcher = watch(projectDir, { persistent: false }, (_event, filename) => {
+				attachProjectWatcher(true);
 				if (filename !== null && filename !== "settings.yaml" && filename !== "settings.local.yaml") return;
+				schedule();
+			});
+			projectWatcher = attachedWatcher;
+			attachedWatcher.on("error", () => {
+				if (projectWatcher !== attachedWatcher) return;
+				attachedWatcher.close();
+				projectWatcher = null;
 				schedule();
 			});
 		} catch {
 			// The poll retries while no project watcher is attached.
 			return;
 		}
-		stopProjectPoll();
-		workspaceWatcher?.close();
-		workspaceWatcher = null;
 		if (notify) schedule();
 	};
 
@@ -75,25 +90,23 @@ export function startConfigWatcher(cb: WatcherCallback, workspaceRoot = process.
 		console.error("[clio-coder:config] watcher setup failed:", err);
 	}
 	attachProjectWatcher(false);
-	if (!projectWatcher) {
-		try {
-			workspaceWatcher = watch(resolveExisting(workspaceRoot), { persistent: false }, (_event, filename) => {
-				if (filename !== null && filename !== ".clio-coder") return;
-				attachProjectWatcher(true);
-				// The local settings file may have been renamed before we attached.
-				schedule();
-			});
-		} catch {
-			// A missing workspace has no project settings to watch yet.
-		}
-		// The directory can appear between the first check and the workspace
-		// watch starting, and the workspace watch can miss it entirely.
-		attachProjectWatcher(true);
-		if (!projectWatcher) {
-			projectPoll = setInterval(() => attachProjectWatcher(true), PROJECT_DIR_POLL_MS);
-			projectPoll.unref();
-		}
+	// Y7: a directory watch follows its inode after rename. Keep the parent
+	// watch and identity poll alive so replacement never strands that handle.
+	try {
+		workspaceWatcher = watch(resolveExisting(workspaceRoot), { persistent: false }, (_event, filename) => {
+			if (filename !== null && filename !== ".clio-coder") return;
+			attachProjectWatcher(true);
+			// The local settings file may have been renamed before we attached.
+			schedule();
+		});
+	} catch {
+		// A missing workspace has no project settings to watch yet.
 	}
+	// The directory can appear between the first check and the workspace
+	// watch starting, and the workspace watch can miss it entirely.
+	attachProjectWatcher(true);
+	projectPoll = setInterval(() => attachProjectWatcher(true), PROJECT_DIR_POLL_MS);
+	projectPoll.unref();
 
 	return {
 		stop() {
