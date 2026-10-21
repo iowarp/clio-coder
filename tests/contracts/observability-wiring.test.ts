@@ -84,6 +84,8 @@ it("persists database-wide queue loss and degradation without claiming complete 
 	});
 	for (let i = 0; i < TRACE_WRITE_QUEUE_LIMIT + 6; i++)
 		mirror.enqueue("dispatch.progress", { runId: "run-loss", agentId: "coder", event: { type: "log" } });
+	match(warnings[0] ?? "", /trace queue saturated at 2048 pending writes/);
+	equal(warnings.length, 1);
 	await mirror.flush();
 	const reader = new TraceReader(path);
 	try {
@@ -93,7 +95,6 @@ it("persists database-wide queue loss and degradation without claiming complete 
 			droppedPackageActivity: null,
 			failedRows: null,
 		});
-		match(warnings[0] ?? "", /dropped 7/);
 		await mirror.flush();
 		equal(reader.captureCoverage().droppedProgress, 7);
 	} finally {

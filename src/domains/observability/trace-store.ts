@@ -11,7 +11,8 @@ import { mkdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import { monitorEventLoopDelay } from "node:perf_hooks";
+import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import type {
 	DispatchCompletedPayload,
 	DispatchEnqueuedPayload,
@@ -19,6 +20,7 @@ import type {
 	DispatchProgressPayload,
 	DispatchStartedPayload,
 } from "../../core/bus-events.js";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import type { PackageActivity } from "../../core/package-activity.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
@@ -593,6 +595,30 @@ function reconcileAbandonedRuns(db: DatabaseSync): void {
 export class TraceStore {
 	readonly db: DatabaseSync;
 	private readonly retention: TraceRetentionPolicy;
+	private readonly statements = new Map<string, StatementSync>();
+	private inTransaction = false;
+
+	/** Reuse the finite set of writer statements across streaming batches (#428). */
+	prepare(sql: string): StatementSync {
+		let statement = this.statements.get(sql);
+		if (statement === undefined) {
+			statement = this.db.prepare(sql);
+			this.statements.set(sql, statement);
+		}
+		return statement;
+	}
+
+	/** A failed queued fact must not roll back its batch's other facts (#428). */
+	captureRow(action: () => void): void {
+		this.db.exec("SAVEPOINT trace_row");
+		try {
+			action();
+			this.db.exec("RELEASE trace_row");
+		} catch (error) {
+			this.db.exec("ROLLBACK TO trace_row; RELEASE trace_row");
+			throw error;
+		}
+	}
 
 	constructor(
 		readonly path: string,
@@ -618,27 +644,32 @@ export class TraceStore {
 	}
 
 	recordCaptureLoss(kind: "progress" | "package_activity" | "failed_rows" | "degraded", count = 1): void {
-		this.db
-			.prepare(`INSERT INTO meta(key, value) VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value=CAST(meta.value AS INTEGER) + CAST(excluded.value AS INTEGER)`)
-			.run(
-				kind === "degraded"
-					? "capture_degraded"
-					: kind === "failed_rows"
-						? "capture_failed_rows"
-						: `capture_dropped_${kind}`,
-				String(count),
-			);
+		this.prepare(`INSERT INTO meta(key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=CAST(meta.value AS INTEGER) + CAST(excluded.value AS INTEGER)`).run(
+			kind === "degraded"
+				? "capture_degraded"
+				: kind === "failed_rows"
+					? "capture_failed_rows"
+					: `capture_dropped_${kind}`,
+			String(count),
+		);
 	}
 
 	transaction(action: () => void): void {
+		if (this.inTransaction) {
+			action();
+			return;
+		}
 		this.db.exec("BEGIN IMMEDIATE");
+		this.inTransaction = true;
 		try {
 			action();
 			this.db.exec("COMMIT");
 		} catch (error) {
 			this.db.exec("ROLLBACK");
 			throw error;
+		} finally {
+			this.inTransaction = false;
 		}
 	}
 
@@ -659,11 +690,9 @@ export class TraceStore {
 		const removed = new Set<string>();
 		const cutoff = new Date(Math.max(0, nowMs - resolved.maxAgeDays * MILLISECONDS_PER_DAY)).toISOString();
 
-		const ageCandidates = this.db
-			.prepare(
-				"SELECT run_id FROM runs WHERE status IN ('success','fail') AND ended_at IS NOT NULL AND ended_at < ? ORDER BY ended_at, started_at, run_id",
-			)
-			.all(cutoff) as { run_id: string }[];
+		const ageCandidates = this.prepare(
+			"SELECT run_id FROM runs WHERE status IN ('success','fail') AND ended_at IS NOT NULL AND ended_at < ? ORDER BY ended_at, started_at, run_id",
+		).all(cutoff) as { run_id: string }[];
 		if (ageCandidates.length > 0) {
 			this.transaction(() => {
 				for (const candidate of ageCandidates) {
@@ -676,11 +705,9 @@ export class TraceStore {
 
 		let pages = tracePageStats(this.db);
 		if (pages.usedBytes > resolved.maxBytes) {
-			const sizeCandidates = this.db
-				.prepare(
-					"SELECT run_id FROM runs WHERE status IN ('success','fail') AND ended_at IS NOT NULL ORDER BY ended_at, started_at, run_id",
-				)
-				.all() as { run_id: string }[];
+			const sizeCandidates = this.prepare(
+				"SELECT run_id FROM runs WHERE status IN ('success','fail') AND ended_at IS NOT NULL ORDER BY ended_at, started_at, run_id",
+			).all() as { run_id: string }[];
 			this.transaction(() => {
 				for (const candidate of sizeCandidates) {
 					if (pages.usedBytes <= resolved.maxBytes) break;
@@ -700,12 +727,12 @@ export class TraceStore {
 			rowsRemoved > 0 && pages.freePages > 0 && (reclaimableFraction >= VACUUM_RECLAIMABLE_FRACTION || sizeNeedsReclaim);
 		if (vacuumed) {
 			this.db.exec("VACUUM");
-			this.db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+			this.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
 		}
 
 		const protectedRuns = Number(
 			(
-				this.db.prepare("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued','running')").get() as {
+				this.prepare("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued','running')").get() as {
 					count: number | bigint;
 				}
 			).count,
@@ -724,47 +751,41 @@ export class TraceStore {
 
 	upsertRun(input: DispatchEnqueuedPayload, at = new Date().toISOString()): void {
 		this.transaction(() => {
-			this.db
-				.prepare(`INSERT INTO runs
+			this.prepare(`INSERT INTO runs
           (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at, source)
           VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, 'dispatch')
           ON CONFLICT(run_id) DO UPDATE SET request=excluded.request, agent=excluded.agent,
-            target=excluded.target, model=excluded.model, runtime=excluded.runtime, node=excluded.node`)
-				.run(
-					input.runId,
-					input.runId,
-					input.task === undefined ? null : traceText(input.task, 2000),
-					input.agentId,
-					input.targetId,
-					input.wireModelId,
-					input.runtimeId,
-					input.node ?? null,
-					at,
-				);
-			this.db
-				.prepare(`INSERT INTO phases
+            target=excluded.target, model=excluded.model, runtime=excluded.runtime, node=excluded.node`).run(
+				input.runId,
+				input.runId,
+				input.task === undefined ? null : traceText(input.task, 2000),
+				input.agentId,
+				input.targetId,
+				input.wireModelId,
+				input.runtimeId,
+				input.node ?? null,
+				at,
+			);
+			this.prepare(`INSERT INTO phases
           (phase_id, run_id, seq, name, kind, owner, description, status, started_at)
           VALUES (?, ?, 0, ?, 'agent', ?, ?, 'queued', NULL)
-          ON CONFLICT(phase_id) DO NOTHING`)
-				.run(
-					input.runId,
-					input.runId,
-					traceText(input.agentId, 256),
-					traceText(input.agentId, 256),
-					input.task === undefined ? null : traceText(input.task, 2000),
-				);
+          ON CONFLICT(phase_id) DO NOTHING`).run(
+				input.runId,
+				input.runId,
+				traceText(input.agentId, 256),
+				traceText(input.agentId, 256),
+				input.task === undefined ? null : traceText(input.task, 2000),
+			);
 		});
 	}
 
 	startRun(input: DispatchStartedPayload, at = new Date().toISOString()): void {
 		this.upsertRun(input, at);
 		this.transaction(() => {
-			this.db.prepare("UPDATE runs SET status='running', started_at=? WHERE run_id=?").run(at, input.runId);
-			this.db
-				.prepare(
-					"UPDATE phases SET status='running', started_at=?, context_window=COALESCE(?, context_window) WHERE phase_id=?",
-				)
-				.run(at, input.contextWindow ?? null, input.runId);
+			this.prepare("UPDATE runs SET status='running', started_at=? WHERE run_id=?").run(at, input.runId);
+			this.prepare(
+				"UPDATE phases SET status='running', started_at=?, context_window=COALESCE(?, context_window) WHERE phase_id=?",
+			).run(at, input.contextWindow ?? null, input.runId);
 			this.insertEventRaw({
 				eventId: `${input.runId}:agent_start`,
 				runId: input.runId,
@@ -780,35 +801,31 @@ export class TraceStore {
 				startedAt: at,
 			});
 			if (input.pid !== null) {
-				this.db
-					.prepare(`INSERT INTO processes(run_id, kind, name, pid, command, command_digest, started_at, host, birth_token)
-            VALUES (?, 'worker', ?, ?, ?, ?, ?, ?, ?)`)
-					.run(
-						input.runId,
-						input.agentId,
-						input.pid,
-						traceText(input.processCommand ?? "[]", 2000),
-						sha256(input.processCommand ?? "[]"),
-						at,
-						hostname(),
-						processBirthToken(input.pid),
-					);
+				this.prepare(`INSERT INTO processes(run_id, kind, name, pid, command, command_digest, started_at, host, birth_token)
+            VALUES (?, 'worker', ?, ?, ?, ?, ?, ?, ?)`).run(
+					input.runId,
+					input.agentId,
+					input.pid,
+					traceText(input.processCommand ?? "[]", 2000),
+					sha256(input.processCommand ?? "[]"),
+					at,
+					hostname(),
+					processBirthToken(input.pid),
+				);
 			}
-			this.db
-				.prepare(`INSERT INTO agent_sessions
+			this.prepare(`INSERT INTO agent_sessions
           (run_id, agent, runtime, model, session_id, context_tokens, context_window, created_at, last_used_at)
           VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?)
           ON CONFLICT(run_id, agent) DO UPDATE SET runtime=excluded.runtime, model=excluded.model,
-            context_window=excluded.context_window, last_used_at=excluded.last_used_at`)
-				.run(
-					input.runId,
-					traceText(input.agentId, 256),
-					traceText(input.runtimeId, 256),
-					traceText(input.wireModelId, 256),
-					input.contextWindow ?? null,
-					at,
-					at,
-				);
+            context_window=excluded.context_window, last_used_at=excluded.last_used_at`).run(
+				input.runId,
+				traceText(input.agentId, 256),
+				traceText(input.runtimeId, 256),
+				traceText(input.wireModelId, 256),
+				input.contextWindow ?? null,
+				at,
+				at,
+			);
 		});
 	}
 
@@ -817,60 +834,59 @@ export class TraceStore {
 	}
 
 	private insertEventRaw(input: TraceEventInput): void {
-		this.db
-			.prepare(`INSERT INTO events
+		this.prepare(`INSERT INTO events
         (event_id, run_id, phase_id, parent_id, type, name, payload_json, tokens, started_at, ended_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(event_id) DO UPDATE SET rowid=(SELECT MAX(rowid)+1 FROM events),
           name=excluded.name, payload_json=excluded.payload_json,
           tokens=excluded.tokens, started_at=excluded.started_at, ended_at=excluded.ended_at
-        WHERE excluded.ended_at IS NOT NULL OR events.ended_at IS NULL`)
-			.run(
-				input.eventId,
-				input.runId,
-				input.phaseId,
-				input.parentId ?? null,
-				input.type,
-				traceText(input.name, 512),
-				input.payload === undefined ? null : boundedJson(input.payload),
-				input.tokens ?? null,
-				input.startedAt,
-				input.endedAt ?? null,
-			);
+        WHERE excluded.ended_at IS NOT NULL OR events.ended_at IS NULL`).run(
+			input.eventId,
+			input.runId,
+			input.phaseId,
+			input.parentId ?? null,
+			input.type,
+			traceText(input.name, 512),
+			input.payload === undefined ? null : boundedJson(input.payload),
+			input.tokens ?? null,
+			input.startedAt,
+			input.endedAt ?? null,
+		);
 	}
 
 	recordContext(runId: string, contextTokens: number, contextWindow: number | null, at: string): void {
 		this.transaction(() => {
-			this.db
-				.prepare("UPDATE phases SET context_tokens=?, context_window=COALESCE(?, context_window) WHERE run_id=?")
-				.run(contextTokens, contextWindow, runId);
-			this.db
-				.prepare(`UPDATE agent_sessions SET context_tokens=?, context_window=COALESCE(?, context_window),
-          last_used_at=? WHERE run_id=?`)
-				.run(contextTokens, contextWindow, at, runId);
+			this.prepare("UPDATE phases SET context_tokens=?, context_window=COALESCE(?, context_window) WHERE run_id=?").run(
+				contextTokens,
+				contextWindow,
+				runId,
+			);
+			this.prepare(`UPDATE agent_sessions SET context_tokens=?, context_window=COALESCE(?, context_window),
+          last_used_at=? WHERE run_id=?`).run(contextTokens, contextWindow, at, runId);
 		});
 	}
 
 	recordGate(input: TraceGateResultInput): void {
 		const violations = input.checks?.filter((check) => !check.ok).map((check) => `${check.item}: ${check.note}`) ?? [];
 		this.transaction(() => {
-			this.db
-				.prepare("DELETE FROM gate_results WHERE run_id=? AND phase_id=? AND attempt=? AND gate=?")
-				.run(input.runId, input.phaseId, input.attempt, input.gate);
-			this.db
-				.prepare(`INSERT INTO gate_results
+			this.prepare("DELETE FROM gate_results WHERE run_id=? AND phase_id=? AND attempt=? AND gate=?").run(
+				input.runId,
+				input.phaseId,
+				input.attempt,
+				input.gate,
+			);
+			this.prepare(`INSERT INTO gate_results
           (run_id, phase_id, attempt, gate, passed, violations_json, checks_json, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-				.run(
-					input.runId,
-					input.phaseId,
-					input.attempt,
-					input.gate,
-					input.passed ? 1 : 0,
-					JSON.stringify(violations),
-					input.checks === null ? null : JSON.stringify(input.checks),
-					input.createdAt,
-				);
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+				input.runId,
+				input.phaseId,
+				input.attempt,
+				input.gate,
+				input.passed ? 1 : 0,
+				JSON.stringify(violations),
+				input.checks === null ? null : JSON.stringify(input.checks),
+				input.createdAt,
+			);
 			this.insertEventRaw({
 				eventId: `${input.runId}:gate:${input.gate}:${input.attempt}`,
 				runId: input.runId,
@@ -885,7 +901,7 @@ export class TraceStore {
 
 	recordRetryDenied(runId: string, agentId: string, detail: string | null, at: string): void {
 		this.transaction(() => {
-			const phase = this.db.prepare("SELECT phase_id FROM phases WHERE run_id=? ORDER BY seq LIMIT 1").get(runId) as
+			const phase = this.prepare("SELECT phase_id FROM phases WHERE run_id=? ORDER BY seq LIMIT 1").get(runId) as
 				| { phase_id: string }
 				| undefined;
 			if (!phase) return;
@@ -919,66 +935,60 @@ export class TraceStore {
 		this.transaction(() => {
 			const fallbackStartedAt =
 				typeof input.durationMs === "number" ? new Date(Math.max(0, Date.parse(at) - input.durationMs)).toISOString() : at;
-			this.db
-				.prepare(`INSERT INTO runs
+			this.prepare(`INSERT INTO runs
           (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at)
           VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(run_id) DO NOTHING`)
-				.run(
-					input.runId,
-					input.lineage?.rootRunId ?? input.runId,
-					input.task === undefined ? null : traceText(input.task, 2000),
-					input.agentId,
-					input.targetId,
-					input.wireModelId,
-					input.runtimeId,
-					input.node ?? null,
-					fallbackStartedAt,
-				);
-			this.db
-				.prepare(`INSERT INTO phases
+          ON CONFLICT(run_id) DO NOTHING`).run(
+				input.runId,
+				input.lineage?.rootRunId ?? input.runId,
+				input.task === undefined ? null : traceText(input.task, 2000),
+				input.agentId,
+				input.targetId,
+				input.wireModelId,
+				input.runtimeId,
+				input.node ?? null,
+				fallbackStartedAt,
+			);
+			this.prepare(`INSERT INTO phases
           (phase_id, run_id, seq, name, kind, owner, description, status, started_at)
           VALUES (?, ?, 0, ?, 'agent', ?, ?, 'running', ?)
-          ON CONFLICT(phase_id) DO NOTHING`)
-				.run(
-					input.runId,
-					input.runId,
-					traceText(input.agentId, 256),
-					traceText(input.agentId, 256),
-					input.task === undefined ? null : traceText(input.task, 2000),
-					fallbackStartedAt,
-				);
-			this.db
-				.prepare("UPDATE runs SET assignment_id=?, status=?, ended_at=?, total_tokens=?, total_cost_usd=? WHERE run_id=?")
-				.run(
-					input.lineage?.rootRunId ?? input.runId,
-					success ? "success" : "fail",
-					at,
-					input.tokenCount ?? null,
-					costUsd,
-					input.runId,
-				);
-			this.db
-				.prepare(`UPDATE phases SET status=?, attempt=?, retries=?, ended_at=?, error=?, input_tokens=?, output_tokens=?,
+          ON CONFLICT(phase_id) DO NOTHING`).run(
+				input.runId,
+				input.runId,
+				traceText(input.agentId, 256),
+				traceText(input.agentId, 256),
+				input.task === undefined ? null : traceText(input.task, 2000),
+				fallbackStartedAt,
+			);
+			this.prepare(
+				"UPDATE runs SET assignment_id=?, status=?, ended_at=?, total_tokens=?, total_cost_usd=? WHERE run_id=?",
+			).run(
+				input.lineage?.rootRunId ?? input.runId,
+				success ? "success" : "fail",
+				at,
+				input.tokenCount ?? null,
+				costUsd,
+				input.runId,
+			);
+			this.prepare(`UPDATE phases SET status=?, attempt=?, retries=?, ended_at=?, error=?, input_tokens=?, output_tokens=?,
           cache_read_tokens=?, cache_write_tokens=?, cache_write_1h_tokens=?, reasoning_tokens=?, total_tokens=?, total_cost_usd=?
-          WHERE phase_id=?`)
-				.run(
-					success ? "success" : "fail",
-					input.lineage?.attempt ?? 0,
-					input.lineage?.attempt ?? 0,
-					at,
-					success ? null : input.outcomeDetail,
-					input.inputTokenCount ?? null,
-					input.outputTokenCount ?? null,
-					input.cacheReadTokenCount ?? null,
-					input.cacheWriteTokenCount ?? null,
-					input.cacheWrite1hTokenCount ?? null,
-					input.reasoningTokenCount ?? null,
-					input.tokenCount ?? null,
-					costUsd,
-					input.runId,
-				);
-			this.db.prepare("UPDATE processes SET ended_at=? WHERE run_id=? AND ended_at IS NULL").run(at, input.runId);
+          WHERE phase_id=?`).run(
+				success ? "success" : "fail",
+				input.lineage?.attempt ?? 0,
+				input.lineage?.attempt ?? 0,
+				at,
+				success ? null : input.outcomeDetail,
+				input.inputTokenCount ?? null,
+				input.outputTokenCount ?? null,
+				input.cacheReadTokenCount ?? null,
+				input.cacheWriteTokenCount ?? null,
+				input.cacheWrite1hTokenCount ?? null,
+				input.reasoningTokenCount ?? null,
+				input.tokenCount ?? null,
+				costUsd,
+				input.runId,
+			);
+			this.prepare("UPDATE processes SET ended_at=? WHERE run_id=? AND ended_at IS NULL").run(at, input.runId);
 			this.insertEventRaw({
 				eventId: `${input.runId}:agent_end`,
 				runId: input.runId,
@@ -1047,23 +1057,19 @@ export class TraceStore {
 
 	recordPackageActivity(activity: PackageActivity): void {
 		this.transaction(() => {
-			if (this.db.prepare("SELECT 1 FROM events WHERE event_id=?").get(activity.eventId)) return;
+			if (this.prepare("SELECT 1 FROM events WHERE event_id=?").get(activity.eventId)) return;
 			const candidate = activity.runId ?? (activity.turnId ? `session:${activity.turnId}` : "");
-			const existing = candidate ? this.db.prepare("SELECT run_id FROM runs WHERE run_id = ?").get(candidate) : undefined;
+			const existing = candidate ? this.prepare("SELECT run_id FROM runs WHERE run_id = ?").get(candidate) : undefined;
 			const runId = existing ? candidate : `session-activity:${activity.sessionId}`;
 			if (!existing) {
-				this.db
-					.prepare(
-						"INSERT INTO runs (run_id, assignment_id, status, agent, target, model, runtime, started_at, ended_at, source) VALUES (?, 'session', 'success', 'package activity', '', '', 'host', ?, ?, 'session') ON CONFLICT(run_id) DO UPDATE SET ended_at=excluded.ended_at",
-					)
-					.run(runId, activity.at, activity.at);
-				this.db
-					.prepare(
-						"INSERT INTO phases (phase_id, run_id, seq, name, kind, owner, status, started_at, ended_at) VALUES (?, ?, 0, 'package activity', 'session', 'host', 'success', ?, ?) ON CONFLICT(phase_id) DO UPDATE SET ended_at=excluded.ended_at",
-					)
-					.run(runId, runId, activity.at, activity.at);
+				this.prepare(
+					"INSERT INTO runs (run_id, assignment_id, status, agent, target, model, runtime, started_at, ended_at, source) VALUES (?, 'session', 'success', 'package activity', '', '', 'host', ?, ?, 'session') ON CONFLICT(run_id) DO UPDATE SET ended_at=excluded.ended_at",
+				).run(runId, activity.at, activity.at);
+				this.prepare(
+					"INSERT INTO phases (phase_id, run_id, seq, name, kind, owner, status, started_at, ended_at) VALUES (?, ?, 0, 'package activity', 'session', 'host', 'success', ?, ?) ON CONFLICT(phase_id) DO UPDATE SET ended_at=excluded.ended_at",
+				).run(runId, runId, activity.at, activity.at);
 			}
-			const phase = this.db.prepare("SELECT phase_id FROM phases WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as
+			const phase = this.prepare("SELECT phase_id FROM phases WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as
 				| { phase_id: string }
 				| undefined;
 			this.insertEventRaw({
@@ -1082,34 +1088,30 @@ export class TraceStore {
 
 	private startSessionTurn(input: SessionTurnStart): void {
 		this.transaction(() => {
-			this.db
-				.prepare(`INSERT INTO runs
+			this.prepare(`INSERT INTO runs
           (run_id, assignment_id, request, status, agent, target, model, runtime, node, started_at, source)
           VALUES (?, ?, ?, 'running', ?, ?, ?, ?, NULL, ?, 'session')
-          ON CONFLICT(run_id) DO NOTHING`)
-				.run(
-					input.runId,
-					SESSION_TRACE_ASSIGNMENT_ID,
-					input.prompt === null ? null : traceText(input.prompt, 2000),
-					traceText(input.agent, 256),
-					traceText(input.target, 256),
-					traceText(input.model, 256),
-					traceText(input.runtime, 256),
-					input.at,
-				);
-			this.db
-				.prepare(`INSERT INTO phases
+          ON CONFLICT(run_id) DO NOTHING`).run(
+				input.runId,
+				SESSION_TRACE_ASSIGNMENT_ID,
+				input.prompt === null ? null : traceText(input.prompt, 2000),
+				traceText(input.agent, 256),
+				traceText(input.target, 256),
+				traceText(input.model, 256),
+				traceText(input.runtime, 256),
+				input.at,
+			);
+			this.prepare(`INSERT INTO phases
           (phase_id, run_id, seq, name, kind, owner, description, status, started_at)
           VALUES (?, ?, 0, ?, 'session', ?, ?, 'running', ?)
-          ON CONFLICT(phase_id) DO NOTHING`)
-				.run(
-					input.runId,
-					input.runId,
-					traceText(input.agent, 256),
-					traceText(input.agent, 256),
-					input.prompt === null ? null : traceText(input.prompt, 2000),
-					input.at,
-				);
+          ON CONFLICT(phase_id) DO NOTHING`).run(
+				input.runId,
+				input.runId,
+				traceText(input.agent, 256),
+				traceText(input.agent, 256),
+				input.prompt === null ? null : traceText(input.prompt, 2000),
+				input.at,
+			);
 			this.insertEventRaw({
 				eventId: `${input.runId}:turn_start`,
 				runId: input.runId,
@@ -1125,27 +1127,29 @@ export class TraceStore {
 	private finishSessionTurn(input: SessionTurnFinish): void {
 		const usage = input.usage;
 		this.transaction(() => {
-			this.db
-				.prepare("UPDATE runs SET status=?, ended_at=?, total_tokens=?, total_cost_usd=? WHERE run_id=?")
-				.run(input.status, input.at, usage?.totalTokens ?? null, usage?.costUsd ?? null, input.runId);
-			this.db
-				.prepare(`UPDATE phases SET status=?, ended_at=?, error=?, input_tokens=?, output_tokens=?,
+			this.prepare("UPDATE runs SET status=?, ended_at=?, total_tokens=?, total_cost_usd=? WHERE run_id=?").run(
+				input.status,
+				input.at,
+				usage?.totalTokens ?? null,
+				usage?.costUsd ?? null,
+				input.runId,
+			);
+			this.prepare(`UPDATE phases SET status=?, ended_at=?, error=?, input_tokens=?, output_tokens=?,
           cache_read_tokens=?, cache_write_tokens=?, cache_write_1h_tokens=?, reasoning_tokens=?, total_tokens=?, total_cost_usd=?
-          WHERE phase_id=?`)
-				.run(
-					input.status,
-					input.at,
-					input.error,
-					usage?.inputTokens ?? null,
-					usage?.outputTokens ?? null,
-					usage?.cacheReadTokens ?? null,
-					usage?.cacheWriteTokens ?? null,
-					usage?.cacheWrite1hTokens ?? null,
-					usage?.reasoningTokens ?? null,
-					usage?.totalTokens ?? null,
-					usage?.costUsd ?? null,
-					input.runId,
-				);
+          WHERE phase_id=?`).run(
+				input.status,
+				input.at,
+				input.error,
+				usage?.inputTokens ?? null,
+				usage?.outputTokens ?? null,
+				usage?.cacheReadTokens ?? null,
+				usage?.cacheWriteTokens ?? null,
+				usage?.cacheWrite1hTokens ?? null,
+				usage?.reasoningTokens ?? null,
+				usage?.totalTokens ?? null,
+				usage?.costUsd ?? null,
+				input.runId,
+			);
 			this.insertEventRaw({
 				eventId: `${input.runId}:turn_end`,
 				runId: input.runId,
@@ -1208,6 +1212,8 @@ function deleteTraceRun(db: DatabaseSync, runId: string): number {
 		"phases",
 		"runs",
 	];
+	// Dispatch-window diagnostics follow their anchor run's retention (#428).
+	db.prepare("DELETE FROM meta WHERE key=?").run(`dispatch_window:${runId}`);
 	for (const table of tables) {
 		const result = db.prepare(`DELETE FROM ${table} WHERE run_id=?`).run(runId);
 		rows += Number(result.changes);
@@ -1451,7 +1457,7 @@ export interface DispatchTraceMirror {
 	enqueuePackageActivity?(activity: PackageActivity): void;
 	enqueue(channel: string, payload: unknown): void;
 	/**
-	 * Mirror one fact about the operator's own turn. Queued on the same chain as
+	 * Mirror one fact about the operator's own turn. Queued on the same batch queue as
 	 * dispatch events, so a turn's start, events and finish keep their order and
 	 * a session row never precedes the run row its events reference.
 	 */
@@ -1498,22 +1504,63 @@ export function createDispatchTraceMirror(
 	path: string,
 	options: { warn?: (message: string) => void; now?: () => string } = {},
 ): DispatchTraceMirror {
-	const warn = options.warn ?? ((message: string) => process.stderr.write(`[clio-coder:trace] ${message}\n`));
+	const warn = options.warn ?? ((message: string) => writeDiagnostic(`[clio-coder:trace] ${message}`));
 	const now = options.now ?? (() => new Date().toISOString());
 	let store: TraceStore | null = null;
-	let chain: Promise<void> = Promise.resolve();
+	let drain: Promise<void> | null = null;
+	const pending: Array<{ row: TraceRow; work: () => void }> = [];
+	let saturationReported = false;
 	let closed = false;
 	let degraded = false;
 	let pendingWrites = 0;
-	let droppedProgress = 0;
+	let peakPendingWrites = 0;
+	// One histogram covers overlapping workers on this process's main thread (#428).
+	const lag = monitorEventLoopDelay({ resolution: 10 });
+	const activeDispatches = new Set<string>();
+	let dispatchWindow: { id: string; startedAt: string; runIds: string[] } | null = null;
+	const beginDispatch = (runId: string, at: string): void => {
+		if (activeDispatches.has(runId)) return;
+		if (activeDispatches.size === 0) {
+			lag.reset();
+			lag.enable();
+			dispatchWindow = { id: runId, startedAt: at, runIds: [] };
+		}
+		activeDispatches.add(runId);
+		dispatchWindow?.runIds.push(runId);
+	};
+	const recordDispatchWindow = (endedAt: string): void => {
+		if (dispatchWindow === null) return;
+		const sample = {
+			...dispatchWindow,
+			endedAt,
+			samples: lag.count,
+			p99Ms: lag.count === 0 ? null : lag.percentile(99) / 1e6,
+			maxMs: lag.count === 0 ? null : lag.max / 1e6,
+			peakPendingWrites,
+		};
+		getStore()
+			.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)")
+			.run(`dispatch_window:${dispatchWindow.id}`, JSON.stringify(sample));
+	};
+	const endDispatch = (runId: string, at: string): void => {
+		if (!activeDispatches.delete(runId)) return;
+		recordDispatchWindow(at);
+		if (activeDispatches.size === 0) {
+			lag.disable();
+			dispatchWindow = null;
+		}
+	};
+
 	let unreportedProgress = 0;
 	const starts = new Map<string, ToolStart>();
 	const seen = new Map<string, number>();
+	const announcedRuns = new Set<string>();
 	const contextWindows = new Map<string, number>();
 	const gateRuns = new Map<string, { role: string; cycle: number }>();
 	const forgetRun = (runId: string): void => {
 		for (const key of starts.keys()) if (key.startsWith(`${runId}:`)) starts.delete(key);
 		seen.delete(runId);
+		announcedRuns.delete(runId);
 		contextWindows.delete(runId);
 		gateRuns.delete(runId);
 	};
@@ -1536,8 +1583,12 @@ export function createDispatchTraceMirror(
 	const degrade = (error: unknown): void => {
 		if (!degraded) warn(error instanceof Error ? error.message : String(error));
 		degraded = true;
+		lag.disable();
+		activeDispatches.clear();
+		dispatchWindow = null;
 		starts.clear();
 		seen.clear();
+		announcedRuns.clear();
 		contextWindows.clear();
 		gateRuns.clear();
 		if (store === null) warn("capture degradation could not be recorded: trace database unavailable");
@@ -1554,14 +1605,9 @@ export function createDispatchTraceMirror(
 		}
 	};
 	/**
-	 * One row that cannot be written loses that row, never the rest of the
-	 * process's capture. Only the failing store transaction rolls back: a write
-	 * split across transactions, such as startRun's upsert and its running
-	 * update, may keep the part that committed. The loss is counted and the
-	 * warning names the channel and run. A run that was tracked before the row
-	 * stays tracked, so its later rows still land. Capture degrades only when
-	 * the store cannot be opened at all or the loss marker itself cannot be
-	 * written.
+	 * Savepoints isolate a failed queued fact inside its tick's transaction.
+	 * Count the loss and keep capturing other rows; only an unavailable store
+	 * or loss marker degrades the whole mirror (#428).
 	 */
 	const rowFailed = (row: TraceRow, error: unknown): void => {
 		const key = `${row.channel}\u0000${row.runId ?? ""}`;
@@ -1579,44 +1625,74 @@ export function createDispatchTraceMirror(
 	};
 	const schedule = (row: TraceRow, work: () => void): void => {
 		if (closed || degraded) return;
+		pending.push({ row, work });
 		pendingWrites += 1;
-		chain = chain.then(
-			() =>
-				new Promise<void>((resolve) => {
-					setImmediate(() => {
-						try {
-							if (degraded) {
-								pendingWrites -= 1;
-								return resolve();
+		peakPendingWrites = Math.max(peakPendingWrites, pendingWrites);
+		ensureDrain();
+	};
+	const ensureDrain = (): void => {
+		if (drain !== null) return;
+		// One tick's facts share a transaction; deltas never enter this queue (#428).
+		drain = new Promise<void>((resolve) => {
+			setImmediate(() => {
+				const batch = pending.splice(0);
+				try {
+					if (!degraded) {
+						const writer = getStore();
+						let reportedProgress = 0;
+						writer.transaction(() => {
+							for (const item of batch) {
+								try {
+									writer.captureRow(item.work);
+								} catch (error) {
+									rowFailed(item.row, error);
+								}
+								if (degraded) break;
 							}
-							getStore();
-						} catch (error) {
-							degrade(error);
-							pendingWrites -= 1;
-							return resolve();
-						}
-						try {
-							work();
 							if (unreportedProgress > 0) {
-								getStore().recordCaptureLoss("progress", unreportedProgress);
-								unreportedProgress = 0;
+								reportedProgress = unreportedProgress;
+								writer.recordCaptureLoss("progress", reportedProgress);
 							}
-						} catch (error) {
-							rowFailed(row, error);
-						}
-						pendingWrites -= 1;
-						resolve();
-					});
-				}),
-		);
+							writer
+								.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)")
+								.run("capture_peak_pending_writes", String(peakPendingWrites));
+						});
+						unreportedProgress -= reportedProgress;
+					}
+				} catch (error) {
+					// A failed batch commit loses all its rows, including cache updates (#428).
+					degrade(error);
+				} finally {
+					pendingWrites -= batch.length;
+					if (pendingWrites < TRACE_WRITE_QUEUE_LIMIT / 2) saturationReported = false;
+					drain = null;
+					if (pending.length > 0) ensureDrain();
+					resolve();
+				}
+			});
+		});
+	};
+	const flush = async (): Promise<void> => {
+		while (drain !== null) await drain;
+		reportUnwarnedFailedRows();
 	};
 
 	return {
 		enqueue(channel, raw): void {
+			if (closed || degraded || isDisplayOnlyTraceDelta(channel, raw)) return;
 			const observedAt = now();
+			if (
+				(channel === "dispatch.enqueued" || channel === "dispatch.started") &&
+				isRecord(raw) &&
+				typeof raw.runId === "string"
+			)
+				beginDispatch(raw.runId, observedAt);
 			if (pendingWrites >= TRACE_WRITE_QUEUE_LIMIT && !isCriticalTraceEvent(channel, raw)) {
-				droppedProgress += 1;
 				unreportedProgress += 1;
+				if (!saturationReported) {
+					saturationReported = true;
+					warn(`trace queue saturated at ${pendingWrites} pending writes; dropping progress events until it drains`);
+				}
 				return;
 			}
 			schedule({ channel, runId: isRecord(raw) && typeof raw.runId === "string" ? raw.runId : null }, () => {
@@ -1624,7 +1700,8 @@ export function createDispatchTraceMirror(
 				if (channel === "dispatch.enqueued") {
 					const payload = raw as unknown as DispatchEnqueuedPayload;
 					getStore().upsertRun(payload, observedAt);
-					seen.set(payload.runId, seen.get(payload.runId) ?? 0);
+					seedRunSequence(getStore(), seen, payload.runId);
+					announcedRuns.add(payload.runId);
 					if (payload.contextWindow !== undefined) contextWindows.set(payload.runId, payload.contextWindow);
 					if (payload.gate !== undefined) gateRuns.set(payload.runId, payload.gate);
 				} else if (channel === "dispatch.started")
@@ -1636,22 +1713,27 @@ export function createDispatchTraceMirror(
 					// attempt it starts, whose row the retry's own enqueue wrote first.
 					if (isRecord(payload.event) && payload.event.type === "attempt_start" && typeof payload.event.runId === "string")
 						payload = { ...payload, runId: payload.event.runId };
-					const active = seen.has(payload.runId);
-					// The forget runs even when the row throws, or a row for a run that
-					// was not tracked leaves its entries in seen and starts for the
-					// life of the process.
-					try {
-						recordProgress(getStore(), payload, starts, seen, contextWindows, gateRuns, observedAt);
-					} finally {
-						if (!active) forgetRun(payload.runId);
-					}
+					seedRunSequence(getStore(), seen, payload.runId);
+					recordProgress(
+						getStore(),
+						payload,
+						starts,
+						seen,
+						contextWindows,
+						gateRuns,
+						observedAt,
+						announcedRuns.has(payload.runId),
+					);
 				} else if (channel === "dispatch.completed" || channel === "dispatch.failed") {
 					const payload = raw as unknown as DispatchFailedPayload;
 					try {
 						if (channel === "dispatch.completed") getStore().finishRun(payload, true, observedAt);
 						else recordFailure(getStore(), payload, observedAt);
 					} finally {
-						if (channel === "dispatch.completed" || payload.reason !== "retry_denied") forgetRun(payload.runId);
+						if (channel === "dispatch.completed" || payload.reason !== "retry_denied") {
+							endDispatch(payload.runId, observedAt);
+							forgetRun(payload.runId);
+						}
 					}
 				}
 			});
@@ -1667,27 +1749,48 @@ export function createDispatchTraceMirror(
 				getStore().recordPackageActivity(activity),
 			);
 		},
-		async flush(): Promise<void> {
-			await chain;
-			if (droppedProgress > 0) {
-				warn(`dropped ${droppedProgress} display-only progress events because the trace queue was full`);
-				droppedProgress = 0;
-			}
-			reportUnwarnedFailedRows();
-		},
+		flush,
 		async close(): Promise<void> {
 			closed = true;
-			await chain;
-			if (droppedProgress > 0)
-				warn(`dropped ${droppedProgress} display-only progress events because the trace queue was full`);
-			reportUnwarnedFailedRows();
+			await flush();
+			try {
+				if (store !== null && !degraded) recordDispatchWindow(now());
+			} catch (error) {
+				degrade(error);
+			}
+			lag.disable();
+			activeDispatches.clear();
 			store?.close();
 			starts.clear();
 			seen.clear();
+			announcedRuns.clear();
 			contextWindows.clear();
 			gateRuns.clear();
 		},
 	};
+}
+
+function seedRunSequence(store: TraceStore, seen: Map<string, number>, runId: string): void {
+	if (seen.has(runId)) return;
+	const prefix = `${runId}:event:`;
+	const row = store
+		.prepare(
+			"SELECT CAST(substr(event_id, ?) AS INTEGER) AS sequence FROM events WHERE run_id=? AND substr(event_id, 1, ?)=? ORDER BY rowid DESC LIMIT 1",
+		)
+		.get(prefix.length + 1, runId, prefix.length, prefix) as { sequence: number } | undefined;
+	seen.set(runId, row?.sequence ?? 0);
+}
+
+// Native, ACP and SDK display deltas carry no durable trace facts (#428).
+function isDisplayOnlyTraceDelta(channel: string, raw: unknown): boolean {
+	if (channel !== "dispatch.progress" || !isRecord(raw) || !isRecord(raw.event)) return false;
+	return (
+		raw.event.type === "message_update" ||
+		raw.event.type === "text_delta" ||
+		raw.event.type === "thinking_delta" ||
+		raw.event.type === "toolcall_delta" ||
+		raw.event.type === "tool_execution_update"
+	);
 }
 
 function recordProgress(
@@ -1698,6 +1801,7 @@ function recordProgress(
 	contextWindows: Map<string, number>,
 	gateRuns: Map<string, { role: string; cycle: number }>,
 	at: string,
+	announced: boolean,
 ): void {
 	if (!isRecord(payload.event)) return;
 	const event = payload.event;
@@ -1728,10 +1832,10 @@ function recordProgress(
 		store.recordContext(payload.runId, contextTokens, contextWindows.get(payload.runId) ?? null, at);
 	}
 	let gate = gateRuns.get(payload.runId);
-	if (!seen.has(payload.runId) && type === "message_end") {
-		const row = store.db
-			.prepare("SELECT payload_json FROM events WHERE event_id=?")
-			.get(`${payload.runId}:agent_start`) as { payload_json: string } | undefined;
+	if (!announced && type === "message_end") {
+		const row = store.prepare("SELECT payload_json FROM events WHERE event_id=?").get(`${payload.runId}:agent_start`) as
+			| { payload_json: string }
+			| undefined;
 		gate = (JSON.parse(row?.payload_json ?? "null") as { gate?: { role: string; cycle: number } } | null)?.gate;
 	}
 	if (type === "message_end" && gate !== undefined && isRecord(event.message) && event.message.role === "assistant") {
@@ -1753,8 +1857,8 @@ function recordProgress(
 		const engine = type === "tool_execution_start";
 		const named = stringValue(toolFacts.toolName) ?? stringValue(toolFacts.tool);
 		const known = starts.get(key);
-		const previous = !seen.has(payload.runId)
-			? (store.db
+		const previous = !announced
+			? (store
 					.prepare("SELECT started_at, ended_at, payload_json FROM events WHERE event_id=?")
 					.get(`${payload.runId}:tool:${toolCallId}`) as
 					| { started_at: string; ended_at: string | null; payload_json: string | null }
@@ -1813,7 +1917,7 @@ function recordProgress(
 		const start = starts.get(key);
 		const previous =
 			start === undefined
-				? (store.db
+				? (store
 						.prepare("SELECT started_at, ended_at, payload_json FROM events WHERE event_id=?")
 						.get(`${payload.runId}:tool:${toolCallId}`) as
 						| { started_at: string; ended_at: string | null; payload_json: string | null }
@@ -1935,17 +2039,7 @@ function recordProgress(
 		}
 		return;
 	}
-	const prefix = `${payload.runId}:event:`;
-	const sequence =
-		(seen.get(payload.runId) ??
-			(
-				store.db
-					.prepare(
-						"SELECT CAST(substr(event_id, ?) AS INTEGER) AS sequence FROM events WHERE run_id=? AND substr(event_id, 1, ?)=? ORDER BY rowid DESC LIMIT 1",
-					)
-					.get(prefix.length + 1, payload.runId, prefix.length, prefix) as { sequence: number } | undefined
-			)?.sequence ??
-			0) + 1;
+	const sequence = (seen.get(payload.runId) ?? 0) + 1;
 	seen.set(payload.runId, sequence);
 	store.insertEvent({
 		eventId: `${payload.runId}:event:${sequence}`,
