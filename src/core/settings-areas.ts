@@ -183,6 +183,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "fleet.retry.maxRetries":
 			return place("fleet", "Limits & retries");
 		case "fleet.limits.internalRunTimeoutMs":
+		case "safety.limits.workerResponseSeconds":
 		case "fleet.retry.routeCooldownMs":
 		case "fleet.retry.breakerThreshold":
 			return place("advanced", "Fleet timing");
@@ -243,6 +244,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "safety.sandboxNetwork":
 		case "safety.sandboxPassEnv":
 		case "safety.sandboxUnixSockets":
+		case "safety.scratchRoots":
 			return place("safety", "Worker approvals");
 		default:
 	}

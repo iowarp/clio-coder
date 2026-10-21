@@ -89,6 +89,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"guardrails.internalDispatchTimeoutMs": "Maximum internal run time",
 	"compaction.auto": "Summarize automatically",
 	"compaction.threshold": "When to summarize",
+	"context.compaction.maxTokens": "Context token ceiling",
 	"context.workingSet.enabled": "Clear old tool output",
 	"context.workingSet.policy": "How old output is chosen",
 	"context.workingSet.profile": "What to keep in context",
@@ -187,6 +188,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"guardrails.internalDispatchTimeoutMs": "Maximum time for one internal worker run.",
 	"compaction.auto": "Summarize older context automatically before the conversation fills up.",
 	"compaction.threshold": "How full the model's context can get before Clio summarizes older content.",
+	"context.compaction.maxTokens":
+		"Input token ceiling used to trigger context cleanup independently of the model's window.",
 	"context.workingSet.enabled": "Free space by setting aside stale tool output before summarizing the conversation.",
 	"context.workingSet.policy": "Choose how Clio finds old tool output to set aside.",
 	"context.workingSet.profile": "Keep extra outputs that matter for the current kind of work.",
@@ -241,6 +244,8 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 		"At least 4 KB. Clio can read up to 192 KB of tool output across a whole turn, even if this per-result limit is higher.",
 	"compaction.threshold":
 		"Choose how full the model's context may get. A higher percentage keeps more history but leaves less room for the next answer.",
+	"context.compaction.maxTokens":
+		"Whole number of at least 1 · default: 200000 tokens. A lower ceiling limits input cost by triggering cleanup sooner, even when the model has a larger context window.",
 	"context.workingSet.enabled":
 		"Old tool output is set aside without changing chat history. When off, Clio waits until it needs to summarize the conversation.",
 	"context.workingSet.policy":

@@ -509,6 +509,7 @@ const NUMBER_SETTING_RULES = {
 	"guardrails.readMaxBytes": { min: 1, integer: true },
 	"guardrails.observationTurnBudgetBytes": { min: 1, integer: true },
 	"guardrails.internalDispatchTimeoutMs": { min: 1, integer: true },
+	"context.compaction.maxTokens": { min: 1, integer: true },
 	// The config validator's bounds for both dock shares; half the axis is the cap.
 	"panes.workers.ratio": { min: 0.05, max: 0.5, integer: false },
 	"panes.yazi.ratio": { min: 0.05, max: 0.5, integer: false },
@@ -1626,6 +1627,10 @@ export function buildSettingItems(
 		}),
 		settingItem("compaction.threshold", formatThreshold(compaction.threshold), {
 			values: ["0.7", "0.8", "0.85", "0.9"],
+		}),
+		settingItem("context.compaction.maxTokens", String(compaction.maxTokens ?? ""), {
+			submenu: editNumberSubmenu("Edit context token ceiling", "context.compaction.maxTokens"),
+			affordance: "free text",
 		}),
 		settingItem("context.workingSet.enabled", String(workingSet.enabled), {
 			values: ["true", "false"],
