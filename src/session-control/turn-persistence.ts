@@ -5,7 +5,7 @@
  * append advances `state.lastTurnId`.
  */
 
-import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
+import type { BackendCompletionTimings, CacheCallObservation } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { PackageIdentity } from "../core/package-identity.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
@@ -26,6 +26,7 @@ import type {
 	AgentMessage,
 	AnthropicResponseObservation,
 	CodexQuotaObservation,
+	CodexTransportObservation,
 	Usage,
 } from "../engine/types.js";
 import {
@@ -360,6 +361,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (explainInterruptedAssistant(message, state.activeInterruptReason)) state.interruptedAssistantMessage = message;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		const transport = (message as { codexTransport?: CodexTransportObservation }).codexTransport;
+		if (transport) payload.codexTransport = transport;
 		const quota = (message as { codexQuota?: CodexQuotaObservation }).codexQuota;
 		if (quota && state.runtime?.runtimeId === "openai-codex") {
 			noteCodexStreamQuota(state.runtime.targetId, quota);
@@ -401,7 +404,16 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
 			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse);
+			const promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse);
+			if (transport) {
+				const observation = promptCache.observation as CacheCallObservation;
+				observation.transport = {
+					mode: transport.mode,
+					request: transport.request,
+					...(transport.reason ? { reason: transport.reason } : {}),
+				};
+			}
+			payload.promptCache = promptCache;
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = appendTurn(deps.session, {

@@ -71,7 +71,7 @@ export interface CacheCallObservation {
 	comparisonId?: string;
 	changedSection?: string;
 	requestFingerprint?: CacheRequestFingerprint;
-	transport?: { mode: "websocket" | "sse" | "http"; request: "full" | "delta" | "unknown"; reason?: string };
+	transport?: { mode: "websocket" | "sse" | "http" | "unknown"; request: "full" | "delta" | "unknown"; reason?: string };
 }
 
 export interface CacheRequestFingerprint {

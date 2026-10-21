@@ -29,6 +29,7 @@
 import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
 import { isLiteLLMConnectionFailure } from "../../core/gateway-routing.js";
+import { isProviderAuthRejection } from "../../core/provider-auth-error.js";
 import { engineRetryDelayMs, isEngineContextOverflow, isEngineRetryableAssistantError } from "../../engine/ai.js";
 import { SESSION_COST_CEILING_REASON } from "../scheduling/budget.js";
 
@@ -130,12 +131,7 @@ export function classifyRecoveryFailure(input: RecoveryFailureInput): RecoveryFa
 	// server error, and another attempt meets the same ceiling (#423).
 	else if (input.message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) kind = "terminal-provider";
 	else if (input.contextOverflow ?? isEngineContextOverflow(input.message)) kind = "context-overflow";
-	else if (
-		input.status === 401 ||
-		input.status === "401" ||
-		/\b401\b|\btoken\b[^\r\n]*\bexpired\b|\binvalid_token\b/i.test(input.message)
-	)
-		kind = "auth";
+	else if (isProviderAuthRejection(input.message, input.status)) kind = "auth";
 	else if (input.runtimeId === "litellm") {
 		kind = !input.hasAttemptOutput && isLiteLLMConnectionFailure(input.message) ? "connection" : "terminal-provider";
 	} else if (isModelLoadingErrorMessage(input.message)) kind = "model-loading";

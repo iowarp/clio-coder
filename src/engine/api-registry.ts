@@ -29,6 +29,7 @@ import { withAnthropicDiagnostics } from "./apis/anthropic-diagnostics.js";
 import { observeAnthropicResponse } from "./apis/anthropic-response.js";
 import { withCodexConfiguration } from "./apis/codex-configuration.js";
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
+import { observeCodexTransport } from "./apis/codex-transport.js";
 import { observeResponsesModelId } from "./apis/responses-model-id.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { normalizeContext } from "./context.js";
@@ -149,7 +150,9 @@ export function engineStream(
 				),
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
-						observeResponsesModelId(model, anthropic, (observed) => dispatchEngineStream(model, context, observed)),
+						observeCodexTransport(model, anthropic, (transport) =>
+							observeResponsesModelId(model, transport, (observed) => dispatchEngineStream(model, context, observed)),
+						),
 					),
 			),
 		),
@@ -195,7 +198,9 @@ function scopedEngineStreamSimple(
 				),
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
-						observeResponsesModelId(model, anthropic, (observed) => dispatchEngineStreamSimple(model, context, observed)),
+						observeCodexTransport(model, anthropic, (transport) =>
+							observeResponsesModelId(model, transport, (observed) => dispatchEngineStreamSimple(model, context, observed)),
+						),
 					),
 				scope,
 			),

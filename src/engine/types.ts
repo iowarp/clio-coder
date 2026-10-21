@@ -99,3 +99,32 @@ export interface ToolRoundRecord {
 	attempt: 0 | 1;
 	downgradeReason?: string;
 }
+
+/** #423: physical WebSocket sends, not provider usage or SSE HTTP retry counts. */
+export interface CodexTransportCounters {
+	requests: number;
+	connectionsCreated: number;
+	connectionsReused: number;
+	fullContextRequests: number;
+	deltaRequests: number;
+	websocketFailures: number;
+	sseFallbacks: number;
+}
+
+/** #423 / #427 AC4: sanitized per-call transport attribution and safe-boundary recovery. */
+export interface CodexTransportObservation {
+	mode: "websocket" | "sse" | "unknown";
+	request: "full" | "delta" | "unknown";
+	attribution: "exclusive" | "overlap" | "no_session" | "counter_reset";
+	counters: CodexTransportCounters | null;
+	lastInputItems: number | null;
+	fallbackActive: boolean;
+	reason?: string;
+	cooldownMs?: number | null;
+	retryAt?: string | null;
+	recovery?: {
+		action: "cooldown_reset" | "auth_reset";
+		countersBeforeReset: CodexTransportCounters;
+		outcome: "eligible" | "recovered" | "failed" | "unknown";
+	};
+}
