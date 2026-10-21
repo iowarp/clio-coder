@@ -81,8 +81,9 @@ test("Anthropic named-tool rounds retain the entire tool prefix and resume think
 	assert.equal(adaptive.output_config?.effort, "high");
 	assert.equal(adaptive.temperature, undefined);
 	const forcedHaiku = await wire(haiku, [{ kind: "required", toolName: "read" }]);
-	assert.deepEqual(forcedHaiku.tool_choice, { type: "tool", name: "read" });
-	assert.equal(forcedHaiku.thinking, undefined);
+	// Haiku 5.5 routes required rounds through auto and keeps thinking, so the cached prefix survives (#423).
+	assert.deepEqual(forcedHaiku.tool_choice, { type: "auto" });
+	assert.equal(forcedHaiku.thinking?.type, "adaptive");
 	const missing = applyToolRounds(managed, request, undefined, [{ kind: "required", toolName: "missing" }]);
 	assert.equal(missing.context, request);
 	assert.equal(missing.options, undefined);
