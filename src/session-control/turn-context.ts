@@ -70,7 +70,8 @@ import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-s
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
-import { memorySectionDelta } from "../domains/memory/prompt-section.js";
+import { memorySectionBlocks, memorySectionDelta } from "../domains/memory/prompt-section.js";
+import type { MemoryStatus } from "../domains/memory/types.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -193,6 +194,7 @@ export interface TurnContextDeps {
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
 	getMemorySection?: ((request: MemoryPromptRequest) => string) | undefined;
+	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryStatus | "deleted">) | undefined;
 	/**
 	 * Memory scores for the section this request builds, or undefined when the
 	 * `relevance` site is unbound, ranking could not change the section, or the
@@ -2453,10 +2455,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					sessionInputs: inputs,
 					attachedToolSchemas,
 				});
-			const memoryDelta = (compiled: string): string =>
-				compiled === liveMemorySection
-					? ""
-					: memorySectionDelta(compiled, liveMemorySection, hostFramedTexts(agentRuntime.agent.state.messages));
+			const memoryDelta = (compiled: string): string => {
+				const framed = hostFramedTexts(agentRuntime.agent.state.messages);
+				const ids = [
+					...new Set(
+						[compiled, ...framed.filter((text) => text.includes("# Memory update"))].flatMap((section) =>
+							memorySectionBlocks(section).map((block) => block.id),
+						),
+					),
+				];
+				const statuses = ids.length > 0 ? deps.getMemoryRecordStatuses?.(ids) : undefined;
+				return memorySectionDelta(compiled, liveMemorySection, framed, statuses);
+			};
 			const frozenInputs = withMemory(frozenMemory);
 			const key = promptKey(frozenInputs);
 			if (sessionPrompt && sessionPromptKey === key) {

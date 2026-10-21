@@ -15,6 +15,7 @@ import type {
 	MemoryRepositoryIdentity,
 	MemoryRuntimeIdentity,
 	MemoryScope,
+	MemoryStatus,
 } from "./types.js";
 
 export const MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET = 400;
@@ -190,16 +191,35 @@ const MEMORY_UPDATE_HEADING = "# Memory update";
  * Records that only dropped out of the live selection say nothing: ranking is
  * not withdrawal.
  */
-export function memorySectionDelta(frozen: string, live: string, framed: readonly string[]): string {
+export function memorySectionDelta(
+	frozen: string,
+	live: string,
+	framed: readonly string[],
+	statuses: ReadonlyMap<string, MemoryStatus | "deleted"> = new Map(),
+): string {
 	const known = memorySectionBlocks(frozen).map((block) => block.text);
+	const delivered = [frozen, ...framed.filter((text) => text.includes(MEMORY_UPDATE_HEADING))];
+	const withdrawn = [...new Set(delivered.flatMap((text) => memorySectionBlocks(text).map((block) => block.id)))]
+		.filter((id) => statuses.get(id) === "rejected" || statuses.get(id) === "deleted")
+		.map((id) => `- [${id}] withdrawn. Do not use this memory record.`)
+		.filter((line) => !framed.some((text) => text.includes(line)));
 	const fresh = memorySectionBlocks(live).filter(
-		(block) => !known.includes(block.text) && !framed.some((text) => text.includes(block.text)),
+		(block) =>
+			statuses.get(block.id) !== "rejected" &&
+			statuses.get(block.id) !== "deleted" &&
+			!known.includes(block.text) &&
+			!framed.some((text) => text.includes(block.text)),
 	);
-	if (fresh.length === 0) return "";
+	if (fresh.length === 0 && withdrawn.length === 0) return "";
 	return [
 		MEMORY_UPDATE_HEADING,
-		"Records added or revised since this session's # Memory section was compiled. They stand like the records there; a revised record replaces the entry with the same id.",
+		...(fresh.length > 0
+			? [
+					"Records added or revised since this session's # Memory section was compiled. They stand like the records there; a revised record replaces the entry with the same id.",
+				]
+			: []),
 		...fresh.map((block) => block.text),
+		...withdrawn,
 	].join("\n");
 }
 

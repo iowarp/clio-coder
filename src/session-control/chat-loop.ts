@@ -179,7 +179,7 @@ import {
 	triageSnapshotMatches,
 	triageUserText,
 } from "./steering-triage.js";
-import type { LiveContextUsage } from "./turn-context.js";
+import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
@@ -979,6 +979,7 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: (request: MemoryPromptRequest) => string;
+	getMemoryRecordStatuses?: TurnContextDeps["getMemoryRecordStatuses"];
 	/**
 	 * Start reading this turn's request through the `turn` site, once, before the
 	 * prompt is built, and return without waiting for it. The interactive host
@@ -1473,6 +1474,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		readSessionEntries: deps.readSessionEntries,
 		autoCompact: deps.autoCompact,
 		getMemorySection: deps.getMemorySection,
+		getMemoryRecordStatuses: deps.getMemoryRecordStatuses,
 		...(deps.getMemoryRelevance ? { getMemoryRelevance: deps.getMemoryRelevance } : {}),
 		memoryCommitBridge: deps.memoryCommitBridge,
 		getReadySkillCount: deps.getReadySkillCount,

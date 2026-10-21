@@ -114,6 +114,7 @@ import {
 	createTaskMemoryTrace,
 	loadMemoryRecordsSync,
 	MemoryRuntime,
+	memoryStatus,
 	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
@@ -126,6 +127,7 @@ import {
 } from "../domains/memory/index.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { createMemoryRelevance } from "../domains/memory/relevance-source.js";
+import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
 import {
 	deleteTaskBankSnapshot,
 	loadTaskBankSnapshot,
@@ -4427,6 +4429,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getMemorySection: (request) => {
 			lastMemoryPromptRuntimeId = request.runtimeId;
 			return memoryReader(request);
+		},
+		getMemoryRecordStatuses: (ids) => {
+			try {
+				const records = new Map(readMemoryStoreSnapshot(clioDataDir()).records.map((record) => [record.id, record]));
+				return new Map(
+					ids.map((id) => {
+						const record = records.get(id);
+						return [id, record ? memoryStatus(record) : "deleted"] as const;
+					}),
+				);
+			} catch {
+				// An unreadable store cannot establish a withdrawal (#423).
+				return new Map();
+			}
 		},
 		// Memory is ranked while the prompt composes, and only when the order decides
 		// what the section carries: more eligible records than it admits and no

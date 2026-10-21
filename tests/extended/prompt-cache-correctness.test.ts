@@ -331,20 +331,22 @@ describe("main compiled-prompt cache identity", () => {
 		strictEqual(compileCalls, 4, "resolved context-window inputs must invalidate reuse");
 
 		memorySection = "# Memory\n\n- second";
-		await context.ensureSessionPrompt(agentRuntime);
-		strictEqual(compileCalls, 5, "resolved memory input must invalidate reuse");
+		const frozenPrompt = await context.ensureSessionPrompt(agentRuntime);
+		strictEqual(compileCalls, 4, "memory changes must preserve the session's frozen compile");
+		strictEqual(JSON.parse(frozenPrompt?.systemPrompt ?? "").memorySection, "# Memory\n\n- first");
 
 		readySkillCount = 0;
-		await context.ensureSessionPrompt(agentRuntime);
-		strictEqual(compileCalls, 6, "ready skill inventory must invalidate reuse");
+		const refreshedPrompt = await context.ensureSessionPrompt(agentRuntime);
+		strictEqual(compileCalls, 6, "changed inventory makes the prompt cold, so a second compile incorporates live memory");
+		strictEqual(JSON.parse(refreshedPrompt?.systemPrompt ?? "").memorySection, memorySection);
 		state.currentTurnConstraints = { mode: "answer", allowedTools: ["read"] };
 		const scopedPrompt = await context.ensureSessionPrompt(agentRuntime);
-		strictEqual(compileCalls, 7, "host scope must invalidate reuse");
+		strictEqual(compileCalls, 6, "turn scope must preserve the session's standing compile");
 		const renderedInputs = JSON.parse(scopedPrompt?.systemPrompt ?? "");
 		strictEqual(renderedInputs.readySkillCount, 0);
-		deepStrictEqual(renderedInputs.turnConstraints, state.currentTurnConstraints);
+		strictEqual(renderedInputs.turnConstraints, undefined);
 		await context.ensureSessionPrompt(agentRuntime);
-		strictEqual(compileCalls, 7, "unchanged scope must preserve the compiled result");
+		strictEqual(compileCalls, 6, "unchanged scope must preserve the compiled result");
 
 		strictEqual(attachedToolSchemasFromState(runtime.agent.state.tools)[0]?.description, "Changed description.");
 		context.dispose();
