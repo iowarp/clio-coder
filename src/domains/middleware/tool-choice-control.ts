@@ -42,18 +42,20 @@ export function createMiddlewareToolChoiceControl(): MiddlewareToolChoiceControl
 		},
 		completeRound(message) {
 			if (choice.kind !== "required" || message.stopReason === "error" || message.stopReason === "aborted") return null;
+			// `choice` is reassigned by sibling methods, so its narrowing does not reach the callbacks below.
+			const toolName = choice.toolName;
 			const records = (message as AssistantMessage & { toolRounds?: ToolRoundRecord[] }).toolRounds;
 			const record = records?.at(-1);
-			if (record?.kind !== "required" || record.toolName !== choice.toolName || record.choice !== "auto") return null;
+			if (record?.kind !== "required" || record.toolName !== toolName || record.choice !== "auto") return null;
 			if (followUpUsed) record.enforcement = "follow-up";
-			if (message.content.some((block) => block.type === "toolCall" && block.name === choice.toolName)) return null;
+			if (message.content.some((block) => block.type === "toolCall" && block.name === toolName)) return null;
 			if (followUpUsed) {
 				record.enforcement = "unmet";
 				return null;
 			}
 			followUpUsed = true;
 			record.enforcement = "follow-up";
-			return `<system-reminder>Call the ${choice.toolName} tool now. This tool is required before answering.</system-reminder>`;
+			return `<system-reminder>Call the ${toolName} tool now. This tool is required before answering.</system-reminder>`;
 		},
 		reset() {
 			choice = { kind: "auto" };
