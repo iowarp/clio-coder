@@ -3330,10 +3330,34 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			yoloHeldAtBoot = true;
 		}
 	}
-	const sessionOverrides: SessionOverrides = new Map(
+	const startupOverrides: SessionOverrides = new Map(
 		bootAutonomy === undefined ? [] : [["safety.autonomy", bootAutonomy]],
 	);
-	if (options.demo !== undefined) sessionOverrides.set("interface.demo", options.demo);
+	if (options.demo !== undefined) startupOverrides.set("interface.demo", options.demo);
+	const conversationOverrides = new Map<string, SessionOverrides>();
+	let overrideSessionId = session?.current()?.id ?? null;
+	let sessionOverrides: SessionOverrides = new Map();
+	let forkParentId: string | null = null;
+	let loadingSessionId: string | null = null;
+	const syncConversationOverrides = (resumedId: string | null = loadingSessionId): boolean => {
+		const incomingId = session?.current()?.id ?? null;
+		if (incomingId === overrideSessionId) return false;
+		if (overrideSessionId !== null) conversationOverrides.set(overrideSessionId, sessionOverrides);
+		// AUD-3 finding 1: a draft's choices belong to its first newly created
+		// conversation, while resuming an existing ID discards the draft. A fork
+		// continues its parent, so inherit a copy; later resumes load its own map.
+		// SessionResuming marks loads before replacement, so earlier resume observers see the same choice.
+		let incomingOverrides = incomingId === null ? undefined : conversationOverrides.get(incomingId);
+		if (incomingOverrides === undefined && incomingId !== null && incomingId !== resumedId) {
+			if (overrideSessionId === null) incomingOverrides = sessionOverrides;
+			else if (forkParentId === overrideSessionId) incomingOverrides = new Map(sessionOverrides);
+		}
+		overrideSessionId = incomingId;
+		sessionOverrides = incomingOverrides ?? new Map();
+		forkParentId = null;
+		loadingSessionId = null;
+		return true;
+	};
 	// The effective view is derived by deep-cloning the saved snapshot, and it
 	// is read on the tool-admission hot path (every call resolves autonomy
 	// through it). Memoize on the two things it depends on: the config
@@ -3353,6 +3377,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		setGitCommitAttributionEnabled(settings.integrations.git.commitAttribution);
 	};
 	const getCurrentSettings = (): ClioSettings => {
+		// AUD-3 finding 1: lazy creates and forks do not emit SessionResumed.
+		// Check identity before a cached view can expose the outgoing conversation.
+		if (syncConversationOverrides()) bumpSessionState();
 		// Recents live in the data dir (core/recent-models.ts), never in
 		// settings.yaml; consumers that need them call listRecentModels
 		// directly, so an Alt+M pick in another session does not churn the
@@ -3360,7 +3387,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const base = config?.get();
 		// No config domain (unit tests, degraded boot): readSettings() returns a
 		// fresh object every call, so there is nothing stable to key a cache on.
-		if (base === undefined) return applySessionRouting(applyOverrides(readSettings(), sessionOverrides), sessionRouting);
+		if (base === undefined) {
+			return applySessionRouting(
+				applyOverrides(readSettings(), new Map([...startupOverrides, ...sessionOverrides])),
+				sessionRouting,
+			);
+		}
 		if (
 			cachedSettingsView !== null &&
 			cachedSettingsBase === base &&
@@ -3368,7 +3400,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		) {
 			return cachedSettingsView;
 		}
-		const view = applySessionRouting(applyOverrides(base, sessionOverrides), sessionRouting);
+		const view = applySessionRouting(
+			applyOverrides(base, new Map([...startupOverrides, ...sessionOverrides])),
+			sessionRouting,
+		);
 		cachedSettingsBase = base;
 		cachedSettingsGeneration = sessionStateGeneration;
 		cachedSettingsView = view;
@@ -3406,6 +3441,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	};
 	bumpSessionState();
+	// AUD-3 finding 1: resume/branch switches publish after replacement; new
+	// conversations and forks only park, so refresh those after replacement.
+	const unsubscribeConversationOverrides = [
+		bus.on(BusChannels.SessionResuming, ({ sessionId }) => {
+			loadingSessionId = sessionId;
+			queueMicrotask(() => {
+				if (loadingSessionId === sessionId) loadingSessionId = null;
+			});
+		}),
+		bus.on(BusChannels.SessionResumed, ({ sessionId }) => {
+			if (syncConversationOverrides(sessionId)) bumpSessionState();
+		}),
+		bus.on(BusChannels.SessionParked, ({ sessionId, reason }) => {
+			forkParentId = reason === "fork" ? sessionId : null;
+			queueMicrotask(() => getCurrentSettings());
+		}),
+	];
+	termination.onDrain(() => {
+		for (const unsubscribe of unsubscribeConversationOverrides) unsubscribe();
+	});
 	// The config bundle publishes saved values on reload; session-scoped
 	// overrides must win, so re-derive every process-local projection from the
 	// effective session view after it.
@@ -3967,7 +4022,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					// A whole-blob write (providers, favorites) must not globalize a
 					// session-only override: restore every overridden leaf from the
 					// fresh file so it stays session-local until explicitly saved.
-					for (const path of sessionOverrides.keys()) setAtPath(persisted, path, getAtPath(fresh, path));
+					for (const path of [...startupOverrides.keys(), ...sessionOverrides.keys()]) {
+						setAtPath(persisted, path, getAtPath(fresh, path));
+					}
 					if (patch) mergeRoutingPatchIntoSettings(persisted, patch);
 					return persisted;
 				}),
@@ -4003,6 +4060,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			applyRoutingAtScope(patch, scope);
 			return;
 		}
+		getCurrentSettings();
 		const value = getAtPath(next, id);
 		if (scope === "session") {
 			sessionOverrides.set(id, value);
@@ -5535,7 +5593,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				? null
 				: createRunCostCap(observability?.sessionCost() ?? 0, options.headless.maxCostUsd);
 		if (runCostCap !== null) {
-			sessionOverrides.set(
+			startupOverrides.set(
 				"safety.limits.sessionCostUsd",
 				runCostCeilingUsd({
 					spentUsd: runCostCap.startUsd,

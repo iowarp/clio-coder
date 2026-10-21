@@ -268,13 +268,15 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// orphan the operator with no current session (issue #93); on success,
 			// the prior is parked and closed only now that the successor is known good.
 			const resumed = resumeSessionState(sessionId);
+			const leafTurnId = resolveLeafOnOpen(resumed);
 			if (state) {
 				const prior = state;
 				emitPark(prior.meta.id, "resume_other");
 				void prior.writer.close();
 			}
+			context.bus.emit(BusChannels.SessionResuming, { sessionId, at: Date.now() });
 			state = resumed.state;
-			currentTurnId = resolveLeafOnOpen(resumed);
+			currentTurnId = leafTurnId;
 			emitResume(resumed.state.meta.id, "resume");
 			return resumed.state.meta;
 		},
@@ -319,13 +321,15 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// as resume() above and for the same reason.
 			if (state?.meta.id === sessionId) return state.meta;
 			const resumed = resumeSessionState(sessionId);
+			const leafTurnId = resolveLeafOnOpen(resumed);
 			if (state) {
 				const prior = state;
 				emitPark(prior.meta.id, "switch_branch");
 				void prior.writer.close();
 			}
+			context.bus.emit(BusChannels.SessionResuming, { sessionId, at: Date.now() });
 			state = resumed.state;
-			currentTurnId = resolveLeafOnOpen(resumed);
+			currentTurnId = leafTurnId;
 			emitResume(resumed.state.meta.id, "switch_branch");
 			return resumed.state.meta;
 		},

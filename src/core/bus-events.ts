@@ -40,6 +40,7 @@ export const BusChannels = {
 	SessionStart: "session.start",
 	SessionEnd: "session.end",
 	SessionParked: "session.parked",
+	SessionResuming: "session.resuming",
 	SessionResumed: "session.resumed",
 	SessionTurnSwitched: "session.turn_switched",
 	DomainLoaded: "domain.loaded",
@@ -443,6 +444,12 @@ export type SessionResumeVia = "resume" | "switch_branch";
 export interface SessionParkedPayload {
 	sessionId: string;
 	reason: SessionParkReason;
+	at: number;
+}
+
+/** Published on {@link BusChannels.SessionResuming} after a load validates, immediately before replacing the current session. */
+export interface SessionResumingPayload {
+	sessionId: string;
 	at: number;
 }
 
@@ -947,6 +954,7 @@ export type BusPayloadMap = {
 	[BusChannels.SessionStart]: SessionStartPayload;
 	[BusChannels.SessionEnd]: SessionEndPayload;
 	[BusChannels.SessionParked]: SessionParkedPayload;
+	[BusChannels.SessionResuming]: SessionResumingPayload;
 	[BusChannels.SessionResumed]: SessionResumedPayload;
 	[BusChannels.SessionTurnSwitched]: SessionTurnSwitchedPayload;
 	[BusChannels.DomainLoaded]: DomainLoadedPayload;
