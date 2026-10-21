@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import type { AnthropicMessagesCompat, Context, SystemMessage, Tool } from "@earendil-works/pi-ai";
+import type {
+	AnthropicMessagesCompat,
+	Context,
+	OpenAIResponsesCompat,
+	SystemMessage,
+	Tool,
+} from "@earendil-works/pi-ai";
 import { getToolStateChanges } from "@earendil-works/pi-ai";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
+import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
@@ -1040,8 +1047,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 	const helperToolAvailable = helperSchema !== null && workerProviderSupportsTools(input);
 	const helperForcedChoiceAvailable = helperToolAvailable && supportsNamedToolChoice(model.api);
-	// The legacy worker stream receives resolved snapshots, so retain native
-	// tool additions here instead of rebuilding Anthropic's cached prefix (#423).
+	// Resolved snapshots lose the tool-addition boundaries; retain them so the
+	// terminal handoff can reuse the work phase's cached prefix (#423).
 	let nativeHelperContext:
 		| {
 				initial: SystemMessage;
@@ -1171,17 +1178,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				currentModel.api === "anthropic-messages"
 					? (currentModel.compat as AnthropicMessagesCompat | undefined)
 					: undefined;
+			const codexCompat =
+				currentModel.api === "openai-codex-responses"
+					? (currentModel.compat as OpenAIResponsesCompat | undefined)
+					: undefined;
+			const codexToolChanges =
+				helperToolAvailable &&
+				codexCompat?.supportsMidConvoSystemMessages === true &&
+				codexCompat.supportsAdditionalTools === true;
 			// Pi needs an active initial tool to anchor native additions (#423).
 			const nativeToolChanges =
-				anthropicCompat?.supportsMidConvoSystemMessages === true &&
-				anthropicCompat.supportsMidConvoToolChanges === true &&
-				(!mutationResult || (resolvedContext.tools ?? []).some((tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL));
+				(codexToolChanges && (resolvedContext.tools ?? []).some((tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL)) ||
+				(anthropicCompat?.supportsMidConvoSystemMessages === true &&
+					anthropicCompat.supportsMidConvoToolChanges === true &&
+					(!mutationResult || (resolvedContext.tools ?? []).some((tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL)));
 			const helperDeclaredFromStart =
 				helperToolAvailable && currentModel.api === "anthropic-messages" && !nativeToolChanges;
 			helperTerminalRequest = synthesisToolLock || helperTerminalPhase;
 			helperExposedThisRound =
 				helperToolAvailable &&
-				(!mutationResult || synthesisToolLock || helperTerminalPhase) &&
+				((!mutationResult && !codexToolChanges) || synthesisToolLock || helperTerminalPhase) &&
 				(!(synthesisToolLock || helperTerminalPhase) || helperForcedChoiceAvailable);
 			// Native additions hide the helper until handoff without rewriting the
 			// initial schemas. Older Anthropic models declare it early; the host
@@ -1258,6 +1274,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// applies to it.
 			const request = (projected: AgentMessage[]) => {
 				const middlewareChoice = middlewareToolChoice.current();
+				// Codex retains the work phase's parallel setting for WS deltas;
+				// beforeToolCall still rejects mixed or duplicate handoffs (#423).
 				const controlled = applyToolRounds(
 					currentModel,
 					{
@@ -1268,7 +1286,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					requestOptions,
 					[
 						terminalHandoffActive(currentModel.api)
-							? { kind: "required", toolName: INTERNAL_HELPER_RESULT_TOOL, handoff: true }
+							? { kind: "required", toolName: INTERNAL_HELPER_RESULT_TOOL, handoff: !codexToolChanges }
 							: undefined,
 						synthesisToolLock ? { kind: "tools-removed" } : undefined,
 						middlewareChoice.kind === "none" && !synthesisToolLock ? { kind: "text-only" } : undefined,
@@ -1281,8 +1299,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				let requestContext: Context = controlled.context;
 				if (helperToolAvailable && nativeToolChanges) {
 					const basePrompt = currentContext.systemPrompt ?? "";
-					const protocol = (systemPrompt ?? "").slice(basePrompt.length);
-					const requestTools = resolvedRequestContext(controlled.context).tools ?? [];
+					// A semantic repair may spend the existing authorized revision
+					// allowance. Reopen that phase by policy, never by erasing history (#423).
+					const protocol =
+						codexToolChanges && resultContractRevisionActive && !helperTerminalRequest
+							? "The host-authorized bounded revision phase is active. Work tools may run within its remaining allowance. Earlier work-closed instructions resume when the terminal handoff begins again."
+							: (systemPrompt ?? "").slice(basePrompt.length);
+					// Codex can append declarations but cannot replay removals without
+					// collapsing them into the leading item. Execution remains gated by
+					// beforeToolCall even though the work declarations stay in history (#423).
+					const requestTools = codexToolChanges
+						? [
+								...new Map(
+									[...(nativeHelperContext?.tools ?? []), ...(currentContext.tools ?? [])].map((tool) => [tool.name, tool]),
+								).values(),
+							]
+						: (resolvedRequestContext(controlled.context).tools ?? []);
 					if (nativeHelperContext === undefined || nativeHelperContext.initial.content !== basePrompt) {
 						nativeHelperContext = {
 							initial: {
@@ -1303,9 +1335,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							changes.toolsRemoved.length > 0 ||
 							nativeHelperContext.protocol !== protocol
 						) {
+							const policy = codexToolChanges
+								? (createHostPolicyMessage(
+										`worker-handoff-${nativeHelperContext.updates.length}`,
+										protocol,
+										0,
+									) as SystemMessage)
+								: { role: "system" as const, content: "", sections: { helper: protocol }, timestamp: 0 };
 							nativeHelperContext.updates.push({
 								at: projected.length,
-								message: { role: "system", content: "", sections: { helper: protocol }, ...changes, timestamp: 0 },
+								message: { ...policy, ...changes },
 							});
 							nativeHelperContext.tools = requestTools;
 							nativeHelperContext.protocol = protocol;
@@ -1342,7 +1381,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						return boundWorkerResponse(
 							currentModel,
 							attemptContext,
-							lockedRound ? thinkingOffOptions : attempt.options,
+							lockedRound && !codexToolChanges ? thinkingOffOptions : attempt.options,
 							{
 								locked: lockedRound,
 								responseSeconds: workerSettings.safety.limits.workerResponseSeconds,

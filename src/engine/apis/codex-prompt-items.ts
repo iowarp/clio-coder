@@ -40,7 +40,23 @@ function moveCodexPromptIntoInput(payload: Payload): Payload {
 	if (instructions.length > 0) {
 		leading.push({ type: "message", role: "developer", content: [{ type: "input_text", text: instructions }] });
 	}
-	return { ...rest, input: [...leading, ...input] };
+	// Terminal tools are introduced after the work history. Keep that boundary
+	// and use the same namespace as the initial declarations so handoff does
+	// not rewrite the cached leading item or rename its callable tools (#423).
+	const history = input.map((item: unknown) => {
+		if (
+			!isRecord(item) ||
+			item.type !== "additional_tools" ||
+			!Array.isArray(item.tools) ||
+			item.tools.some((tool: unknown) => isRecord(tool) && tool.type === "namespace")
+		)
+			return item;
+		return {
+			...item,
+			tools: [{ type: "namespace", name: "functions", description: "", tools: item.tools }],
+		};
+	});
+	return { ...rest, input: [...leading, ...history] };
 }
 
 /**
