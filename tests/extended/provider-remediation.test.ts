@@ -258,12 +258,14 @@ test("provider dump composes async payload mutations and preserves every stream 
 	try {
 		const path = join(env.dir, "wire.jsonl");
 		const sent: unknown[] = [];
+		const sentBetas: Array<string | null> = [];
 		let mutations = 0;
 		const options = {
 			apiKey: "fixture-secret-provider-key",
 			headers: { Authorization: "Bearer fixture-secret-header" },
 			fetch: async (_input: unknown, init?: RequestInit) => {
 				sent.push(JSON.parse(String(init?.body)));
+				sentBetas.push(new Headers(init?.headers).get("anthropic-beta"));
 				return anthropicResponse();
 			},
 			onPayload: async (payload: unknown) => {
@@ -301,7 +303,12 @@ test("provider dump composes async payload mutations and preserves every stream 
 		const lines = raw.trim().split("\n");
 		assert.equal(lines.length, 1);
 		const record = JSON.parse(lines[0] ?? "");
-		assert.deepEqual(record.payloads, [sent[1]]);
+		// The dump keeps Pi's params; the SDK moves `betas` into the anthropic-beta header (#423).
+		const { betas, ...dumpedBody } = record.payloads[0];
+		assert.equal(record.payloads.length, 1);
+		assert.deepEqual(dumpedBody, sent[1]);
+		assert.deepEqual(betas, ["cache-diagnosis-2026-04-07"]);
+		assert.match(sentBetas[1] ?? "", /cache-diagnosis-2026-04-07/u);
 		assert.deepEqual(record.response.content, captured.response.content);
 		assert.equal(record.payloads[0].max_tokens, 77);
 		assert.doesNotMatch(raw, /fixture-secret-provider-key|fixture-secret-header|Authorization/u);
