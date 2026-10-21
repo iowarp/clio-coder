@@ -35,6 +35,8 @@ function redactUnlessEnvReference(match: string, prefix: string, secret: string,
 const SECRET_FLAG_NAME_RE = /(?=(api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token))/giu;
 
 function secretFlagStart(word: string): number | null {
+	// Plain prose words cannot name a shell flag; streaming cards revisit them often (#428).
+	if (!word.includes("-")) return null;
 	const lastUnderscore = word.lastIndexOf("_");
 	const previousUnderscore = lastUnderscore <= 0 ? -1 : word.lastIndexOf("_", lastUnderscore - 1);
 	const suffixDash = word.indexOf("-", lastUnderscore + 1);
@@ -90,6 +92,37 @@ export function redactSecretString(value: string): string {
 				redactUnlessEnvReference(match, prefix, secret),
 			),
 	);
+}
+
+/** Keep completed tokens while an appended display string changes only its tail (#428). */
+export class RedactedStringProjection {
+	private source = "";
+	private committed = 0;
+	private prefix = "";
+	private text = "";
+
+	project(source: string): string {
+		if (source === this.source) return this.text;
+		if (!source.startsWith(this.source)) {
+			this.committed = 0;
+			this.prefix = "";
+		}
+		const tail = source.slice(this.committed);
+		let through = 0;
+		// Whitespace after a non-flag token closes every credential pattern. A flag
+		// can consume the following token, so keep it buffered with its value (#428).
+		const tokens = /\S+\s+/gu;
+		for (const match of tail.matchAll(tokens)) {
+			if (!match[0].includes("-")) through = match.index + match[0].length;
+		}
+		if (through > 0) {
+			this.prefix += redactSecretString(tail.slice(0, through));
+			this.committed += through;
+		}
+		this.text = this.prefix + redactSecretString(tail.slice(through));
+		this.source = source;
+		return this.text;
+	}
 }
 
 /** Whether an argument key names a secret outright, so its value never renders. */

@@ -13,6 +13,7 @@ const TEXT_SYMBOL = /^[©®™\u2190-\u21FF]\uFE0E?$/u;
 export interface AssistantProseFilter {
 	push(chunk: string): string;
 	flush(): string;
+	peek(): string;
 }
 
 /** Incremental Markdown-aware policy. Only one unfinished grapheme is held. */
@@ -121,14 +122,76 @@ export function createAssistantProseFilter(): AssistantProseFilter {
 	return {
 		push(chunk) {
 			if (!chunk) return "";
-			const parts = [...GRAPHEMES.segment(pending + chunk)];
-			pending = parts.pop()?.segment ?? "";
-			return parts.map(({ segment }) => project(segment)).join("");
+			const source = pending + chunk;
+			let output = "";
+			pending = "";
+			// ASCII has only the CRLF grapheme pair; avoid ICU and its per-character objects (#428).
+			if (!/\P{ASCII}/u.test(source)) {
+				for (let index = 0; index < source.length; index += 1) {
+					const end = source[index] === "\r" && source[index + 1] === "\n" ? index + 2 : index + 1;
+					const segment = source.slice(index, end);
+					if (end === source.length) pending = segment;
+					else output += project(segment);
+					index = end - 1;
+				}
+			} else {
+				for (const { segment } of GRAPHEMES.segment(source)) {
+					if (pending) output += project(pending);
+					pending = segment;
+				}
+			}
+			return output;
 		},
 		flush() {
 			const result = pending ? project(pending) : "";
 			pending = "";
 			finishRun();
+			return result;
+		},
+		peek() {
+			if (!pending) return "";
+			// A complete worker preview includes the held grapheme without closing its parser (#428).
+			const saved = {
+				firstContent,
+				structured,
+				arrayCandidate,
+				leading,
+				indent,
+				quoted,
+				indentedCode,
+				fence,
+				inlineTicks,
+				run: run ? { ...run } : undefined,
+				linkDepth,
+				angleLiteral,
+				escaped,
+				previous,
+				previousOutput,
+				omitSpace,
+				word,
+				url,
+			};
+			const result = project(pending);
+			({
+				firstContent,
+				structured,
+				arrayCandidate,
+				leading,
+				indent,
+				quoted,
+				indentedCode,
+				fence,
+				inlineTicks,
+				run,
+				linkDepth,
+				angleLiteral,
+				escaped,
+				previous,
+				previousOutput,
+				omitSpace,
+				word,
+				url,
+			} = saved);
 			return result;
 		},
 	};
@@ -146,8 +209,9 @@ export class AssistantProseProjection {
 	private filter = createAssistantProseFilter();
 	private finalized = false;
 
-	project(source: string, finalized = true): string {
-		if (source === this.source && finalized === this.finalized) return this.text;
+	project(source: string, finalized = true, includePending = false): string {
+		if (source === this.source && finalized === this.finalized)
+			return this.text + (!finalized && includePending ? this.filter.peek() : "");
 		if (this.finalized || !source.startsWith(this.source)) {
 			this.source = "";
 			this.text = "";
@@ -157,6 +221,6 @@ export class AssistantProseProjection {
 		if (finalized) this.text += this.filter.flush();
 		this.source = source;
 		this.finalized = finalized;
-		return this.text;
+		return this.text + (!finalized && includePending ? this.filter.peek() : "");
 	}
 }

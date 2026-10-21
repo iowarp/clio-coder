@@ -198,6 +198,8 @@ type TextSegment = {
 	prose?: AssistantProseProjection;
 	/** The segment's stock Markdown component and the source it last rendered. */
 	markdown?: { view: Markdown; source: string; epoch: number };
+	/** Reuse wrapped rows while another entry streams or its clock advances (#428). */
+	rendered?: { source: string; finalized: boolean; epoch: number; layouts: Map<string, string[]> };
 	/**
 	 * Live denoising state while a diffusion model streams whole frames. The
 	 * text before `settled` agreed between the last two frames and is shown as
@@ -338,6 +340,7 @@ type ThinkingSegment = {
 	/** Panel clock when the first delta of this stretch arrived. */
 	startedAtMs?: number;
 };
+type ThinkingRender = { source: string; epoch: number; layouts: Map<string, string[]> };
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
 /**
  * A caller-rendered block receives the frame's transcript detail policy so a
@@ -361,6 +364,7 @@ type TranscriptEntry =
 			role: "assistant";
 			models?: string[];
 			segments: AssistantSegment[];
+			reasoningRenders?: Map<number, ThinkingRender>;
 			/**
 			 * `segments.length` when the current model call began, so `message_end`
 			 * can tell which segments belong to the message it is settling. A
@@ -849,6 +853,13 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	if (!seg.finalized && seg.diffusion) {
 		return renderDiffusionFrameLines(seg, seg.diffusion.settled, width);
 	}
+	const epoch = skinEpoch();
+	if (seg.rendered?.source !== seg.text || seg.rendered.finalized !== seg.finalized || seg.rendered.epoch !== epoch) {
+		seg.rendered = { source: seg.text, finalized: seg.finalized, epoch, layouts: new Map() };
+	}
+	const key = `${width}|${bareFences}`;
+	const cached = seg.rendered.layouts.get(key);
+	if (cached !== undefined) return cached;
 	seg.prose ??= new AssistantProseProjection();
 	const prose = seg.prose.project(seg.text, seg.finalized);
 	if (seg.markdown === undefined || seg.markdown.epoch !== skinEpoch())
@@ -857,7 +868,13 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 		seg.markdown.view.setText(prose);
 		seg.markdown.source = prose;
 	}
-	return withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences));
+	const lines = withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences));
+	seg.rendered.layouts.set(key, lines);
+	if (seg.rendered.layouts.size > 3) {
+		const oldest = seg.rendered.layouts.keys().next().value;
+		if (oldest !== undefined) seg.rendered.layouts.delete(oldest);
+	}
+	return lines;
 }
 
 /**
@@ -1333,14 +1350,33 @@ function renderEntryLines(
 	// its shape: Standard shows the bounded tail of the reasoning behind Clio's
 	// words, and the marker for the reasoning behind an action.
 	let reasoning = "";
+	let reasoningIndex = 0;
 	let lastMarker: TurnBlock | undefined;
 	const flushReasoning = (next: "action" | "words"): void => {
 		const text = reasoning;
 		reasoning = "";
 		if (text.trim().length === 0) return;
+		const index = reasoningIndex++;
 		const rows = next === "action" ? detail.reasoningBeforeActionRows : detail.reasoningRows;
 		if (rows > 0 || unboundedToolBodies) {
-			const lines = renderThinkingRail(text, width, previewBudget(rows, terminalRows), unboundedToolBodies);
+			// A running tool's clock must not re-filter or re-wrap earlier reasoning (#428).
+			entry.reasoningRenders ??= new Map();
+			let cached = entry.reasoningRenders.get(index);
+			if (cached?.source !== text || cached.epoch !== skinEpoch()) {
+				cached = { source: text, epoch: skinEpoch(), layouts: new Map() };
+				entry.reasoningRenders.set(index, cached);
+			}
+			const limit = previewBudget(rows, terminalRows);
+			const key = `${width}|${limit}|${unboundedToolBodies}`;
+			let lines = cached.layouts.get(key);
+			if (lines === undefined) {
+				lines = renderThinkingRail(text, width, limit, unboundedToolBodies);
+				cached.layouts.set(key, lines);
+				if (cached.layouts.size > 3) {
+					const oldest = cached.layouts.keys().next().value;
+					if (oldest !== undefined) cached.layouts.delete(oldest);
+				}
+			}
 			blocks.push({ kind: "thinking", lines });
 			return;
 		}
@@ -2030,12 +2066,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const previous = i > 0 ? transcript[i - 1] : undefined;
 			if (i > 0 && !stacksUnder(entry, previous, detail)) out.push("");
 			const renders = entryRenderCache.get(entry);
-			const cached = renders?.get(baseKey);
+			const renderKey = entry.role === "worker" && entryHasRunningTool(entry) ? `${baseKey}|${tick}` : baseKey;
+			const cached = renders?.get(renderKey);
 			// A replay block that is not live is a pure function of the render key,
 			// so it caches like any settled entry. Excluding every replay block made
 			// a long session's notices and `!` commands re-render on each rebuild:
 			// 1,400 of them turned a 0.7 ms warm Alt+O revisit into 45 ms.
-			const cacheable = i >= transcript.length - capacity && entryIsStable(entry);
+			// Worker mutations invalidate their own entry; only elapsed time needs a tick (#428).
+			const cacheable = i >= transcript.length - capacity && (entryIsStable(entry) || entry.role === "worker");
 			if (cacheable && cached !== undefined) {
 				// A spread here is slower than a loop for large arrays and blows the
 				// stack outright for a single entry that renders enough lines.
@@ -2056,7 +2094,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
 					const byKey = renders ?? new Map<string, string[]>();
-					byKey.set(baseKey, renderedEntry);
+					byKey.set(renderKey, renderedEntry);
 					if (byKey.size > RENDERS_PER_ENTRY) {
 						const oldestKey = byKey.keys().next().value;
 						if (oldestKey !== undefined) byKey.delete(oldestKey);

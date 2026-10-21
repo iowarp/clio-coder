@@ -1,15 +1,39 @@
-import { sanitizeAssistantProse } from "../../core/assistant-prose.js";
+import { AssistantProseProjection, sanitizeAssistantProse } from "../../core/assistant-prose.js";
 import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
-import { redactSecretString } from "../../domains/safety/redaction.js";
+import { RedactedStringProjection, redactSecretString } from "../../domains/safety/redaction.js";
 import { GLYPH } from "../theme/index.js";
 
 /** Sanitize complete source text before splitting, so OSC payloads cannot cross rows. */
-export function safeWorkerAnswerText(text: string): string {
-	const normalized = sanitizeAssistantProse(text)
+function projectWorkerAnswerText(text: string, projection?: WorkerAnswerProjection): string {
+	const normalized = (projection ? projection.prose.project(text, false, true) : sanitizeAssistantProse(text))
 		.replaceAll(String.fromCharCode(0x9d), "\u001b]")
 		.replaceAll(String.fromCharCode(0x9b), "\u001b[")
 		.replaceAll(String.fromCharCode(0x9c), "\u001b\\");
-	return redactSecretString(sanitizeMultilineDisplayText(normalized).text).replace(/[\p{Cf}\u0080-\u009f]/gu, "");
+	const safe = sanitizeMultilineDisplayText(normalized).text;
+	return (projection ? projection.secrets.project(safe) : redactSecretString(safe)).replace(
+		/[\p{Cf}\u0080-\u009f]/gu,
+		"",
+	);
+}
+
+export function safeWorkerAnswerText(text: string): string {
+	return projectWorkerAnswerText(text);
+}
+
+/** Each worker keeps parser state across appended deltas, including complete preview tails (#428). */
+export class WorkerAnswerProjection {
+	readonly prose = new AssistantProseProjection();
+	readonly secrets = new RedactedStringProjection();
+	private source: string | undefined;
+	private text = "";
+
+	project(source: string): string {
+		if (source !== this.source) {
+			this.text = projectWorkerAnswerText(source, this);
+			this.source = source;
+		}
+		return this.text;
+	}
 }
 
 const isStringArray = (value: unknown): value is string[] =>

@@ -8,6 +8,7 @@ import {
 	type PresentedContractAnswer,
 	presentWorkerContractAnswer,
 	safeWorkerAnswerText,
+	WorkerAnswerProjection,
 } from "./worker-answer.js";
 
 /** Bounded worker summaries share the main transcript's output style. */
@@ -39,6 +40,36 @@ import { workerPhaseActivity } from "../worker-activity.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
+
+const workerTextCache = new WeakMap<WorkerEntryState, Map<string, { source: string; text: string }>>();
+const workerAnswers = new WeakMap<WorkerEntryState, WorkerAnswerProjection>();
+
+function displayText(entry: WorkerEntryState, key: string, source: string): string {
+	const fields = workerTextCache.get(entry) ?? new Map();
+	const cached = fields.get(key);
+	if (cached?.source === source) return cached.text;
+	const text = sanitizeCallTargetText(redactSecretString(source));
+	fields.set(key, { source, text });
+	workerTextCache.set(entry, fields);
+	return text;
+}
+
+function answerText(entry: WorkerEntryState, source: string): string {
+	let projection = workerAnswers.get(entry);
+	if (projection === undefined) {
+		projection = new WorkerAnswerProjection();
+		workerAnswers.set(entry, projection);
+	}
+	return projection.project(source);
+}
+
+/** A plain display string needs only enough complete words to fill the row (#428). */
+function fitDisplayText(text: string, width: number): string {
+	const head = text.slice(0, Math.max(0, width) + 32);
+	const boundary = head.lastIndexOf(" ");
+	const prefix = head.slice(0, boundary);
+	return truncateToWidth(boundary > 0 && visibleWidth(prefix) > width ? prefix : text, width, GLYPH.ellipsis, false);
+}
 
 // The worker card follows the transcript's gutter grammar: the origin glyph
 // sits in the gutter and the card's body nests under it in the content column.
@@ -255,14 +286,14 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 		entry.droppedLines !== 0 ||
 		(entry.progress?.droppedBytes ?? 0) !== 0
 	)
-		return safeWorkerAnswerText(entry.pending ? stripDeadToolCallMarkup(entry.text) : entry.text).split("\n");
+		return answerText(entry, entry.pending ? stripDeadToolCallMarkup(entry.text) : entry.text).split("\n");
 	const structured = entry.droppedLines === 0 ? exactWorkerAnswerObject(entry.text) : null;
-	if (structured === null) return safeWorkerAnswerText(entry.text).split("\n");
+	if (structured === null) return answerText(entry, entry.text).split("\n");
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
 	return (
 		mutationReportLines(structured, entry.receipt?.placement)?.map(safeWorkerAnswerText) ??
-		safeWorkerAnswerText(entry.text).split("\n")
+		answerText(entry, entry.text).split("\n")
 	);
 }
 
@@ -427,7 +458,7 @@ function elapsedMsOf(entry: WorkerEntryState, nowMs: number): number | undefined
 const TIMER_WIDTH = 7;
 
 function workerName(entry: WorkerEntryState): string {
-	return sanitizeCallTargetText(redactSecretString(entry.council?.label ?? entry.agentId));
+	return displayText(entry, "name", entry.council?.label ?? entry.agentId);
 }
 
 /** Dispatch rows reserve the clock before cutting the task or agent name. */
@@ -467,9 +498,8 @@ function alignedHeader(
 		entry.council !== undefined ? councilLabelText(theme, shown, entry.council.color) : theme.fg("workerIdentity", shown);
 	const header = `${prefix}${identity}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shown)))} ${status} ${timer}`;
 	const taskWidth = width - visibleWidth(header) - 2;
-	const task = sanitizeCallTargetText(redactSecretString(entry.task ?? ""));
-	if (taskWidth > 0 && task.length > 0)
-		return `${header}  ${theme.fg("body", truncateToWidth(task, taskWidth, GLYPH.ellipsis, false))}`;
+	const task = displayText(entry, "task", entry.task ?? "");
+	if (taskWidth > 0 && task.length > 0) return `${header}  ${theme.fg("body", fitDisplayText(task, taskWidth))}`;
 	if (visibleWidth(header) <= width) return header;
 	// Below the header's minimum width, even its identity yields to elapsed.
 	return meta(truncateToWidth(elapsed, width, "", false));
@@ -545,9 +575,10 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 function progressLine(entry: WorkerEntryState, width: number, nowMs: number, includeTimer = true): string {
 	const action = describedAction(entry);
 	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
-	const answer = entry.helper
-		? ""
-		: safeWorkerAnswerText(stripDeadToolCallMarkup(entry.text)).replace(/\s+/gu, " ").trim();
+	const answer =
+		entry.helper || action !== null
+			? ""
+			: answerText(entry, stripDeadToolCallMarkup(entry.text)).replace(/\s+/gu, " ").trim();
 	const doing =
 		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${GLYPH.phaseTool} ${action}`;
 	const elapsedMs = elapsedMsOf(entry, nowMs);
@@ -561,7 +592,7 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	// The elapsed time is the line's live signal, so a narrow row cuts the
 	// action's text and then drops the spend, never the clock.
 	const room = Math.max(0, width - RAIL_WIDTH);
-	const activity = sanitizeCallTargetText(redactSecretString(doing));
+	const activity = displayText(entry, "activity", doing);
 	const current = entry.progress?.currentAction;
 	const prefix =
 		action === null ? `${glyph} ${idle}` : `${GLYPH.phaseTool} ${current?.descriptor?.verb ?? current?.tool ?? ""}`;
@@ -574,7 +605,7 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 		const tail = kept === 0 ? "" : `${SEPARATOR}${facts.slice(0, kept).join(SEPARATOR)}`;
 		const activityRoom = room - tail.length;
 		if (activityRoom < 1 || (kept > 1 && activityRoom < Math.min(24, activity.length))) continue;
-		const shown = truncateToWidth(activity, activityRoom, GLYPH.ellipsis, false);
+		const shown = fitDisplayText(activity, activityRoom);
 		return truncateToWidth(
 			`${theme.fg("gutter", RAIL)}${styledActivity(shown)}${meta(tail)}`,
 			width,
@@ -583,7 +614,7 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 		);
 	}
 	return truncateToWidth(
-		`${theme.fg("gutter", RAIL)}${styledActivity(truncateToWidth(activity, room, GLYPH.ellipsis, false))}`,
+		`${theme.fg("gutter", RAIL)}${styledActivity(fitDisplayText(activity, room))}`,
 		width,
 		GLYPH.ellipsis,
 		false,
@@ -684,7 +715,7 @@ export function renderWorkerEntryLines(
 	const summary =
 		entry.text.length === 0
 			? []
-			: (inspect ? safeWorkerAnswerText(entry.text).split("\n") : bodySourceLines(entry)).flatMap((line) =>
+			: (inspect ? answerText(entry, entry.text).split("\n") : bodySourceLines(entry)).flatMap((line) =>
 					railLines(redactSecretString(line), needsInput ? "warning" : "assistantProse", safeWidth),
 				);
 	// A running card says what it is doing on its one live line in every style,
