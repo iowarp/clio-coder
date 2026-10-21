@@ -2252,10 +2252,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			pendingUserImages = [...(input.images ?? [])];
 			if (input.continuation && memoryTurn !== null) return;
 			// A prewarm has not chosen the first operator turn's memory. Freeze
-			// only after preparation has loaded that turn's evidence (#423).
+			// only after preparation has loaded that turn's evidence. Sessionless
+			// loops retain their submitted turns in engine history instead (#423).
 			if (
 				!input.continuation &&
 				state.lastTurnId === null &&
+				!runtime.agent.state.messages.some((message) => message.role === "user") &&
 				!(deps.readSessionEntries?.() ?? []).some((entry) => entry.kind === "message" && entry.role === "user")
 			) {
 				frozenMemorySection = null;
