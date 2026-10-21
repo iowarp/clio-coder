@@ -320,7 +320,14 @@ describe("production compaction controls", () => {
 				["unchanged", "unchanged"],
 			);
 			deepStrictEqual(
-				f.entries().filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+				// A durable thinking row is session state, not a checkpoint.
+				f
+					.entries()
+					.filter(
+						(entry) =>
+							entry.kind !== "thinkingLevelChange" &&
+							(entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+					),
 				before,
 			);
 			const operations = f
@@ -517,7 +524,10 @@ describe("production compaction controls", () => {
 					f
 						.entries()
 						.filter(
-							(entry) => !isOutcome(entry) && (entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+							(entry) =>
+								!isOutcome(entry) &&
+								entry.kind !== "thinkingLevelChange" &&
+								(entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
 						),
 					before,
 					"canceled compaction does not append a summary or pending user turn",

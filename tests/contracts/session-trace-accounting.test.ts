@@ -39,8 +39,13 @@ it("session traces retain known subtotals, call coverage, and pricing uncertaint
 				targetId: "target",
 				wireModelId: "model",
 				runtimeId: "litellm",
-				runtimeResolution: { costProvenance: prices[0] as CostProvenance },
-				agent: {},
+				runtimeResolution: {
+					costProvenance: prices[0] as CostProvenance,
+					requestedThinkingLevel: "off",
+					effectiveThinkingLevel: "off",
+					modelRuntime: { thinking: {} },
+				},
+				agent: { state: { model: { api: "openai-completions" } } },
 			} as unknown as AgentRuntime;
 			const state = { runtime, lastTurnId: null } as ChatTurnState;
 			const persistence = createTurnPersistence({
