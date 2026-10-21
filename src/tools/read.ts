@@ -624,13 +624,13 @@ async function readTail(handle: FileHandle, request: ReadRequest, plan: ReadPlan
 			sourceTruncation.outputLines,
 		);
 		truncation = truncateTail(numberedContent, { maxBytes: cap, maxLines: tail });
-		if (sourceTruncation.lastLinePartial || truncation.lastLinePartial) {
-			// Never return a tail fragment with a lost or fabricated complete
-			// line label. Keep the suffix within the cap and mark it partial.
-			const label = `${totalLines} | [partial line suffix] `;
-			const suffix = truncateTail(lastLineOf(decoded), { maxBytes: cap - Buffer.byteLength(label) });
-			truncation = { ...truncation, content: label + suffix.content, outputLines: 0, truncated: true };
-		}
+	}
+	if (sourceTruncation.lastLinePartial || truncation.lastLinePartial) {
+		// Never return a tail fragment with a lost or fabricated complete
+		// line label. Keep the suffix within the cap and mark it partial.
+		const label = `${numbered && totalLines !== null ? `${totalLines} | ` : ""}[partial line suffix] `;
+		const suffix = truncateTail(lastLineOf(decoded), { maxBytes: cap - Buffer.byteLength(label) });
+		truncation = { ...truncation, content: label + suffix.content, outputLines: 0, truncated: true };
 	}
 	const shownLines = truncation.outputLines;
 	// A front cut means the byte cap, not the tail count, bounded this call.

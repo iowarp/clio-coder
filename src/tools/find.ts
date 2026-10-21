@@ -48,9 +48,9 @@ type FindOrder = "path" | "mtime";
 // Build fd's argv. Ignore semantics (hidden files, .gitignore honoring,
 // generated-dir excludes, include_ignored) come entirely from the shared
 // ignore policy so grep and find never disagree about tree visibility.
-function buildFdArgs(pattern: string, searchPath: string, collectLimit: number, includeIgnored: boolean): string[] {
+function buildFdArgs(pattern: string, searchPath: string, includeIgnored: boolean): string[] {
 	const args = ["--glob", "--color=never", ...fdIgnoreArgs(searchPath, includeIgnored)];
-	args.push("--show-errors", "--max-results", String(collectLimit));
+	args.push("--show-errors");
 	let effectivePattern = pattern;
 	if (pattern.includes("/")) {
 		args.push("--full-path");
@@ -74,10 +74,11 @@ async function fdFind(
 ): Promise<{ ok: true; paths: string[] } | { ok: false; message: string }> {
 	const lines: string[] = [];
 	const diagnostics = createSearchDiagnostics(search, (path) => allows(resolve(process.cwd(), path)));
-	const result = await spawnLineStream(fdPath, buildFdArgs(pattern, searchPath, collectLimit, includeIgnored), {
+	const result = await spawnLineStream(fdPath, buildFdArgs(pattern, searchPath, includeIgnored), {
 		...(signal ? { signal } : {}),
 		onStderrLine: diagnostics.onLine,
 		onLine(line, stop) {
+			if (line.length === 0 || !allows(resolve(searchPath, line))) return;
 			lines.push(line);
 			if (lines.length >= collectLimit) stop();
 		},
@@ -361,8 +362,8 @@ export const findTool: ToolSpec = {
 				search.complete = false;
 				search.reason = "cancelled";
 			}
-			const collectedCount = collectedPaths.length;
 			collectedPaths = collectedPaths.filter((entry) => pathFilter.allows(join(searchPath, entry)));
+			const collectedCount = collectedPaths.length;
 			const ordered: OrderedPaths =
 				order === "mtime"
 					? orderByMtime(collectedPaths, searchPath, limit, collectLimit, search)

@@ -255,6 +255,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 	let limitHit = false;
 	let linesTruncated = false;
 	const relPath = (filePath: string): string => formatPath(filePath, input.searchPath, input.isDirectory);
+	let lastMatch: RenderedLine["location"];
 
 	const onContentLine = (line: string, stop: () => void): void => {
 		if (line.length === 0) return;
@@ -273,9 +274,21 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		const lineText = rgJsonText(data?.lines);
 		if (typeof filePath !== "string" || typeof lineNumber !== "number" || typeof lineText !== "string") return;
 		if (!input.pathFilter.allows(filePath)) return;
+		const isMatch = type === "match";
+		if (isMatch && matchCount >= input.limit) {
+			limitHit = true;
+			stop();
+			return;
+		}
+		if (
+			!isMatch &&
+			matchCount >= input.limit &&
+			(lastMatch === undefined || lastMatch.file !== path.resolve(filePath) || lineNumber > lastMatch.line + input.context)
+		) {
+			return;
+		}
 		const { text, wasTruncated } = truncateLine(sanitizeMatchText(lineText));
 		if (wasTruncated) linesTruncated = true;
-		const isMatch = type === "match";
 		rendered.push({
 			text: isMatch ? `${relPath(filePath)}:${lineNumber}: ${text}` : `${relPath(filePath)}-${lineNumber}- ${text}`,
 			isMatch,
@@ -283,10 +296,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		});
 		if (isMatch) {
 			matchCount += 1;
-			if (matchCount >= input.limit) {
-				limitHit = true;
-				stop();
-			}
+			lastMatch = { file: path.resolve(filePath), line: lineNumber };
 		}
 	};
 
@@ -295,6 +305,11 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		if (trimmed.length === 0) return;
 		const filePath = input.mode === "count" ? trimmed.slice(0, trimmed.lastIndexOf(":")) : trimmed;
 		if (!input.pathFilter.allows(filePath)) return;
+		if (matchCount >= input.limit) {
+			limitHit = true;
+			stop();
+			return;
+		}
 		let text: string;
 		if (input.mode === "count") {
 			const sep = trimmed.lastIndexOf(":");
@@ -304,10 +319,6 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		}
 		rendered.push({ text, isMatch: true });
 		matchCount += 1;
-		if (matchCount >= input.limit) {
-			limitHit = true;
-			stop();
-		}
 	};
 
 	const search = newSearchCompleteness();
@@ -452,12 +463,19 @@ async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
 			if (!regex.test(lineText)) continue;
 			fileMatches += 1;
 			if (input.mode === "files") {
+				if (matchCount >= input.limit) {
+					limitHit = true;
+					return;
+				}
 				rendered.push({ text: rel, isMatch: true });
 				matchCount += 1;
-				if (matchCount >= input.limit) limitHit = true;
 				return;
 			}
 			if (input.mode === "content") {
+				if (matchCount >= input.limit) {
+					limitHit = true;
+					return;
+				}
 				const start = input.context > 0 ? Math.max(1, i + 1 - input.context) : i + 1;
 				const end = input.context > 0 ? Math.min(lines.length, i + 1 + input.context) : i + 1;
 				for (let current = start; current <= end; current += 1) {
@@ -467,16 +485,15 @@ async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
 					else pushLine(`${rel}-${current}- ${text}`, false, location);
 				}
 				matchCount += 1;
-				if (matchCount >= input.limit) {
-					limitHit = true;
-					return;
-				}
 			}
 		}
 		if (input.mode === "count" && fileMatches > 0) {
+			if (matchCount >= input.limit) {
+				limitHit = true;
+				return;
+			}
 			rendered.push({ text: `${rel}:${fileMatches}`, isMatch: true });
 			matchCount += 1;
-			if (matchCount >= input.limit) limitHit = true;
 		}
 	};
 

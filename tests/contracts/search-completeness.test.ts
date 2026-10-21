@@ -377,7 +377,7 @@ test("fd receives native glob semantics and bounds without statting unrelated en
 	await findTool.run({ path: root, pattern: "nested/[a-z].txt", limit: 3 });
 	const argv = JSON.parse(fs.readFileSync(argvFile, "utf8")) as string[];
 	assert.ok(argv.includes("**/nested/[a-z].txt"));
-	assert.equal(argv[argv.indexOf("--max-results") + 1], "4");
+	assert.ok(!argv.includes("--max-results"));
 	assert.ok(argv.includes("--full-path"));
 	fs.unlinkSync(join(bin, "fd"));
 	assert.equal((await findTool.run({ path: root, pattern: "[" })).kind, "error");
