@@ -21,6 +21,8 @@ import {
 
 export type InteractiveNoticeLevel = "info" | "success" | "warning" | "error";
 
+const WORKER_PAINT_INTERVAL_MS = 16;
+
 export interface InteractiveSubscriptionsDeps {
 	bus: SafeEventBus;
 	getSessionId?: () => string | null;
@@ -69,10 +71,9 @@ export interface InteractiveSubscriptions {
 
 /**
  * Own the non-modal dispatch and context repaint subscriptions. Bus delivery
- * is synchronous, so each handler deliberately preserves the existing order:
- * fold the worker block, refresh data-backed footer state, refresh islands,
- * then request one render. The worker fold runs first because the render it
- * asks for has to show the delta that arrived with the event.
+ * is synchronous, so worker state stays current as events arrive. Lifecycle
+ * handlers paint immediately; streaming changes invalidate each worker card
+ * once per frame without repeating the projection's footer reads (#428).
  */
 export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDeps): InteractiveSubscriptions {
 	const workers = createWorkerStream({ readReceipt: deps.readWorkerReceipt ?? readWorkerReceiptFacts });
@@ -113,6 +114,26 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		deps.renderTaskIsland();
 		deps.requestRender();
 	};
+	// Keep the stream current for /share, but invalidate each card at most once
+	// per frame. The observability projection already refreshes the footer and
+	// task data; repeating those reads per token also hashes the live budget (#428).
+	const pendingWorkers = new Map<string, WorkerEntryState>();
+	let workerPaintTimer: ReturnType<typeof setTimeout> | null = null;
+	const paintWorkers = (): void => {
+		workerPaintTimer = null;
+		const pending = [...pendingWorkers.values()];
+		pendingWorkers.clear();
+		for (const entry of pending) {
+			if (workers.get(entry.assignmentId) === entry) deps.applyWorkerState?.(entry);
+		}
+		if (pending.length > 0) deps.requestRender();
+	};
+	const queueWorkerPaint = (entry: WorkerEntryState): void => {
+		pendingWorkers.set(entry.assignmentId, entry);
+		if (workerPaintTimer !== null) return;
+		workerPaintTimer = setTimeout(paintWorkers, WORKER_PAINT_INTERVAL_MS);
+		workerPaintTimer.unref?.();
+	};
 	const recordSettled = (change: WorkerStreamChange): void => {
 		const fields = workerSettledFields(change.entry);
 		if (fields !== null) deps.recordWorkerSettled?.(fields);
@@ -123,6 +144,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		(payload: P): void => {
 			const change = reduce(payload);
 			if (change !== null) {
+				pendingWorkers.delete(change.entry.assignmentId);
 				deps.applyWorkerState?.(change.entry);
 				after?.(change);
 			}
@@ -138,16 +160,14 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			helperNotice(payload, "working");
 			folded(workers.started, (change) => deps.recordWorkerRun?.(workerRunEntryFields(change.entry)))(payload);
 		}),
-		deps.bus.on(
-			BusChannels.DispatchProgress,
-			folded((payload) => {
-				const workerEvent = payload.event as { type?: unknown } | null | undefined;
-				if (workerEvent?.type === "clio_coder_steer_received") {
-					deps.notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
-				}
-				return workers.progress(payload);
-			}),
-		),
+		deps.bus.on(BusChannels.DispatchProgress, (payload) => {
+			const workerEvent = payload.event as { type?: unknown } | null | undefined;
+			if (workerEvent?.type === "clio_coder_steer_received") {
+				deps.notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
+			}
+			const change = workers.progress(payload);
+			if (change !== null) queueWorkerPaint(change.entry);
+		}),
 		// An abort settles the block provisionally; the terminal event dispatch
 		// publishes for every finalized run seals it, and that event writes the one
 		// settled row. Recording here as well left two rows per aborted run.
@@ -190,6 +210,8 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			if (disposed) return;
 			disposed = true;
 			for (const unsubscribe of unsubscribers) unsubscribe();
+			if (workerPaintTimer !== null) clearTimeout(workerPaintTimer);
+			pendingWorkers.clear();
 		},
 	};
 }

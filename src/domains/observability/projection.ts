@@ -590,29 +590,35 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			// Agent startup provides the monotonic origin for TTFT. Lifecycle
 			// timestamps remain owned by DispatchStarted.
 			if (type === "agent_start") summary.startedAtClockMs = performance.now();
+			let changed = false;
 			if (type === "message_update") {
 				const assistantEvent = (event.assistantMessageEvent ?? {}) as Record<string, unknown>;
 				const hasDelta = ["text_delta", "thinking_delta", "toolcall_start", "toolcall_delta"].includes(
 					String(assistantEvent.type),
 				);
-				if (hasDelta && summary.ttftMs === null && summary.startedAtClockMs !== null)
+				if (hasDelta && summary.ttftMs === null && summary.startedAtClockMs !== null) {
 					summary.ttftMs = Math.round(performance.now() - summary.startedAtClockMs);
+					changed = true;
+				}
 			}
 			if (type === "clio_coder_write_record_downgraded") {
 				const detail = (event.payload ?? {}) as Record<string, unknown>;
 				const tool = parseNonEmptyString(detail.tool);
 				const toolCallId = parseNonEmptyString(detail.toolCallId);
-				if (detail.reason === "opaque_tool_succeeded" && tool !== undefined && toolCallId !== undefined)
+				if (detail.reason === "opaque_tool_succeeded" && tool !== undefined && toolCallId !== undefined) {
 					summary.writeRecordDowngrade = {
 						reason: "opaque_tool_succeeded",
 						tool: sanitizeCallTargetText(tool),
 						toolCallId: sanitizeCallTargetText(toolCallId),
 					};
+					changed = true;
+				}
 			}
-			summary.progressFold.observe(payload.event);
+			changed = summary.progressFold.observe(payload.event) || changed;
 			if (type === "clio_coder_steer_received") {
 				const detail = (event.payload ?? {}) as Record<string, unknown>;
 				summary.steerAcknowledgement = { receivedAtMs: now, chars: Math.max(0, Math.floor(num(detail.chars, 0))) };
+				changed = true;
 			}
 			if (type === "message_end" && !isTerminal(summary.status)) {
 				const message = (event.message ?? {}) as { role?: unknown; usage?: Record<string, unknown> };
@@ -624,12 +630,15 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 					summary.tokens.output += output;
 					summary.tokens.total += usage.totalTokens;
 					summary.lastContextTokens = input + output;
+					changed = true;
 				}
 			}
 			// A worker's agent_end settles its displayed progress; only a terminal
 			// dispatch event changes the canonical run outcome.
-			if (type === "agent_end") summary.progressFold.settle();
-			markChanged();
+			if (type === "agent_end") changed = summary.progressFold.settle() || changed;
+			// Deltas cannot change run retention. Avoid scanning terminal history
+			// or publishing snapshots for ignored frames such as thinking repeats (#428).
+			if (changed) scheduleFlush();
 		}),
 		bus.on(BusChannels.DispatchCompleted, (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
