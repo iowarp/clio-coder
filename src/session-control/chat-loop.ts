@@ -1331,12 +1331,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * The same transcript notice every admission exit already emitted, carrying
-	 * the reason the turn never started. Text, level, and surface are unchanged,
-	 * so the TUI and headless paths render exactly what they rendered before.
+	 * Transcript notice for an admission exit, carrying the reason the turn
+	 * never started. Refusals that end the run report at `"error"` level; exits
+	 * where the turn simply did not need to start keep `"info"`.
 	 */
-	const emitAdmissionNotice = (text: string, reason: string): void => {
-		emit({ type: "notice", level: "info", surface: "transcript", text, admission: { reason } });
+	const emitAdmissionNotice = (text: string, reason: string, level: ChatNoticeEvent["level"] = "info"): void => {
+		emit({ type: "notice", level, surface: "transcript", text, admission: { reason } });
 	};
 	const visionModelOptions = (): string[] => {
 		const options: string[] = [];
@@ -2426,6 +2426,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								refusal !== null ? `the interrupt was refused: ${refusal}` : "wait for settlement or interrupt the active run"
 							}.`,
 							"constrained-turn-in-flight",
+							"error",
 						);
 						options.onRefused?.("constrained-turn-in-flight");
 						return;
@@ -2494,11 +2495,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					emitAdmissionNotice(
 						err instanceof Error ? err.message : String(err),
 						err instanceof TurnAdmissionError ? err.reason : "admission-failed",
+						"error",
 					);
 					return;
 				}
 				if (!agentRuntime) {
-					emitAdmissionNotice(notConfiguredNotice(deps.getSettings().chat), nullRuntimeAdmissionReason());
+					emitAdmissionNotice(notConfiguredNotice(deps.getSettings().chat), nullRuntimeAdmissionReason(), "error");
 					return;
 				}
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
@@ -2539,10 +2541,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							emitNotice(`[Clio Coder] Image processed with ${analysis.model}.`);
 						} catch (err) {
 							if (controller.signal.aborted) {
-								emitAdmissionNotice("[Clio Coder] Image processing cancelled.", "vision-sidecar-cancelled");
+								emitAdmissionNotice("[Clio Coder] Image processing cancelled.", "vision-sidecar-cancelled", "info");
 							} else {
 								const reason = err instanceof Error ? err.message : String(err);
-								emitAdmissionNotice(`[Clio Coder] Image processing failed: ${reason}`, "vision-sidecar-failed");
+								emitAdmissionNotice(`[Clio Coder] Image processing failed: ${reason}`, "vision-sidecar-failed", "error");
 							}
 							return;
 						} finally {
@@ -2882,6 +2884,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						emitAdmissionNotice(
 							`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} Trim the prompt or reduce active tools.`,
 							"context-window-exceeded",
+							"error",
 						);
 						return;
 					}
