@@ -4906,6 +4906,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest(ACP_BOARD_METHOD, (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		if (options.board === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
@@ -4918,6 +4919,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// resumes reads this once and folds `job.changed` after it.
 	options.transport.onRequest(ACP_JOBS_LIST_METHOD, (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		const listJobs = options.commands?.jobs;
 		if (listJobs === undefined) {
@@ -4984,6 +4986,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest(ACP_SESSION_TREE_METHOD, (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		const { session } = requireBranches();
 		const bound = getSession(request);
@@ -5265,6 +5268,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// read that throws fails only the quota half; the session numbers still answer.
 	options.transport.onRequest(ACP_USAGE_READ_METHOD, async (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		if (options.usage === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		getSession(request);
@@ -5347,6 +5351,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// The /extensions view: what this session loaded, never paths or provenance.
 	options.transport.onRequest(ACP_EXTENSIONS_LIST_METHOD, (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		if (options.extensions === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
@@ -5413,6 +5418,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// The terminal's /context window view, read and never recomputed.
 	options.transport.onRequest(ACP_CONTEXT_LEDGER_METHOD, (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		if (options.contextLedger === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
@@ -5429,6 +5435,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// The terminal's /view artifacts, from the overlay's own providers.
 	const artifactDeps = (request: Record<string, unknown>) => {
 		requireInitialized();
+		requireAuthenticated();
 		if (options.artifacts === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
@@ -5816,6 +5823,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest(ACP_SETTINGS_GET_SAFE_METHOD, (params) => {
 		requireInitialized();
+		requireAuthenticated();
 		assertParamKeys(params, new Set());
 		if (options.settings === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
@@ -6174,6 +6182,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest(ACP_SESSION_QUEUE_METHOD, (params): AcpQueueResult => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		getSession(request);
 		// An empty pair of lists is a fact about the queues, so a build that
