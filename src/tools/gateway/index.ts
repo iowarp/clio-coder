@@ -724,7 +724,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// an admitted name with none recorded launches its own server here, as
 			// a call of that name would, and is described from the live listing.
 			if (allowed === null || deps.mcp.metadata(name).metadata !== null) return describeFromCatalog(name);
-			const ensured = await deps.mcp.ensure(name, options?.signal ? { signal: options.signal } : {});
+			const ensured = await deps.mcp.ensure(name, mcpLaunchOptions(options));
 			if (ensured.spec === null) {
 				return { kind: "error", message: `gateway: ${ensured.reason ?? `unknown capability ${name}`}` };
 			}
