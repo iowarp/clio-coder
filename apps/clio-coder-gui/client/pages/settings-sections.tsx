@@ -66,7 +66,7 @@ export function ModelsSettings({ client }: { client: Client }) {
 			client={client}
 			scope="models"
 			title="Models"
-			lede="Which model answers, and how it answers. Connections and sign-in are set up in the guided setup."
+			lede="Saved model defaults for your projects. To change one conversation, use its model control beside Send."
 			before={(workspaceId) => (
 				<ul className="settings-page__links">
 					<li>

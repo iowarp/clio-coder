@@ -207,7 +207,7 @@ function ControlRow({
 					{showPath ? <code>{control.path}</code> : null}
 					<Link
 						to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}
-						title="Inspect the effective value and every layer that sets it"
+						title="Inspect the effective value and its reported source"
 					>
 						{sourceLabel(control.source)}
 					</Link>
@@ -613,7 +613,10 @@ export function SettingsControlsView({
 			) : null}
 			<div className={`settings-write-scope${scope && scope !== "advanced" ? " settings-write-scope--quiet" : ""}`}>
 				{scope && scope !== "advanced" ? null : <strong>Save to your user settings</strong>}
-				<p>Saved to your user settings and applied across projects. Project and command-line overrides take precedence.</p>
+				<p>
+					Save defaults for all your projects to your user settings. The selected project shows its effective values; project
+					and command-line overrides take precedence. For one conversation, use its model control beside Send.
+				</p>
 				{userFile && (
 					<details>
 						<summary>Saved settings file</summary>

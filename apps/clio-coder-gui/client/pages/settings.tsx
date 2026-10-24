@@ -64,7 +64,7 @@ export function WorkspacePicker({ selection }: { selection: ReturnType<typeof us
 	return (
 		<label className="workspace-picker">
 			<span className="workspace-picker__label">
-				Project context <small>Values are resolved for this folder</small>
+				Project context <small>Resolve values and overrides for this folder; saves go to your user settings</small>
 			</span>
 			<select value={id} onChange={(event) => select(event.target.value)}>
 				{!id && (
