@@ -14,6 +14,7 @@ import { availableThinkingLevels, type CapabilityFlags, type ThinkingLevel } fro
 import type { KnowledgeBase, KnowledgeBaseHit } from "./types/knowledge-base.js";
 import {
 	extractLocalModelQuirks,
+	type HarmonyReasoningField,
 	type LocalModelQuirks,
 	type ThinkingMechanism,
 	type ThinkingQuirks,
@@ -71,6 +72,20 @@ export interface UndeliverableChatTemplateKwargs {
 export interface ResolvedResponseCapability {
 	parser: ResponseParserKind;
 	stripTokenizerSentinels: boolean;
+	/** Replay field for reasoning recovered from raw Harmony markers; set only for the harmony parser (#435). */
+	recoveredReasoningField?: HarmonyReasoningField;
+}
+
+const DEFAULT_RECOVERED_REASONING_FIELD: HarmonyReasoningField = "reasoning_content";
+
+function resolveRecoveredReasoningField(
+	quirks: LocalModelQuirks | undefined,
+	runtimeId: string,
+): HarmonyReasoningField {
+	const declared = quirks?.harmony?.recoveredReasoningField;
+	if (declared === undefined) return DEFAULT_RECOVERED_REASONING_FIELD;
+	if (typeof declared === "string") return declared;
+	return declared[runtimeId] ?? declared.default ?? DEFAULT_RECOVERED_REASONING_FIELD;
 }
 
 export interface ResolvedModelRuntimeCapabilities {
@@ -680,6 +695,9 @@ export function resolveModelRuntimeCapabilities(
 		response: {
 			parser,
 			stripTokenizerSentinels: true,
+			...(parser === "harmony"
+				? { recoveredReasoningField: resolveRecoveredReasoningField(quirks, input.runtimeId) }
+				: {}),
 		},
 	};
 	if (quirks) result.quirks = quirks;

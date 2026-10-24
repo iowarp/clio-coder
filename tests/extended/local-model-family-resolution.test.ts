@@ -28,13 +28,15 @@ const routerIds = [
 	{ id: "Qwen/Qwen3.5-4B", family: "qwen3.5-4b", mechanism: "on-off" },
 	{ id: "Qwen/Qwen3.8-27B", family: "qwen3.8-27b", mechanism: "effort-levels" },
 	{ id: "openai/gpt-oss-20b", family: "openai-gpt-oss", mechanism: "effort-levels" },
+	{ id: "openai/gpt-oss-120b", family: "openai-gpt-oss", mechanism: "effort-levels" },
 ] as const;
 
 const mustNotResolveTo = [
 	{ id: "qwen3.8-32b", family: "qwen3.8-27b" },
 	{ id: "gemma-4-70b-it", family: "gemma4-26b-a4b" },
 	{ id: "nemotron-3.5-lightning-8b", family: "nemotron-3.5-lightning-30b-a3b" },
-	{ id: "gpt-oss-120b", family: "openai-gpt-oss" },
+	// gpt-oss-120b matches the profile explicitly (#435); the safeguard classifier checkpoint must not.
+	{ id: "gpt-oss-safeguard-120b", family: "openai-gpt-oss" },
 ] as const;
 
 function resolveOn(runtimeId: string, modelId: string, level: "off" | "medium" | "high") {

@@ -94,6 +94,8 @@ export interface ToolCallVerification {
 	/** Epoch ms when the probe finished. */
 	checkedAt: number;
 	error?: string;
+	/** Server-side Harmony parsing seen on a gpt-oss model: none, reasoning-only or full (#435). */
+	harmony?: "none" | "reasoning-only" | "full" | "unknown";
 }
 
 export interface LiveProbeOptions {

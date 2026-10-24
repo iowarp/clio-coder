@@ -17,6 +17,7 @@ import { readLayeredSettings, settingsSourceFor } from "../core/settings-layers.
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
+import { missingVllmHarmonyFlags } from "../domains/providers/harmony-server.js";
 import {
 	endpointCapacityForStatus,
 	isDispatchEligibleRuntime,
@@ -1213,8 +1214,11 @@ function formatNotes(status: TargetStatus): string {
 function formatToolProbe(probe: TargetStatus["toolProbe"]): string | null {
 	if (!probe) return null;
 	const model = probe.modelId ?? "no model";
-	if (probe.status === "verified") return `tools verified (${model}, ${probe.latencyMs}ms)`;
-	return `tools ${probe.status} (${model}): ${probe.error ?? "unknown error"}`;
+	// The level leads so the table's narrow notes column still shows it (#435).
+	const harmony = probe.harmony !== undefined && probe.harmony !== "unknown" ? `, server Harmony ${probe.harmony}` : "";
+	const flags = missingVllmHarmonyFlags(probe.harmony);
+	if (probe.status === "verified") return `tools verified${harmony} (${model}, ${probe.latencyMs}ms)${flags}`;
+	return `tools ${probe.status}${harmony} (${model}): ${probe.error ?? "unknown error"}${flags}`;
 }
 
 function degradedHealthDiagnostic(status: TargetStatus): string | null {

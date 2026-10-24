@@ -70,6 +70,18 @@ export interface ThinkingQuirks {
 	chatTemplateKwargs?: ChatTemplateKwargsQuirks;
 }
 
+/** Assistant reasoning fields an OpenAI-compatible server reads back on replay. */
+export type HarmonyReasoningField = "reasoning" | "reasoning_content" | "reasoning_text";
+
+export interface HarmonyQuirks {
+	/**
+	 * Replay field for reasoning Clio recovered from raw Harmony markers, as one
+	 * field or keyed by runtime id with a `default` (#435). Unset resolves to
+	 * `reasoning_content`, pi's own fallback for llama.cpp gpt-oss.
+	 */
+	recoveredReasoningField?: HarmonyReasoningField | Partial<Record<string, HarmonyReasoningField>>;
+}
+
 export interface LocalModelQuirks {
 	/**
 	 * A profile's suggested output budget. It fills a budget the operator and the request left
@@ -79,6 +91,35 @@ export interface LocalModelQuirks {
 	sampling?: SamplingQuirks;
 	thinking?: ThinkingQuirks;
 	chatTemplateKwargs?: ChatTemplateKwargsQuirks;
+	harmony?: HarmonyQuirks;
+}
+
+const HARMONY_REASONING_FIELDS: ReadonlyArray<HarmonyReasoningField> = [
+	"reasoning",
+	"reasoning_content",
+	"reasoning_text",
+];
+
+function asHarmonyReasoningField(value: unknown): HarmonyReasoningField | undefined {
+	return typeof value === "string" && (HARMONY_REASONING_FIELDS as ReadonlyArray<string>).includes(value)
+		? (value as HarmonyReasoningField)
+		: undefined;
+}
+
+function extractHarmonyQuirks(raw: unknown): HarmonyQuirks | undefined {
+	if (!isRecord(raw)) return undefined;
+	const out: HarmonyQuirks = {};
+	const single = asHarmonyReasoningField(raw.recoveredReasoningField);
+	if (single !== undefined) out.recoveredReasoningField = single;
+	else if (isRecord(raw.recoveredReasoningField)) {
+		const byRuntime: Partial<Record<string, HarmonyReasoningField>> = {};
+		for (const [runtime, value] of Object.entries(raw.recoveredReasoningField)) {
+			const field = asHarmonyReasoningField(value);
+			if (field !== undefined) byRuntime[runtime] = field;
+		}
+		if (Object.keys(byRuntime).length > 0) out.recoveredReasoningField = byRuntime;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -266,5 +307,7 @@ export function extractLocalModelQuirks(raw: unknown): LocalModelQuirks | undefi
 		extractChatTemplateKwargs(isRecord(raw.thinking) ? raw.thinking.chatTemplateKwargs : undefined) ??
 		extractChatTemplateKwargs(isRecord(raw.request) ? raw.request.chatTemplateKwargs : undefined);
 	if (chatTemplateKwargs) out.chatTemplateKwargs = chatTemplateKwargs;
+	const harmony = extractHarmonyQuirks(raw.harmony);
+	if (harmony) out.harmony = harmony;
 	return Object.keys(out).length > 0 ? out : undefined;
 }

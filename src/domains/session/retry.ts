@@ -30,7 +30,12 @@ import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
 import { isLiteLLMConnectionFailure } from "../../core/gateway-routing.js";
 import { isProviderAuthRejection } from "../../core/provider-auth-error.js";
-import { engineRetryDelayMs, isEngineContextOverflow, isEngineRetryableAssistantError } from "../../engine/ai.js";
+import {
+	engineRetryDelayMs,
+	isEngineContextOverflow,
+	isEngineRetryableAssistantError,
+	isHarmonyTerminalFailure,
+} from "../../engine/ai.js";
 import { SESSION_COST_CEILING_REASON } from "../scheduling/budget.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
@@ -91,6 +96,7 @@ function isModelLoadingErrorMessage(errorMessage: string | null | undefined): bo
  */
 export function isRetryableErrorMessage(errorMessage: string | null | undefined): boolean {
 	if (!errorMessage || errorMessage.length === 0) return false;
+	if (isHarmonyTerminalFailure(errorMessage)) return false;
 	return isEngineRetryableAssistantError(errorMessage) || MODEL_LOADING_PATTERN.test(errorMessage);
 }
 
@@ -131,6 +137,9 @@ export function classifyRecoveryFailure(input: RecoveryFailureInput): RecoveryFa
 	// server error, and another attempt meets the same ceiling (#423).
 	else if (input.message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) kind = "terminal-provider";
 	else if (input.contextOverflow ?? isEngineContextOverflow(input.message)) kind = "context-overflow";
+	// The engine already retried a Harmony server failure once and wrote this
+	// code; its code, not its wording, makes it final here (#435).
+	else if (isHarmonyTerminalFailure(input.message)) kind = "terminal-provider";
 	else if (isProviderAuthRejection(input.message, input.status)) kind = "auth";
 	else if (input.runtimeId === "litellm") {
 		kind = !input.hasAttemptOutput && isLiteLLMConnectionFailure(input.message) ? "connection" : "terminal-provider";

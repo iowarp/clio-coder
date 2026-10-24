@@ -735,6 +735,7 @@ export function createProvidersBundle(
 			checkedAt: Date.now(),
 		};
 		if (result.error !== undefined) out.error = result.error;
+		if (result.harmony !== undefined) out.harmony = result.harmony;
 		return out;
 	}
 

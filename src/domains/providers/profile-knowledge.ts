@@ -82,6 +82,9 @@ function entryFromProfile(profile: ModelProfile, old: KnowledgeBaseEntry | null)
 	const sampling = profile.recommendations?.sampling ?? old?.quirks?.sampling;
 	if (sampling !== undefined) quirks.sampling = sampling;
 	if (thinking !== undefined) quirks.thinking = thinking;
+	// Replay field for reasoning recovered from raw Harmony markers (#435).
+	const harmony = profile.behavior?.harmony;
+	if (harmony !== undefined) quirks.harmony = harmony;
 	const outputTokens = profile.recommendations?.outputTokens;
 	if (typeof outputTokens === "number") quirks.outputTokens = outputTokens;
 	return {

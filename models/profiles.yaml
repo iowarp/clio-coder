@@ -6,8 +6,10 @@ models:
   - id: openai-gpt-oss
     match:
       exactIds:
+        - openai/gpt-oss-120b
         - openai/gpt-oss-20b
       familyPrefixes:
+        - gpt-oss-120b
         - gpt-oss-20b
     claims:
       modelMaxContext: 131072
@@ -36,7 +38,21 @@ models:
       runtimePreference:
         llamaCpp: Use the checkpoint chat template with --jinja and the OpenAI-compatible chat-completions endpoint.
           Send template controls through chat_template_kwargs. Choose the loaded context for available memory;
-          the model maximum does not size the server.
+          the model maximum does not size the server. Reasoning streams as reasoning_content.
+        lmstudio: Reasoning streams as reasoning; chat_template_kwargs is unsupported and the effort goes as
+          reasoning_effort only (#269).
+        vllm: vllm serve <model> --reasoning-parser openai_gptoss --tool-call-parser openai --enable-auto-tool-choice.
+          Without the reasoning parser the analysis channel arrives as raw Harmony markers in content; without the
+          tool-call parser tool calls arrive as raw commentary frames addressed to functions.<name>. Clio recovers
+          both from content and `targets --probe --tools` reports the server's Harmony parsing level, but the server
+          flags keep reasoning replay exact. Recovered reasoning replays as reasoning_content unless
+          quirks.harmony.recoveredReasoningField names another field per runtime; which field vLLM reads back is
+          unverified (#435).
+        alcfSophia: ALCF Sophia serves gpt-oss through vLLM (resource_server/sophia/vllm/v1) with flags the operator
+          does not control; probe it with --tools before relying on tool loops (#435).
+        alcfMetis: ALCF Metis (resource_server/metis/api/v1) is not vLLM. It returns structured tool calls and a
+          reasoning field, rejects chat_template_kwargs with 422, and answers a bare 400 to an assistant turn that
+          carries content, reasoning and tool_calls together, so tool turns replay with one analysis message (#414).
     provenance:
       source: upstream-model-card
       url: https://huggingface.co/openai/gpt-oss-20b
@@ -46,6 +62,8 @@ models:
       chatTemplate: https://huggingface.co/openai/gpt-oss-20b/blob/main/chat_template.jinja
       notes: Context comes from config.json max_position_embeddings. The card and generation config publish no
         recommended temperature or top_p; retain runtime sampling defaults instead of inventing a sampler.
+        gpt-oss-120b (https://huggingface.co/openai/gpt-oss-120b) shares the 131072 context, the Harmony chat
+        template and the effort levels; only its parameter count differs, so it matches this profile (#435).
       runtimeSources:
         - https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
         - https://docs.litellm.ai/docs/providers/openai_compatible

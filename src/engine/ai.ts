@@ -277,6 +277,12 @@ export function isEngineRetryableAssistantError(errorMessage: string): boolean {
 	return piIsRetryableAssistantError(errorOnlyMessage(errorMessage));
 }
 
+export {
+	type HarmonyServerParsing,
+	harmonyServerParsing,
+	isHarmonyTerminalFailure,
+} from "./harmony-failure.js";
+
 /** A thrown error or a worker stderr tail is only text, so classify it as a bare error turn. */
 function errorOnlyMessage(errorMessage: string): AssistantMessage {
 	return {

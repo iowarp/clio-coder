@@ -9,7 +9,12 @@
  */
 import { performance } from "node:perf_hooks";
 import { Type } from "typebox";
-import { streamSimple, validateEngineToolArguments } from "../../../engine/ai.js";
+import {
+	type HarmonyServerParsing,
+	harmonyServerParsing,
+	streamSimple,
+	validateEngineToolArguments,
+} from "../../../engine/ai.js";
 import type { EngineModel } from "../../../engine/types.js";
 
 export const TOOL_PROBE_TOOL_NAME = "record_sum";
@@ -53,6 +58,13 @@ export interface ProbeToolCallResult {
 	argumentsValid: boolean;
 	latencyMs: number;
 	error?: string;
+	/**
+	 * For a Harmony (gpt-oss) model, how much of the Harmony format the server
+	 * parsed itself: `none` left reasoning and the call in raw markers,
+	 * `reasoning-only` left the tool call raw, `full` returned structured
+	 * fields. Absent for other models (#435).
+	 */
+	harmony?: HarmonyServerParsing;
 }
 
 interface FrameCounter {
@@ -157,6 +169,7 @@ export async function probeToolCall(opts: ProbeToolCallOptions): Promise<ProbeTo
 	const raw = new Map<number, string>();
 	const calls: ObservedCall[] = [];
 	let argumentsValid = false;
+	let harmony: HarmonyServerParsing | undefined;
 	const started = performance.now();
 	const outcome = (error?: string): ProbeToolCallResult => {
 		const result: ProbeToolCallResult = {
@@ -169,6 +182,7 @@ export async function probeToolCall(opts: ProbeToolCallOptions): Promise<ProbeTo
 			latencyMs: Math.round(performance.now() - started),
 		};
 		if (error !== undefined) result.error = error;
+		if (harmony !== undefined) result.harmony = harmony;
 		return result;
 	};
 
@@ -206,9 +220,14 @@ export async function probeToolCall(opts: ProbeToolCallOptions): Promise<ProbeTo
 				});
 			}
 			if (event.type === "error") {
+				if (event.error.harmonyRecovery !== undefined) harmony = harmonyServerParsing(event.error.harmonyRecovery);
 				return outcome(event.error.errorMessage ?? "stream failed");
 			}
-			if (event.type === "done") break;
+			if (event.type === "done") {
+				// Only the Harmony recovery layer sets this, so other models stay silent.
+				if (event.message.harmonyRecovery !== undefined) harmony = harmonyServerParsing(event.message.harmonyRecovery);
+				break;
+			}
 		}
 		const first = calls[0];
 		if (!first) return outcome("no tool call in the response");

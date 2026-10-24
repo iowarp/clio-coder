@@ -3,7 +3,9 @@
 # Source URLs and retrieval dates live in each profile provenance.
 - family: openai-gpt-oss
   matchPatterns:
+    - openai/gpt-oss-120b
     - openai/gpt-oss-20b
+    - gpt-oss-120b
     - gpt-oss-20b
   capabilities:
     chat: true
@@ -21,7 +23,21 @@
     runtimePreference:
       llamaCpp: Use the checkpoint chat template with --jinja and the OpenAI-compatible chat-completions endpoint.
         Send template controls through chat_template_kwargs. Choose the loaded context for available memory;
-        the model maximum does not size the server.
+        the model maximum does not size the server. Reasoning streams as reasoning_content.
+      lmstudio: Reasoning streams as reasoning; chat_template_kwargs is unsupported and the effort goes as
+        reasoning_effort only (#269).
+      vllm: vllm serve <model> --reasoning-parser openai_gptoss --tool-call-parser openai --enable-auto-tool-choice.
+        Without the reasoning parser the analysis channel arrives as raw Harmony markers in content; without the
+        tool-call parser tool calls arrive as raw commentary frames addressed to functions.<name>. Clio recovers
+        both from content and `targets --probe --tools` reports the server's Harmony parsing level, but the server
+        flags keep reasoning replay exact. Recovered reasoning replays as reasoning_content unless
+        quirks.harmony.recoveredReasoningField names another field per runtime; which field vLLM reads back is
+        unverified (#435).
+      alcfSophia: ALCF Sophia serves gpt-oss through vLLM (resource_server/sophia/vllm/v1) with flags the operator
+        does not control; probe it with --tools before relying on tool loops (#435).
+      alcfMetis: ALCF Metis (resource_server/metis/api/v1) is not vLLM. It returns structured tool calls and a
+        reasoning field, rejects chat_template_kwargs with 422, and answers a bare 400 to an assistant turn that
+        carries content, reasoning and tool_calls together, so tool turns replay with one analysis message (#414).
     thinking:
       mechanism: effort-levels
       effortByLevel:

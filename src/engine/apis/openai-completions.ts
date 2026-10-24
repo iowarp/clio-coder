@@ -40,7 +40,7 @@ import type { LiteLLMTargetSettings, LmStudioTargetSettings } from "../../domain
 import { isProviderContentFilter, providerContentFilterMessage } from "../ai.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
-import { HarmonyResponseParser } from "../harmony-response.js";
+import { retryHarmonyFailureOnce, routeHarmonyStream } from "../harmony-stream.js";
 import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
 import { deferResponseDeadline } from "../response-deadline.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
@@ -828,19 +828,14 @@ function withReasoningTokenEstimate(
  * sometimes leak these when the chat template is misconfigured. Sanitizing
  * them at the engine adapter layer prevents the literal sentinel text from
  * reaching the agent loop, turn history, or the TUI renderer. Thinking and
- * tool-call events pass through unchanged.
+ * tool-call events pass through unchanged. Harmony frames are not sentinels:
+ * `routeHarmonyStream` reads them off a gpt-oss stream before this runs (#435).
  */
-function stripSentinelsFromStream(
-	source: AssistantMessageEventStream,
-	model: Model<Api>,
-	resolved: ResolvedModelRuntimeCapabilities,
-): AssistantMessageEventStream {
+function stripSentinelsFromStream(source: AssistantMessageEventStream, model: Model<Api>): AssistantMessageEventStream {
 	const sanitized = createAssistantMessageEventStream();
 	(async () => {
 		try {
-			const parseHarmony = resolved.response.parser === "harmony";
 			const strippers = new Map<number, ReturnType<typeof createSentinelStripper>>();
-			const harmonyParsers = new Map<number, HarmonyResponseParser>();
 			const safeText = new Map<number, string>();
 			const ensureStripper = (idx: number): ReturnType<typeof createSentinelStripper> => {
 				const existing = strippers.get(idx);
@@ -850,27 +845,13 @@ function stripSentinelsFromStream(
 				safeText.set(idx, "");
 				return created;
 			};
-			const ensureHarmonyParser = (idx: number): HarmonyResponseParser => {
-				const existing = harmonyParsers.get(idx);
-				if (existing) return existing;
-				const created = new HarmonyResponseParser();
-				harmonyParsers.set(idx, created);
-				return created;
-			};
 			const rewritePartialText = (event: AssistantMessageEvent, idx: number, value: string): void => {
 				if (!("partial" in event)) return;
 				const block = event.partial.content[idx];
 				if (block && block.type === "text") block.text = value;
 			};
-			const sanitizeChunk = (idx: number, chunk: string): string => {
-				const harmonySafe = parseHarmony ? ensureHarmonyParser(idx).push(chunk).text : chunk;
-				return ensureStripper(idx).push(harmonySafe);
-			};
-			const flushChunk = (idx: number): string => {
-				const harmonyTail = parseHarmony ? ensureHarmonyParser(idx).flush().text : "";
-				const stripper = ensureStripper(idx);
-				return stripper.push(harmonyTail) + stripper.flush();
-			};
+			const sanitizeChunk = (idx: number, chunk: string): string => ensureStripper(idx).push(chunk);
+			const flushChunk = (idx: number): string => ensureStripper(idx).flush();
 			for await (const event of source) {
 				if (event.type === "text_delta") {
 					const safeChunk = sanitizeChunk(event.contentIndex, event.delta);
@@ -899,7 +880,6 @@ function stripSentinelsFromStream(
 					}
 					sanitized.push({ ...event, content: accumulated });
 					strippers.delete(event.contentIndex);
-					harmonyParsers.delete(event.contentIndex);
 					continue;
 				}
 				if (event.type === "done" || event.type === "error") {
@@ -1133,29 +1113,54 @@ function streamCompletions<TOptions extends StreamOptions>(
 		: options;
 	const diffusion = diffusionFramesActive(model);
 	const requestOptions = withLiteLLMRequestOptions(model, transportOptions ?? ({} as TOptions));
-	const source = withResponseModelIdCapture(model, requestOptions, (capturedOptions) =>
-		withLocalResidency(model, options ?? {}, (requestModel) => {
-			return start(
-				requestModel,
-				normalizeContext(preserveInterruptedReasoning(effectiveContext, requestModel, resolved)),
-				withRemainingContextBudget(
+	const harmony = resolved.response.parser === "harmony";
+	const attempt = (): AssistantMessageEventStream => {
+		const source = withResponseModelIdCapture(model, requestOptions, (capturedOptions) =>
+			withLocalResidency(model, options ?? {}, (requestModel) => {
+				return start(
 					requestModel,
-					effectiveContext,
-					withSamplingOverrides(requestModel, capturedOptions, resolved, diffusion),
-				),
-			);
-		}),
-	);
-	const advised = withLiteLLMRouteFailureAdvice(model, source);
-	const channels = filterGemmaChannelStream(advised, usesGemmaChannelMarkers(resolved.modelId), (stream, error) =>
-		failStream(stream, model, error),
-	);
-	const thinking = stripNeverReasoningFromStream(channels, model, resolved);
-	// The sentinel stripper accumulates deltas and rewrites the partial from
-	// that sum, which is exactly wrong for a stream whose deltas are whole
-	// frames. A diffusion provider is a cloud endpoint with no sentinel leak.
-	const sanitized = diffusion ? thinking : stripSentinelsFromStream(thinking, model, resolved);
-	return guardMalformedToolCalls(withReasoningTokenEstimate(sanitized, model), model, resolvedRequestContext(context));
+					normalizeContext(preserveInterruptedReasoning(effectiveContext, requestModel, resolved)),
+					withRemainingContextBudget(
+						requestModel,
+						effectiveContext,
+						withSamplingOverrides(requestModel, capturedOptions, resolved, diffusion),
+					),
+				);
+			}),
+		);
+		const advised = withLiteLLMRouteFailureAdvice(model, source);
+		const channels = filterGemmaChannelStream(advised, usesGemmaChannelMarkers(resolved.modelId), (stream, error) =>
+			failStream(stream, model, error),
+		);
+		const thinking = stripNeverReasoningFromStream(channels, model, resolved);
+		// Raw Harmony frames become thinking and tool calls before the sentinel
+		// stripper sees the text. Recovered thinking replays under the field the
+		// resolved runtime capability names (catalog `quirks.harmony`, default
+		// `reasoning_content`); a reasoning field the server streamed keeps its
+		// own signature (#435).
+		const routed = harmony
+			? routeHarmonyStream(
+					thinking,
+					{ recoveredThinkingSignature: resolved.response.recoveredReasoningField ?? "reasoning_content" },
+					(stream, error) => failStream(stream, model, error),
+				)
+			: thinking;
+		// The sentinel stripper accumulates deltas and rewrites the partial from
+		// that sum, which is exactly wrong for a stream whose deltas are whole
+		// frames. A diffusion provider is a cloud endpoint with no sentinel leak.
+		const sanitized = diffusion ? routed : stripSentinelsFromStream(routed, model);
+		return guardMalformedToolCalls(withReasoningTokenEstimate(sanitized, model), model, resolvedRequestContext(context));
+	};
+	// Two deterministic vLLM Harmony failures get one engine retry, then a
+	// terminal message, instead of pi's three identical transient retries (#435).
+	return harmony
+		? retryHarmonyFailureOnce(
+				attempt(),
+				attempt,
+				{ modelId: model.id, ...(resolved.thinking.effort !== undefined ? { effort: resolved.thinking.effort } : {}) },
+				(stream, error) => failStream(stream, model, error),
+			)
+		: attempt();
 }
 
 export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions", OpenAICompletionsOptions> = {
