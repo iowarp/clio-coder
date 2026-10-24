@@ -4,14 +4,20 @@ import { afterEach, beforeEach, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { installDiagnosticSink } from "../../src/core/diagnostics.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { PromptsContract } from "../../src/domains/prompts/contract.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SemanticHit, SemanticRecord, SemanticSearchResult } from "../../src/domains/semantic/index.js";
 import { SemanticIndex, sourceHash } from "../../src/domains/semantic/index.js";
 import { createSemanticBackgroundRefresh } from "../../src/domains/semantic-app/background.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createTurnContext } from "../../src/session-control/turn-context.js";
+import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import type { ContextSemanticRequest } from "../../src/tools/context/index.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
 import { commitObservationReservation, releaseObservation, reserveObservation } from "../../src/tools/observation.js";
+import type { ToolRegistry } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -145,6 +151,64 @@ test("disabled and unbound semantic mode is inert, including core-bootstrap's se
 	const registered = registry.get(ToolNames.Context);
 	assert(registered);
 	assert.equal((await registered.run({ scope: "semantic", query: "retry" }, {})).kind, "error");
+});
+
+test("turn hint, tool gate and advertised scope agree on semantic pins (#432)", async (t) => {
+	t.mock.method(globalThis, "fetch", () => {
+		throw new Error("agreement regression must not call a provider");
+	});
+	const pinned = { enabled: true, target: "embedding", model: "gemma", assetIdentity: "fixture" };
+	for (const [label, semantic, usable] of [
+		["pinned", pinned, true],
+		["missing target", { ...pinned, target: undefined }, false],
+		["missing model", { ...pinned, model: " " }, false],
+		["missing asset identity", { ...pinned, assetIdentity: undefined }, false],
+	] as const) {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		Object.assign(settings.context.semantic, semantic);
+		let hint: boolean | undefined;
+		const context = createTurnContext({
+			state: createTurnState("off"),
+			getSettings: () => settings,
+			providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
+			prompts: {
+				inputEpoch: () => "1:1",
+				async compileSessionPrompt(input) {
+					hint = input.sessionInputs.semanticSearchAvailable;
+					return { systemPrompt: "", systemPromptHash: "", tokenEstimate: 0, sections: [], fragmentManifest: [] };
+				},
+				async compileWorkerPrompt() {
+					throw new Error("not used");
+				},
+			} as PromptsContract,
+			toolRegistry: { get: () => undefined, listAll: () => [] } as unknown as ToolRegistry,
+			middleware: {} as TurnMiddleware,
+			emitNotice: () => {},
+		});
+		await context.ensureSessionPrompt({
+			targetId: "local",
+			runtimeId: "llama.cpp",
+			wireModelId: "model",
+			runtimeResolution: {
+				capabilityDecisions: { tools: true },
+				contextWindowDetails: { effectiveContextWindow: 32_768 },
+			},
+			agent: { state: { systemPrompt: "", thinkingLevel: "off", messages: [], model: {}, tools: [] } },
+		} as unknown as AgentRuntime);
+		context.dispose();
+		const registry = createRegistry({ safety: createWorkerSafety() });
+		registerCoreTools(registry, { getSettings: () => settings });
+		const registered = registry.get(ToolNames.Context);
+		assert(registered);
+		const scopes = (registered.parameters as { properties: { scope: { enum: string[] } } }).properties.scope.enum;
+		const searched = await registered.run({ scope: "semantic", query: "retry" }, {});
+		const gated = searched.kind === "error" && /disabled or unavailable/.test(searched.message);
+		assert.deepEqual(
+			{ hint, gate: !gated, scope: scopes.includes("semantic") },
+			{ hint: usable, gate: usable, scope: usable },
+			label,
+		);
+	}
 });
 
 test("enabled searches load lazily and forward only narrowed filters, trusted cwd and cancellation", async () => {
