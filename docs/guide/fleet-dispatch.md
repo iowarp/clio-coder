@@ -644,7 +644,11 @@ After a successful worker and successful host verification, merge application
 commits the task branch, rechecks protected paths, and uses the same guarded
 merge path as compete. A conflict fails closed with
 `worktree_merge_conflict` and preserves the branch and worktree. Preserve
-application never merges and reports the branch. A detached task applies when its
+application never merges and reports the branch. An in-progress Git operation
+detected by the merge guard yields `worktree_destination_busy` and leaves that
+operation, the index, and working-tree edits untouched. The guard recognizes
+merges, cherry-picks, reverts, rebases, and cherry-pick/revert sequences.
+A detached task applies when its
 run finalizes, so `monitor(mode="collect")` returns the sealed application receipt.
 
 Four cases withhold the merge: a worker whose own report lists a failing validation,

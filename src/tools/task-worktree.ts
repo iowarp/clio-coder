@@ -111,6 +111,9 @@ export const WORKTREE_HEAD_MOVED = "worktree_head_moved";
 /** Receipt reason for a merge refused because the source checkout is no longer on a branch that holds the task's base. */
 export const WORKTREE_DESTINATION_MOVED = "worktree_destination_moved";
 
+/** Receipt reason for a merge refused because the source checkout already has a Git operation in progress. */
+export const WORKTREE_DESTINATION_BUSY = "worktree_destination_busy";
+
 /** Receipt reason for a merge refused because the worktree no longer holds the commit an operator was shown. */
 export const WORKTREE_CHANGED_SINCE_PREVIEW = "worktree_changed_since_preview";
 
@@ -119,15 +122,45 @@ const OWNER_FILE_SUFFIX = TASK_WORKTREE_OWNER_SUFFIX;
 /** Identity of commits the host makes on a task branch, and of worker commits when the repository names none. */
 export const COMMIT_IDENTITY = "clio-coder-task";
 
-function gitBytes(root: string, args: string[]): Buffer {
+interface GitOptions {
+	env?: NodeJS.ProcessEnv;
+}
+
+function gitBytes(root: string, args: string[], options: GitOptions = {}): Buffer {
 	return execFileSync("git", internalGitArgv(["-C", root, ...args]), {
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,
+		...options,
 	});
 }
 
-function git(root: string, args: string[]): string {
-	return gitBytes(root, args).toString("utf8").trim();
+function git(root: string, args: string[], options: GitOptions = {}): string {
+	return gitBytes(root, args, options).toString("utf8").trim();
+}
+
+function gitErrorOutput(error: unknown, stream: "stdout" | "stderr"): string {
+	if (error === null || typeof error !== "object") return "";
+	const output = (error as { stdout?: unknown; stderr?: unknown })[stream];
+	return typeof output === "string" ? output : Buffer.isBuffer(output) ? output.toString("utf8") : "";
+}
+
+function gitFailureReason(error: unknown, fallback: string): string {
+	const stderr = gitErrorOutput(error, "stderr")
+		.split(/\r?\n/)
+		.find((line) => line.trim().length > 0)
+		?.trim();
+	if (stderr !== undefined) return stderr;
+	const code = error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
+	if (typeof code !== "string") return fallback;
+	const cause =
+		code === "ENOENT"
+			? "Git executable was not found."
+			: code === "ETIMEDOUT"
+				? "Git exceeded its subprocess timeout."
+				: code === "ENOBUFS"
+					? "Git exceeded its subprocess output buffer."
+					: fallback;
+	return `${code}: ${cause}`;
 }
 
 export function isCanonicalWorktreePathInside(parent: string, candidate: string): boolean {
@@ -234,26 +267,84 @@ export function mergeWorktreeBranch(
 	identity: string,
 	/** Merge commit message; git's default names `branch`, which reads badly when it is a commit id. */
 	message?: string,
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true } | { ok: false; reason: string; code?: typeof WORKTREE_DESTINATION_BUSY } {
+	let mergeAttempted = false;
+	let targetCommit: string | undefined;
+	let mergeHeadPath: string | undefined;
+	// Conflict-path reporting parses Git diagnostics, so merge subprocesses need a stable locale.
+	const mergeEnv = { ...process.env, LC_ALL: "C", LANGUAGE: "" };
 	try {
-		git(root, [
-			...hostCommitIdentity(root, identity),
-			"merge",
-			"--no-edit",
-			"--no-verify",
-			...(message !== undefined ? ["-m", message] : []),
-			branch,
-		]);
+		targetCommit = git(root, ["rev-parse", "--verify", "--end-of-options", `${branch}^{commit}`]);
+		const gitDir = git(root, ["rev-parse", "--absolute-git-dir"]);
+		mergeHeadPath = join(gitDir, "MERGE_HEAD");
+		// A task must not interrupt the operator's partially completed Git operation.
+		for (const [marker, operation] of [
+			["MERGE_HEAD", "merge"],
+			["CHERRY_PICK_HEAD", "cherry-pick"],
+			["REVERT_HEAD", "revert"],
+			["rebase-merge", "rebase"],
+			["rebase-apply", "rebase"],
+			["sequencer", "cherry-pick or revert sequence"],
+		] as const) {
+			if (existsSync(join(gitDir, marker))) {
+				return {
+					ok: false,
+					code: WORKTREE_DESTINATION_BUSY,
+					reason: `Cannot merge: a ${operation} is already in progress in the destination checkout.`,
+				};
+			}
+		}
+		mergeAttempted = true;
+		git(
+			root,
+			[
+				...hostCommitIdentity(root, identity),
+				"merge",
+				"--no-edit",
+				"--no-verify",
+				...(message !== undefined ? ["-m", message] : []),
+				branch,
+			],
+			{ env: mergeEnv },
+		);
 		return { ok: true };
 	} catch (error) {
-		try {
-			git(root, ["merge", "--abort"]);
-		} catch {
-			// No merge remains to abort.
+		const stdout = gitErrorOutput(error, "stdout");
+		const conflictLines = stdout.split(/\r?\n/).filter((line) => line.startsWith("CONFLICT "));
+		const status = error !== null && typeof error === "object" && "status" in error ? error.status : undefined;
+		const reportsConflict = mergeAttempted && status === 1 && conflictLines.length > 0;
+		let mergeLeftInProgress = false;
+		// Exit 128 refuses an operator's merge, including a same-oid merge with unresolved index entries.
+		// Only exit 1 can own cleanup, and the pin protects a branch moved before Git runs.
+		if (mergeAttempted && targetCommit !== undefined && mergeHeadPath !== undefined) {
+			try {
+				if (existsSync(mergeHeadPath)) {
+					if (status === 128) {
+						return {
+							ok: false,
+							code: WORKTREE_DESTINATION_BUSY,
+							reason: gitFailureReason(error, "Cannot merge: a merge is already in progress in the destination checkout."),
+						};
+					}
+					if (status === 1 && readFileSync(mergeHeadPath, "utf8").trim() === targetCommit) {
+						git(root, ["merge", "--abort"], { env: mergeEnv });
+					} else {
+						mergeLeftInProgress = true;
+					}
+				}
+			} catch {
+				return {
+					ok: false,
+					reason: `Git left this task merge in progress; run git merge --abort in ${root}`,
+				};
+			}
 		}
+		const reason = reportsConflict
+			? `Merge conflict: ${conflictLines.join(" ")}`
+			: gitFailureReason(error, "Git could not merge the branch.");
 		return {
 			ok: false,
-			reason: error instanceof Error ? (error.message.split("\n")[0] ?? "merge failed") : String(error),
+			reason: `${reason}${mergeLeftInProgress ? ` ; this task merge was left in progress; run git merge --abort in ${root}` : ""}`,
 		};
 	}
 }
@@ -539,9 +630,7 @@ function checkTaskWorktreeHead(worktree: TaskWorktree): TaskHeadCheck {
 		if (canonicalOrResolved(common) !== canonicalOrResolved(rootCommon))
 			return moved(`a checkout of another repository (${common})`);
 	} catch (error) {
-		return moved(
-			`no readable git checkout (${error instanceof Error ? (error.message.split("\n")[0] ?? "git failed") : String(error)})`,
-		);
+		return moved(`no readable git checkout (${gitFailureReason(error, "Git could not inspect the checkout.")})`);
 	}
 	let symbolic = "";
 	try {
@@ -580,7 +669,7 @@ export function attestTaskWorktreeCwd(
 	} catch (error) {
 		return {
 			ok: false,
-			detail: `task worktree ${worktree.runId} could not be attested: ${error instanceof Error ? (error.message.split("\n")[0] ?? "git failed") : String(error)}`,
+			detail: `task worktree ${worktree.runId} could not be attested: ${gitFailureReason(error, "Git could not inspect the checkout.")}`,
 		};
 	}
 }
@@ -802,7 +891,7 @@ export function applyTaskWorktree(input: {
 	const stranded = destinationRefusal(worktree, destinationBranch);
 	if (stranded !== null) return { ...receipt, reason: WORKTREE_DESTINATION_MOVED, detail: stranded };
 	const merged = mergeWorktreeBranch(worktree.root, commit, COMMIT_IDENTITY, `Merge branch '${worktree.branch}'`);
-	if (!merged.ok) return { ...receipt, reason: "worktree_merge_conflict" };
+	if (!merged.ok) return { ...receipt, reason: merged.code ?? "worktree_merge_conflict", detail: merged.reason };
 	const landedCommit = git(worktree.root, ["rev-parse", "HEAD"]);
 	return { ...receipt, applied: true, detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}` };
 }
@@ -1034,7 +1123,7 @@ function workHeldBy(canonical: string, claim: Pick<TaskClaim, "base" | "branch" 
 		const dirty = git(claim.path, ["status", "--porcelain", "--untracked-files=all"]);
 		return dirty.length > 0 ? `${dirty.split("\n").length} uncommitted path(s)` : null;
 	} catch (error) {
-		return `git could not inspect it: ${error instanceof Error ? (error.message.split("\n")[0] ?? "error") : String(error)}`;
+		return `git could not inspect it: ${gitFailureReason(error, "Git inspection failed.")}`;
 	}
 }
 

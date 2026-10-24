@@ -1759,7 +1759,7 @@ async function runCompete(
 						decisions,
 						group,
 						winner,
-						needsDecision: `winner candidate ${pick} could not be merged (${merge.reason}); its branch ${pickedWorktree.branch} is preserved`,
+						needsDecision: `winner candidate ${pick} merge was refused (${merge.reason}); its branch ${pickedWorktree.branch} is preserved`,
 					};
 				}
 				try {
@@ -1970,7 +1970,7 @@ function runApplyWinner(
 	if (!merge.ok) {
 		return {
 			kind: "error",
-			message: `dispatch: winner branch ${branch} could not be merged: ${merge.reason}; the branch is preserved`,
+			message: `dispatch: merge of winner branch ${branch} was refused: ${merge.reason}; the branch is preserved`,
 			...(confirmation !== null
 				? { details: { confirmationPath: confirmation.path, confirmationId: confirmation.artifact.id } }
 				: {}),

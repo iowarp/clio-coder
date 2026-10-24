@@ -680,7 +680,7 @@ export async function removeCandidateWorktreeMapped(
  * may have moved), so a regular merge commit is created; a conflict aborts
  * the merge and reports failure so the operator decides.
  */
-export function mergeWinnerBranch(root: string, branch: string): { ok: true } | { ok: false; reason: string } {
+export function mergeWinnerBranch(root: string, branch: string): ReturnType<typeof mergeWorktreeBranch> {
 	return mergeWorktreeBranch(root, branch, COMPETE_COMMIT_IDENTITY);
 }
 
