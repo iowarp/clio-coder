@@ -11,6 +11,7 @@ import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import { UsageInsights } from "./usage-insights.js";
+import { usageCacheEvidence } from "./usage-insights-model.js";
 import { filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
 import "./usage.css";
 
@@ -25,6 +26,7 @@ export function UsagePage({ client }: { client: Client }) {
 	});
 	const view = query.data ? usageView(query.data) : null;
 	const facts = query.data ? filterUsageFacts(query.data.facts, factQuery) : [];
+	const cache = query.data ? usageCacheEvidence(query.data) : null;
 	return (
 		<section className="usage-page">
 			<PanelHeading
@@ -33,7 +35,7 @@ export function UsagePage({ client }: { client: Client }) {
 				level={1}
 				action={
 					<span className="usage-window">
-						<Icon name="clock" /> Last 30 days
+						<Icon name="clock" /> Retained local records
 					</span>
 				}
 			/>
@@ -123,6 +125,51 @@ export function UsagePage({ client }: { client: Client }) {
 							<p className="usage-chart-footnote">{view.originsNote}</p>
 						</section>
 					</div>
+					{cache && (
+						<section className="usage-cache-evidence" aria-labelledby="usage-cache-title">
+							<p className="usage-kicker">05 / Prompt cache</p>
+							<h2 id="usage-cache-title">Observed prefill work</h2>
+							<p className="usage-chart-footnote">
+								Model prompt-cache evidence from retained session records. Uncached prefill is backend work; reprocessed prefix
+								is an estimate of earlier prompt tokens evaluated again on measured cache breaks. These observations do not add
+								to token totals or establish a hit rate, saved cost, or tool-call cache reuse.
+							</p>
+							{cache.rows.length ? (
+								// biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need focus to scroll the evidence table horizontally.
+								<section className="usage-cache-scroll" aria-label="Session prompt-cache observations" tabIndex={0}>
+									<table className="usage-cache-table">
+										<thead>
+											<tr>
+												<th scope="col">Session</th>
+												<th scope="col">Uncached prefill tokens</th>
+												<th scope="col">Reprocessed prefix tokens · estimated</th>
+												<th scope="col">Measured cache breaks</th>
+												<th scope="col">Recorded verdicts</th>
+											</tr>
+										</thead>
+										<tbody>
+											{cache.rows.map((row) => (
+												<tr key={row.key}>
+													<th scope="row">{row.session}</th>
+													<td>{row.uncached}</td>
+													<td>{row.reprocessed}</td>
+													<td>{row.breaks}</td>
+													<td>{row.verdicts}</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</section>
+							) : (
+								<PanelEmpty>No session prompt-cache observations were recorded in this window.</PanelEmpty>
+							)}
+							<p className="usage-chart-footnote">
+								{cache.rows.length} of {cache.total} session observations shown.
+								{cache.omitted > 0 ? ` ${cache.omitted} further observations remain in recorded facts below.` : ""} Not recorded
+								means missing evidence; a recorded zero remains zero. Counts cover recorded verdicts only.
+							</p>
+						</section>
+					)}
 					<details className="usage-records">
 						<summary>
 							<Icon name="evidence" />

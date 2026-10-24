@@ -42,6 +42,7 @@ export interface ContextView {
 	figure: { percent: string | null; used: string; window: string | null; basis: string };
 	/** The window's settings and recent history as short label and value pairs, for a facts list. */
 	facts: ContextFact[];
+	cacheFacts: ContextFact[];
 }
 
 export interface ContextFact {
@@ -78,7 +79,6 @@ function contextFacts(ledger: ContextLedger): ContextFact[] {
 	const known = ledger.contextWindow > 0;
 	const slots = ledger.contextWindowSlots;
 	const route = [ledger.provider, ledger.model].filter(Boolean).join(" · ");
-	const cache = ledger.promptCache;
 	const facts: ContextFact[] = [
 		{ label: "Model", value: null, note: route || "Route not reported" },
 		known
@@ -112,19 +112,34 @@ function contextFacts(ledger: ContextLedger): ContextFact[] {
 			value: `${count(ledger.lastCompaction.tokensBefore)} → ${count(ledger.lastCompaction.tokensAfter)}`,
 			note: `runtime estimates; ${ledger.lastCompaction.trigger}`,
 		});
-	if (cache !== null)
-		facts.push({
-			label: "Prompt cache",
-			value: cache.cacheReadTokens === null ? null : count(cache.cacheReadTokens),
-			note: [
-				cache.cacheReadTokens === null ? "cache reads not reported" : "read from the provider cache",
-				cache.shellReused ? "session shell reused" : "session shell rebuilt",
-				cache.backendVerdict === null ? null : VERDICT_WORDS[cache.backendVerdict],
-			]
-				.filter(Boolean)
-				.join("; "),
-		});
 	return facts;
+}
+
+function promptCacheFacts(cache: ContextLedger["promptCache"]): ContextFact[] {
+	if (cache === null) return [{ label: "Prompt cache", value: null, note: "Not reported" }];
+	return [
+		{
+			label: "Session shell",
+			value: null,
+			note: cache.shellReused ? "Reused compiled shell" : "Rebuilt compiled shell",
+		},
+		{
+			label: "Backend verdict",
+			value: null,
+			note: cache.backendVerdict === null ? "Not reported" : (VERDICT_WORDS[cache.backendVerdict] ?? "Not reported"),
+		},
+		...(
+			[
+				["Cache read", cache.cacheReadTokens],
+				["Cache write", cache.cacheWriteTokens],
+				["Uncached input", cache.uncachedInputTokens],
+			] as const
+		).map(([label, value]) => ({
+			label,
+			value: value === null ? null : count(value),
+			note: value === null ? "Not reported" : "tokens · last run",
+		})),
+	];
 }
 
 export function contextView(ledger: ContextLedger): ContextView {
@@ -151,6 +166,7 @@ export function contextView(ledger: ContextLedger): ContextView {
 			basis: ledger.measured ? "Total anchored to provider-reported usage" : "Estimated until the provider reports usage",
 		},
 		facts: contextFacts(ledger),
+		cacheFacts: promptCacheFacts(ledger.promptCache),
 		route: [ledger.provider, ledger.model].filter(Boolean).join(" · ") || "Route not reported",
 		window: known
 			? `${tokens(ledger.contextWindow)}${slots ? `, one of ${slots.slots} slots sharing ${tokens(slots.totalTokens)}` : ""}, ${

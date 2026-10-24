@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { memo, useId } from "react";
+import { memo, useId, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionWorkspace } from "../../contracts/session-telemetry.js";
@@ -39,6 +39,7 @@ export const ContextPanel = memo(function ContextPanel({
 }) {
 	const supported = !!capabilities?.context;
 	const id = useId();
+	const refreshButton = useRef<HTMLButtonElement>(null);
 	const ledger = useContextLedger(client, sessionId, settledTurns, sessionOpen && supported);
 	const status = useQuery({
 		meta: { errorSurface: "inline" },
@@ -61,9 +62,11 @@ export const ContextPanel = memo(function ContextPanel({
 				<div className="pane-inspection-toolbar">
 					<p>Reported context</p>
 					<button
+						ref={refreshButton}
 						type="button"
-						disabled={ledger.isFetching || status.isFetching}
+						aria-disabled={ledger.isFetching || status.isFetching}
 						onClick={() => {
+							if (ledger.isFetching || status.isFetching) return;
 							void ledger.refetch();
 							if (capabilities?.context?.status) void status.refetch();
 						}}
@@ -89,6 +92,7 @@ export const ContextPanel = memo(function ContextPanel({
 							type="button"
 							disabled={status.isFetching}
 							onClick={() => {
+								refreshButton.current?.focus();
 								void status.refetch();
 							}}
 						>
@@ -118,6 +122,7 @@ export const ContextPanel = memo(function ContextPanel({
 						type="button"
 						disabled={ledger.isFetching}
 						onClick={() => {
+							refreshButton.current?.focus();
 							void ledger.refetch();
 						}}
 					>
@@ -223,7 +228,26 @@ export const ContextPanel = memo(function ContextPanel({
 						<p className="drill__note">Project instructions and session history are accounted for separately.</p>
 					</details>
 					<details className="pane-inspection-disclosure">
-						<summary id={`${id}-window`}>Window, model & cache details</summary>
+						<summary id={`${id}-cache`}>Prompt cache evidence</summary>
+						<dl className="drill__facts">
+							{view.cacheFacts.map((fact) => (
+								<div key={fact.label}>
+									<dt>{fact.label}</dt>
+									<dd>
+										{fact.value !== null ? <span className="drill__num">{fact.value}</span> : null}
+										{fact.note !== null ? <span>{fact.note}</span> : null}
+									</dd>
+								</div>
+							))}
+						</dl>
+						<p className="drill__note">
+							Shell reuse describes Clio's compiled prompt. Provider reads and writes describe model prompt caching; they do
+							not measure tool-call caching. The backend verdict describes the first call of the last run. Missing counts do
+							not mean zero; these fields do not establish a cache hit rate or cost savings.
+						</p>
+					</details>
+					<details className="pane-inspection-disclosure">
+						<summary id={`${id}-window`}>Window & model details</summary>
 						<dl className="drill__facts">
 							{view.facts.map((fact) => (
 								<div key={fact.label}>

@@ -408,6 +408,42 @@
 	color: var(--ink-muted);
 	font-size: var(--text-instrument);
 }
+.usage-cache-evidence {
+	margin-block: var(--space-5);
+	padding-block: var(--space-4);
+	border-top: 1px solid var(--line);
+}
+.usage-cache-evidence h2 {
+	font-family: var(--font-editorial);
+	font-weight: 400;
+}
+.usage-cache-scroll {
+	overflow-x: auto;
+}
+.usage-cache-scroll:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 3px;
+}
+.usage-cache-table {
+	width: 100%;
+	border-collapse: collapse;
+	text-align: left;
+	font-size: var(--text-meta);
+}
+.usage-cache-table th,
+.usage-cache-table td {
+	padding: var(--space-3);
+	border-bottom: 1px solid var(--line);
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+.usage-cache-table th {
+	font-weight: 500;
+}
+.usage-cache-table td {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
 .usage-secondary {
 	display: grid;
 	grid-template-columns: 1fr 1fr;

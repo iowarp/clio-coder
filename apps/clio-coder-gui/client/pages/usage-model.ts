@@ -85,6 +85,7 @@ const ORIGINS: ReadonlyArray<readonly [string, string]> = [
 	["backgroundMemorySteps", "Background memory steps"],
 	["failedCompactionCalls", "Failed compaction calls"],
 	["systemOneCalls", "System One calls"],
+	["safetyJudgeCalls", "Safety judge calls"],
 ];
 
 /** These four are read out of the report by name; everything else keeps its wire shape. */
@@ -168,7 +169,7 @@ export function usageView(report: UsageReport): UsageView {
 	const workers = first("worker-tokens");
 	const tokens = overall ?? sessionTokens;
 	const cost = tokens.cost as
-		| { knownUsd?: number; hasEstimated?: boolean; hasUnknown?: boolean; calls?: number }
+		| { knownUsd?: number; hasEstimated?: boolean; hasUnknown?: boolean; allKnownFree?: boolean; calls?: number }
 		| undefined;
 	const missing = number(overall?.missingTokenCalls ?? sessionTokens.missingTokenCalls) ?? 0;
 
@@ -213,7 +214,9 @@ export function usageView(report: UsageReport): UsageView {
 						: cost?.hasEstimated
 							? "Includes estimated prices"
 							: cost
-								? "Recorded prices"
+								? cost.allKnownFree
+									? "Every recorded call is known free"
+									: "Recorded prices"
 								: "Historical cost; pricing provenance unavailable",
 		},
 		store("sessions", "session-store-missing", "Sessions"),
@@ -255,9 +258,9 @@ export function usageView(report: UsageReport): UsageView {
 		window: `from ${formatDay(report.from)} through ${formatDay(report.to)}`,
 		headline,
 		bars,
-		barsCaveat: BARS_CAVEAT,
+		barsCaveat: `${BARS_CAVEAT}${partialBreakdown ? " Some calls lack token fields; displayed fields are known subtotals, and absent amounts do not mean zero." : ""}`,
 		knownSubtotals:
-			missing > 0 || sessionTokens.knownSubtotals === true
+			missing > 0 || sessionTokens.knownSubtotals === true || overall?.knownSubtotals === true
 				? `${missing > 0 ? `${missing.toLocaleString("en-US")} recorded calls are missing token usage. ` : ""}Token amounts are known subtotals; missing usage is not zero. Reports cover retained local records, not provider invoices.`
 				: null,
 		origins,

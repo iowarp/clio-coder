@@ -155,3 +155,30 @@ export function filterUsageModels(
 		return terms.every((term) => text.includes(term)) && (coverage !== "incomplete" || incomplete);
 	});
 }
+
+/** Session prompt-cache telemetry is a separate observation, never another token or cost total. */
+export function usageCacheEvidence(report: UsageReport) {
+	const facts = report.facts.filter((fact) => fact.name === "session-cache");
+	return {
+		total: facts.length,
+		omitted: Math.max(0, facts.length - 24),
+		rows: facts.slice(0, 24).map((fact, index) => {
+			const values = fact.values;
+			const verdicts = record(values.verdictCounts);
+			const count = (value: unknown) => {
+				const amount = number(value);
+				return amount === null ? "Not recorded" : amount.toLocaleString("en-US");
+			};
+			return {
+				key: `${index}:${name(values.sessionId, "unknown")}`,
+				session: name(values.sessionId, "Session not recorded"),
+				uncached: count(values.uncachedPrefillTokens),
+				reprocessed: count(values.reprefilledTokens),
+				breaks: count(values.cacheBreakCalls),
+				verdicts: ["hot", "partial", "cold", "small", "unknown"]
+					.map((verdict) => `${verdict}: ${count(verdicts?.[verdict])}`)
+					.join(" · "),
+			};
+		}),
+	};
+}
