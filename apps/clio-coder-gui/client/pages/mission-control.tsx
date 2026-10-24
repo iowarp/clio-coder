@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionOverviewItem } from "../../contracts/session-overview.js";
@@ -15,6 +15,7 @@ import { TopBar } from "../shell/TopBar.js";
 import { useSessionOverview, useTaskActions } from "../shell/tasks.js";
 import type { SessionFilter } from "./mission-control-model.js";
 import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
+import { type SessionControls, useSessionControls } from "./session-control-actions.js";
 import "./mission-control.css";
 
 const FILTER_NAMES: Readonly<Record<SessionFilter, string>> = {
@@ -46,6 +47,7 @@ export function MissionControl({ client }: { client: Client }) {
 			{ replace: true },
 		);
 	const overview = useSessionOverview(client);
+	const controls = useSessionControls(client);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const items = overview.data?.sessions;
 	const projects = workspaces.data;
@@ -142,6 +144,7 @@ export function MissionControl({ client }: { client: Client }) {
 							</small>
 						</div>
 					</div>
+					<ControlFeedback controls={controls} connected={connected} />
 					<div className="mission__toolbar">
 						<label className="mission__search">
 							<Icon name="search" />
@@ -196,7 +199,7 @@ export function MissionControl({ client }: { client: Client }) {
 						{shown.map((item) => (
 							<SessionCard
 								key={item.id}
-								client={client}
+								controls={controls}
 								item={item}
 								projectName={projects?.find((workspace) => workspace.id === item.workspaceId)?.name ?? "Unavailable project"}
 								connected={connected}
@@ -234,55 +237,103 @@ export function MissionControl({ client }: { client: Client }) {
 	);
 }
 
+function ControlFeedback({ controls, connected }: { controls: SessionControls; connected: boolean }) {
+	const recovery = useRef<HTMLElement>(null);
+	const unresolvedKey = controls.records
+		.filter((row) => row.stage === "unresolved")
+		.map((row) => row.key)
+		.join(":");
+	useEffect(() => {
+		if (!unresolvedKey) return;
+		let landing = 0;
+		const frame = requestAnimationFrame(() => {
+			landing = requestAnimationFrame(() => recovery.current?.focus());
+		});
+		return () => {
+			cancelAnimationFrame(frame);
+			cancelAnimationFrame(landing);
+		};
+	}, [unresolvedKey]);
+	if (!controls.records.length && !controls.notice) return null;
+	return (
+		<section className="mission-controls" aria-label="Session control results" ref={recovery} tabIndex={-1}>
+			{controls.notice ? <p role="alert">{controls.notice}</p> : null}
+			{controls.records.map((record) => (
+				<div key={record.key} className="mission-controls__record" data-state={record.stage}>
+					<div>
+						<h3>
+							{record.action === "stop" ? "Stop turn" : "Close session"} · {record.title}
+						</h3>
+						<p role={record.stage === "unresolved" ? "alert" : "status"}>{record.message}</p>
+						{record.stage === "unresolved" ? (
+							<p className="mission-controls__hint">
+								The outcome is unconfirmed. Recovery stays with this session, even when you change filters or leave this page.
+							</p>
+						) : null}
+					</div>
+					<div className="mission-controls__actions">
+						<Link to={`/sessions/${record.sessionId}`}>Open session</Link>
+						{record.stage !== "sending" ? (
+							<button type="button" disabled={!connected} onClick={() => void controls.inspect(record.key)}>
+								Refresh session state
+							</button>
+						) : null}
+						{record.stage === "complete" ? (
+							<button type="button" onClick={() => controls.dismiss(record.key)}>
+								Dismiss
+							</button>
+						) : null}
+						{record.stage === "unresolved" ? (
+							<button type="button" disabled={!connected || record.restarted} onClick={() => controls.retry(record.key)}>
+								Retry original {record.action}
+							</button>
+						) : null}
+					</div>
+					{record.stage === "unresolved" ? (
+						<details>
+							<summary>Review control tracking</summary>
+							<p>
+								Session <code>{record.sessionId}</code>
+								{record.turnId ? (
+									<>
+										{" "}
+										· Original turn <code>{record.turnId}</code>
+									</>
+								) : null}
+								.
+							</p>
+							<p>
+								Retries retain the original request key. After a server restart, replay is refused. Forgetting tracking does not
+								cancel work; review this session's records before starting another control.
+							</p>
+							<Link to={`/workspaces/${record.workspaceId}/sessions`}>Review project history</Link>{" "}
+							<button type="button" onClick={() => controls.forget(record.key)}>
+								I reviewed the records; forget tracking
+							</button>
+						</details>
+					) : null}
+				</div>
+			))}
+		</section>
+	);
+}
+
 const SessionCard = memo(function SessionCard({
-	client,
+	controls,
 	item,
 	projectName,
 	connected,
 }: {
-	client: Client;
+	controls: SessionControls;
 	item: SessionOverviewItem;
 	projectName: string;
 	connected: boolean;
 }) {
-	const queries = useQueryClient();
 	const [confirm, setConfirm] = useState(false);
-	const keys = useRef(new Map<string, string>());
-	const commandKey = (scope: string) => {
-		if (scope !== "close")
-			for (const previous of keys.current.keys())
-				if (previous !== "close" && previous !== scope) keys.current.delete(previous);
-		let key = keys.current.get(scope);
-		if (!key) {
-			key = crypto.randomUUID();
-			keys.current.set(scope, key);
-		}
-		return key;
-	};
-	const refresh = () => {
-		void queries.invalidateQueries({ queryKey: ["session-overview"] });
-		void queries.invalidateQueries({ queryKey: ["sessions"] });
-		void queries.invalidateQueries({ queryKey: ["session", item.id] });
-	};
-	const stop = useMutation({
-		mutationFn: (turnId: string) =>
-			client.call(routes.cancelTurn, { params: { id: item.id, turnId }, query: {}, body: {} }, commandKey(turnId)),
-		onSuccess: refresh,
-		retry: false,
-	});
-	const close = useMutation({
-		mutationFn: () =>
-			client.call(routes.closeSession, { params: { id: item.id }, query: {}, body: {} }, commandKey("close")),
-		onSuccess: () => {
-			keys.current.delete("close");
-			setConfirm(false);
-			refresh();
-		},
-		retry: false,
-	});
+	const control = controls.records.find((record) => record.sessionId === item.id);
 	const state = ACTIVITY[item.activity];
 	const held = item.state === "open" || item.state === "parked" || item.state === "starting";
-	const busy = stop.isPending || close.isPending;
+	const busy = control !== undefined && control.stage !== "complete";
 	return (
 		<article className="mission-card" data-activity={item.activity}>
 			<header>
@@ -342,10 +393,10 @@ const SessionCard = memo(function SessionCard({
 							type="button"
 							className="mission-card__stop"
 							disabled={!connected || busy}
-							onClick={() => item.currentTurnId && stop.mutate(item.currentTurnId)}
+							onClick={() => controls.start(item, "stop")}
 						>
 							<Icon name="stop" />
-							{stop.isPending ? "Stopping…" : "Stop"}
+							{control?.stage === "sending" && control.action === "stop" ? "Stopping…" : "Stop"}
 						</button>
 					) : null}
 					{held ? (
@@ -366,11 +417,6 @@ const SessionCard = memo(function SessionCard({
 					</Link>
 				</div>
 			</footer>
-			{stop.error || close.error ? (
-				<p className="mission-card__error" role="alert">
-					{stop.error?.message ?? close.error?.message}
-				</p>
-			) : null}
 			{confirm ? (
 				<Dialog title="Close this session?" eyebrow="Session control" onClose={() => setConfirm(false)}>
 					<p>
@@ -381,8 +427,15 @@ const SessionCard = memo(function SessionCard({
 						<button type="button" onClick={() => setConfirm(false)}>
 							Keep open
 						</button>
-						<button type="button" disabled={!connected || busy} onClick={() => close.mutate()}>
-							{close.isPending ? "Closing…" : "Close session"}
+						<button
+							type="button"
+							disabled={!connected || busy}
+							onClick={() => {
+								controls.start(item, "close");
+								setConfirm(false);
+							}}
+						>
+							Close session
 						</button>
 					</div>
 				</Dialog>
