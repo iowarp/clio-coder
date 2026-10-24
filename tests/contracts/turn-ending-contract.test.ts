@@ -135,6 +135,30 @@ it("continues only an armed plan that has not asked or changed files, once", () 
 	strictEqual(end().length, 1);
 });
 
+// #431: a long pasted document that mentions planning is evidence, not a plan request.
+it("does not arm on a long pasted document that mentions planning", () => {
+	const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
+	const armed = (text: string) => {
+		const effects = rule.evaluate({ hook: "turn_start", text, metadata: { promptChars: text.length } });
+		rule.evaluate({ hook: "turn_end", metadata: { stopReason: "stop" } });
+		return effects.length > 0;
+	};
+	const sections = ["Ingest", "Indexing", "Query", "Retention", "Rollout"].map(
+		(area, index) =>
+			`## ${index + 1}. ${area}\n\nThe ${area.toLowerCase()} tier was sized during capacity planning in Q2. ` +
+			"The migration plan moves one shard group per night behind a feature flag, and each step has a rollback " +
+			"plan that restores the previous manifest within ten minutes. Planning assumed 40% headroom on every node.\n\n" +
+			"| Phase | Owner | Exit criterion |\n| --- | --- | --- |\n| Dry run | storage | p99 under 80 ms |\n" +
+			"| Canary | sre | no paging alerts for 48 h |\n| General | storage | error budget above 90% |\n\n" +
+			"- Risks: plans that span shard groups need a coordinator lock.\n- Open: who signs off the capacity plan?\n",
+	);
+	const doc = `# Storage migration design\n\n${sections.join("\n").repeat(3)}`;
+	ok(doc.length > 8_000, String(doc.length));
+	strictEqual(armed(`Summarize the risks in this design doc in five bullets.\n\n${doc}`), false);
+	// Positive control: a short operator request for a plan still arms.
+	strictEqual(armed("Write a plan for adding a cache in front of the index."), true);
+});
+
 describe("turn_end effects inside one chat-loop run", () => {
 	let env: IsolatedClioEnv;
 	let faux: ReturnType<typeof registerEngineFauxProvider>;
