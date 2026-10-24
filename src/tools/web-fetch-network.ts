@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP } from "node:net";
+import type { Transform } from "node:stream";
 import { Readable } from "node:stream";
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { WEB_FETCH_ALLOW_PRIVATE_NETWORK_ENV } from "./network-policy.js";
@@ -83,37 +84,45 @@ async function requestPinnedWebUrl(url: URL, init: RequestInit, address: Address
 				},
 			},
 			(response) => {
-				const responseHeaders = new Headers();
-				for (const [key, value] of Object.entries(response.headers)) {
-					if (value !== undefined) responseHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+				let decoder: Transform | null = null;
+				try {
+					const status = response.statusCode ?? 500;
+					if (status < 200 || status > 599) throw new Error(`unsupported HTTP status ${status}`);
+					const responseHeaders = new Headers();
+					for (const [key, value] of Object.entries(response.headers)) {
+						if (value !== undefined) responseHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+					}
+					let stream: Readable = response;
+					const encoding = responseHeaders.get("content-encoding");
+					decoder =
+						encoding === "gzip"
+							? createGunzip()
+							: encoding === "br"
+								? createBrotliDecompress()
+								: encoding === "deflate"
+									? createInflate()
+									: null;
+					if (decoder) {
+						response.on("error", (error) => decoder?.destroy(error));
+						decoder.on("close", () => response.destroy());
+						stream = response.pipe(decoder);
+						responseHeaders.delete("content-encoding");
+						responseHeaders.delete("content-length");
+					}
+					const noBody = init.method === "HEAD" || [204, 205, 304].includes(status);
+					if (noBody) response.resume();
+					const result = new Response(noBody ? null : (Readable.toWeb(stream) as ReadableStream<Uint8Array>), {
+						status,
+						statusText: response.statusMessage ?? "",
+						headers: responseHeaders,
+					});
+					Object.defineProperty(result, "url", { value: url.toString() });
+					resolve(result);
+				} catch (error) {
+					decoder?.destroy();
+					response.destroy();
+					reject(error);
 				}
-				const status = response.statusCode ?? 500;
-				let stream: Readable = response;
-				const encoding = responseHeaders.get("content-encoding");
-				const decoder =
-					encoding === "gzip"
-						? createGunzip()
-						: encoding === "br"
-							? createBrotliDecompress()
-							: encoding === "deflate"
-								? createInflate()
-								: null;
-				if (decoder) {
-					response.on("error", (error) => decoder.destroy(error));
-					decoder.on("close", () => response.destroy());
-					stream = response.pipe(decoder);
-					responseHeaders.delete("content-encoding");
-					responseHeaders.delete("content-length");
-				}
-				const noBody = init.method === "HEAD" || [204, 205, 304].includes(status);
-				if (noBody) response.resume();
-				const result = new Response(noBody ? null : (Readable.toWeb(stream) as ReadableStream<Uint8Array>), {
-					status,
-					statusText: response.statusMessage ?? "",
-					headers: responseHeaders,
-				});
-				Object.defineProperty(result, "url", { value: url.toString() });
-				resolve(result);
 			},
 		);
 		request.on("error", reject);
