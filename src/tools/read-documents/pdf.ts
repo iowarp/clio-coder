@@ -28,10 +28,17 @@ function parsePages(spec: string | undefined, pageCount: number): { first: numbe
 	return { first, last: Math.min(last, pageCount) };
 }
 
+/** First line of a rendering; attachments rebuild it when their cap drops pages (#438). */
+export function pdfTextHeader(fileName: string, pageCount: number, first: number, last: number): string {
+	return `# Extracted PDF text ${fileName}: ${pageCount} pages, showing pages ${first}-${last}`;
+}
+
 export async function renderPdf(
 	filePath: string,
 	request: DocumentRequest,
-): Promise<Rendered & { pageStarts?: Array<{ page: number; offset: number }> }> {
+): Promise<
+	Rendered & { pageCount?: number; headerLength?: number; pageStarts?: Array<{ page: number; offset: number }> }
+> {
 	const cwd = dirname(filePath);
 	const exec = (file: string, args: string[]) =>
 		runCommandVector(file, args, {
@@ -69,9 +76,9 @@ export async function renderPdf(
 	}
 	const pages = text.stdout.split("\f");
 	if (pages[pages.length - 1]?.trim() === "") pages.pop();
-	const lines = [
-		`# Extracted PDF text ${basename(filePath)}: ${pageCount} pages, showing pages ${range.first}-${range.last}`,
-	];
+	// A capped pdftotext stream ends inside the page range, so name only the pages it reached (#438).
+	const shownLast = text.outputCapped ? range.first + Math.max(pages.length, 1) - 1 : range.last;
+	const lines = [pdfTextHeader(basename(filePath), pageCount, range.first, shownLast)];
 	if (range.last < pageCount) {
 		lines.push(
 			`[text truncated to this page range; more pages follow: pass pages=${range.last + 1}-${Math.min(pageCount, range.last + PDF_DEFAULT_PAGES)}]`,
@@ -92,5 +99,5 @@ export async function renderPdf(
 		lines.push("", heading, body);
 		return { page: pageNumber, offset: start };
 	});
-	return { text: lines.join("\n"), pageStarts };
+	return { text: lines.join("\n"), pageCount, headerLength: (lines[0] ?? "").length, pageStarts };
 }

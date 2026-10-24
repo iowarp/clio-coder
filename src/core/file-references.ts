@@ -165,7 +165,7 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 		isPdf ||= bytes.subarray(0, 5).toString("ascii") === "%PDF-";
 		if (isPdf) {
 			// PDF bytes are not text context; share read's bounded page extraction (#438).
-			const [{ renderPdf }, { truncateUtf8 }] = await Promise.all([
+			const [{ pdfTextHeader, renderPdf }, { truncateUtf8 }] = await Promise.all([
 				import("../tools/read-documents/pdf.js"),
 				import("../tools/truncate-utf8.js"),
 			]);
@@ -184,6 +184,13 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 					`\n[PDF attachment truncated at 32 KiB; included pages 1-${lastPage}, final page may be partial; use read with pages to inspect more.]`;
 				content = truncateUtf8(content, PDF_ATTACHMENT_MAX_BYTES - Buffer.byteLength(marker("50")), "");
 				const lastPage = rendered.pageStarts?.filter((page) => page.offset <= content.length).at(-1)?.page ?? 0;
+				// The header must agree with the marker; the rebuilt one is never longer, so the cap holds (#438).
+				const firstPage = rendered.pageStarts?.[0]?.page;
+				const { headerLength, pageCount } = rendered;
+				if (pageCount !== undefined && headerLength !== undefined && firstPage !== undefined && lastPage >= firstPage) {
+					const header = pdfTextHeader(path.basename(filePath), pageCount, firstPage, lastPage);
+					content = header + content.slice(headerLength);
+				}
 				content += marker(String(lastPage));
 			}
 			return result(renderTextFile(filePath, content), [], [], [filePath]);
