@@ -669,7 +669,13 @@ export interface WorkersDashboardOptions {
 export async function runWorkersDashboard(options: WorkersDashboardOptions): Promise<number> {
 	const { ProcessTerminal, TuiAltScreen, isKeyRelease, matchesKey } = await import("../engine/tui-primitives.js");
 	const terminal = new ProcessTerminal();
-	const tui = new TuiAltScreen(terminal);
+	const tui = new TuiAltScreen(terminal, undefined, undefined, {
+		// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
+		copySelection: (text) =>
+			import("../engine/clipboard.js")
+				.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
+				.catch(() => "Copy failed: clipboard module did not load"),
+	});
 	const paint = createBoardPaint();
 	const source = options.source ?? createBoardSource();
 

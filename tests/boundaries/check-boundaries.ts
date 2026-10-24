@@ -199,6 +199,11 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 			"a pure re-export of the three pi-tui symbols src/cli/fleet-view.ts needs. It has no relative imports at all, and boundaries rule1 forbids the CLI importing pi-tui directly, so this module is why fleet-view does not touch the engine tui barrel.",
 	},
 	{
+		module: "src/engine/clipboard.ts",
+		reason:
+			"the confirmed system clipboard copy (#437) the fullscreen CLI views (fleet view, workers board, extension dock) hand pi-tui as copySelection, so they never flash Copied! for a bare OSC 52. Reached only by dynamic import on the first copy. It has no relative imports at all: its static imports are node built-ins, and pi-tui's native clipboard loads lazily on darwin and win32.",
+	},
+	{
 		module: "src/engine/types.ts",
 		reason:
 			"the erased engine shapes (AgentMessage, ImageContent) domains and the CLI both take. Type-only at every call site.",

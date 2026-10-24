@@ -857,7 +857,13 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 async function followRun(runId: string, scope: ReturnType<typeof fleetInspectionScope>): Promise<number> {
 	const { ProcessTerminal, TuiAltScreen } = await import("../engine/tui-primitives.js");
 	const terminal = new ProcessTerminal();
-	const tui = new TuiAltScreen(terminal);
+	const tui = new TuiAltScreen(terminal, undefined, undefined, {
+		// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
+		copySelection: (text) =>
+			import("../engine/clipboard.js")
+				.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
+				.catch(() => "Copy failed: clipboard module did not load"),
+	});
 	let model = loadRunViewModel(runId, { scope });
 	let following = true;
 

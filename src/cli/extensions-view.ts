@@ -49,7 +49,13 @@ export async function runExtensionsView(argv: ReadonlyArray<string>): Promise<nu
 		return 0;
 	}
 	const terminal = new ProcessTerminal();
-	const tui = new TuiAltScreen(terminal);
+	const tui = new TuiAltScreen(terminal, undefined, undefined, {
+		// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
+		copySelection: (text) =>
+			import("../engine/clipboard.js")
+				.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
+				.catch(() => "Copy failed: clipboard module did not load"),
+	});
 	let frame: ExtensionDockFrame | null = null;
 	let reason = "waiting for extension dock frame";
 	let selected = -1;

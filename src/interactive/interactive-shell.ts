@@ -346,7 +346,20 @@ export function createProcessInteractiveShell(
 			createTui: (terminal) =>
 				options.testing?.createTui?.(terminal) ??
 				(options.tuiMode === "fullscreen"
-					? new InstrumentedTuiAltScreen(terminal, renderObserver, undefined, undefined, undefined, renderAdmission)
+					? new InstrumentedTuiAltScreen(
+							terminal,
+							renderObserver,
+							undefined,
+							undefined,
+							{
+								// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
+								copySelection: (text) =>
+									import("../engine/clipboard.js")
+										.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
+										.catch(() => "Copy failed: clipboard module did not load"),
+							},
+							renderAdmission,
+						)
 					: new InstrumentedTuiMainScreen(terminal, renderObserver, undefined, undefined, renderAdmission)),
 			prepareRoot: (root) => {
 				if (trace) restoreRoot = traceComponentRenders(root, trace);
