@@ -103,7 +103,7 @@ export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly stri
 	context: ["Compaction", "Context cleanup", "Proactive memory", "Semantic search"],
 	workspace: ["Files pane", "Task copies", "Git"],
 	safety: ["Autonomy", "Worker approvals", "External agents", "Review", "Spending & tool limits"],
-	interface: ["Transcript", "Guidance", "Panes"],
+	interface: ["Transcript", "Guidance", "Updates", "Panes"],
 	integrations: ["External agents", "Startup plugins", "Project resources", "Resource library"],
 	advanced: [
 		"Maintenance",
@@ -175,6 +175,8 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 			return place("interface", "Transcript");
 		case "interface.demo":
 			return place("interface", "Guidance");
+		case "interface.autoUpdate":
+			return place("interface", "Updates");
 		case "fleet.worktrees.root":
 			return place("workspace", "Task copies");
 		case "fleet.concurrency":

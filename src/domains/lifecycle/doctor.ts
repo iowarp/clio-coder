@@ -21,7 +21,9 @@ import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReaso
 import type { SiteBindingInfo } from "../system-one/types.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
 import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
+import { nativeAutoUpdatePolicy } from "./native-update.js";
 import { readStateInfoResult } from "./state.js";
+import { readLastBackgroundUpdate } from "./update-check.js";
 import { getVersionInfo } from "./version.js";
 
 /** `info` reports a fact that needs no action, such as an optional tool that is absent. */
@@ -356,11 +358,24 @@ function installMethodFinding(installation: Installation): DoctorFinding {
 	}
 	const stale = record.current !== installation.prefix ? `; the launcher now runs ${record.current}` : "";
 	const foreignNode = process.execPath !== record.node ? `; this process runs ${process.execPath} instead` : "";
+	// #436: name which switch holds background installs off and how the last one ended.
+	let setting = true;
+	try {
+		setting = readSettings().interface.autoUpdate;
+	} catch {
+		// The settings row reports an unreadable file; the policy falls back to the default.
+	}
+	const policy = nativeAutoUpdatePolicy(installation, setting);
+	const autoUpdate = policy?.enabled ? "; auto-update on" : `; auto-update off (${policy?.blocker ?? "installer"})`;
+	const last = readLastBackgroundUpdate(installation, resolveClioDirs().cache);
+	const lastUpdate = last
+		? `; last background update ${new Date(last.at).toISOString()}: ${last.ok ? `ok v${last.from} -> v${last.to}` : `failed v${last.to}: ${last.detail}`}`
+		: "";
 	return {
 		ok: true,
-		...(stale || foreignNode ? { level: "warn" as const } : {}),
+		...(stale || foreignNode || (last && !last.ok) ? { level: "warn" as const } : {}),
 		name: "install method",
-		detail: `installer (prefix ${installation.prefix ?? installation.root}; runtime Node v${record.nodeVersion} ${record.nodeBuild} at ${record.node}${stale}${foreignNode})`,
+		detail: `installer (prefix ${installation.prefix ?? installation.root}; runtime Node v${record.nodeVersion} ${record.nodeBuild} at ${record.node}${stale}${foreignNode}${autoUpdate}${lastUpdate})`,
 	};
 }
 

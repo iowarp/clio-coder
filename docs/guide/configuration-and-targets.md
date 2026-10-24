@@ -287,6 +287,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `interface.smoothStreaming` | `auto` | immediately |
 | `interface.exitSummary` | `auto` | immediately, at the next exit |
 | `interface.desktopNotifications` | `false` | next turn |
+| `interface.autoUpdate` | `true` | immediately; `false` keeps the update notice and leaves the native background install to `clio-coder upgrade` |
 | `interface.panes.enabled` | `embedded` | restart; bare Clio Coder can offer to open a pane host, while `auto` only joins one already running |
 | `interface.panes.notifications` | `failures` | immediately |
 | `interface.panes.layout` | `off` | restart |

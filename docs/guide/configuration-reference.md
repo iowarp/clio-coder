@@ -150,6 +150,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `interface.fullscreenScrollbar` | `"auto"` | `hidden`, `auto` or `always`. | restart required |
 | `interface.smoothStreaming` | `"auto"` | `off`, `auto` or `on`. Presentation-only pacing of streamed text and thinking. | hot reload |
 | `interface.desktopNotifications` | `false` | Boolean. Content-free alerts when a turn ends, a detached batch settles or an approval parks. Interactive TTY sessions only. | next turn |
+| `interface.autoUpdate` | `true` | Boolean. A native-installer install fetches and activates a newer release in the background; running sessions keep their version until restart. `false` keeps the update notice and leaves the install to `clio-coder upgrade`. Package-manager installs only show their upgrade command. | hot reload |
 | `interface.panes.enabled` | `"embedded"` | `auto`, `embedded` or `off`. `embedded` lets bare `clio-coder` open a workspace in a pane host after one remembered question, and joins a host it is started inside. `auto` uses a detected pane host and never starts one. `off` never detects or opens a pane. | restart required |
 | `interface.panes.notifications` | `"failures"` | `failures`, `all` or `off`. Which run states raise a pane-host toast. | hot reload |
 | `interface.panes.layout` | `"off"` | `off`, `workers` or `cockpit`. Panes composed at interactive boot. | restart required |

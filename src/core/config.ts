@@ -2515,10 +2515,11 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"fullscreenScrollbar",
 				"terminalProgress",
 				"desktopNotifications",
+				"autoUpdate",
 				"panes",
 				"keybindings",
 			]);
-			for (const key of ["terminalProgress", "desktopNotifications", "demo"] as const) {
+			for (const key of ["terminalProgress", "desktopNotifications", "demo", "autoUpdate"] as const) {
 				if (!(key in ui)) continue;
 				const parsed = expectBoolean(issues, `interface.${key}`, ui[key]);
 				if (parsed !== undefined) (settings.interface as unknown as Record<string, unknown>)[key] = parsed;

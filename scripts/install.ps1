@@ -123,9 +123,51 @@ function Install-ClioCoder {
 	if ($Options.Rollback -and -not (Test-Path -LiteralPath $manifestFile)) { Fail "no installer manifest at $manifestFile; nothing to roll back" }
 	New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 	$lock = Join-Path $installRoot ".install-lock"
+	# A killed installer skips the finally block and leaves the lock and its
+	# staging prefix behind (#436). Reclaim only a lock this computer wrote
+	# whose pid is gone and whose age exceeds 10 minutes; a foreign or
+	# unlabelled owner is never adjudicated. Ownership moves by renaming the
+	# owner's pid file, so exactly one reclaimer wins and the lock directory
+	# never disappears for a concurrent run to slip in.
+	$lockPid = Join-Path $lock "pid"
+	$lockHost = Join-Path $lock "host"
+	$thisHost = [string]$env:COMPUTERNAME
 	try { New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null }
-	catch { Fail "installation locked at $lock. If its pid process has exited, remove only that lock directory and retry." }
-	[IO.File]::WriteAllText((Join-Path $lock "pid"), [string]$PID)
+	catch {
+		$ownerPid = ([string](Get-Content -LiteralPath $lockPid -Raw -ErrorAction SilentlyContinue)).Trim()
+		$ownerHost = ([string](Get-Content -LiteralPath $lockHost -Raw -ErrorAction SilentlyContinue)).Trim()
+		$parsed = 0
+		$reclaimed = $false
+		if ($ownerHost -and $ownerHost -eq $thisHost -and [int]::TryParse($ownerPid, [ref]$parsed) -and
+			-not (Get-Process -Id $parsed -ErrorAction SilentlyContinue) -and
+			((Get-Date) - (Get-Item -LiteralPath $lock).LastWriteTime).TotalMinutes -gt 10) {
+			$claim = "$lockPid.reclaim.$PID"
+			try {
+				Move-Item -LiteralPath $lockPid -Destination $claim -ErrorAction Stop
+				if (([string](Get-Content -LiteralPath $claim -Raw)).Trim() -eq $ownerPid) {
+					Remove-Item -LiteralPath $claim -Force
+					Remove-Item -LiteralPath (Join-Path $installRoot "versions\.staging-$ownerPid") -Recurse -Force -ErrorAction SilentlyContinue
+					Warn "reclaimed stale installation lock $lock (pid $ownerPid on $ownerHost)"
+					$reclaimed = $true
+				} else {
+					# A slower reclaimer took the winner's fresh pid file; hand it back.
+					Move-Item -LiteralPath $claim -Destination $lockPid -ErrorAction SilentlyContinue
+				}
+			} catch {
+				# Another reclaimer renamed the pid file first; this run stands down as locked.
+			}
+		}
+		if (-not $reclaimed) {
+			$who = if ($ownerHost) { $ownerHost } else { "an unrecorded host" }
+			# Exit 75 (EX_TEMPFAIL), not 1: a held lock is another run or a recent
+			# crash, so a background update retries later instead of recording a failure.
+			[Console]::Error.WriteLine("[install] error: installation locked at $lock by pid $ownerPid on $who. If that process has exited, remove only that lock directory and retry.")
+			exit 75
+		}
+	}
+	[IO.File]::WriteAllText($lockHost, $thisHost)
+	[IO.File]::WriteAllText($lockPid, [string]$PID)
+	(Get-Item -LiteralPath $lock).LastWriteTime = Get-Date
 	$work = $null
 	try {
 	if ($Options.Rollback) {
@@ -331,6 +373,11 @@ function Install-ClioCoder {
 		# Native Windows has no background service yet; `clio-coder gui` starts a private server and prints its link.
 		Write-Host "Desktop app: $run gui"
 	} finally {
+		# Stopping this script (Ctrl+C, a quitting session) leaves the npm child
+		# and its descendants running and writing into staging; end the whole
+		# tree before the lock and staging go (#436). Untested: no pwsh here.
+		Get-CimInstance Win32_Process -Filter "ParentProcessId=$PID" -ErrorAction SilentlyContinue |
+			ForEach-Object { & taskkill.exe /T /F /PID $_.ProcessId 2>$null | Out-Null }
 		Remove-Item -LiteralPath $lock -Recurse -Force -ErrorAction SilentlyContinue
 		if ($work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 		Remove-Item -LiteralPath (Join-Path $installRoot "versions\.staging-$PID") -Recurse -Force -ErrorAction SilentlyContinue

@@ -8,9 +8,13 @@ export interface UpdateMonitorOptions {
 	isIdle: () => boolean;
 	onChange: () => void;
 	signal: AbortSignal;
-	check?: ReturnType<typeof createUpdateCheck>;
+	/** Live `interface.autoUpdate` (#436). */
+	autoUpdate?: () => boolean;
+	check?: Pick<UpdateCheck, "probe" | "claim"> & Partial<Pick<UpdateCheck, "maybeInstall">>;
 	now?: () => number;
 }
+
+type UpdateCheck = ReturnType<typeof createUpdateCheck>;
 
 /** Starts only after hydration. Timers are unref'ed and all failures are silent. */
 export function startUpdateMonitor(options: UpdateMonitorOptions) {
@@ -22,6 +26,7 @@ export function startUpdateMonitor(options: UpdateMonitorOptions) {
 			runningVersion: options.runningVersion,
 			cacheDir: resolveClioDirs().cache,
 			processStartedAt: Date.now() - performance.now(),
+			...(options.autoUpdate ? { autoUpdate: options.autoUpdate } : {}),
 		});
 	let pending: UpdateNotice | null = null;
 	let displayed: UpdateNotice | null = null;
@@ -29,6 +34,7 @@ export function startUpdateMonitor(options: UpdateMonitorOptions) {
 	let nextProbe = 0;
 	let inFlight = false;
 	let offeredUpdate = false;
+	let installStarted = false;
 	const seen = new Set<string>();
 	function text(): string | null {
 		if (!displayed || options.signal.aborted || now() >= expiresAt) return null;
@@ -41,6 +47,23 @@ export function startUpdateMonitor(options: UpdateMonitorOptions) {
 			if (now() >= nextProbe) {
 				nextProbe = now() + 60_000;
 				pending = await check.probe(options.signal);
+				// The install does not wait for idle and does not hold the tick:
+				// probes and notices keep running while it works, and its outcome
+				// surfaces through the next probe (#436).
+				if (pending?.install && !installStarted && check.maybeInstall) {
+					installStarted = true;
+					void check
+						.maybeInstall(options.signal)
+						.catch(() => false)
+						.then((ok) => {
+							// A cache-lock timeout, a sibling's lease or a held installer
+							// lock is not this session's verdict: the next scheduled probe
+							// (at most 60 s away) may start the install again. Success
+							// re-probes at once to show the Updated notice.
+							if (ok) nextProbe = 0;
+							else installStarted = false;
+						});
+				}
 			}
 			if (options.signal.aborted) return;
 			if (pending && !(pending.kind === "available" && offeredUpdate) && !seen.has(pending.key) && options.isIdle()) {

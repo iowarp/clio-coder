@@ -373,6 +373,11 @@ export interface InterfaceSettings {
 	 * non-TTY runs never emit one.
 	 */
 	desktopNotifications: boolean;
+	/**
+	 * Background install of a newer release for a native-installer install
+	 * (#436). Off keeps the update notice and leaves the install to the operator.
+	 */
+	autoUpdate: boolean;
 	panes: PanesSettings;
 	keybindings: Record<string, string | string[]>;
 }
@@ -876,6 +881,7 @@ export const DEFAULT_SETTINGS = {
 		fullscreenScrollbar: "auto",
 		smoothStreaming: "auto",
 		desktopNotifications: false,
+		autoUpdate: true,
 		panes: {
 			enabled: "embedded",
 			notifications: "failures",
@@ -1110,6 +1116,8 @@ interface:
   fullscreenScrollbar: auto
   terminalProgress: false
   desktopNotifications: false
+  # Native installs update themselves in the background; false keeps only the notice.
+  autoUpdate: true
   panes:
     enabled: embedded
     notifications: failures

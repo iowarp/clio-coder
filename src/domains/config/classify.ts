@@ -30,6 +30,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"interface.outputDetail",
 	"interface.demo",
 	"interface.smoothStreaming",
+	// The update monitor reads it before each background install (#436).
+	"interface.autoUpdate",
 	"interface.panes.notifications",
 	"integrations.git.commitAttribution",
 	// `/music` reads both on every invocation.

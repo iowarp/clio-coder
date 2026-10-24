@@ -26,6 +26,11 @@
 # The whole body lives in functions and main is called on the last line, so a
 # truncated download parses as an incomplete script and runs nothing.
 set -eu
+# A background run whose parent session died writes into a closed pipe. With
+# SIGPIPE ignored that write fails with EPIPE, set -e exits, and the EXIT trap
+# still removes the lock and staging; the default SIGPIPE would kill the shell
+# before its trap runs (#436).
+trap '' PIPE
 
 PACKAGE="@iowarp/clio-coder"
 PACKAGE_MIN="0.6.0"
@@ -634,16 +639,93 @@ default_install_root() {
 	fi
 }
 
+# Lock owner identity: a stable machine id plus the pid namespace, so a pid
+# recorded by another machine on a shared filesystem, or by another container
+# on this one, is never judged against this host's process table (#436). The
+# host name is only a fallback: macOS renames itself per network (Mac.local,
+# Mac.lan) and would read its own old lock as foreign forever.
+install_lock_host() {
+	id=""
+	for file in /etc/machine-id /var/lib/dbus/machine-id; do
+		if [ -z "$id" ] && [ -r "$file" ]; then id="$(tr -d ' \n' <"$file" 2>/dev/null || true)"; fi
+	done
+	if [ -z "$id" ] && have ioreg; then
+		id="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/ { print $4; exit }')"
+	fi
+	[ -n "$id" ] || id="$(uname -n 2>/dev/null || hostname 2>/dev/null || true)"
+	printf '%s' "$id"
+	if [ -r /proc/self/ns/pid ]; then printf '/%s' "$(readlink /proc/self/ns/pid 2>/dev/null || true)"; fi
+}
+
+# True only when pid $1 is provably absent here. kill -0 also fails with EPERM
+# for another user's live process, so a failure is confirmed against /proc,
+# or ps where there is no /proc.
+install_pid_gone() {
+	case "$1" in '' | *[!0-9]*) return 1 ;; esac
+	kill -0 "$1" 2>/dev/null && return 1
+	if [ -d /proc/self ]; then
+		[ ! -d "/proc/$1" ]
+	else
+		! ps -p "$1" >/dev/null 2>&1
+	fi
+}
+
+# A SIGKILLed installer skips its EXIT trap and leaves the lock and its staging
+# prefixes behind, failing every later run until someone deletes the lock by
+# hand (#436). Reclaim only a lock written by this host whose pid is provably
+# gone and whose age exceeds 10 minutes; a foreign or unlabelled owner is never
+# adjudicated. Ownership moves by renaming the owner's pid file: one rename
+# wins, and the lock directory never disappears, so no concurrent reclaimer or
+# fresh acquirer can slip in between.
+reclaim_stale_install_lock() {
+	lock="$install_root/.install-lock"
+	owner_pid="$(cat "$lock/pid" 2>/dev/null || true)"
+	owner_host="$(cat "$lock/host" 2>/dev/null || true)"
+	[ -n "$owner_host" ] && [ "$owner_host" = "$(install_lock_host)" ] || return 1
+	install_pid_gone "$owner_pid" || return 1
+	[ -n "$(find "$lock" -prune -mmin +10 2>/dev/null)" ] || return 1
+	mv "$lock/pid" "$lock/pid.reclaim.$$" 2>/dev/null || return 1
+	# A slower reclaimer that judged the same owner can reach here after the
+	# winner wrote its own pid; it hands that file back and stands down.
+	if [ "$(cat "$lock/pid.reclaim.$$" 2>/dev/null || true)" != "$owner_pid" ]; then
+		mv "$lock/pid.reclaim.$$" "$lock/pid" 2>/dev/null || true
+		return 1
+	fi
+	rm -f "$lock/pid.reclaim.$$"
+	warn "reclaimed stale installation lock $lock (pid $owner_pid on $(cat "$lock/hostname" 2>/dev/null || echo "$owner_host"))"
+	rm -rf "$install_root/versions/.staging.$owner_pid" "$install_root/runtime/.staging.$owner_pid"
+	return 0
+}
+
 acquire_install_lock() {
 	mkdir -p "$install_root"
-	if ! mkdir "$install_root/.install-lock" 2>/dev/null; then
-		fail "installation locked at $install_root/.install-lock (owner $(cat "$install_root/.install-lock/pid" 2>/dev/null || true)). If that process has exited, remove only that lock directory and retry."
+	if ! mkdir "$install_root/.install-lock" 2>/dev/null && ! reclaim_stale_install_lock; then
+		# Exit 75 (EX_TEMPFAIL), not 1: a held lock is another run in progress
+		# or a recent crash, so a background update retries later instead of
+		# recording a failure (#436).
+		printf '[install] error: %s\n' "installation locked at $install_root/.install-lock by pid $(cat "$install_root/.install-lock/pid" 2>/dev/null || echo '?') on $(cat "$install_root/.install-lock/hostname" 2>/dev/null || cat "$install_root/.install-lock/host" 2>/dev/null || echo 'an unrecorded host'). If that process has exited, remove only that lock directory and retry." >&2
+		exit 75
 	fi
 	lock_owned=1
+	install_lock_host >"$install_root/.install-lock/host"
+	(uname -n 2>/dev/null || hostname 2>/dev/null || true) >"$install_root/.install-lock/hostname"
 	printf '%s\n' "$$" >"$install_root/.install-lock/pid"
+	touch "$install_root/.install-lock"
 	trap cleanup EXIT
 	trap 'exit 130' INT
 	trap 'exit 143' TERM
+	# A background update belongs to the session that started it. If that
+	# session is SIGKILLed nothing signals this shell, so a watchdog turns the
+	# parent's exit into our TERM and cleanup removes the lock and staging
+	# instead of finishing an install nobody is waiting for (#436).
+	if [ "${CLIO_CODER_BACKGROUND_UPDATE:-}" = 1 ]; then
+		session_pid=$PPID
+		installer_pid=$$
+		# It also stops when this shell is gone, so a later reuse of our pid is
+		# never sent a TERM meant for us.
+		(while kill -0 "$session_pid" 2>/dev/null; do kill -0 "$installer_pid" 2>/dev/null || exit 0; sleep 1; done; kill -TERM "$installer_pid" 2>/dev/null) </dev/null >/dev/null 2>&1 &
+		watchdog_pid=$!
+	fi
 }
 
 do_rollback() {
@@ -661,6 +743,11 @@ do_rollback() {
 }
 
 cleanup() {
+	if [ -n "${watchdog_pid:-}" ]; then kill "$watchdog_pid" 2>/dev/null || true; fi
+	if [ -n "${npm_pid:-}" ]; then
+		kill -KILL "$npm_pid" 2>/dev/null || true
+		wait "$npm_pid" 2>/dev/null || true
+	fi
 	if [ "${lock_owned:-0}" = 1 ]; then rm -rf "$install_root/.install-lock"; fi
 	if [ -n "${work:-}" ]; then rm -rf "$work"; fi
 	if [ -n "${install_root:-}" ]; then rm -rf "$install_root/runtime/.staging.$$" "$install_root/versions/.staging.$$"; fi
@@ -882,9 +969,18 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 	# stdin is closed because under `curl | sh` it carries the rest of this
 	# script, and a child that reads it would eat the installer.
 	mkdir -p "$staging/lib"
+	# npm runs as a waited background child: a shell defers its INT/TERM trap
+	# until a foreground child exits, and npm takes 10-20 s to honor SIGTERM, so
+	# a quitting session's installer used to outlive it. `wait` returns at once
+	# on a trapped signal and cleanup kills npm before removing staging (#436).
 	# shellcheck disable=SC2086 # npm_extra is one flag or nothing.
-	if ! PATH="$runtime_dir/bin:$PATH" npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false \
-		"$node_bin" "$npm_cli" install --prefix "$staging/lib" --no-save --loglevel=error $npm_extra "$spec" </dev/null; then
+	PATH="$runtime_dir/bin:$PATH" npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false \
+		"$node_bin" "$npm_cli" install --prefix "$staging/lib" --no-save --loglevel=error $npm_extra "$spec" </dev/null &
+	npm_pid=$!
+	npm_status=0
+	wait "$npm_pid" || npm_status=$?
+	npm_pid=""
+	if [ "$npm_status" != 0 ]; then
 		fail "npm could not install $spec. Common causes: no route to the registry (set https_proxy, or npm_config_registry for a mirror), an unknown version, or a full disk under $install_root."
 	fi
 	pkg_dir="$staging/lib/node_modules/@iowarp/clio-coder"

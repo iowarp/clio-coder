@@ -2165,6 +2165,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						updateMonitor = startUpdateMonitor({
 							runningVersion,
 							signal: updateAbort.signal,
+							autoUpdate: () => deps.getSettings?.().interface.autoUpdate ?? true,
 							onChange: () => {
 								footer.refresh();
 								tui.requestRender();

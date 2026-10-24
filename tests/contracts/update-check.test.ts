@@ -55,7 +55,8 @@ test("checks once a day across processes, caches failures, and reminds once a we
 	assert.deepEqual(await readdir(f.home.dir), ["package"], "construction does no I/O");
 	const notice = await check.probe(controller.signal);
 	assert.equal(notice?.kind, "available");
-	assert.match(notice?.text ?? "", /\/upgrade to review/u);
+	// #436: a package-manager install names its exact command and never runs it.
+	assert.match(notice?.text ?? "", /npm install -g --prefix .* @iowarp\/clio-coder@latest/u);
 	assert.equal(calls, 1);
 	assert.ok(notice);
 	assert.equal(
@@ -256,7 +257,7 @@ test("native background policy respects channel, pin, opt-out and manager owners
 			},
 			backgroundUpdate: async () => {
 				updates++;
-				return true;
+				return { ok: true, exitCode: 0, detail: "" };
 			},
 		});
 		const signal = new AbortController().signal;
@@ -267,10 +268,13 @@ test("native background policy respects channel, pin, opt-out and manager owners
 		} else {
 			assert.ok(notice);
 			assert.deepEqual(channels, policy === "manager" ? ["latest"] : ["latest", "beta"]);
-			assert.equal(await check.claim(notice, () => false, signal), false);
-			assert.equal(updates, 0);
-			assert.equal(await check.claim(notice, () => true, signal), true);
+			// #436: the install is staked once a day and does not wait for idle.
+			assert.equal(notice.install === true, policy === "enabled");
+			assert.equal(await check.maybeInstall(signal), policy === "enabled");
+			assert.equal(await check.maybeInstall(signal), false);
 			assert.equal(updates, policy === "enabled" ? 1 : 0);
+			assert.equal(await check.claim(notice, () => false, signal), false);
+			assert.equal(await check.claim(notice, () => true, signal), true);
 			assert.equal(JSON.parse(await readFile(join(installRoot, "install.json"), "utf8")).versionPin, "");
 		}
 	}

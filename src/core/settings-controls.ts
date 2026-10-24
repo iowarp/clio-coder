@@ -622,6 +622,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Demo presentation and guidance",
 		"The full welcome artwork, dashboard, and shortcut hints. Off starts with a compact identity header and skips welcome-only reads. Also controls a short tip after some turns, picked from what the turn did, plus idle footer tips and key hints. On by default before 1.0. Off stops every tip and the guidance profile. No automatic demonstrations or permission changes.",
 	],
+	"interface.autoUpdate": [
+		"Background updates",
+		"A native install fetches and activates a newer release in the background; running sessions keep their version until restart, and upgrade --rollback undoes it. Off keeps the update notice and leaves the install to clio-coder upgrade. Package-manager installs only ever show their upgrade command.",
+	],
 	"integrations.externalAgents.entries": [
 		"Custom agent definitions",
 		"Add an external coding agent with its launch command and options as JSON. The command runs when you connect, so choose agents you trust. Use Available agents for guided setup.",
