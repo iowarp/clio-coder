@@ -72,7 +72,9 @@ export function ConversationOutline({
 								</span>
 								<span className="conversation-finder__body">
 									<strong>{entry.title}</strong>
-									{entry.response ? (
+									{found.query && entry.request.replace(/\s+/g, " ").toLocaleLowerCase().includes(found.query) ? (
+										<span>Request: {conversationExcerpt(entry.request, found.query)}</span>
+									) : entry.response ? (
 										<span>{conversationExcerpt(entry.response, found.query)}</span>
 									) : (
 										<span>No response text recorded.</span>
