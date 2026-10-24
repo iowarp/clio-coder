@@ -6,15 +6,12 @@
 import { existsSync, readFileSync, watch } from "node:fs";
 import { join } from "node:path";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
-import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { atomicWrite } from "../../engine/session.js";
 import type { AssignmentStatus } from "./assignment.js";
 
 const MAX_ASSIGNMENT_RECORDS = 1_000;
-// Readers and watches must not publish the rename before its directory flush (#428).
-const pendingWrites = new Map<string, DurableAssignmentRecord[]>();
-const observers = new Map<string, Set<() => void>>();
 
 /**
  * Who decides a record's status.
@@ -146,23 +143,12 @@ export function assignmentProcessOwnerAlive(
 	return true;
 }
 
-/** `previous` is the store as read under the lock, served to readers until the rename is durable. */
-async function writeStore(
-	assignments: ReadonlyArray<DurableAssignmentRecord>,
-	previous: DurableAssignmentRecord[],
-): Promise<void> {
+function writeStore(assignments: ReadonlyArray<DurableAssignmentRecord>): void {
 	const file: AssignmentStoreFile = {
 		version: 1,
 		assignments: assignments.slice(0, MAX_ASSIGNMENT_RECORDS).map(copyRecord),
 	};
-	const target = storePath();
-	pendingWrites.set(target, previous);
-	try {
-		await safeResourceWriteAsync(target, JSON.stringify(file, null, 2));
-	} finally {
-		pendingWrites.delete(target);
-		for (const listener of observers.get(target) ?? []) queueMicrotask(listener);
-	}
+	atomicWrite(storePath(), JSON.stringify(file, null, 2));
 }
 
 async function updateRecord(
@@ -170,52 +156,39 @@ async function updateRecord(
 	update: (current: DurableAssignmentRecord | null) => DurableAssignmentRecord,
 ): Promise<DurableAssignmentRecord> {
 	let result!: DurableAssignmentRecord;
-	await withStateFileLock(storePath(), async () => {
+	await withStateFileLock(storePath(), () => {
 		const records = readStore();
-		// Callers replace elements rather than mutate them, so a shallow copy is the pre-write store.
-		const previous = [...records];
 		const index = records.findIndex((record) => record.assignmentId === assignmentId);
 		const current = index === -1 ? null : (records[index] ?? null);
 		result = update(current);
 		if (index === -1) records.unshift(result);
 		else records[index] = result;
-		await writeStore(records, previous);
+		writeStore(records);
 	});
 	return copyRecord(result);
 }
 
 /** Directory observation survives atomic replacement of the durable assignment file. */
 export function subscribeStoredAssignments(listener: () => void): () => void {
-	const target = storePath();
-	const notify = (): void => {
-		if (!pendingWrites.has(target)) listener();
-	};
 	const watcher = watch(clioStateDir(), { persistent: false }, (_event, filename) => {
-		if (filename === null || filename === "assignments.json") notify();
+		if (filename === null || filename === "assignments.json") listener();
 	});
-	const listeners = observers.get(target) ?? new Set<() => void>();
-	listeners.add(notify);
-	observers.set(target, listeners);
 	// An unavailable filesystem watch ends observation at the caller's existing
 	// timeout; wake once so it can still inspect the last durable state.
 	watcher.on("error", () => {
 		watcher.close();
-		notify();
+		listener();
 	});
-	return () => {
-		watcher.close();
-		listeners.delete(notify);
-		if (listeners.size === 0) observers.delete(target);
-	};
+	return () => watcher.close();
 }
 
 export function getStoredAssignment(assignmentId: string): DurableAssignmentRecord | null {
-	const record = (pendingWrites.get(storePath()) ?? readStore()).find((entry) => entry.assignmentId === assignmentId);
+	const record = readStore().find((entry) => entry.assignmentId === assignmentId);
 	return record ? copyRecord(record) : null;
 }
 
 export function listStoredAssignments(): ReadonlyArray<DurableAssignmentRecord> {
-	return (pendingWrites.get(storePath()) ?? readStore()).map(copyRecord);
+	return readStore();
 }
 
 export async function renameStoredAssignment(
@@ -223,7 +196,7 @@ export async function renameStoredAssignment(
 	toAssignmentId: string,
 ): Promise<DurableAssignmentRecord> {
 	let result!: DurableAssignmentRecord;
-	await withStateFileLock(storePath(), async () => {
+	await withStateFileLock(storePath(), () => {
 		const records = readStore();
 		const from = records.findIndex((record) => record.assignmentId === fromAssignmentId);
 		if (from === -1) throw new Error(`unknown queued assignment '${fromAssignmentId}'`);
@@ -232,9 +205,8 @@ export async function renameStoredAssignment(
 		const current = records[from];
 		if (!current) throw new Error(`unknown queued assignment '${fromAssignmentId}'`);
 		result = { ...current, assignmentId: toAssignmentId };
-		const previous = [...records];
 		records[from] = result;
-		await writeStore(records, previous);
+		writeStore(records);
 	});
 	return copyRecord(result);
 }

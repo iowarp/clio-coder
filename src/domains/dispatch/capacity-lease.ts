@@ -1,9 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
-import { fsyncDirectoryAsync, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import {
 	FILE_LOCK_ACQUIRE_TIMEOUT_MS,
 	withStateFileLockSection,
@@ -138,61 +137,13 @@ export function readCapacityStateUnsafe(): CapacityStateFile {
 	return { ...parsed, leases: parsed.leases.map(clone), reservations: structuredClone(parsed.reservations) };
 }
 export function writeCapacityStateUnsafe(file: CapacityStateFile): void {
-	assertCapacityLeaseBound(file);
-	atomicWrite(capacityStatePath(), JSON.stringify(file, null, 2));
-}
-
-function assertCapacityLeaseBound(file: CapacityStateFile): void {
 	// Truncating here would hand back a lease that no process can see or release,
 	// so the bound is an admission failure instead of a silent drop.
 	if (file.leases.length > MAX_CAPACITY_LEASES)
 		throw new Error(
 			`dispatch: admission denied: capacity lease store is full (${file.leases.length}/${MAX_CAPACITY_LEASES})`,
 		);
-}
-
-/** Retry a prepared write if a synchronous planner changed the snapshot (#428). */
-export async function updateCapacityStateAsync<T>(
-	update: (state: CapacityStateFile) => { result: T; changed: boolean },
-): Promise<T> {
-	const conflict = Symbol("capacity snapshot changed");
-	for (let attempt = 0; attempt < 32; attempt += 1) {
-		const prepared = await withStateFileLockSection(capacityStateLockPath(), () => {
-			const state = readCapacityStateUnsafe();
-			const before = JSON.stringify(state);
-			const { result, changed } = update(state);
-			// The async writer enforces the same bound as writeCapacityStateUnsafe (#428).
-			if (changed) assertCapacityLeaseBound(state);
-			return { before, contents: JSON.stringify(state, null, 2), result, changed };
-		});
-		if (!prepared.changed) {
-			// A sibling may have renamed this state and still be flushing it (#428).
-			await fsyncDirectoryAsync(dirname(capacityStatePath()));
-			return prepared.result;
-		}
-		try {
-			await safeResourceWriteAsync(capacityStatePath(), prepared.contents, {
-				withRename: (commit) =>
-					withStateFileLockSection(capacityStateLockPath(), () => {
-						if (JSON.stringify(readCapacityStateUnsafe()) !== prepared.before) throw conflict;
-						commit();
-					}),
-			});
-			return prepared.result;
-		} catch (error) {
-			if (error !== conflict) throw error;
-		}
-	}
-	throw new Error("dispatch: capacity settlement failed after 32 concurrent snapshot changes");
-}
-
-export function releaseCapacityLeaseAsync(leaseId: string): Promise<boolean> {
-	return updateCapacityStateAsync((file) => {
-		const before = file.leases.length;
-		file.leases = file.leases.filter((lease) => lease.leaseId !== leaseId);
-		const changed = before !== file.leases.length;
-		return { result: changed, changed };
-	});
+	atomicWrite(capacityStatePath(), JSON.stringify(file, null, 2));
 }
 
 const defaultProbe: LeaseOwnerProbe = {

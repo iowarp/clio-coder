@@ -7,7 +7,7 @@
  *
  * The ledger holds an in-memory mirror of runs.json. `create()` and `update()`
  * mutate memory only; `persist()` writes the settings-bounded ring (default
- * 1000) atomically via safeResourceWriteAsync.
+ * 1000) atomically via engine.atomicWrite.
  *
  * This module owns persistence. The dispatch extension wires worker spawning,
  * cross-domain coordination, and event emission around this ledger.
@@ -23,7 +23,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { resolveGuardrail } from "../../core/guardrails.js";
-import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
@@ -81,7 +81,6 @@ export interface Ledger {
 	get(id: string): RunEnvelope | null;
 	list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope>;
 	recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt;
-	recordReceiptAsync(id: string, receipt: RunReceiptDraft): Promise<RunReceipt>;
 	/** Insert a fully-formed envelope recovered from a durable artifact. Returns false when the id already exists. */
 	adopt(envelope: RunEnvelope): boolean;
 	persist(): Promise<void>;
@@ -275,30 +274,6 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		return runs.findIndex((r) => r.id === id);
 	}
 
-	function prepareReceipt(id: string, receipt: RunReceiptDraft): RunReceipt {
-		const current = runs[findIndex(id)];
-		if (!current) throw new Error(`dispatch ledger missing run for receipt '${id}'`);
-		// Fold the durable findings summary onto the draft before sealing so both
-		// the ACP and worker finalizers get it for free and receipt integrity
-		// digest covers it. Computed cheaply from in-memory fields; never reads
-		// disk or calls buildEvidence.
-		const draft: RunReceiptDraft =
-			receipt.findingsSummary === undefined
-				? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
-				: receipt;
-		return withReceiptIntegrity(draft, current);
-	}
-
-	function attachReceipt(id: string, target: string): void {
-		// Async receipt writes must preserve updates and reordered rows (#428).
-		const index = findIndex(id);
-		const current = runs[index];
-		if (current) {
-			runs[index] = { ...current, receiptPath: target };
-			dirty.add(id);
-		}
-	}
-
 	return {
 		create(input: CreateRunInput): RunEnvelope {
 			const envelope: RunEnvelope = {
@@ -373,41 +348,32 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		},
 
 		recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt {
-			const sealed = prepareReceipt(id, receipt);
+			const target = receiptPathFor(id);
+			const idx = findIndex(id);
+			if (idx === -1) {
+				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
+			}
+			const current = runs[idx];
+			if (!current) {
+				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
+			}
+			// Fold the durable findings summary onto the draft before sealing so both
+			// the ACP and worker finalizers get it for free and receipt integrity
+			// digest covers it. Computed cheaply from in-memory fields; never reads
+			// disk or calls buildEvidence.
+			const draft: RunReceiptDraft =
+				receipt.findingsSummary === undefined
+					? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
+					: receipt;
+			const receiptWithIntegrity = withReceiptIntegrity(draft, current);
 			// The sealed receipt is still returned to the finalizer that asked for
 			// it; what it must not do is write the state root back into existence
 			// under an uninstall. receiptPath stays null because no file was made.
-			if (stateRootRemoved()) return sealed;
-			const target = receiptPathFor(id);
-			atomicWrite(target, JSON.stringify(sealed, null, 2));
-			attachReceipt(id, target);
-			return sealed;
-		},
-
-		async recordReceiptAsync(id: string, receipt: RunReceiptDraft): Promise<RunReceipt> {
-			const sealed = prepareReceipt(id, receipt);
-			// Same uninstall contract as recordReceipt: return the sealed receipt,
-			// write nothing, and leave receiptPath null.
-			if (stateRootRemoved()) return sealed;
-			const target = receiptPathFor(id);
-			let skipped = false;
-			try {
-				await safeResourceWriteAsync(target, JSON.stringify(sealed, null, 2), {
-					// The awaited write and fsync are a window an uninstall can land in,
-					// so check again in the same tick as the rename (#428).
-					withRename: (commit) => {
-						if (stateRootRemoved()) skipped = true;
-						else commit();
-					},
-				});
-			} catch (error) {
-				// Decided from the skip itself: a sibling lock can mkdir the root back
-				// before a second poll, which would turn a real outcome into a failure.
-				if (skipped) return sealed;
-				throw error;
-			}
-			attachReceipt(id, target);
-			return sealed;
+			if (stateRootRemoved()) return receiptWithIntegrity;
+			atomicWrite(target, JSON.stringify(receiptWithIntegrity, null, 2));
+			runs[idx] = { ...current, receiptPath: target };
+			dirty.add(id);
+			return receiptWithIntegrity;
 		},
 
 		adopt(envelope: RunEnvelope): boolean {
@@ -434,18 +400,10 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				const contents = JSON.stringify(capped, null, 2);
 				for (let attempt = 0; ; attempt += 1) {
 					if (stateRootRemoved()) return;
-					let skipped = false;
 					try {
-						await safeResourceWriteAsync(target, contents, {
-							// The awaited fsync is a window an uninstall can land in (#428).
-							withRename: (commit) => {
-								if (stateRootRemoved()) skipped = true;
-								else commit();
-							},
-						});
+						atomicWrite(target, contents);
 						break;
 					} catch (error) {
-						if (skipped) return;
 						const code = (error as NodeJS.ErrnoException).code;
 						if (process.platform !== "win32" || attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "")) {
 							throw error;

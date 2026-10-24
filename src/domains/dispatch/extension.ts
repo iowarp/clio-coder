@@ -376,7 +376,7 @@ import {
 	type ReservationCapacitySnapshot,
 	rebindDispatchReservationMember,
 	releaseDispatchReservation,
-	releaseDispatchReservationMemberAsync,
+	releaseDispatchReservationMember,
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
@@ -3874,8 +3874,6 @@ export function createDispatchBundle(
 		reservedPlanPeak: (planId) =>
 			reservedPlanPeakSlots(planId, (error) => reportDispatchDiagnostic("read reserved plan peak", error)),
 		onRenewalError: (error) => reportDispatchDiagnostic("renew capacity leases", error),
-		onReleaseError: (leaseId, error) =>
-			reportDispatchDiagnostic(`release capacity lease ${leaseId}; retrying at the next heartbeat`, error),
 		onLeaseLost: (lease, detail) => {
 			reportDispatchDiagnostic("capacity lease lost", new Error(detail));
 			stopLostCapacityOwners(lease.assignmentId, detail);
@@ -4356,28 +4354,12 @@ export function createDispatchBundle(
 		status: "succeeded" | "failed" | "canceled",
 		outcomeDetail?: string,
 	): void {
-		void trackAssignmentWrite(
-			(async () => {
-				// A failed write is reported, never swapped for the worker's real
-				// outcome, and never left holding the capacity slot (#428).
-				try {
-					await settleStoredAssignment(assignmentId, receipt.runId, status);
-				} catch (error) {
-					reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error);
-				}
-				try {
-					await capacityAdmission.releaseAssignmentAsync(assignmentId);
-				} catch (error) {
-					reportDispatchDiagnostic(`release capacity for assignment ${assignmentId}`, error);
-				}
-				// Terminal observers must wait for both directory flushes (#428).
-				try {
-					assignments.settle(assignmentId, receipt, status, outcomeDetail);
-				} catch (error) {
-					reportDispatchDiagnostic(`settle assignment ${assignmentId}:${status}`, error);
-				}
-			})(),
-		);
+		trackAssignmentWrite(settleStoredAssignment(assignmentId, receipt.runId, status))
+			.catch((error) => reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error))
+			.finally(() => {
+				assignments.settle(assignmentId, receipt, status, outcomeDetail);
+				capacityAdmission.releaseAssignment(assignmentId);
+			});
 	}
 
 	/**
@@ -6576,7 +6558,7 @@ export function createDispatchBundle(
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
 				};
 				ledgerRef.update(envelope.id, ledgerPatch);
-				const receipt = await ledgerRef.recordReceiptAsync(envelope.id, sealRouteDecision(receiptDraft, routeDecision));
+				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeDecision));
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
@@ -8827,10 +8809,7 @@ export function createDispatchBundle(
 					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
 				}
 				ledgerRef.update(envelope.id, ledgerPatch);
-				const receipt = await ledgerRef.recordReceiptAsync(
-					envelope.id,
-					sealRouteDecision(receiptDraft, routeObservation.decision),
-				);
+				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation.decision));
 				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {
 					void appendAgentLedgerReport(agentLedgerId, agentLedgerAttribution, receipt)
 						.then((posted) => {
@@ -9202,12 +9181,9 @@ export function createDispatchBundle(
 		const terminal =
 			reservation === undefined
 				? assignment.terminal.finally(() => writerLease?.release())
-				: assignment.terminal.finally(async () => {
-						try {
-							await releaseDispatchReservationMemberAsync(reservation.ownerId, reservation.memberId, now());
-						} finally {
-							writerLease?.release();
-						}
+				: assignment.terminal.finally(() => {
+						releaseDispatchReservationMember(reservation.ownerId, reservation.memberId, now());
+						writerLease?.release();
 					});
 		return { runId: handle.runId, events: assignment.events, finalPromise: terminal };
 	}
@@ -9794,7 +9770,7 @@ export function createDispatchBundle(
 			...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
 			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
 		});
-		const receipt = await l.recordReceiptAsync(runId, {
+		const receipt = l.recordReceipt(runId, {
 			runId,
 			agentId: "council-synthesis",
 			executionRole: "judge",

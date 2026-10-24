@@ -16,7 +16,6 @@ import {
 	describeEndpointCapacityHolders,
 	type EndpointCapacityHolders,
 	releaseCapacityLease,
-	releaseCapacityLeaseAsync,
 	renameCapacityLeaseAssignment,
 	renewCapacityLeasesUnsafe,
 } from "./capacity-lease.js";
@@ -64,7 +63,6 @@ export interface CapacityAdmissionController {
 	rename(leaseId: string, assignmentId: string): CapacityLease;
 	release(leaseId: string): boolean;
 	releaseAssignment(assignmentId: string): boolean;
-	releaseAssignmentAsync(assignmentId: string): Promise<boolean>;
 	/** Requests this process admitted for a plan and has not settled yet. */
 	activePlanCount(planId: string): number;
 	/**
@@ -245,40 +243,9 @@ export function createCapacityAdmissionController(options: {
 	 * already belong to someone else. The owner stops the run holding it.
 	 */
 	onLeaseLost?: (lease: CapacityLease, detail: string) => void;
-	/** Report a durable lease release that failed; each heartbeat retries it until it lands. */
-	onReleaseError?: (leaseId: string, error: Error) => void;
 }): CapacityAdmissionController {
 	const now = options.now ?? Date.now;
 	const leases = new Map<string, CapacityLease>();
-	const releases = new Map<string, Promise<boolean>>();
-	/**
-	 * Leases whose durable release failed. A sibling never reclaims a lease whose
-	 * owner is alive with a matching birth token, whatever its expiry, so an
-	 * unretried failure would hold a global, node and endpoint slot for this
-	 * process's lifetime and show other processes a phantom holder (#428).
-	 */
-	const pendingReleases = new Set<string>();
-	let releaseRetry: Promise<void> | null = null;
-	const reportReleaseError = (leaseId: string, error: unknown): void => {
-		const failure = error instanceof Error ? error : new Error(String(error));
-		notify(() => options.onReleaseError?.(leaseId, failure));
-	};
-	const retryPendingReleases = (): void => {
-		if (releaseRetry !== null || pendingReleases.size === 0) return;
-		releaseRetry = (async () => {
-			for (const leaseId of [...pendingReleases]) {
-				if (stopSignal.signal.aborted) return;
-				try {
-					await releaseCapacityLeaseAsync(leaseId);
-					pendingReleases.delete(leaseId);
-				} catch (error) {
-					reportReleaseError(leaseId, error);
-				}
-			}
-		})().finally(() => {
-			releaseRetry = null;
-		});
-	};
 	/** Queued request ids by assignment; fleet members share their root's assignment and wait together. */
 	const pending = new Map<string, Set<string>>();
 	const forgetPending = (assignmentId: string, requestId: string): void => {
@@ -521,9 +488,7 @@ export function createCapacityAdmissionController(options: {
 	 * its run.
 	 */
 	const heartbeat = (): void => {
-		if (stopped) return;
-		retryPendingReleases();
-		if (heartbeatRun !== null) return;
+		if (stopped || heartbeatRun !== null) return;
 		const owned = [...leases.keys()].filter((leaseId) => !lost.has(leaseId));
 		if (owned.length === 0) {
 			renewalFault = null;
@@ -698,34 +663,6 @@ export function createCapacityAdmissionController(options: {
 			}
 			return controller.release(lease.leaseId);
 		},
-		releaseAssignmentAsync(assignmentId) {
-			const pendingRelease = releases.get(assignmentId);
-			if (pendingRelease) return pendingRelease;
-			const lease = [...leases.values()].find((entry) => entry.assignmentId === assignmentId);
-			if (!lease) {
-				queue.complete(assignmentId);
-				return Promise.resolve(false);
-			}
-			leases.delete(lease.leaseId);
-			lost.delete(lease.leaseId);
-			if (leases.size === 0) renewalFault = null;
-			// The local slot frees even when the durable release fails; the shared
-			// record then waits in pendingReleases for the heartbeat to retry (#428).
-			const release = releaseCapacityLeaseAsync(lease.leaseId)
-				.catch((error: unknown) => {
-					pendingReleases.add(lease.leaseId);
-					reportReleaseError(lease.leaseId, error);
-					return false;
-				})
-				.finally(() => {
-					releases.delete(assignmentId);
-					queue.complete(assignmentId);
-					pumpNow();
-				});
-			releases.set(assignmentId, release);
-			return release;
-		},
-
 		activePlanCount(planId) {
 			return queue.activePlanCount(planId);
 		},
@@ -748,9 +685,7 @@ export function createCapacityAdmissionController(options: {
 				pumpTimer = null;
 			}
 			clearInterval(heartbeatTimer);
-			return Promise.allSettled([pumpRun, heartbeatRun, transactions, releaseRetry, ...releases.values()]).then(
-				() => undefined,
-			);
+			return Promise.allSettled([pumpRun, heartbeatRun, transactions]).then(() => undefined);
 		},
 	};
 	return controller;
