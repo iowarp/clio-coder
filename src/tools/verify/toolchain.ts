@@ -592,12 +592,10 @@ function parsePackageJsonText(text: string): PackageJsonParse {
 	return { ok: true, scripts: scripts as Record<string, unknown> };
 }
 
-export function parsePackageJson(packagePath: string): PackageJsonParse {
-	let text: string;
-	try {
-		text = declaredFileText(packagePath);
-	} catch (error) {
-		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-	}
+/** Contained like every other declaration read, so a package.json symlinked outside the workspace is never parsed. */
+export function parsePackageJson(packagePath: string, workspaceRoot: string): PackageJsonParse {
+	const text = regularFileText(packagePath, workspaceRoot);
+	if (text === null) return { ok: false, reason: "file not found" };
+	if (text instanceof Error) return { ok: false, reason: text.message };
 	return parsePackageJsonText(text);
 }

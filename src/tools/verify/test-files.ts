@@ -18,11 +18,11 @@ function isTestFile(filename: string): boolean {
 	);
 }
 
-function declaredRunner(root: string, check: DeclaredCheck, filename: string): string[] | null {
+function declaredRunner(root: string, workspaceRoot: string, check: DeclaredCheck, filename: string): string[] | null {
 	const packageScript = check.source.kind === "package.json";
 	let argv = check.command;
 	if (packageScript) {
-		const pkg = parsePackageJson(check.source.path);
+		const pkg = parsePackageJson(check.source.path, workspaceRoot);
 		const script = pkg.ok ? pkg.scripts[check.id] : null;
 		if (typeof script !== "string") return null;
 		const parsed = shellLikeArgv(script);
@@ -47,7 +47,8 @@ function declaredRunner(root: string, check: DeclaredCheck, filename: string): s
 		args = ["discover", "-s", path.dirname(filename), "-p", path.basename(filename)];
 	} else return null;
 	if (!packageScript) return [...argv, ...args];
-	return verifyResolutionArgv(resolveVerifyCall(root, { check: check.id, cwd: check.cwd, args }), { args });
+	// The check is already resolved; rediscovering from root would contain the read at the package root, not the workspace.
+	return verifyResolutionArgv({ kind: "package", check, packageRoot: path.dirname(check.source.path) }, { args });
 }
 
 /** Resolve changed tests from the same project declarations verify uses, without guessing an installed runner. */
@@ -79,11 +80,11 @@ export function resolveTestFileChecks(
 			root = path.dirname(root);
 		}
 		const local = `./${path.relative(root, absolute).split(path.sep).join("/")}`;
-		const discovery = discoverDeclaredChecksAtRoot(root, undefined);
+		const discovery = discoverDeclaredChecksAtRoot(root, undefined, workspaceRoot);
 		const declared = discovery.ok ? discovery.sources.flatMap((source) => source.checks) : [];
 		let resolved: TestFileCheck | undefined;
 		for (const check of declared) {
-			const argv = declaredRunner(root, check, local);
+			const argv = declaredRunner(root, workspaceRoot, check, local);
 			if (argv !== null) {
 				resolved = { check, argv };
 				break;

@@ -601,7 +601,7 @@ export async function runScriptCheck(
 	}
 	const packagePath = path.join(cwd, "package.json");
 	if (!existsSync(packagePath)) return { kind: "error", message: `verify: package.json not found in ${cwd}` };
-	const pkg = parsePackageJson(packagePath);
+	const pkg = parsePackageJson(packagePath, process.cwd());
 	if (!pkg.ok) return { kind: "error", message: `verify: ${packagePath}: ${pkg.reason}` };
 	if (!Object.hasOwn(pkg.scripts, check)) {
 		const declared = declaredVerificationScripts(pkg.scripts);

@@ -34,11 +34,12 @@ function packageTag(id: string): string[] {
 function packageCheckSource(
 	packageRoot: string,
 	workspaceRoot: string,
+	containmentRoot: string,
 	diagnostics: string[],
 ): DeclaredCheckSource | null {
 	const packagePath = path.join(packageRoot, "package.json");
 	if (!existsSync(packagePath)) return null;
-	const pkg = parsePackageJson(packagePath);
+	const pkg = parsePackageJson(packagePath, containmentRoot);
 	if (!pkg.ok) {
 		if (pkg.reason !== PACKAGE_JSON_NO_SCRIPTS) {
 			const relative = path.relative(workspaceRoot, packagePath).split(path.sep).join("/");
@@ -70,9 +71,15 @@ function providerCollision(sources: ReadonlyArray<DeclaredCheckSource>): string 
 	return null;
 }
 
+/**
+ * containmentRoot bounds the package.json read when workspaceRoot is a nested
+ * package root, so a monorepo package whose manifest links elsewhere inside the
+ * real workspace still parses.
+ */
 export function discoverDeclaredChecksAtRoot(
 	workspaceRoot: string,
 	cwdArg: string | undefined,
+	containmentRoot: string = workspaceRoot,
 ): DeclaredCheckDiscoveryResult {
 	let packageRoot: string;
 	try {
@@ -82,7 +89,7 @@ export function discoverDeclaredChecksAtRoot(
 	}
 	const sources: DeclaredCheckSource[] = [];
 	const diagnostics: string[] = [];
-	const packageSource = packageCheckSource(packageRoot, workspaceRoot, diagnostics);
+	const packageSource = packageCheckSource(packageRoot, workspaceRoot, containmentRoot, diagnostics);
 	if (packageSource !== null) sources.push(packageSource);
 	const projectCatalog = loadProjectVerifierCatalog(workspaceRoot);
 	if (!projectCatalog.ok) return projectCatalog;
