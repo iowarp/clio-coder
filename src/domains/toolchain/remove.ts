@@ -1,6 +1,6 @@
-import { readdirSync, rmdirSync, rmSync, statSync } from "node:fs";
+import { readdirSync, rmdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { toolchainRoot } from "./paths.js";
+import { statOrNull, toolchainRoot } from "./paths.js";
 import { findPinnedTool } from "./registry.js";
 
 /**
@@ -167,8 +167,8 @@ function sweepStaleStaging(dir: string, staleMs: number): string[] {
 	const swept: string[] = [];
 	for (const name of names.sort((a, b) => a.localeCompare(b))) {
 		if (!STAGING_NAME.test(name)) continue;
-		const stat = statSync(join(dir, name), { throwIfNoEntry: false });
-		if (stat === undefined || !stat.isDirectory() || stat.mtimeMs > cutoff) continue;
+		const stat = statOrNull(join(dir, name));
+		if (stat === null || !stat.isDirectory() || stat.mtimeMs > cutoff) continue;
 		try {
 			rmSync(join(dir, name), { recursive: true, force: true });
 			swept.push(name);
@@ -214,5 +214,5 @@ function describeRemoval(
 }
 
 function isDirectory(path: string): boolean {
-	return statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+	return statOrNull(path)?.isDirectory() === true;
 }

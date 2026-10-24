@@ -1,6 +1,5 @@
-import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { toolVersionDir, vendoredBinaryPath } from "./paths.js";
+import { statOrNull, toolVersionDir, vendoredBinaryPath } from "./paths.js";
 import { currentToolPlatform, findPinnedTool, findPinnedToolByBinary, PINNED_TOOLS } from "./registry.js";
 import { installedToolVersions } from "./remove.js";
 import type { PinnedTool, ToolPathCandidate, ToolResolution, ToolStatus } from "./types.js";
@@ -29,7 +28,7 @@ export function findExecutableOnPath(name: string): string | null {
 		if (!dir) continue;
 		for (const candidate of candidates) {
 			const full = join(dir, candidate);
-			const stat = statSync(full, { throwIfNoEntry: false });
+			const stat = statOrNull(full);
 			if (stat?.isFile() && (process.platform === "win32" || (stat.mode & 0o111) !== 0)) return full;
 		}
 	}
@@ -66,7 +65,7 @@ export function resolveToolBinary(name: string): ToolResolution {
 export function resolveEntryBinary(entry: PinnedTool, binary: string): ToolResolution {
 	const pathCandidate = probePathCandidate(entry, binary);
 	const vendored = vendoredBinaryPath(entry.id, entry.version, binary);
-	const vendoredStat = statSync(vendored, { throwIfNoEntry: false });
+	const vendoredStat = statOrNull(vendored);
 	const vendoredPath = vendoredStat?.isFile() ? vendored : null;
 
 	if (pathCandidate?.satisfiesMinimum) {

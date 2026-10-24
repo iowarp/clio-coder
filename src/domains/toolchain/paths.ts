@@ -1,3 +1,4 @@
+import { type Stats, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioDataDir, resolveClioDirs } from "../../core/xdg.js";
 
@@ -31,4 +32,18 @@ export function vendoredBinaryPath(id: string, version: string, binary: string):
 /** `<data>/tools`, creating the data root the way every other writer does. */
 export function ensureToolchainRoot(): string {
 	return join(clioDataDir(), "tools");
+}
+
+/**
+ * stat that reports any failure as absent. `throwIfNoEntry: false` covers only
+ * ENOENT and ENOTDIR; a path under an untraversable directory still throws
+ * EACCES (ELOOP, ENAMETOOLONG likewise), which crashed TUI startup through the
+ * fd PATH lookup (#437). Toolchain lookups never throw.
+ */
+export function statOrNull(file: string): Stats | null {
+	try {
+		return statSync(file, { throwIfNoEntry: false }) ?? null;
+	} catch {
+		return null;
+	}
 }
