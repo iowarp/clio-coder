@@ -70,6 +70,8 @@ export function useFirstTask(client: Client) {
 						routes.newSession,
 						{ params: { id: workspaceId }, query: {}, body: {} },
 						request.createKey,
+						undefined,
+						request.epoch,
 					);
 					rememberOwnDraft(session.id);
 					request = { ...request, sessionId: session.id, phase: "created" };
@@ -83,6 +85,8 @@ export function useFirstTask(client: Client) {
 					routes.turn,
 					{ params: { id: sessionId }, query: {}, body: request.exactTurnBody },
 					request.turnKey,
+					undefined,
+					request.epoch,
 				);
 				confirmFirstRequest(request);
 				rememberPrompt(request.exactTurnBody.text);

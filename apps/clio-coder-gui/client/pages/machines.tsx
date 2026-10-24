@@ -426,6 +426,8 @@ export function MachinesPage({ client }: { client: Client }) {
 					routes.machineMutation,
 					{ ...emptyInput, params: { id: sent.workspaceId }, body: sent.body },
 					sent.key,
+					undefined,
+					currentMeta.epoch,
 				);
 				store.update((current) => ({
 					...current,

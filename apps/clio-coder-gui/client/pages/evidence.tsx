@@ -97,6 +97,8 @@ function EvidenceActions({
 			request.action === "build" ? routes.evidenceBuild : routes.receiptVerify,
 			{ ...emptyInput, params: { id: request.workspaceId, runId: request.resourceId } },
 			request.key,
+			undefined,
+			request.epoch ?? undefined,
 		),
 	);
 	const { operation, busy } = tracking;

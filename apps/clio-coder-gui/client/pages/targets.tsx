@@ -40,6 +40,8 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 						: routes.targetsRemove,
 			{ ...emptyInput, params: { id: request.workspaceId, targetId: request.resourceId } },
 			request.key,
+			undefined,
+			request.epoch ?? undefined,
 		),
 	);
 	const { operation, request, busy } = tracking;

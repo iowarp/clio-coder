@@ -28,9 +28,18 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 			epoch = value;
 		},
 		/** `signal` cancels the request itself; a cancelled call rejects with the abort, never as "server unavailable". */
-		async call<R extends Route>(route: R, input: Input<R>, key?: string, signal?: AbortSignal): Promise<Output<R>> {
+		async call<R extends Route>(
+			route: R,
+			input: Input<R>,
+			key?: string,
+			signal?: AbortSignal,
+			expectedEpoch?: string,
+		): Promise<Output<R>> {
 			// A refused token only recovers through a reload, so nothing else is read in this document.
 			if (tokenRejected()) throw unauthorized();
+			// Retained requests pin their original preflight epoch. The server checks it before
+			// admitting a write, including a restart that raced the preflight response.
+			const commandEpoch = expectedEpoch ?? epoch;
 			const path = route.path.replace(/:([A-Za-z0-9]+)/g, (_, name: string) =>
 				encodeURIComponent(String((input.params as Record<string, unknown>)[name])),
 			);
@@ -47,6 +56,7 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 						...(route.method !== "GET"
 							? { "Content-Type": "application/json", "Idempotency-Key": key ?? crypto.randomUUID() }
 							: {}),
+						...(route.method !== "GET" && commandEpoch !== undefined ? { "X-Clio-Epoch": commandEpoch } : {}),
 					},
 					...(route.method !== "GET" ? { body: JSON.stringify(input.body) } : {}),
 					...(signal ? { signal } : {}),

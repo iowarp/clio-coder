@@ -42,17 +42,25 @@ export function useSessionControls(client: Client) {
 					routes.closeSession,
 					{ ...emptyInput, params: { id: original.sessionId } },
 					original.key,
+					undefined,
+					meta.epoch,
 				);
-				queries.setQueryData(["session", snapshot.id], sessionBuffer(snapshot.id).snapshot(snapshot) ?? snapshot);
+				const accepted = sessionBuffer(snapshot.id).snapshot(snapshot) ?? snapshot;
+				queries.setQueryData(["session", snapshot.id], accepted);
+				const closed = observedControlOutcome(original, accepted);
 				store.patch(original.key, {
-					stage: "complete",
-					message: "This session is closed. Its recorded conversation remains available.",
+					stage: closed ? "complete" : "unresolved",
+					message: closed
+						? "This session is closed. Its recorded conversation remains available."
+						: "Clio returned a session whose closure is unconfirmed. Refresh its recorded state before starting another control.",
 				});
 			} else {
 				await client.call(
 					routes.cancelTurn,
 					{ ...emptyInput, params: { id: original.sessionId, turnId: original.turnId ?? "" } },
 					original.key,
+					undefined,
+					meta.epoch,
 				);
 				store.patch(original.key, {
 					stage: "complete",
@@ -102,8 +110,9 @@ export function useSessionControls(client: Client) {
 			store.patch(key, { stage: "sending", message: "Reading the original session's recorded state…" });
 			try {
 				const snapshot = await client.call(routes.session, { ...emptyInput, params: { id: request.sessionId } });
-				queries.setQueryData(["session", snapshot.id], sessionBuffer(snapshot.id).snapshot(snapshot) ?? snapshot);
-				const outcome = observedControlOutcome(request, snapshot);
+				const accepted = sessionBuffer(snapshot.id).snapshot(snapshot) ?? snapshot;
+				queries.setQueryData(["session", snapshot.id], accepted);
+				const outcome = observedControlOutcome(request, accepted);
 				store.patch(key, {
 					stage: outcome ? "complete" : "unresolved",
 					message: outcome ?? "The original action is not confirmed by this snapshot. Review the session before retrying.",
