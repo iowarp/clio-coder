@@ -1,5 +1,16 @@
 import { createHash } from "node:crypto";
-import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+	closeSync,
+	type Dirent,
+	existsSync,
+	constants as fsConstants,
+	fstatSync,
+	openSync,
+	readdirSync,
+	readSync,
+	realpathSync,
+	type Stats,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { CLIO_SELF_DEVELOPMENT_SKILLS, detectClioCoderRepo } from "../../../core/clio-repo.js";
@@ -260,7 +271,12 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			// frontmatter name differs from the path. Use the loader's names so
 			// a descendant launch cannot resurrect a hidden root override.
 			const rootOverrides = loadSkillRoot(
-				{ path: path.join(selfRepo, ".clio-coder", "skills"), scope: "project", containment: selfRepo },
+				{
+					path: path.join(selfRepo, ".clio-coder", "skills"),
+					scope: "project",
+					containment: selfRepo,
+					strictContainment: true,
+				},
 				[],
 			);
 			for (const candidate of rootOverrides) ownedNames.add(candidate.skill.name);
@@ -338,6 +354,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			trusted: false,
 			foreign: true,
 			containment: cwd,
+			strictContainment: true,
 		});
 	}
 
@@ -349,6 +366,10 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		precedence: SKILL_PRECEDENCE.project,
 		trusted: true,
 		containment: cwd,
+		// A repository root that is itself a symlink must not move the boundary
+		// to wherever it points: relocation is for the operator's own user and
+		// XDG roots, while a repository can only offer what it contains.
+		strictContainment: true,
 	});
 
 	return roots;
@@ -709,14 +730,54 @@ function escapesContainment(fullPath: string, anchor: string | null, diagnostics
 	return true;
 }
 
+function describeFileType(stat: Stats): string {
+	if (stat.isDirectory()) return "a directory";
+	if (stat.isFIFO()) return "a FIFO";
+	if (stat.isSocket()) return "a socket";
+	if (stat.isCharacterDevice()) return "a character device";
+	if (stat.isBlockDevice()) return "a block device";
+	return "not a regular file";
+}
+
+/**
+ * Read a skill file only when it is a regular file, at most one byte past the
+ * size limit. The descriptor is opened non-blocking and checked with fstat, so
+ * a FIFO named SKILL.md cannot park `--skill` or `library validate` in a read
+ * that never returns, and the type check and the read see the same file with
+ * no stat-then-open window between them.
+ */
+function readRegularSkillFile(filePath: string): { bytes: Buffer; size: number } {
+	const fd = openSync(filePath, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+	try {
+		const stat = fstatSync(fd);
+		if (!stat.isFile()) throw new Error(`${describeFileType(stat)}, not a regular file`);
+		const limit = MAX_SKILL_BYTES + 1;
+		const chunks: Buffer[] = [];
+		let total = 0;
+		while (total < limit) {
+			const chunk = Buffer.allocUnsafe(Math.min(limit - total, Math.max(stat.size + 1 - total, 64 * 1024)));
+			const read = readSync(fd, chunk, 0, chunk.byteLength, null);
+			if (read === 0) break;
+			chunks.push(chunk.subarray(0, read));
+			total += read;
+		}
+		// The read stops one byte past the limit, so the over-limit diagnostic
+		// takes the file's own size to name what the operator actually has.
+		return { bytes: Buffer.concat(chunks, total), size: Math.max(stat.size, total) };
+	} finally {
+		closeSync(fd);
+	}
+}
+
 function loadSkillFile(
 	filePath: string,
 	root: SkillRoot,
 ): { candidate: SkillCandidate | null; diagnostics: ResourceDiagnostic[] } {
 	const diagnostics: ResourceDiagnostic[] = [];
 	let bytes: Buffer;
+	let size: number;
 	try {
-		bytes = readFileSync(filePath);
+		({ bytes, size } = readRegularSkillFile(filePath));
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		return {
@@ -730,7 +791,7 @@ function loadSkillFile(
 			diagnostics: [
 				{
 					type: "warning",
-					message: `skill file is ${bytes.byteLength} bytes, over the ${MAX_SKILL_BYTES}-byte limit for a SKILL.md`,
+					message: `skill file is ${size} bytes, over the ${MAX_SKILL_BYTES}-byte limit for a SKILL.md`,
 					path: filePath,
 				},
 			],
@@ -855,7 +916,11 @@ function collectSkills(
 		return [];
 	}
 
-	const skillEntry = entries.find((entry) => entry.name === "SKILL.md" && entry.isFile());
+	// A symlinked SKILL.md is still the package marker. Recursion never loads
+	// loose files, so treating only a plain file as the marker made a nested
+	// link vanish with no diagnostic. Containment and the regular-file check in
+	// loadSkillFile decide whether its target is acceptable.
+	const skillEntry = entries.find((entry) => entry.name === "SKILL.md" && (entry.isFile() || entry.isSymbolicLink()));
 	if (skillEntry) {
 		const skillPath = path.join(dir, skillEntry.name);
 		if (escapesContainment(skillPath, anchor, diagnostics)) return [];

@@ -10,11 +10,13 @@ import { scratchClioEnvVars } from "../harness/scratch-env.js";
 // re-verifies every installed plugin tree, and that walk is the integrity
 // check: about 70 ms of blocked event loop with 52 installed plugins. These pin
 // how many walks the operations an interactive session repeats may cost. A walk
-// is measured rather than assumed. The integrity check fstats every file it
-// hashes (src/domains/extensions/integrity.ts), so a walk is the fstatSync calls
-// one listInstalledPlugins adds for the plugin set against a project holding
-// none. Counting hashed files rather than every fs call keeps per-plugin
-// parsing, such as reading each package's SKILL.md, out of the walk count.
+// is measured rather than assumed. The integrity check opens every file it
+// hashes and fstats it twice (src/domains/extensions/integrity.ts), while the
+// skill loader opens each SKILL.md and fstats it once to refuse a FIFO. So a
+// walk is the fstatSync calls beyond openSync calls that one
+// listInstalledPlugins adds for the plugin set against a project holding none.
+// Counting hashed files rather than every fs call keeps per-plugin parsing,
+// such as reading each package's SKILL.md, out of the walk count.
 // Counters are installed before any product module loads so their fs imports
 // see the wrappers.
 const home = mkdtempSync(join(tmpdir(), "clio-coder-plugin-walks-"));
@@ -90,7 +92,9 @@ async function counted(cwd: string, body: (cwd: string) => unknown): Promise<num
 		// Let reload and install I/O drain so it cannot land inside the window.
 		await new Promise((settle) => setImmediate(settle));
 		await new Promise((settle) => setImmediate(settle));
-		return (await countFsCalls(async () => await body(cwd))).byName["fs.fstatSync"] ?? 0;
+		const calls = (await countFsCalls(async () => await body(cwd))).byName;
+		// Hazard: every bare openSync (buffer-mode readFileSync, lock or append opens) also subtracts, so a new per-file read inside a measured operation discounts walks.
+		return (calls["fs.fstatSync"] ?? 0) - (calls["fs.openSync"] ?? 0);
 	} finally {
 		process.chdir(previous);
 	}
@@ -205,9 +209,10 @@ describe("plugin walks per repeated operation", () => {
 			await counted(installed, operation.run);
 		}
 		const perWalk = (await counted(installed, walk)) - (await counted(baseline, walk));
-		// Each fixture plugin holds seven files. Fewer hashes means verification
-		// stopped using fstatSync and this contract no longer measures walks.
-		ok(perWalk >= PLUGINS * 7, `a walk over ${PLUGINS} plugins made only ${perWalk} fstatSync calls`);
+		// Each fixture plugin holds seven files; a walk measures one short of 42
+		// because one unpaired open lands in the window. Well under one per file
+		// means verification stopped using fstatSync and nothing measures walks.
+		ok(perWalk >= PLUGINS * 6, `a walk over ${PLUGINS} plugins made only ${perWalk} unpaired fstatSync calls`);
 		const measured: string[] = [];
 		const over: string[] = [];
 		for (const operation of OPERATIONS) {
