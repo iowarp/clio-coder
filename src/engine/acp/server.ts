@@ -79,6 +79,7 @@ import {
 } from "../../domains/dispatch/receipt-facts.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
+import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";
 import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
 import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
@@ -2417,7 +2418,17 @@ function safeSettingsProjection(snapshot: AcpSafeSettingsSnapshot): AcpSafeSetti
 }
 
 function safeTargetModels(status: ReturnType<ProvidersContract["list"]>[number]): string[] {
-	const candidates = [status.target.defaultModel, ...(status.target.wireModels ?? []), ...status.discoveredModels];
+	return targetModelCandidates(status).slice(0, ACP_TARGET_MODEL_LIMIT);
+}
+
+function targetModelCandidates(status: ReturnType<ProvidersContract["list"]>[number]): string[] {
+	const candidates = [
+		status.target.defaultModel,
+		...(status.target.wireModels ?? []),
+		...status.discoveredModels,
+		...modelIdsForStatus(status),
+		status.runtime?.defaultModel,
+	];
 	const seen = new Set<string>();
 	const models: string[] = [];
 	for (const candidate of candidates) {
@@ -2425,7 +2436,6 @@ function safeTargetModels(status: ReturnType<ProvidersContract["list"]>[number])
 		if (id === null || seen.has(id)) continue;
 		seen.add(id);
 		models.push(id);
-		if (models.length === ACP_TARGET_MODEL_LIMIT) break;
 	}
 	return models;
 }
@@ -2479,12 +2489,8 @@ function safeTargetProjection(status: ReturnType<ProvidersContract["list"]>[numb
 			/* Invalid configured endpoints disclose no raw credentials. */
 		}
 	}
-	const models = safeTargetModels(status);
-	const allModels = new Set(
-		[status.target.defaultModel, ...(status.target.wireModels ?? []), ...status.discoveredModels]
-			.map((model) => safeStoredIdentifier(model, ACP_MAX_MODEL_ID_BYTES))
-			.filter((model) => model !== null),
-	);
+	const allModels = targetModelCandidates(status);
+	const models = allModels.slice(0, ACP_TARGET_MODEL_LIMIT);
 	const window = status.capabilities?.contextWindow;
 	return {
 		id,
@@ -2499,7 +2505,7 @@ function safeTargetProjection(status: ReturnType<ProvidersContract["list"]>[numb
 		...(status.health?.status !== undefined ? { health: status.health.status } : {}),
 		...(status.runtime?.tier !== undefined ? { tier: status.runtime.tier } : {}),
 		...(window !== undefined ? { contextWindow: Number.isFinite(window) && window > 0 ? window : null } : {}),
-		modelsTruncated: allModels.size > models.length,
+		modelsTruncated: allModels.length > models.length,
 	};
 }
 
@@ -4666,7 +4672,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				category: "model",
 				type: "select",
 				currentValue: session.model,
-				options: models.map((model) => {
+				options: models.slice(0, ACP_TARGET_MODEL_LIMIT).map((model) => {
 					const thinking = sessionThinking(session, model);
 					return { value: model, name: model, ...(thinking ? { thinkingLevels: thinking.supportedLevels } : {}) };
 				}),
@@ -5938,9 +5944,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				const target = request.configId === "target" ? value : session.target;
 				const status = options.providers.list().find((item) => item.target.id === target);
 				if (!target || !status) throw new AcpRequestError(-32602, "target is not available", { code: "invalid_params" });
-				const models = safeTargetModels(status);
+				const models = targetModelCandidates(status);
+				const defaultModel =
+					safeStoredIdentifier(status.target.defaultModel, ACP_MAX_MODEL_ID_BYTES) ??
+					safeStoredIdentifier(status.runtime?.defaultModel, ACP_MAX_MODEL_ID_BYTES) ??
+					undefined;
 				const model =
-					request.configId === "model" ? value : session.model && models.includes(session.model) ? session.model : models[0];
+					request.configId === "model"
+						? value
+						: session.model && models.includes(session.model)
+							? session.model
+							: defaultModel;
 				if (!model || (!models.includes(model) && !(target === session.target && model === session.model)))
 					throw modelNotDeclared(target, model, models);
 				try {
