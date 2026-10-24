@@ -10,8 +10,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { rememberOAuthCallFailure, withOAuthRefresh } from "../../src/core/oauth-retry.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
-import { AuthStorage } from "../../src/domains/providers/auth/storage.js";
+import { AuthStorage, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
+import type { ProvidersContract } from "../../src/domains/providers/contract.js";
+import { resolveSideCallAuth } from "../../src/domains/providers/side-call-auth.js";
+import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { registerClioOAuthProviders } from "../../src/engine/oauth.js";
 
 // The engine registry is lazy and ALCF joins it only through this call, which
@@ -101,6 +106,70 @@ describe("contracts/auth OAuth refresh", () => {
 			throw new Error("network must not be touched");
 		}) as typeof fetch;
 		strictEqual((await open().resolveApiKey("alcf")).apiKey, "old-access");
+	});
+
+	it("refreshes inside the skew window and on a server rejection of an unexpired token (#427)", async () => {
+		globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+			calls.push({ url: String(url), body: String(init?.body) });
+			return globusResponse(`access-${calls.length}`);
+		}) as typeof fetch;
+		// Two minutes left is inside the five-minute margin, so the token is refreshed before use.
+		seed(2 * 60_000);
+		strictEqual((await open().resolveApiKey("alcf")).apiKey, "access-1");
+		strictEqual(calls.length, 1);
+
+		// Codex has an hour left locally, but the server rejects it: one locked refresh, one same-call retry.
+		writeFileSync(
+			path,
+			[
+				"version: 2",
+				"entries:",
+				"  openai-codex:",
+				"    type: oauth",
+				"    access: codex-old",
+				"    refresh: refresh-old",
+				`    expires: ${Date.now() + 60 * 60_000}`,
+				"    updatedAt: 2026-01-01T00:00:00.000Z",
+				"",
+			].join("\n"),
+		);
+		const claims = { "https://api.openai.com/auth": { chatgpt_account_id: "acct-427" } };
+		const codexAccess = `h.${Buffer.from(JSON.stringify(claims)).toString("base64")}.s`;
+		globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+			calls.push({ url: String(url), body: String(init?.body) });
+			return new Response(JSON.stringify({ access_token: codexAccess, refresh_token: "refresh-new", expires_in: 3600 }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+		const storage = open();
+		// The same delegation the providers extension gives the auth contract.
+		const auth = {
+			resolveForTarget: (target, runtime, options) =>
+				storage.resolveForTarget(resolveAuthTarget(target, runtime), { includeFallback: false, ...options }),
+		} as Pick<ProvidersContract["auth"], "resolveForTarget"> as ProvidersContract["auth"];
+		const sideAuth = await resolveSideCallAuth(
+			auth,
+			{ id: "codex", runtime: "openai-codex" } as TargetDescriptor,
+			{ id: "openai-codex", auth: "oauth" } as RuntimeDescriptor,
+			"unused",
+		);
+		strictEqual(sideAuth.apiKey, "codex-old");
+		strictEqual(calls.length, 1, "a locally unexpired token is used without a refresh");
+		const sent: string[] = [];
+		const answer = await withOAuthRefresh(sideAuth, async ({ apiKey }) => {
+			sent.push(String(apiKey));
+			if (apiKey !== "codex-old") return "ok";
+			// The message alone does not read as an auth rejection; only the recorded 401 does.
+			const error = new Error("provider request failed");
+			rememberOAuthCallFailure(error, { invoked: true, stage: "provider", httpStatus: 401, errorClass: "http" });
+			throw error;
+		});
+		strictEqual(answer, "ok");
+		deepStrictEqual(sent, ["codex-old", codexAccess]);
+		strictEqual(calls.length, 2, "exactly one refresh for the rejection");
+		ok(calls[1]?.url.includes("auth.openai.com/oauth/token"), calls[1]?.url);
+		ok(readFileSync(path, "utf8").includes(codexAccess), "the forced rotation is persisted");
 	});
 
 	it("refreshes once when two stores race on the same file", async () => {
