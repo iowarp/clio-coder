@@ -5,8 +5,13 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { endpointCapacityUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
-import { runTaskMemoryPolicy, type TaskMemoryModelClient } from "../../src/domains/memory/task-memory-policy.js";
+import {
+	runTaskMemoryPolicy,
+	type TaskMemoryModelClient,
+	type TaskMemoryStepUsage,
+} from "../../src/domains/memory/task-memory-policy.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
+import { backgroundMemoryUsageRow } from "../../src/domains/observability/background-memory-usage.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
@@ -121,7 +126,7 @@ for (const ending of ["deadline", "cancelled"] as const) {
 			ok(route);
 			const controller = new AbortController();
 			let completion: ReturnType<typeof route.client.complete> | undefined;
-			let usage = 0;
+			const usage: TaskMemoryStepUsage[] = [];
 			const policy = runTaskMemoryPolicy(
 				new TaskMemoryBank(),
 				{
@@ -137,8 +142,8 @@ for (const ending of ["deadline", "cancelled"] as const) {
 					maxTokens: 512,
 					timeoutMs: ending === "deadline" ? 100 : 2000,
 					signal: controller.signal,
-					onStepUsage: () => {
-						usage++;
+					onStepUsage: (step) => {
+						usage.push(step);
 					},
 				},
 			);
@@ -149,7 +154,18 @@ for (const ending of ["deadline", "cancelled"] as const) {
 			release();
 			await completion?.catch(() => undefined);
 			strictEqual(f.fixture.requests.length, 0, "expired metadata cannot spend inference");
-			strictEqual(usage, 0, "metadata is not model usage");
+			// #430: the abort is recorded as a never-sent step, which no fold counts as a call, missing usage or cost.
+			strictEqual(usage.length, 1);
+			const [step] = usage;
+			ok(step);
+			strictEqual(step.failure?.invoked, false, "metadata is not model usage");
+			strictEqual(step.totalTokens, 0);
+			strictEqual(step.costUsd, 0);
+			strictEqual(step.missingTokenCalls, undefined);
+			const row = backgroundMemoryUsageRow(step, { repoIdentity: null });
+			strictEqual(row.callOutcome, "aborted");
+			strictEqual(row.usage.totalTokens, null);
+			strictEqual(row.usage.costUsd, null);
 			strictEqual(f.providers.list()[0]?.health.lastCheckAt, null, "abort is not endpoint-down evidence");
 			const recovered = await route.client.complete({
 				systemPrompt: "fixture",

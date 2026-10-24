@@ -95,7 +95,9 @@ type UsageField = (typeof USAGE_FIELDS)[number];
 
 /** Known subtotals and missing-field coverage; zero missing values are never inferred. */
 export function summarizeFailedCompactionUsage(rows: ReadonlyArray<OutOfTurnUsageRow>) {
-	const calls = rows.filter((row) => row.label === "failed-compaction");
+	// #430: a compaction cancelled before its request left the process is not a
+	// stream, and its null fields are not missing usage.
+	const calls = rows.filter((row) => row.label === "failed-compaction" && row.failure?.invoked !== false);
 	const knownUsage = Object.fromEntries(USAGE_FIELDS.map((field) => [field, null])) as Record<UsageField, number | null>;
 	const erroredKnownUsage = { ...knownUsage };
 	const unobservedUsageCalls = Object.fromEntries(USAGE_FIELDS.map((field) => [field, 0])) as Record<UsageField, number>;

@@ -269,6 +269,9 @@ export function createObservabilityBundle(
 			if (sessionId) {
 				for (const row of readOutOfTurnUsageRows(clioStateDir()).rows) {
 					if (row.sessionId !== sessionId) continue;
+					// #430: a never-sent call is evidence, not spend. The live path never
+					// recorded it, so a resumed session must not count it as a call either.
+					if (row.failure?.invoked === false) continue;
 					cost.accumulate(
 						row.target,
 						row.attributedModelId,
