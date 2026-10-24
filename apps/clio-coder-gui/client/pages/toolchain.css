@@ -47,3 +47,47 @@
 		gap: var(--space-1);
 	}
 }
+
+.toolchain-discovery {
+	margin-block: var(--space-6);
+	padding: var(--space-4);
+	background: var(--surface);
+	border-block: 1px solid var(--line);
+}
+.toolchain-filters {
+	display: flex;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+	margin: var(--space-4) 0;
+	padding: 0;
+	border: 0;
+}
+.toolchain-filters legend {
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+	margin-bottom: var(--space-2);
+}
+.toolchain-filters button[aria-pressed="true"] {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+.toolchain-results {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.toolchain-results > span[role="status"] {
+	margin-right: auto;
+}
+.tool-technical {
+	padding-block: var(--space-3);
+	border-block: 1px solid var(--line);
+}
+.tool-technical > summary {
+	color: var(--accent);
+	cursor: pointer;
+	font-size: var(--text-meta);
+}

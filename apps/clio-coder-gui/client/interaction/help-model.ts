@@ -3,8 +3,8 @@ import type { KeybindingId } from "./keybindings.js";
 import { KEYBINDINGS } from "./keybindings.js";
 
 export const HELP_VIEWS = [
-	{ id: "shortcuts", title: "Shortcuts" },
 	{ id: "guide", title: "Using Clio" },
+	{ id: "shortcuts", title: "Shortcuts" },
 	{ id: "documentation", title: "Documentation" },
 ] as const;
 export type HelpView = (typeof HELP_VIEWS)[number]["id"];

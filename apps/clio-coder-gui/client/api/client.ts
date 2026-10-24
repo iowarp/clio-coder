@@ -20,8 +20,13 @@ function unauthorized() {
 	});
 }
 export function createClient(token: string, fetcher: typeof fetch = fetch) {
+	let epoch: string | undefined;
 	return {
 		token,
+		/** The event stream establishes which server may answer reads in this document (GUI-03). */
+		adoptEpoch(value: string) {
+			epoch = value;
+		},
 		/** `signal` cancels the request itself; a cancelled call rejects with the abort, never as "server unavailable". */
 		async call<R extends Route>(route: R, input: Input<R>, key?: string, signal?: AbortSignal): Promise<Output<R>> {
 			// A refused token only recovers through a reload, so nothing else is read in this document.
@@ -64,7 +69,19 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 				markTokenRejected();
 			}
 			if (!response.ok) throw new ApiProblem((await response.json()) as Problem);
-			return response.json() as Promise<Output<R>>;
+			const value = (await response.json()) as Output<R>;
+			if (signal?.aborted) throw signal.reason;
+			const responseEpoch = response.headers.get("X-Clio-Epoch");
+			if (epoch !== undefined && responseEpoch !== null && responseEpoch !== epoch)
+				throw new ApiProblem({
+					type: "urn:clio-coder:problem:unavailable",
+					title: "Server changed",
+					status: 503,
+					code: "unavailable",
+					detail: "Clio Coder restarted while this request was in flight. Refresh the task before continuing.",
+					instance: "browser",
+				});
+			return value;
 		},
 	};
 }

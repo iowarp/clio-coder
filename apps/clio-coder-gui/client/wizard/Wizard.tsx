@@ -47,7 +47,7 @@ import "./wizard.css";
 export type WizardExit = "home" | "back";
 
 const CAPTIONS: Readonly<Record<StageId | "welcome" | "saved", string>> = {
-	welcome: "A coding agent that works in your folders and asks before it changes anything.",
+	welcome: "A coding agent that works in your folders, with approvals governed by your workspace policy.",
 	provider: "Choose what you already use.",
 	connect: "Credentials stay with the Clio command-line tool, never in this page.",
 	model: "Clio starts on the model marked default.",

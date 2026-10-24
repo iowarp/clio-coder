@@ -29,6 +29,17 @@
 	font-size: var(--text-exact);
 	line-height: 1.8;
 }
+.panel-boundary > summary {
+	cursor: pointer;
+	width: fit-content;
+	color: var(--ink-muted);
+}
+.panel-boundary > summary:hover {
+	color: var(--accent);
+}
+.panel-boundary > p {
+	margin-block: var(--space-2) 0;
+}
 .panel-empty {
 	color: var(--ink-muted);
 	font-size: var(--text-meta);

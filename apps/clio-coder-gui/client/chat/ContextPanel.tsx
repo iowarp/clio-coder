@@ -12,6 +12,7 @@ import { contextWorkView } from "./context-work-model.js";
 import { contextMeter, contextSegments } from "./overview-model.js";
 import { useContextLedger, useContextWork } from "./session-telemetry.js";
 import "./session-board.css";
+import "./pane-inspection.css";
 
 /**
  * The terminal's /context window view. The numbers are Clio Coder's accounting, read when the panel
@@ -40,6 +41,7 @@ export const ContextPanel = memo(function ContextPanel({
 	const id = useId();
 	const ledger = useContextLedger(client, sessionId, settledTurns, sessionOpen && supported);
 	const status = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["session-context-work", sessionId],
 		queryFn: ({ signal }) =>
 			client.call(routes.sessionContextStatus, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
@@ -55,6 +57,21 @@ export const ContextPanel = memo(function ContextPanel({
 	const segments = ledger.data ? contextSegments(ledger.data) : [];
 	return (
 		<div className="pane-drill drill context-panel">
+			{sessionOpen && supported && (
+				<div className="pane-inspection-toolbar">
+					<p>Reported context</p>
+					<button
+						type="button"
+						disabled={ledger.isFetching || status.isFetching}
+						onClick={() => {
+							void ledger.refetch();
+							if (capabilities?.context?.status) void status.refetch();
+						}}
+					>
+						{ledger.isFetching ? "Refreshing…" : "Refresh context"}
+					</button>
+				</div>
+			)}
 			{operationView ? (
 				<ContextWorkCard
 					key={operationView.id}
@@ -67,6 +84,17 @@ export const ContextPanel = memo(function ContextPanel({
 			{status.error || stop.error ? (
 				<p role="alert" className="drill__note drill__note--error">
 					{status.error?.message ?? stop.error?.message}
+					{status.error && (
+						<button
+							type="button"
+							disabled={status.isFetching}
+							onClick={() => {
+								void status.refetch();
+							}}
+						>
+							Retry context status
+						</button>
+					)}
 				</p>
 			) : null}
 			{sessionOpen && capabilities?.commands ? (
@@ -85,7 +113,16 @@ export const ContextPanel = memo(function ContextPanel({
 			{ledger.isPending && sessionOpen && supported ? <p className="pane-empty">Reading the context window…</p> : null}
 			{ledger.error ? (
 				<p role="alert" className="pane-empty">
-					{ledger.error.message}
+					{ledger.error.message}{" "}
+					<button
+						type="button"
+						disabled={ledger.isFetching}
+						onClick={() => {
+							void ledger.refetch();
+						}}
+					>
+						Retry context accounting
+					</button>
 				</p>
 			) : null}
 			{view ? (
@@ -173,8 +210,8 @@ export const ContextPanel = memo(function ContextPanel({
 							</tbody>
 						</table>
 					</section>
-					<section className="drill__section" aria-labelledby={`${id}-project`}>
-						<h3 id={`${id}-project`}>Project instructions</h3>
+					<details className="pane-inspection-disclosure">
+						<summary id={`${id}-project`}>Project instructions</summary>
 						<dl className="drill__facts">
 							{view.project.map((fact) => (
 								<div key={fact.label}>
@@ -184,9 +221,9 @@ export const ContextPanel = memo(function ContextPanel({
 							))}
 						</dl>
 						<p className="drill__note">Project instructions and session history are accounted for separately.</p>
-					</section>
-					<section className="drill__section" aria-labelledby={`${id}-window`}>
-						<h3 id={`${id}-window`}>Window</h3>
+					</details>
+					<details className="pane-inspection-disclosure">
+						<summary id={`${id}-window`}>Window, model & cache details</summary>
 						<dl className="drill__facts">
 							{view.facts.map((fact) => (
 								<div key={fact.label}>
@@ -198,7 +235,7 @@ export const ContextPanel = memo(function ContextPanel({
 								</div>
 							))}
 						</dl>
-					</section>
+					</details>
 				</>
 			) : null}
 		</div>

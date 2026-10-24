@@ -28,6 +28,14 @@
 .newtask__title em {
 	color: var(--accent);
 }
+.newtask__intro {
+	margin: calc(-1 * var(--space-2)) 0 var(--space-2);
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
+	text-align: center;
+	text-wrap: balance;
+}
 .newtask__notice {
 	display: grid;
 	gap: var(--space-3);
@@ -47,9 +55,97 @@
 .newtask__composer {
 	width: 100%;
 }
+.newtask__composer .composer__submit.primary {
+	width: auto;
+	gap: var(--space-2);
+	padding-inline: var(--space-4);
+	border-radius: var(--radius-md);
+	font-size: var(--text-meta);
+	white-space: nowrap;
+}
+.newtask__composer :where(.composer__submit) .icon {
+	width: var(--icon-md);
+	height: var(--icon-md);
+}
 .newtask__error {
 	margin: 0;
 	color: var(--status-fail-fg);
+	font-size: var(--text-meta);
+}
+.newtask__context,
+.newtask__recovery,
+.newtask__composer,
+.newtask__starters,
+.newtask__error,
+.newtask__hint,
+.newtask__discard {
+	grid-column: 1 / -1;
+}
+.newtask__context {
+	width: 100%;
+	min-width: 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.newtask__context > summary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) 0;
+	list-style: none;
+	cursor: pointer;
+}
+.newtask__context > summary::-webkit-details-marker {
+	display: none;
+}
+.newtask__context > summary > span:first-of-type {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.newtask__context-label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	margin-inline-start: auto;
+	white-space: nowrap;
+}
+.newtask__context .icon {
+	flex: none;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+}
+.newtask__context[open] {
+	border-bottom: 1px solid var(--line);
+}
+.newtask__context dl {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: var(--space-3) var(--space-4);
+	margin: var(--space-3) 0 var(--space-4);
+	line-height: var(--leading-body);
+}
+.newtask__context dt {
+	color: var(--ink);
+}
+.newtask__context dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.newtask__recovery-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3);
+}
+.newtask__request {
+	max-height: 12rem;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.newtask__discard {
+	justify-self: end;
+	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
 .newtask__hint {
@@ -61,41 +157,51 @@
 
 .newtask__starters {
 	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: var(--space-3);
 	width: 100%;
-	margin: var(--space-2) 0 0;
+	margin: var(--space-4) 0 0;
 	padding: 0;
 	list-style: none;
 }
-.newtask__starters li + li {
-	border-top: 1px solid var(--line);
-}
 .newtask__starters button {
-	display: flex;
-	align-items: center;
-	gap: var(--space-3);
+	display: grid;
+	align-content: start;
+	justify-items: start;
+	gap: var(--space-2);
 	width: 100%;
-	min-height: 44px;
-	padding: 11px var(--space-3);
-	border: 0;
-	border-radius: var(--radius-sm);
+	height: 100%;
+	padding: var(--space-4);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
 	background: transparent;
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 	line-height: 1.4;
 	text-align: left;
+	transition:
+		background-color var(--motion-fast) var(--ease-standard),
+		border-color var(--motion-fast) var(--ease-standard);
 }
-.newtask__starters button::before {
-	content: "↳";
-	flex: none;
+.newtask__starters .icon {
+	width: 20px;
+	height: 20px;
+	margin-bottom: var(--space-2);
 	color: var(--accent);
-	opacity: 0.7;
+}
+.newtask__starters strong {
+	color: var(--ink);
+	font-weight: 500;
+}
+.newtask__starters button > span {
+	font-size: var(--text-instrument);
 }
 .newtask__starters button:hover {
 	background: var(--wb-faint);
-	color: var(--ink);
+	border-color: var(--accent);
 }
 
-/* Workspace picker, a details element used as a menu. */
+/* Workspace disclosure: native Enter/Space to open, Tab through its ordinary buttons. */
 .ws-menu {
 	position: relative;
 	margin: 0;
@@ -120,6 +226,7 @@
 	max-width: min(26rem, calc(100vw - 32px));
 	max-height: 18rem;
 	overflow-y: auto;
+	margin: 0;
 	padding: var(--space-1);
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-md);

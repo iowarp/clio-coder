@@ -1,5 +1,6 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { Autonomy } from "./autonomy.js";
 import { ContextLedger } from "./context-ledger.js";
 
 const closed = { additionalProperties: false };
@@ -111,6 +112,7 @@ export type MemoryGuardian = Static<typeof MemoryGuardian>;
 
 export const SessionTelemetry = Type.Object(
 	{
+		autonomy: Type.Optional(Autonomy),
 		eggs: Type.Optional(ActiveEggs),
 		memory: Type.Optional(MemoryGuardian),
 		usage: Type.Optional(LiveUsage),

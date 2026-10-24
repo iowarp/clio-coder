@@ -67,10 +67,13 @@ export function presenceMark(agent: Pick<InteropAgent, "hasExecutable" | "presen
 }
 
 /** A version always says where it came from, because a recorded one can be older than the binary. */
-export function versionText(agent: Pick<InteropAgent, "version" | "versionSource" | "presence">): string {
+export function versionText(
+	agent: Pick<InteropAgent, "version" | "versionSource" | "presence">,
+	observedAt?: string,
+): string {
 	if (agent.version === null)
 		return agent.presence === "present" ? "Not recorded yet. Detect again to probe it." : "Not reported";
-	return `${agent.version} · ${agent.versionSource === "probed" ? "probed just now" : "last recorded"}`;
+	return `${agent.version} · ${agent.versionSource === "probed" ? (observedAt ? `probed at ${formatTime(observedAt)}` : "probed just now") : "last recorded"}`;
 }
 
 export function adapterText(adapter: InteropAgent["adapter"]): string {
@@ -137,4 +140,31 @@ export function decisionOutcome(
 	return result.wired.length > 0
 		? { tone: "success", text: "Wired as a delegation peer." }
 		: { tone: "neutral", text: "Accepted; a delegation entry already named it." };
+}
+
+export const INTEROP_FILTERS = ["all", "detected", "peers", "offers", "unknown"] as const;
+export type InteropFilter = (typeof INTEROP_FILTERS)[number];
+export const INTEROP_FILTER_LABELS: Record<InteropFilter, string> = {
+	all: "All known kinds",
+	detected: "Detected",
+	peers: "Delegation peers",
+	offers: "Needs an answer",
+	unknown: "Uncertain",
+};
+export function matchesAgent(agent: InteropAgent, query: string, filter: InteropFilter): boolean {
+	const state =
+		filter === "all" ||
+		(filter === "detected" && isDetected(agent)) ||
+		(filter === "peers" && agent.wiring === "configured") ||
+		(filter === "offers" && agent.wiring === "proposed") ||
+		(filter === "unknown" &&
+			(agent.presence === "unknown" || agent.wiring === "unknown" || agent.inventory.status === "unknown"));
+	const text = [
+		agent.label,
+		agent.kind,
+		wiringMark(agent).label,
+		presenceMark(agent).label,
+		...agent.inventory.items.map((item) => item.name),
+	].join(" ");
+	return state && text.toLocaleLowerCase("en-US").includes(query.trim().toLocaleLowerCase("en-US"));
 }

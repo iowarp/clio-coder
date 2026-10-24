@@ -1,6 +1,6 @@
 // The drafts this window created, so "New task" reuses only its own (#420). sessionStorage is the
-// narrowest identity that survives a reload of one window and differs between windows: every tab and
-// every window opened through openAppWindow (noopener) starts with its own copy.
+// narrowest identity that survives reload without sharing writes between normal new tabs or windows
+// opened through openAppWindow (noopener). Browser duplication or opener-based creation can clone it.
 
 import { withOwnDraft } from "./shell-model.js";
 

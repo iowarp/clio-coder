@@ -1,4 +1,5 @@
 import { workerData } from "node:worker_threads";
+import { closeMachines, readMachines } from "../clio/adapters/machines.js";
 import { runtimeInfo } from "../clio/adapters/runtime.js";
 import { sessionWorkspaces } from "../clio/adapters/sessions.js";
 import { toolchainAdapter } from "../clio/adapters/toolchain.js";
@@ -18,6 +19,7 @@ const fixture =
 const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
 serveWorker(async (call) => {
+	if (call.method === "machines.list") return readMachines(call.params.cwd);
 	if (call.method === "runtime.info" && process.env.NODE_ENV === "test") return runtimeInfo(import.meta.url);
 	if (call.method === "system.read" || call.method === "interop.read") {
 		const { inspectSystem, inspectInterop } = await import("../clio/adapters/system.js");
@@ -66,4 +68,4 @@ serveWorker(async (call) => {
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, settings.readDelayMs);
 	if (settings.fixture && settings.crashRead) process.exit(7);
 	return adapter.list();
-});
+}, closeMachines);

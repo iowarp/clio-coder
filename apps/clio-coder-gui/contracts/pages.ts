@@ -6,6 +6,7 @@
 export const PAGE_PATHS = [
 	"/",
 	"/sessions",
+	"/machines",
 	"/sessions/:id",
 	"/workspaces/:workspaceId/sessions",
 	"/traces",

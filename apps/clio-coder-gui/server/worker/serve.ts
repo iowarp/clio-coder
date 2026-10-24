@@ -7,10 +7,16 @@ export function serveWorker(
 		call: Call,
 		progress: (message: string) => void,
 	) => Promise<Methods[keyof Methods]["result"]> | Methods[keyof Methods]["result"],
+	close?: () => Promise<void>,
 ) {
 	const port = parentPort;
 	if (!port) throw new Error("A domain entry must run in a worker.");
-	port.on("message", async (call: Call) => {
+	port.on("message", async (call: Call | { shutdown: true }) => {
+		if ("shutdown" in call) {
+			await close?.();
+			port.postMessage({ shutdown: true });
+			return;
+		}
 		const send = (reply: Reply) => port.postMessage(reply);
 		try {
 			if (Date.now() >= call.deadlineMs) throw new AppProblem("unavailable", "Call expired before execution.");

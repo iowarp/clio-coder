@@ -18,11 +18,13 @@ import { traceFixture } from "../tests/harness/trace-fixture.js";
 const { values } = parseArgs({
 	options: {
 		chrome: { type: "string", default: "/usr/bin/google-chrome" },
-		// A comma list, for rerunning one breakpoint while fixing it. The final gate includes 320px.
-		widths: { type: "string", default: "1600,1050,390,320" },
+		// The desktop browser and installed app are the active product targets.
+		widths: { type: "string", default: "1600,1050" },
 		"zoom-only": { type: "boolean", default: false },
 		// A private build, so a concurrent `vite build` into dist/client cannot pull pages out from under a run.
 		client: { type: "string", default: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
+		// Keep durable review captures separate from temporary browser profiles and fixture homes.
+		out: { type: "string" },
 	},
 });
 const widths = values.widths.split(",").map(Number);
@@ -30,10 +32,14 @@ assert.ok(
 	widths.length > 0 && widths.every((width) => [1600, 1440, 1050, 400, 390, 320].includes(width)),
 	"widths: 1600, 1440, 1050, 400, 390, 320",
 );
-const scratch = fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
+// Keep browser profiles and failure captures under the caller's private temp root too.
+const scratch = process.env.TMPDIR
+	? join(process.env.TMPDIR, "clio-coder-gui-validation")
+	: fileURLToPath(new URL("../../../tmp/gui-validation/", import.meta.url));
 await mkdir(scratch, { recursive: true });
 process.env.TMPDIR ??= scratch;
-const output = await mkdtemp(join(scratch, "browser-"));
+const output = values.out ?? (await mkdtemp(join(scratch, "browser-")));
+await mkdir(output, { recursive: true });
 let origin = "http://127.0.0.1:0";
 const h = await harness(
 	{ installDelayMs: 150 },

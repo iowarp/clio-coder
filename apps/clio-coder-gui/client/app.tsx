@@ -3,7 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
-import type { SessionSnapshot, SessionSummary } from "../contracts/sessions.js";
+import type { SessionSummary } from "../contracts/sessions.js";
 import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { type ConnectionState, subscribe } from "./api/events.js";
@@ -22,7 +22,7 @@ import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
 import { isHeld, isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model.js";
 import { TaskSidebar } from "./shell/TaskSidebar.js";
-import { rememberedWorkspace, rememberWorkspace, useTaskActions } from "./shell/tasks.js";
+import { rememberedWorkspace, rememberWorkspace, useSessionOverview, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
 import { WindowTitlebar } from "./shell/WindowTitlebar.js";
 import { launchedPath, openAppWindow, whenFocused } from "./shell/windows.js";
@@ -110,6 +110,7 @@ function Workbench({ client }: { client: Client }) {
 		if (client.token) return subscribe(client, queries, setConnection, (path) => launched.current(path));
 	}, [client, queries]);
 	const setup = useSetupStatus(client, !!client.token && !refused);
+	const overview = useSessionOverview(client, !!client.token && !refused);
 	// A machine with no connection at all opens the wizard, full window. It stays until the wizard
 	// itself finishes, because saving the connection makes the status "ready" before the last step.
 	useEffect(() => {
@@ -128,6 +129,7 @@ function Workbench({ client }: { client: Client }) {
 
 	const sessionId = sessionIdFromPath(location.pathname);
 	const mode = isSettingsPath(location.pathname) ? "settings" : "work";
+	const pageAside = mode === "work" && location.pathname !== "/sessions";
 	// `enabled: false` reads the cache the conversation already filled and re-renders when it
 	// changes, without this component ever fetching a session of its own.
 	const session = useQuery({
@@ -238,7 +240,7 @@ function Workbench({ client }: { client: Client }) {
 	useEffect(() => {
 		if (!paletteOpen) return;
 		const collect = () => {
-			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
+			const sessions = overview.data?.sessions ?? [];
 			return (workspaces.data ?? []).flatMap((workspace) =>
 				taskRows(
 					workspace.id,
@@ -263,10 +265,10 @@ function Workbench({ client }: { client: Client }) {
 		return () => {
 			current = false;
 		};
-	}, [paletteOpen, workspaces.data, queries, client]);
+	}, [paletteOpen, workspaces.data, overview.data, queries, client]);
 	const openTask = useCallback(
 		(id: string) => {
-			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
+			const sessions = overview.data?.sessions ?? [];
 			if (sessions.some((session) => session.id === id && isHeld(session))) void navigate(`/sessions/${id}`);
 			else {
 				const workspace = (workspaces.data ?? []).find((candidate) =>
@@ -275,7 +277,7 @@ function Workbench({ client }: { client: Client }) {
 				if (workspace) actions.resume(id, workspace.id);
 			}
 		},
-		[queries, navigate, workspaces.data, actions.resume],
+		[queries, navigate, workspaces.data, overview.data, actions.resume],
 	);
 	const commands = useMemo(
 		() =>
@@ -341,7 +343,7 @@ function Workbench({ client }: { client: Client }) {
 			openHelp,
 			activeWorkspaceId,
 			starting: actions.launch.busy,
-			asideSlot: docked && mode === "work" ? asideSlot : null,
+			asideSlot: docked && pageAside ? asideSlot : null,
 		}),
 		[
 			sidebarCollapsed,
@@ -352,7 +354,7 @@ function Workbench({ client }: { client: Client }) {
 			activeWorkspaceId,
 			actions.launch.busy,
 			docked,
-			mode,
+			pageAside,
 			asideSlot,
 		],
 	);
@@ -399,7 +401,7 @@ function Workbench({ client }: { client: Client }) {
 			className="wb"
 			data-sidebar={collapsed ? "collapsed" : "expanded"}
 			data-drawer={drawer ? "open" : "closed"}
-			data-aside={docked && mode === "work" && authed && asideExpanded ? "expanded" : "collapsed"}
+			data-aside={docked && pageAside && authed && asideExpanded ? "expanded" : "collapsed"}
 			data-mode={mode}
 		>
 			<WindowTitlebar />
@@ -483,7 +485,7 @@ function Workbench({ client }: { client: Client }) {
 				) : null}
 			</Suspense>
 			{/* The right sidebar, the left rail's mirror in the same chrome. Pages portal into its body. */}
-			{docked && mode === "work" && authed ? (
+			{docked && pageAside && authed ? (
 				<aside className="wb-aside" aria-label="This task and project" inert={layered} hidden={!asideExpanded}>
 					<Splitter spec={RIGHT_SIDEBAR} edge="start" label="Resize right sidebar" host=".wb" onCollapse={toggleAside} />
 					<div className="wb-aside__slot" ref={setAsideSlot} />

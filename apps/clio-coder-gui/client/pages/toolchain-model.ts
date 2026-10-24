@@ -34,3 +34,41 @@ export function toolActionEffect(tool: Pick<Tool, "supported" | "installed" | "r
 		? "Install adds a pinned fallback. The compatible PATH copy may remain the executable Clio uses."
 		: "Install downloads and verifies the pinned version into Clio’s toolchain folder.";
 }
+
+export const TOOL_FILTERS = ["all", "available", "missing", "unsupported"] as const;
+export type ToolFilter = (typeof TOOL_FILTERS)[number];
+export const TOOL_FILTER_LABELS: Record<ToolFilter, string> = {
+	all: "All tools",
+	available: "Available",
+	missing: "Missing",
+	unsupported: "No platform download",
+};
+export function matchesTool(tool: Tool, query: string, filter: ToolFilter): boolean {
+	const available = tool.resolution.source === "path" || tool.resolution.source === "vendored";
+	const matchesState =
+		filter === "all" ||
+		(filter === "available" && available) ||
+		(filter === "missing" && !available && tool.supported) ||
+		(filter === "unsupported" && !tool.supported);
+	return (
+		matchesState &&
+		`${tool.id} ${tool.summary} ${tool.version} ${toolResolution(tool).label}`
+			.toLocaleLowerCase("en-US")
+			.includes(query.trim().toLocaleLowerCase("en-US"))
+	);
+}
+export function operationUnsettled(operationId: string | null, status: string | undefined): boolean {
+	return operationId !== null && status !== "succeeded" && status !== "failed" && status !== "cancelled";
+}
+
+export function requestOutcomeUnknown(status: number | undefined): boolean {
+	return status === undefined || status === 408 || status >= 500;
+}
+
+export function toolAvailability(tool: Pick<Tool, "supported" | "resolution">): string {
+	if (tool.resolution.source === "path") return "A compatible executable on PATH is available to Clio.";
+	if (tool.resolution.source === "vendored") return "Clio resolves the installed pinned executable.";
+	return tool.supported
+		? "No usable executable was resolved. Install the pinned version to make this tool available."
+		: "No executable was resolved and no pinned download is available for this platform.";
+}

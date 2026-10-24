@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link } from "react-router";
 import type { Client } from "../api/client.js";
 import { useShell } from "../shell/shell-context.js";
 import { settingsDestination } from "../shell/shell-model.js";
@@ -30,9 +30,8 @@ function SettingsPageFrame({
 	after?: ReactNode;
 }) {
 	const shell = useShell();
-	const [search] = useSearchParams();
 	const selection = useWorkspaceSelection(client);
-	const id = search.get("workspace") || shell?.activeWorkspaceId || selection.id;
+	const { id } = selection;
 	return (
 		<section className="general settings-page">
 			<div className="panel-heading">
@@ -41,13 +40,13 @@ function SettingsPageFrame({
 					<p className="settings-page__lede">{lede}</p>
 				</div>
 			</div>
+			<WorkspacePicker selection={selection} />
 			{before?.(id)}
-			{(selection.workspaces.data?.length ?? 0) > 1 ? <WorkspacePicker selection={{ ...selection, id }} /> : null}
 			{id ? (
 				<SettingsControlsView key={`${id}:${scope}`} client={client} workspaceId={id} scope={scope} />
 			) : selection.workspaces.isPending ? (
 				<p>Reading settings…</p>
-			) : (
+			) : selection.missing || selection.workspaces.error ? null : (
 				<p className="settings-page__note">
 					Settings are read for a project.{" "}
 					<button type="button" className="wb-link" onClick={() => shell?.openWorkspace()}>

@@ -31,7 +31,8 @@ export default defineConfig({
 				changeOrigin: true,
 				configure(proxy) {
 					proxy.on("proxyReq", (request, incoming) => {
-						if (incoming.headers.origin === "http://127.0.0.1:4318") request.setHeader("Origin", "http://127.0.0.1:4317");
+						if (incoming.headers.origin === `http://${incoming.headers.host}`)
+							request.setHeader("Origin", "http://127.0.0.1:4317");
 					});
 				},
 			},

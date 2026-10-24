@@ -46,3 +46,17 @@ export const catalogMayBeCut = (models: readonly string[], limit = ACP_TARGET_MO
 export function modelAfterTargetChange(model: string, models: readonly string[] | null): string {
 	return model !== "" && models !== null && models.includes(model) ? model : "";
 }
+
+/** Expand only capability marks the runtime reports; cached capabilities do not imply health. */
+export function capabilityLabels(marks: string): string[] {
+	const labels: Record<string, string> = {
+		C: "Chat",
+		T: "Tools",
+		R: "Reasoning",
+		V: "Vision",
+		E: "Embeddings",
+		K: "Rerank",
+		F: "Fill in the middle",
+	};
+	return Object.entries(labels).flatMap(([mark, label]) => (marks.includes(mark) ? [label] : []));
+}

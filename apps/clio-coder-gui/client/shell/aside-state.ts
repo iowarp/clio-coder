@@ -8,10 +8,10 @@ const listeners = new Set<() => void>();
 
 function read(): boolean {
 	try {
-		return localStorage.getItem(ASIDE_KEY) !== "collapsed";
+		return localStorage.getItem(ASIDE_KEY) === "expanded";
 	} catch {
-		// The sidebar shows when storage is unavailable.
-		return true;
+		// Keep the conversation clear when no browser preference can be read.
+		return false;
 	}
 }
 
@@ -39,7 +39,7 @@ export function useAsideExpanded(): boolean {
 			return () => listeners.delete(listener);
 		},
 		() => expanded,
-		() => true,
+		() => false,
 	);
 }
 

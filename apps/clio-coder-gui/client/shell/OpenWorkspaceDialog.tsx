@@ -22,10 +22,11 @@ export function OpenWorkspaceDialog({
 	const pathId = useId();
 	const recents = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const open = (target: string) => {
-		if (target.trim()) launch.open(target.trim(), true);
+		if (target.trim()) launch.open(target.trim(), false);
 	};
 	return (
 		<Dialog title="Open workspace" eyebrow="A folder on this machine" onClose={onClose} initialFocus={field}>
+			<p className="wb-open__intro">Choose a project folder. You can browse its work before starting a task.</p>
 			<form
 				className="wb-open"
 				onSubmit={(event) => {

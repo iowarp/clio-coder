@@ -1,12 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark, toneForOutcome } from "../design/status.js";
-import { toolActionEffect, toolCandidateNote, toolResolution } from "./toolchain-model.js";
+import {
+	matchesTool,
+	operationUnsettled,
+	requestOutcomeUnknown,
+	TOOL_FILTER_LABELS,
+	TOOL_FILTERS,
+	type ToolFilter,
+	toolActionEffect,
+	toolAvailability,
+	toolCandidateNote,
+	toolResolution,
+} from "./toolchain-model.js";
 import "./toolchain.css";
 
 function Failure({ error }: { error: Error }) {
@@ -31,27 +42,40 @@ export function Toolchain({
 	filter?: string;
 }) {
 	const queries = useQueryClient();
-	const tools = useQuery({ queryKey: ["tools"], queryFn: () => client.call(routes.tools, emptyInput) });
+	const [search, setSearch] = useState("");
+	const [availability, setAvailability] = useState<ToolFilter>("all");
+	const actionLock = useRef(false);
+	const tools = useQuery({
+		meta: { errorSurface: "inline" },
+		queryKey: ["tools"],
+		queryFn: () => client.call(routes.tools, emptyInput),
+	});
 	const [operationId, setOperationId] = useState<string | null>(null);
 	const operation = useOperation(client, operationId);
 	useEffect(() => {
-		if (operation.data?.status === "succeeded" || operation.data?.status === "failed")
+		if (operationId && !operationUnsettled(operationId, operation.data?.status))
 			void queries.invalidateQueries({ queryKey: ["tools"] });
-	}, [operation.data?.status, queries]);
+	}, [operationId, operation.data?.status, queries]);
 	const action = useMutation({
-		mutationFn: async ({ id, kind }: { id: string; kind: "install" | "remove" }) =>
-			client.call(routes[kind], { params: { toolId: id }, query: {}, body: {} }),
+		meta: { errorSurface: "inline" },
+		mutationFn: async ({ id, kind, key }: { id: string; kind: "install" | "remove"; key: string }) =>
+			client.call(routes[kind], { params: { toolId: id }, query: {}, body: {} }, key),
 		onSuccess: (result) => setOperationId(result.operationId),
+		onSettled: () => {
+			actionLock.current = false;
+		},
 	});
-	const busy =
-		action.isPending ||
-		(!!operationId && operation.isPending) ||
-		operation.data?.status === "running" ||
-		operation.data?.status === "queued";
-	const needle = filter.trim().toLocaleLowerCase();
-	const visibleTools = tools.data?.filter((tool) =>
-		`${tool.id} ${tool.summary} ${tool.version} ${toolResolution(tool).label}`.toLocaleLowerCase().includes(needle),
-	);
+	const uncertainRequest =
+		action.isError && requestOutcomeUnknown(action.error instanceof ApiProblem ? action.error.problem.status : undefined);
+	const busy = action.isPending || uncertainRequest || operationUnsettled(operationId, operation.data?.status);
+	const run = (id: string, kind: "install" | "remove") => {
+		if (busy || actionLock.current) return;
+		actionLock.current = true;
+		setOperationId(null);
+		action.mutate({ id, kind, key: crypto.randomUUID() });
+	};
+	const visibleTools = tools.data?.filter((tool) => matchesTool(tool, compact ? filter : search, availability));
+
 	return (
 		<>
 			{!compact && (
@@ -73,7 +97,47 @@ export function Toolchain({
 					</div>
 				</>
 			)}
-			{tools.isPending && <p>Resolving tools…</p>}
+			{!compact && tools.data && (
+				<div className="toolchain-discovery">
+					<label className="settings-filter">
+						Find a tool
+						<input
+							type="search"
+							value={search}
+							onChange={(event) => setSearch(event.target.value)}
+							placeholder="Search tools or capabilities"
+						/>
+					</label>
+					<fieldset className="toolchain-filters">
+						<legend>Availability</legend>
+						{TOOL_FILTERS.map((value) => (
+							<button key={value} type="button" aria-pressed={availability === value} onClick={() => setAvailability(value)}>
+								{TOOL_FILTER_LABELS[value]} · {tools.data.filter((tool) => matchesTool(tool, "", value)).length}
+							</button>
+						))}
+					</fieldset>
+					<div className="toolchain-results">
+						<span role="status">
+							{visibleTools?.length} of {tools.data.length} tools
+						</span>
+						{(search || availability !== "all") && (
+							<button
+								type="button"
+								onClick={() => {
+									setSearch("");
+									setAvailability("all");
+								}}
+							>
+								Clear filters
+							</button>
+						)}
+						<button type="button" disabled={tools.isFetching || busy} onClick={() => void tools.refetch()}>
+							{tools.isFetching ? "Refreshing…" : "Refresh resolution"}
+						</button>
+					</div>
+				</div>
+			)}
+			{tools.isPending && <p role="status">Resolving tools…</p>}
 			{tools.error && (
 				<>
 					<Failure error={tools.error} />
@@ -84,115 +148,39 @@ export function Toolchain({
 			)}
 			{tools.data && !tools.data.length && <PanelEmpty>{emptyState.emptyStore("pinned tool")}</PanelEmpty>}
 			{!!tools.data?.length && !visibleTools?.length && <PanelEmpty>No pinned tools match this filter.</PanelEmpty>}
-			<div className="tools">
-				{visibleTools?.map((tool, index) => {
-					const candidate = toolCandidateNote(tool);
-					const ToolContainer = compact ? "details" : "article";
-					return (
-						<ToolContainer className="tool" key={tool.id} aria-label={tool.id}>
-							{compact && (
-								<summary>
-									<span className="tool-compact-identity">
-										<strong>{tool.id}</strong>
-										<span>{tool.version}</span>
-									</span>
-									<StatusMark {...toolResolution(tool)} />
-								</summary>
-							)}
-							{!compact && (
-								<div className="tool-identity">
-									<span className="tool-number">0{index + 1}</span>
-									<div>
-										<h2>
-											{tool.id}
-											<span className="version">{tool.version}</span>
-										</h2>
-										<p>{tool.summary}</p>
-										<small>
-											{tool.license} · {tool.platform ?? "Unsupported platform"}
-										</small>
-									</div>
-								</div>
-							)}
-							<div className="tool-resolution">
-								{!compact && <StatusMark {...toolResolution(tool)} />}
-								<p>{tool.resolution.description}</p>
-								<dl className="tool-facts">
-									<div>
-										<dt>Resolved version</dt>
-										<dd>{tool.resolution.version ?? "Not reported"}</dd>
-									</div>
-									<div>
-										<dt>Executable</dt>
-										<dd>{tool.resolution.binaryPath ? <code>{tool.resolution.binaryPath}</code> : "No executable resolved"}</dd>
-									</div>
-									<div>
-										<dt>Vendored copy</dt>
-										<dd>
-											{tool.installed ? "Installed" : "Not installed"}
-											{tool.resolution.vendoredPath && <code>{tool.resolution.vendoredPath}</code>}
-										</dd>
-									</div>
-								</dl>
-								{candidate && <p className="panel-note">{candidate}</p>}
-								<details>
-									<summary>Install destination & PATH candidate</summary>
-									<dl className="tool-facts">
-										<div>
-											<dt>Pinned destination</dt>
-											<dd>
-												<code>{tool.installDir}</code>
-											</dd>
-										</div>
-										<div>
-											<dt>PATH candidate</dt>
-											<dd>
-												{tool.resolution.pathCandidate ? (
-													<>
-														<code>{tool.resolution.pathCandidate.path}</code>
-														<span>
-															{tool.resolution.pathCandidate.version ?? "Version not reported"} ·{" "}
-															{tool.resolution.pathCandidate.satisfiesMinimum ? "Meets minimum" : "Below minimum"}
-														</span>
-													</>
-												) : (
-													"No candidate reported"
-												)}
-											</dd>
-										</div>
-									</dl>
-								</details>
-								<p className="tool-action-effect">{toolActionEffect(tool)}</p>
-								<div className="actions">
-									<button
-										type="button"
-										className="primary"
-										disabled={busy || !tool.supported}
-										onClick={() => action.mutate({ id: tool.id, kind: "install" })}
-									>
-										{tool.installed ? "Check installation" : "Install pinned version"} <span aria-hidden="true">↓</span>
-									</button>
-									{tool.installed && (
-										<button
-											type="button"
-											className="secondary"
-											disabled={busy}
-											onClick={() => action.mutate({ id: tool.id, kind: "remove" })}
-										>
-											Remove vendored copy
-										</button>
-									)}
-								</div>
-							</div>
-						</ToolContainer>
-					);
-				})}
-			</div>
+			{action.isPending && (
+				<p role="status">
+					Sending {action.variables?.kind} request for {action.variables?.id}…
+				</p>
+			)}
 			{action.error && <Failure error={action.error} />}
+			{uncertainRequest && (
+				<>
+					<p className="panel-note">
+						The request outcome is unknown. Retry this same request to recover its result without starting a duplicate
+						operation.
+					</p>
+					<button
+						type="button"
+						disabled={action.isPending}
+						onClick={() => {
+							if (action.variables && !actionLock.current) {
+								actionLock.current = true;
+								action.mutate(action.variables);
+							}
+						}}
+					>
+						Recover {action.variables?.kind} request · {action.variables?.id}
+					</button>
+				</>
+			)}
 			{operation.error && (
 				<>
 					<Failure error={operation.error} />
-					<p className="panel-note">Progress could not be read. The accepted operation may still be running.</p>
+					<p className="panel-note">
+						Progress could not be read. The accepted operation may still be running. Installation actions remain paused until
+						its outcome is known.
+					</p>
 					<button type="button" onClick={() => void operation.refetch()}>
 						Read operation again
 					</button>
@@ -246,6 +234,106 @@ export function Toolchain({
 					)}
 				</section>
 			)}
+			<div className="tools">
+				{visibleTools?.map((tool, index) => {
+					const candidate = toolCandidateNote(tool);
+					const ToolContainer = compact ? "details" : "article";
+					return (
+						<ToolContainer className="tool" key={tool.id} aria-label={tool.id}>
+							{compact && (
+								<summary>
+									<span className="tool-compact-identity">
+										<strong>{tool.id}</strong>
+										<span>{tool.version}</span>
+									</span>
+									<StatusMark {...toolResolution(tool)} />
+								</summary>
+							)}
+							{!compact && (
+								<div className="tool-identity">
+									<span className="tool-number">{String(index + 1).padStart(2, "0")}</span>
+									<div>
+										<h2>
+											{tool.id}
+											<span className="version">{tool.version}</span>
+										</h2>
+										<p>{tool.summary}</p>
+										<small>
+											{tool.license} · {tool.platform ?? "Unsupported platform"}
+										</small>
+									</div>
+								</div>
+							)}
+							<div className="tool-resolution">
+								{!compact && <StatusMark {...toolResolution(tool)} />}
+								<p>{toolAvailability(tool)}</p>
+								<details className="tool-technical">
+									<summary>Executable, versions and installation paths</summary>
+									<p>{tool.resolution.description}</p>
+									<dl className="tool-facts">
+										<div>
+											<dt>Resolved version</dt>
+											<dd>{tool.resolution.version ?? "Not reported"}</dd>
+										</div>
+										<div>
+											<dt>Executable</dt>
+											<dd>{tool.resolution.binaryPath ? <code>{tool.resolution.binaryPath}</code> : "No executable resolved"}</dd>
+										</div>
+										<div>
+											<dt>Vendored copy</dt>
+											<dd>
+												{tool.installed ? "Installed" : "Not installed"}
+												{tool.resolution.vendoredPath && <code>{tool.resolution.vendoredPath}</code>}
+											</dd>
+										</div>
+									</dl>
+									{candidate && <p className="panel-note">{candidate}</p>}
+									<dl className="tool-facts">
+										<div>
+											<dt>Pinned destination</dt>
+											<dd>
+												<code>{tool.installDir}</code>
+											</dd>
+										</div>
+										<div>
+											<dt>PATH candidate</dt>
+											<dd>
+												{tool.resolution.pathCandidate ? (
+													<>
+														<code>{tool.resolution.pathCandidate.path}</code>
+														<span>
+															{tool.resolution.pathCandidate.version ?? "Version not reported"} ·{" "}
+															{tool.resolution.pathCandidate.satisfiesMinimum ? "Meets minimum" : "Below minimum"}
+														</span>
+													</>
+												) : (
+													"No candidate reported"
+												)}
+											</dd>
+										</div>
+									</dl>
+								</details>
+								<p className="tool-action-effect">{toolActionEffect(tool)}</p>
+								<div className="actions">
+									<button
+										type="button"
+										className="primary"
+										disabled={busy || !tool.supported}
+										onClick={() => run(tool.id, "install")}
+									>
+										{tool.installed ? "Check installation" : "Install pinned version"} <span aria-hidden="true">↓</span>
+									</button>
+									{tool.installed && (
+										<button type="button" className="secondary" disabled={busy} onClick={() => run(tool.id, "remove")}>
+											Remove vendored copy
+										</button>
+									)}
+								</div>
+							</div>
+						</ToolContainer>
+					);
+				})}
+			</div>
 		</>
 	);
 }
