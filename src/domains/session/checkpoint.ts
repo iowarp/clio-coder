@@ -25,7 +25,7 @@ import type { SessionManagerState } from "./manager.js";
  */
 export async function performCheckpoint(state: SessionManagerState, reason?: string): Promise<void> {
 	await state.writer.persistTree();
-	if (stateRootRemoved()) return;
+	if (stateRootRemoved() || state.writer.fenced) return;
 	const paths = sessionPaths(state.meta);
 	const at = new Date().toISOString();
 	const enriched: SessionMeta = {

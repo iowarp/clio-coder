@@ -163,6 +163,20 @@ export interface ClioSessionWriter {
 	/** Synchronously fsync append-only transcript bytes without rewriting tree/meta. */
 	flushAppends(): void;
 	close(): Promise<void>;
+	/**
+	 * Stop writing this ledger for good. A forced release on another host
+	 * (#439) handed the session to whoever resumes it next, so every later
+	 * append, checkpoint and the closing endedAt rewrite becomes a no-op
+	 * instead of clobbering a ledger this process no longer owns.
+	 */
+	fence(): void;
+	readonly fenced: boolean;
+	/**
+	 * Fence as soon as `probe` answers true, checked before every append,
+	 * rewrite, checkpoint and close, so a write queued behind a stopped or
+	 * partitioned process cannot land between two heartbeat ticks.
+	 */
+	fenceWhen(probe: () => boolean): void;
 }
 
 export interface ClioSessionReader {
@@ -702,6 +716,8 @@ export function readSessionMeta(id: string): ClioSessionMeta {
 }
 
 const APPEND_FSYNC_DEBOUNCE_MS = 500;
+/** See isFenced in createWriter. */
+const FENCE_PROBE_REUSE_MS = 1_000;
 
 /**
  * True when the file's last byte is a newline (or the file is empty or
@@ -762,6 +778,21 @@ function createWriter(
 	// would grow the writer with the whole transcript.
 	const header = normalizedEntries[0] as ClioSessionJsonlHeader;
 	let closed = false;
+	let fenced = false;
+	let fenceProbe: (() => boolean) | null = null;
+	let fenceProbedAt = Number.NEGATIVE_INFINITY;
+	// The probe costs file-system round trips (NFS on a shared home), and a
+	// tool-heavy turn writes dozens of entries. One answer per second is enough:
+	// a SIGCONT gap is longer than that, and a forced release needs a 180 s
+	// stale heartbeat before it can happen at all.
+	function isFenced(): boolean {
+		if (fenced || fenceProbe === null) return fenced;
+		const now = performance.now();
+		if (now - fenceProbedAt < FENCE_PROBE_REUSE_MS) return false;
+		fenceProbedAt = now;
+		if (fenceProbe()) fenced = true;
+		return fenced;
+	}
 	let appendFd: number | null = null;
 	let fsyncTimer: NodeJS.Timeout | null = null;
 	// Descriptor cleanup must not discard accepted bytes or rollback changes
@@ -922,6 +953,7 @@ function createWriter(
 	return {
 		append(turn: ClioTurnRecord): void {
 			if (closed) throw new Error("session writer closed");
+			if (isFenced()) return;
 			const record = recordFromTurn(turn);
 			appendLine(record);
 			treeDirty = true;
@@ -937,6 +969,7 @@ function createWriter(
 			opts?: { treeNode?: SessionTreeNode; onAppend?: (observation: SessionAppendObservation) => void },
 		): void {
 			if (closed) throw new Error("session writer closed");
+			if (isFenced()) return;
 			const observation = appendLine(entry);
 			if (opts?.treeNode) {
 				tree.push({ ...opts.treeNode });
@@ -946,6 +979,7 @@ function createWriter(
 		},
 		replaceEntries(entries: ReadonlyArray<unknown>): void {
 			if (closed) throw new Error("session writer closed");
+			if (isFenced()) return;
 			// The rename below replaces the inode; the held fd would keep
 			// appending to the orphaned old file. Drop it, reopen lazily.
 			closeAppendFd({ flush: false });
@@ -960,6 +994,7 @@ function createWriter(
 			}
 		},
 		async persistTree(): Promise<void> {
+			if (isFenced()) return;
 			// Checkpoint: make appended lines durable alongside the tree.
 			flushPendingAppends();
 			// `paths` was resolved at construction, but atomicWrite mkdirs the
@@ -970,19 +1005,30 @@ function createWriter(
 			persistPendingTree();
 		},
 		flushAppends(): void {
+			if (isFenced()) return;
 			flushPendingAppends();
 		},
 		async close(): Promise<void> {
 			if (closed) return;
-			closeAppendFd({ flush: true });
+			const fencedAtClose = isFenced();
+			closeAppendFd({ flush: !fencedAtClose });
 			// Closed regardless: the writer is done either way, and a removed state
 			// root must not get tree.json and meta.json written back into it.
 			closed = true;
-			if (stateRootRemoved()) return;
+			if (fencedAtClose || stateRootRemoved()) return;
 			persistPendingTree();
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
 			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
 			meta.endedAt = ended.endedAt;
+		},
+		fence(): void {
+			fenced = true;
+		},
+		get fenced(): boolean {
+			return isFenced();
+		},
+		fenceWhen(probe: () => boolean): void {
+			fenceProbe = probe;
 		},
 	};
 }

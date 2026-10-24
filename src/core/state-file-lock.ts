@@ -1,6 +1,17 @@
-import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, utimesSync, writeSync } from "node:fs";
+import {
+	closeSync,
+	type Dirent,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	unlinkSync,
+	utimesSync,
+	writeSync,
+} from "node:fs";
 import { hostname } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import { processAlive, processBirthToken } from "./process-identity.js";
@@ -290,4 +301,51 @@ export function withStateFileLockSection<T>(
 			if (held) release(lockPath);
 		}
 	});
+}
+
+/** The owner triple a forced release matches; see `releaseStateLocksOwnedBy`. */
+export interface StateLockOwner {
+	host: string;
+	pid: number;
+	birth: string | null;
+}
+
+function lockFilesUnder(root: string, depth: number): string[] {
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(root, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	const found: string[] = [];
+	for (const entry of entries) {
+		const path = join(root, entry.name);
+		if (entry.isFile() && entry.name.endsWith(".lock")) found.push(path);
+		else if (entry.isDirectory() && depth > 0) found.push(...lockFilesUnder(path, depth - 1));
+	}
+	return found;
+}
+
+/**
+ * Remove every `*.lock` under `root` (two directory levels deep) whose recorded
+ * owner is exactly `owner`. `tryAcquire` never adjudicates a foreign host, so
+ * a lock left by a dead owner on another node blocks forever; this is the
+ * release `clio-coder session terminate --force` runs once that owner's session
+ * heartbeat is stale (#439). A record without a host or birth token is never
+ * matched: only the full triple identifies the dead process.
+ */
+export function releaseStateLocksOwnedBy(root: string, owner: StateLockOwner): string[] {
+	if (owner.birth === null) return [];
+	const released: string[] = [];
+	for (const lockPath of lockFilesUnder(root, 2)) {
+		const held = readLockOwner(lockPath);
+		if (held?.host !== owner.host || held.pid !== owner.pid || held.birthToken !== owner.birth) continue;
+		try {
+			unlinkSync(lockPath);
+			released.push(lockPath);
+		} catch {
+			// Already gone.
+		}
+	}
+	return released;
 }

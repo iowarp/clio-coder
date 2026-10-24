@@ -594,3 +594,30 @@ export function createNodeLeaseUsageReader(options: {
 		return cache.nodes[nodeId] ?? 0;
 	};
 }
+/**
+ * Drop every lease whose owner is exactly `owner` ({host, pid, birth}). Leases
+ * from another host are never reclaimed by `reclaim`, so a node that died with
+ * a lease held would pin its slots forever; `clio-coder session terminate
+ * --force` calls this once that node's session heartbeat is stale (#439). A
+ * legacy lease without a host reads as this host, as `reclaim` reads it.
+ */
+export function releaseCapacityLeasesOwnedBy(owner: {
+	host: string;
+	pid: number;
+	birth: string | null;
+}): Promise<number> {
+	return withStateFileLockSection(capacityStateLockPath(), () => {
+		if (owner.birth === null) return 0;
+		const file = readCapacityStateUnsafe();
+		const before = file.leases.length;
+		file.leases = file.leases.filter(
+			(lease) =>
+				(lease.host ?? hostname()) !== owner.host ||
+				lease.ownerPid !== owner.pid ||
+				lease.processBirthToken !== owner.birth,
+		);
+		const released = before - file.leases.length;
+		if (released > 0) writeCapacityStateUnsafe(file);
+		return released;
+	});
+}

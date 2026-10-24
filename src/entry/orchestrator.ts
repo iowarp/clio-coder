@@ -1936,7 +1936,17 @@ function advanceScopedTarget(
 
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
 	const { registerRunningBuild } = await import("../core/running-build.js");
-	registerRunningBuild(options.acp ? "acp" : options.headless ? "run" : "tui");
+	const bootSurface = options.acp ? "acp" : options.headless ? "run" : "tui";
+	registerRunningBuild(bootSurface);
+	// Every session this boot opens names its surface in the live record (#439).
+	(await import("../domains/session/heartbeat.js")).configureSessionHeartbeat({
+		surface: bootSurface,
+		terminate: (notice) => {
+			const termination = getTerminationCoordinator();
+			termination.notice(notice);
+			void termination.shutdown(143);
+		},
+	});
 	let capabilityGate = createCapabilityGate();
 	const bootStdout = (text: string): void => {
 		if (options.terminalLease) options.terminalLease.writeDiagnostic("stdout", text);

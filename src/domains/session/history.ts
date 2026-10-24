@@ -133,7 +133,7 @@ export function listSessionWorkspaces(): SessionWorkspace[] {
  * recorded when it started the host, and this does not check it. The end is dated by the transcript's last
  * write so history order stays truthful. Returns false for anything that is not an unended record of `cwd`.
  */
-export function endAbandonedSession(cwd: string, sessionId: string): boolean {
+export function endAbandonedSession(cwd: string, sessionId: string, owner?: ClioSessionOwner): boolean {
 	if (!/^[\w-]{1,128}$/.test(sessionId)) return false;
 	const dir = join(clioStateDir(), "sessions", cwdHash(cwd), sessionId);
 	const metaPath = join(dir, "meta.json");
@@ -145,6 +145,12 @@ export function endAbandonedSession(cwd: string, sessionId: string): boolean {
 		return false;
 	}
 	if (meta.id !== sessionId || meta.cwd !== cwd || meta.endedAt !== null) return false;
+	// A forced release names the dead owner; a session another node has reopened since is not its to end (#439).
+	if (
+		owner !== undefined &&
+		(meta.owner?.host !== owner.host || meta.owner.pid !== owner.pid || meta.owner.birth !== owner.birth)
+	)
+		return false;
 	let endedAt: string;
 	try {
 		endedAt = new Date(statSync(join(dir, "current.jsonl")).mtimeMs).toISOString();

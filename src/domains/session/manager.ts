@@ -2,6 +2,7 @@ import { v7 as uuidv7 } from "uuid";
 import { stateRootRemoved } from "../../core/xdg.js";
 import {
 	atomicWrite,
+	type ClioSessionMeta,
 	type ClioSessionWriter,
 	type ClioTurnRecord,
 	createSession as engineCreateSession,
@@ -15,7 +16,8 @@ import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { isSessionEntry, type SessionEntry } from "./entries.js";
 import { SessionEntriesIndex } from "./entries-index.js";
-import { liveSessionOwner } from "./live-owner.js";
+import { startSessionHeartbeat } from "./heartbeat.js";
+import { liveSessionOwner, liveSessionRefusal } from "./live-owner.js";
 import { runMigrations } from "./migrations/index.js";
 
 /**
@@ -58,14 +60,29 @@ export function startSession(input: {
 		...(input.parentSession !== undefined ? { parentSession: input.parentSession } : {}),
 		...(input.parentTurnId !== undefined ? { parentTurnId: input.parentTurnId } : {}),
 	});
-	return { meta: meta as SessionMeta, writer };
+	return { meta: meta as SessionMeta, writer: withHeartbeat(meta, writer) };
+}
+
+/** The live record lives exactly as long as the writer; closing it ends the heartbeat (#439). */
+function withHeartbeat(meta: ClioSessionMeta, writer: ClioSessionWriter): ClioSessionWriter {
+	const stop = startSessionHeartbeat({ meta, writer });
+	const close = writer.close;
+	writer.close = async () => {
+		try {
+			await close();
+		} finally {
+			stop();
+		}
+	};
+	return writer;
 }
 
 export function persistSessionMeta(state: SessionManagerState): void {
 	// The other meta.json writer. `sessionPaths` mkdirs on the way, so a metadata
 	// update landing after `clio-coder uninstall` rebuilds the state root the same way
 	// the shutdown checkpoint did. See core/xdg.ts stateRootRemoved().
-	if (stateRootRemoved()) return;
+	// A fenced writer lost the session to a forced release (#439); its meta is no longer ours to write.
+	if (stateRootRemoved() || state.writer.fenced) return;
 	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));
 }
 
@@ -76,11 +93,7 @@ export function resumeSessionState(sessionId: string): {
 	const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
 	// Refuse before migration or reopening can write another process's ledger (#420).
 	const owner = liveSessionOwner(persistedMeta);
-	if (owner && owner.pid !== process.pid) {
-		throw new Error(
-			`session ${sessionId} is open in another process (pid ${owner.pid} on ${owner.host}); end it there first`,
-		);
-	}
+	if (owner && owner.pid !== process.pid) throw new Error(liveSessionRefusal(sessionId, owner));
 	const paths = sessionPaths(persistedMeta);
 	const migration = runMigrations(persistedMeta, paths.meta);
 	const candidate = openSession(sessionId);
@@ -95,7 +108,7 @@ export function resumeSessionState(sessionId: string): {
 		sessionId,
 		migration.migrated ? { sessionFormatVersion: migration.to } : {},
 	);
-	const state: SessionManagerState = { meta: meta as SessionMeta, writer };
+	const state: SessionManagerState = { meta: meta as SessionMeta, writer: withHeartbeat(meta, writer) };
 	return { state, nodes: tree };
 }
 
