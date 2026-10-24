@@ -259,7 +259,10 @@ describe("compaction working-set provider boundary", () => {
 		const ledger = [...entries];
 		const state = {
 			lastTurnId: "tail",
-			runtime: { agent: { state: { messages: [...live], systemPrompt: "", tools: [] } } },
+			runtime: {
+				agent: { state: { messages: [...live], systemPrompt: "", tools: [] } },
+				runtimeResolution: { modelRuntime: { thinking: {} }, effectiveThinkingLevel: "off" },
+			},
 		} as unknown as ChatTurnState;
 		const session = {
 			current: () => ({ id: "test-session" }),
@@ -272,7 +275,7 @@ describe("compaction working-set provider boundary", () => {
 			state,
 			session,
 			readSessionEntries: () => ledger,
-			getSettings: () => ({}) as ClioSettings,
+			getSettings: () => ({ chat: {} }) as ClioSettings,
 			middlewareToolChoice: { reset: () => {} } as unknown as MiddlewareToolChoiceControl,
 			consumePersistedEcho: (text) => text === "Continue.",
 			removeQueuedMirrorEntry: () => {},
