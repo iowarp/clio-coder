@@ -38,16 +38,32 @@ export const READONLY_SCOPE: ScopeSpec = {
 	allowDispatch: false,
 };
 
+/**
+ * Scopes rooted at the process working directory, read at each use. `run --cwd`
+ * and ACP `session/new` enter the selected workspace after this module is
+ * imported, so a root captured at import named the launch directory (#433).
+ * The root stays the process directory, the one the orchestrator's own tools
+ * and policy engine resolve against, so a resumed session recorded elsewhere
+ * fails closed instead of widening worker writes past the orchestrator.
+ */
+function processWorkspaceRoots(): string[] {
+	return [asDirectoryPathBoundary(path.resolve(process.cwd()))];
+}
+
 export const WORKSPACE_SCOPE: ScopeSpec = {
 	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch"]),
-	allowedWriteRoots: [asDirectoryPathBoundary(path.resolve(process.cwd()))],
+	get allowedWriteRoots() {
+		return processWorkspaceRoots();
+	},
 	allowNetwork: true,
 	allowDispatch: true,
 };
 
 export const CONFIRMED_SCOPE: ScopeSpec = {
 	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch", "system_modify", "destructive"]),
-	allowedWriteRoots: [asDirectoryPathBoundary(path.resolve(process.cwd()))],
+	get allowedWriteRoots() {
+		return processWorkspaceRoots();
+	},
 	allowNetwork: true,
 	allowDispatch: true,
 };
