@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import type { Model } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { responseFormatFor, responseSchemaDialectFor } from "../../src/core/response-schema.js";
 import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
@@ -14,7 +14,7 @@ import {
 	supportsNamedToolChoice,
 	type ToolRound,
 } from "../../src/engine/provider-payload.js";
-import type { EngineModel } from "../../src/engine/types.js";
+import type { EngineModel, ToolRoundRecord } from "../../src/engine/types.js";
 
 const name = "clio_submit_result";
 const tool = (toolName: string) => ({
@@ -129,6 +129,134 @@ test("Responses terminal handoff uses native function choice", async () => {
 	deepStrictEqual(names(body.tools), [name]);
 	deepStrictEqual(body.tool_choice, { type: "function", name });
 	strictEqual(body.parallel_tool_calls, false);
+});
+test("Codex sends only accepted tool_choice shapes and retries one rejected choice without force", async () => {
+	const codex = catalog("openai-codex", "gpt-6-luna");
+	const account = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const apiKey = `e30.${account.toString("base64url")}.sig`;
+	// gpt-6-luna takes native tool changes, so the worker's handoff round keeps the work phase's parallel setting (#423).
+	const codexHandoff: ToolRound = { kind: "required", toolName: name, handoff: false };
+	const rounds: Array<[string, ToolRound[], string[] | undefined, unknown]> = [
+		["ordinary", [], ["write", name], "auto"],
+		// The tester call that died in #426: the worker sends its terminal handoff ahead of the synthesis lock.
+		["handoff", [codexHandoff, lock], [name], "auto"],
+		// The worker synthesis lock strips the surface, so Codex sees no tools and no tool_choice.
+		["synthesis", [lock], undefined, undefined],
+		// Codex rejects a forced choice once Pi's WS delta omits tools; auto over the one narrowed tool is safe.
+		["required", [{ kind: "required", toolName: "write" }], ["write"], "auto"],
+		["middleware text-only", [{ kind: "text-only" }], ["write", name], "none"],
+	];
+	const bodies = new Map<string, Record<string, unknown>>();
+	for (const [label, round, tools, choice] of rounds) {
+		const body = await wire(codex, round, true, { apiKey });
+		bodies.set(label, body);
+		deepStrictEqual(body.tools === undefined ? undefined : names(body.tools), tools, label);
+		// Pi's own default may be omitted on an ordinary round; any forced round must spell its choice.
+		if (label === "ordinary") ok(body.tool_choice === undefined || body.tool_choice === "auto", label);
+		else strictEqual(body.tool_choice, choice, label);
+	}
+	strictEqual(bodies.get("handoff")?.parallel_tool_calls, bodies.get("ordinary")?.parallel_tool_calls);
+	for (const [label, round, , choice] of rounds) {
+		// The record names the wire choice of each forced round; tools-removed sends none, recorded as null.
+		const records = applyToolRounds(
+			codex,
+			{ messages: [], tools: [tool("write"), tool(name)] },
+			undefined,
+			round,
+		).toolRounds;
+		deepStrictEqual(
+			records?.map((entry) => entry.choice),
+			round.length === 0 ? undefined : [choice ?? null],
+			label,
+		);
+	}
+	// Loaded on demand so the round table above still reports its own failure on a build without the retry seam.
+	const { streamToolRound } = await import("../../src/engine/provider-payload.js");
+	const reply = (stopReason: "stop" | "error", errorMessage?: string) => ({
+		role: "assistant" as const,
+		content: [],
+		api: codex.api,
+		provider: codex.provider,
+		model: codex.id,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason,
+		...(errorMessage === undefined ? {} : { errorMessage }),
+		timestamp: 5,
+	});
+	const attempt = async (fault: string, targetId: string, afterOutput = false) => {
+		const sent: unknown[] = [];
+		const controlled = applyToolRounds(codex, { messages: [], tools: [tool("write")] }, undefined, [
+			{ kind: "text-only" },
+		]);
+		const result = await streamToolRound(
+			codex,
+			controlled,
+			(request) => {
+				sent.push(request.options?.toolChoice);
+				const events = createAssistantMessageEventStream();
+				const message = sent.length === 1 ? reply("error", fault) : reply("stop");
+				if (afterOutput && sent.length === 1) {
+					events.push({ type: "start", partial: reply("stop") });
+					events.push({ type: "text_delta", contentIndex: 0, delta: "partial", partial: reply("stop") });
+				}
+				events.push(
+					message.stopReason === "error"
+						? { type: "error", reason: "error", error: message }
+						: { type: "done", reason: "stop", message },
+				);
+				events.end(message);
+				return events;
+			},
+			targetId,
+		).result();
+		return { sent, result };
+	};
+	const rejection = "400 Unsupported parameter: 'tool_choice' is not supported by rustponsesapi";
+	const rejected = await attempt(rejection, "t426");
+	deepStrictEqual(rejected.sent, ["none", "auto"]);
+	strictEqual(rejected.result.stopReason, "stop");
+	deepStrictEqual(
+		(rejected.result as typeof rejected.result & { toolRounds?: ToolRoundRecord[] }).toolRounds?.map((entry) => [
+			entry.attempt,
+			entry.choice,
+		]),
+		[
+			[0, "none"],
+			[1, "auto"],
+		],
+	);
+	// The rejection is remembered for the target, so its next text-only round starts on auto.
+	const remembered = applyToolRounds(
+		codex,
+		{ messages: [], tools: [tool("write")] },
+		undefined,
+		[{ kind: "text-only" }],
+		"t426",
+	).toolRounds?.[0];
+	deepStrictEqual([remembered?.choice, remembered?.downgradeReason], ["auto", rejection]);
+	// Each fault names tool_choice, so only its status keeps it from being read as a choice rejection; a 400
+	// about anything else is not one either.
+	for (const fault of [
+		"401 Unauthorized tool_choice",
+		"429 Rate limit tool_choice",
+		"500 Server error tool_choice",
+		"400 Invalid request: input[0] malformed",
+	]) {
+		const failed = await attempt(fault, `t426-${fault.slice(0, 3)}`);
+		deepStrictEqual(failed.sent, ["none"], fault);
+		strictEqual(failed.result.stopReason, "error", fault);
+	}
+	// Output already streamed, so a rejection then cannot be replayed without force.
+	const late = await attempt(rejection, "t426-late", true);
+	deepStrictEqual(late.sent, ["none"]);
+	strictEqual(late.result.stopReason, "error");
 });
 test("Google terminal handoff narrows nested declarations", async () => {
 	const body = await wire(catalog("google", "gemini-3.1-pro-preview"), [handoff]);
