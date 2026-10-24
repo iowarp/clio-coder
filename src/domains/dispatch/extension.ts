@@ -4259,7 +4259,7 @@ export function createDispatchBundle(
 	const assignments = new AssignmentRegistry({
 		onStreamError: (error) => reportDispatchDiagnostic("assignment event stream", error),
 	});
-	const durableWrites = new Set<Promise<unknown>>();
+	const assignmentWrites = new Set<Promise<unknown>>();
 	let draining = false;
 	const drainController = new AbortController();
 	const dispatching = new Set<Promise<unknown>>();
@@ -4340,25 +4340,14 @@ export function createDispatchBundle(
 		}
 	}
 
-	function trackDurableWrite<T>(operation: Promise<T>): Promise<T> {
-		durableWrites.add(operation);
-		operation.finally(() => durableWrites.delete(operation)).catch(() => {});
+	function trackAssignmentWrite<T>(operation: Promise<T>): Promise<T> {
+		assignmentWrites.add(operation);
+		operation.finally(() => assignmentWrites.delete(operation)).catch(() => {});
 		return operation;
 	}
 
-	function persistLedgerInBackground(target: Ledger, runId: string): void {
-		trackDurableWrite(target.persist()).catch((error) =>
-			reportDispatchDiagnostic(`persist running row for run ${runId}`, error),
-		);
-	}
-
-	/** A settlement can queue a reservation release as it lands, so loop until none is pending (#428). */
-	async function flushDurableWrites(): Promise<void> {
-		while (durableWrites.size > 0) await Promise.allSettled([...durableWrites]);
-	}
-
 	function persistAssignment(operation: Promise<unknown>, label: string): void {
-		trackDurableWrite(operation).catch((error) => reportDispatchDiagnostic(`persist assignment ${label}`, error));
+		trackAssignmentWrite(operation).catch((error) => reportDispatchDiagnostic(`persist assignment ${label}`, error));
 	}
 
 	function settleAssignmentDurably(
@@ -4367,7 +4356,7 @@ export function createDispatchBundle(
 		status: "succeeded" | "failed" | "canceled",
 		outcomeDetail?: string,
 	): void {
-		void trackDurableWrite(
+		void trackAssignmentWrite(
 			(async () => {
 				// A failed write is reported, never swapped for the worker's real
 				// outcome, and never left holding the capacity slot (#428).
@@ -6111,10 +6100,7 @@ export function createDispatchBundle(
 			});
 			// One durable write at start so sibling processes (clio-coder fleet status)
 			// can observe the running row; finalization persists the terminal state.
-			// Not awaited: the worker is already live, and an fsync wait here kept a
-			// spawned retry out of `active`, so snapshot and abort could not see it.
-			// A failed write leaves the row dirty for the terminal persist (#428).
-			persistLedgerInBackground(ledgerRef, envelope.id);
+			await ledgerRef.persist();
 			if (req.lineage !== undefined) {
 				context.bus.emit(BusChannels.DispatchEnqueued, {
 					runId: envelope.id,
@@ -7853,10 +7839,7 @@ export function createDispatchBundle(
 			});
 			// One durable write at start so sibling processes (clio-coder fleet status)
 			// can observe the running row; finalization persists the terminal state.
-			// Not awaited: the worker is already live, and an fsync wait here kept a
-			// spawned retry out of `active`, so snapshot and abort could not see it.
-			// A failed write leaves the row dirty for the terminal persist (#428).
-			persistLedgerInBackground(ledgerRef, envelope.id);
+			await ledgerRef.persist();
 
 			// Fleet-visibility facts for the board: node placement, gate role,
 			// reroute lineage depth, and the model context window for the
@@ -9221,12 +9204,7 @@ export function createDispatchBundle(
 				? assignment.terminal.finally(() => writerLease?.release())
 				: assignment.terminal.finally(async () => {
 						try {
-							// Tracked so drain and stop wait for the shared capacity record. A
-							// failed release is reported, never turned into a failed run whose
-							// receipt already sealed its outcome (#428).
-							await trackDurableWrite(releaseDispatchReservationMemberAsync(reservation.ownerId, reservation.memberId, now()));
-						} catch (error) {
-							reportDispatchDiagnostic(`release reservation member ${reservation.memberId}`, error);
+							await releaseDispatchReservationMemberAsync(reservation.ownerId, reservation.memberId, now());
 						} finally {
 							writerLease?.release();
 						}
@@ -9909,9 +9887,6 @@ export function createDispatchBundle(
 	let journalBridge: RunEventJournalBridge | null = null;
 
 	const extension: DomainExtension = {
-		// Stop drains again and flushes leases, assignments and the ledger, which
-		// now wait on fsync off the main thread; give it the drain's allowance (#428).
-		stopAllowanceMs: () => contract.drainAllowanceMs?.() ?? 0,
 		async start() {
 			// The journal subscribes before anything can dispatch. It rides the
 			// domain's own progress and terminal channels, so it covers a run
@@ -10040,7 +10015,7 @@ export function createDispatchBundle(
 				for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
 				ownedReservations.clear();
 				publishedPathScopeRoots.clear();
-				await flushDurableWrites();
+				await Promise.allSettled([...assignmentWrites]);
 				await liveLedgerWrite;
 				// After drain(), so the last run's terminal line is written before the
 				// bridge stops listening.
@@ -10227,17 +10202,9 @@ export function createDispatchBundle(
 			while (memberWork.size > 0) {
 				await Promise.allSettled([...memberWork.values()].flatMap((work) => [...work]));
 			}
-			await flushDurableWrites();
+			await Promise.allSettled([...assignmentWrites]);
 			await liveLedgerWrite;
-			// Non-fatal so stop() still releases leases, flushes and closes the
-			// journal bridge; the rows stay dirty for any later persist (#428).
-			if (ledger) {
-				try {
-					await ledger.persist();
-				} catch (error) {
-					reportDispatchDiagnostic("persist ledger at drain", error);
-				}
-			}
+			if (ledger) await ledger.persist();
 		})().then(
 			// Concurrent callers share one drain; a call after it settled runs
 			// again, so a ledger change made since then is still persisted. The
@@ -10599,7 +10566,9 @@ export function createDispatchBundle(
 		assignments: {
 			get: (id) => assignments.get(assignmentRootFor(id)),
 			getStored: (id) => getStoredAssignment(assignmentRootFor(id)),
-			flushWrites: flushDurableWrites,
+			flushWrites: async () => {
+				await Promise.allSettled([...assignmentWrites]);
+			},
 		},
 		async drainMember(runId) {
 			const root = controlRootFor(runId);

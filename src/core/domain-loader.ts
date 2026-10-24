@@ -31,12 +31,6 @@ export interface DomainExtension {
 	start(): Promise<void> | void;
 	/** The loader passes its stop signal; a direct caller with nothing to cancel may omit it. */
 	stop?(signal?: AbortSignal): Promise<void> | void;
-	/**
-	 * Time beyond the shared hook budget that stop() needs. Durable writes now
-	 * yield to libuv, so a slow filesystem can outlast the flat budget and an
-	 * abandoned stop would leak a lease or leave a row running (#428).
-	 */
-	stopAllowanceMs?(): number;
 }
 
 /**
@@ -98,10 +92,9 @@ export async function loadDomains(
 
 	const stopAll = async (signal?: AbortSignal): Promise<void> => {
 		const debug = process.env.CLIO_CODER_DEBUG_SHUTDOWN === "1";
-		const baseBudgetMs = resolveShutdownHookBudgetMs();
+		const budgetMs = resolveShutdownHookBudgetMs();
 		for (const [name, ext] of [...extensions].reverse()) {
 			if (!ext.stop) continue;
-			const budgetMs = Math.min(2 ** 31 - 1, baseBudgetMs + (ext.stopAllowanceMs?.() ?? 0));
 			const stopFn = ext.stop.bind(ext);
 			const t0 = debug ? process.hrtime.bigint() : 0n;
 			const completed = await runWithBudget(
