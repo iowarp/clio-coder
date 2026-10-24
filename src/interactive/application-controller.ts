@@ -391,15 +391,22 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		}
 		if (deps.leaderKeys.isPending() && deps.leaderKeys.route(data)) return { consume: true };
 		if (deps.leaderKeys.route(data)) return { consume: true };
+		// Suspend escapes every modal owner before it routes the key (#413). The
+		// side-question, context view, permission card and dispatch board consume
+		// every key they see, and transcript search forwards everything to its box,
+		// so checking after them left Ctrl-Z swallowed with the process running.
+		if (
+			(deps.isSearchFocused?.() || overlayOwnsInput(deps.getOverlayState())) &&
+			deps.matchesAction(data, "clio-coder.suspend") &&
+			deps.dispatchAction("clio-coder.suspend")
+		)
+			return { consume: true };
 		if (deps.isSearchFocused?.()) {
 			deps.forwardFocusedInput?.(data);
 			return { consume: true };
 		}
 		if (deps.routeOverlayKey(data)) return { consume: true };
 		if (overlayOwnsInput(deps.getOverlayState())) {
-			// Unconsumed suspend keys must escape modal focus too (#413).
-			if (deps.matchesAction(data, "clio-coder.suspend"))
-				return deps.dispatchAction("clio-coder.suspend") ? { consume: true } : undefined;
 			if (deps.forwardFocusedInput) {
 				deps.forwardFocusedInput(data);
 				return { consume: true };
