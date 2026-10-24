@@ -6,6 +6,7 @@ import type { Client } from "../api/client.js";
 import { ApiProblem, emptyInput } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
+import { sessionQuery } from "../api/session-query.js";
 import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
@@ -28,8 +29,10 @@ import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
 import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { memoryGuardianMark } from "../chat/telemetry-model.js";
+import { TRANSCRIPT_PAGE_SIZE } from "../chat/transcript-view-model.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { useShown } from "../chat/use-shown.js";
+import { useTranscriptView } from "../chat/use-transcript-view.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { setPageTitle } from "../interaction/announcer.js";
@@ -142,7 +145,7 @@ function EmptyTranscript({ sessionId }: { sessionId: string }) {
 function SessionView({ client, id }: { client: Client; id: string }) {
 	countRender("session-view");
 	const navigate = useNavigate();
-	const ids = { changes: useId(), pane: useId() };
+	const ids = { changes: useId(), pane: useId(), transcript: useId() };
 	const pane = usePaneState(ids.pane);
 	const paneActions = useMemo(
 		() => ({ show: (target: PaneTarget) => pane.show(target, ids.pane) }),
@@ -154,13 +157,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
-	const session = useQuery({
-		queryKey: ["session", id],
-		queryFn: async ({ signal }) => {
-			const snapshot = await client.call(routes.session, input, undefined, signal);
-			return sessionBuffer(id).snapshot(snapshot) ?? snapshot;
-		},
-	});
+	const session = useQuery(sessionQuery(client, id));
 	// A saved task this server has not opened answers not_found. Only that answer starts the search for
 	// its project; a task that loads, and a server that cannot be reached, never do.
 	const notOpen =
@@ -250,6 +247,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	// A deep link starts without a cached snapshot. Attach the observer only once
 	// the transcript element exists; a ref becoming non-null does not rerun an effect.
 	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline, running);
+	const transcript = useTranscriptView(client, id, turns, snapshot !== undefined, scroll, follow);
 	const restoreScroll = follow.restore;
 	useEffect(() => {
 		if (outline || !pendingJump.current) return;
@@ -540,6 +538,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					</div>
 					<div
 						className="chat-transcript"
+						id={ids.transcript}
 						ref={scroll}
 						onClickCapture={(event) => {
 							// Opening a detail is reading intent. Freeze before its height changes, so the live
@@ -551,8 +550,23 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					>
 						<div className="chat-transcript__content">
 							{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
+							{transcript.start > 0 ? (
+								<div className="transcript-history">
+									<p>{transcript.start} earlier turns in this conversation</p>
+									<div>
+										<button type="button" onClick={transcript.earlier} aria-controls={ids.transcript}>
+											<Icon name="arrowUp" />
+											Show {Math.min(TRANSCRIPT_PAGE_SIZE, transcript.start)} earlier turns
+										</button>
+										<button type="button" onClick={() => setOutline(true)}>
+											<Icon name="search" />
+											Find in full conversation
+										</button>
+									</div>
+								</div>
+							) : null}
 
-							{turns.map((item) => (
+							{transcript.turns.map((item) => (
 								<ChatTurnView
 									key={item.turnId}
 									turn={item}
@@ -642,6 +656,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						truncated={snapshot.timelineTruncated === true}
 						onClose={() => setOutline(false)}
 						onSelect={(turnId) => {
+							transcript.revealTurn(turnId);
 							pendingJump.current = turnId;
 							setOutline(false);
 						}}

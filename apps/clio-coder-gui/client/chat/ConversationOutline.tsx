@@ -55,8 +55,8 @@ export function ConversationOutline({
 					{found.total} {found.query ? "matching" : "loaded"} {found.total === 1 ? "exchange" : "exchanges"}
 					{found.rows.length < found.total ? ` · first ${found.rows.length} shown; refine your search` : ""}.
 					{truncated
-						? " Earlier exchanges outside this view are not searched."
-						: " Searches the requests and responses in this view."}
+						? " Searches retained requests and responses; older exchanges omitted by Clio are not included."
+						: " Searches every request and response, including earlier turns."}
 				</p>
 				<ol className="conversation-finder__list" id={id} aria-label="Conversation exchanges">
 					{found.rows.map((entry) => (

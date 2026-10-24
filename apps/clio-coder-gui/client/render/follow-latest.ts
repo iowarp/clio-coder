@@ -42,6 +42,7 @@ export function useFollowLatest(
 	const originalAnchor = useRef<string | null>(null);
 	const wasRunning = useRef(running);
 	const settling = useRef(false);
+	const previousActivity = useRef(activityKey);
 
 	const setFollow = useCallback(
 		(next: boolean) => {
@@ -58,9 +59,11 @@ export function useFollowLatest(
 		[scrollRef],
 	);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: activityKey is the trigger, not a read value; a changed key is what marks new output unseen.
 	useEffect(() => {
-		if (!followingRef.current) setUnseen(true);
+		const previous = previousActivity.current;
+		previousActivity.current = activityKey;
+		// Restoring an existing transcript is not new activity below the reader.
+		if (previous !== undefined && previous !== activityKey && !followingRef.current) setUnseen(true);
 	}, [activityKey]);
 
 	useEffect(() => {

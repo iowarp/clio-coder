@@ -33,6 +33,28 @@
 	border-radius: var(--radius-sm);
 }
 
+.transcript-history {
+	display: grid;
+	gap: var(--space-3);
+	padding-block: var(--space-3) var(--space-6);
+	border-bottom: 1px solid var(--line);
+	color: var(--muted);
+	font-size: var(--text-meta);
+}
+.transcript-history > p {
+	margin: 0;
+}
+.transcript-history > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+}
+.transcript-history button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
 /* A grid item's automatic minimum size is its min-content width, so a card holding a long command
    or a wide diff refuses to shrink and pushes the whole page sideways on a phone. Every level of
    the transcript's nesting opts out, which is what lets each card's own `overflow-x: auto` do the
