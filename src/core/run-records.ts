@@ -9,6 +9,7 @@ import {
 	openSync,
 	readdirSync,
 	readSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	statSync,
@@ -16,6 +17,7 @@ import {
 } from "node:fs";
 import { open } from "node:fs/promises";
 import path from "node:path";
+import { canonicalizePath } from "./path-canonical.js";
 
 /**
  * Run records: the durable provenance a `run_script` execution leaves behind.
@@ -137,6 +139,12 @@ export interface RunRecordPaths {
 	manifestPath: string;
 	stdoutPath: string;
 	stderrPath: string;
+	/**
+	 * The run directory as created: its realpath and inode. Later writes by
+	 * path check it first, because the script runs between creation and the
+	 * manifest write and can swap the directory for a link to anywhere.
+	 */
+	identity: { realDir: string; dev: number; ino: number };
 }
 
 const RUN_ID_PATTERN = /^\d{8}T\d{6}Z-[0-9a-f]{6}$/u;
@@ -161,23 +169,85 @@ export function runRecordsDir(workspaceRoot: string): string {
 	return path.join(path.resolve(workspaceRoot), ...RUN_RECORDS_RELATIVE_DIR.split("/"));
 }
 
-function runRecordPaths(workspaceRoot: string, runId: string): RunRecordPaths {
+type RecordsRootLanding = { inside: true; landed: string } | { inside: false; reason: string };
+
+/**
+ * Where the records root really lands, or why it may not be used. A
+ * `.clio-coder` or `runs` symlink to a sibling directory would otherwise put
+ * every log there and let retention delete that directory's oldest entries.
+ * A root that cannot be canonicalized counts as outside, and so does a
+ * workspace root that cannot be resolved.
+ */
+function landRunRecordsRoot(workspaceRoot: string): RecordsRootLanding {
+	const records = runRecordsDir(workspaceRoot);
+	const outside = (landed: string): RecordsRootLanding => ({
+		inside: false,
+		reason: `${RUN_RECORDS_RELATIVE_DIR} resolves outside the workspace root (${landed})`,
+	});
+	let realRoot: string;
+	try {
+		realRoot = path.resolve(realpathSync(workspaceRoot));
+	} catch {
+		return outside(records);
+	}
+	const landed = canonicalizePath(records);
+	if (landed === null) return outside(records);
+	const relative = path.relative(realRoot, landed);
+	if (relative === "") {
+		return { inside: false, reason: `${RUN_RECORDS_RELATIVE_DIR} resolves to the workspace root itself (${landed})` };
+	}
+	if (relative.startsWith("..") || path.isAbsolute(relative)) return outside(landed);
+	return { inside: true, landed };
+}
+
+/**
+ * Create the run directory. The id is fresh, so an existing directory is a
+ * collision and an error, and so is a records root outside the workspace.
+ */
+export function createRunRecord(workspaceRoot: string, runId: string = newRunId()): RunRecordPaths {
+	const landing = landRunRecordsRoot(workspaceRoot);
+	if (!landing.inside) throw new Error(`${landing.reason}; no record written`);
 	const dir = path.join(runRecordsDir(workspaceRoot), runId);
+	if (existsSync(dir)) throw new Error(`run record already exists: ${dir}`);
+	mkdirSync(dir, { recursive: true });
+	const realDir = path.resolve(realpathSync(dir));
+	const stat = lstatSync(dir);
+	if (realDir !== path.join(landing.landed, runId) || !stat.isDirectory()) {
+		throw new Error(`run record moved while it was created: ${dir} -> ${realDir}; no record written`);
+	}
 	return {
 		runId,
 		dir,
 		manifestPath: path.join(dir, RUN_MANIFEST_FILENAME),
 		stdoutPath: path.join(dir, RUN_STDOUT_FILENAME),
 		stderrPath: path.join(dir, RUN_STDERR_FILENAME),
+		identity: { realDir, dev: stat.dev, ino: stat.ino },
 	};
 }
 
-/** Create the run directory. The id is fresh, so an existing directory is a collision and an error. */
-export function createRunRecord(workspaceRoot: string, runId: string = newRunId()): RunRecordPaths {
-	const paths = runRecordPaths(workspaceRoot, runId);
-	if (existsSync(paths.dir)) throw new Error(`run record already exists: ${paths.dir}`);
-	mkdirSync(paths.dir, { recursive: true });
-	return paths;
+/**
+ * Refuse a write by path into a run directory that is no longer the one
+ * createRunRecord made: replaced by a link, moved, or swapped for another
+ * directory. A script runs with the same file access as Clio, so it can do
+ * any of these between creation and the manifest write.
+ */
+export function assertRunRecordIntact(paths: RunRecordPaths): void {
+	let stat: ReturnType<typeof lstatSync>;
+	let realDir: string;
+	try {
+		stat = lstatSync(paths.dir);
+		realDir = path.resolve(realpathSync(paths.dir));
+	} catch (error) {
+		throw new Error(`run record is gone: ${paths.dir} (${error instanceof Error ? error.message : String(error)})`);
+	}
+	if (
+		!stat.isDirectory() ||
+		realDir !== paths.identity.realDir ||
+		stat.dev !== paths.identity.dev ||
+		stat.ino !== paths.identity.ino
+	) {
+		throw new Error(`run record was replaced: ${paths.dir} now resolves to ${realDir}; nothing written there`);
+	}
 }
 
 /** Workspace-relative rendering with forward slashes, or null when the target sits outside the root. */
@@ -303,6 +373,7 @@ export async function captureOutputRef(
 
 /** Write the manifest atomically: a temp file in the run directory, then a rename over the final name. */
 export function writeRunManifest(paths: RunRecordPaths, manifest: RunManifest): void {
+	assertRunRecordIntact(paths);
 	const temp = path.join(paths.dir, `${RUN_MANIFEST_FILENAME}.${process.pid}.tmp`);
 	writeFileSync(temp, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 	renameSync(temp, paths.manifestPath);
@@ -376,9 +447,12 @@ function manifestCompletionMs(manifestPath: string): number | null | undefined {
  * oldest first by the completion time their manifests record. A directory
  * without a manifest is a run in flight and is never removed while it could
  * still be one; entries that are not run directories are never touched.
+ * A records root that resolves outside the workspace is never read or swept.
  */
 export function sweepRunRecords(workspaceRoot: string, options: { keep?: number } = {}): RunRecordSweepResult {
 	const keep = Math.max(0, Math.floor(options.keep ?? RUN_RECORDS_DEFAULT_KEEP));
+	const landing = landRunRecordsRoot(workspaceRoot);
+	if (!landing.inside) return { removed: 0, kept: 0, active: 0, skipped: 0 };
 	const root = runRecordsDir(workspaceRoot);
 	let entries: string[];
 	try {
@@ -425,6 +499,11 @@ export function sweepRunRecords(workspaceRoot: string, options: { keep?: number 
 	}
 	completed.sort((a, b) => a.finishedMs - b.finishedMs || a.entry.localeCompare(b.entry));
 	const excess = Math.max(0, completed.length - keep);
+	// The scan took time and removal reopens by path: a root relinked since
+	// the check is left alone rather than swept wherever it points now.
+	if (excess > 0 && canonicalizePath(root) !== landing.landed) {
+		return { removed: 0, kept: completed.length, active, skipped: skipped + excess };
+	}
 	let removed = 0;
 	for (const { entry } of completed.slice(0, excess)) {
 		try {
