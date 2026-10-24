@@ -420,7 +420,12 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const commandRuns = [{ argv: [...argv], cwd, exitCode: spawned.exitCode, durationMs: primaryDurationMs }];
 	const testFiles = input.mutatedPaths?.length
 		? (await import("../../tools/verify/test-files.js")).resolveTestFileChecks(input.workspaceRoot, input.mutatedPaths)
-		: { checks: [], notes: [] };
+		: { checks: [], notes: [], refusals: [] };
+	// A changed test that cannot be run fails the step so the loop repairs or reports it, never a silent pass.
+	for (const refusal of testFiles.refusals) {
+		checks.push({ name: "changed tests", passed: false, evidence: refusal });
+		spawned = { ...spawned, exitCode: spawned.exitCode === 0 ? 1 : spawned.exitCode };
+	}
 	for (const test of testFiles.checks) {
 		if (input.signal?.aborted || spawned.timedOut) break;
 		const testCommand: PlaybookCommand = {
@@ -441,12 +446,14 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		checks.push({
 			name: testCommand.id,
 			passed: result.exitCode === 0,
-			evidence: `\`${test.argv.join(" ")}\` exit ${result.exitCode} in ${testDurationMs}ms`,
+			evidence: `\`${test.argv.join(" ")}\` exit ${result.exitCode} in ${testDurationMs}ms${test.detail === undefined ? "" : `; ${test.detail}`}`,
 		});
 		commandRuns.push({ argv: [...test.argv], cwd: testCwd, exitCode: result.exitCode, durationMs: testDurationMs });
 		const captured = Buffer.concat([
 			spawned.captured,
-			Buffer.from(`\n$ ${test.argv.join(" ")}\ncwd: ${testCwd}\nexit: ${result.exitCode}\n`),
+			Buffer.from(
+				`\n$ ${test.argv.join(" ")}\ncwd: ${testCwd}\nexit: ${result.exitCode}\n${test.detail === undefined ? "" : `note: ${test.detail}\n`}`,
+			),
 			result.captured,
 			Buffer.from(result.spawnError === null ? "" : `\n${result.spawnError}\n`),
 		]);
@@ -464,7 +471,9 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const capturedText =
 		spawned.captured.toString("utf8") +
 		(spawned.spawnError === null ? "" : `\n${spawned.spawnError}\n`) +
-		(testFiles.notes.length === 0 ? "" : `\n${testFiles.notes.join("\n")}\n`);
+		(testFiles.notes.length + testFiles.refusals.length === 0
+			? ""
+			: `\n${[...testFiles.refusals, ...testFiles.notes].join("\n")}\n`);
 	const printed = Buffer.from(capturedText, "utf8");
 	const excerpt = tailUtf8(printed, CODE_STEP_EXCERPT_MAX_BYTES, CODE_STEP_TRUNCATION_MARKER);
 	const rendered = argv.join(" ");
