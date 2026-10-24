@@ -10,6 +10,7 @@ import { aggregateCostAmounts, type CostAggregate, formatCostAggregate } from ".
 import { resolveCostProvenance } from "../domains/providers/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
+import { usageCoverageLabel } from "../domains/session/usage.js";
 import type { ViewArtifact } from "../domains/session/view-artifacts.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
@@ -1071,7 +1072,7 @@ function renderTurnUsageLine(
 	const outcome = usage.outcome ?? "Done";
 	const coverage =
 		(usage.unknownUsageCalls ?? 0) > 0 || (usage.neverSentCalls ?? 0) > 0
-			? ` · ${usage.unknownUsageCalls ?? 0} calls with unknown usage; ${usage.neverSentCalls ?? 0} never sent`
+			? ` · ${usageCoverageLabel(usage.unknownUsageCalls ?? 0, usage.neverSentCalls ?? 0)}`
 			: "";
 	const settled = `${outcome}${coverage}${usage.elapsedMs === undefined ? "" : ` · ${formatCompactMs(usage.elapsedMs)}`}`;
 	const glyph = receiptGlyph(outcome);

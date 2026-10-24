@@ -322,7 +322,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(combined, /worker calls.*2/);
 		match(combined, /conversation calls.*1/);
 		match(combined, /System One.*1/);
-		match(combined, /1 call; token amounts are known subtotals/);
+		match(combined, /1 call with unknown usage; token amounts are known subtotals/);
 
 		quota = [
 			{

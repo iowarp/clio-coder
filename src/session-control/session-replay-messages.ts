@@ -397,6 +397,16 @@ export function messageFailure(entry: MessageEntry): { stopReason: "error" | "ab
 	return { stopReason, errorMessage };
 }
 
+/** Only host-written closures change presentation; unmarked historical turns retain their replay (#430). */
+export function messageInterruptClosure(entry: MessageEntry): { text: string; operatorCancel: boolean } | null {
+	const obj = payloadObject(entry.payload);
+	if (obj?.stopReason !== "aborted") return null;
+	const closure = payloadObject(obj.interruptClosure);
+	return typeof closure?.operatorCancel === "boolean"
+		? { text: extractTurnText(entry.payload), operatorCancel: closure.operatorCancel }
+		: null;
+}
+
 export function payloadObject(payload: unknown): Record<string, unknown> | null {
 	return payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null;
 }

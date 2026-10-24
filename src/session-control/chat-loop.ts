@@ -212,6 +212,7 @@ import {
 	type ChatLoopRunSnapshot,
 	createTurnState,
 	type TurnPreparationPhase,
+	takeInterruptedCall,
 } from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
 
@@ -3082,7 +3083,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.toolProseAssessedChars = 0;
 				state.activeInterruptReason = null;
 				state.interruptedAssistantMessage = null;
-				state.interruptedUsage = null;
+				state.interruptedCall = null;
 
 				// 6. Cache-disturbance honesty (T3.3)
 				context.consumeExpectedColdReasons(agentRuntime.runtimeId);
@@ -3249,10 +3250,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// it cannot split the entry the provider's message_end finalizes.
 						if (state.interruptedAssistantMessage === null) {
 							const closing = noticeMessage(reason);
-							if (state.interruptedUsage !== null) {
-								(closing as { usage?: unknown }).usage = state.interruptedUsage;
+							const interrupted = takeInterruptedCall(state);
+							if (interrupted !== null) {
+								Object.assign(closing, interrupted.message, noticeMessage(reason));
+								delete (closing as { errorMessage?: string }).errorMessage;
 							}
-							persistence.appendAssistantTurn(closing);
+							persistence.appendAssistantTurn(closing, interrupted?.timing, undefined, {
+								operatorCancel: state.activeInterruptByOperator,
+							});
 							emit({
 								type: "notice",
 								level: "warning",
@@ -3263,7 +3268,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							});
 						}
 						state.interruptedAssistantMessage = null;
-						state.interruptedUsage = null;
+						state.interruptedCall = null;
 					}
 					// A continuation writes its outcome too: the streak that gates the next
 					// turn's direction workflow resets on a turn that used a tool, and a

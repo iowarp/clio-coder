@@ -1,7 +1,7 @@
 import { responseModelIdObservationCountsLabel } from "../core/response-model-id.js";
 import { aggregateCostEntries, type CostRow } from "../domains/observability/cost-rows.js";
 import type { CostAggregate, ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
-import { ledgerCallFailureCounts } from "../domains/session/usage.js";
+import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
 
 // The fold moved to the observability domain so the ACP host can report the same rows without this overlay.
 export { aggregateCostEntries, type CostRow };
@@ -166,12 +166,7 @@ function summaryBlock(
 		...((totals.workers ?? 0) > 0 ? [["worker calls", formatTokens(totals.workers ?? 0)] as const] : []),
 		...((totals.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(totals.compactions ?? 0)] as const] : []),
 		...((totals.missingTokenCalls ?? 0) > 0 || neverSentCalls > 0
-			? [
-					[
-						"missing token usage",
-						`${formatTokens(totals.missingTokenCalls ?? 0)} calls with unknown usage; ${neverSentCalls} never sent`,
-					] as const,
-				]
+			? [["missing token usage", usageCoverageLabel(totals.missingTokenCalls ?? 0, neverSentCalls)] as const]
 			: []),
 		...(totals.sideQuestions > 0 ? [["side questions", formatTokens(totals.sideQuestions)] as const] : []),
 		...(totals.handoffs > 0 ? [["handoffs", formatTokens(totals.handoffs)] as const] : []),
@@ -221,12 +216,7 @@ function modelBlock(row: CostRow): string[] {
 		...((row.workers ?? 0) > 0 ? [["worker calls", formatTokens(row.workers ?? 0)] as const] : []),
 		...((row.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(row.compactions ?? 0)] as const] : []),
 		...((row.missingTokenCalls ?? 0) > 0
-			? [
-					[
-						"missing token usage",
-						`${formatTokens(row.missingTokenCalls ?? 0)} calls with unknown usage; token amounts are known subtotals`,
-					] as const,
-				]
+			? [["missing token usage", usageCoverageLabel(row.missingTokenCalls ?? 0)] as const]
 			: []),
 		...(row.sideQuestions > 0 ? [["side questions", formatTokens(row.sideQuestions)] as const] : []),
 		...(row.handoffs > 0 ? [["handoffs", formatTokens(row.handoffs)] as const] : []),
@@ -351,9 +341,7 @@ function renderActivity(
 	);
 	const missing = sumRows(snapshot.rows).missingTokenCalls;
 	if (missing > 0 || (snapshot.neverSentCalls ?? 0) > 0)
-		lines.push(
-			`${label("Usage")}${theme.fg("annotation", `${missing} calls with unknown usage; ${snapshot.neverSentCalls ?? 0} never sent`)}`,
-		);
+		lines.push(`${label("Usage")}${theme.fg("annotation", usageCoverageLabel(missing, snapshot.neverSentCalls ?? 0))}`);
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
 		const pct = Math.max(0, Math.min(100, window.item.usedPct));

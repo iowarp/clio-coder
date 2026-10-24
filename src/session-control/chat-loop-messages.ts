@@ -625,7 +625,8 @@ export function assistantSessionPayload(
  * authoritative usage paths.
  *
  * Returns null when the provider did report usage (there is nothing to fill in)
- * or when nothing streamed. A never-sent request has no display estimate (#430).
+ * or when neither prompt nor output tokens can be estimated. Never-sent
+ * requests have no display estimate (#430).
  */
 export function estimatedUsageForInterruptedTurn(
 	message: AgentMessage,
@@ -643,8 +644,8 @@ export function estimatedUsageForInterruptedTurn(
 		}
 	}
 	const streamedChars = assistantOutputChars(message);
-	if (streamedChars === 0) return null;
 	const input = Math.max(0, Math.round(promptSideTokens));
+	if (streamedChars === 0 && input === 0) return null;
 	const output = streamedChars > 0 ? Math.max(1, ceilChars(streamedChars)) : 0;
 	return {
 		input,

@@ -27,7 +27,7 @@ import {
 	parseSessionEntries,
 	readAuditRows,
 } from "../domains/session/index.js";
-import { ledgerCallFailureCounts } from "../domains/session/usage.js";
+import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
 import { expandChainMessages } from "../tools/surface.js";
@@ -898,11 +898,11 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	if (usageMeasurable) {
 		if (sessionFailureCounts.invokedUnknownCalls > 0 || sessionFailureCounts.neverInvokedCalls > 0)
 			console.log(
-				`  session failures: ${sessionFailureCounts.invokedUnknownCalls} calls with unknown usage; ${sessionFailureCounts.neverInvokedCalls} never sent (excluded from spending)`,
+				`  session failures: ${usageCoverageLabel(sessionFailureCounts.invokedUnknownCalls, sessionFailureCounts.neverInvokedCalls)}${sessionFailureCounts.neverInvokedCalls > 0 ? " (excluded from spending)" : ""}`,
 			);
 		if (outOfTurnFailureCounts.invokedUnknownCalls > 0 || outOfTurnFailureCounts.neverInvokedCalls > 0)
 			out(
-				`  out-of-turn failures: ${outOfTurnFailureCounts.invokedUnknownCalls} invoked calls with unknown usage; ${outOfTurnFailureCounts.neverInvokedCalls} never-sent calls (excluded from spending)`,
+				`  out-of-turn failures: ${usageCoverageLabel(outOfTurnFailureCounts.invokedUnknownCalls, outOfTurnFailureCounts.neverInvokedCalls)}${outOfTurnFailureCounts.neverInvokedCalls > 0 ? " (excluded from spending)" : ""}`,
 			);
 		out(
 			`  session and side-call tokens in window: ${usageAmount(reportedTotals.totalTokens)} over ${usageTotals.apiCalls} model calls (input ${usageAmount(reportedTotals.input)}, output ${usageAmount(reportedTotals.output)}, cache read ${usageAmount(reportedTotals.cacheRead)}, cache write ${usageAmount(reportedTotals.cacheWrite)}, reasoning ${usageAmount(reportedTotals.reasoningTokens)})`,

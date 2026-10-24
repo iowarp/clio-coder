@@ -110,14 +110,8 @@ export interface ChatTurnState {
 	activeInterruptByOperator: boolean;
 	/** The provider's nonempty aborted message closes this interrupt without a synthetic second assistant. */
 	interruptedAssistantMessage: AgentMessage | null;
-	/**
-	 * Estimated spend of the cancelled call whose hollow aborted message the
-	 * interrupt suppressed. The message never reaches the ledger, so the closing
-	 * turn persisted in submit's finally carries this instead of an estimate
-	 * derived from its own notice text. Cleared with
-	 * `activeInterruptReason`.
-	 */
-	interruptedUsage: Record<string, unknown> | null;
+	/** Accounting for the hollow call carried by the interrupt's closing turn (#430). */
+	interruptedCall: { message: AgentMessage; timing: { ttftMs: number | null; apiMs: number } | null } | null;
 	/**
 	 * Loop-guard synthesis lockout: once the guard locks a turn, the remaining
 	 * model rounds are forced text-only at the request level (tool_choice none
@@ -179,7 +173,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		activeInterruptReason: null,
 		activeInterruptByOperator: false,
 		interruptedAssistantMessage: null,
-		interruptedUsage: null,
+		interruptedCall: null,
 		synthesisToolLock: false,
 		toolBudgetLock: false,
 		toolProseAbortReason: null,
@@ -198,4 +192,11 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		currentAskUserPolicy: undefined,
 		lastRunSnapshot: null,
 	};
+}
+
+/** Consume callback-written accounting after the provider settles, outside submit's narrowing (#430). */
+export function takeInterruptedCall(state: ChatTurnState): ChatTurnState["interruptedCall"] {
+	const interrupted = state.interruptedCall;
+	state.interruptedCall = null;
+	return interrupted;
 }

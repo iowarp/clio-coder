@@ -40,7 +40,7 @@ import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
-const PARTIAL = "CANCEL_PARTIAL_ONCE";
+const PARTIAL = "[Clio Coder] CANCEL_PARTIAL_ONCE";
 const THOUGHT = "CANCEL_THINKING_ONCE";
 const target = { id: "cancellation-fixture", runtime: "litellm", url: "http://fixture.invalid:4000" };
 const model = litellm.synthesizeModel(target, "unknown-cancellation-model", null) as Model<"openai-completions">;
@@ -372,11 +372,18 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			strictEqual(payload.stopReason, "aborted");
 			const usage = recordValue(payload.usage);
 			ok(usage);
-			strictEqual(usage.estimated, true);
-			if (mode !== "empty") ok(Number(usage.output) > 0);
+			strictEqual(usage.usageObserved, false);
+			strictEqual(usage.costProvenance, "unknown");
+			for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"]) strictEqual(usage[key], null);
+			const estimatedUsage = recordValue(payload.estimatedUsage);
+			ok(estimatedUsage);
+			strictEqual(estimatedUsage.estimated, true);
+			ok(Number(estimatedUsage.input) > 0);
+			if (mode !== "empty") ok(Number(estimatedUsage.output) > 0);
+			else strictEqual(estimatedUsage.output, 0);
 			const serialized = JSON.stringify(assistant);
 			doesNotMatch(serialized, /LiteLLM route|\/model/u);
-			if (mode === "partial") match(serialized, new RegExp(PARTIAL));
+			if (mode === "partial") ok(serialized.includes(PARTIAL));
 			if (mode === "thinking") match(serialized, new RegExp(THOUGHT));
 			strictEqual(f.wire().calls(), 1);
 			strictEqual(f.audit.length, 1);
@@ -424,7 +431,7 @@ it("loop-guard interruption keeps its own reason on the single partial assistant
 		const assistants = f.entries().filter((entry) => entry.kind === "message" && entry.role === "assistant");
 		strictEqual(assistants.length, 1);
 		match(JSON.stringify(assistants[0]), /loop guard stopped repeated calls/u);
-		match(JSON.stringify(assistants[0]), new RegExp(PARTIAL));
+		ok(JSON.stringify(assistants[0]).includes(PARTIAL));
 		doesNotMatch(JSON.stringify(assistants[0]), /active response cancelled|LiteLLM route/u);
 	} finally {
 		await f.close();
@@ -516,6 +523,55 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 				const row = rows.find((line) => stripTerminalSequences(line).includes("loop guard stopped"));
 				ok(row?.includes(`${theme.fg("warning", GLYPH.warn)} `), row);
 			}
+			const assistants = f.entries().filter((entry) => entry.kind === "message" && entry.role === "assistant");
+			strictEqual(assistants.length, 1);
+			const assistant = assistants[0];
+			ok(assistant?.kind === "message");
+			const payload = recordValue(assistant.payload);
+			strictEqual(recordValue(payload?.usage)?.usageObserved, false);
+			strictEqual(recordValue(payload?.usage)?.input, null);
+			strictEqual(recordValue(payload?.failure)?.invoked, true);
+			strictEqual(recordValue(payload?.interruptClosure)?.operatorCancel, source === "stream_cancel");
+			strictEqual(recordValue(payload?.estimatedUsage)?.output, 0);
+			ok(typeof payload?.apiMs === "number");
+			const replay = createChatPanel({ getOutputStyle: () => "detailed" });
+			rehydrateChatPanelFromTurns(replay, f.entries());
+			const resumedLines = replay.render(120);
+			const resumed = resumedLines.map(stripTerminalSequences).join("\n");
+			for (const rendered of [live, resumed]) {
+				match(rendered, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
+				match(rendered, /in ≈\S+ · out ≈0/u);
+				strictEqual(rendered.split("Cancelled").length - 1, 1, rendered);
+				doesNotMatch(rendered, /✦|\[aborted\]/u);
+			}
+			strictEqual(resumed.match(/in ≈\S+ · out ≈0/u)?.[0], live.match(/in ≈\S+ · out ≈0/u)?.[0]);
+			const html = renderSessionHtml({
+				sessionId: source,
+				exportedAt: "2026-09-07T00:00:00Z",
+				ansiLines: resumedLines,
+			}).replace(/<[^>]*>/gu, "");
+			match(html, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
+			match(html, /in ≈\S+ · out ≈0/u);
+			strictEqual(html.split("Cancelled").length - 1, 1, html);
+			if (source === "loop_guard") {
+				for (const rendered of [resumed, html]) {
+					match(rendered, /! loop guard stopped repeated calls\./u);
+					ok(rendered.indexOf("⊘ Cancelled") < rendered.indexOf("! loop guard"));
+				}
+			} else doesNotMatch(resumed, /!|Cancelled at your request\./u);
+			const historicalEntries = f.entries().map((entry) => {
+				if (entry.kind !== "message" || entry.role !== "assistant") return entry;
+				const historicalPayload = { ...recordValue(entry.payload) };
+				delete historicalPayload.interruptClosure;
+				return { ...entry, payload: historicalPayload };
+			});
+			const historical = createChatPanel({ getOutputStyle: () => "detailed" });
+			rehydrateChatPanelFromTurns(historical, historicalEntries);
+			const oldReplay = historical.render(120).map(stripTerminalSequences).join("\n");
+			match(
+				oldReplay,
+				source === "loop_guard" ? /✦ \[Clio Coder\] loop guard stopped/u : /✦ Cancelled at your request\./u,
+			);
 		} finally {
 			await f.close();
 		}

@@ -110,6 +110,7 @@ export interface TurnPersistence {
 		message: AgentMessage,
 		timing?: AssistantCallTiming | null,
 		deliveryId?: string,
+		interruptClosure?: { operatorCancel: boolean },
 	): string | undefined;
 	appendQueuedUserTurn(message: AgentMessage): void;
 	appendToolCallTurn(event: Extract<AgentEvent, { type: "tool_execution_start" }>): void;
@@ -352,22 +353,20 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		message: AgentMessage,
 		timing?: AssistantCallTiming | null,
 		deliveryId?: string,
+		interruptClosure?: { operatorCancel: boolean },
 	): string | undefined => {
 		if (message?.role !== "assistant") return;
 		if (persistedAssistantMessages.has(message)) return;
-		// A loop-guard interrupt already persisted a durable closing turn with the
-		// stop reason; drop the empty aborted message the abort leaves behind so
-		// the operator does not see a hollow "request aborted" turn after it.
-		// Stamped calls still need a ledger row when an interrupt supplies the notice (#430).
-		if (
-			state.activeInterruptReason !== null &&
-			isEmptyAbortedAssistantMessage(message) &&
-			(message as { usage?: { callInvoked?: boolean } }).usage?.callInvoked === undefined
-		)
+		// Keep hollow-call accounting on the warning closure without rendering a second turn (#430).
+		if (state.activeInterruptReason !== null && isEmptyAbortedAssistantMessage(message)) {
+			state.interruptedCall = { message, timing: timing ?? null };
 			return;
+		}
 		if (explainInterruptedAssistant(message, state.activeInterruptReason)) state.interruptedAssistantMessage = message;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		// Only the host argument can mark a closure; provider fields cannot opt into this presentation (#430).
+		if (interruptClosure !== undefined) payload.interruptClosure = interruptClosure;
 		const transport = (message as { codexTransport?: CodexTransportObservation }).codexTransport;
 		if (transport) payload.codexTransport = transport;
 		const quota = (message as { codexQuota?: CodexQuotaObservation }).codexQuota;
@@ -395,8 +394,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			payload.continuityDeliveryId = deliveryId;
 			payload.stopReason = message.stopReason;
 		}
-		// Keep the interrupted display estimate beside unknown provider usage (#423, #430).
-		const interruptedUsage = estimatedUsageForInterruptedTurn(message, deps.promptSideTokens());
+		// A synthetic notice is not output, so it can only carry the hollow call's display estimate (#423, #430).
+		const interruptedUsage =
+			(message as { estimatedUsage?: Record<string, unknown> }).estimatedUsage ??
+			(interruptClosure === undefined ? estimatedUsageForInterruptedTurn(message, deps.promptSideTokens()) : null);
 		// A call that reached the provider and failed unmetered is recorded as
 		// unknown, not as the zeros its stream started with (#423).
 		const recordedUsage = unmeteredInvokedUsage(message);

@@ -181,3 +181,10 @@ export function ledgerCallFailureCounts(entries: ReadonlyArray<SessionEntry>) {
 	}
 	return { invokedUnknownCalls, neverInvokedCalls };
 }
+
+/** Coverage labels preserve the distinction between unknown and never sent (#430). */
+export function usageCoverageLabel(unknownCalls: number, neverSentCalls = 0): string {
+	if (unknownCalls === 0)
+		return `${neverSentCalls.toLocaleString("en-US")} call${neverSentCalls === 1 ? "" : "s"} never sent`;
+	return `${unknownCalls.toLocaleString("en-US")} call${unknownCalls === 1 ? "" : "s"} with unknown usage; token amounts are known subtotals${neverSentCalls > 0 ? `; ${neverSentCalls.toLocaleString("en-US")} never sent` : ""}`;
+}

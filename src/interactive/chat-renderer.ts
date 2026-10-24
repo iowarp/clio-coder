@@ -53,6 +53,7 @@ import {
 	extractTurnText,
 	makeTextMessage,
 	messageFailure,
+	messageInterruptClosure,
 	payloadObject,
 	richMessageFromEntry,
 	selectReplayEntries,
@@ -751,8 +752,14 @@ function replayEntries(
 						// tool-use message continues the run, so its entry stays pending until
 						// a terminal assistant arrives; settling before its tool rows exist
 						// could attach a Done receipt to an earlier visible failure.
-						chatPanel.applyEvent({ type: "message_start", message });
-						chatPanel.applyEvent({ type: "message_end", message });
+						const interruptClosure = messageInterruptClosure(entry);
+						// The receipt has no answer text; settlement still uses the original aborted call (#430).
+						const displayMessage =
+							interruptClosure !== null && message.role === "assistant"
+								? { ...message, content: [], stopReason: "stop" as const }
+								: message;
+						chatPanel.applyEvent({ type: "message_start", message: displayMessage });
+						chatPanel.applyEvent({ type: "message_end", message: displayMessage });
 						runAssistantMessages.push(message);
 						for (const reason of persistedColdReasons(entry)) {
 							if (!runColdReasons.includes(reason)) runColdReasons.push(reason);
@@ -772,7 +779,18 @@ function replayEntries(
 								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
 							};
 							const messages = runAssistantMessages;
-							pendingSettle = () => chatPanel.applyEvent({ type: "agent_end", messages, replayed } as ChatLoopEvent);
+							pendingSettle = () => {
+								chatPanel.applyEvent({ type: "agent_end", messages, replayed } as ChatLoopEvent);
+								if (interruptClosure !== null) {
+									chatPanel.applyEvent({
+										type: "notice",
+										level: "warning",
+										surface: "transcript",
+										text: interruptClosure.text,
+										...(interruptClosure.operatorCancel ? { operatorCancel: true } : {}),
+									});
+								}
+							};
 						}
 					}
 					break;

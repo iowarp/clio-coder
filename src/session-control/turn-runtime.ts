@@ -1066,11 +1066,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// message of the run (prompts, assistant, tool results) via message_end,
 		// so the slice from here is the run's real message window.
 		let runStartMessageCount = 0;
-		// Estimated spend of each cancelled call, keyed by the engine's message
-		// object: message_end publishes it, agent_end re-reports it on the same
-		// object from agent state, and a suppressed hollow abort hands it to the
-		// closing turn. Weak so a settled run's messages are not retained.
-		const interruptedUsageByMessage = new WeakMap<object, Record<string, unknown>>();
 
 		handle.agent.subscribe(async (event) => {
 			if (event.type === "agent_start") runIdentity = deps.turnIdentity?.();
@@ -1207,7 +1202,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const interruptedUsage = estimatedUsageForInterruptedTurn(enrichedEvent.message, context.promptSideTokens());
 				if (interruptedUsage !== null) {
 					// Preserve the display estimate without replacing provider usage (#423, #430).
-					interruptedUsageByMessage.set(enrichedEvent.message as object, interruptedUsage);
 					Object.assign(enrichedEvent.message, { estimatedUsage: interruptedUsage });
 				}
 			}
@@ -1313,24 +1307,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 			}
 			if (enrichedEvent.type === "agent_end") unsettledSpendUsd = 0;
-			// While a loop-guard interrupt is active its closing message has
-			// already been shown; the aborted follow-up calls the abort leaves
-			// behind carry no content and would render as "[aborted] Request was
-			// aborted." noise, so drop them from the live transcript the same way
-			// persistence does.
+			// Suppress the hollow transcript event while its closing turn keeps the call's accounting (#430).
 			if (
 				state.activeInterruptReason !== null &&
 				enrichedEvent.type === "message_end" &&
-				isEmptyAbortedAssistantMessage(enrichedEvent.message) &&
-				// Interrupt notices cannot replace the failed call's accounting (#430).
-				(enrichedEvent.message as { usage?: { callInvoked?: boolean } }).usage?.callInvoked === undefined
+				isEmptyAbortedAssistantMessage(enrichedEvent.message)
 			) {
-				// The ledger drops this message too, so the spend the cancelled call
-				// streamed as thinking would otherwise vanish from the durable record.
-				// Hand it to the closing turn the interrupt persists when the run
-				// settles; the public agent_end window above still feeds status.
-				const estimate = interruptedUsageByMessage.get(enrichedEvent.message as object);
-				if (estimate !== undefined) state.interruptedUsage = estimate;
+				persistence.appendAssistantTurn(
+					enrichedEvent.message,
+					apiCallStartedAt === null
+						? null
+						: {
+								ttftMs: apiCallFirstDeltaAt === null ? null : Math.round(Math.max(0, apiCallFirstDeltaAt - apiCallStartedAt)),
+								apiMs: Math.round(Math.max(0, eventClock - apiCallStartedAt)),
+							},
+				);
 				return;
 			}
 			if (publicEvent) deps.emit(publicEvent);
