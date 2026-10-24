@@ -62,7 +62,8 @@ export function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmoun
 			((amount.missingTokenCalls ?? 0) > 0 && amount.provenance !== "known_free"),
 		allKnownFree:
 			(amount.costSummary?.allKnownFree ?? amount.provenance === "known_free") && (first || aggregate.allKnownFree),
-		calls: aggregate.calls + (amount.apiCalls ?? 1),
+		// Carried summaries retain their call coverage along with their USD and flags (#434).
+		calls: aggregate.calls + (amount.costSummary?.calls ?? amount.apiCalls ?? 1),
 	};
 }
 
@@ -167,6 +168,7 @@ export type CostEntryLabel =
 	| "compaction";
 
 export interface CostEntry {
+	replayed?: boolean;
 	costSummary?: CostAggregate;
 	providerId: string;
 	attributedModelId: string;
@@ -200,6 +202,7 @@ export interface CostTracker {
 		},
 		label?: CostEntryLabel,
 		costSummary?: CostAggregate,
+		replayed?: boolean,
 	): number;
 	sessionTotal(): number;
 	sessionCost(): CostAggregate;
@@ -217,7 +220,18 @@ export function createCostTracker(): CostTracker {
 	let aggregate = emptyCostAggregate();
 	const totals = emptyBreakdown();
 	return {
-		accumulate(providerId, attributedModelId, tokens, usd, breakdown, costProvenance, modelIdFacts, label, costSummary) {
+		accumulate(
+			providerId,
+			attributedModelId,
+			tokens,
+			usd,
+			breakdown,
+			costProvenance,
+			modelIdFacts,
+			label,
+			costSummary,
+			replayed,
+		) {
 			const resolvedUsd = usd ?? 0;
 			const provenance = normalizeCostProvenance(costProvenance);
 			const input = breakdown?.input ?? 0;
@@ -228,6 +242,7 @@ export function createCostTracker(): CostTracker {
 			const apiCalls = breakdown?.apiCalls;
 			const missingTokenCalls = breakdown?.missingTokenCalls ?? 0;
 			log.push({
+				...(replayed ? { replayed } : {}),
 				providerId,
 				attributedModelId,
 				requestedModelIds: [...(modelIdFacts?.requestedModelIds ?? [attributedModelId])],

@@ -74,16 +74,38 @@ test("editing a selected target refreshes the next request and retains portable 
 	});
 	try {
 		const constraints = { mode: "proposal" as const, allowedTools: ["read"] };
-		const firstTurn = loop.submit("First authorized task", { constraints });
+		let admittedConstraints: ReturnType<NonNullable<typeof loop.currentTurnConstraints>>;
+		let editRefusal: Promise<string> | undefined;
+		const firstTurn = loop.submit("First authorized task", {
+			constraints,
+			onAdmitted: () => {
+				// R8 keeps schemas stable; isolation holds in turn admission (#423).
+				admittedConstraints = loop.currentTurnConstraints?.();
+				editRefusal = agents[0]?.agent.state.tools
+					.find((tool) => tool.name === "edit")
+					?.execute("caller-mutation-edit", {
+						path: `${process.env.TMPDIR}/caller-mutation-must-not-edit.txt`,
+						edits: [{ oldText: "before", newText: "after" }],
+					})
+					.then(
+						() => "",
+						(error: unknown) => (error instanceof Error ? error.message : String(error)),
+					);
+			},
+		});
 		constraints.allowedTools.push("edit");
 		await firstTurn;
-		strictEqual(first.requests.length, 1);
+		strictEqual(first.requests.length, 1, "proposal mode refuses the middleware's request_continuation");
 		deepStrictEqual(
-			agents[0]?.agent.state.tools.map((tool) => tool.name),
-			["read"],
+			admittedConstraints,
+			{ mode: "proposal", allowedTools: ["read"] },
 			"caller mutation cannot widen an admitted turn",
 		);
-		deepStrictEqual(loop.currentTurnConstraints?.()?.allowedTools, ["read"]);
+		ok(
+			(await editRefusal)?.includes("edit is outside this task's admitted tool scope."),
+			"edit is refused by tool_scope",
+		);
+		strictEqual(loop.currentTurnConstraints?.(), undefined, "settlement releases the turn's restriction (#423)");
 		await loop.submit("Same target configuration");
 		strictEqual(
 			loop.currentTurnConstraints?.(),

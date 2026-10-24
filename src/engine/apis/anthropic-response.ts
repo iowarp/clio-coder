@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Api, AssistantMessage, AssistantMessageEventStream, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { AnthropicResponseObservation } from "../types.js";
 
 const RATE_LIMIT_PREFIX = "anthropic-ratelimit-unified-";
@@ -63,14 +64,24 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 			await onProviderStreamEvent?.(data, eventModel);
 		},
 	} as T);
+	const annotate = (terminal: AssistantMessage): void => {
+		(terminal as AssistantMessage & { anthropicResponse?: AnthropicResponseObservation }).anthropicResponse = observation;
+		if (observation.messageStart === null) return;
+		const reported = observation.messageStart.model;
+		const reportedModelId = typeof reported === "string" ? reported.trim() : "";
+		const modelIdObservation: ResponseModelIdObservation = reportedModelId
+			? { state: "reported", reportedModelId }
+			: { state: "not-reported" };
+		terminal.responseModelIdObservation = modelIdObservation;
+		if (reportedModelId && reportedModelId !== model.id) terminal.responseModel = reportedModelId;
+	};
 	const output = createAssistantMessageEventStream();
 	void (async () => {
 		try {
 			for await (const event of source) {
 				if (event.type === "done" || event.type === "error") {
 					const terminal = event.type === "done" ? event.message : event.error;
-					(terminal as AssistantMessage & { anthropicResponse?: AnthropicResponseObservation }).anthropicResponse =
-						observation;
+					annotate(terminal);
 				}
 				output.push(event);
 			}
@@ -96,6 +107,7 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 				timestamp: Date.now(),
 				anthropicResponse: observation,
 			};
+			annotate(error);
 			output.push({ type: "error", reason, error });
 			output.end(error);
 		}

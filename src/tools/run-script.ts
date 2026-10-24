@@ -2,6 +2,7 @@ import { closeSync, openSync, realpathSync, statSync, writeSync } from "node:fs"
 import path from "node:path";
 import { Type } from "typebox";
 import {
+	assertRunRecordIntact,
 	captureFileRef,
 	captureOutputRef,
 	createRunRecord,
@@ -714,6 +715,7 @@ interface OpenLog {
 }
 
 function openLogs(paths: RunRecordPaths): { stdout: OpenLog; stderr: OpenLog } {
+	assertRunRecordIntact(paths);
 	const stdout: OpenLog = { fd: openSync(paths.stdoutPath, "w"), path: paths.stdoutPath };
 	let stderr: OpenLog;
 	try {
@@ -788,7 +790,7 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			} catch (error) {
 				return {
 					kind: "error",
-					message: `run_script: cannot create the run record: ${error instanceof Error ? error.message : String(error)}`,
+					message: `run_script: cannot create the run record, script not run: ${error instanceof Error ? error.message : String(error)}`,
 				};
 			}
 

@@ -48,18 +48,32 @@ function truncate(text: string, maxBytes: number): string {
 	return truncateUtf8(text, maxBytes, TRUNCATION_MARKER);
 }
 
-function decodeUtf8Prefix(bytes: Buffer, maxBytes: number): string {
-	let cut = Math.min(maxBytes, bytes.byteLength);
-	while (cut > 0) {
-		const nextByte = bytes[cut];
-		if (nextByte === undefined || (nextByte & 0xc0) !== 0x80) break;
-		cut -= 1;
-	}
-	return bytes.subarray(0, cut).toString("utf8");
+function capOutput(text: string, maxBytes: number): { output: string; truncated: boolean } {
+	const output = truncate(text, maxBytes);
+	return { output, truncated: output !== text };
 }
 
 async function readResponseText(response: Response, maxBytes: number): Promise<ReadResult> {
 	if (!response.body) return { text: "", bytesRead: 0, truncated: false };
+	const charset = /(?:^|;)\s*charset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^;\s]*))/i.exec(
+		response.headers.get("content-type") ?? "",
+	);
+	const encoding = (charset?.[1] ?? charset?.[2] ?? charset?.[3] ?? "").trim() || "utf-8";
+	let decoder: InstanceType<typeof TextDecoder>;
+	try {
+		decoder = new TextDecoder(encoding);
+	} catch {
+		if (
+			response.status < 200 ||
+			response.status >= 300 ||
+			isProbablyBinary(response.headers.get("content-type") ?? "", "")
+		) {
+			decoder = new TextDecoder("utf-8");
+		} else {
+			await response.body.cancel();
+			throw new Error(`unsupported text encoding: ${JSON.stringify(encoding)}`);
+		}
+	}
 	const reader = response.body.getReader();
 	const chunks: Buffer[] = [];
 	let totalBytes = 0;
@@ -92,12 +106,12 @@ async function readResponseText(response: Response, maxBytes: number): Promise<R
 	const bytes = Buffer.concat(chunks, totalBytes);
 	if (truncated || bytes.byteLength > maxBytes) {
 		return {
-			text: `${decodeUtf8Prefix(bytes, maxBytes)}${TRUNCATION_MARKER}`,
+			text: `${decoder.decode(bytes.subarray(0, maxBytes), { stream: true })}${TRUNCATION_MARKER}`,
 			bytesRead: bytes.byteLength,
 			truncated: true,
 		};
 	}
-	return { text: bytes.toString("utf8"), bytesRead: bytes.byteLength, truncated: false };
+	return { text: decoder.decode(bytes), bytesRead: bytes.byteLength, truncated: false };
 }
 
 function headerValue(response: Response, name: string): string {
@@ -393,7 +407,8 @@ async function fetchArxivPaperSummary(
 			alphaxivRead = await readResponseText(alpha, Math.min(80_000, Math.max(0, maxBytes - read.bytesRead)));
 			if (alphaxivRead.text.trim().length > 0) paper.alphaxivOverview = alphaxivRead.text.trim();
 		}
-	} catch {
+	} catch (error) {
+		if (init?.signal?.aborted) throw error;
 		// AlphaXiv is opportunistic; arXiv metadata is the source of truth.
 	}
 
@@ -418,16 +433,17 @@ async function fetchArxivPaperSummary(
 	if (paper.abstract) lines.push("", "Abstract:", paper.abstract);
 	if (paper.alphaxivOverview) lines.push("", "AlphaXiv overview:", paper.alphaxivOverview);
 	const bytesRead = read.bytesRead + (alphaxivRead?.bytesRead ?? 0);
+	const formatted = capOutput(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, maxBytes);
 	return {
 		kind: "ok",
-		output: truncate(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, maxBytes),
+		output: formatted.output,
 		details: {
 			url: `https://arxiv.org/abs/${paper.id}`,
 			status: 200,
 			contentType: "application/atom+xml",
 			format: "arxiv-paper",
 			bytesRead,
-			truncated: read.truncated || (alphaxivRead?.truncated ?? false),
+			truncated: read.truncated || (alphaxivRead?.truncated ?? false) || formatted.truncated,
 		},
 	};
 }
@@ -461,6 +477,7 @@ async function fetchArxivApiSummary(
 		"",
 		"Papers:",
 	];
+	let truncated = read.truncated;
 	for (const [index, paper] of entries.entries()) {
 		lines.push("", `## ${index + 1}. ${paper.title ?? paper.id}`);
 		lines.push(`Paper ID: ${paper.id}`);
@@ -470,18 +487,23 @@ async function fetchArxivApiSummary(
 		if (paper.updated) lines.push(`Updated: ${paper.updated}`);
 		if (paper.categories.length > 0) lines.push(`Categories: ${paper.categories.join(", ")}`);
 		lines.push(`Links: https://arxiv.org/abs/${paper.id} | https://arxiv.org/pdf/${paper.id}`);
-		if (paper.abstract) lines.push("Abstract:", truncate(paper.abstract, 1600));
+		if (paper.abstract) {
+			const abstract = capOutput(paper.abstract, 1600);
+			lines.push("Abstract:", abstract.output);
+			truncated ||= abstract.truncated;
+		}
 	}
+	const formatted = capOutput(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, maxBytes);
 	return {
 		kind: "ok",
-		output: truncate(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, maxBytes),
+		output: formatted.output,
 		details: {
 			url: url.toString(),
 			status: 200,
 			contentType: "application/atom+xml",
 			format: "arxiv-search-results",
 			bytesRead: read.bytesRead,
-			truncated: read.truncated,
+			truncated: truncated || formatted.truncated,
 		},
 	};
 }
@@ -584,25 +606,28 @@ async function fetchRepoTreeSummary(
 		...allNames.map((name) => `- ${name}`),
 	];
 	let remaining = maxBytes - Buffer.byteLength(sections.join("\n"));
+	let truncated = apiRead.truncated;
 	for (const file of files) {
 		if (remaining <= 2000) break;
 		const rawUrl = `${target.rawBaseUrl}/${file}`;
 		const rawResponse = await fetchWebUrl(rawUrl, init, network);
 		if (rawResponse.status < 200 || rawResponse.status >= 300) continue;
 		const rawRead = await readResponseText(rawResponse, Math.min(80_000, remaining));
+		truncated ||= rawRead.truncated;
 		sections.push("", `--- ${file} ---`, rawRead.text.trim());
 		remaining -= Buffer.byteLength(rawRead.text);
 	}
+	const formatted = capOutput(`${UNTRUSTED_CONTENT_BANNER}\n${sections.join("\n")}`, maxBytes);
 	return {
 		kind: "ok",
-		output: truncate(`${UNTRUSTED_CONTENT_BANNER}\n${sections.join("\n")}`, maxBytes),
+		output: formatted.output,
 		details: {
 			url: target.apiUrl,
 			status: 200,
 			contentType: "application/json",
 			format: `repository-${target.kind}-tree-summary`,
 			bytesRead: apiRead.bytesRead,
-			truncated: apiRead.truncated,
+			truncated: truncated || formatted.truncated,
 		},
 	};
 }
@@ -615,7 +640,7 @@ function formatOutput(args: {
 	truncated: boolean;
 	extracted: ExtractedContent;
 	maxBytes: number;
-}): string {
+}): { output: string; truncated: boolean } {
 	const lines = [
 		`URL: ${args.url}`,
 		`Status: ${args.status}`,
@@ -627,7 +652,7 @@ function formatOutput(args: {
 	if (args.extracted.description) lines.push(`Description: ${args.extracted.description}`);
 	if (args.extracted.canonical) lines.push(`Canonical: ${args.extracted.canonical}`);
 	lines.push("", "Content:", args.extracted.content || "[empty]");
-	return truncate(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, args.maxBytes);
+	return capOutput(`${UNTRUSTED_CONTENT_BANNER}\n${lines.join("\n")}`, args.maxBytes);
 }
 
 export const webFetchTool: ToolSpec = {
@@ -737,38 +762,40 @@ export const webFetchTool: ToolSpec = {
 			}
 			const finalUrl = response.url || parsed.toString();
 			const extracted = extractWebFetchContent(read.text, contentType, finalUrl, format);
+			const formatted = formatOutput({
+				url: finalUrl,
+				status: response.status,
+				contentType,
+				bytesRead: read.bytesRead,
+				truncated: read.truncated,
+				extracted,
+				maxBytes,
+			});
 			return {
 				kind: "ok",
-				output: formatOutput({
-					url: finalUrl,
-					status: response.status,
-					contentType,
-					bytesRead: read.bytesRead,
-					truncated: read.truncated,
-					extracted,
-					maxBytes,
-				}),
+				output: formatted.output,
 				details: {
 					url: finalUrl,
 					status: response.status,
 					contentType,
 					format: extracted.format,
 					bytesRead: read.bytesRead,
-					truncated: read.truncated,
+					truncated: read.truncated || formatted.truncated,
 				},
 			};
 		} catch (err) {
-			if (err instanceof Error && err.name === "AbortError") {
-				if (externalAborted) {
-					return { kind: "error", message: "web_fetch: request aborted" };
-				}
-				if (timedOut) {
-					return { kind: "error", message: `web_fetch: timeout after ${timeoutMs}ms` };
-				}
+			if (externalAborted) {
 				return { kind: "error", message: "web_fetch: request aborted" };
 			}
-			const msg = err instanceof Error ? err.message : String(err);
-			return { kind: "error", message: `web_fetch: ${msg}` };
+			if (timedOut) {
+				return { kind: "error", message: `web_fetch: timeout after ${timeoutMs}ms` };
+			}
+			if (err instanceof Error && err.name === "AbortError") {
+				return { kind: "error", message: "web_fetch: request aborted" };
+			}
+			const errors: unknown[] = err instanceof AggregateError ? err.errors : [err];
+			const msg = errors.map((error) => (error instanceof Error ? error.message || error.name : String(error))).join("; ");
+			return { kind: "error", message: `web_fetch: ${msg || "request failed"}` };
 		} finally {
 			clearTimeout(timer);
 			externalSignal?.removeEventListener("abort", onExternalAbort);
