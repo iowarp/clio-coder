@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { rmSync } from "node:fs";
+import { relaunchScript } from "./relaunch-script.js";
 import { restartIntentPath } from "./restart-intent.js";
 import { markRestartHandoff } from "./restart-status.js";
 import type { getTerminationCoordinator } from "./termination.js";
@@ -9,7 +10,9 @@ export function armRestartHandoff(stateDir: string, termination: ReturnType<type
 	termination.setExitHandoff(async () => {
 		try {
 			return await new Promise<number>((resolve, reject) => {
-				const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+				const [script, ...args] = process.argv.slice(1);
+				const argv = script === undefined ? [] : [relaunchScript(script), ...args];
+				const child = spawn(process.execPath, [...process.execArgv, ...argv], {
 					cwd: process.cwd(),
 					env: process.env,
 					stdio: "inherit",

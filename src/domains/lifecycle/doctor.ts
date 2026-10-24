@@ -4,6 +4,7 @@ import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
+import { readClioVersion } from "../../core/package-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
@@ -19,11 +20,12 @@ import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { isSessionEntry, type SessionEntry } from "../session/entries.js";
 import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReason } from "../session/prompt-cache.js";
 import type { SiteBindingInfo } from "../system-one/types.js";
+import { deferredUpdateTarget, readDeferredResult } from "./deferred-update.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
 import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
 import { nativeAutoUpdatePolicy } from "./native-update.js";
 import { readStateInfoResult } from "./state.js";
-import { readLastBackgroundUpdate } from "./update-check.js";
+import { deferredResultPath, readDeferredWait, readLastBackgroundUpdate } from "./update-check.js";
 import { getVersionInfo } from "./version.js";
 
 /** `info` reports a fact that needs no action, such as an optional tool that is absent. */
@@ -354,7 +356,39 @@ function installMethodFinding(installation: Installation): DoctorFinding {
 	}
 	const record = installation.installer;
 	if (installation.kind !== "installer" || record === undefined) {
-		return { ok: true, name: "install method", detail: `${installation.kind} (${installation.root})` };
+		if (!["npm", "pnpm", "bun"].includes(installation.kind))
+			return { ok: true, name: "install method", detail: `${installation.kind} (${installation.root})` };
+		// #436: a user-writable package-manager prefix updates after the session quits.
+		let setting = true;
+		try {
+			setting = readSettings().interface.autoUpdate;
+		} catch {
+			// The settings row reports an unreadable file.
+		}
+		const off =
+			process.env.CLIO_CODER_AUTO_UPDATE === "0"
+				? "env"
+				: !setting
+					? "setting"
+					: deferredUpdateTarget(installation, "0.0.0") === null
+						? "prefix not user-writable"
+						: null;
+		const cache = resolveClioDirs().cache;
+		const pending = readDeferredResult(deferredResultPath(installation, cache));
+		const last = pending?.deferred ? null : (pending ?? readLastBackgroundUpdate(installation, cache));
+		const lastText = last
+			? `; last background update ${new Date(last.at).toISOString()}: ${last.ok ? `ok v${last.from} -> v${last.to}` : `failed v${last.to}: ${last.detail}${"log" in last && last.log ? `; log ${last.log}` : ""}`}`
+			: "";
+		const wait = readDeferredWait(installation, cache, readClioVersion());
+		const waitText = wait
+			? `; update to v${wait.to} waiting for ${wait.detail} since ${new Date(wait.at).toISOString()}`
+			: "";
+		return {
+			ok: true,
+			...((last && !last.ok) || wait ? { level: "warn" as const } : {}),
+			name: "install method",
+			detail: `${installation.kind} (${installation.root}; update after exit ${off ? `off (${off})` : "on"}${lastText}${waitText})`,
+		};
 	}
 	const stale = record.current !== installation.prefix ? `; the launcher now runs ${record.current}` : "";
 	const foreignNode = process.execPath !== record.node ? `; this process runs ${process.execPath} instead` : "";

@@ -96,6 +96,199 @@ function runUnder(nodePath, entryArgs) {
 	});
 }
 
+function sleepMs(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function processAlive(pid) {
+	if (!(typeof pid === "number" && pid > 0 && pid % 1 === 0 && pid <= 9007199254740991)) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return error.code === "EPERM";
+	}
+}
+
+/* Same host id as the update wrapper: machine-id, else the host name. */
+function hostId(fs) {
+	var files = ["/etc/machine-id", "/var/lib/dbus/machine-id"];
+	for (var i = 0; i < files.length; i += 1) {
+		try {
+			var value = fs.readFileSync(files[i], "utf8").trim();
+			if (value) return value + ":" + require("os").hostname();
+		} catch (_error) {
+			/* not on this platform */
+		}
+	}
+	return require("os").hostname();
+}
+
+/* Linux start time of a pid, so a reused pid does not pass for its predecessor. */
+function birthToken(fs, pid) {
+	try {
+		var stat = fs.readFileSync("/proc/" + pid + "/stat", "utf8");
+		return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] || null;
+	} catch (_error) {
+		return null;
+	}
+}
+
+/*
+ * True for the global layouts a deferred update can replace: npm and volta
+ * (lib/node_modules), bun (install/global/node_modules) and pnpm
+ * (global/<n>/.pnpm). npx caches and project-local node_modules never are.
+ */
+function updatableRoot(path, root) {
+	var parts = root.split(path.sep);
+	if (parts.indexOf("_npx") !== -1) return false;
+	var modules = path.dirname(path.dirname(root));
+	if (path.basename(path.dirname(root)) !== "@iowarp" || path.basename(modules) !== "node_modules") return false;
+	var above = path.basename(path.dirname(modules));
+	if (above === "lib") return true;
+	if (above === "global" && path.basename(path.dirname(path.dirname(modules))) === "install") return true;
+	var pnpm = parts.indexOf(".pnpm");
+	return pnpm > 1 && /^\d+$/.test(parts[pnpm - 1]) && parts[pnpm - 2] === "global";
+}
+
+/*
+ * A package-manager install is replaced in place after a session quits, by a
+ * detached wrapper that waits until no Clio of this install runs (#436). A
+ * launch registers itself so that wrapper waits for it, and waits while the
+ * wrapper's lease is live so it never links half-replaced files. The common
+ * case costs one stat; source checkouts, native installs, npx and
+ * project-local copies skip all of it. Returns false to stop.
+ */
+/* The wrapper's result counts only when written by this run: the path is fixed per install. */
+function resultSince(fs, lease) {
+	if (!lease.result) return false;
+	try {
+		var result = JSON.parse(fs.readFileSync(String(lease.result), "utf8"));
+		return Number(result.at) >= Number(lease.startedAt);
+	} catch (_error) {
+		return false;
+	}
+}
+
+function holdInstall(path) {
+	var fs = require("fs");
+	var root = path.dirname(__dirname);
+	if (!updatableRoot(path, root)) return true;
+	var hold = path.dirname(path.dirname(root));
+	var marker = path.join(hold, ".clio-coder-update.json");
+	var present = false;
+	try {
+		fs.statSync(marker);
+		present = true;
+	} catch (_error) {
+		present = false;
+	}
+	var host = hostId(fs);
+	var active = path.join(hold, ".clio-coder-active");
+	var self = path.join(active, String(process.pid));
+	try {
+		fs.mkdirSync(active, { recursive: true });
+		fs.writeFileSync(
+			self,
+			JSON.stringify({
+				host: host,
+				hostname: require("os").hostname(),
+				birth: birthToken(fs, process.pid),
+				startedAt: Date.now(),
+			}) + "\n",
+		);
+		process.on("exit", function () {
+			try {
+				fs.unlinkSync(self);
+			} catch (_error) {
+				/* already gone */
+			}
+		});
+		// The heartbeat lets a wrapper on another host tell a live session on a
+		// shared home from one that crashed with its machine.
+		setInterval(
+			function () {
+				try {
+					var now = new Date();
+					fs.utimesSync(self, now, now);
+				} catch (_error) {
+					/* removed by a wrapper that judged it stale; nothing to do */
+				}
+			},
+			5 * 60 * 1000,
+		).unref();
+	} catch (_error) {
+		/* A read-only prefix never gets a deferred update, so nothing waits on this file. */
+	}
+	// A wrapper that staked its lease between the first stat and the
+	// registration above has not seen this process; look once more.
+	if (!present) {
+		try {
+			fs.statSync(marker);
+			present = true;
+		} catch (_error) {
+			return true;
+		}
+	}
+	var lease = null;
+	try {
+		lease = JSON.parse(fs.readFileSync(marker, "utf8"));
+	} catch (_error) {
+		lease = null;
+	}
+	if (!lease || typeof lease.pid !== "number") {
+		// A stake that died between create and write: hold until the cap by
+		// the file's own time, then clear it so updates can run again.
+		var mtime = 0;
+		try {
+			mtime = fs.statSync(marker).mtimeMs;
+		} catch (_error) {
+			return true;
+		}
+		if (Date.now() - mtime > 30 * 60 * 1000) {
+			try {
+				fs.unlinkSync(marker);
+			} catch (_error) {
+				/* another launch removed it */
+			}
+			return true;
+		}
+		lease = { pid: -1, host: "", hostname: "an unreadable lease", startedAt: mtime, manager: "unknown" };
+	}
+	// A lease from this host is judged by its pid and birth token. One from
+	// another host on a shared home is held until the 30 min cap: its pid means
+	// nothing here, and deleting it would load a half-replaced dist.
+	var leaseAlive = function () {
+		var age = Date.now() - Number(lease.startedAt);
+		if (!(age < 30 * 60 * 1000)) return false;
+		if (lease.pid === -1) return fs.existsSync(marker);
+		// A foreign lease dated more than five minutes ahead is skewed or planted.
+		if (lease.host !== host) return age > -5 * 60 * 1000;
+		if (!processAlive(Number(lease.pid))) return false;
+		var born = birthToken(fs, Number(lease.pid));
+		return !lease.birth || born === null || born === lease.birth;
+	};
+	if (!leaseAlive()) {
+		try {
+			fs.unlinkSync(marker);
+		} catch (_error) {
+			/* another launch removed it */
+		}
+		return true;
+	}
+	var where = lease.host === host ? "" : " on " + String(lease.hostname || "another host");
+	process.stderr.write("Clio Coder is updating (" + String(lease.manager) + where + "); waiting…\n");
+	var deadline = Date.now() + 120 * 1000;
+	while (Date.now() < deadline) {
+		if (!fs.existsSync(marker) || resultSince(fs, lease)) return true;
+		if (!leaseAlive()) return true;
+		sleepMs(250);
+	}
+	process.stderr.write("clio-coder: the update is still running after 120 s; see " + String(lease.log) + "\n");
+	process.exitCode = 75;
+	return false;
+}
+
 function main() {
 	var path = require("path");
 	var entry = path.join(__dirname, "..", "dist", "cli", "index.js");
@@ -109,6 +302,7 @@ function main() {
 		process.exitCode = 1;
 		return;
 	}
+	if (!holdInstall(path)) return;
 	// dist/cli/index.js and install-method detection read argv[1] as the entry.
 	process.argv[1] = entry;
 	var url = require("url").pathToFileURL(entry).href;

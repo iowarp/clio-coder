@@ -10,7 +10,12 @@ export interface UpdateMonitorOptions {
 	signal: AbortSignal;
 	/** Live `interface.autoUpdate` (#436). */
 	autoUpdate?: () => boolean;
-	check?: Pick<UpdateCheck, "probe" | "claim"> & Partial<Pick<UpdateCheck, "maybeInstall">>;
+	/**
+	 * Receives the synchronous starter of a deferred package-manager update,
+	 * once, for the owner to run from a shutdown hook (#436).
+	 */
+	onDeferredUpdate?: (start: () => boolean) => void;
+	check?: Pick<UpdateCheck, "probe" | "claim"> & Partial<Pick<UpdateCheck, "maybeInstall" | "spawnDeferred">>;
 	now?: () => number;
 }
 
@@ -35,6 +40,7 @@ export function startUpdateMonitor(options: UpdateMonitorOptions) {
 	let inFlight = false;
 	let offeredUpdate = false;
 	let installStarted = false;
+	let deferredArmed = false;
 	const seen = new Set<string>();
 	function text(): string | null {
 		if (!displayed || options.signal.aborted || now() >= expiresAt) return null;
@@ -50,6 +56,10 @@ export function startUpdateMonitor(options: UpdateMonitorOptions) {
 				// The install does not wait for idle and does not hold the tick:
 				// probes and notices keep running while it works, and its outcome
 				// surfaces through the next probe (#436).
+				if (pending?.defer && !deferredArmed && check.spawnDeferred && options.onDeferredUpdate) {
+					deferredArmed = true;
+					options.onDeferredUpdate(check.spawnDeferred);
+				}
 				if (pending?.install && !installStarted && check.maybeInstall) {
 					installStarted = true;
 					void check

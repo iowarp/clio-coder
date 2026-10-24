@@ -165,6 +165,11 @@ class TerminationCoordinator {
 		this.persistHooks.push(registeredHook(hook, options));
 	}
 
+	/** True once /restart armed a handoff: this process lives on as the child's guardian after persist. */
+	hasExitHandoff(): boolean {
+		return this.exitHandoff !== undefined;
+	}
+
 	/** A foreground guardian runs after bounded resource teardown, for the child's lifetime. */
 	setExitHandoff(handoff: () => Promise<number>): void {
 		if (this.started || this.exitHandoff) throw new Error("shutdown handoff is already armed or started");

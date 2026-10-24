@@ -1,11 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { isDevVersion } from "../../core/build-info.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
-import { withStateFileLock } from "../../core/state-file-lock.js";
+import { withStateFileLock, withStateFileLockSync } from "../../core/state-file-lock.js";
+import {
+	DEFERRED_RUN_MS,
+	DEFERRED_WAIT_MS,
+	type DeferredTarget,
+	deferredUpdateTarget,
+	readDeferredResult,
+	spawnDeferredUpdate,
+} from "./deferred-update.js";
 import type { Installation } from "./install-method.js";
 import { installationCommand, installerPackageRoot, readInstallerRecord } from "./install-method.js";
 import { NATIVE_UPDATE_TIMEOUT_MS, nativeAutoUpdatePolicy, runNativeBackgroundUpdate } from "./native-update.js";
@@ -38,8 +46,12 @@ interface UpdateCache {
 	updatePid?: number;
 	updateHost?: string;
 	updateBirth?: string;
+	/** Lease length for this holder; a deferred wrapper may wait for sessions before it runs. */
+	updateLeaseMs?: number;
 	/** Outcome of the newest background install, read by later sessions and `doctor`. */
 	lastUpdate?: LastBackgroundUpdate;
+	/** A deferred wrapper gave up waiting; `detail` names what held it (pid@host). Not a failure. */
+	deferredWait?: DeferredWait;
 }
 
 export interface LastBackgroundUpdate {
@@ -49,14 +61,21 @@ export interface LastBackgroundUpdate {
 	ok: boolean;
 	exitCode: number | null;
 	detail: string;
+	/** Set for a deferred package-manager update: who ran it and where it logged. */
+	manager?: string;
+	log?: string;
+	/** The next launch already showed this result. */
+	announced?: boolean;
 }
 
 export interface UpdateNotice {
-	kind: "available" | "replaced" | "failed";
+	kind: "available" | "replaced" | "failed" | "updated";
 	key: string;
 	text: string;
 	/** An eligible native install the session should start in the background. */
 	install?: boolean;
+	/** A package-manager install the session should hand to a wrapper when it quits. */
+	defer?: boolean;
 }
 
 export interface UpdateCheckOptions {
@@ -72,12 +91,20 @@ export interface UpdateCheckOptions {
 }
 
 /** The cache file a check keeps per install root; `doctor` reads `lastUpdate` from it. */
-function updateCachePath(installation: Installation, cacheDir: string): string {
-	const fingerprint = createHash("sha256")
+function updateFingerprint(installation: Installation): string {
+	return createHash("sha256")
 		.update(installation.installer?.root ?? installation.root)
 		.digest("hex")
 		.slice(0, 16);
-	return join(cacheDir, `update-${fingerprint}.json`);
+}
+
+function updateCachePath(installation: Installation, cacheDir: string): string {
+	return join(cacheDir, `update-${updateFingerprint(installation)}.json`);
+}
+
+/** Where a deferred wrapper leaves its outcome until the next launch merges it. */
+export function deferredResultPath(installation: Installation, cacheDir: string): string {
+	return join(cacheDir, `update-${updateFingerprint(installation)}.result.json`);
 }
 
 /** The lease holder still runs: same pid and, where the platform tells, the same birth token, so a reused pid does not hold it. */
@@ -86,6 +113,44 @@ function leaseHolderAlive(pid: number, birth: string | undefined): boolean {
 	if (!birth) return true;
 	const current = processBirthToken(pid);
 	return current === null || current === birth;
+}
+
+export interface DeferredWait {
+	at: number;
+	to: string;
+	detail: string;
+}
+
+/**
+ * The newest give-up of a deferred wrapper, pending or merged, for `doctor`.
+ * Gated like the notice: only while it names a version newer than the one
+ * running and is under a day old, so a manual upgrade clears the warning.
+ */
+export function readDeferredWait(
+	installation: Installation,
+	cacheDir: string,
+	runningVersion: string,
+	now = Date.now(),
+): DeferredWait | null {
+	const current = (wait: DeferredWait | null | undefined): DeferredWait | null =>
+		wait &&
+		typeof wait.at === "number" &&
+		typeof wait.to === "string" &&
+		parseReleaseVersion(wait.to) &&
+		parseReleaseVersion(runningVersion) &&
+		compareReleaseVersions(wait.to, runningVersion) === 1 &&
+		wait.at <= now &&
+		now - wait.at < UPDATE_CHECK_INTERVAL_MS
+			? wait
+			: null;
+	const pending = readDeferredResult(deferredResultPath(installation, cacheDir));
+	if (pending?.deferred) return current({ at: pending.at, to: pending.to, detail: pending.detail });
+	try {
+		const value = JSON.parse(readFileSync(updateCachePath(installation, cacheDir), "utf8")) as UpdateCache;
+		return current(value?.deferredWait);
+	} catch {
+		return null;
+	}
 }
 
 export function readLastBackgroundUpdate(installation: Installation, cacheDir: string): LastBackgroundUpdate | null {
@@ -105,8 +170,16 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 	const cachePath = updateCachePath(installation, options.cacheDir);
 	const installPolicy = () => nativeAutoUpdatePolicy(installation, options.autoUpdate?.() ?? true);
 	const recent = (at: unknown, interval: number) => typeof at === "number" && at <= now() && now() - at < interval;
+	const resultPath = deferredResultPath(installation, options.cacheDir);
+	// Detection write-tests two directories; once per version is enough for a session.
+	const targets = new Map<string, DeferredTarget | null>();
+	const targetFor = (version: string): DeferredTarget | null => {
+		if (!targets.has(version)) targets.set(version, deferredUpdateTarget(installation, version));
+		return targets.get(version) ?? null;
+	};
+	const autoUpdateOn = () => (options.autoUpdate?.() ?? true) && process.env.CLIO_CODER_AUTO_UPDATE !== "0";
 	const leaseLive = (cache: UpdateCache) =>
-		recent(cache.updateAttemptedAt, INSTALL_LEASE_MS) &&
+		recent(cache.updateAttemptedAt, cache.updateLeaseMs ?? INSTALL_LEASE_MS) &&
 		(cache.updateHost !== hostname() ||
 			typeof cache.updatePid !== "number" ||
 			leaseHolderAlive(cache.updatePid, cache.updateBirth));
@@ -134,8 +207,78 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 			await rm(temporary, { force: true });
 		}
 	}
+	function readCacheSync(): UpdateCache {
+		try {
+			const value = JSON.parse(readFileSync(cachePath, "utf8"));
+			return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+		} catch {
+			return {};
+		}
+	}
+	function writeCacheSync(value: UpdateCache): void {
+		const temporary = `${cachePath}.${randomUUID()}.tmp`;
+		try {
+			writeFileSync(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+			renameSync(temporary, cachePath);
+		} finally {
+			rmSync(temporary, { force: true });
+		}
+	}
+	/**
+	 * Folds a deferred wrapper's result into the shared record. A wrapper that
+	 * gave up waiting for sessions only releases the lease, so the next quit
+	 * tries again; a finished run becomes `lastUpdate`, which also starts the
+	 * day-long back-off for that version (#436).
+	 */
+	async function mergeDeferredResult(signal: AbortSignal): Promise<void> {
+		const result = readDeferredResult(resultPath);
+		if (result === null) return;
+		await withStateFileLock(
+			cachePath,
+			async () => {
+				const cache = await readCache();
+				const {
+					updateAttemptedAt: _at,
+					updatePid: _pid,
+					updateHost: _host,
+					updateBirth: _birth,
+					updateLeaseMs: _ms,
+					...rest
+				} = cache;
+				const lastUpdate: LastBackgroundUpdate = {
+					at: result.at,
+					from: result.from,
+					to: result.to,
+					ok: result.ok,
+					exitCode: result.exitCode,
+					detail: result.detail,
+					manager: result.manager,
+					log: result.log,
+				};
+				const { deferredWait: _wait, ...settled } = rest;
+				await writeCache(
+					result.deferred
+						? { ...rest, deferredWait: { at: result.at, to: result.to, detail: result.detail } }
+						: { ...settled, lastUpdate },
+					signal,
+				);
+				await rm(resultPath, { force: true });
+			},
+			{ timeoutMs: 50, signal },
+		);
+	}
 	async function probe(signal: AbortSignal): Promise<UpdateNotice | null> {
 		signal.throwIfAborted();
+		if (!installation.installer) {
+			await mergeDeferredResult(signal).catch(() => {});
+			const last = (await readCache()).lastUpdate;
+			if (last?.manager && last.ok && !last.announced && compareReleaseVersions(last.to, runningVersion) === 0)
+				return {
+					kind: "updated",
+					key: `updated-after:${last.at}`,
+					text: `Updated to v${last.to} · installed by ${last.manager} after your last session`,
+				};
+		}
 		// Read the installed files afresh; the running version is deliberately captured before hydration.
 		try {
 			const active = installation.installer ? readInstallerRecord(installation.installer.root) : null;
@@ -232,13 +375,34 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		const available = cache.available;
 		const channel = native?.channel ?? (runningVersion.includes("-snapshot.") ? "dev" : cache.availableTag);
 		const key = `available:${runningVersion}:${available}`;
-		// Package-manager installs get the exact command; the session never runs it (#436).
-		if (!installation.installer)
+		// Package-manager installs never update while Clio runs: a user-writable
+		// prefix is handed to a wrapper when the session quits; any other gets
+		// the exact command (#436).
+		if (!installation.installer) {
+			const command = installationCommand(installation, "upgrade", channel ?? "latest");
+			const target = autoUpdateOn() ? targetFor(available) : null;
+			if (target === null) return { kind: "available", key, text: `v${available} available · ${command}` };
+			const last = cache.lastUpdate;
+			if (last && !last.ok && settledToday(cache, available))
+				return {
+					kind: "failed",
+					key: `failed:${runningVersion}:${available}:${last.at}`,
+					text: `background update to v${available} failed (${last.detail}); log: ${last.log ?? "none"}; run ${command}`,
+				};
+			if (last?.ok && settledToday(cache, available))
+				return { kind: "available", key, text: `v${available} available · ${command}` };
+			const wait = cache.deferredWait;
+			const waited =
+				wait && wait.to === available && recent(wait.at, UPDATE_CHECK_INTERVAL_MS)
+					? `; the last attempt waited for ${wait.detail}`
+					: "";
 			return {
 				kind: "available",
 				key,
-				text: `v${available} available · ${installationCommand(installation, "upgrade", channel ?? "latest")}`,
+				text: `v${available} available · installs after you quit${waited}`,
+				defer: !leaseLive(cache),
 			};
+		}
 		if (!installPolicy()?.enabled) {
 			const channelFlag = channel && channel !== "latest" ? ` --channel=${channel}` : "";
 			return { kind: "available", key, text: `v${available} available · clio-coder upgrade${channelFlag} to install` };
@@ -312,7 +476,14 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 			cachePath,
 			async () => {
 				const cache = await readCache();
-				const { updateAttemptedAt: _at, updatePid: _pid, updateHost: _host, updateBirth: _birth, ...rest } = cache;
+				const {
+					updateAttemptedAt: _at,
+					updatePid: _pid,
+					updateHost: _host,
+					updateBirth: _birth,
+					updateLeaseMs: _ms,
+					...rest
+				} = cache;
 				if (cache.updatePid !== process.pid || cache.updateHost !== hostname()) return;
 				const lastUpdate: LastBackgroundUpdate = {
 					at: now(),
@@ -331,6 +502,52 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		});
 		return result.ok && !interrupted;
 	}
+	/**
+	 * Called from a persist shutdown hook, so it is synchronous: the process
+	 * exits right after. Re-checks policy (the setting may have changed since
+	 * the notice), takes the shared lease for the wrapper's pid and starts it.
+	 */
+	function spawnDeferred(): boolean {
+		if (installation.installer || !autoUpdateOn()) return false;
+		try {
+			return withStateFileLockSync(
+				cachePath,
+				() => {
+					const cache = readCacheSync();
+					const version = cache.available;
+					if (
+						typeof version !== "string" ||
+						compareReleaseVersions(version, runningVersion) !== 1 ||
+						leaseLive(cache) ||
+						settledToday(cache, version)
+					)
+						return false;
+					const target = targetFor(version);
+					if (target === null) return false;
+					const started = spawnDeferredUpdate(target, {
+						cacheDir: options.cacheDir,
+						fingerprint: updateFingerprint(installation),
+						resultPath,
+						from: runningVersion,
+						to: version,
+					});
+					if (started === null) return false;
+					writeCacheSync({
+						...cache,
+						updateAttemptedAt: now(),
+						updatePid: started.pid,
+						updateHost: hostname(),
+						...(processBirthToken(started.pid) ? { updateBirth: processBirthToken(started.pid) as string } : {}),
+						updateLeaseMs: DEFERRED_WAIT_MS + DEFERRED_RUN_MS + 60_000,
+					});
+					return true;
+				},
+				{ timeoutMs: 200 },
+			);
+		} catch {
+			return false;
+		}
+	}
 	/** Display bookkeeping only: the idle gate and the reminder throttles. */
 	async function claim(notice: UpdateNotice, isIdle: () => boolean, signal: AbortSignal): Promise<boolean> {
 		return withStateFileLock(
@@ -348,11 +565,17 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 						recent(cache.notifiedAt, UPDATE_NOTICE_INTERVAL_MS))
 				)
 					return false;
-				await writeCache({ ...cache, notifiedKey: notice.key, notifiedAt: now() }, signal);
+				// A deferred update's result is announced once, on the first idle launch after it.
+				const lastUpdate =
+					notice.kind === "updated" && cache.lastUpdate ? { ...cache.lastUpdate, announced: true } : cache.lastUpdate;
+				await writeCache(
+					{ ...cache, ...(lastUpdate ? { lastUpdate } : {}), notifiedKey: notice.key, notifiedAt: now() },
+					signal,
+				);
 				return isIdle() && !signal.aborted;
 			},
 			{ timeoutMs: 50, signal },
 		);
 	}
-	return { probe, claim, maybeInstall };
+	return { probe, claim, maybeInstall, spawnDeferred };
 }

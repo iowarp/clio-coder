@@ -20,6 +20,7 @@
  */
 
 import type { ClioSettings } from "../core/config.js";
+import { relaunchScript } from "../core/relaunch-script.js";
 import type { BootOptions } from "../entry/boot-options.js";
 
 /** Multiplexers Clio will not nest a pane host inside. */
@@ -58,7 +59,7 @@ function workspaceIneligibility(input: WorkspaceEligibilityInput): string | null
 function clioArgv(): string[] {
 	const script = process.argv[1];
 	const args = process.argv.slice(2);
-	return script === undefined ? [process.execPath, ...args] : [process.execPath, script, ...args];
+	return script === undefined ? [process.execPath, ...args] : [process.execPath, relaunchScript(script), ...args];
 }
 
 /**

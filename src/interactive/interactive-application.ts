@@ -2166,6 +2166,14 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 							runningVersion,
 							signal: updateAbort.signal,
 							autoUpdate: () => deps.getSettings?.().interface.autoUpdate ?? true,
+							// The package manager replaces the install in place, so it runs
+							// only after this process has left persist (#436).
+							// A /restart keeps this process alive as the new child's guardian,
+							// so a wrapper started now would wait on both for its full window.
+							onDeferredUpdate: (start) =>
+								getTerminationCoordinator().onPersist(() => {
+									if (!getTerminationCoordinator().hasExitHandoff()) start();
+								}),
 							onChange: () => {
 								footer.refresh();
 								tui.requestRender();

@@ -39,11 +39,26 @@ export function compareReleaseVersions(left: string, right: string): number | nu
 	return 0;
 }
 
+/**
+ * The registry the package manager itself installs from, so the version a
+ * check announces is the one `npm install` fetches on a mirror (#436).
+ */
+function registryBase(): string {
+	const configured = process.env.npm_config_registry ?? process.env.NPM_CONFIG_REGISTRY;
+	try {
+		const url = new URL(configured ?? "");
+		if (url.protocol === "https:" || url.protocol === "http:") return url.href.replace(/\/+$/u, "");
+	} catch {
+		// Unset or malformed: the public registry.
+	}
+	return "https://registry.npmjs.org";
+}
+
 export async function fetchTagVersion(channel: string, signal?: AbortSignal): Promise<string | null> {
 	if (!["latest", "beta", "dev"].includes(channel)) return null;
 	try {
 		const timeout = AbortSignal.timeout(2500);
-		const response = await fetch(`https://registry.npmjs.org/@iowarp/clio-coder/${channel}`, {
+		const response = await fetch(`${registryBase()}/@iowarp/clio-coder/${channel}`, {
 			headers: { Accept: "application/json" },
 			signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
 		});
