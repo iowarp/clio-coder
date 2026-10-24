@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readlinkSync, readSync, realpathSync } from "node:fs";
-import { join } from "node:path";
 import { internalGitArgv } from "../core/internal-git.js";
 
 export interface CheckoutSnapshot {
@@ -44,15 +43,21 @@ export function snapshotCheckout(cwd: string): CheckoutSnapshot | null {
 		return null;
 	}
 	const paths = new Map<string, string>();
-	for (const item of status.toString("utf8").split("\0")) {
+	const rootPrefix = Buffer.from(`${root}/`);
+	for (let start = 0, end = status.indexOf(0); end !== -1; start = end + 1, end = status.indexOf(0, start)) {
+		const item = status.subarray(start, end);
 		if (item.length < 4) continue;
-		const name = item.slice(3);
-		const hash = createHash("sha256").update(item.slice(0, 2));
+		const raw = item.subarray(3);
+		const name = raw.toString("utf8");
+		const hash = createHash("sha256").update(item.subarray(0, 2));
 		try {
-			const candidate = join(root, name);
+			// The file is opened by its raw bytes: a non-UTF-8 name decodes
+			// lossily, so the decoded key alone cannot reach it and its edits
+			// would hash as missing on both sides.
+			const candidate = Buffer.concat([rootPrefix, raw]);
 			const stat = lstatSync(candidate);
 			hash.update(String(stat.mode));
-			if (stat.isSymbolicLink()) hash.update(readlinkSync(candidate));
+			if (stat.isSymbolicLink()) hash.update(readlinkSync(candidate, { encoding: "buffer" }));
 			else if (stat.isFile()) {
 				const descriptor = openSync(candidate, "r");
 				try {

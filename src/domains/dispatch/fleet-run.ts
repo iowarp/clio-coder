@@ -33,7 +33,14 @@ import {
 	recordAssignmentAttempt,
 	settleStoredAssignment,
 } from "./assignment-store.js";
-import { type CodeStepRunInput, newCodeRunId, preflightCodeStep, runCodeStep } from "./code-step.js";
+import {
+	type CodeStepRunInput,
+	newCodeRunId,
+	preflightCodeStep,
+	runCodeStep,
+	workspaceChangedPaths,
+	workspaceChangeSnapshot,
+} from "./code-step.js";
 import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
 import type { DispatchContract, DispatchPlanTaskResolution, DispatchRequest } from "./contract.js";
 import { buildDelegationProposalBriefing, validateDelegationPlan } from "./delegation-plan.js";
@@ -528,6 +535,10 @@ async function runFleetHoldingWorkspace(
 	});
 	const receipts: RunReceipt[] = [];
 	const receiptsByStep = new Map<string, RunReceipt>();
+	// Paths a workspace code step created or edited, so a later loop check runs
+	// a test it generated exactly as it runs an agent ancestor's changed tests.
+	// Null marks a step whose changes could not be measured (no git status).
+	const codeChangedPathsByStep = new Map<string, ReadonlyArray<string> | null>();
 	const attemptRunIdsByStep = new Map<string, ReadonlyArray<string>>();
 	const memberReceipts = async (runId: string, firstReceipt: RunReceipt) =>
 		dispatch.waitForMember ? dispatch.waitForMember(runId) : { receipt: firstReceipt, receipts: [firstReceipt] };
@@ -985,12 +996,27 @@ async function runFleetHoldingWorkspace(
 				}
 				const originalMessage = isCommit ? commitMessageFor(step, priorResults) : null;
 				const mutatedPaths = new Set<string>();
+				const notes: string[] = [];
 				if (step.loop?.role === "check" && step.gate === undefined) {
 					const ancestors = executionPlanAncestors(livePlan, step.id);
 					for (const source of livePlan.steps) {
-						if (source.kind !== "agent" || source.scope !== "workspace" || !ancestors.has(source.id)) continue;
+						if (source.scope !== "workspace" || !ancestors.has(source.id)) continue;
 						const result = priorResults.get(source.id);
 						if (result?.integrityValid !== true) continue;
+						if (source.kind === "code") {
+							// A commit records changes rather than making them, so it is never tracked.
+							if (source.commitFrom !== undefined) continue;
+							// Absent means the step ran in an earlier process and was replayed on
+							// resume; its paths were never persisted, so the check says so.
+							const changed = codeChangedPathsByStep.get(source.id);
+							if (changed === null || changed === undefined) {
+								notes.push(
+									`changed tests from code step '${source.id}' not run: its workspace changes could not be measured${changed === undefined ? " after resume" : ""}`,
+								);
+							}
+							for (const filename of changed ?? []) mutatedPaths.add(filename);
+							continue;
+						}
 						const receipt = receiptsByStep.get(source.id);
 						const paths =
 							source.expectedResultContract === "mutation-report"
@@ -1009,6 +1035,7 @@ async function runFleetHoldingWorkspace(
 				const runInput: CodeStepRunInput = {
 					runId: codeRunId,
 					...(mutatedPaths.size > 0 ? { mutatedPaths: [...mutatedPaths] } : {}),
+					...(notes.length > 0 ? { notes } : {}),
 					...(step.args ? { args: step.args } : {}),
 					stepId: step.id,
 					command,
@@ -1039,7 +1066,27 @@ async function runFleetHoldingWorkspace(
 					commandId: command.id,
 				};
 				stepDispatched(event);
+				// Only a later code loop check consumes these paths, so a step with
+				// none downstream pays for no git status or hashing.
+				const tracksChanges =
+					!isCommit &&
+					step.scope === "workspace" &&
+					livePlan.steps.some(
+						(later) =>
+							later.kind === "code" &&
+							later.loop?.role === "check" &&
+							later.gate === undefined &&
+							executionPlanAncestors(livePlan, later.id).has(step.id),
+					);
+				const before = tracksChanges ? workspaceChangeSnapshot(workspaceRoot) : null;
 				const outcome = await runCodeStep(runInput);
+				if (tracksChanges) {
+					const after = before === null ? null : workspaceChangeSnapshot(workspaceRoot);
+					codeChangedPathsByStep.set(
+						step.id,
+						before === null || after === null ? null : workspaceChangedPaths(before, after),
+					);
+				}
 				if (step.verification === true) validationFresh = outcome.report.passed;
 				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
 				if (input.onStepSettled)

@@ -15,8 +15,8 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
 import {
@@ -25,6 +25,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { type CheckoutSnapshot, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import {
 	PLAYBOOK_COMMAND_BASE_ENV,
 	type PlaybookCommand,
@@ -54,6 +55,8 @@ export interface CodeStepRunInput {
 	runId?: string;
 	/** Run-local mutation paths supplied only for a fleet loop's code check. */
 	mutatedPaths?: ReadonlyArray<string>;
+	/** Caller notes appended to the command check's evidence, such as an ancestor whose changes could not be measured. */
+	notes?: ReadonlyArray<string>;
 	/** Already resolved literal arguments; never interpolated a second time. */
 	args?: ReadonlyArray<string>;
 	stepId: string;
@@ -215,6 +218,39 @@ export function workspaceHasChanges(root: string): boolean {
 	return status.trim().length > 0;
 }
 
+export interface WorkspaceChangeSnapshot {
+	checkout: CheckoutSnapshot;
+	/** The workspace's path below the checkout top level, "" or ending in "/". */
+	prefix: string;
+}
+
+/**
+ * Git-visible file state under `root`. A code step records nothing about what
+ * it wrote, so the fleet diffs one snapshot before and one after the command
+ * to learn which files it created or edited. Null outside a git workspace or
+ * when git cannot report status.
+ */
+export function workspaceChangeSnapshot(root: string): WorkspaceChangeSnapshot | null {
+	const checkout = snapshotCheckout(root);
+	if (checkout === null) return null;
+	let prefix: string;
+	try {
+		prefix = relative(checkout.root, realpathSync(root));
+	} catch {
+		return null;
+	}
+	if (prefix.startsWith("..") || isAbsolute(prefix)) return null;
+	return { checkout, prefix: prefix === "" ? "" : `${prefix.split(sep).join("/")}/` };
+}
+
+/** Changed paths inside the workspace, relative to it, as later checks resolve them. */
+export function workspaceChangedPaths(before: WorkspaceChangeSnapshot, after: WorkspaceChangeSnapshot): string[] {
+	if (before.prefix !== after.prefix) return [];
+	return changedCheckoutPaths(before.checkout, after.checkout)
+		.filter((path) => path.startsWith(before.prefix))
+		.map((path) => path.slice(before.prefix.length));
+}
+
 export function newCodeRunId(): string {
 	return `code-${createHash("sha256")
 		.update(`${process.pid}:${Date.now()}:${Math.random()}`)
@@ -367,11 +403,13 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 			}
 		: await spawnCommand(input, cwd, argv);
 	const primaryDurationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
-	const primaryEvidence = emptyWorkspace
-		? CODE_STEP_EMPTY_DIFF_MESSAGE
-		: spawned.timedOut
-			? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
-			: `exit ${spawned.exitCode} in ${primaryDurationMs}ms`;
+	const primaryEvidence =
+		(emptyWorkspace
+			? CODE_STEP_EMPTY_DIFF_MESSAGE
+			: spawned.timedOut
+				? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
+				: `exit ${spawned.exitCode} in ${primaryDurationMs}ms`) +
+		(input.notes?.length ? `; ${input.notes.join("; ")}` : "");
 	const checks = [
 		{
 			name: command.id,
@@ -444,6 +482,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 				`exit: ${spawned.exitCode}`,
 				`duration_ms: ${durationMs}`,
 				`timed_out: ${spawned.timedOut}`,
+				...(input.notes ?? []).map((note) => `note: ${note}`),
 				"",
 				capturedText,
 			].join("\n"),
