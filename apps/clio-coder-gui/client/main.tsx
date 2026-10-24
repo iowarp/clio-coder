@@ -17,6 +17,8 @@ const queries = new QueryClient({
 	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
 	queryCache: new QueryCache({
 		onError: (error, query) => {
+			// Speculative reads have no visible owner. Opening the view surfaces any failure there.
+			if (query.getObserversCount() === 0) return;
 			if (query.meta?.errorSurface === "inline") return;
 			// The project list explains unavailable saved history beside the affected tasks.
 			if (query.queryKey[0] === "session-history" && error instanceof ApiProblem && error.problem.code === "unsupported")

@@ -5,11 +5,55 @@ import type { Supervisor } from "../acp/supervisor.js";
 import { AppProblem } from "./problem.js";
 import type { WorkspaceService } from "./workspaces.js";
 export class SessionService {
+	private readonly historyReads = new Map<
+		string,
+		{ controller: AbortController; readers: Set<symbol>; result: Promise<SessionSummary[]> }
+	>();
 	constructor(
 		readonly supervisor: Supervisor,
 		readonly workspaces: WorkspaceService,
 	) {}
 	async history(workspaceId: string, signal?: AbortSignal): Promise<SessionSummary[]> {
+		signal?.throwIfAborted();
+		let read = this.historyReads.get(workspaceId);
+		if (!read || read.controller.signal.aborted) {
+			const controller = new AbortController();
+			read = { controller, readers: new Set(), result: this.readHistory(workspaceId, controller.signal) };
+			this.historyReads.set(workspaceId, read);
+			const current = read;
+			const settled = () => {
+				if (this.historyReads.get(workspaceId) === current) this.historyReads.delete(workspaceId);
+			};
+			void read.result.then(settled, settled);
+		}
+		const shared = read;
+		const reader = Symbol();
+		shared.readers.add(reader);
+		return new Promise((resolve, reject) => {
+			const release = () => {
+				signal?.removeEventListener("abort", aborted);
+				shared.readers.delete(reader);
+				if (shared.readers.size === 0) shared.controller.abort();
+			};
+			const aborted = () => {
+				release();
+				reject(signal?.reason);
+			};
+			signal?.addEventListener("abort", aborted, { once: true });
+			void shared.result.then(
+				(rows) => {
+					release();
+					if (signal?.aborted) reject(signal.reason);
+					else resolve(structuredClone(rows));
+				},
+				(error: unknown) => {
+					release();
+					reject(error);
+				},
+			);
+		});
+	}
+	private async readHistory(workspaceId: string, signal: AbortSignal): Promise<SessionSummary[]> {
 		return this.supervisor.workspaceControl(
 			workspaceId,
 			async (client, cwd) => {

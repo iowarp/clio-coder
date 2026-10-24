@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useDeferredValue, useMemo, useRef } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
+import { InventoryMore } from "../interaction/InventoryMore.js";
+import { useInventoryWindow } from "../interaction/use-inventory-window.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { HomeAside } from "../shell/HomeAside.js";
 import { STATE_LABELS, shortAge, type TaskRow, taskRows } from "../shell/shell-model.js";
@@ -29,8 +31,11 @@ export function Sessions({ client }: { client: Client }) {
 	const now = useMinuteClock();
 	const actions = useTaskActions(client);
 	const query = search.get("q") ?? "";
+	const deferredQuery = useDeferredValue(query);
 	const filter = PROJECT_TASK_FILTERS.find((item) => item === search.get("status")) ?? "all";
 	const sort = PROJECT_TASK_SORTS.find((item) => item === search.get("sort")) ?? "recent";
+	const page = useInventoryWindow(JSON.stringify([workspaceId, deferredQuery, filter, sort]));
+	const list = useRef<HTMLUListElement>(null);
 	const set = (key: string, value: string) =>
 		setSearch(
 			(previous) => {
@@ -59,8 +64,8 @@ export function Sessions({ client }: { client: Client }) {
 		[workspaceId, overview.data, history.data],
 	);
 	const inventory = useMemo(
-		() => projectTaskInventory(rows, history.data ?? [], overview.data?.sessions ?? [], query, filter, sort),
-		[rows, history.data, overview.data, query, filter, sort],
+		() => projectTaskInventory(rows, history.data ?? [], overview.data?.sessions ?? [], deferredQuery, filter, sort),
+		[rows, history.data, overview.data, deferredQuery, filter, sort],
 	);
 	const saved = useMemo(() => new Map((history.data ?? []).map((row) => [row.id, row])), [history.data]);
 	const held = useMemo(() => new Map((overview.data?.sessions ?? []).map((row) => [row.id, row])), [overview.data]);
@@ -182,8 +187,8 @@ export function Sessions({ client }: { client: Client }) {
 						</p>
 					) : null}
 					{inventory.shown.length ? (
-						<ul className="taskpage__list">
-							{inventory.shown.map((row) => {
+						<ul className="taskpage__list" ref={list} aria-busy={query !== deferredQuery}>
+							{inventory.shown.slice(0, page.limit).map((row) => {
 								const summary = saved.get(row.id);
 								const session = held.get(row.id);
 								const meta = [
@@ -265,6 +270,9 @@ export function Sessions({ client }: { client: Client }) {
 								</button>
 							)}
 						</div>
+					) : null}
+					{!loading ? (
+						<InventoryMore total={inventory.shown.length} limit={page.limit} label="tasks" list={list} onMore={page.more} />
 					) : null}
 					<footer className="taskpage__scope">
 						<Link to="/sessions">All sessions</Link>

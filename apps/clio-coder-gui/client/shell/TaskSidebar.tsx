@@ -20,6 +20,7 @@ import { SettingsSidebar } from "./SettingsSidebar.js";
 import { isSettingsPath, STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
 import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask, useSessionOverview } from "./tasks.js";
 import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
+import { useSessionIntent } from "./use-session-intent.js";
 import "./task-sidebar-actions.css";
 
 const TASKS_PER_PROJECT = 6;
@@ -389,6 +390,7 @@ function TaskItem({
 }) {
 	const rename = useRenameTask(client);
 	const remove = useDeleteTask(client);
+	const intent = useSessionIntent(client, row.id, row.open && !selected);
 	const [editing, setEditing] = useState(false);
 	const [confirming, setConfirming] = useState(false);
 	const age = shortAge(row.at, now);
@@ -462,7 +464,7 @@ function TaskItem({
 					/>
 				</div>
 			) : row.open ? (
-				<NavLink to={`/sessions/${row.id}`} className="wb-task__main" title={title} onClick={onNavigate}>
+				<NavLink to={`/sessions/${row.id}`} className="wb-task__main" title={title} onClick={onNavigate} {...intent}>
 					{body}
 				</NavLink>
 			) : (

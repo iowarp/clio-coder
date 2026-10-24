@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionOverviewItem } from "../../contracts/session-overview.js";
@@ -10,9 +10,12 @@ import type { ConnectionState } from "../api/events.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
+import { InventoryMore } from "../interaction/InventoryMore.js";
+import { useInventoryWindow } from "../interaction/use-inventory-window.js";
 import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useSessionOverview, useTaskActions } from "../shell/tasks.js";
+import { useSessionIntent } from "../shell/use-session-intent.js";
 import type { SessionFilter } from "./mission-control-model.js";
 import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
 import { type SessionControls, useSessionControls } from "./session-control-actions.js";
@@ -35,7 +38,10 @@ export function MissionControl({ client }: { client: Client }) {
 	const selection = search.get("status");
 	const filter = SESSION_FILTERS.find((value) => value === selection) ?? "all";
 	const query = search.get("q") ?? "";
+	const deferredQuery = useDeferredValue(query);
 	const project = search.get("workspace") ?? "";
+	const page = useInventoryWindow(JSON.stringify([deferredQuery, project, filter]));
+	const list = useRef<HTMLDivElement>(null);
 	const set = (key: string, value: string) =>
 		setSearch(
 			(previous) => {
@@ -52,8 +58,8 @@ export function MissionControl({ client }: { client: Client }) {
 	const items = overview.data?.sessions;
 	const projects = workspaces.data;
 	const shown = useMemo(
-		() => sessionInventory(items ?? [], projects ?? [], query, project, filter),
-		[items, projects, query, project, filter],
+		() => sessionInventory(items ?? [], projects ?? [], deferredQuery, project, filter),
+		[items, projects, deferredQuery, project, filter],
 	);
 	const counts = { attention: 0, working: 0, ready: 0, closed: 0, workers: 0 };
 	let workersComplete = true;
@@ -195,10 +201,11 @@ export function MissionControl({ client }: { client: Client }) {
 						<p role="status">Project names could not be loaded. Session records remain available.</p>
 					) : null}
 					{overview.isPending ? <p role="status">Reading session activity…</p> : null}
-					<div className="mission__grid">
-						{shown.map((item) => (
+					<div className="mission__grid" ref={list} aria-busy={query !== deferredQuery}>
+						{shown.slice(0, page.limit).map((item) => (
 							<SessionCard
 								key={item.id}
+								client={client}
 								controls={controls}
 								item={item}
 								projectName={projects?.find((workspace) => workspace.id === item.workspaceId)?.name ?? "Unavailable project"}
@@ -206,6 +213,9 @@ export function MissionControl({ client }: { client: Client }) {
 							/>
 						))}
 					</div>
+					{items ? (
+						<InventoryMore total={shown.length} limit={page.limit} label="sessions" list={list} onMore={page.more} />
+					) : null}
 					{items && shown.length === 0 ? (
 						<div className="mission__empty">
 							<Icon name="sessions" />
@@ -319,17 +329,20 @@ function ControlFeedback({ controls, connected }: { controls: SessionControls; c
 }
 
 const SessionCard = memo(function SessionCard({
+	client,
 	controls,
 	item,
 	projectName,
 	connected,
 }: {
+	client: Client;
 	controls: SessionControls;
 	item: SessionOverviewItem;
 	projectName: string;
 	connected: boolean;
 }) {
 	const [confirm, setConfirm] = useState(false);
+	const intent = useSessionIntent(client, item.id, connected);
 	const control = controls.records.find((record) => record.sessionId === item.id);
 	const state = ACTIVITY[item.activity];
 	const held = item.state === "open" || item.state === "parked" || item.state === "starting";
@@ -344,7 +357,9 @@ const SessionCard = memo(function SessionCard({
 				<StatusMark tone={state.tone} label={state.label} />
 			</header>
 			<h3>
-				<Link to={`/sessions/${item.id}`}>{item.title}</Link>
+				<Link to={`/sessions/${item.id}`} {...intent}>
+					{item.title}
+				</Link>
 			</h3>
 			<div className="mission-card__facts">
 				<span>
@@ -411,7 +426,7 @@ const SessionCard = memo(function SessionCard({
 							<Icon name="close" />
 						</button>
 					) : null}
-					<Link className="mission-card__open" to={`/sessions/${item.id}`}>
+					<Link className="mission-card__open" to={`/sessions/${item.id}`} {...intent}>
 						{state.group === "attention" ? "Review" : item.state === "parked" ? "Continue" : "Open"}
 						<Icon name="arrowUp" />
 					</Link>
