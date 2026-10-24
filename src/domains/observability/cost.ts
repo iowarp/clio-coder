@@ -62,7 +62,8 @@ export function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmoun
 			((amount.missingTokenCalls ?? 0) > 0 && amount.provenance !== "known_free"),
 		allKnownFree:
 			(amount.costSummary?.allKnownFree ?? amount.provenance === "known_free") && (first || aggregate.allKnownFree),
-		calls: aggregate.calls + (amount.apiCalls ?? 1),
+		// Carried summaries retain their call coverage along with their USD and flags (#434).
+		calls: aggregate.calls + (amount.costSummary?.calls ?? amount.apiCalls ?? 1),
 	};
 }
 
