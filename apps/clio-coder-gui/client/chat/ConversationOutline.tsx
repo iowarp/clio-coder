@@ -1,9 +1,14 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useId, useMemo, useRef, useState } from "react";
 import type { Turn } from "../../contracts/sessions.js";
 import { formatTime } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
 import { Dialog } from "../interaction/Dialog.js";
-import { conversationEntry, conversationExcerpt, findConversation } from "./conversation-outline-model.js";
+import {
+	type ConversationEntry,
+	conversationEntries,
+	conversationExcerpt,
+	findConversation,
+} from "./conversation-outline-model.js";
 import type { ChatTurn } from "./turns.js";
 import "./conversation-outline.css";
 
@@ -22,13 +27,16 @@ export function ConversationOutline({
 	onSelect: (turnId: string) => void;
 }) {
 	const [query, setQuery] = useState("");
+	const deferredQuery = useDeferredValue(query);
 	const field = useRef<HTMLInputElement>(null);
 	const id = useId();
-	const entries = useMemo(
-		() => turns.map((turn, index) => conversationEntry(turn, rows.get(turn.turnId), index)),
-		[turns, rows],
-	);
-	const found = useMemo(() => findConversation(entries, query), [entries, query]);
+	const previous = useRef<readonly ConversationEntry[]>([]);
+	const entries = useMemo(() => {
+		const next = conversationEntries(turns, rows, previous.current);
+		previous.current = next;
+		return next;
+	}, [turns, rows]);
+	const found = useMemo(() => findConversation(entries, deferredQuery), [entries, deferredQuery]);
 	return (
 		<Dialog
 			title="Find in conversation"
@@ -58,7 +66,12 @@ export function ConversationOutline({
 						? " Searches retained requests and responses; older exchanges omitted by Clio are not included."
 						: " Searches every request and response, including earlier turns."}
 				</p>
-				<ol className="conversation-finder__list" id={id} aria-label="Conversation exchanges">
+				<ol
+					className="conversation-finder__list"
+					id={id}
+					aria-label="Conversation exchanges"
+					aria-busy={query !== deferredQuery}
+				>
 					{found.rows.map((entry) => (
 						<li key={entry.id}>
 							<button

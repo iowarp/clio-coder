@@ -21,9 +21,12 @@ export interface ConversationEntry {
 	readonly startedAt: string | null;
 }
 
+const sources = new WeakMap<ConversationEntry, { turn: ChatTurn; row: Turn | undefined }>();
+const searchText = new WeakMap<ConversationEntry, readonly string[]>();
+
 export function conversationEntry(turn: ChatTurn, row: Turn | undefined, index: number): ConversationEntry {
 	const request = requestView(turn);
-	return {
+	const entry: ConversationEntry = {
 		id: turn.turnId,
 		number: index + 1,
 		request: request.missing ? "" : request.text,
@@ -40,14 +43,43 @@ export function conversationEntry(turn: ChatTurn, row: Turn | undefined, index: 
 				: "Outcome unreported",
 		startedAt: row?.startedAt ?? null,
 	};
+	sources.set(entry, { turn, row });
+	return entry;
+}
+
+/** A live answer changes its own entry; earlier exchanges keep their text and search index. */
+export function conversationEntries(
+	turns: readonly ChatTurn[],
+	rows: ReadonlyMap<string, Turn>,
+	previous: readonly ConversationEntry[] = [],
+): readonly ConversationEntry[] {
+	const byId = new Map(previous.map((entry) => [entry.id, entry]));
+	let unchanged = previous.length === turns.length;
+	const entries = turns.map((turn, index) => {
+		const row = rows.get(turn.turnId);
+		const prior = byId.get(turn.turnId);
+		const source = prior ? sources.get(prior) : undefined;
+		if (prior && source?.turn === turn && source.row === row && prior.number === index + 1) {
+			if (previous[index] !== prior) unchanged = false;
+			return prior;
+		}
+		unchanged = false;
+		return conversationEntry(turn, row, index);
+	});
+	return unchanged ? previous : entries;
 }
 
 export function findConversation(entries: readonly ConversationEntry[], query: string) {
 	const needle = query.replace(/\s+/g, " ").trim().toLocaleLowerCase();
 	const matching = needle
-		? entries.filter((entry) =>
-				[entry.request, entry.response].some((text) => text.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle)),
-			)
+		? entries.filter((entry) => {
+				let text = searchText.get(entry);
+				if (!text) {
+					text = [entry.request, entry.response].map((value) => value.replace(/\s+/g, " ").toLocaleLowerCase());
+					searchText.set(entry, text);
+				}
+				return text.some((value) => value.includes(needle));
+			})
 		: entries;
 	return { rows: matching.slice(0, 100), total: matching.length, query: needle };
 }
