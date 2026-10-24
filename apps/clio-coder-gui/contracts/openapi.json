@@ -434,6 +434,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -919,6 +928,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -1566,6 +1584,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -1950,6 +1977,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -2961,6 +2997,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -3591,6 +3636,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -4131,6 +4185,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -4620,6 +4683,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -6971,6 +7043,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -7172,6 +7253,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -10352,6 +10442,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -10553,6 +10652,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -10754,6 +10862,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -10955,6 +11072,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -11800,6 +11926,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -12853,6 +12988,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -13091,6 +13235,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -13304,6 +13457,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -14203,6 +14365,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -14650,6 +14821,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -14846,6 +15026,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -15154,6 +15343,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -15357,6 +15555,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -15557,6 +15764,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -16227,6 +16443,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -16467,6 +16692,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -17030,6 +17264,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -17234,6 +17477,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -17704,6 +17956,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -18201,6 +18462,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -19026,6 +19296,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -19268,6 +19547,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -19665,6 +19953,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -21106,6 +21403,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -21298,6 +21604,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -21770,6 +22085,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -22083,6 +22407,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -22334,6 +22667,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -22590,6 +22932,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -23182,6 +23533,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -23693,6 +24053,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -24069,6 +24438,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -24583,6 +24961,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -24812,6 +25199,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -25007,6 +25403,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -29057,6 +29462,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -29437,6 +29851,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -29871,6 +30294,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -30697,6 +31129,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -34394,6 +34835,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -42129,6 +42579,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -42390,6 +42849,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -46078,6 +46546,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -46271,6 +46748,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -49813,6 +50299,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -50009,6 +50504,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
@@ -51421,6 +51925,15 @@
 							"minLength": 1,
 							"maxLength": 128
 						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
 					}
 				],
 				"requestBody": {
