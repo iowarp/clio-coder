@@ -8,7 +8,7 @@ import { useLocation, useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
-import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
+import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { homeDraft, updateHomeDraft } from "../pages/home-draft.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
 import { ownDrafts } from "./own-drafts.js";
@@ -64,6 +64,7 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string; window?: boolean }) =>
 			client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
 		onSuccess: (session, request) => {
+			advanceSessionReadScope(session.id);
 			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, session.id] });
 			queries.setQueryData(["session", session.id], sessionBuffer(session.id).snapshot(session) ?? session);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });

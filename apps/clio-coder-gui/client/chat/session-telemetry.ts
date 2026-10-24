@@ -1,16 +1,18 @@
 // Pushed context and totals share the session snapshot; settled accounting still supplies model and quota details.
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ContextLedger } from "../../contracts/context-ledger.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
-import type { SessionUsage } from "../../contracts/usage.js";
 import type { Client } from "../api/client.js";
+import { sessionReadScope } from "../api/sessions.js";
 import { compactCount } from "./overview-model.js";
 
 import type { Spend } from "./session-usage-model.js";
 
 type Turns = SessionSnapshot["turns"];
+// A GET may supersede the push it began after, but cannot overwrite a newer push that raced it.
+const contextReadBasis = new WeakMap<ContextLedger, number>();
 
 /** Changes when a turn settles, which is when the ledger and the accounting can have moved. */
 export const settledTurns = (turns: Turns): number => turns.filter((turn) => turn.status !== "running").length;
@@ -45,27 +47,47 @@ export function useContextWork(client: Client, sessionId: string) {
 }
 
 export function useContextLedger(client: Client, sessionId: string, settled: number, enabled: boolean) {
+	const queries = useQueryClient();
 	const live = useSessionTelemetry(client, sessionId)?.usage?.context;
 	const operation = useContextWork(client, sessionId)?.latest;
+	const pushedRevision = useQuery<number>({ queryKey: ["session-context-push", sessionId], enabled: false }).data ?? 0;
+	const scope = sessionReadScope(sessionId);
 	const query = useQuery({
-		queryKey: ["session-context", sessionId, settled, operation?.id ?? null],
-		queryFn: () => client.call(routes.sessionContext, { params: { id: sessionId }, query: {}, body: {} }),
+		queryKey: ["session-context", sessionId, settled, operation?.id ?? null, scope],
+		queryFn: async ({ signal }) => {
+			const basis = queries.getQueryData<number>(["session-context-push", sessionId]) ?? 0;
+			const result = await client.call(
+				routes.sessionContext,
+				{ params: { id: sessionId }, query: {}, body: {} },
+				undefined,
+				signal,
+			);
+			contextReadBasis.set(result, basis);
+			return result;
+		},
+		// Preserve the response identity used for freshness above, including an equal-valued refresh.
+		structuralSharing: false,
 		enabled,
 		retry: false,
 		// The previous turn's figure stays on screen while the next one is read, so nothing blinks.
-		placeholderData: (previous: ContextLedger | undefined) => previous,
+		placeholderData: (previous, previousQuery) =>
+			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
 	});
-	const data = live ?? query.data;
-	return { ...query, data, isPending: !data && query.isPending, error: data ? null : query.error };
+	const readIsCurrent = query.data && contextReadBasis.get(query.data) === pushedRevision;
+	const data = readIsCurrent ? query.data : (live ?? query.data);
+	return { ...query, data, isPending: !data && query.isPending };
 }
 
 export function useSessionUsage(client: Client, sessionId: string, settled: number, enabled: boolean) {
+	const scope = sessionReadScope(sessionId);
 	return useQuery({
-		queryKey: ["session-usage", sessionId, settled],
-		queryFn: () => client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }),
+		queryKey: ["session-usage", sessionId, settled, scope],
+		queryFn: ({ signal }) =>
+			client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
 		enabled,
 		retry: false,
-		placeholderData: (previous: SessionUsage | undefined) => previous,
+		placeholderData: (previous, previousQuery) =>
+			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
 	});
 }
 

@@ -6,6 +6,7 @@ import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
+import { sessionReadScope } from "../api/sessions.js";
 import { StatusMark } from "../design/status.js";
 import { quotaCards, quotaTone, usageCoverageNotes, usageRows, usageSummary } from "./session-usage-model.js";
 import "./session-board.css";
@@ -35,18 +36,20 @@ export const UsagePanel = memo(function UsagePanel({
 	turns: SessionSnapshot["turns"];
 }) {
 	const supported = !!capabilities?.usage;
+	const scope = sessionReadScope(sessionId);
 	const id = useId();
 	const refreshButton = useRef<HTMLButtonElement>(null);
 	const usage = useQuery({
 		meta: { errorSurface: "inline" },
-		queryKey: ["session-usage", sessionId, settledTurns],
+		queryKey: ["session-usage", sessionId, settledTurns, scope],
 		queryFn: ({ signal }) =>
 			client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
 		enabled: sessionOpen && supported,
 		retry: false,
 		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
 		// so rows (and the focus a row holds) do not vanish between the two reads.
-		placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === sessionId ? previous : undefined),
+		placeholderData: (previous, previousQuery) =>
+			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
 	});
 	const summary = usageSummary(sessionOpen, turns, usage.data, liveUsage);
 	const quota = usage.data ? quotaCards(usage.data) : null;

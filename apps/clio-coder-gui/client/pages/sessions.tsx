@@ -6,7 +6,7 @@ import type { Client } from "../api/client.js";
 import { ApiProblem, emptyInput } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
-import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
+import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
@@ -203,6 +203,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			client.call(routes.loadSession, { params: { id }, query: {}, body: { workspaceId } }),
 		onSuccess: (snapshot) => {
 			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, id] });
+			advanceSessionReadScope(id);
 			queries.setQueryData(["session", id], sessionBuffer(id).snapshot(snapshot) ?? snapshot);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
 			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
@@ -537,7 +538,17 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						) : null}
 						<ApprovalBanner client={client} session={snapshot} />
 					</div>
-					<div className="chat-transcript" ref={scroll}>
+					<div
+						className="chat-transcript"
+						ref={scroll}
+						onClickCapture={(event) => {
+							// Opening a detail is reading intent. Freeze before its height changes, so the live
+							// edge observer cannot carry an expanded request or tool result out of view.
+							if (event.target instanceof Element && event.target.closest("summary")) {
+								follow.restore({ ...follow.snapshot(), following: false });
+							}
+						}}
+					>
 						<div className="chat-transcript__content">
 							{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
 
