@@ -1,5 +1,5 @@
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Value } from "typebox/value";
@@ -157,5 +157,83 @@ it("binds recording into approval plans and returns the manifest reference from 
 	} finally {
 		await bundle.extension.stop?.();
 		process.chdir(originalCwd);
+	}
+});
+
+it("admits an approved sibling-checkout Scout read once per run and records the root on the receipt (#433)", async () => {
+	const host = join(env.dir, "host");
+	const sibling = join(env.dir, "sibling");
+	mkdirSync(host);
+	mkdirSync(sibling);
+	// A symlinked root proves admission canonicalizes it rather than resolving it lexically (#433).
+	const link = join(env.dir, "link");
+	symlinkSync(sibling, link);
+	writeFileSync(join(sibling, "input.txt"), "sibling evidence\n");
+	const context = dispatchStubContext();
+	const bundle = makeDispatchBundle(context, {
+		journalRunEvents: false,
+		spawnWorker: () => ({
+			pid: null,
+			heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+			abort() {},
+			promise: Promise.resolve({ exitCode: 0, signal: null }),
+			events: (async function* () {
+				const content = JSON.stringify({
+					findings: [{ claim: "sibling evidence", path: "input.txt", line: 1 }],
+					needsSplit: false,
+					proposedSubtasks: [],
+				});
+				yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content } };
+				yield { type: "agent_end" };
+			})(),
+		}),
+	});
+	await bundle.extension.start();
+	try {
+		const approvals: string[] = [];
+		const tool = createDispatchTool({
+			dispatch: bundle.contract,
+			getAutonomy: () => "yolo",
+			getWorkspaceRoot: () => host,
+			approveExternalRead: async (root) => {
+				approvals.push(root);
+				return { requestId: "approval-1", requestedBy: "operator" };
+			},
+			getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+		});
+		const scout = { agent: "scout", mode: "parallel", intent: { read_roots: [`${link}/`] } };
+		const writing = tool.prepareAdmissionArguments?.({
+			...scout,
+			task: "Inspect and fix the sibling checkout.",
+			intent: { read_roots: [`${link}/`], write_roots: ["src/"] },
+		});
+		const refused = writing === undefined ? null : await tool.run(writing);
+		equal(refused?.kind, "error", JSON.stringify(refused));
+		match(JSON.stringify(refused), /external_read_write_scope/);
+		const prepared = tool.prepareAdmissionArguments?.({
+			...scout,
+			tasks: ["Inspect the sibling checkout.", "Inspect the sibling checkout again."],
+		});
+		ok(prepared);
+		const result = await tool.run(prepared);
+		equal(result.kind, "ok", JSON.stringify(result));
+		const root = realpathSync(sibling);
+		deepStrictEqual(approvals, [root, root]);
+		const runs = result.details?.runs as Array<{ runId: string }>;
+		equal(runs.length, 2);
+		equal(new Set(runs.map((run) => run.runId)).size, 2);
+		for (const run of runs) {
+			const receipt = JSON.parse(readFileSync(join(clioStateDir(), "receipts", `${run.runId}.json`), "utf8"));
+			equal(receipt.safety.readOnly, true);
+			equal(receipt.reproducibility.cwd, root);
+			deepStrictEqual(receipt.safety.externalReadApproval, {
+				root,
+				requestId: "approval-1",
+				requestedBy: "operator",
+				runId: run.runId,
+			});
+		}
+	} finally {
+		await bundle.extension.stop?.();
 	}
 });
