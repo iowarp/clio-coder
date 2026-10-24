@@ -16,6 +16,7 @@
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { type MemoryGateOutcome, recordMemoryObservations } from "./guardian-gate.js";
 import type { MemoryDeliveryOutcome, MemoryKnowledgeReview } from "./intervention.js";
 import { observationDigest } from "./observations.js";
@@ -61,6 +62,12 @@ const HISTORY_CANDIDATE_VERSION = 1;
 const HISTORY_CANDIDATE_MAX_BYTES = 64 * 1024;
 /** Pending files kept at most; past it a failing store holds the history cursor instead (SPEC R11). */
 const HISTORY_CANDIDATE_MAX_FILES = 64;
+/**
+ * The sync lock wait spins the event loop, and foreground history review can
+ * save while the chat streams, so a wedged lock must not freeze rendering. A
+ * refused writer only keeps its cursor. Matches the history cursor locks.
+ */
+const HISTORY_CANDIDATE_LOCK_TIMEOUT_MS = 100;
 /** Pending history files read per replay wake. */
 export const HISTORY_REPLAY_BATCH = 4;
 
@@ -294,17 +301,29 @@ export class MemoryLessonFeedback {
 			at: new Date().toISOString(),
 		});
 		if (Buffer.byteLength(body) > HISTORY_CANDIDATE_MAX_BYTES) return null;
-		if (this.#pendingHistoryCount() >= HISTORY_CANDIDATE_MAX_FILES) {
-			this.#ports.diagnostic("history lesson candidates not saved: pending candidate limit reached");
-			return null;
-		}
+		const directory = this.#historyDirectory();
 		const path = join(
-			this.#historyDirectory(),
+			directory,
 			`${observationDigest([input.sessionId, input.grounded.map((entry) => entry.content), input.ungrounded.map((entry) => entry.content)])}.json`,
 		);
+		// Several processes share one state root. The count, the identity check
+		// and the write hold one directory lock so concurrent writers cannot all
+		// pass the count and overrun the cap; a writer refused here reports
+		// `failed`, which keeps its history cursor.
 		try {
-			safeResourceWrite(path, body, { mode: 0o600 });
-			return path;
+			return withStateFileLockSync(
+				directory,
+				() => {
+					// The same lessons already saved: rewriting them adds no file.
+					if (!existsSync(path) && this.#pendingHistoryCount() >= HISTORY_CANDIDATE_MAX_FILES) {
+						this.#ports.diagnostic("history lesson candidates not saved: pending candidate limit reached");
+						return null;
+					}
+					safeResourceWrite(path, body, { mode: 0o600 });
+					return path;
+				},
+				{ timeoutMs: HISTORY_CANDIDATE_LOCK_TIMEOUT_MS },
+			);
 		} catch (error) {
 			this.#ports.diagnostic(`history lesson candidates not saved: ${errorText(error)}`);
 			return null;
