@@ -59,6 +59,7 @@ export async function expandSubmitText(
 	text: string,
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
+	signal?: AbortSignal,
 ): Promise<SubmitExpansion> {
 	const parsed = resources?.parsePendingSkillRequests(text, cwd) ?? {
 		text,
@@ -81,6 +82,7 @@ export async function expandSubmitText(
 		cwd,
 		includeImages: true,
 		missing: "leave",
+		...(signal ? { signal } : {}),
 	});
 	const attached =
 		fileExpansion.referencedPaths.length > 0 ? attachmentNote(fileExpansion.referencedPaths, cwd) : undefined;

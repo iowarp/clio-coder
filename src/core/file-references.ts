@@ -23,9 +23,14 @@ export interface FileReferenceOptions {
 	missing?: "error" | "leave";
 	includeImages?: boolean;
 	autoResizeImages?: boolean;
+	signal?: AbortSignal;
 }
 
+/** Attachment refusals are input errors, including when expansion happens after boot (#438). */
+export class FileReferenceError extends Error {}
+
 const DEFAULT_IMAGE_MAX_BASE64_BYTES = 4.5 * 1024 * 1024;
+const PDF_ATTACHMENT_MAX_BYTES = 32 * 1024;
 
 interface InlineFileReference {
 	start: number;
@@ -136,6 +141,7 @@ export async function prepareBoundedImage(bytes: Buffer, maxBytes: number): Prom
 }
 
 async function readFileReferenceAsync(fileArg: string, options: FileReferenceOptions): Promise<FileReferenceResult> {
+	options.signal?.throwIfAborted();
 	const filePath = expandConfigPath(fileArg, options.cwd === undefined ? undefined : { cwd: options.cwd });
 	if (!existsSync(filePath)) {
 		if (options.missing === "leave") return result(`@${fileArg}`);
@@ -152,8 +158,36 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 		return result("", [{ type: "error", message: `not a file: ${filePath}`, path: filePath }]);
 	}
 	if (stat.size === 0) return result("", [], [], [filePath]);
+	let isPdf = path.extname(filePath).toLowerCase() === ".pdf";
+	let binary = false;
 	try {
 		const bytes = readFileSync(filePath);
+		isPdf ||= bytes.subarray(0, 5).toString("ascii") === "%PDF-";
+		if (isPdf) {
+			// PDF bytes are not text context; share read's bounded page extraction (#438).
+			const [{ renderPdf }, { truncateUtf8 }] = await Promise.all([
+				import("../tools/read-documents/pdf.js"),
+				import("../tools/truncate-utf8.js"),
+			]);
+			const rendered = await renderPdf(filePath, {
+				numbered: false,
+				offset: 1,
+				limit: null,
+				tail: null,
+				signal: options.signal,
+			});
+			options.signal?.throwIfAborted();
+			if ("error" in rendered) throw new Error(rendered.error);
+			let content = rendered.text;
+			if (Buffer.byteLength(content) > PDF_ATTACHMENT_MAX_BYTES) {
+				const marker = (lastPage: string) =>
+					`\n[PDF attachment truncated at 32 KiB; included pages 1-${lastPage}, final page may be partial; use read with pages to inspect more.]`;
+				content = truncateUtf8(content, PDF_ATTACHMENT_MAX_BYTES - Buffer.byteLength(marker("50")), "");
+				const lastPage = rendered.pageStarts?.filter((page) => page.offset <= content.length).at(-1)?.page ?? 0;
+				content += marker(String(lastPage));
+			}
+			return result(renderTextFile(filePath, content), [], [], [filePath]);
+		}
 		const imageMimeType = detectSupportedImageMimeType(bytes);
 		if (imageMimeType) {
 			if (options.includeImages !== true) return result(`@${fileArg}`);
@@ -187,9 +221,15 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 				[filePath],
 			);
 		}
+		// Match read's NUL-based binary check; encoding mismatches and ANSI logs remain text (#438).
+		binary = bytes.includes(0);
+		if (binary) throw new Error("contains binary control bytes");
 		return result(renderTextFile(filePath, bytes.toString("utf8")), [], [], [filePath]);
 	} catch (err) {
+		options.signal?.throwIfAborted();
 		const reason = err instanceof Error ? err.message : String(err);
+		if (isPdf) throw new FileReferenceError(`PDF attachment ${filePath} could not be extracted: ${reason}`);
+		if (binary) throw new FileReferenceError(`Binary attachment ${filePath} cannot be inlined as text: ${reason}`);
 		return result("", [{ type: "error", message: `file could not be read: ${reason}`, path: filePath }]);
 	}
 }

@@ -1494,6 +1494,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): Promise<boolean> => {
 		lastCompactionNoGain = false;
 		if (!deps.readSessionEntries) return false;
+		// A fresh prompt has no history to shrink; request admission reports its budget (#438).
+		if (deps.session && !deps.session.current()) return false;
 		const originSession = deps.session?.current()?.id;
 		const originNavigation = navigationEpoch;
 		// A known window lets overflow recovery force a fit attempt. With an

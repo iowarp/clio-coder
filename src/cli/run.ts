@@ -5,7 +5,7 @@ import { BusChannels } from "../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
-import { readFileArgsAsync } from "../core/file-references.js";
+import { FileReferenceError, readFileArgsAsync } from "../core/file-references.js";
 import { readClioVersion } from "../core/package-root.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
@@ -357,7 +357,15 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
-	return withRunFailureReporting(parsed.json, () => executeRunCommand(parsed, options));
+	return withRunFailureReporting(parsed.json, async () => {
+		try {
+			return await executeRunCommand(parsed, options);
+		} catch (error) {
+			if (!(error instanceof FileReferenceError)) throw error;
+			writeRunDiagnostic(`${error.message}\n`);
+			return 2;
+		}
+	});
 }
 
 async function executeRunCommand(

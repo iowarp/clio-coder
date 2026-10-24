@@ -28,7 +28,10 @@ function parsePages(spec: string | undefined, pageCount: number): { first: numbe
 	return { first, last: Math.min(last, pageCount) };
 }
 
-export async function renderPdf(filePath: string, request: DocumentRequest): Promise<Rendered> {
+export async function renderPdf(
+	filePath: string,
+	request: DocumentRequest,
+): Promise<Rendered & { pageStarts?: Array<{ page: number; offset: number }> }> {
 	const cwd = dirname(filePath);
 	const exec = (file: string, args: string[]) =>
 		runCommandVector(file, args, {
@@ -66,18 +69,28 @@ export async function renderPdf(filePath: string, request: DocumentRequest): Pro
 	}
 	const pages = text.stdout.split("\f");
 	if (pages[pages.length - 1]?.trim() === "") pages.pop();
-	const lines = [`# PDF ${basename(filePath)}: ${pageCount} pages, showing pages ${range.first}-${range.last}`];
+	const lines = [
+		`# Extracted PDF text ${basename(filePath)}: ${pageCount} pages, showing pages ${range.first}-${range.last}`,
+	];
 	if (range.last < pageCount) {
 		lines.push(
-			`[more pages follow: pass pages=${range.last + 1}-${Math.min(pageCount, range.last + PDF_DEFAULT_PAGES)}]`,
+			`[text truncated to this page range; more pages follow: pass pages=${range.last + 1}-${Math.min(pageCount, range.last + PDF_DEFAULT_PAGES)}]`,
 		);
 	}
 	if (text.outputCapped) lines.push(`[text cut at ${formatSize(RENDER_CAP_BYTES)}; pass a narrower pages range]`);
 	if (pages.every((page) => page.trim().length === 0)) {
 		lines.push("[no extractable text on these pages; they may be scanned images, and OCR is not supported]");
 	}
-	pages.forEach((page, index) => {
-		lines.push("", `--- page ${range.first + index} ---`, page.replace(/\n+$/u, ""));
+	// Attachment caps use renderer offsets so page-like text in the PDF cannot spoof coverage (#438).
+	let offset = lines.join("\n").length;
+	const pageStarts = pages.map((page, index) => {
+		const pageNumber = range.first + index;
+		const heading = `--- page ${pageNumber} ---`;
+		const body = page.replace(/\n+$/u, "");
+		const start = offset + heading.length + 3;
+		offset = start + body.length;
+		lines.push("", heading, body);
+		return { page: pageNumber, offset: start };
 	});
-	return { text: lines.join("\n") };
+	return { text: lines.join("\n"), pageStarts };
 }
