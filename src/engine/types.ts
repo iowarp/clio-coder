@@ -91,6 +91,30 @@ export interface CodexConfiguration {
 	updates: ReadonlyArray<{ position: string; effort: string }>;
 }
 
+/** Private opaque state is addressed by integrity hash, never embedded in a ledger or prompt (#423). */
+export interface ProviderCheckpointHandle {
+	version: 1;
+	digest: string;
+	/** Provider-measured output tokens of the compaction call; never inferred from encrypted bytes. */
+	outputTokens: number;
+	/** Inclusive measured first-replay input is a conservative bound for its opaque contribution (#423). */
+	replayInputTokens?: number;
+}
+
+export interface ProviderCompactionResult {
+	outputJson: string;
+	usage: import("@earendil-works/pi-ai").Usage;
+	compatibility: {
+		accountScope: string;
+		provider: string;
+		model: string;
+		protocol: "codex-responses-trigger-v1";
+	};
+	initialEffort: string;
+	effectiveEffort: string;
+	policyDigest: string;
+}
+
 /** Effective routing attempts retained in existing run records and receipts (#426). */
 export interface ToolRoundRecord {
 	kind: "required" | "text-only" | "tools-removed";

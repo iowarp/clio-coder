@@ -1632,6 +1632,9 @@ export function buildSettingItems(
 			submenu: editNumberSubmenu("Edit context token ceiling", "context.compaction.maxTokens"),
 			affordance: "free text",
 		}),
+		settingItem("context.compaction.provider", compaction.provider ?? "off", {
+			values: ["off", "native"],
+		}),
 		settingItem("context.workingSet.enabled", String(workingSet.enabled), {
 			values: ["true", "false"],
 		}),

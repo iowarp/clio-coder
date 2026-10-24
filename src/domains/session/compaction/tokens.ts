@@ -128,7 +128,11 @@ function estimateCustom(entry: CustomEntry): number {
 }
 
 function estimateSummary(entry: BranchSummaryEntry | CompactionSummaryEntry): number {
-	let tokens = ceilChars(entry.summary.length);
+	let tokens =
+		entry.kind === "compactionSummary" && entry.providerCheckpoint
+			? (entry.providerCheckpoint.replayInputTokens ?? entry.providerCheckpoint.outputTokens) +
+				ceilChars(entry.summary.length)
+			: ceilChars(entry.summary.length);
 	if (entry.kind !== "compactionSummary") return tokens;
 	if (entry.userContext) tokens += ceilChars(entry.userContext.text.length + 40) + 4;
 	for (const skill of entry.skillContext?.skills ?? []) {

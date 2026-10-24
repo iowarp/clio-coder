@@ -1,5 +1,6 @@
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { scheduleProviderCheckpointPrune } from "../../../core/provider-checkpoint.js";
 import {
 	appendSessionFileEntry,
 	openSession,
@@ -111,6 +112,7 @@ export function removeSessionDirectory(sessionId: string): void {
 	const paths = sessionPaths(meta);
 	const dir = dirname(paths.meta);
 	rmSync(dir, { recursive: true, force: true });
+	scheduleProviderCheckpointPrune();
 }
 
 /**

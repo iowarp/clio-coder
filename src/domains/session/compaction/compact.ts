@@ -3,6 +3,8 @@ import type { CallFailureRecord } from "../../../core/call-failure.js";
 import { trackCallFetch } from "../../../core/call-failure.js";
 import type { SideCallAuth } from "../../../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../../core/oauth-retry.js";
+import { prepareProviderCheckpoint } from "../../../core/provider-checkpoint.js";
+import { ProviderCompactionError } from "../../../core/provider-checkpoint-handle.js";
 // Direct modules, not the memory barrel: entries and compaction sit in the
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
@@ -30,7 +32,7 @@ import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
  */
 
 import { streamSimple } from "../../../engine/ai.js";
-import type { EngineModel, Usage } from "../../../engine/types.js";
+import type { EngineModel, ProviderCheckpointHandle, ProviderCompactionResult, Usage } from "../../../engine/types.js";
 import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
 import type { WorkingSetView } from "../../context/working-set/contract.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
@@ -106,6 +108,10 @@ export interface CompactionCallObservation {
 }
 
 export interface CompactInput extends SideCallAuth {
+	/** Main-route native port, supplied only after runtime, setting and flow admission (#423). */
+	providerCompaction?: (observe: CompactInput["onCall"]) => Promise<ProviderCompactionResult>;
+	providerCheckpointSource?: { sessionId: string; archive: string };
+	providerFallbackReason?: string;
 	/**
 	 * Memory's substitute for one history slice. `slice` holds the raw ledger
 	 * entries the slice covers, which is what observation batches were prepared
@@ -183,6 +189,11 @@ export interface CompactInput extends SideCallAuth {
 export type CompactEmptyReason = "protected-recent" | "protected-skill" | "repeat-no-gain";
 
 export interface CompactResult {
+	providerCheckpoint?: ProviderCheckpointHandle;
+	/** Called synchronously by the session owner immediately before its durable ledger append (#423). */
+	publishProviderCheckpoint?: () => void;
+	providerFallbackReason?: string;
+	checkpointParentTurnId?: string;
 	memoryReceipt?: MemoryConsumptionReceipt;
 	/** The paid checkpoint was discarded because it would not reduce context. */
 	noGain?: boolean;
@@ -805,7 +816,7 @@ function numberOrZero(value: unknown): number {
  * turn runs two calls; both are billed, so both are counted. Missing provider
  * counts stay separate from the known token subtotal.
  */
-function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): CompactionUsage | undefined {
+function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): CompactionUsage {
 	const usage = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Partial<Usage> & {
 		reasoning?: number;
 	};
@@ -994,6 +1005,101 @@ async function runSummaryAttempt(
  * message list for `entries.slice(firstKeptEntryIndex)`.
  */
 export async function compact(input: CompactInput): Promise<CompactResult> {
+	let nativeUsage: CompactionUsage | undefined;
+	let fallbackReason = input.providerFallbackReason;
+	if (
+		input.providerCompaction &&
+		input.providerCheckpointSource &&
+		input.entries.some((entry) => entry.kind === "message")
+	) {
+		input.signal?.throwIfAborted();
+		const selection =
+			input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
+		const skillContext = captureSkillContext(input.entries, selection);
+		try {
+			if (!skillContext && input.entries.some((entry) => entry.kind === "skillActivation" && !entry.activation.runId))
+				throw new ProviderCompactionError("native-skills-unverified");
+			await input.beforeSummaryCall?.();
+			input.signal?.throwIfAborted();
+			const native = await input.providerCompaction(input.onCall);
+			nativeUsage = addCompactionUsage(undefined, native.usage);
+			input.signal?.throwIfAborted();
+			const cutCursor = [...input.entries].reverse().find((entry) => entry.kind === "message")?.turnId ?? "";
+			const prepared = prepareProviderCheckpoint(
+				{
+					...native,
+					...input.providerCheckpointSource,
+					version: 1,
+					createdAt: new Date().toISOString(),
+					cutCursor,
+					entryRefs: input.entries.map((entry) => entry.turnId),
+					receiptRefs: input.entries
+						.filter((entry) => entry.kind === "workerRun" || entry.kind === "skillActivation")
+						.map((entry) => entry.turnId),
+					recallRefs: input.entries
+						.filter((entry) => entry.kind === "message" && entry.role === "tool_result")
+						.map((entry) => entry.turnId),
+					skillContext: skillContext ?? null,
+				},
+				input.signal,
+			);
+			const latestUser = [...input.entries]
+				.reverse()
+				.find(
+					(entry) =>
+						entry.kind === "message" &&
+						entry.role === "user" &&
+						(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+				);
+			const text = latestUser?.kind === "message" ? operatorMessageText(latestUser) : null;
+			const userContext =
+				!input.pendingOperatorTurn && latestUser && text ? { turnId: latestUser.turnId, text } : undefined;
+			const workingSet = foldWorkingSet(input.entries);
+			return {
+				providerCheckpoint: prepared.handle,
+				publishProviderCheckpoint: prepared.publish,
+				checkpointParentTurnId: cutCursor,
+				summary: `Native Codex checkpoint; original history is retained for recall.${formatOperatorNotes(extractOperatorNotes(input.entries, input.instructions))}${formatRecallableRefs(input.entries, input.entries.length, workingSet)}`,
+				firstKeptEntryIndex: input.entries.length,
+				firstKeptTurnId: null,
+				tokensBefore: calculateContextTokens(input.entries, getLastAssistantUsage(input.entries), input.continuityNote),
+				messagesSummarized: input.entries.filter((entry) => entry.kind === "message").length,
+				isSplitTurn: false,
+				...(nativeUsage ? { usage: nativeUsage } : {}),
+				...(skillContext ? { skillContext } : {}),
+				...(userContext ? { userContext } : {}),
+			};
+		} catch (error) {
+			input.signal?.throwIfAborted();
+			if (!(error instanceof ProviderCompactionError)) throw error;
+			fallbackReason = error.category;
+		}
+	}
+	// Native checkpoints never replace evidence. A portable route summarizes the original ledger lazily (#423).
+	const latestCompaction = [...input.entries].reverse().find((entry) => entry.kind === "compactionSummary");
+	if (latestCompaction?.providerCheckpoint) {
+		const { providerCompaction: _native, ...portable } = input;
+		const original = input.entries.filter((entry) => entry.kind !== "compactionSummary" || !entry.providerCheckpoint);
+		const result = await compact({ ...portable, entries: original });
+		return {
+			...result,
+			providerFallbackReason: fallbackReason ?? "native-checkpoint-needs-portable-route",
+			firstKeptEntryIndex:
+				result.firstKeptTurnId === null
+					? input.entries.length
+					: input.entries.findIndex((entry) => entry.turnId === result.firstKeptTurnId),
+			...(nativeUsage ? { usage: addCompactionUsage(result.usage, nativeUsage) } : {}),
+		};
+	}
+	if (fallbackReason !== undefined) {
+		const { providerCompaction: _native, providerFallbackReason: _reason, ...portable } = input;
+		const result = await compact(portable);
+		return {
+			...result,
+			providerFallbackReason: fallbackReason,
+			...(nativeUsage ? { usage: addCompactionUsage(result.usage, nativeUsage) } : {}),
+		};
+	}
 	const reserveTokens = input.reserveTokens ?? DEFAULT_RESERVE_TOKENS;
 	const keepRecentTokens = input.keepRecentTokens ?? DEFAULT_KEEP_RECENT_TOKENS;
 	// Apply the same ledger decisions as live replay before pricing or

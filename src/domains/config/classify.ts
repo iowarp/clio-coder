@@ -21,6 +21,8 @@ export interface ConfigDiff {
 const HOT_RELOAD_FIELDS = new Set<string>([
 	// C1 / #422: pressure checkpoints and /context read the economic ceiling live.
 	"context.compaction.maxTokens",
+	// Native checkpoint selection is read at each compaction and replay (#423).
+	"context.compaction.provider",
 	"interface.exitSummary",
 	"interface.keybindings",
 	"safety.autonomy",

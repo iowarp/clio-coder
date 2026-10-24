@@ -90,6 +90,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"compaction.auto": "Summarize automatically",
 	"compaction.threshold": "When to summarize",
 	"context.compaction.maxTokens": "Context token ceiling",
+	"context.compaction.provider": "Provider compaction",
 	"context.workingSet.enabled": "Clear old tool output",
 	"context.workingSet.policy": "How old output is chosen",
 	"context.workingSet.profile": "What to keep in context",
@@ -188,6 +189,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"guardrails.internalDispatchTimeoutMs": "Maximum time for one internal worker run.",
 	"compaction.auto": "Summarize older context automatically before the conversation fills up.",
 	"compaction.threshold": "How full the model's context can get before Clio summarizes older content.",
+	"context.compaction.provider": "Use native Codex checkpoints when supported; off keeps portable Clio summaries.",
 	"context.compaction.maxTokens":
 		"Input token ceiling used to trigger context cleanup independently of the model's window.",
 	"context.workingSet.enabled": "Free space by setting aside stale tool output before summarizing the conversation.",
@@ -484,6 +486,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.panes.notifications": ["failures", "all", "off"],
 	"interface.panes.files.mode": ["companion", "chooser"],
 	"interface.panes.files.profile": ["managed", "user"],
+	"context.compaction.provider": ["off", "native"],
 	"context.workingSet.policy": ["structural-v1", "structural-v2", "age-horizon"],
 	"context.workingSet.profile": ["default", "data-analysis", "web-design"],
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
@@ -507,6 +510,10 @@ const OPTIONAL_STRINGS = new Set([
 	"context.compaction.systemPrompt",
 ]);
 const EXTRA_HELP: Record<string, [string, string]> = {
+	"context.compaction.provider": [
+		"Provider compaction",
+		"Use private native checkpoints on compatible Codex routes. Off uses portable Clio summaries; switching routes generates a portable summary from the retained history.",
+	],
 	"safety.limits.workerResponseSeconds": [
 		"Worker response time",
 		"Seconds one native worker model response may run; locked synthesis rounds stop at 120.",

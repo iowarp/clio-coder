@@ -24,9 +24,10 @@ import { isMemoryConsumptionReceipt } from "../memory/observations.js";
  */
 
 import { createHash } from "node:crypto";
-
+import { isProviderCheckpointHandle } from "../../core/provider-checkpoint-handle.js";
 import { isSkillActivation, type PendingSkillToolPolicy, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
+import type { ProviderCheckpointHandle } from "../../engine/types.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { AUTONOMY_EXPOSURES, type AutonomyExposure } from "../safety/autonomy.js";
 import type {
@@ -309,6 +310,8 @@ export function latestSkillContextState(entries: ReadonlyArray<SessionEntry>): S
 }
 
 export interface CompactionSummaryEntry extends BaseSessionEntry {
+	providerCheckpoint?: ProviderCheckpointHandle;
+	providerFallbackReason?: string;
 	memoryReceipt?: MemoryConsumptionReceipt;
 	kind: "compactionSummary";
 	skillContext?: SkillContextCheckpoint;
@@ -888,6 +891,8 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			return isString(v.fromTurnId) && isString(v.summary);
 		case "compactionSummary":
 			return (
+				(v.providerCheckpoint === undefined || isProviderCheckpointHandle(v.providerCheckpoint)) &&
+				isOptionalString(v.providerFallbackReason) &&
 				isString(v.summary) &&
 				isNumber(v.tokensBefore) &&
 				isString(v.firstKeptTurnId) &&
@@ -982,4 +987,29 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			return isContinuityCommitEntry(v);
 	}
 	return false;
+}
+
+/** Replay calibration is a public measurement row; encrypted bytes never enter the ledger (#423). */
+export function withProviderCheckpointMeasurements(entries: ReadonlyArray<SessionEntry>): SessionEntry[] {
+	const measured = new Map<string, number>();
+	for (const entry of entries) {
+		if (entry.kind !== "custom" || entry.customType !== "clio_coder_provider_checkpoint_input") continue;
+		const data = entry.data as { version?: unknown; checkpointDigest?: unknown; inputTokens?: unknown } | null;
+		if (
+			data?.version === 1 &&
+			typeof data.checkpointDigest === "string" &&
+			typeof data.inputTokens === "number" &&
+			Number.isSafeInteger(data.inputTokens) &&
+			data.inputTokens >= 0 &&
+			!measured.has(data.checkpointDigest)
+		)
+			measured.set(data.checkpointDigest, data.inputTokens);
+	}
+	return entries.map((entry) => {
+		if (entry.kind !== "compactionSummary" || !entry.providerCheckpoint) return entry;
+		const tokens = measured.get(entry.providerCheckpoint.digest);
+		return tokens === undefined
+			? entry
+			: { ...entry, providerCheckpoint: { ...entry.providerCheckpoint, replayInputTokens: tokens } };
+	});
 }

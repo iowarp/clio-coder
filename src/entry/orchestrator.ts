@@ -25,6 +25,7 @@ import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.j
 import { installInternalGitPolicy } from "../core/internal-git.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
+import { pruneProviderCheckpoints } from "../core/provider-checkpoint.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
@@ -269,6 +270,7 @@ import { continuityProjectionTokens, resolveContinuityProjection } from "../doma
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
+import { withProviderCheckpointMeasurements } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
 import {
 	observationCheckpoint,
@@ -1444,6 +1446,8 @@ async function runCompactionFlow(
 	observability?: BackgroundMemoryUsageSink,
 	budget?: Pick<
 		CompactInput,
+		| "providerCompaction"
+		| "providerFallbackReason"
 		| "keepRecentTokens"
 		| "preserveUserTurnId"
 		| "pendingOperatorTurn"
@@ -1462,6 +1466,7 @@ async function runCompactionFlow(
 		/** Information-flow admission of the summarizer request; the block reason or null. */
 		admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 		memory?: MemoryRuntime;
+		summaryAdmitted?: boolean;
 	},
 ): Promise<CompactResult | null> {
 	const meta = session.current();
@@ -1472,7 +1477,7 @@ async function runCompactionFlow(
 	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
 	const isOriginCurrent = () =>
 		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
-	const entries = filterEntriesToActivePath(session.readEntries(), activeLeafTurnId);
+	const entries = withProviderCheckpointMeasurements(filterEntriesToActivePath(session.readEntries(), activeLeafTurnId));
 	if (entries.length === 0) return null;
 	// Folded over the full applicable ledger before this compaction cuts it, so
 	// the carry written below reflects every durable transition, including ones
@@ -1536,6 +1541,24 @@ async function runCompactionFlow(
 	// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
 	// pre-warm so dispatch admission and background memory see its real usage.
 	const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
+	const { providerCompaction, ...compactionBudget } = budget ?? {};
+	const nativeEnabled =
+		settings.context.compaction.provider === "native" &&
+		!settings.context.compaction.model &&
+		resolved.runtimeId === "openai-codex";
+	let nativeAdmission: Promise<void> | undefined;
+	const admitSummary = async (): Promise<void> => {
+		if (admission?.summaryAdmitted) return;
+		await budget?.beforeSummaryCall?.();
+		if (resolved.costProvenance === "known" || resolved.costProvenance === "estimated") {
+			await admission?.scheduling?.admitPaidRequest?.({
+				waitForRaise: admission.headless !== true,
+				...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
+				...(budget?.signal ? { signal: budget.signal } : {}),
+			});
+		}
+	};
+
 	let result: CompactResult;
 	try {
 		result = await compact({
@@ -1555,16 +1578,17 @@ async function runCompactionFlow(
 				);
 			},
 			continuityNote,
-			...budget,
-			beforeSummaryCall: async () => {
-				await budget?.beforeSummaryCall?.();
-				if (resolved.costProvenance === "known" || resolved.costProvenance === "estimated") {
-					await admission?.scheduling?.admitPaidRequest?.({
-						waitForRaise: admission.headless !== true,
-						...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
-						...(budget?.signal ? { signal: budget.signal } : {}),
-					});
-				}
+			...compactionBudget,
+			...(nativeEnabled && providerCompaction ? { providerCompaction } : {}),
+			...(nativeEnabled ? { providerCheckpointSource: { sessionId: meta.id, archive: sessionPaths(meta).current } } : {}),
+			...(settings.context.compaction.provider === "native" && !nativeEnabled
+				? { providerFallbackReason: "non-codex-or-compaction-override" }
+				: {}),
+			// Native rejection and its portable retry share one transaction admission (#423).
+			beforeSummaryCall: () => {
+				if (!nativeEnabled || !providerCompaction) return admitSummary();
+				nativeAdmission ??= admitSummary();
+				return nativeAdmission;
 			},
 			...(summarize ? { summarize } : {}),
 			onCall: (call) => calls.push(call),
@@ -1638,8 +1662,10 @@ async function runCompactionFlow(
 	const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 		kind: "compactionSummary",
 		turnId: randomUUID(),
-		parentTurnId: result.firstKeptTurnId ?? null,
+		parentTurnId: result.checkpointParentTurnId ?? result.firstKeptTurnId ?? null,
 		summary: result.summary,
+		...(result.providerCheckpoint ? { providerCheckpoint: result.providerCheckpoint } : {}),
+		...(result.providerFallbackReason ? { providerFallbackReason: result.providerFallbackReason } : {}),
 		...(result.skillContext ? { skillContext: result.skillContext } : {}),
 		...(result.userContext ? { userContext: result.userContext } : {}),
 		...(result.memoryReceipt ? { memoryReceipt: result.memoryReceipt } : {}),
@@ -1670,13 +1696,43 @@ async function runCompactionFlow(
 		entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
 	}
 	if (trigger !== undefined) entry.trigger = trigger;
+	// No asynchronous work may separate private publication from the owned ledger append (#423).
+	if (budget?.signal?.aborted) {
+		preserveCalls();
+		budget.signal.throwIfAborted();
+	}
+	if (!isOriginCurrent()) {
+		preserveCalls();
+		throw new Error("compaction ownership changed before publication");
+	}
+	try {
+		result.publishProviderCheckpoint?.();
+	} catch {
+		preserveCalls();
+		budget?.signal?.throwIfAborted();
+		const { providerCompaction: _native, ...portableBudget } = budget ?? {};
+		return runCompactionFlow(
+			session,
+			settings,
+			providers,
+			instructions,
+			trigger,
+			observability,
+			{ ...portableBudget, providerFallbackReason: "checkpoint-publication-failed" },
+			summarize,
+			{ ...admission, summaryAdmitted: true },
+		);
+	}
 	try {
 		session.appendEntry(entry);
 	} catch (error) {
 		// A write may have reached the ledger before its caller threw. Reconcile
 		// this exact checkpoint identity before choosing a second accounting store.
 		try {
-			if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) preserveCalls();
+			if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) {
+				preserveCalls();
+				if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
+			}
 		} catch (recordingError) {
 			throw new AggregateError(
 				[error, recordingError],
@@ -1684,6 +1740,27 @@ async function runCompactionFlow(
 			);
 		}
 		throw error;
+	}
+	session.flushAppends?.();
+	if (calls.some((call) => call.outcome !== "success")) {
+		try {
+			recordFailedCompactionCalls(
+				{
+					stateDir,
+					sessionId: meta.id,
+					repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
+					target: resolved.targetId,
+					model: resolved.wireModelId,
+				},
+				calls.filter((call) => call.outcome !== "success"),
+				observability,
+			);
+		} catch {
+			// The cut is already durable; a secondary accounting failure must not invalidate it (#423).
+			process.emitWarning("Compaction completed, but failed-attempt usage could not be saved", {
+				code: "CLIO_CODER_COMPACTION_USAGE_PERSISTENCE_FAILED",
+			});
+		}
 	}
 	return result;
 }
@@ -1737,6 +1814,8 @@ export function createProductionAutoCompact(
 	trigger?: CompactionTrigger,
 	budget?: Pick<
 		CompactInput,
+		| "providerCompaction"
+		| "providerFallbackReason"
 		| "keepRecentTokens"
 		| "preserveUserTurnId"
 		| "pendingOperatorTurn"
@@ -1769,6 +1848,8 @@ function estimateTokensFromSummary(result: CompactResult): number {
 		parentTurnId: null,
 		timestamp: "",
 		summary: result.summary,
+		...(result.providerCheckpoint ? { providerCheckpoint: result.providerCheckpoint } : {}),
+		...(result.providerFallbackReason ? { providerFallbackReason: result.providerFallbackReason } : {}),
 		firstKeptTurnId: result.firstKeptTurnId ?? "",
 		tokensBefore: result.tokensBefore,
 		...(result.skillContext ? { skillContext: result.skillContext } : {}),

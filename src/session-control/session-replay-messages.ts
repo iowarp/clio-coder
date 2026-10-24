@@ -606,7 +606,11 @@ export function selectReplayEntries(
 	const cut = compactionCut(entries);
 	if (cut.compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
 	const compaction = entries[cut.compactionIndex] as CompactionSummaryEntry;
-	const selected: SessionEntry[] = [compaction, ...cut.visible];
+	// A retained suffix can contain an older native cut; only the current cut owns replay (#423).
+	const selected: SessionEntry[] = [
+		compaction,
+		...cut.visible.filter((entry) => entry.kind !== "compactionSummary" || !entry.providerCheckpoint),
+	];
 	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, cut.compactionIndex));
 }
 
@@ -795,7 +799,13 @@ export function buildReplayAgentMessagesFromTurns(
 				appendContextMessage(out, "user", branchContextText(entry), entry.timestamp);
 				break;
 			case "compactionSummary": {
-				out.push(makeTextMessage("user", compactionContextText(entry), entry.timestamp));
+				const message = makeTextMessage("user", compactionContextText(entry), entry.timestamp);
+				if (entry.providerCheckpoint) {
+					Object.assign(message, { clioProviderCheckpoint: entry.providerCheckpoint });
+					out.push(message);
+					// Constraints and recall refs remain inspectable host data after the opaque splice (#423).
+					out.push(makeTextMessage("user", compactionContextText(entry), entry.timestamp));
+				} else out.push(message);
 				const checkpointIndex = activeEntries.findIndex((candidate) => candidate.turnId === entry.turnId);
 				const board = checkpointIndex < 0 ? null : foldTaskBoard(activeEntries.slice(0, checkpointIndex));
 				if (board) {

@@ -209,6 +209,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "context.compaction.auto":
 		case "context.compaction.threshold":
 		case "context.compaction.maxTokens":
+		case "context.compaction.provider":
 		case "context.compaction.model":
 			return place("context", "Compaction");
 		case "context.workingSet.enabled":

@@ -6,10 +6,12 @@ import {
 	toToolDeclaration,
 } from "@earendil-works/pi-ai";
 import { createHostPolicyMessage, isHostPolicyMessage } from "../core/host-policy-message.js";
+import { ProviderCompactionError, providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
-import { resolvedRequestContext } from "./context.js";
+import { compactOpenAI, providerCheckpointCompatibility } from "./apis/openai-compaction.js";
+import { normalizeContext, resolvedRequestContext } from "./context.js";
 import { omitImageBlocks } from "./image-context.js";
-import type { CodexConfiguration } from "./types.js";
+import type { CodexConfiguration, ProviderCheckpointHandle } from "./types.js";
 
 /**
  * Thin wrapper over Clio's engine Agent class.
@@ -32,7 +34,7 @@ export {
 	codexUserTurn as engineCodexUserTurn,
 } from "./apis/codex-configuration.js";
 
-import { engineStreamSimple } from "./api-registry.js";
+import { engineMainStreamSimple, engineStreamSimple } from "./api-registry.js";
 import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
@@ -121,6 +123,79 @@ function refusedStream(request: EngineStreamRequest, reason: string, aborted = f
 }
 
 const codexConfigurations = new WeakMap<Agent, CodexConfiguration>();
+const providerCompactionPolicies = new WeakMap<Agent, () => boolean>();
+const providerReplayFallbacks = new WeakMap<Agent, (reason: string) => Promise<void>>();
+
+/** A rejected replay is resolved through the owning turn path before one fresh invocation (#423). */
+export function setEngineProviderReplayFallback(agent: Agent, resolve: (reason: string) => Promise<void>): void {
+	providerReplayFallbacks.set(agent, resolve);
+}
+
+function portableReplayReason(error: string): string | null {
+	if (error.includes("native-setting-or-route-disabled")) return "setting-off";
+	if (error.includes("provider checkpoint requires portable replay")) return "non-codex-route";
+	return (
+		error.match(
+			/native-replay-(?:checkpoint-unreadable|provider-or-model-changed|account-changed-or-unknown|non-codex-route)/u,
+		)?.[0] ?? null
+	);
+}
+const providerCheckpointObservers = new WeakMap<
+	Agent,
+	(handle: ProviderCheckpointHandle, inputTokens: number) => void
+>();
+
+export function setEngineProviderCheckpointObserver(
+	agent: Agent,
+	observer: (handle: ProviderCheckpointHandle, inputTokens: number) => void,
+): void {
+	providerCheckpointObservers.set(agent, observer);
+}
+
+/** Read the live setting at payload time, including config reloads during preparation (#423). */
+export function setEngineProviderCompactionPolicy(agent: Agent, enabled: () => boolean): void {
+	providerCompactionPolicies.set(agent, enabled);
+}
+
+/** Snapshot public Pi transforms and the live transcript without running the agent loop (#423). */
+export async function compactEngineCodex(
+	agent: Agent,
+	options: { signal?: AbortSignal; sessionId?: string; onUsage?: Parameters<typeof compactOpenAI>[0]["onUsage"] },
+) {
+	let messages = structuredClone(agent.state.messages);
+	if (agent.transformContext) messages = await agent.transformContext(messages, options.signal);
+	const converted = await agent.convertToLlm(messages);
+	// Cutting an in-flight tool batch would orphan its eventual results (#423).
+	const pending = new Set<string>();
+	for (const message of converted) {
+		if (message.role === "assistant") {
+			for (const block of message.content) if (block.type === "toolCall") pending.add(block.id);
+		} else if (message.role === "toolResult") pending.delete(message.toolCallId);
+	}
+	if (pending.size > 0) throw new ProviderCompactionError("native-pending-tools");
+	const apiKey = await agent.getApiKey?.(agent.state.model.provider);
+	options.signal?.throwIfAborted();
+	const configuration = codexConfigurations.get(agent);
+	return compactOpenAI({
+		stream: engineMainStreamSimple,
+		model: agent.state.model,
+		context: { messages: converted },
+		options: {
+			clioProviderCompaction: () => providerCompactionPolicies.get(agent)?.() === true,
+			clioProviderCheckpointObserved: (handle, tokens) => providerCheckpointObservers.get(agent)?.(handle, tokens),
+			...(agent.onProviderStreamEvent ? { onProviderStreamEvent: agent.onProviderStreamEvent } : {}),
+			...(apiKey === undefined ? {} : { apiKey }),
+			...(options.signal === undefined ? {} : { signal: options.signal }),
+			...(configuration ? { codexConfiguration: configuration } : {}),
+			...(agent.state.thinkingLevel === "off" ? {} : { reasoning: agent.state.thinkingLevel }),
+			...((options.sessionId ?? agent.sessionId) === undefined ? {} : { sessionId: options.sessionId ?? agent.sessionId }),
+			...(agent.transport === undefined ? {} : { transport: agent.transport }),
+			...(agent.onPayload === undefined ? {} : { onPayload: agent.onPayload }),
+			...(agent.onResponse === undefined ? {} : { onResponse: agent.onResponse }),
+		},
+		...(options.onUsage ? { onUsage: options.onUsage } : {}),
+	});
+}
 
 /** Session-control owns durable effort history; the engine only serializes it (#423). */
 export function setEngineCodexConfiguration(agent: Agent, configuration: CodexConfiguration | undefined): void {
@@ -141,14 +216,89 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	let activeCorrelationId: string | undefined;
 	const invoke: StreamFn = async (model, context, streamOptions) => {
 		onStreamInvocation?.();
+		streamOptions = {
+			...streamOptions,
+			clioProviderCheckpointObserved: (handle: ProviderCheckpointHandle, tokens: number) =>
+				providerCheckpointObservers.get(agent)?.(handle, tokens),
+			clioProviderCompaction: () => providerCompactionPolicies.get(agent)?.() === true,
+		} as typeof streamOptions;
 		const configuration = codexConfigurations.get(agent);
 		if (configuration) streamOptions = { ...streamOptions, codexConfiguration: configuration } as typeof streamOptions;
 		const delegate = (guarded: typeof streamOptions) =>
 			streamFn ? streamFn(model, resolvedRequestContext(context), guarded) : transcriptStreamFn(model, context, guarded);
-		const source = await (streamFn || transcriptStreamFn !== engineStreamSimple
-			? guardToolArgumentStream(model, context, streamOptions, delegate)
-			: delegate(streamOptions));
-		return filterAssistantProseStream(source, model);
+		const open = async () =>
+			filterAssistantProseStream(
+				await (streamFn || transcriptStreamFn !== engineStreamSimple
+					? guardToolArgumentStream(model, context, streamOptions, delegate)
+					: delegate(streamOptions)),
+				model,
+			);
+		const marker = normalizeContext(context)
+			.messages.map(providerCheckpointFromMessage)
+			.find((handle) => handle !== undefined);
+		const resolve = providerReplayFallbacks.get(agent);
+		if (!marker || !resolve) return open();
+		const rebuild = async (reason: string): Promise<void> => {
+			await resolve(reason);
+			streamOptions?.signal?.throwIfAborted();
+			let messages = structuredClone(agent.state.messages);
+			if (agent.transformContext) messages = await agent.transformContext(messages, streamOptions?.signal);
+			context = normalizeContext({ messages: await agent.convertToLlm(messages) });
+			const { codexConfiguration: _old, ...portableOptions } = (streamOptions ?? {}) as NonNullable<
+				typeof streamOptions
+			> & { codexConfiguration?: CodexConfiguration };
+			const fresh = codexConfigurations.get(agent);
+			streamOptions = { ...portableOptions, ...(fresh ? { codexConfiguration: fresh } : {}) } as typeof streamOptions;
+		};
+		const preflight =
+			providerCompactionPolicies.get(agent)?.() === true
+				? providerCheckpointCompatibility(marker, model, streamOptions?.apiKey)
+				: "setting-off";
+		if (preflight !== null) await rebuild(preflight);
+		const output = createAssistantMessageEventStream();
+		void (async () => {
+			let retried = preflight !== null;
+			try {
+				for (;;) {
+					let retryReason: string | null = null;
+					let start:
+						| Extract<Awaited<ReturnType<typeof open>> extends AsyncIterable<infer E> ? E : never, { type: "start" }>
+						| undefined;
+					try {
+						const source = await open();
+						for await (const event of source) {
+							if (event.type === "start") {
+								start = event;
+								continue;
+							}
+							if (!retried && event.type === "error") retryReason = portableReplayReason(event.error.errorMessage ?? "");
+							if (retryReason !== null) break;
+							if (start) {
+								output.push(start);
+								start = undefined;
+							}
+							output.push(event);
+						}
+					} catch (error) {
+						retryReason = !retried ? portableReplayReason(error instanceof Error ? error.message : String(error)) : null;
+						if (retryReason === null) throw error;
+					}
+					if (retryReason === null) break;
+					retried = true;
+					await rebuild(retryReason);
+				}
+				output.end();
+			} catch (error) {
+				const failure = await refusedStream(
+					{ model, context, options: streamOptions },
+					error instanceof Error ? error.message : String(error),
+					streamOptions?.signal?.aborted,
+				);
+				for await (const event of failure) output.push(event);
+				output.end();
+			}
+		})();
+		return output;
 	};
 	const admit: StreamFn = (model, context, streamOptions) => {
 		if (!beforeStreamRequest) return invoke(model, context, streamOptions);

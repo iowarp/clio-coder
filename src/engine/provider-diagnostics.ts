@@ -159,7 +159,12 @@ function diagnosticSerializer(model: Model<Api>, options: StreamOptions | undefi
 						Object.entries(value).filter(([key]) => !/^(?:headers|env|apiKey|api_key|authorization)$/iu.test(key)),
 					)
 				: value;
-		let serialized = JSON.stringify(body);
+		// Encrypted provider state is usable context, never diagnostic text (#423).
+		let serialized = JSON.stringify(body, (_key, value: unknown) =>
+			value !== null && typeof value === "object" && "type" in value && value.type === "compaction"
+				? { type: "compaction", encrypted_content: "[REDACTED]" }
+				: value,
+		);
 		if (serialized === undefined) serialized = "null";
 		for (const secret of secrets) serialized = serialized.replaceAll(JSON.stringify(secret).slice(1, -1), "[REDACTED]");
 		return serialized;

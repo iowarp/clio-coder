@@ -136,8 +136,18 @@ function branchEntriesFromParent(
 	const path = traceAncestry(linked, leafTurnId);
 	const pathIds = new Set(path.map((record) => record.id));
 	const forkPointIndex = parsed.findIndex((entry) => linkedRecordFromEntry(entry).id === leafTurnId);
-	const entries = parsed.filter((entry, index) =>
-		sessionEntryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex),
+	// Forking the current leaf after an idle native cut inherits that cut. Historical selections stay positional (#423).
+	const latestMessage = [...parsed].reverse().find((entry) => entry.kind === "message");
+	const latestCompaction = [...parsed].reverse().find((entry) => entry.kind === "compactionSummary");
+	const nativeAtLeaf =
+		(parentMeta.pinnedLeafTurnId ?? latestMessage?.turnId) === leafTurnId &&
+		latestCompaction?.providerCheckpoint &&
+		latestCompaction.parentTurnId === leafTurnId
+			? latestCompaction
+			: undefined;
+	const entries = parsed.filter(
+		(entry, index) =>
+			entry === nativeAtLeaf || sessionEntryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex),
 	);
 	return {
 		parentCurrentPath,

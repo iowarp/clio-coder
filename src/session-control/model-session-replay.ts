@@ -1,3 +1,4 @@
+import { providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { projectWorkingSet } from "../domains/context/working-set/project.js";
 import {
@@ -8,6 +9,7 @@ import {
 } from "../domains/session/continuity/projection.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
+import { withProviderCheckpointMeasurements } from "../domains/session/entries.js";
 import type { AgentMessage } from "../engine/types.js";
 import {
 	activeEntriesBeforeCompactionCut,
@@ -136,6 +138,16 @@ export function buildModelReplayAgentMessagesFromTurns(
 	options: ModelReplayOptions = {},
 ): AgentMessage[] {
 	const activeLeafTurnId = options.activeLeafTurnId ?? options.uptoTurnId;
+	entries = withProviderCheckpointMeasurements(entries);
+	const active = activeEntriesBeforeCompactionCut(entries, options, false);
+	const resolved = providerFallbackDigests(active);
+	const latest = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
+	if (
+		latest?.kind === "compactionSummary" &&
+		latest.providerCheckpoint &&
+		resolved.has(latest.providerCheckpoint.digest)
+	)
+		entries = entries.filter((entry) => entry.kind !== "compactionSummary" || !entry.providerCheckpoint);
 	// A caller that already resolved the projection passes its blocks through,
 	// so the transcript beside this replay renders the identical bytes.
 	const blocks = options.continuityBlocks ?? continuityReplayBlocks(resolveReplayContinuity(entries, options));

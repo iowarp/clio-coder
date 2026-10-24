@@ -3,18 +3,24 @@ import { semanticUsable } from "../core/config.js";
 import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { isHostPolicyMessage } from "../core/host-policy-message.js";
+import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import {
 	appendEnginePolicyMessage,
+	compactEngineCodex,
 	engineCodexUserTurn,
 	engineInitialSystemPrompt,
 	replaceEngineMessages,
 	setEngineCodexConfiguration,
 	setEngineCodexUserTurn,
+	setEngineProviderCheckpointObserver,
+	setEngineProviderCompactionPolicy,
+	setEngineProviderReplayFallback,
 	setEngineSystemPrompt,
 } from "../engine/agent.js";
+import { providerCheckpointCompatibility } from "../engine/ai.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
@@ -128,7 +134,12 @@ import {
 	type PromptCacheStats,
 } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import { type CompactionTrigger, mainSkillContextState, type SessionEntry } from "../domains/session/entries.js";
+import {
+	type CompactionTrigger,
+	mainSkillContextState,
+	type SessionEntry,
+	withProviderCheckpointMeasurements,
+} from "../domains/session/entries.js";
 import {
 	appendPromptCompileRecord,
 	PROMPT_MANIFEST_VERSION,
@@ -192,6 +203,8 @@ export interface TurnContextDeps {
 				trigger?: CompactionTrigger,
 				budget?: Pick<
 					CompactInput,
+					| "providerCompaction"
+					| "providerFallbackReason"
 					| "keepRecentTokens"
 					| "preserveUserTurnId"
 					| "pendingOperatorTurn"
@@ -298,7 +311,12 @@ export interface TurnContext {
 	): void;
 	/** Bind first-session creation after append without rereading the prepared snapshot. */
 	commitMemoryTurn(runtime: AgentRuntime): void;
-	ensureSessionPrompt(agentRuntime: AgentRuntime, beforeSend?: boolean): Promise<CompiledSessionPrompt | null>;
+	ensureSessionPrompt(
+		agentRuntime: AgentRuntime,
+		beforeSend?: boolean,
+		pendingUserText?: string,
+		skipProviderFallback?: boolean,
+	): Promise<CompiledSessionPrompt | null>;
 	thinkingUsesConfigurationUpdate(): boolean;
 	commitSessionPosture(agentRuntime: AgentRuntime, userTurnId: string): void;
 	/**
@@ -358,6 +376,7 @@ export interface TurnContext {
 		signal?: AbortSignal,
 		handoff?: ContinuityReductionHooks,
 		pendingUserIsOperator?: boolean,
+		providerFallbackReason?: string,
 	): Promise<boolean>;
 	lastCompactionWasNoGain(): boolean;
 	cancelCompaction(): void;
@@ -1307,8 +1326,46 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 	};
 
+	const bindProviderCompaction = (runtime: AgentRuntime): void => {
+		setEngineProviderCompactionPolicy(
+			runtime.agent,
+			() => deps.getSettings().context.compaction.provider === "native" && runtime.runtimeId === "openai-codex",
+		);
+		const origin = deps.session?.current()?.id;
+		setEngineProviderReplayFallback(runtime.agent, async (reason) => {
+			if (origin !== deps.session?.current()?.id) throw new DOMException("Replay ownership changed", "AbortError");
+			await resolveProviderReplay(runtime, reason);
+		});
+		setEngineProviderCheckpointObserver(runtime.agent, (handle, inputTokens) => {
+			if (origin !== deps.session?.current()?.id) return;
+			const entries = withProviderCheckpointMeasurements(
+				filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
+			);
+			const checkpoint = entries.find(
+				(entry) => entry.kind === "compactionSummary" && entry.providerCheckpoint?.digest === handle.digest,
+			);
+			if (checkpoint?.kind !== "compactionSummary" || checkpoint.providerCheckpoint?.replayInputTokens !== undefined)
+				return;
+			// The full inclusive request is a measured upper bound; it never underprices opaque input (#423).
+			deps.session?.appendEntry({
+				kind: "custom",
+				parentTurnId: state.lastTurnId,
+				customType: "clio_coder_provider_checkpoint_input",
+				data: { version: 1, checkpointDigest: handle.digest, inputTokens, measurement: "inclusive-request-upper-bound" },
+			});
+			deps.session?.flushAppends?.();
+			runtime.agent.state.messages = runtime.agent.state.messages.map((message) => {
+				const marker = providerCheckpointFromMessage(message);
+				return marker?.digest === handle.digest
+					? { ...message, clioProviderCheckpoint: { ...marker, replayInputTokens: inputTokens } }
+					: message;
+			});
+		});
+	};
+
 	// Ledger boundaries, rather than request retries, own Codex effort changes (#423).
 	const syncCodexConfiguration = (runtime: AgentRuntime): void => {
+		bindProviderCompaction(runtime);
 		const model = runtime.agent.state.model;
 		thinkingUsesConfigurationUpdate = false;
 		if (model?.api !== "openai-codex-responses") {
@@ -1491,7 +1548,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		signal?: AbortSignal,
 		handoff?: ContinuityReductionHooks,
 		pendingUserIsOperator = true,
+		providerFallbackReason?: string,
 	): Promise<boolean> => {
+		bindProviderCompaction(agentRuntime);
 		lastCompactionNoGain = false;
 		if (!deps.readSessionEntries) return false;
 		// A fresh prompt has no history to shrink; request admission reports its budget (#438).
@@ -1502,7 +1561,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// unknown window, summarize directly and let the server judge the retry.
 		const knownWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow > 0;
 		const requiredFit = triggerOverride === "overflow" && knownWindow;
-		const useRequestBudget = !force || requiredFit || handoff !== undefined;
+		const useRequestBudget = !force || requiredFit || handoff !== undefined || providerFallbackReason !== undefined;
 		const activeAutoTurnId = useRequestBudget ? state.activeUserTurnId : null;
 		const skillContextState = mainSkillContextState(
 			filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined),
@@ -1902,6 +1961,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		let budget:
 			| Pick<
 					CompactInput,
+					| "providerCompaction"
+					| "providerFallbackReason"
 					| "keepRecentTokens"
 					| "preserveUserTurnId"
 					| "pendingOperatorTurn"
@@ -1955,6 +2016,26 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					(await deps.autoCompact?.(instructions, trigger, {
 						...budget,
 						...handoff,
+						...(providerFallbackReason ? { providerFallbackReason } : {}),
+						...(settings.context.compaction.provider === "native" &&
+						agentRuntime.runtimeId === "openai-codex" &&
+						providerFallbackReason === undefined
+							? {
+									providerCompaction: async (observe: CompactInput["onCall"]) => {
+										// A fresh process has history before its first prompt compile; native must use the main prefix (#423).
+										await controller.ensureSessionPrompt(agentRuntime, false, undefined, true);
+										syncCodexConfiguration(agentRuntime);
+										const timestamp = new Date().toISOString();
+										const sessionId = deps.session?.current()?.id;
+										return compactEngineCodex(agentRuntime.agent, {
+											...(sessionId ? { sessionId } : {}),
+											...(summarySignal ? { signal: summarySignal } : {}),
+											onUsage: (usage, outcome, failure) =>
+												observe?.({ usage, outcome, timestamp, ...(failure ? { failure } : {}) }),
+										});
+									},
+								}
+							: {}),
 						...(summarySignal ? { signal: summarySignal } : {}),
 						...(automaticSummary && noGainSummaryDigest !== null ? { skipSummaryDigest: noGainSummaryDigest } : {}),
 						checkpointTokenFigures: (entry) => {
@@ -1995,6 +2076,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		)
 			throw new Error("Context ownership changed during compaction.");
 		summarySignal?.throwIfAborted();
+		if (result?.providerFallbackReason)
+			deps.emitNotice(`Native compaction used Clio's portable path: ${result.providerFallbackReason}.`);
 		if (result?.noGain) {
 			lastCompactionNoGain = true;
 			// Remembered even when eviction acted in this pass: the summary request
@@ -2228,6 +2311,61 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		thinkingLevel: agentRuntime.agent.state.thinkingLevel,
 	});
 
+	const resolveProviderReplay = async (
+		runtime: AgentRuntime,
+		reason: string,
+		pendingUserText?: string,
+		pendingIsOperator = true,
+	): Promise<void> => {
+		const origin = deps.session?.current()?.id;
+		const navigation = navigationEpoch;
+		const signal = deps.turnSignal?.();
+		const active = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+		const checkpoint = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
+		if (checkpoint?.kind !== "compactionSummary" || !checkpoint.providerCheckpoint) {
+			refreshAgentMessagesFromSession(runtime);
+			return;
+		}
+		if (!providerFallbackDigests(active).has(checkpoint.providerCheckpoint.digest)) {
+			let changed = false;
+			let resolutionReason = reason;
+			try {
+				changed = await runAutoCompact(
+					runtime,
+					true,
+					undefined,
+					"force",
+					pendingUserText,
+					undefined,
+					signal,
+					undefined,
+					pendingIsOperator,
+					reason,
+				);
+			} catch (error) {
+				if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+				resolutionReason = `${reason}:portable-summary-failed`;
+				deps.emitNotice("Portable compaction failed; continuing from the original session history.");
+			}
+			if (signal?.aborted || origin !== deps.session?.current()?.id || navigation !== navigationEpoch)
+				throw new DOMException("Replay ownership changed", "AbortError");
+			if (!changed) {
+				deps.session?.appendEntry({
+					kind: "custom",
+					parentTurnId: state.lastTurnId,
+					customType: "clio_coder_provider_fallback",
+					data: {
+						version: 1,
+						checkpointDigest: checkpoint.providerCheckpoint.digest,
+						providerFallbackReason: resolutionReason,
+					},
+				});
+				deps.session?.flushAppends?.();
+			}
+		}
+		refreshAgentMessagesFromSession(runtime);
+	};
+
 	const controller: TurnContext = {
 		thinkingUsesConfigurationUpdate: () => thinkingUsesConfigurationUpdate,
 		notifyMemoryCommit,
@@ -2405,11 +2543,45 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		 * compile whose text differs from the previous prompt queues a
 		 * "promptRecompiled" ledger entry (written once the session exists).
 		 */
-		async ensureSessionPrompt(agentRuntime: AgentRuntime, beforeSend = false): Promise<CompiledSessionPrompt | null> {
+		async ensureSessionPrompt(
+			agentRuntime: AgentRuntime,
+			beforeSend = false,
+			pendingUserText?: string,
+			skipProviderFallback = false,
+		): Promise<CompiledSessionPrompt | null> {
 			const signal = deps.turnSignal?.();
 			const originNavigation = navigationEpoch;
-			const current = (): boolean => !disposed && !signal?.aborted && originNavigation === navigationEpoch;
+			const originSession = deps.session?.current()?.id;
+			bindProviderCompaction(agentRuntime);
+			const current = (): boolean =>
+				!disposed &&
+				!signal?.aborted &&
+				originNavigation === navigationEpoch &&
+				originSession === deps.session?.current()?.id;
 			if (!current()) return null;
+			// A route switch materializes portable context only when it is first needed (#423).
+			const active = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const checkpoint = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
+			if (
+				!skipProviderFallback &&
+				checkpoint?.kind === "compactionSummary" &&
+				checkpoint.providerCheckpoint &&
+				!providerFallbackDigests(active).has(checkpoint.providerCheckpoint.digest)
+			) {
+				const key =
+					agentRuntime.runtimeId === "openai-codex"
+						? await agentRuntime.agent.getApiKey?.(agentRuntime.agent.state.model.provider)
+						: undefined;
+				const reason =
+					deps.getSettings().context.compaction.provider !== "native"
+						? "setting-off"
+						: providerCheckpointCompatibility(checkpoint.providerCheckpoint, agentRuntime.agent.state.model, key);
+				if (!current()) return null;
+				if (reason !== null) {
+					await resolveProviderReplay(agentRuntime, reason, pendingUserText, beforeSend);
+					if (!current()) return null;
+				}
+			}
 			if (!deps.prompts) return null;
 			const settings = deps.getSettings();
 			const autonomy = deps.getAutonomy?.() ?? settings.safety.autonomy ?? "default";

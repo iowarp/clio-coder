@@ -193,7 +193,7 @@ const openaiCodexRuntime: RuntimeDescriptor = {
 	defaultCapabilities,
 	probeServingWindows: createCodexServingWindowReader(),
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
-		return synthesizeCatalogBackedModel({
+		const model = synthesizeCatalogBackedModel({
 			target,
 			wireModelId,
 			kb,
@@ -203,6 +203,15 @@ const openaiCodexRuntime: RuntimeDescriptor = {
 			provider: "openai-codex",
 			defaultBaseUrl: DEFAULT_BASE_URL,
 		});
+		// Explicit triggers are a runtime capability of the GPT-6 family, not an engine model-name rule (#423).
+		if (/^gpt-6(?:[.-]|$)/u.test(wireModelId))
+			Object.assign(model, {
+				clioCoder: {
+					...(model as Model<Api> & { clioCoder?: object }).clioCoder,
+					nativeCompactionProtocol: "codex-responses-trigger-v1",
+				},
+			});
+		return model;
 	},
 };
 

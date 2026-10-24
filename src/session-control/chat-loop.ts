@@ -919,6 +919,8 @@ export interface CreateChatLoopDeps {
 		trigger?: CompactionTrigger,
 		budget?: Pick<
 			CompactInput,
+			| "providerCompaction"
+			| "providerFallbackReason"
 			| "keepRecentTokens"
 			| "preserveUserTurnId"
 			| "skillContextState"
@@ -2895,7 +2897,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (!admissionCurrent()) return;
 
 				// 3. Ensure the session prompt (compiles only on explicit events)
-				const compiledPrompt = await context.ensureSessionPrompt(agentRuntime, true);
+				const compiledPrompt = await context.ensureSessionPrompt(agentRuntime, true, submittedText);
 				if (!admissionCurrent()) return;
 				submittedText = composeSubmittedText();
 

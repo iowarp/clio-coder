@@ -46,6 +46,7 @@ import { engineModels } from "./models.js";
 import { deterministicSampling } from "./provider-payload.js";
 import type { EngineModel } from "./types.js";
 
+export { providerCheckpointCompatibility } from "./apis/openai-compaction.js";
 export { StringEnum };
 
 /** #416: keep optional Claude discovery behind the existing provider engine seam. */

@@ -190,6 +190,8 @@ export interface FleetRouteSettings {
  *     text at call time, not at settings load.
  */
 export interface CompactionSettings {
+	/** Opt-in opaque Codex checkpoints; portable summaries remain the default (#423). */
+	provider?: "off" | "native";
 	auto: boolean;
 	threshold: number;
 	/** C1 / #422: economic input ceiling, independent of the serving window. */
@@ -806,6 +808,7 @@ export const DEFAULT_SETTINGS = {
 			auto: true,
 			threshold: 0.8,
 			maxTokens: 200_000,
+			provider: "off",
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
@@ -1014,6 +1017,7 @@ context:
     auto: true
     threshold: 0.8
     maxTokens: 200000
+    provider: off
   memory:
     enabled: true
     observations:

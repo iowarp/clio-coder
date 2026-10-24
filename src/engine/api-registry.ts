@@ -30,6 +30,7 @@ import { observeAnthropicResponse } from "./apis/anthropic-response.js";
 import { withCodexConfiguration } from "./apis/codex-configuration.js";
 import { withCodexPromptItems } from "./apis/codex-prompt-items.js";
 import { observeCodexTransport } from "./apis/codex-transport.js";
+import { withProviderCheckpoint } from "./apis/openai-compaction.js";
 import { observeResponsesModelId } from "./apis/responses-model-id.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { normalizeContext } from "./context.js";
@@ -143,10 +144,14 @@ export function engineStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(
 				model,
-				withAnthropicDiagnostics(
+				withProviderCheckpoint(
 					model,
+					withAnthropicDiagnostics(
+						model,
+						context,
+						withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
+					),
 					context,
-					withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
 				),
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
@@ -191,10 +196,14 @@ function scopedEngineStreamSimple(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(
 				model,
-				withAnthropicDiagnostics(
+				withProviderCheckpoint(
 					model,
+					withAnthropicDiagnostics(
+						model,
+						context,
+						withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
+					),
 					context,
-					withCodexConfiguration(model, withCodexPromptItems(model, guarded), context),
 				),
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>

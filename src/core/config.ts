@@ -2177,6 +2177,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				else {
 					const compaction = context.compaction;
 					issues.unknownKeys("context.compaction", compaction, [
+						"provider",
 						"maxTokens",
 						"auto",
 						"threshold",
@@ -2196,6 +2197,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if ("threshold" in compaction) {
 						const parsed = expectNumber(issues, "context.compaction.threshold", compaction.threshold, { min: 0, max: 1 });
 						if (parsed !== undefined) settings.context.compaction.threshold = parsed;
+					}
+					if ("provider" in compaction) {
+						const parsed = expectEnum(issues, "context.compaction.provider", compaction.provider, ["off", "native"] as const);
+						if (parsed !== undefined) settings.context.compaction.provider = parsed;
 					}
 					if ("maxTokens" in compaction) {
 						const parsed = expectInteger(issues, "context.compaction.maxTokens", compaction.maxTokens, { min: 1 });

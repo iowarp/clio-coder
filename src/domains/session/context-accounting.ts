@@ -236,6 +236,7 @@ export function extractReasoningTokens(usage: unknown): number | null {
  * satisfy it without casting; `messageChars` duck-types every field anyway.
  */
 export interface MessageTokenEstimateInput {
+	clioProviderCheckpoint?: { outputTokens: number; replayInputTokens?: number };
 	role?: unknown;
 	payload?: unknown;
 	content?: unknown;
@@ -245,6 +246,12 @@ export interface MessageTokenEstimateInput {
 }
 
 export function estimateAgentMessageTokens(message: MessageTokenEstimateInput): number {
+	// The provider's measured compaction output is the only available token figure for opaque state (#423).
+	if (message.clioProviderCheckpoint)
+		return (
+			(message.clioProviderCheckpoint.replayInputTokens ?? message.clioProviderCheckpoint.outputTokens) +
+			MESSAGE_OVERHEAD_TOKENS
+		);
 	return ceilChars(messageChars(message)) + MESSAGE_OVERHEAD_TOKENS;
 }
 
