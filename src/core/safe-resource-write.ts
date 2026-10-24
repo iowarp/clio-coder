@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Stats } from "node:fs";
 import {
 	chmodSync,
 	closeSync,
@@ -12,6 +13,7 @@ import {
 	statSync,
 	writeSync,
 } from "node:fs";
+import { chmod, copyFile, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 export interface SafeResourceBackupOptions {
@@ -163,5 +165,95 @@ export function safeResourceWrite(
 	} catch (err) {
 		if (tempExists) rmSync(tempPath, { force: true });
 		throw err;
+	}
+}
+
+export interface SafeResourceWriteAsyncOptions extends SafeResourceWriteOptions {
+	/** A short commit section may check a snapshot and rename under its lock (#428). */
+	withRename?: (commit: () => void) => void | Promise<void>;
+}
+
+export async function fsyncDirectoryAsync(dir: string): Promise<void> {
+	let fd: Awaited<ReturnType<typeof open>> | undefined;
+	try {
+		fd = await open(dir, "r");
+		await fd.sync();
+	} catch {
+		// Directory fsync is best effort on unsupported filesystems, as above (#428).
+	} finally {
+		await fd?.close();
+	}
+}
+
+/** Preserve the synchronous writer's durability while fsync runs in libuv (#428). */
+export async function safeResourceWriteAsync(
+	targetPath: string,
+	contents: string | Uint8Array,
+	options: SafeResourceWriteAsyncOptions = {},
+): Promise<SafeResourceWriteResult> {
+	const dir = path.dirname(targetPath);
+	const buffer = bufferFrom(contents, options.encoding);
+	await mkdir(dir, { recursive: true });
+	const tempPath = tempPathFor(targetPath);
+	let mode = options.mode;
+	if (mode === undefined) {
+		try {
+			mode = (await stat(targetPath)).mode & 0o777;
+		} catch {
+			// A missing or unreadable target uses the sync writer's default (#428).
+			mode = 0o666;
+		}
+	}
+	let tempExists = false;
+	let backupPath: string | undefined;
+	try {
+		const fd = await open(tempPath, "wx", mode);
+		tempExists = true;
+		try {
+			await fd.writeFile(buffer);
+			await fd.sync();
+		} finally {
+			await fd.close();
+		}
+		const backup = backupOptions(options.backup);
+		let targetStat: Stats | undefined;
+		if (backup) {
+			try {
+				targetStat = await stat(targetPath);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
+		}
+		if (backup && targetStat) {
+			backupPath = backup.path ?? safeResourceBackupPath(targetPath, backup.suffix ?? ".bak");
+			await mkdir(path.dirname(backupPath), { recursive: true });
+			await copyFile(targetPath, backupPath);
+			if (options.mode !== undefined) await chmod(backupPath, targetStat.mode & 0o777 & options.mode);
+			const backupFd = await open(backupPath, process.platform === "win32" ? "r+" : "r");
+			try {
+				await backupFd.sync();
+			} finally {
+				await backupFd.close();
+			}
+			await fsyncDirectoryAsync(path.dirname(backupPath));
+		}
+		options.beforeRename?.({ targetPath, tempPath, bytes: buffer.byteLength, ...(backupPath ? { backupPath } : {}) });
+		if (options.withRename) {
+			// Only rename stays synchronous: a sync planner cannot wait on a lock
+			// whose holder needs this thread to resume an awaited fsync (#428).
+			await options.withRename(() => {
+				renameSync(tempPath, targetPath);
+				tempExists = false;
+			});
+			if (tempExists) throw new Error("safeResourceWriteAsync: commit did not rename the prepared file");
+		} else {
+			await rename(tempPath, targetPath);
+			tempExists = false;
+		}
+		await fsyncDirectoryAsync(dir);
+		return { path: targetPath, tempPath, bytes: buffer.byteLength, ...(backupPath ? { backupPath } : {}) };
+	} catch (error) {
+		if (tempExists) await rm(tempPath, { force: true });
+		throw error;
 	}
 }
