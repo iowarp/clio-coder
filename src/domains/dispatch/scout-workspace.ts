@@ -30,7 +30,7 @@ export function scoutReadWorkspace(input: {
 	if (!input.readOnlyScout || input.agentId !== "scout") {
 		return refuse(
 			"intent_path_absolute",
-			"External read roots require the read-only Scout recipe and one approval per run. Write roots and outputs must remain repository-relative.",
+			'For an outside checkout, dispatch agent "scout" with one absolute directory in intent.read_roots and no write_roots, expected_outputs or verification; the host asks the operator once per run and headless runs refuse that task. Write roots and outputs must remain repository-relative.',
 		);
 	}
 	if (!record(raw))

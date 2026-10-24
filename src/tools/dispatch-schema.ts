@@ -50,12 +50,10 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 /** Ordinary delegation on the permanent surface. Advanced composition is described on demand. */
 export function coordinatorDispatchParameters() {
 	const intent = Type.Object({
-		read_roots: Type.Optional(
-			Type.Array(Type.String(), {
-				description:
-					"Workspace-relative reads, or one absolute checkout directory for Scout; outside reads ask once per run and headless refuses only that task.",
-			}),
-		),
+		// No description: intent renders twice here and every request resends it.
+		// The Scout absolute-checkout form is taught on demand by the admission
+		// refusals for an outside read root (scout-workspace.ts, intent.ts) (#433).
+		read_roots: Type.Optional(Type.Array(Type.String())),
 		write_roots: Type.Optional(
 			Type.Array(Type.String(), {
 				description: "Allowed output paths; confines writes and disables worker bash/verify.",

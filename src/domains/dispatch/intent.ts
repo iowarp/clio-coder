@@ -93,7 +93,12 @@ function normalizeScopePathEntry(
 				return fail("intent_path_absolute", absolutePathMessage(field, index));
 			}
 			if (error.code === "parent") {
-				return fail("intent_path_escapes_root", `${field}[${index}] escapes the repository root`);
+				// Point outside reads at the Scout form; the attached schema omits it to save per-request bytes (#433).
+				const scout =
+					field === "intent.read_roots"
+						? '. For an outside checkout, dispatch agent "scout" with one absolute read_roots directory.'
+						: "";
+				return fail("intent_path_escapes_root", `${field}[${index}] escapes the repository root${scout}`);
 			}
 		}
 		return fail(
