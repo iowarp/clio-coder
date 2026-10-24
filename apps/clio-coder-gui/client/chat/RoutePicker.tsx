@@ -162,7 +162,7 @@ function RouteForm({
 		config,
 		requested?.model ?? "",
 		targets.data?.targets.find((row) => row.id === requested?.target)?.thinkingLevels,
-		requested?.target === config?.target,
+		requested?.target === (config?.target ?? ""),
 	);
 	const draft = draftWithSupportedThinking(requested, thinkingLevels);
 	const chosenTarget = draft?.target ?? "";
@@ -238,7 +238,7 @@ function RouteForm({
 	const count = models === null ? "" : ` ${models.length} ${models.length === 1 ? "model" : "models"}.`;
 	const note =
 		chosenTarget === ""
-			? "Automatic routing chooses the target, so it chooses the model too."
+			? "Select a connection before applying a model to this conversation."
 			: catalogCheck.isFetching
 				? `Asking ${chosenTarget} for its models…`
 				: catalogCheck.data?.healthy
@@ -304,7 +304,19 @@ function RouteForm({
 			</div>
 			{thinkingNote ? <p id={thinkingNoteId}>{thinkingNote}</p> : null}
 			<p>{note}</p>
-			{modelNeedsTarget ? <p role="alert">Choose a connection before naming a model.</p> : null}
+			{choices.needsConnectionSetup ? (
+				<p>
+					No connection is selected, and Clio Coder has not exposed a connection selector for this conversation.{" "}
+					<Link
+						to={workspaceId ? `/settings/targets?${new URLSearchParams({ workspace: workspaceId })}` : "/settings/targets"}
+					>
+						Manage saved connections
+					</Link>{" "}
+					to select one for chat, then open a new conversation.
+				</p>
+			) : modelNeedsTarget ? (
+				<p role="alert">Choose a connection before naming a model.</p>
+			) : null}
 			<p className="route-picker__scope" id={scopeId}>
 				<strong>This conversation.</strong> Connection, model and thinking apply from its next request.{" "}
 				<Link to={workspaceId ? `/settings/models?${new URLSearchParams({ workspace: workspaceId })}` : "/settings/models"}>

@@ -79,14 +79,21 @@ export function routePickerChoices(
 	config: SessionConfig | undefined,
 	draft: RouteDraft,
 	inventory: ReadonlyArray<{ id: string; models: readonly string[] }> | undefined,
-): { targets: ModelOption[]; models: ModelOption[]; targetEditable: boolean; modelEditable: boolean } {
+): {
+	targets: ModelOption[];
+	models: ModelOption[];
+	targetEditable: boolean;
+	modelEditable: boolean;
+	needsConnectionSetup: boolean;
+} {
 	const targetControl = config?.options.find((option) => option.id === "target");
 	const modelControl = config?.options.find((option) => option.id === "model");
 	const targets: ModelOption[] = (targetControl?.options ?? []).map((row) => ({ value: row.value, label: row.name }));
 	if (draft.target && !targets.some((row) => row.value === draft.target))
 		targets.unshift({ value: draft.target, label: draft.target });
-	if (!draft.target) targets.unshift({ value: "", label: "Connection not reported" });
-	const current = draft.target === config?.target;
+	if (!draft.target)
+		targets.unshift({ value: "", label: config?.target === null ? "No connection selected" : "Connection not reported" });
+	const current = draft.target === (config?.target ?? "");
 	const models: ModelOption[] = current
 		? (modelControl?.options ?? []).map((row) => ({ value: row.value, label: row.name }))
 		: (inventory?.find((row) => row.id === draft.target)?.models ?? []).map((model) => ({ value: model, label: model }));
@@ -98,6 +105,7 @@ export function routePickerChoices(
 		models,
 		targetEditable: (targetControl?.options.length ?? 0) > 0,
 		modelEditable: models.some((row) => row.value !== draft.model),
+		needsConnectionSetup: config?.target === null && targetControl === undefined,
 	};
 }
 
@@ -108,7 +116,7 @@ export function thinkingControlNote(
 	levels: readonly string[],
 ): string | null {
 	if (
-		draft.target === config?.target &&
+		draft.target === (config?.target ?? "") &&
 		draft.model === config?.options.find((row) => row.id === "model")?.currentValue
 	) {
 		const control = config?.options.find((row) => row.id === "thinkingLevel");
