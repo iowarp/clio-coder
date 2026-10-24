@@ -11,7 +11,7 @@ import { mkdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { monitorEventLoopDelay } from "node:perf_hooks";
+import { createHistogram, performance } from "node:perf_hooks";
 import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import type {
 	DispatchCompletedPayload,
@@ -69,6 +69,8 @@ export const DEFAULT_TRACE_RETENTION_POLICY: Readonly<TraceRetentionPolicy> = Ob
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const VACUUM_RECLAIMABLE_FRACTION = 0.2;
+/** Same tick the dispatch-window lag histogram used before (#428). */
+const LAG_RESOLUTION_MS = 10;
 
 type DatabaseSyncConstructor = typeof import("node:sqlite").DatabaseSync;
 let sqliteConstructor: DatabaseSyncConstructor | null = null;
@@ -1515,14 +1517,35 @@ export function createDispatchTraceMirror(
 	let pendingWrites = 0;
 	let peakPendingWrites = 0;
 	// One histogram covers overlapping workers on this process's main thread (#428).
-	const lag = monitorEventLoopDelay({ resolution: 10 });
+	// monitorEventLoopDelay drops the first interval after enable() and after
+	// reset(), and a window opens inside the dispatch call's own admission
+	// block, so that block never reached the window. This sampler takes its
+	// baseline when the window opens, so its first tick measures that block, and
+	// it runs only while a window is open, never at 100 Hz through an idle session.
+	const lag = createHistogram();
+	let lastLagTick = 0;
+	let lagSampler: NodeJS.Timeout | null = null;
+	const startLagSampler = (): void => {
+		if (lagSampler !== null) return;
+		lag.reset();
+		lastLagTick = performance.now();
+		lagSampler = setInterval(() => {
+			const tick = performance.now();
+			lag.record(Math.max(1, Math.round((tick - lastLagTick - LAG_RESOLUTION_MS) * 1e6)));
+			lastLagTick = tick;
+		}, LAG_RESOLUTION_MS);
+		lagSampler.unref();
+	};
+	const stopLagSampler = (): void => {
+		if (lagSampler !== null) clearInterval(lagSampler);
+		lagSampler = null;
+	};
 	const activeDispatches = new Set<string>();
 	let dispatchWindow: { id: string; startedAt: string; runIds: string[] } | null = null;
 	const beginDispatch = (runId: string, at: string): void => {
 		if (activeDispatches.has(runId)) return;
 		if (activeDispatches.size === 0) {
-			lag.reset();
-			lag.enable();
+			startLagSampler();
 			dispatchWindow = { id: runId, startedAt: at, runIds: [] };
 		}
 		activeDispatches.add(runId);
@@ -1546,7 +1569,7 @@ export function createDispatchTraceMirror(
 		if (!activeDispatches.delete(runId)) return;
 		recordDispatchWindow(at);
 		if (activeDispatches.size === 0) {
-			lag.disable();
+			stopLagSampler();
 			dispatchWindow = null;
 		}
 	};
@@ -1583,7 +1606,7 @@ export function createDispatchTraceMirror(
 	const degrade = (error: unknown): void => {
 		if (!degraded) warn(error instanceof Error ? error.message : String(error));
 		degraded = true;
-		lag.disable();
+		stopLagSampler();
 		activeDispatches.clear();
 		dispatchWindow = null;
 		starts.clear();
@@ -1758,7 +1781,7 @@ export function createDispatchTraceMirror(
 			} catch (error) {
 				degrade(error);
 			}
-			lag.disable();
+			stopLagSampler();
 			activeDispatches.clear();
 			store?.close();
 			starts.clear();

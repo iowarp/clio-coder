@@ -2249,9 +2249,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	}
 	// The loader caps each domain separately. The outer hook must allow the
-	// whole sequence to finish, including cleanup after a timed-out domain.
+	// whole sequence to finish, including cleanup after a timed-out domain and
+	// the dispatch stop's own allowance for its async durable writes (#428).
 	termination.onPersist((signal) => result.stop(signal), {
-		timeoutMs: Math.min(2 ** 31 - 1, (result.loaded.length + 1) * resolveShutdownHookBudgetMs()),
+		timeoutMs: Math.min(
+			2 ** 31 - 1,
+			(result.loaded.length + 1) * resolveShutdownHookBudgetMs() + (dispatch?.drainAllowanceMs?.() ?? 0),
+		),
 	});
 
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });

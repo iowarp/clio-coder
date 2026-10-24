@@ -7,7 +7,7 @@
  *
  * The ledger holds an in-memory mirror of runs.json. `create()` and `update()`
  * mutate memory only; `persist()` writes the settings-bounded ring (default
- * 1000) atomically via engine.atomicWrite.
+ * 1000) atomically via safeResourceWriteAsync.
  *
  * This module owns persistence. The dispatch extension wires worker spawning,
  * cross-domain coordination, and event emission around this ledger.
@@ -23,7 +23,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { resolveGuardrail } from "../../core/guardrails.js";
-import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
@@ -81,6 +81,12 @@ export interface Ledger {
 	get(id: string): RunEnvelope | null;
 	list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope>;
 	recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt;
+	/**
+	 * `terminalPatch` lands on the row in the same step as `receiptPath`, never
+	 * before the receipt file exists: a persist during the awaited write would
+	 * otherwise store a terminal row with no receipt (#428).
+	 */
+	recordReceiptAsync(id: string, receipt: RunReceiptDraft, terminalPatch?: Partial<RunEnvelope>): Promise<RunReceipt>;
 	/** Insert a fully-formed envelope recovered from a durable artifact. Returns false when the id already exists. */
 	adopt(envelope: RunEnvelope): boolean;
 	persist(): Promise<void>;
@@ -263,6 +269,20 @@ function capRuns(all: RunEnvelope[], maxRuns: number): RunEnvelope[] {
 	return kept;
 }
 
+/**
+ * persist() holds the runs.json lock across an awaited fsync, and a waiter in
+ * this process polled that lock with backoff, so one ledger's write could
+ * stall a sibling dispatch's for far longer than the write itself (#428).
+ * Persists in this process queue here and take the file lock in turn.
+ */
+let queuedPersist: Promise<unknown> = Promise.resolve();
+function withRunsLock(target: string, fn: () => Promise<void>): Promise<void> {
+	// Checked again after the queue wait, since acquiring the lock mkdirs the root.
+	const run = queuedPersist.then(() => (stateRootRemoved() ? undefined : withStateFileLock(target, fn)));
+	queuedPersist = run.catch(() => {});
+	return run;
+}
+
 export function openLedger(opts?: LedgerOptions): Ledger {
 	let runs: RunEnvelope[] = readRuns();
 	// Ids this process has written since the last successful persist. See
@@ -272,6 +292,33 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 
 	function findIndex(id: string): number {
 		return runs.findIndex((r) => r.id === id);
+	}
+
+	function prepareReceipt(id: string, receipt: RunReceiptDraft, terminalPatch?: Partial<RunEnvelope>): RunReceipt {
+		const row = runs[findIndex(id)];
+		if (!row) throw new Error(`dispatch ledger missing run for receipt '${id}'`);
+		// Sealed against the row as it will be committed, terminal patch included.
+		const current = terminalPatch === undefined ? row : applyPatch(row, terminalPatch);
+		// Fold the durable findings summary onto the draft before sealing so both
+		// the ACP and worker finalizers get it for free and receipt integrity
+		// digest covers it. Computed cheaply from in-memory fields; never reads
+		// disk or calls buildEvidence.
+		const draft: RunReceiptDraft =
+			receipt.findingsSummary === undefined
+				? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
+				: receipt;
+		return withReceiptIntegrity(draft, current);
+	}
+
+	function attachReceipt(id: string, target: string | null, terminalPatch?: Partial<RunEnvelope>): void {
+		// Async receipt writes must preserve updates and reordered rows (#428).
+		const index = findIndex(id);
+		const current = runs[index];
+		if (current) {
+			const next = terminalPatch === undefined ? current : applyPatch(current, terminalPatch);
+			runs[index] = target === null ? next : { ...next, receiptPath: target };
+			dirty.add(id);
+		}
 	}
 
 	return {
@@ -348,32 +395,55 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		},
 
 		recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt {
-			const target = receiptPathFor(id);
-			const idx = findIndex(id);
-			if (idx === -1) {
-				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
-			}
-			const current = runs[idx];
-			if (!current) {
-				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
-			}
-			// Fold the durable findings summary onto the draft before sealing so both
-			// the ACP and worker finalizers get it for free and receipt integrity
-			// digest covers it. Computed cheaply from in-memory fields; never reads
-			// disk or calls buildEvidence.
-			const draft: RunReceiptDraft =
-				receipt.findingsSummary === undefined
-					? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
-					: receipt;
-			const receiptWithIntegrity = withReceiptIntegrity(draft, current);
+			const sealed = prepareReceipt(id, receipt);
 			// The sealed receipt is still returned to the finalizer that asked for
 			// it; what it must not do is write the state root back into existence
 			// under an uninstall. receiptPath stays null because no file was made.
-			if (stateRootRemoved()) return receiptWithIntegrity;
-			atomicWrite(target, JSON.stringify(receiptWithIntegrity, null, 2));
-			runs[idx] = { ...current, receiptPath: target };
-			dirty.add(id);
-			return receiptWithIntegrity;
+			if (stateRootRemoved()) return sealed;
+			const target = receiptPathFor(id);
+			atomicWrite(target, JSON.stringify(sealed, null, 2));
+			attachReceipt(id, target);
+			return sealed;
+		},
+
+		async recordReceiptAsync(
+			id: string,
+			receipt: RunReceiptDraft,
+			terminalPatch?: Partial<RunEnvelope>,
+		): Promise<RunReceipt> {
+			const sealed = prepareReceipt(id, receipt, terminalPatch);
+			// Same uninstall contract as recordReceipt: return the sealed receipt,
+			// write nothing, and leave receiptPath null.
+			if (stateRootRemoved()) {
+				attachReceipt(id, null, terminalPatch);
+				return sealed;
+			}
+			const target = receiptPathFor(id);
+			let skipped = false;
+			try {
+				await safeResourceWriteAsync(target, JSON.stringify(sealed, null, 2), {
+					// The awaited write and fsync are a window an uninstall can land in,
+					// so check again in the same tick as the rename (#428).
+					withRename: (commit) => {
+						if (stateRootRemoved()) skipped = true;
+						else {
+							commit();
+							// Same tick as the rename: once the receipt file exists the row is
+							// terminal, and never before it, for any persist or reader (#428).
+							attachReceipt(id, target, terminalPatch);
+						}
+					},
+				});
+			} catch (error) {
+				// Decided from the skip itself: a sibling lock can mkdir the root back
+				// before a second poll, which would turn a real outcome into a failure.
+				if (skipped) {
+					attachReceipt(id, null, terminalPatch);
+					return sealed;
+				}
+				throw error;
+			}
+			return sealed;
 		},
 
 		adopt(envelope: RunEnvelope): boolean {
@@ -390,7 +460,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			// call waits for a sibling process to finish its own critical section.
 			if (stateRootRemoved()) return;
 			const target = runsPath();
-			await withStateFileLock(target, async () => {
+			await withRunsLock(target, async () => {
 				if (stateRootRemoved()) return;
 				const diskRuns = readRuns();
 				const merged = mergeRunsById(diskRuns, runs, dirty);
@@ -400,10 +470,18 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				const contents = JSON.stringify(capped, null, 2);
 				for (let attempt = 0; ; attempt += 1) {
 					if (stateRootRemoved()) return;
+					let skipped = false;
 					try {
-						atomicWrite(target, contents);
+						await safeResourceWriteAsync(target, contents, {
+							// The awaited fsync is a window an uninstall can land in (#428).
+							withRename: (commit) => {
+								if (stateRootRemoved()) skipped = true;
+								else commit();
+							},
+						});
 						break;
 					} catch (error) {
+						if (skipped) return;
 						const code = (error as NodeJS.ErrnoException).code;
 						if (process.platform !== "win32" || attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "")) {
 							throw error;

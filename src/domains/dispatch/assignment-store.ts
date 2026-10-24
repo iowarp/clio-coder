@@ -6,12 +6,16 @@
 import { existsSync, readFileSync, watch } from "node:fs";
 import { join } from "node:path";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
+import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { atomicWrite } from "../../engine/session.js";
 import type { AssignmentStatus } from "./assignment.js";
 
 const MAX_ASSIGNMENT_RECORDS = 1_000;
+// In-process readers see the store this process has decided, before its fsync
+// lands; watches still wake only once the rename is durable (#428).
+const pendingWrites = new Map<string, DurableAssignmentRecord[]>();
+const observers = new Map<string, Set<() => void>>();
 
 /**
  * Who decides a record's status.
@@ -143,12 +147,34 @@ export function assignmentProcessOwnerAlive(
 	return true;
 }
 
-function writeStore(assignments: ReadonlyArray<DurableAssignmentRecord>): void {
+async function writeStore(assignments: ReadonlyArray<DurableAssignmentRecord>): Promise<void> {
 	const file: AssignmentStoreFile = {
 		version: 1,
 		assignments: assignments.slice(0, MAX_ASSIGNMENT_RECORDS).map(copyRecord),
 	};
-	atomicWrite(storePath(), JSON.stringify(file, null, 2));
+	const target = storePath();
+	// Durability is about crashes, not visibility: a retry or settlement this
+	// process already decided must be readable while the fsync runs (#428).
+	pendingWrites.set(target, file.assignments);
+	try {
+		await safeResourceWriteAsync(target, JSON.stringify(file, null, 2));
+	} finally {
+		pendingWrites.delete(target);
+		for (const listener of observers.get(target) ?? []) queueMicrotask(listener);
+	}
+}
+
+/**
+ * The file lock is now held across an awaited fsync, and a waiter in this
+ * process polled it with backoff: a sibling dispatch's registration starved
+ * behind another run's writes for 250 ms, so the two ran one after the other
+ * (#428). Writers in this process queue here and take the lock in turn.
+ */
+let queuedStoreWrite: Promise<unknown> = Promise.resolve();
+function withStoreLock(fn: () => Promise<void>): Promise<void> {
+	const run = queuedStoreWrite.then(() => withStateFileLock(storePath(), fn));
+	queuedStoreWrite = run.catch(() => {});
+	return run;
 }
 
 async function updateRecord(
@@ -156,39 +182,50 @@ async function updateRecord(
 	update: (current: DurableAssignmentRecord | null) => DurableAssignmentRecord,
 ): Promise<DurableAssignmentRecord> {
 	let result!: DurableAssignmentRecord;
-	await withStateFileLock(storePath(), () => {
+	await withStoreLock(async () => {
 		const records = readStore();
 		const index = records.findIndex((record) => record.assignmentId === assignmentId);
 		const current = index === -1 ? null : (records[index] ?? null);
 		result = update(current);
 		if (index === -1) records.unshift(result);
 		else records[index] = result;
-		writeStore(records);
+		await writeStore(records);
 	});
 	return copyRecord(result);
 }
 
 /** Directory observation survives atomic replacement of the durable assignment file. */
 export function subscribeStoredAssignments(listener: () => void): () => void {
+	const target = storePath();
+	const notify = (): void => {
+		if (!pendingWrites.has(target)) listener();
+	};
 	const watcher = watch(clioStateDir(), { persistent: false }, (_event, filename) => {
-		if (filename === null || filename === "assignments.json") listener();
+		if (filename === null || filename === "assignments.json") notify();
 	});
+	const listeners = observers.get(target) ?? new Set<() => void>();
+	listeners.add(notify);
+	observers.set(target, listeners);
 	// An unavailable filesystem watch ends observation at the caller's existing
 	// timeout; wake once so it can still inspect the last durable state.
 	watcher.on("error", () => {
 		watcher.close();
-		listener();
+		notify();
 	});
-	return () => watcher.close();
+	return () => {
+		watcher.close();
+		listeners.delete(notify);
+		if (listeners.size === 0) observers.delete(target);
+	};
 }
 
 export function getStoredAssignment(assignmentId: string): DurableAssignmentRecord | null {
-	const record = readStore().find((entry) => entry.assignmentId === assignmentId);
+	const record = (pendingWrites.get(storePath()) ?? readStore()).find((entry) => entry.assignmentId === assignmentId);
 	return record ? copyRecord(record) : null;
 }
 
 export function listStoredAssignments(): ReadonlyArray<DurableAssignmentRecord> {
-	return readStore();
+	return (pendingWrites.get(storePath()) ?? readStore()).map(copyRecord);
 }
 
 export async function renameStoredAssignment(
@@ -196,7 +233,7 @@ export async function renameStoredAssignment(
 	toAssignmentId: string,
 ): Promise<DurableAssignmentRecord> {
 	let result!: DurableAssignmentRecord;
-	await withStateFileLock(storePath(), () => {
+	await withStoreLock(async () => {
 		const records = readStore();
 		const from = records.findIndex((record) => record.assignmentId === fromAssignmentId);
 		if (from === -1) throw new Error(`unknown queued assignment '${fromAssignmentId}'`);
@@ -206,7 +243,7 @@ export async function renameStoredAssignment(
 		if (!current) throw new Error(`unknown queued assignment '${fromAssignmentId}'`);
 		result = { ...current, assignmentId: toAssignmentId };
 		records[from] = result;
-		writeStore(records);
+		await writeStore(records);
 	});
 	return copyRecord(result);
 }

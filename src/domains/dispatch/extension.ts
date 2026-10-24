@@ -376,7 +376,7 @@ import {
 	type ReservationCapacitySnapshot,
 	rebindDispatchReservationMember,
 	releaseDispatchReservation,
-	releaseDispatchReservationMember,
+	releaseDispatchReservationMemberAsync,
 	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
@@ -556,6 +556,12 @@ interface ActiveRun {
 	abortDetail: string | null;
 	/** Set by the reconciler before terminating a dead/stalled worker. */
 	stallKilled: boolean;
+	/**
+	 * The worker is done and its receipt is being written. The terminal row
+	 * patch waits for the receipt file (#428), so the heartbeat cannot use
+	 * `endedAt` to tell this run from a live one and must skip it.
+	 */
+	sealing?: boolean;
 	/** ACP event-inactivity window; null for native runs (heartbeat spec governs those). */
 	stallTimeoutMs: number | null;
 	/** Internal logical assignment/retry lineage, independent of published host ancestry. */
@@ -3874,6 +3880,8 @@ export function createDispatchBundle(
 		reservedPlanPeak: (planId) =>
 			reservedPlanPeakSlots(planId, (error) => reportDispatchDiagnostic("read reserved plan peak", error)),
 		onRenewalError: (error) => reportDispatchDiagnostic("renew capacity leases", error),
+		onReleaseError: (leaseId, error) =>
+			reportDispatchDiagnostic(`release capacity lease ${leaseId}; retrying at the next heartbeat`, error),
 		onLeaseLost: (lease, detail) => {
 			reportDispatchDiagnostic("capacity lease lost", new Error(detail));
 			stopLostCapacityOwners(lease.assignmentId, detail);
@@ -4257,7 +4265,7 @@ export function createDispatchBundle(
 	const assignments = new AssignmentRegistry({
 		onStreamError: (error) => reportDispatchDiagnostic("assignment event stream", error),
 	});
-	const assignmentWrites = new Set<Promise<unknown>>();
+	const durableWrites = new Set<Promise<unknown>>();
 	let draining = false;
 	const drainController = new AbortController();
 	const dispatching = new Set<Promise<unknown>>();
@@ -4338,14 +4346,25 @@ export function createDispatchBundle(
 		}
 	}
 
-	function trackAssignmentWrite<T>(operation: Promise<T>): Promise<T> {
-		assignmentWrites.add(operation);
-		operation.finally(() => assignmentWrites.delete(operation)).catch(() => {});
+	function trackDurableWrite<T>(operation: Promise<T>): Promise<T> {
+		durableWrites.add(operation);
+		operation.finally(() => durableWrites.delete(operation)).catch(() => {});
 		return operation;
 	}
 
+	function persistLedgerInBackground(target: Ledger, runId: string): Promise<void> {
+		return trackDurableWrite(target.persist()).catch((error) =>
+			reportDispatchDiagnostic(`persist running row for run ${runId}`, error),
+		);
+	}
+
+	/** A settlement can queue a reservation release as it lands, so loop until none is pending (#428). */
+	async function flushDurableWrites(): Promise<void> {
+		while (durableWrites.size > 0) await Promise.allSettled([...durableWrites]);
+	}
+
 	function persistAssignment(operation: Promise<unknown>, label: string): void {
-		trackAssignmentWrite(operation).catch((error) => reportDispatchDiagnostic(`persist assignment ${label}`, error));
+		trackDurableWrite(operation).catch((error) => reportDispatchDiagnostic(`persist assignment ${label}`, error));
 	}
 
 	function settleAssignmentDurably(
@@ -4354,12 +4373,28 @@ export function createDispatchBundle(
 		status: "succeeded" | "failed" | "canceled",
 		outcomeDetail?: string,
 	): void {
-		trackAssignmentWrite(settleStoredAssignment(assignmentId, receipt.runId, status))
-			.catch((error) => reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error))
-			.finally(() => {
-				assignments.settle(assignmentId, receipt, status, outcomeDetail);
-				capacityAdmission.releaseAssignment(assignmentId);
-			});
+		void trackDurableWrite(
+			(async () => {
+				// A failed write is reported, never swapped for the worker's real
+				// outcome, and never left holding the capacity slot (#428).
+				try {
+					await settleStoredAssignment(assignmentId, receipt.runId, status);
+				} catch (error) {
+					reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error);
+				}
+				try {
+					await capacityAdmission.releaseAssignmentAsync(assignmentId);
+				} catch (error) {
+					reportDispatchDiagnostic(`release capacity for assignment ${assignmentId}`, error);
+				}
+				// Terminal observers must wait for both directory flushes (#428).
+				try {
+					assignments.settle(assignmentId, receipt, status, outcomeDetail);
+				} catch (error) {
+					reportDispatchDiagnostic(`settle assignment ${assignmentId}:${status}`, error);
+				}
+			})(),
+		);
 	}
 
 	/**
@@ -4862,7 +4897,7 @@ export function createDispatchBundle(
 		consumeOperatorCancelRequests();
 		const tickMonotonic = monotonicNow();
 		for (const run of active.values()) {
-			if (run.aborted || run.stallKilled) continue;
+			if (run.aborted || run.stallKilled || run.sealing === true) continue;
 			const row = ledger.get(run.runId);
 			// Finalizers keep active entries while persisting their sealed receipt.
 			if (!row || row.endedAt !== null) continue;
@@ -6023,6 +6058,7 @@ export function createDispatchBundle(
 		// The ACP process is already live; any failure to establish its tracking
 		// row must not leave an orphaned agent holding a concurrency slot.
 		let envelope!: RunEnvelope;
+		let runningRowPersisted: Promise<void> = Promise.resolve();
 		let lineage!: RunLineage;
 		let identity!: ReturnType<typeof detectRunIdentity>;
 		try {
@@ -6082,7 +6118,10 @@ export function createDispatchBundle(
 			});
 			// One durable write at start so sibling processes (clio-coder fleet status)
 			// can observe the running row; finalization persists the terminal state.
-			await ledgerRef.persist();
+			// Awaited only after `active` holds the run: an fsync wait here kept a
+			// spawned retry out of `active`, so snapshot and abort could not see it.
+			// A failed write leaves the row dirty for the terminal persist (#428).
+			runningRowPersisted = persistLedgerInBackground(ledgerRef, envelope.id);
 			if (req.lineage !== undefined) {
 				context.bus.emit(BusChannels.DispatchEnqueued, {
 					runId: envelope.id,
@@ -6557,8 +6596,13 @@ export function createDispatchBundle(
 					reasoningTokenCount: receiptDraft.reasoningTokenCount ?? 0,
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
 				};
-				ledgerRef.update(envelope.id, ledgerPatch);
-				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeDecision));
+				// The terminal patch commits with receiptPath, after the receipt exists (#428).
+				activeRun.sealing = true;
+				const receipt = await ledgerRef.recordReceiptAsync(
+					envelope.id,
+					sealRouteDecision(receiptDraft, routeDecision),
+					ledgerPatch,
+				);
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
@@ -6636,6 +6680,11 @@ export function createDispatchBundle(
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
 		watchAssignmentDeadline(activeRun, callerDeadlineAt);
+		// The handle goes out once the running row is durable, as it did with the
+		// sync writer: a sibling session's steer reads ownership from runs.json,
+		// and without the row it fell through to the assignment and let a foreign
+		// cancel through (#428).
+		await runningRowPersisted;
 
 		return {
 			runId: envelope.id,
@@ -7717,6 +7766,7 @@ export function createDispatchBundle(
 		// The worker is already live; any failure to establish its tracking row
 		// must not leave an orphaned subprocess holding a concurrency slot.
 		let envelope!: RunEnvelope;
+		let runningRowPersisted: Promise<void> = Promise.resolve();
 		let lineage!: RunLineage;
 		let identity!: ReturnType<typeof detectRunIdentity>;
 		try {
@@ -7821,7 +7871,10 @@ export function createDispatchBundle(
 			});
 			// One durable write at start so sibling processes (clio-coder fleet status)
 			// can observe the running row; finalization persists the terminal state.
-			await ledgerRef.persist();
+			// Awaited only after `active` holds the run: an fsync wait here kept a
+			// spawned retry out of `active`, so snapshot and abort could not see it.
+			// A failed write leaves the row dirty for the terminal persist (#428).
+			runningRowPersisted = persistLedgerInBackground(ledgerRef, envelope.id);
 
 			// Fleet-visibility facts for the board: node placement, gate role,
 			// reroute lineage depth, and the model context window for the
@@ -8808,8 +8861,13 @@ export function createDispatchBundle(
 				if (receiptDraft.reasoningTokenCount !== undefined) {
 					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
 				}
-				ledgerRef.update(envelope.id, ledgerPatch);
-				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation.decision));
+				// The terminal patch commits with receiptPath, after the receipt exists (#428).
+				activeRun.sealing = true;
+				const receipt = await ledgerRef.recordReceiptAsync(
+					envelope.id,
+					sealRouteDecision(receiptDraft, routeObservation.decision),
+					ledgerPatch,
+				);
 				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {
 					void appendAgentLedgerReport(agentLedgerId, agentLedgerAttribution, receipt)
 						.then((posted) => {
@@ -8959,6 +9017,8 @@ export function createDispatchBundle(
 		active.set(envelope.id, activeRun);
 		stopIfCapacityLost(envelope.id, capacityLease.leaseId);
 		watchAssignmentDeadline(activeRun, preparation?.deadlineAt);
+		// Same as the ACP path: return the handle once the running row is durable (#428).
+		await runningRowPersisted;
 
 		return attachRouteObservation({
 			runId: envelope.id,
@@ -9181,9 +9241,17 @@ export function createDispatchBundle(
 		const terminal =
 			reservation === undefined
 				? assignment.terminal.finally(() => writerLease?.release())
-				: assignment.terminal.finally(() => {
-						releaseDispatchReservationMember(reservation.ownerId, reservation.memberId, now());
-						writerLease?.release();
+				: assignment.terminal.finally(async () => {
+						try {
+							// Tracked so drain and stop wait for the shared capacity record. A
+							// failed release is reported, never turned into a failed run whose
+							// receipt already sealed its outcome (#428).
+							await trackDurableWrite(releaseDispatchReservationMemberAsync(reservation.ownerId, reservation.memberId, now()));
+						} catch (error) {
+							reportDispatchDiagnostic(`release reservation member ${reservation.memberId}`, error);
+						} finally {
+							writerLease?.release();
+						}
 					});
 		return { runId: handle.runId, events: assignment.events, finalPromise: terminal };
 	}
@@ -9760,7 +9828,8 @@ export function createDispatchBundle(
 			cwd: input.template.reproducibility?.cwd ?? process.cwd(),
 		});
 		const endedAt = new Date().toISOString();
-		l.update(runId, {
+		// The terminal patch commits with receiptPath, after the receipt exists (#428).
+		const terminalPatch: Partial<RunEnvelope> = {
 			status: "completed",
 			outcome: "succeeded",
 			endedAt,
@@ -9769,49 +9838,53 @@ export function createDispatchBundle(
 			council,
 			...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
 			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
-		});
-		const receipt = l.recordReceipt(runId, {
+		};
+		const receipt = await l.recordReceiptAsync(
 			runId,
-			agentId: "council-synthesis",
-			executionRole: "judge",
-			requestOrigin: origin,
-			task,
-			targetId: input.template.targetId,
-			wireModelId: input.template.wireModelId,
-			runtimeId: input.template.runtimeId,
-			runtimeKind: input.template.runtimeKind,
-			startedAt: created.startedAt,
-			endedAt,
-			outcome: "succeeded",
-			outcomeDetail: null,
-			exitCode: 0,
-			tokenCount: 0,
-			inputTokenCount: 0,
-			outputTokenCount: 0,
-			reasoningTokenCount: 0,
-			cacheReadTokenCount: 0,
-			cacheWriteTokenCount: 0,
-			output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
-			costUsd: 0,
-			costProvenance: "unknown",
-			compiledPromptHash: null,
-			staticCompositionHash: null,
-			clioCoderVersion: readClioVersion(),
-			piMonoVersion: readPiMonoVersion(),
-			platform: process.platform,
-			nodeVersion: process.version,
-			toolCalls: 0,
-			toolStats: [],
-			verification: { state: "unverified", basis: "no-validation-tool" },
-			routingIntent: defaultRoutingIntent({}),
-			quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
-			reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
-			sessionId: input.template.sessionId,
-			gate,
-			council,
-			...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
-			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
-		});
+			{
+				runId,
+				agentId: "council-synthesis",
+				executionRole: "judge",
+				requestOrigin: origin,
+				task,
+				targetId: input.template.targetId,
+				wireModelId: input.template.wireModelId,
+				runtimeId: input.template.runtimeId,
+				runtimeKind: input.template.runtimeKind,
+				startedAt: created.startedAt,
+				endedAt,
+				outcome: "succeeded",
+				outcomeDetail: null,
+				exitCode: 0,
+				tokenCount: 0,
+				inputTokenCount: 0,
+				outputTokenCount: 0,
+				reasoningTokenCount: 0,
+				cacheReadTokenCount: 0,
+				cacheWriteTokenCount: 0,
+				output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
+				costUsd: 0,
+				costProvenance: "unknown",
+				compiledPromptHash: null,
+				staticCompositionHash: null,
+				clioCoderVersion: readClioVersion(),
+				piMonoVersion: readPiMonoVersion(),
+				platform: process.platform,
+				nodeVersion: process.version,
+				toolCalls: 0,
+				toolStats: [],
+				verification: { state: "unverified", basis: "no-validation-tool" },
+				routingIntent: defaultRoutingIntent({}),
+				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
+				reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
+				sessionId: input.template.sessionId,
+				gate,
+				council,
+				...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
+				...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
+			},
+			terminalPatch,
+		);
 		await l.persist();
 		// The synthesis never ran as a worker, so nothing else publishes its
 		// lifecycle. The Fleet Runs board and /share are built from these
@@ -9863,6 +9936,9 @@ export function createDispatchBundle(
 	let journalBridge: RunEventJournalBridge | null = null;
 
 	const extension: DomainExtension = {
+		// Stop drains again and flushes leases, assignments and the ledger, which
+		// now wait on fsync off the main thread; give it the drain's allowance (#428).
+		stopAllowanceMs: () => contract.drainAllowanceMs?.() ?? 0,
 		async start() {
 			// The journal subscribes before anything can dispatch. It rides the
 			// domain's own progress and terminal channels, so it covers a run
@@ -9991,7 +10067,7 @@ export function createDispatchBundle(
 				for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
 				ownedReservations.clear();
 				publishedPathScopeRoots.clear();
-				await Promise.allSettled([...assignmentWrites]);
+				await flushDurableWrites();
 				await liveLedgerWrite;
 				// After drain(), so the last run's terminal line is written before the
 				// bridge stops listening.
@@ -10178,9 +10254,17 @@ export function createDispatchBundle(
 			while (memberWork.size > 0) {
 				await Promise.allSettled([...memberWork.values()].flatMap((work) => [...work]));
 			}
-			await Promise.allSettled([...assignmentWrites]);
+			await flushDurableWrites();
 			await liveLedgerWrite;
-			if (ledger) await ledger.persist();
+			// Non-fatal so stop() still releases leases, flushes and closes the
+			// journal bridge; the rows stay dirty for any later persist (#428).
+			if (ledger) {
+				try {
+					await ledger.persist();
+				} catch (error) {
+					reportDispatchDiagnostic("persist ledger at drain", error);
+				}
+			}
 		})().then(
 			// Concurrent callers share one drain; a call after it settled runs
 			// again, so a ledger change made since then is still persisted. The
@@ -10542,9 +10626,7 @@ export function createDispatchBundle(
 		assignments: {
 			get: (id) => assignments.get(assignmentRootFor(id)),
 			getStored: (id) => getStoredAssignment(assignmentRootFor(id)),
-			flushWrites: async () => {
-				await Promise.allSettled([...assignmentWrites]);
-			},
+			flushWrites: flushDurableWrites,
 		},
 		async drainMember(runId) {
 			const root = controlRootFor(runId);

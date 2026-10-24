@@ -13,6 +13,7 @@ import {
 	describeEndpointCapacityHolders,
 	endpointCapacityRemedy,
 	readCapacityStateUnsafe,
+	updateCapacityStateAsync,
 	writeCapacityStateUnsafe,
 } from "./capacity-lease.js";
 import { COUNCIL_MIN_MEMBERS } from "./gate-role-prompts.js";
@@ -458,6 +459,29 @@ export function releaseDispatchReservationMember(
 		}
 		writeStore(records);
 		return copyRecord(record);
+	});
+}
+
+export function releaseDispatchReservationMemberAsync(
+	ownerId: string,
+	memberId: string,
+	nowMs = Date.now(),
+): Promise<DispatchReservationRecord | null> {
+	return updateCapacityStateAsync((state) => {
+		const records = parseReservations(state.reservations);
+		const record = records.find((entry) => entry.ownerId === ownerId);
+		if (!record) return { result: null, changed: false };
+		const member = record.members.find((entry) => entry.memberId === memberId);
+		if (record.status !== "active" || !member || member.status === "released")
+			return { result: copyRecord(record), changed: false };
+		member.status = "released";
+		member.releasedAt = new Date(nowMs).toISOString();
+		if (record.members.every((entry) => entry.status === "released")) {
+			record.status = "released";
+			record.settledAt = new Date(nowMs).toISOString();
+		}
+		replaceReservations(state, records);
+		return { result: copyRecord(record), changed: true };
 	});
 }
 
