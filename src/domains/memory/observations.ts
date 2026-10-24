@@ -215,14 +215,14 @@ export function prepareObservation(input: {
 
 /**
  * A reflection keeps every constraint, unresolved item and attempt among its
- * inputs (SPEC R12). An output note represents one when it keeps its id or
- * text, lists it in supersedes, or keeps its category while citing one of its
- * refs. One the model left out entirely is carried forward verbatim rather
- * than failing the whole reflection: replayed live, both local models
- * rewrote while consolidating and dropped a few such notes in most runs, and
- * a check that only accepted verbatim copies refused every run while also
- * rewarding a stale note copied word for word. The size check still decides
- * whether the result is worth keeping, and the note bound still applies.
+ * inputs (SPEC R12). An output note represents one only when it keeps its
+ * id or text or lists it in supersedes. Sharing a category and a ref is not
+ * enough: two unrelated pending items often cite the same tool result, and
+ * that shortcut silently dropped one of them. An input the model left out is
+ * carried forward verbatim rather than failing the whole reflection, because
+ * both local models rewrote while consolidating and dropped a few such notes
+ * in most live runs. The size check still decides whether the result is worth
+ * keeping, and past the note bound the reflection is refused.
  */
 function withRequiredInputs(
 	notes: readonly ObservationNote[],
@@ -233,13 +233,7 @@ function withRequiredInputs(
 		.filter(
 			(note) =>
 				(note.category === "constraint" || note.category === "unresolved" || note.status === "attempt") &&
-				!notes.some(
-					(next) =>
-						next.id === note.id ||
-						next.text.includes(note.text) ||
-						next.supersedes?.includes(note.id) ||
-						(next.category === note.category && next.refs.some((ref) => note.refs.includes(ref))),
-				),
+				!notes.some((next) => next.id === note.id || next.text.includes(note.text) || next.supersedes?.includes(note.id)),
 		);
 	if (notes.length + carried.length > OBSERVATION_MAX_NOTES) throw new Error("reflection lost required note");
 	return [...notes, ...carried];
@@ -384,6 +378,9 @@ export function isSessionObservation(value: unknown): value is SessionObservatio
 				!hash(value.priorObservationRevision)) ||
 			(value.checkpoint !== null &&
 				(!record(value.checkpoint) || !id(value.checkpoint.id) || !hash(value.checkpoint.digest))) ||
+			// makeRoom orders stale batches by createdAt, so a missing or malformed
+			// one must make the file unreadable and evicted first, not crash eviction.
+			!isoTimestamp(value.createdAt) ||
 			typeof value.rendered !== "string" ||
 			observationDigest(value.rendered) !== value.digest ||
 			!value.coverage.every(
@@ -435,6 +432,11 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 function id(value: unknown): value is string {
 	return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/u.test(value);
+}
+function isoTimestamp(value: unknown): value is string {
+	if (typeof value !== "string") return false;
+	const timestamp = Date.parse(value);
+	return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }
 function hash(value: unknown): value is string {
 	return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
