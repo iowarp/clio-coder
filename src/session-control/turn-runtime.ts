@@ -1069,7 +1069,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// so the slice from here is the run's real message window.
 		let runStartMessageCount = 0;
 
-		handle.agent.subscribe(async (event) => {
+		const onAgentEvent = async (event: AgentEvent): Promise<void> => {
 			if (event.type === "agent_start") runIdentity = deps.turnIdentity?.();
 			if (!currentRun()) {
 				clearStallTimer();
@@ -1449,6 +1449,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				turnEndFiredFor = null;
 			}
+		};
+		handle.agent.subscribe((event) => {
+			const settled = onAgentEvent(event);
+			// Pi awaits this promise and fails the prompt on a rejection, which the
+			// chat loop reports. An emitter that drops it must not turn the same
+			// fault into an unhandled rejection that kills a headless run before
+			// its receipt and events are written (#428).
+			settled.catch(() => {});
+			return settled;
 		});
 
 		state.runtime = localRuntime;

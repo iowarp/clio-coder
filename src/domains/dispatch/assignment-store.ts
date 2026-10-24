@@ -12,7 +12,8 @@ import { clioStateDir } from "../../core/xdg.js";
 import type { AssignmentStatus } from "./assignment.js";
 
 const MAX_ASSIGNMENT_RECORDS = 1_000;
-// Readers and watches must not publish the rename before its directory flush (#428).
+// In-process readers see the store this process has decided, before its fsync
+// lands; watches still wake only once the rename is durable (#428).
 const pendingWrites = new Map<string, DurableAssignmentRecord[]>();
 const observers = new Map<string, Set<() => void>>();
 
@@ -146,17 +147,15 @@ export function assignmentProcessOwnerAlive(
 	return true;
 }
 
-/** `previous` is the store as read under the lock, served to readers until the rename is durable. */
-async function writeStore(
-	assignments: ReadonlyArray<DurableAssignmentRecord>,
-	previous: DurableAssignmentRecord[],
-): Promise<void> {
+async function writeStore(assignments: ReadonlyArray<DurableAssignmentRecord>): Promise<void> {
 	const file: AssignmentStoreFile = {
 		version: 1,
 		assignments: assignments.slice(0, MAX_ASSIGNMENT_RECORDS).map(copyRecord),
 	};
 	const target = storePath();
-	pendingWrites.set(target, previous);
+	// Durability is about crashes, not visibility: a retry or settlement this
+	// process already decided must be readable while the fsync runs (#428).
+	pendingWrites.set(target, file.assignments);
 	try {
 		await safeResourceWriteAsync(target, JSON.stringify(file, null, 2));
 	} finally {
@@ -172,14 +171,12 @@ async function updateRecord(
 	let result!: DurableAssignmentRecord;
 	await withStateFileLock(storePath(), async () => {
 		const records = readStore();
-		// Callers replace elements rather than mutate them, so a shallow copy is the pre-write store.
-		const previous = [...records];
 		const index = records.findIndex((record) => record.assignmentId === assignmentId);
 		const current = index === -1 ? null : (records[index] ?? null);
 		result = update(current);
 		if (index === -1) records.unshift(result);
 		else records[index] = result;
-		await writeStore(records, previous);
+		await writeStore(records);
 	});
 	return copyRecord(result);
 }
@@ -232,9 +229,8 @@ export async function renameStoredAssignment(
 		const current = records[from];
 		if (!current) throw new Error(`unknown queued assignment '${fromAssignmentId}'`);
 		result = { ...current, assignmentId: toAssignmentId };
-		const previous = [...records];
 		records[from] = result;
-		await writeStore(records, previous);
+		await writeStore(records);
 	});
 	return copyRecord(result);
 }
