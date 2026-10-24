@@ -353,6 +353,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -590,6 +635,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -757,6 +847,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -1039,6 +1174,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -1305,6 +1485,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -1644,6 +1869,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -1930,6 +2200,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -2105,6 +2420,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -2518,6 +2878,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -2705,6 +3110,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -3058,6 +3508,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -3544,6 +4039,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -3988,6 +4528,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -4143,6 +4728,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -4377,6 +5007,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -4554,6 +5229,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -4813,6 +5533,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -4990,6 +5755,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -5418,6 +6228,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -6024,6 +6879,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -6180,6 +7080,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -6336,6 +7281,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -6543,6 +7533,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -7175,6 +8210,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -7448,6 +8528,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -7685,6 +8810,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -7819,6 +8989,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -8144,6 +9359,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -8400,6 +9660,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -8608,6 +9913,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -8910,6 +10260,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -9066,6 +10461,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -9222,6 +10662,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -9378,6 +10863,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -9534,6 +11064,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -9804,6 +11379,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -10099,6 +11719,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -10471,6 +12136,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -10819,6 +12529,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -11006,6 +12761,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -11199,6 +12999,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -11367,6 +13212,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -11517,6 +13407,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -12185,6 +14120,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -12367,6 +14347,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -12542,6 +14567,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -12693,6 +14763,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -12956,6 +15071,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -13114,6 +15274,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -13269,6 +15474,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -13444,6 +15694,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -13849,6 +16144,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -14044,6 +16384,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -14252,6 +16637,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -14517,6 +16947,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -14676,6 +17151,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -14844,6 +17364,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -15056,6 +17621,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -15284,6 +17894,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -15463,6 +18118,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -15720,6 +18420,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -16198,6 +18943,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -16395,6 +19185,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -16747,6 +19582,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -16893,6 +19773,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -17313,6 +20238,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -18053,6 +21023,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -18200,6 +21215,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -18627,6 +21687,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -18895,6 +22000,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -19101,6 +22251,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -19312,6 +22507,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -19465,6 +22705,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -19816,6 +23101,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -19999,6 +23329,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -20237,6 +23612,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -20566,6 +23986,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -20815,6 +24280,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -20981,6 +24491,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -21174,6 +24729,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -21326,6 +24926,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -21470,6 +25115,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -21980,6 +25670,51 @@
 																	},
 																	"instance": {
 																		"type": "string"
+																	},
+																	"modelSelection": {
+																		"type": "object",
+																		"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+																		"properties": {
+																			"code": {
+																				"type": "string",
+																				"const": "model_not_declared"
+																			},
+																			"targetId": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"requestedModel": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"availableModels": {
+																				"type": "array",
+																				"items": {
+																					"type": "string",
+																					"maxLength": 256
+																				},
+																				"maxItems": 64
+																			},
+																			"remedy": {
+																				"type": "string",
+																				"maxLength": 1024
+																			}
+																		},
+																		"additionalProperties": false
 																	}
 																},
 																"additionalProperties": false
@@ -25059,6 +28794,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -25196,6 +28976,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -25367,6 +29192,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -25495,6 +29365,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -25648,6 +29563,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -25837,6 +29797,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -26009,6 +30014,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -26144,6 +30194,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -26299,6 +30394,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -26476,6 +30616,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -27008,6 +31193,51 @@
 																	},
 																	"instance": {
 																		"type": "string"
+																	},
+																	"modelSelection": {
+																		"type": "object",
+																		"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+																		"properties": {
+																			"code": {
+																				"type": "string",
+																				"const": "model_not_declared"
+																			},
+																			"targetId": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"requestedModel": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"availableModels": {
+																				"type": "array",
+																				"items": {
+																					"type": "string",
+																					"maxLength": 256
+																				},
+																				"maxItems": 64
+																			},
+																			"remedy": {
+																				"type": "string",
+																				"maxLength": 1024
+																			}
+																		},
+																		"additionalProperties": false
 																	}
 																},
 																"additionalProperties": false
@@ -30081,6 +34311,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -30621,6 +34896,51 @@
 																	},
 																	"instance": {
 																		"type": "string"
+																	},
+																	"modelSelection": {
+																		"type": "object",
+																		"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+																		"properties": {
+																			"code": {
+																				"type": "string",
+																				"const": "model_not_declared"
+																			},
+																			"targetId": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"requestedModel": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"availableModels": {
+																				"type": "array",
+																				"items": {
+																					"type": "string",
+																					"maxLength": 256
+																				},
+																				"maxItems": 64
+																			},
+																			"remedy": {
+																				"type": "string",
+																				"maxLength": 1024
+																			}
+																		},
+																		"additionalProperties": false
 																	}
 																},
 																"additionalProperties": false
@@ -33694,6 +38014,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -34198,6 +38563,51 @@
 																		},
 																		"instance": {
 																			"type": "string"
+																		},
+																		"modelSelection": {
+																			"type": "object",
+																			"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+																			"properties": {
+																				"code": {
+																					"type": "string",
+																					"const": "model_not_declared"
+																				},
+																				"targetId": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"maxLength": 128
+																						},
+																						{
+																							"type": "null"
+																						}
+																					]
+																				},
+																				"requestedModel": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"maxLength": 256
+																						},
+																						{
+																							"type": "null"
+																						}
+																					]
+																				},
+																				"availableModels": {
+																					"type": "array",
+																					"items": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"maxItems": 64
+																				},
+																				"remedy": {
+																					"type": "string",
+																					"maxLength": 1024
+																				}
+																			},
+																			"additionalProperties": false
 																		}
 																	},
 																	"additionalProperties": false
@@ -37272,6 +41682,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -37591,6 +42046,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -37807,6 +42307,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -38341,6 +42886,51 @@
 																	},
 																	"instance": {
 																		"type": "string"
+																	},
+																	"modelSelection": {
+																		"type": "object",
+																		"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+																		"properties": {
+																			"code": {
+																				"type": "string",
+																				"const": "model_not_declared"
+																			},
+																			"targetId": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 128
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"requestedModel": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"availableModels": {
+																				"type": "array",
+																				"items": {
+																					"type": "string",
+																					"maxLength": 256
+																				},
+																				"maxItems": 64
+																			},
+																			"remedy": {
+																				"type": "string",
+																				"maxLength": 1024
+																			}
+																		},
+																		"additionalProperties": false
 																	}
 																},
 																"additionalProperties": false
@@ -41414,6 +46004,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -41553,6 +46188,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -41694,6 +46374,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -41891,6 +46616,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -42240,6 +47010,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -42507,6 +47322,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -42869,6 +47729,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -43047,6 +47952,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -43230,6 +48180,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -43471,6 +48466,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -43629,6 +48669,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -43779,6 +48864,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -43974,6 +49104,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -44084,6 +49259,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -44223,6 +49443,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -44465,6 +49730,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -44616,6 +49926,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -44763,6 +50118,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -45751,6 +51151,51 @@
 														},
 														"instance": {
 															"type": "string"
+														},
+														"modelSelection": {
+															"type": "object",
+															"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+															"properties": {
+																"code": {
+																	"type": "string",
+																	"const": "model_not_declared"
+																},
+																"targetId": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"maxLength": 128
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"requestedModel": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"maxLength": 256
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"availableModels": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 256
+																	},
+																	"maxItems": 64
+																},
+																"remedy": {
+																	"type": "string",
+																	"maxLength": 1024
+																}
+															},
+															"additionalProperties": false
 														}
 													},
 													"additionalProperties": false
@@ -45893,6 +51338,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -46903,6 +52393,51 @@
 														},
 														"instance": {
 															"type": "string"
+														},
+														"modelSelection": {
+															"type": "object",
+															"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+															"properties": {
+																"code": {
+																	"type": "string",
+																	"const": "model_not_declared"
+																},
+																"targetId": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"maxLength": 128
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"requestedModel": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"maxLength": 256
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"availableModels": {
+																	"type": "array",
+																	"items": {
+																		"type": "string",
+																		"maxLength": 256
+																	},
+																	"maxItems": 64
+																},
+																"remedy": {
+																	"type": "string",
+																	"maxLength": 1024
+																}
+															},
+															"additionalProperties": false
 														}
 													},
 													"additionalProperties": false
@@ -47039,6 +52574,51 @@
 										},
 										"instance": {
 											"type": "string"
+										},
+										"modelSelection": {
+											"type": "object",
+											"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+											"properties": {
+												"code": {
+													"type": "string",
+													"const": "model_not_declared"
+												},
+												"targetId": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 128
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"requestedModel": {
+													"anyOf": [
+														{
+															"type": "string",
+															"maxLength": 256
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"availableModels": {
+													"type": "array",
+													"items": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"maxItems": 64
+												},
+												"remedy": {
+													"type": "string",
+													"maxLength": 1024
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -47121,6 +52701,51 @@
 					},
 					"instance": {
 						"type": "string"
+					},
+					"modelSelection": {
+						"type": "object",
+						"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+						"properties": {
+							"code": {
+								"type": "string",
+								"const": "model_not_declared"
+							},
+							"targetId": {
+								"anyOf": [
+									{
+										"type": "string",
+										"maxLength": 128
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"requestedModel": {
+								"anyOf": [
+									{
+										"type": "string",
+										"maxLength": 256
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"availableModels": {
+								"type": "array",
+								"items": {
+									"type": "string",
+									"maxLength": 256
+								},
+								"maxItems": 64
+							},
+							"remedy": {
+								"type": "string",
+								"maxLength": 1024
+							}
+						},
+						"additionalProperties": false
 					}
 				},
 				"additionalProperties": false
@@ -49399,6 +55024,51 @@
 															},
 															"instance": {
 																"type": "string"
+															},
+															"modelSelection": {
+																"type": "object",
+																"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+																"properties": {
+																	"code": {
+																		"type": "string",
+																		"const": "model_not_declared"
+																	},
+																	"targetId": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"requestedModel": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 256
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"availableModels": {
+																		"type": "array",
+																		"items": {
+																			"type": "string",
+																			"maxLength": 256
+																		},
+																		"maxItems": 64
+																	},
+																	"remedy": {
+																		"type": "string",
+																		"maxLength": 1024
+																	}
+																},
+																"additionalProperties": false
 															}
 														},
 														"additionalProperties": false
@@ -50215,6 +55885,51 @@
 													},
 													"instance": {
 														"type": "string"
+													},
+													"modelSelection": {
+														"type": "object",
+														"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+														"properties": {
+															"code": {
+																"type": "string",
+																"const": "model_not_declared"
+															},
+															"targetId": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"maxLength": 128
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"requestedModel": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"maxLength": 256
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"availableModels": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"maxLength": 256
+																},
+																"maxItems": 64
+															},
+															"remedy": {
+																"type": "string",
+																"maxLength": 1024
+															}
+														},
+														"additionalProperties": false
 													}
 												},
 												"additionalProperties": false
@@ -60025,6 +65740,51 @@
 															},
 															"instance": {
 																"type": "string"
+															},
+															"modelSelection": {
+																"type": "object",
+																"required": ["code", "targetId", "requestedModel", "availableModels", "remedy"],
+																"properties": {
+																	"code": {
+																		"type": "string",
+																		"const": "model_not_declared"
+																	},
+																	"targetId": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 128
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"requestedModel": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"maxLength": 256
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"availableModels": {
+																		"type": "array",
+																		"items": {
+																			"type": "string",
+																			"maxLength": 256
+																		},
+																		"maxItems": 64
+																	},
+																	"remedy": {
+																		"type": "string",
+																		"maxLength": 1024
+																	}
+																},
+																"additionalProperties": false
 															}
 														},
 														"additionalProperties": false

@@ -407,18 +407,11 @@ export class Supervisor {
 		}
 	}
 	/**
-	 * A resumed child reads autonomy, thinking and its other session controls from settings. The task
-	 * was parked with the operator's own choices, kept in its snapshot, so they are set again before
-	 * any window is told the task is open. A choice the new child no longer offers is left at its
-	 * setting, and a refusal leaves the task open on the settings' values rather than failing the resume.
+	 * Autonomy is a GUI-held override; routing controls come from the restored ACP session.
+	 * Reapplying a cached route would overwrite newer ledger choices made through another client (AUD-3).
 	 */
 	private async restoreChoices(entry: Entry, id: string) {
 		const level = this.parkedAutonomy.get(id);
-		const choices = Object.freeze(
-			(this.snapshots.get(id)?.config?.options ?? []).map(({ id: configId, currentValue }) =>
-				Object.freeze({ configId, value: currentValue }),
-			),
-		);
 		this.parkedAutonomy.delete(id);
 		const refused = (error: unknown) => {
 			console.error(
@@ -428,19 +421,6 @@ export class Supervisor {
 		if (level !== undefined) {
 			try {
 				await entry.client.autonomy(id, level);
-			} catch (error) {
-				refused(error);
-			}
-		}
-		// Target and model changes rebuild the offered controls; restore thinking against that final route (GUI-03).
-		for (const configId of ["target", "model", "thinkingLevel"] as const) {
-			const kept = choices.find((choice) => choice.configId === configId);
-			if (!kept) continue;
-			try {
-				const offered = entry.client.config?.options.find((option) => option.id === configId);
-				if (!offered || offered.currentValue === kept.value || !offered.options.some((row) => row.value === kept.value))
-					continue;
-				await entry.client.setConfig(id, { configId, value: kept.value });
 			} catch (error) {
 				refused(error);
 			}

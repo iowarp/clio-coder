@@ -65,6 +65,7 @@ import {
 } from "../../contracts/wire.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
+import { modelSelectionRefusal, promptAdmissionDetail } from "./error-model.js";
 import { projectConfigOptions } from "./session-config.js";
 import { sessionResultTelemetry } from "./telemetry.js";
 
@@ -142,11 +143,22 @@ export function acpProblem(error: unknown) {
 	if (error instanceof AcpProtocolError) {
 		const detail = record(record(record(error.data).data)._meta)[ACP_ERROR_META_KEY];
 		const code = record(detail).code;
+		const modelSelection = code === "invalid_params" ? modelSelectionRefusal(record(detail).modelSelection) : undefined;
+		if (modelSelection)
+			return new AppProblem(
+				"validation",
+				"Clio did not change the conversation route because the requested model is not declared for this target. Choose an available model or update targets[].wireModels in settings.yaml, then restart the ACP session.",
+				undefined,
+				undefined,
+				{ modelSelection },
+			);
 		if (code === "prompt_not_admitted" && record(detail).reason === "authentication-required")
 			return new AppProblem(
 				"upstream_acp",
 				"Clio cannot access credentials for the selected target. Connect it with clio-coder auth login <target> in a terminal, then close and reopen this session. Background apps use Clio's saved credentials; terminal-only API keys are unavailable after login or restart.",
 			);
+		if (code === "prompt_not_admitted")
+			return new AppProblem("upstream_acp", promptAdmissionDetail(record(detail).reason));
 		if (code === "turn_failed")
 			return new AppProblem(
 				"upstream_acp",
@@ -157,7 +169,7 @@ export function acpProblem(error: unknown) {
 				"conflict",
 				code === "shell_active"
 					? "A shell line is running in this task. Wait for it or stop it."
-					: "A shell line runs between turns. Wait for this turn or stop it.",
+					: "A turn is already running in this task. Wait for it or stop it before changing the conversation.",
 			);
 		if (code === "shell_failed")
 			return new AppProblem("upstream_acp", "Clio could not run or record that shell line. (shell_failed)");

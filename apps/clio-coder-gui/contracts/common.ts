@@ -22,6 +22,17 @@ export const ProblemCode = Type.Union([
 	Type.Literal("internal"),
 ]);
 export type ProblemCode = Static<typeof ProblemCode>;
+export const ModelSelectionRefusal = Type.Object(
+	{
+		code: Type.Literal("model_not_declared"),
+		targetId: Type.Union([Type.String({ maxLength: 128 }), Type.Null()]),
+		requestedModel: Type.Union([Type.String({ maxLength: 256 }), Type.Null()]),
+		availableModels: Type.Array(Type.String({ maxLength: 256 }), { maxItems: 64 }),
+		remedy: Type.String({ maxLength: 1024 }),
+	},
+	{ additionalProperties: false },
+);
+export type ModelSelectionRefusal = Static<typeof ModelSelectionRefusal>;
 export const Problem = Type.Object(
 	{
 		type: Type.String(),
@@ -30,6 +41,7 @@ export const Problem = Type.Object(
 		detail: Type.String(),
 		code: ProblemCode,
 		instance: Type.String(),
+		modelSelection: Type.Optional(ModelSelectionRefusal),
 	},
 	{ additionalProperties: false },
 );
