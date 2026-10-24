@@ -166,6 +166,10 @@ export function classifyFailure(
 		/^acp delegation failed: acp (?:session\/prompt|session\/set_model) failed: (?:http )?(?:400|404)\b/.test(diagnostic)
 	)
 		return "deterministic-task";
+	// An ACP peer never writes the worker's typed status marker, so its 408
+	// needs the same transient verdict here that the typed 408 gets below.
+	// Without it a 408 whose body lacks timeout wording fell to worker-runtime.
+	if (/^acp peer reported http 408:/.test(diagnostic)) return "target-transient";
 	// A provider that reports the prompt no longer fits the model's context
 	// window has judged the request, not the target. The identical input earns
 	// the identical overflow on every retry, and charging it to the target
@@ -181,6 +185,12 @@ export function classifyFailure(
 	if (httpStatus !== null && httpStatus >= 400 && httpStatus < 500 && ![401, 403, 408, 429].includes(httpStatus)) {
 		return "deterministic-task";
 	}
+	// A typed 408 says the endpoint gave up waiting on this request, the same
+	// verdict a 5xx carries. Typed 5xx reach target-transient only because the
+	// marker line matches TRANSIENT_TARGET_TEXT; 408 has no such wording, so it
+	// fell to worker-runtime and retried on another runtime against the same
+	// slow target.
+	if (httpStatus === 408) return "target-transient";
 	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(diagnostic)) return "target-auth";
 	if (/\b429\b|rate[ -]?limit|too many requests/.test(diagnostic)) return "target-rate-limit";
 	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(diagnostic)) return "node-resource";

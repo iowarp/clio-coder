@@ -104,6 +104,7 @@ describe("dispatch failure classification", () => {
 			strictEqual(affectsTargetBreaker(failureClass), false, tail);
 		}
 		strictEqual(classifyTail("ACP peer reported HTTP 500: server error"), "target-transient");
+		strictEqual(classifyTail("ACP peer reported HTTP 408: request was rejected"), "target-transient");
 	});
 
 	it("does not resend a request the provider rejected with a 4xx, except 408 and 429", () => {
@@ -114,7 +115,7 @@ describe("dispatch failure classification", () => {
 			strictEqual(decideRetry(classifyTail(tail(status)), 0, 2).retry, false, String(status));
 		}
 		strictEqual(classifyTail(tail(429)), "target-rate-limit");
-		strictEqual(classifyTail(tail(408)), "worker-runtime");
+		strictEqual(classifyTail(tail(408)), "target-transient");
 		strictEqual(decideRetry(classifyTail(tail(408)), 0, 2).retry, true);
 	});
 
