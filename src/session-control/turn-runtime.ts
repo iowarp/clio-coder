@@ -1040,7 +1040,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return false;
 			middleware.fireTurnStart(localRuntime, "", 0, true);
-			const content = [block, middleware.flushPendingReminders()]
+			// The reminder block leads: only a block opening the message is host
+			// framing, and the orientation block quotes scout findings.
+			const content = [middleware.flushPendingReminders(), block]
 				.filter((part): part is string => part !== null && part.length > 0)
 				.join("\n\n");
 			if (content.length === 0) return false;

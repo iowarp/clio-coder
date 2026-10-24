@@ -6,7 +6,13 @@ import { Value } from "typebox/value";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
-import { TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
+import {
+	carriesToolResultNote,
+	recordedToolResultNotes,
+	TOOL_RESULT_HOST_NOTES_KEY,
+	TOOL_RESULT_NOTES_SEPARATOR,
+	toolResultNote,
+} from "../core/reminder-framing.js";
 import {
 	type MainSandboxPolicy,
 	mainSandboxPolicy,
@@ -67,7 +73,7 @@ import { approvalGiver, withApprovalNote } from "./approval-note.js";
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
-import type { ToolResultDigest, ToolResultDisposition } from "./result-disposition.js";
+import { type ToolResultDigest, type ToolResultDisposition, toolResultContextText } from "./result-disposition.js";
 import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
 import { effectiveToolCall, type ToolPlacement, toolSpecPlacement } from "./surface.js";
 import { pathToolLanding } from "./tool-landing.js";
@@ -1275,7 +1281,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					: syncAfter;
 				const finalResult = shapeToolResult(
 					spec,
-					applyToolResultEffects(labeled, [...beforeEffects, ...afterEffects], labeled !== result),
+					applyToolResultEffects(
+						labeled,
+						[...beforeEffects, ...afterEffects],
+						labeled !== result,
+						nestedDecisions.has(result) ? "call" : nestedChainResults.has(result) ? "chain" : null,
+					),
 					options,
 					resultDisposition,
 				);
@@ -2822,6 +2833,14 @@ function askUserAnswered(verdict: RegistryVerdict): boolean {
  */
 const nestedDecisions = new WeakMap<ToolResult, SafetyDecision>();
 
+const nestedChainResults = new WeakSet<ToolResult>();
+
+/** Mark a gateway chain's combined result, whose step notes the nested calls recorded. */
+export function nestedChainResult(result: ToolResult): ToolResult {
+	nestedChainResults.add(result);
+	return result;
+}
+
 /** Carry trusted in-process delegation authority without adding model-visible metadata. */
 export function nestedExecutedResult(result: ToolResult, decision: SafetyDecision): ToolResult {
 	nestedDecisions.set(result, decision);
@@ -3304,9 +3323,11 @@ function applyToolResultEffects(
 	result: ToolResult,
 	effects: ReadonlyArray<MiddlewareEffect>,
 	bannered = false,
+	nested: "call" | "chain" | null = null,
 ): ToolResult {
+	const inherited = inheritedHostNotes(result, nested);
 	const annotations = annotationMessages(effects);
-	if (annotations.length === 0) return result;
+	if (annotations.length === 0) return withHostNotes(result, inherited);
 	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
 	const prefix = !bannered && annotations.includes(warning) ? `${warning}\n\n` : "";
 	const remaining = annotations.filter((annotation) => annotation !== warning);
@@ -3316,11 +3337,44 @@ function applyToolResultEffects(
 		if (result.details !== undefined) annotated.details = result.details;
 		if (result.terminate === true) annotated.terminate = true;
 		if (result.images !== undefined) annotated.images = result.images;
-		return annotated;
+		return withHostNotes(annotated, [...inherited, ...remaining]);
 	}
 	const annotated: ToolResult = { kind: "error", message: `${prefix}${result.message}${suffix}` };
 	if (result.details !== undefined) annotated.details = result.details;
-	return annotated;
+	return withHostNotes(annotated, [...inherited, ...remaining]);
+}
+
+/**
+ * Notes the nested registry call already appended and recorded, kept only
+ * when this registry itself delegated the call (the WeakMap and WeakSet
+ * entries no tool output can create) and the text still carries them: a
+ * gateway call ends with exactly the capability's run, a chain keeps each
+ * step's run in its section.
+ */
+function inheritedHostNotes(result: ToolResult, nested: "call" | "chain" | null): string[] {
+	if (nested === null) return [];
+	const notes = recordedToolResultNotes(result.details);
+	if (notes.length === 0) return [];
+	const text = toolResultContextText(result);
+	const carried =
+		nested === "call"
+			? text.endsWith(`${TOOL_RESULT_NOTES_SEPARATOR}${notes.join("\n")}`)
+			: notes.every((note) => carriesToolResultNote(text, note));
+	return carried ? notes : [];
+}
+
+/**
+ * Record the trailing notes this host appended, and drop any value a tool put
+ * under the same key: delivery accounting trusts only this record, never
+ * note-shaped text at the end of tool output.
+ */
+function withHostNotes(result: ToolResult, notes: readonly string[]): ToolResult {
+	const details = result.details;
+	if (notes.length === 0 && (details === undefined || !Object.hasOwn(details, TOOL_RESULT_HOST_NOTES_KEY)))
+		return result;
+	const { [TOOL_RESULT_HOST_NOTES_KEY]: _forged, ...rest } = details ?? {};
+	const recorded = notes.length > 0 ? { ...rest, [TOOL_RESULT_HOST_NOTES_KEY]: [...notes] } : rest;
+	return { ...result, details: recorded };
 }
 
 function annotationMessages(effects: ReadonlyArray<MiddlewareEffect>): string[] {

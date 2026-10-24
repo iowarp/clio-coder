@@ -21,49 +21,96 @@ export function toolResultNote(severity: string, message: string): string {
 export const TOOL_RESULT_NOTES_SEPARATOR = "\n\n";
 
 /**
- * The texts the host framed inside a submitted request: the bodies of
- * `<system-reminder>` blocks in user messages and the trailing middleware notes
- * of tool results. Text a tool merely returned (a session ledger, a trace, a
- * file quoting an old reminder) is not host framing, so a reminder it happens
- * to contain was not delivered by it.
+ * The `details` key where the registry records the exact notes it appended to
+ * a tool result. Tool output is arbitrary bytes and can end in anything that
+ * looks like a note, so the text alone never proves the host wrote it; the
+ * registry overwrites this key on every result, so a tool cannot set it.
  */
-export function hostFramedTexts(messages: readonly { role: string; content: unknown }[]): string[] {
+export const TOOL_RESULT_HOST_NOTES_KEY = "hostNotes";
+
+/**
+ * The texts the host framed inside a submitted request: the bodies of the
+ * `<system-reminder>` blocks that open a user message and the middleware notes
+ * the registry recorded appending to a tool result. Text a tool merely
+ * returned (a session ledger, a trace, a file quoting an old reminder, operator
+ * shell output replayed as a user message) is not host framing, so a reminder
+ * it happens to contain was not delivered by it.
+ */
+export function hostFramedTexts(messages: readonly { role: string; content: unknown; details?: unknown }[]): string[] {
 	const framed: string[] = [];
 	for (const message of messages) {
 		if (message.role !== "user" && message.role !== "toolResult") continue;
 		const blocks =
 			typeof message.content === "string" ? [message.content] : Array.isArray(message.content) ? message.content : [];
-		for (const block of blocks) {
+		const texts = blocks.flatMap((block) => {
 			const text =
 				typeof block === "string"
 					? block
 					: block !== null && typeof block === "object" && (block as { type?: unknown }).type === "text"
 						? (block as { text?: unknown }).text
 						: null;
-			if (typeof text !== "string") continue;
-			if (message.role === "user") framed.push(...systemReminderBodies(text));
-			else framed.push(...trailingToolResultNotes(text));
-		}
+			return typeof text === "string" ? [text] : [];
+		});
+		if (message.role === "user") framed.push(...leadingSystemReminderBodies(texts[0] ?? ""));
+		else framed.push(...hostAppendedToolResultNotes(texts, message.details));
 	}
 	return framed;
 }
 
-function systemReminderBodies(text: string): string[] {
-	return [...text.matchAll(/<system-reminder>\n([\s\S]*?)\n<\/system-reminder>/gu)].map((match) => match[1] ?? "");
+const LEADING_SYSTEM_REMINDER = /^<system-reminder>\n([\s\S]*?)\n<\/system-reminder>(?:\n\n|$)/u;
+
+/**
+ * The host composes every reminder-carrying user message with its blocks
+ * first and appends operator words, orientation findings or replayed shell
+ * output after them. A block anywhere later came from that appended text, so
+ * only the run of blocks opening the message counts.
+ */
+function leadingSystemReminderBodies(text: string): string[] {
+	const bodies: string[] = [];
+	let rest = text;
+	for (let match = LEADING_SYSTEM_REMINDER.exec(rest); match; match = LEADING_SYSTEM_REMINDER.exec(rest)) {
+		bodies.push(match[1] ?? "");
+		rest = rest.slice(match[0].length);
+	}
+	return bodies;
 }
 
 /**
- * Notes are appended last, after a blank line, each starting with its own
- * severity tag; a note may span lines. The last blank-line-plus-tag boundary
- * opens the trailing run, so output that quotes a tag earlier is not read as
- * a note.
+ * The well-formed note lines a `details.hostNotes` value holds; anything else
+ * there invalidates the whole record.
  */
-function trailingToolResultNotes(text: string): string[] {
-	const start = text.lastIndexOf(`${TOOL_RESULT_NOTES_SEPARATOR}[middleware:`);
-	if (start < 0) return [];
-	return text
-		.slice(start + TOOL_RESULT_NOTES_SEPARATOR.length)
-		.split(/\n(?=\[middleware:[a-z-]+\] )/u)
-		.filter((note) => TOOL_RESULT_NOTE_PREFIX.test(note))
+export function recordedToolResultNotes(details: unknown): string[] {
+	const recorded =
+		details !== null && typeof details === "object"
+			? (details as Record<string, unknown>)[TOOL_RESULT_HOST_NOTES_KEY]
+			: undefined;
+	if (!Array.isArray(recorded)) return [];
+	const notes = recorded.filter(
+		(note): note is string => typeof note === "string" && TOOL_RESULT_NOTE_PREFIX.test(note),
+	);
+	return notes.length === recorded.length ? notes : [];
+}
+
+/**
+ * Whether `text` still carries `note` as whole lines. A gateway call keeps
+ * the capability's notes ahead of its own, and a chain keeps each step's notes
+ * at the end of that step's section, so a recorded note need not be the last
+ * line; it must only have survived shaping intact.
+ */
+export function carriesToolResultNote(text: string, note: string): boolean {
+	for (let at = text.indexOf(`\n${note}`); at >= 0; at = text.indexOf(`\n${note}`, at + 1)) {
+		const end = at + 1 + note.length;
+		if (end === text.length || text[end] === "\n") return true;
+	}
+	return false;
+}
+
+/**
+ * Notes count only when the registry recorded appending them and the text
+ * still carries them; a result shaped or cut after the append does not.
+ */
+function hostAppendedToolResultNotes(texts: readonly string[], details: unknown): string[] {
+	return recordedToolResultNotes(details)
+		.filter((note) => texts.some((text) => carriesToolResultNote(text, note)))
 		.map((note) => note.replace(TOOL_RESULT_NOTE_PREFIX, ""));
 }

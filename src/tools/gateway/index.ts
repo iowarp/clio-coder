@@ -17,6 +17,7 @@ import {
 } from "../observation.js";
 import {
 	nestedBlockedResult,
+	nestedChainResult,
 	nestedExecutedResult,
 	resolveToolPromptHint,
 	type ToolInvokeOptions,
@@ -921,13 +922,15 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			if (op === "describe") return runDescribe(args, options);
 			if (op === "call") return runCall(args, options);
 			if (op === "chain")
-				return runGatewayChain(
-					args.steps,
-					{
-						getSpec: (name) => registry.get(name as ToolName),
-						call: (name, stepArgs, stepOptions) => runCall({ capability: name, args: stepArgs }, stepOptions, true),
-					},
-					options,
+				return nestedChainResult(
+					await runGatewayChain(
+						args.steps,
+						{
+							getSpec: (name) => registry.get(name as ToolName),
+							call: (name, stepArgs, stepOptions) => runCall({ capability: name, args: stepArgs }, stepOptions, true),
+						},
+						options,
+					),
 				);
 			return { kind: "error", message: `gateway: op must be ${GATEWAY_OPS.join(", ")}; got '${op}'` };
 		},

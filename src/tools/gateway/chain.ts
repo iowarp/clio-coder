@@ -1,3 +1,8 @@
+import {
+	carriesToolResultNote,
+	recordedToolResultNotes,
+	TOOL_RESULT_HOST_NOTES_KEY,
+} from "../../core/reminder-framing.js";
 import { skillActivationFromToolDetails } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
@@ -279,9 +284,16 @@ export async function runGatewayChain(
 		pending,
 		...(boundary ? { boundary } : {}),
 	});
+	// Each step's notes were appended and recorded by its own nested registry
+	// call; the chain hands on those its projected section still carries, and
+	// the registry keeps them only because it delegated this chain itself.
+	const hostNotes = rows.flatMap((row) =>
+		recordedToolResultNotes(results.get(row.id)?.details).filter((note) => carriesToolResultNote(row.output, note)),
+	);
 	const details = {
 		...activationDetails,
 		...(activationDetails ? { capability: ToolNames.Context } : {}),
+		...(hostNotes.length > 0 ? { [TOOL_RESULT_HOST_NOTES_KEY]: hostNotes } : {}),
 		op: "chain",
 		// `truncated` lets a consumer tell a complete step from a cut one
 		// without reading the model-facing text.
