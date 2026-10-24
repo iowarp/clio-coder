@@ -6,7 +6,7 @@ import type { DeclaredCheck } from "./catalog.js";
 import {
 	cargoProposals,
 	cmakeProposals,
-	discoverDeclaredProjectEntriesAtRoot,
+	discoverTaskRunnerEntriesAtRoot,
 	goProposals,
 	pythonProposals,
 	type RawProposal,
@@ -95,10 +95,9 @@ function ciScriptProposals(workspaceRoot: string): RawProposal[] {
 }
 
 /** Makefile and justfile targets whose names are verification words: test, lint, check, typecheck, format, build, ci. */
-function taskRunnerProposals(workspaceRoot: string): RawProposal[] {
+function taskRunnerProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
 	const proposals: RawProposal[] = [];
-	for (const entry of discoverDeclaredProjectEntriesAtRoot(workspaceRoot)) {
-		if (entry.kind === "package-script") continue;
+	for (const entry of discoverTaskRunnerEntriesAtRoot(workspaceRoot, diagnostics)) {
 		const family = familyTag(entry.id);
 		if (family === null) continue;
 		const runner = entry.kind === "make-target" ? "make" : "just";
@@ -128,14 +127,14 @@ function argsBaseFor(proposal: RawProposal): string[] | undefined {
 	return [...command];
 }
 
-export function discoverToolchainChecks(workspaceRoot: string): ToolchainCheck[] {
-	const diagnostics: string[] = [];
+/** Every check the toolchain files derive; a file discovery had to skip lands in diagnostics. */
+export function discoverToolchainChecks(workspaceRoot: string, diagnostics: string[] = []): ToolchainCheck[] {
 	const proposals = [
 		...pythonProposals(workspaceRoot, diagnostics),
 		...cargoProposals(workspaceRoot, diagnostics),
 		...goProposals(workspaceRoot, diagnostics),
 		...cmakeProposals(workspaceRoot, diagnostics).filter((proposal) => proposal.tags.includes("test")),
-		...taskRunnerProposals(workspaceRoot),
+		...taskRunnerProposals(workspaceRoot, diagnostics),
 		...ciScriptProposals(workspaceRoot),
 	];
 	const checks: ToolchainCheck[] = [];

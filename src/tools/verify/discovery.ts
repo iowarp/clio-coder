@@ -8,7 +8,7 @@ import {
 	loadProjectVerifierCatalog,
 	packageDeclaredCheck,
 } from "./catalog.js";
-import { parsePackageJson } from "./toolchain.js";
+import { PACKAGE_JSON_NO_SCRIPTS, parsePackageJson } from "./toolchain.js";
 
 /**
  * Package scripts and the project catalog meet here as one canonical check
@@ -16,7 +16,10 @@ import { parsePackageJson } from "./toolchain.js";
  * resolve a verify call without loading them.
  */
 
-export type DeclaredCheckDiscoveryResult = { ok: true; sources: DeclaredCheckSource[] } | { ok: false; reason: string };
+/** diagnostics name each declaration file that exists but was skipped, as '<file>: <reason>'. */
+export type DeclaredCheckDiscoveryResult =
+	| { ok: true; sources: DeclaredCheckSource[]; diagnostics?: string[] }
+	| { ok: false; reason: string };
 
 function repositoryRelativeCwd(workspaceRoot: string, resolved: string): string {
 	const relative = path.relative(workspaceRoot, resolved);
@@ -28,11 +31,21 @@ function packageTag(id: string): string[] {
 	return [separator === -1 ? id : id.slice(0, separator)];
 }
 
-function packageCheckSource(packageRoot: string, workspaceRoot: string): DeclaredCheckSource | null {
+function packageCheckSource(
+	packageRoot: string,
+	workspaceRoot: string,
+	diagnostics: string[],
+): DeclaredCheckSource | null {
 	const packagePath = path.join(packageRoot, "package.json");
 	if (!existsSync(packagePath)) return null;
 	const pkg = parsePackageJson(packagePath);
-	if (!pkg.ok) return null;
+	if (!pkg.ok) {
+		if (pkg.reason !== PACKAGE_JSON_NO_SCRIPTS) {
+			const relative = path.relative(workspaceRoot, packagePath).split(path.sep).join("/");
+			diagnostics.push(`${relative}: ${pkg.reason}; package script discovery skipped.`);
+		}
+		return null;
+	}
 	const cwd = repositoryRelativeCwd(workspaceRoot, packageRoot);
 	const checks = declaredVerificationScripts(pkg.scripts).map((id) =>
 		packageDeclaredCheck(id, packagePath, cwd, packageTag(id)),
@@ -68,14 +81,15 @@ export function discoverDeclaredChecksAtRoot(
 		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
 	}
 	const sources: DeclaredCheckSource[] = [];
-	const packageSource = packageCheckSource(packageRoot, workspaceRoot);
+	const diagnostics: string[] = [];
+	const packageSource = packageCheckSource(packageRoot, workspaceRoot, diagnostics);
 	if (packageSource !== null) sources.push(packageSource);
 	const projectCatalog = loadProjectVerifierCatalog(workspaceRoot);
 	if (!projectCatalog.ok) return projectCatalog;
 	if (projectCatalog.source !== null) sources.push(projectCatalog.source);
 	const collision = providerCollision(sources);
 	if (collision !== null) return { ok: false, reason: collision };
-	return { ok: true, sources };
+	return { ok: true, sources, ...(diagnostics.length > 0 ? { diagnostics } : {}) };
 }
 
 export function discoverDeclaredChecks(cwdArg: string | undefined): DeclaredCheckDiscoveryResult {

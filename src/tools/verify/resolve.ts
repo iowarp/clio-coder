@@ -36,15 +36,17 @@ function extraArgs(args: Record<string, unknown>): string[] {
 export function availableToolchainChecks(
 	workspaceRoot: string,
 	declared: ReadonlyArray<DeclaredCheck>,
+	diagnostics?: string[],
 ): ToolchainCheck[] {
 	const taken = new Set(declared.map((check) => check.id));
-	return discoverToolchainChecks(workspaceRoot).filter((check) => !taken.has(check.id));
+	return discoverToolchainChecks(workspaceRoot, diagnostics).filter((check) => !taken.has(check.id));
 }
 
-function nothingDeclared(root: string): string {
+function nothingDeclared(root: string, diagnostics: ReadonlyArray<string>): string {
+	const skipped = diagnostics.length > 0 ? ` Skipped during discovery: ${diagnostics.join(" ")}` : "";
 	return (
 		`no declared or derivable verification checks in ${root}. Looked for ${TOOLCHAIN_DISCOVERY_SOURCES}. ` +
-		"Run the repository's documented test or gate command through bash instead."
+		`Run the repository's documented test or gate command through bash instead.${skipped}`
 	);
 }
 
@@ -126,7 +128,10 @@ function resolveWithDiscovery(
 		} catch {
 			// discoverDeclaredChecksAtRoot already accepted this cwd; keep the workspace root for the message.
 		}
-		return { kind: "unresolved", message: nothingDeclared(root) };
+		// Rediscover only on this empty path, to name the files that were skipped.
+		const diagnostics = [...(discovery.diagnostics ?? [])];
+		discoverToolchainChecks(workspaceRoot, diagnostics);
+		return { kind: "unresolved", message: nothingDeclared(root, diagnostics) };
 	}
 	if (owners.length > 1) {
 		return {

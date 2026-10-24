@@ -1,4 +1,15 @@
-import { accessSync, constants, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+	accessSync,
+	closeSync,
+	constants,
+	existsSync,
+	fstatSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import path from "node:path";
 import { buildSafeToolEnv, resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { parseTomlDocument, tomlTableAt } from "../../core/toml.js";
@@ -55,18 +66,48 @@ export interface RawProposal {
 
 export const DECLARED_FILE_CAP_BYTES = 1024 * 1024;
 
+export type RegularFileRead =
+	| { ok: true; text: string }
+	| { ok: false; reason: "not-regular" }
+	| { ok: false; reason: "too-large"; size: number };
+
+/**
+ * Read a file only if it is a regular file under the cap. The open is
+ * nonblocking and the type check runs on the open descriptor, so a FIFO named
+ * Makefile is refused at once instead of blocking the event loop in a read
+ * that no writer will ever end, past any timeout_ms the caller gave. Throws
+ * only for an operating-system error; the caller words a refusal.
+ */
+export function readRegularFileText(filePath: string, capBytes: number): RegularFileRead {
+	const fd = openSync(filePath, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+	try {
+		const stats = fstatSync(fd);
+		if (!stats.isFile()) return { ok: false, reason: "not-regular" };
+		if (stats.size > capBytes) return { ok: false, reason: "too-large", size: stats.size };
+		return { ok: true, text: readFileSync(fd, "utf8") };
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function declaredFileText(filePath: string): string {
+	const read = readRegularFileText(filePath, DECLARED_FILE_CAP_BYTES);
+	if (read.ok) return read.text;
+	if (read.reason === "not-regular") throw new Error("path is not a regular file");
+	throw new Error(`file exceeds the ${DECLARED_FILE_CAP_BYTES}-byte discovery cap`);
+}
+
 export function regularFileText(filePath: string, workspaceRoot: string): string | null | Error {
 	if (!existsSync(filePath)) return null;
 	try {
 		const realRoot = realpathSync(workspaceRoot);
 		const realFilePath = realpathSync(filePath);
-		resolveSafeCwd(realFilePath, realRoot);
-		const stats = statSync(realFilePath);
-		if (!stats.isFile()) return new Error("path is not a regular file");
-		if (stats.size > DECLARED_FILE_CAP_BYTES) {
-			return new Error(`file exceeds the ${DECLARED_FILE_CAP_BYTES}-byte discovery cap`);
+		try {
+			resolveSafeCwd(realFilePath, realRoot);
+		} catch {
+			return new Error(`resolves outside the workspace root to ${realFilePath}`);
 		}
-		return readFileSync(realFilePath, "utf8");
+		return declaredFileText(realFilePath);
 	} catch (error) {
 		return error instanceof Error ? error : new Error(String(error));
 	}
@@ -451,12 +492,25 @@ export interface DeclaredProjectEntry {
 	kind: "package-script" | "just-recipe" | "make-target";
 }
 
-/** Discover every exact project-declared entry without promoting it to a verifier check. */
-export function discoverDeclaredProjectEntriesAtRoot(workspaceRoot: string): DeclaredProjectEntry[] {
+/**
+ * Discover every exact project-declared entry without promoting it to a
+ * verifier check. A declaration file that exists but cannot be used (outside
+ * the workspace through a link, not a regular file, over the cap, malformed)
+ * goes to diagnostics as '<file>: <reason>' instead of vanishing.
+ */
+export function discoverDeclaredProjectEntriesAtRoot(
+	workspaceRoot: string,
+	diagnostics: string[] = [],
+): DeclaredProjectEntry[] {
 	const entries: DeclaredProjectEntry[] = [];
-	const packagePath = path.join(workspaceRoot, "package.json");
-	if (existsSync(packagePath)) {
-		const pkg = parsePackageJson(packagePath);
+	const packageText = regularFileText(path.join(workspaceRoot, "package.json"), workspaceRoot);
+	if (packageText instanceof Error) {
+		diagnostics.push(`package.json: ${packageText.message}; package script discovery skipped.`);
+	} else if (packageText !== null) {
+		const pkg = parsePackageJsonText(packageText);
+		if (!pkg.ok && pkg.reason !== PACKAGE_JSON_NO_SCRIPTS) {
+			diagnostics.push(`package.json: ${pkg.reason}; package script discovery skipped.`);
+		}
 		if (pkg.ok) {
 			for (const name of Object.keys(pkg.scripts).sort()) {
 				if (typeof pkg.scripts[name] !== "string") continue;
@@ -470,10 +524,21 @@ export function discoverDeclaredProjectEntriesAtRoot(workspaceRoot: string): Dec
 			}
 		}
 	}
+	entries.push(...discoverTaskRunnerEntriesAtRoot(workspaceRoot, diagnostics));
+	return entries;
+}
+
+/** The justfile recipes and Makefile targets of discoverDeclaredProjectEntriesAtRoot alone. */
+export function discoverTaskRunnerEntriesAtRoot(workspaceRoot: string, diagnostics: string[]): DeclaredProjectEntry[] {
+	const entries: DeclaredProjectEntry[] = [];
 	for (const relative of ["justfile", "Justfile"] as const) {
-		const filePath = path.join(workspaceRoot, relative);
-		if (!existsSync(filePath)) continue;
-		const text = readFileSync(filePath, "utf8");
+		const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
+		if (text === null) continue;
+		// just reads the first of these it finds, so an unusable one ends the search.
+		if (text instanceof Error) {
+			diagnostics.push(`${relative}: ${text.message}; just recipe discovery skipped.`);
+			break;
+		}
 		for (const match of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_-]*)\s*(?:[^:=\n]*)?:\s*(?:#.*)?$/gmu)) {
 			const name = match[1];
 			if (name === undefined || name.startsWith("_")) continue;
@@ -487,9 +552,9 @@ export function discoverDeclaredProjectEntriesAtRoot(workspaceRoot: string): Dec
 		}
 		break;
 	}
-	const makePath = path.join(workspaceRoot, "Makefile");
-	if (existsSync(makePath)) {
-		const text = readFileSync(makePath, "utf8");
+	const text = regularFileText(path.join(workspaceRoot, "Makefile"), workspaceRoot);
+	if (text instanceof Error) diagnostics.push(`Makefile: ${text.message}; make target discovery skipped.`);
+	if (typeof text === "string") {
 		for (const match of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?![=])[^\n]*$/gmu)) {
 			const name = match[1];
 			if (name === undefined || name.startsWith(".")) continue;
@@ -505,20 +570,34 @@ export function discoverDeclaredProjectEntriesAtRoot(workspaceRoot: string): Dec
 	return entries;
 }
 
-export function parsePackageJson(
-	packagePath: string,
-): { ok: true; scripts: Record<string, unknown> } | { ok: false; reason: string } {
+type PackageJsonParse = { ok: true; scripts: Record<string, unknown> } | { ok: false; reason: string };
+
+/** A package.json without scripts is ordinary, not a defect worth a diagnostic. */
+export const PACKAGE_JSON_NO_SCRIPTS = "package.json has no scripts object";
+
+function parsePackageJsonText(text: string): PackageJsonParse {
+	let parsed: unknown;
 	try {
-		const parsed = JSON.parse(readFileSync(packagePath, "utf8")) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			return { ok: false, reason: "package.json root must be an object" };
-		}
-		const scripts = (parsed as Record<string, unknown>).scripts;
-		if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) {
-			return { ok: false, reason: "package.json has no scripts object" };
-		}
-		return { ok: true, scripts: scripts as Record<string, unknown> };
+		parsed = JSON.parse(text);
 	} catch (error) {
 		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
 	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { ok: false, reason: "package.json root must be an object" };
+	}
+	const scripts = (parsed as Record<string, unknown>).scripts;
+	if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) {
+		return { ok: false, reason: PACKAGE_JSON_NO_SCRIPTS };
+	}
+	return { ok: true, scripts: scripts as Record<string, unknown> };
+}
+
+export function parsePackageJson(packagePath: string): PackageJsonParse {
+	let text: string;
+	try {
+		text = declaredFileText(packagePath);
+	} catch (error) {
+		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+	}
+	return parsePackageJsonText(text);
 }

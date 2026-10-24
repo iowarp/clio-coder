@@ -518,13 +518,19 @@ it("shares Git enumeration, declaration reads and input hashing across checks in
 		const entries = mutation();
 		for (const check of checks) await verify(entries, { check });
 		const reads = mock.method(fs, "readFileSync", fs.readFileSync);
+		const opens = mock.method(fs, "openSync", fs.openSync);
 		const commands = mock.method(childProcess, "execFileSync", childProcess.execFileSync);
 		syncBuiltinESMExports();
 		try {
 			strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).kind, "ok");
 			strictEqual(reads.mock.calls.filter((call) => String(call.arguments[0]) === join(root, "src/solver.ts")).length, 1);
+			// Discovery reads package.json through a nonblocking descriptor, so it
+			// counts as one nonblocking open; the declaration fingerprint reads it by path.
+			const nonblocking = (call: { arguments: unknown[] }) =>
+				typeof call.arguments[1] === "number" && (call.arguments[1] & fs.constants.O_NONBLOCK) !== 0;
 			strictEqual(
-				reads.mock.calls.filter((call) => String(call.arguments[0]) === join(root, "package.json")).length,
+				opens.mock.calls.filter((call) => String(call.arguments[0]) === join(root, "package.json") && nonblocking(call))
+					.length + reads.mock.calls.filter((call) => String(call.arguments[0]) === join(root, "package.json")).length,
 				2,
 				"one discovery read and one declaration fingerprint",
 			);
@@ -543,6 +549,7 @@ it("shares Git enumeration, declaration reads and input hashing across checks in
 			);
 		} finally {
 			reads.mock.restore();
+			opens.mock.restore();
 			commands.mock.restore();
 			syncBuiltinESMExports();
 		}

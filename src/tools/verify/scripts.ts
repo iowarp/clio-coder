@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { declaredVerificationScripts, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
@@ -29,7 +29,12 @@ import {
 	renderPerfBaseline,
 } from "./perf.js";
 import { availableToolchainChecks } from "./resolve.js";
-import { type DeclaredProjectEntry, discoverDeclaredProjectEntriesAtRoot, parsePackageJson } from "./toolchain.js";
+import {
+	type DeclaredProjectEntry,
+	discoverDeclaredProjectEntriesAtRoot,
+	parsePackageJson,
+	readRegularFileText,
+} from "./toolchain.js";
 import { TOOLCHAIN_DISCOVERY_SOURCES, type ToolchainCheck } from "./toolchain-checks.js";
 
 /** The structured verdict a numeric-compare or perf-budget check records beside the command facts. */
@@ -104,7 +109,8 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 	const discovery = discoverDeclaredChecks(cwdArg);
 	if (!discovery.ok) return { kind: "error", message: `verify: ${discovery.reason}` };
 	const declared = discovery.sources.flatMap((source) => source.checks);
-	const derived = availableToolchainChecks(process.cwd(), declared);
+	const diagnostics = [...(discovery.diagnostics ?? [])];
+	const derived = availableToolchainChecks(process.cwd(), declared, diagnostics);
 	const lines: string[] = [];
 	if (declared.length === 0 && derived.length === 0) {
 		lines.push(
@@ -135,6 +141,9 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 			}
 		}
 	}
+	if (diagnostics.length > 0) {
+		lines.push("Skipped during discovery:", ...diagnostics.map((diagnostic) => `- ${diagnostic}`));
+	}
 	lines.push(
 		"",
 		'Run one with verify(check="<id>"). verify(check="frontend", path=<file>) validates an HTML/CSS/JS artifact.',
@@ -143,6 +152,7 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 		kind: "ok",
 		output: lines.join("\n"),
 		details: {
+			...(diagnostics.length > 0 ? { diagnostics } : {}),
 			sources: clonedSources(discovery.sources),
 			derived: derived.map((check) => ({
 				id: check.id,
@@ -298,7 +308,8 @@ export function extractNumericPayloadText(output: string): string {
  * Read a repository-relative check file inside the workspace root, as text.
  * The file is bounded by JUDGED_CHECK_MAX_OUTPUT_BYTES, the same ceiling as
  * the command output it is judged beside, and the size is checked before any
- * byte is read so an oversized file costs nothing but a stat.
+ * byte is read so an oversized file costs nothing but a stat. Only a regular
+ * file is read, so a FIFO reference cannot block the event loop.
  */
 function readCheckFile(workspaceRoot: string, relative: string, label: string): string | Error {
 	let resolved: string;
@@ -309,11 +320,10 @@ function readCheckFile(workspaceRoot: string, relative: string, label: string): 
 	}
 	if (!existsSync(resolved)) return new Error(`${label} '${relative}' does not exist`);
 	try {
-		const { size } = statSync(resolved);
-		if (size > JUDGED_CHECK_MAX_OUTPUT_BYTES) {
-			return new Error(`${label} '${relative}' exceeds the ${JUDGED_CHECK_MAX_OUTPUT_BYTES}-byte cap (${size} bytes)`);
-		}
-		return readFileSync(resolved, "utf8");
+		const read = readRegularFileText(resolved, JUDGED_CHECK_MAX_OUTPUT_BYTES);
+		if (read.ok) return read.text;
+		if (read.reason === "not-regular") return new Error(`${label} '${relative}' is not a regular file`);
+		return new Error(`${label} '${relative}' exceeds the ${JUDGED_CHECK_MAX_OUTPUT_BYTES}-byte cap (${read.size} bytes)`);
 	} catch (error) {
 		return new Error(`${label} '${relative}' cannot be read (${error instanceof Error ? error.message : String(error)})`);
 	}
@@ -592,7 +602,7 @@ export async function runScriptCheck(
 	const packagePath = path.join(cwd, "package.json");
 	if (!existsSync(packagePath)) return { kind: "error", message: `verify: package.json not found in ${cwd}` };
 	const pkg = parsePackageJson(packagePath);
-	if (!pkg.ok) return { kind: "error", message: `verify: ${pkg.reason}` };
+	if (!pkg.ok) return { kind: "error", message: `verify: ${packagePath}: ${pkg.reason}` };
 	if (!Object.hasOwn(pkg.scripts, check)) {
 		const declared = declaredVerificationScripts(pkg.scripts);
 		const list = declared.length > 0 ? declared.join(", ") : "(none)";

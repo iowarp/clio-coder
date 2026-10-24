@@ -128,6 +128,7 @@ describe("git tool", () => {
 			"--oneline",
 			"-n",
 			"200",
+			"--",
 		]);
 		deepStrictEqual((await call({ op: "log", limit: -3 })).details?.argv, [
 			"git",
@@ -137,6 +138,7 @@ describe("git tool", () => {
 			"--oneline",
 			"-n",
 			"20",
+			"--",
 		]);
 		deepStrictEqual(subjects((await call({ op: "log", path: "a.txt" })).output), ["first"]);
 	});
@@ -167,6 +169,7 @@ describe("git tool", () => {
 			"--diff-merges=first-parent",
 			"--end-of-options",
 			"HEAD~1",
+			"--",
 		]);
 		match(show.output, /^ {4}first$/m);
 		match(show.output, /^\+one$/m);

@@ -32,8 +32,11 @@ const OP_EXAMPLES: Record<GitOp, Record<string, unknown>> = {
 
 const REV_MAX_CHARS = 200;
 // Ref names, abbreviated or full hashes, and the ~ ^ @{n} suffixes. No
-// whitespace, ":" (rev:path), globs, or pathspec magic.
-const REV_PART = /^[A-Za-z0-9._/@^~{}+-]+$/;
+// whitespace, ":" (rev:path), globs, or pathspec magic. Git refuses only ASCII
+// bytes in a ref name, so a non-ASCII spelling such as the tag "rélease" is
+// valid; any non-ASCII letter, mark, number, symbol or punctuation passes,
+// while Unicode whitespace, controls and lone surrogates stay refused.
+const REV_PART = /^(?:[A-Za-z0-9._/@^~{}+-]|(?![\p{White_Space}\p{Cc}\p{Cs}])[\u0080-\u{10FFFF}])+$/u;
 
 function example(op: GitOp): string {
 	return `gateway({op:"call",capability:"git",args:${JSON.stringify(OP_EXAMPLES[op])}})`;
@@ -118,12 +121,14 @@ export function isGitInspectOp(op: GitOp): op is GitInspectOp {
 /**
  * The argv an inspection op runs, for fields checkGitFields admitted. A
  * revision always follows --end-of-options, so it can never be read as an
- * option even if validation were bypassed.
+ * option even if validation were bypassed, and diff, log and show always end
+ * their revisions with --, so a rev that names a tracked file and no commit is
+ * a bad-revision error (exit 128) instead of a silent pathspec filter.
  */
 export function gitInspectArgv(op: GitInspectOp, args: Record<string, unknown>): string[] {
 	const path = typeof args.path === "string" && args.path.length > 0 ? args.path : null;
 	const rev = typeof args.rev === "string" ? args.rev : null;
-	const tail = [...(rev !== null ? ["--end-of-options", rev] : []), ...(path !== null ? ["--", path] : [])];
+	const tail = [...(rev !== null ? ["--end-of-options", rev] : []), "--", ...(path !== null ? [path] : [])];
 	if (op === "status") return ["status", "--short", "--branch", ...(path !== null ? ["--", path] : [])];
 	if (op === "diff") {
 		const vector = ["diff", "--no-ext-diff", "--no-textconv"];
