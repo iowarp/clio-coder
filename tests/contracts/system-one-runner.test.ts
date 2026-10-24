@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
+import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
 import { BREAKER_THRESHOLD, createRunner } from "../../src/domains/system-one/runner.js";
@@ -120,6 +121,23 @@ describe("System One runner", () => {
 		strictEqual(seen.stateCalls, 0);
 		deepStrictEqual(lookups, []);
 		strictEqual(records.length, 0);
+	});
+
+	it("derives relevance from context.memory only for a local target, under the site deadline (#429)", () => {
+		const derive = (runtime: string, url?: string) =>
+			capabilitySettings({
+				chat: { target: "chat", model: "chat-model" },
+				context: { memory: { enabled: true, target: "memory", model: "side-model" } },
+				targets: [{ id: "memory", runtime, ...(url === undefined ? {} : { url }) }],
+				systemOne: { engines: {}, sites: {}, cuts: {}, record: false, retentionDays: 30, maxMiB: 64 },
+			} as unknown as ClioSettings).systemOne;
+		// A remote subscription or cloud memory model must not be auto-bound to a per-turn site.
+		deepStrictEqual(derive("openai-codex").sites, {});
+		deepStrictEqual(derive("openrouter", "https://openrouter.ai/api/v1").sites, {});
+		// A local one derives without the 800 ms override, so the site's own deadline applies.
+		deepStrictEqual(derive("llamacpp", "http://127.0.0.1:8080").sites, {
+			relevance: { engine: "clio-capability-side-model" },
+		});
 	});
 
 	it("asks nothing and records nothing when state() is null", async () => {
