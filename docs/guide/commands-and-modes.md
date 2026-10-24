@@ -598,7 +598,7 @@ IDs and has no default direct key.
 | Editing or contextual key | Behavior |
 | --- | --- |
 | `Enter` | Accept completion first, otherwise send idle input or queue at the next steering slot |
-| `Ctrl+J`, `Shift+Enter` | Composer newline; distinct Shift+Enter delivery is optional |
+| `Ctrl+J`, `Shift+Enter`, `Alt+Enter` | Composer newline; distinct Shift+Enter delivery is optional |
 | `Alt+B`/`Alt+F`, Ctrl+Left/Right, Alt+Left/Right | Word movement |
 | `Alt+D`/Alt+Delete | Delete the next word |
 | Ctrl+W, Alt+Backspace, Ctrl+Backspace | Delete the previous word; Ctrl+Backspace covers Windows Terminal's BS encoding |

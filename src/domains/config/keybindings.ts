@@ -254,7 +254,13 @@ export const CLIO_KEYBINDINGS = {
 		defaultKeys: ["ctrl+w", "alt+backspace", "ctrl+backspace"],
 	},
 	"tui.editor.undo": { ...TUI_KEYBINDINGS["tui.editor.undo"], defaultKeys: "ctrl+_" },
-	"tui.input.newLine": { ...TUI_KEYBINDINGS["tui.input.newLine"], defaultKeys: ["ctrl+j", "shift+enter"] },
+	// alt+enter matches CSI 13;3u under the kitty protocol. Legacy ESC CR already
+	// inserts a newline through the editor's hardcoded check, so without this
+	// binding default Alt+Enter depended on the terminal (#389).
+	"tui.input.newLine": {
+		...TUI_KEYBINDINGS["tui.input.newLine"],
+		defaultKeys: ["ctrl+j", "shift+enter", "alt+enter"],
+	},
 	"tui.altScreen.top": { ...TUI_KEYBINDINGS["tui.altScreen.top"], defaultKeys: [] },
 	"tui.altScreen.bottom": { ...TUI_KEYBINDINGS["tui.altScreen.bottom"], defaultKeys: [] },
 	"tui.altScreen.previousPrompt": { ...TUI_KEYBINDINGS["tui.altScreen.previousPrompt"], defaultKeys: "ctrl+up" },

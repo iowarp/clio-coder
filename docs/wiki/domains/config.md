@@ -151,7 +151,7 @@ Several entries have `defaultKeys: []` (no binding), which means they are only r
 - `tui.editor.historyNext` → `ctrl+n`
 - `tui.editor.deleteWordBackward` → `["ctrl+w", "alt+backspace", "ctrl+backspace"]`
 - `tui.editor.undo` → `ctrl+_`
-- `tui.input.newLine` → `["ctrl+j", "shift+enter"]`
+- `tui.input.newLine` → `["ctrl+j", "shift+enter", "alt+enter"]`
 - `tui.altScreen.top` / `bottom` → `[]` (disabled)
 - `tui.altScreen.previousPrompt` / `nextPrompt` → `ctrl+up` / `ctrl+down`
 - `tui.altScreen.search` → `ctrl+r`
