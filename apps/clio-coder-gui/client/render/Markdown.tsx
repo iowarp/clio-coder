@@ -10,7 +10,17 @@ import type { Tokens } from "marked";
 import type { ReactNode, RefObject } from "react";
 import * as React from "react";
 
-const { createContext, memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React;
+const {
+	createContext,
+	memo,
+	useContext,
+	useDeferredValue,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} = React;
 
 import { type HighlightToken, highlightCode } from "./highlight.js";
 import {
@@ -690,20 +700,24 @@ export const MarkdownContent = memo(function MarkdownContent({
 	complete,
 	deferDiagrams = false,
 }: MarkdownContentProps) {
+	// Text entry stays urgent while the growing response is parsed in interruptible work.
+	// Completion follows the displayed source so a deferred tail is never parsed as a final answer.
+	const displayedSource = useDeferredValue(source);
+	const displayedComplete = complete && displayedSource === source;
 	const incremental = useRef<IncrementalMarkdown | null>(null);
 	const split = useMemo(() => {
-		if (complete) return null;
+		if (displayedComplete) return null;
 		incremental.current ??= new IncrementalMarkdown();
-		return incremental.current.update(source);
-	}, [source, complete]);
+		return incremental.current.update(displayedSource);
+	}, [displayedSource, displayedComplete]);
 	const finalTokens = useMemo(() => {
-		if (!complete) return null;
-		const tokens = lexMarkdown(source);
+		if (!displayedComplete) return null;
+		const tokens = lexMarkdown(displayedSource);
 		// The canonical parse replaces the streaming lexer; settled messages need
 		// neither its second token tree nor its retained source and tail strings.
 		incremental.current = null;
 		return tokens;
-	}, [source, complete]);
+	}, [displayedSource, displayedComplete]);
 	const tokens = useMemo(
 		() => finalTokens ?? [...(split?.settled ?? NO_TOKENS), ...(split?.tail ?? NO_TOKENS)],
 		[finalTokens, split],
@@ -712,7 +726,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 		<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
 			<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
 				{/* One child list keeps a growing block mounted when it joins the settled prefix. */}
-				<Blocks tokens={tokens} settled={complete} settledCount={split?.settled.length ?? 0} />
+				<Blocks tokens={tokens} settled={displayedComplete} settledCount={split?.settled.length ?? 0} />
 			</div>
 		</StreamingContext.Provider>
 	);

@@ -963,7 +963,7 @@ export const Composer = memo(function Composer({
 						setActiveIndex(0);
 						setSlashError(null);
 						if (!event.target.value.startsWith("/")) setDismissed(null);
-						if (!send.isPending) send.reset();
+						if (!send.isPending && !send.isIdle) send.reset();
 					}}
 					onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
 					onPaste={(event) => {
@@ -1014,7 +1014,7 @@ export const Composer = memo(function Composer({
 						}
 						setPasteReview(null);
 						store.write(plan.text);
-						if (!send.isPending) send.reset();
+						if (!send.isPending && !send.isIdle) send.reset();
 						requestAnimationFrame(() => field.setSelectionRange(plan.caret, plan.caret));
 					}}
 					onKeyDown={(event) => {
@@ -1243,7 +1243,7 @@ export const Composer = memo(function Composer({
 										disabled={send.isPending}
 										onClick={() => {
 											store.chooseMode(offer.mode);
-											if (!send.isPending) send.reset();
+											if (!send.isPending && !send.isIdle) send.reset();
 										}}
 									>
 										<span className="composer__delivery-full">{offer.label}</span>

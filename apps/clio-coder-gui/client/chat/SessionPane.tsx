@@ -1,19 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Activity, lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
+import { DeferredViewBoundary } from "../interaction/DeferredView.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { ASIDE_DOCK_QUERY } from "../shell/aside-state.js";
 import { useShell } from "../shell/shell-context.js";
-import { ArtifactsPanel } from "./ArtifactsPanel.js";
 import { BranchPanel } from "./BranchPanel.js";
-import { ChangesView } from "./ChangesView.js";
-import { ContextPanel } from "./ContextPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
 import { ExtensionsPanel } from "./ExtensionsPanel.js";
 import { HandoffPanel } from "./HandoffPanel.js";
@@ -30,14 +28,19 @@ import {
 import { usePaneSection } from "./pane-state.js";
 import { openRoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
-import { SessionBoardPanel } from "./SessionBoard.js";
-import { SessionOverview } from "./SessionOverview.js";
 import { needsTrustReview } from "./session-facts-model.js";
 import { selectSessionPanel } from "./session-panel-model.js";
-import { UsagePanel } from "./UsagePanel.js";
-import { WorkerGraph } from "./WorkerGraph.js";
 import "./pane.css";
 import "./pane-inspection.css";
+
+// Opening a conversation needs the chat, not every inspector's rendering code.
+const ArtifactsPanel = lazy(() => import("./ArtifactsPanel.js").then((view) => ({ default: view.ArtifactsPanel })));
+const ChangesView = lazy(() => import("./ChangesView.js").then((view) => ({ default: view.ChangesView })));
+const ContextPanel = lazy(() => import("./ContextPanel.js").then((view) => ({ default: view.ContextPanel })));
+const SessionBoardPanel = lazy(() => import("./SessionBoard.js").then((view) => ({ default: view.SessionBoardPanel })));
+const SessionOverview = lazy(() => import("./SessionOverview.js").then((view) => ({ default: view.SessionOverview })));
+const UsagePanel = lazy(() => import("./UsagePanel.js").then((view) => ({ default: view.UsagePanel })));
+const WorkerGraph = lazy(() => import("./WorkerGraph.js").then((view) => ({ default: view.WorkerGraph })));
 
 /**
  * The pane beside the conversation. At 1440px and wider it docks and can be resized; narrower, the
@@ -361,7 +364,15 @@ export const SessionPane = memo(function SessionPane({
 				{PANE_VIEWS.map(({ id }) => (
 					<Activity key={`${sessionId}-${id}`} mode={open && view === id ? "visible" : "hidden"}>
 						<section className="pane__panel" aria-labelledby={`${headId}-title`}>
-							{mounted(id) ? body(id) : null}
+							<Suspense
+								fallback={
+									<p className="pane-inspection-description" role="status">
+										Loading {paneViewLabel(id).toLocaleLowerCase()}…
+									</p>
+								}
+							>
+								<DeferredViewBoundary>{mounted(id) ? body(id) : null}</DeferredViewBoundary>
+							</Suspense>
 						</section>
 					</Activity>
 				))}
