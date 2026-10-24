@@ -16,6 +16,7 @@ test("board and fleet approval share target labels without the observe glyph", (
 	const preview = {
 		name: "review",
 		planHash: "abc",
+		plan: { hash: "def" },
 		waves: [
 			{
 				index: 0,

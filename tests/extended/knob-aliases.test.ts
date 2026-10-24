@@ -32,9 +32,25 @@ describe("removed knob spellings", () => {
 		assert.deepEqual(parsed.constraints, {
 			mode: "proposal",
 			allowedTools: ["context", "tasks"],
+			toolSurfaceSources: [
+				{
+					tools: ["context", "tasks"],
+					source: "--allow-tools",
+					remedy: "Restart the session with a wider --allow-tools list, then resubmit.",
+				},
+			],
 			delegation: "forbidden",
 		});
-		assert.deepEqual(parseRunCliArgs(["--allow-tools", "none", "Hello"]).constraints, { allowedTools: [] });
+		assert.deepEqual(parseRunCliArgs(["--allow-tools", "none", "Hello"]).constraints, {
+			allowedTools: [],
+			toolSurfaceSources: [
+				{
+					tools: [],
+					source: "--allow-tools",
+					remedy: "Restart the session with a wider --allow-tools list, then resubmit.",
+				},
+			],
+		});
 		assert.equal(parseRunCliArgs(["Do not use tools"]).constraints, undefined);
 		assert.equal(parseRunCliArgs(["--turn-mode", "guess"]).diagnostics[0]?.type, "error");
 	});

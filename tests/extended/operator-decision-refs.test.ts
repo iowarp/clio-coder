@@ -184,6 +184,8 @@ describe("active decisions on actual operator dispatch paths", () => {
 							getDecisionBoard,
 							io: { stdout: noop, stderr: noop },
 							chatPanel: { appendReplayBlock: noop, appendUser: noop },
+							// A session started without --allow-tools: no standing bounds reach the dispatch.
+							chat: { toolLimits: () => undefined } as unknown as InteractiveSlashRuntimeDeps["chat"],
 							requestRender: () => {
 								if (receipts.length > 0 && path === "run") resolveSettled();
 							},

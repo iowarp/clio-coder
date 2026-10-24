@@ -1,5 +1,5 @@
 import { doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -90,12 +90,24 @@ describe("clio-coder run --timeout", () => {
 		for (const scratch of scratches.splice(0)) scratch.cleanup();
 	});
 
-	async function headlessTurn(steps: ReadonlyArray<Step>, autonomy: string, flags: ReadonlyArray<string>) {
+	async function headlessTurn(
+		steps: ReadonlyArray<Step>,
+		autonomy: string,
+		flags: ReadonlyArray<string>,
+		sandbox?: "off",
+	) {
 		const scratch = headlessScratch("clio-coder-run-timeout-");
 		scratches.push(scratch);
 		const provider = await scriptedProvider(steps);
 		servers.push(provider.server);
 		seedOpenAICompatToolOrchestrator(scratch.configDir, provider.url, autonomy);
+		if (sandbox !== undefined) {
+			const settings = join(scratch.configDir, "settings.yaml");
+			const yaml = readFileSync(settings, "utf8");
+			const line = /^( {2}sandbox: )auto$/m;
+			if (!line.test(yaml)) throw new Error(`no safety.sandbox line to seed in ${settings}`);
+			writeFileSync(settings, yaml.replace(line, `$1${sandbox}`), "utf8");
+		}
 		const project = join(scratch.root, "project");
 		mkdirSync(project);
 		const turn = await runCli(
@@ -134,8 +146,10 @@ describe("clio-coder run --timeout", () => {
 	});
 
 	it("reports a timeout, not a no-op, when --fail-on-noop is also set", async () => {
-		// Hidden shell content asks in default, which makes a headless run a no-op; the
-		// model then stalls, and the timeout is what ends it.
+		// Hidden shell content asks in default for an uncontained shell, which makes a
+		// headless run a no-op; the model then stalls, and the timeout is what ends it.
+		// The sandbox is off so the ask holds on every host: a bwrap-contained shell
+		// runs the command instead (287a523c0) and the run would not be a no-op.
 		const { turn, scratch } = await headlessTurn(
 			[
 				{
@@ -147,6 +161,7 @@ describe("clio-coder run --timeout", () => {
 			],
 			"default",
 			["--timeout", "15", "--fail-on-noop"],
+			"off",
 		);
 		strictEqual(turn.code, 124, turn.stderr);
 		const { receipt } = sealedReceipt(scratch.stateDir);

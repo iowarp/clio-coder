@@ -46,7 +46,10 @@ describe("dev extension discovery and workspace trust", () => {
 
 	it("discovers the folder once the workspace's project extensions are approved", () => {
 		mkdirSync(path.join(workspace, ".clio-coder", "extensions"), { recursive: true });
-		writeFileSync(path.join(workspace, ".clio-coder", "extensions", "state.json"), '{"version":1,"extensions":{}}\n');
+		writeFileSync(
+			path.join(workspace, ".clio-coder", "extensions", "state.json"),
+			'{"version":1,"disabled":[],"installed":{}}\n',
+		);
 		trustProjectPackages(workspace, "extensions");
 		const found = scope.discover();
 		deepStrictEqual(found, [path.join(workspace, DEV_EXTENSIONS_DIR, "cloned")]);

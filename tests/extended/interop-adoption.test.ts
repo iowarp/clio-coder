@@ -175,6 +175,10 @@ describe("interop discovery and adoption", () => {
 		file(".claude/skills/example/SKILL.md", skill);
 		const childEnv = {
 			...process.env,
+			// The scratch env sets CLIO_CODER_INTEROP_HOME=none to keep interop off the
+			// real home; this child reads the scratch HOME below, so it must see it.
+			// spawnSync omits an undefined value.
+			CLIO_CODER_INTEROP_HOME: undefined,
 			HOME: home,
 			CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
 			CODEX_HOME: path.join(home, ".codex"),

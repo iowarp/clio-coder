@@ -23,6 +23,7 @@ for (const columns of [80, 120, 160])
 		const preview = {
 			name: "fixture",
 			planHash: "a".repeat(64),
+			plan: { hash: "b".repeat(64) },
 			waves: [{ index: 0, steps: [{ kind: "code", stepId: "check", commandId: "check", scope: "readonly", argv }] }],
 			budget: { playbookUsd: null, ceilingUsd: 2, currentUsd: 0 },
 		} as unknown as FleetRunPreview;
