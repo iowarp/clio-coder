@@ -1,7 +1,11 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { isUtf8 } from "node:buffer";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { open } from "node:fs/promises";
 import path from "node:path";
+import { formatSize } from "../engine/truncate.js";
 import type { ImageContent } from "../engine/types.js";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize.js";
+import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 import { expandConfigPath } from "./resolve-config-value.js";
 
 export interface FileReferenceDiagnostic {
@@ -26,6 +30,16 @@ export interface FileReferenceOptions {
 }
 
 const DEFAULT_IMAGE_MAX_BASE64_BYTES = 4.5 * 1024 * 1024;
+
+/** Enough of a file to recognise an image or document signature (tar's sits at offset 257). */
+const SIGNATURE_BYTES = 4096;
+
+/**
+ * Largest text file an `@path` reference inlines whole, the same ceiling the ACP
+ * server puts on an embedded resource. A bigger file is named instead, so one
+ * reference cannot fill the context window before the turn starts.
+ */
+export const INLINE_TEXT_MAX_BYTES = 256 * 1024;
 
 interface InlineFileReference {
 	start: number;
@@ -97,6 +111,22 @@ function renderImageFile(filePath: string, content = ""): string {
 	return `<file name="${filePath}">${content}</file>\n`;
 }
 
+/** A referenced file whose bytes are not inlined: the block says what it is and how to read it. */
+function renderFileNote(filePath: string, note: string): string {
+	return `<file name="${filePath}">[${note}]</file>\n`;
+}
+
+function readSignature(filePath: string, size: number): Buffer {
+	const bytes = Buffer.alloc(Math.min(size, SIGNATURE_BYTES));
+	const fd = openSync(filePath, "r");
+	try {
+		const read = readSync(fd, bytes, 0, bytes.length, 0);
+		return bytes.subarray(0, read);
+	} finally {
+		closeSync(fd);
+	}
+}
+
 function result(
 	text: string,
 	diagnostics: FileReferenceDiagnostic[] = [],
@@ -123,6 +153,64 @@ export function detectSupportedImageMimeType(bytes: Buffer): string | null {
 		return "image/webp";
 	}
 	return null;
+}
+
+export type DocumentKind = "notebook" | "pdf" | "zip" | "tar" | "gzip";
+
+/** Documents read renders to text before windowing: by extension for notebooks, by magic bytes otherwise. */
+export function detectDocumentKind(filePath: string, first: Buffer): DocumentKind | null {
+	if (path.extname(filePath).toLowerCase() === ".ipynb") return "notebook";
+	if (first.toString("latin1", 0, 5) === "%PDF-") return "pdf";
+	if (
+		first[0] === 0x50 &&
+		first[1] === 0x4b &&
+		(first[2] === 3 || first[2] === 5) &&
+		(first[3] === 4 || first[3] === 6)
+	) {
+		return "zip";
+	}
+	if (first[0] === 0x1f && first[1] === 0x8b) return "gzip";
+	if (first.length >= 262 && first.toString("latin1", 257, 262) === "ustar") return "tar";
+	return null;
+}
+
+/**
+ * A PDF or archive reference becomes the text `read` would show on its first
+ * call, under read's per-call cap, with the call that continues it. Rendering
+ * failures (no poppler, a damaged file) name the file and the reason instead.
+ */
+async function renderDocumentReference(filePath: string, kind: Exclude<DocumentKind, "notebook">, size: number) {
+	const { renderDocument, windowDocument } = await import("../tools/read-documents/index.js");
+	const request = { numbered: false, offset: 1, limit: null, tail: null, signal: undefined };
+	const handle = await open(filePath, "r");
+	let rendered: Awaited<ReturnType<typeof renderDocument>>;
+	try {
+		rendered = await renderDocument(kind, filePath, handle, size, request);
+	} finally {
+		await handle.close();
+	}
+	if ("error" in rendered) {
+		return {
+			text: renderFileNote(filePath, `${kind} file (${formatSize(size)}), not inlined: ${rendered.error}`),
+			diagnostic: {
+				type: "warning" as const,
+				message: `${kind} file could not be rendered: ${rendered.error}`,
+				path: filePath,
+			},
+		};
+	}
+	const view = windowDocument(rendered.text, request, GUARDRAIL_DEFAULTS.readMaxBytes);
+	if ("error" in view) {
+		return {
+			text: renderFileNote(filePath, `${kind} file (${formatSize(size)}), not inlined: ${view.error}`),
+			diagnostic: { type: "warning" as const, message: view.error, path: filePath },
+		};
+	}
+	const more =
+		view.next === undefined
+			? ""
+			: `\n[showing ${view.shownCount} of ${view.totalCount} rendered lines; continue with read on this path, ${view.next}]`;
+	return { text: renderTextFile(filePath, `${view.output}${more}`) };
 }
 
 /** Shared tool image encoding; the cap counts base64 bytes actually sent. */
@@ -153,11 +241,12 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 	}
 	if (stat.size === 0) return result("", [], [], [filePath]);
 	try {
-		const bytes = readFileSync(filePath);
-		const imageMimeType = detectSupportedImageMimeType(bytes);
+		const signature = readSignature(filePath, stat.size);
+		const imageMimeType = detectSupportedImageMimeType(signature);
 		if (imageMimeType) {
 			if (options.includeImages !== true) return result(`@${fileArg}`);
 
+			const bytes = readFileSync(filePath);
 			const originalImage: ImageContent = {
 				type: "image",
 				mimeType: imageMimeType,
@@ -187,6 +276,34 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 				[filePath],
 			);
 		}
+		// A notebook is JSON text and inlines like any other text file.
+		const kind = detectDocumentKind(filePath, signature);
+		if (kind !== null && kind !== "notebook") {
+			const document = await renderDocumentReference(filePath, kind, stat.size);
+			return result(document.text, document.diagnostic ? [document.diagnostic] : [], [], [filePath]);
+		}
+		const size = formatSize(stat.size);
+		const binary = (what: string) =>
+			result(
+				renderFileNote(filePath, `${what} (${size}), not inlined; inspect it with run_script and a library for its format`),
+				[{ type: "warning", message: `${what} not inlined (${size})`, path: filePath }],
+				[],
+				[filePath],
+			);
+		if (signature.includes(0)) return binary("binary file");
+		if (stat.size > INLINE_TEXT_MAX_BYTES) {
+			return result(
+				renderFileNote(
+					filePath,
+					`text file (${size}) is larger than the ${formatSize(INLINE_TEXT_MAX_BYTES)} inline limit, not inlined; read it in windows with read and offset/limit`,
+				),
+				[{ type: "warning", message: `text file not inlined (${size})`, path: filePath }],
+				[],
+				[filePath],
+			);
+		}
+		const bytes = readFileSync(filePath);
+		if (!isUtf8(bytes)) return binary("file that is not UTF-8 text");
 		return result(renderTextFile(filePath, bytes.toString("utf8")), [], [], [filePath]);
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);

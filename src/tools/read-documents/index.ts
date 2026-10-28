@@ -1,4 +1,5 @@
 import type { FileHandle } from "node:fs/promises";
+import type { DocumentKind } from "../../core/file-references.js";
 import { splitLinesForCounting, truncateHead, truncateTail } from "../truncate.js";
 import { truncateUtf8 } from "../truncate-utf8.js";
 import { renderTar, renderZip } from "./archive.js";
@@ -17,7 +18,7 @@ export type { DocumentRequest } from "./shared.js";
  * disk: archive members are inflated in memory up to RENDER_CAP_BYTES.
  */
 
-export type DocumentKind = "notebook" | "pdf" | "zip" | "tar" | "gzip";
+export type { DocumentKind };
 
 export interface DocumentView {
 	output: string;

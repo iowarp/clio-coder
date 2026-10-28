@@ -4,7 +4,12 @@ import { type FileHandle, open, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { Type } from "typebox";
-import { detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
+import {
+	type DocumentKind,
+	detectDocumentKind,
+	detectSupportedImageMimeType,
+	prepareBoundedImage,
+} from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -714,25 +719,6 @@ async function readImage(
 	});
 }
 
-type DocumentKind = "notebook" | "pdf" | "zip" | "tar" | "gzip";
-
-/** Documents read renders to text before windowing: by extension for notebooks, by magic bytes otherwise. */
-function documentKind(filePath: string, first: Buffer): DocumentKind | null {
-	if (extname(filePath).toLowerCase() === ".ipynb") return "notebook";
-	if (first.toString("latin1", 0, 5) === "%PDF-") return "pdf";
-	if (
-		first[0] === 0x50 &&
-		first[1] === 0x4b &&
-		(first[2] === 3 || first[2] === 5) &&
-		(first[3] === 4 || first[3] === 6)
-	) {
-		return "zip";
-	}
-	if (first[0] === 0x1f && first[1] === 0x8b) return "gzip";
-	if (first.length >= 262 && first.toString("latin1", 257, 262) === "ustar") return "tar";
-	return null;
-}
-
 async function readDocument(
 	kind: DocumentKind,
 	filePath: string,
@@ -875,7 +861,7 @@ export const readTool: ToolSpec = {
 			const first = await readExact(handle, 0, Math.min(file.bytes, READ_SCAN_CHUNK_BYTES));
 			if (detectSupportedImageMimeType(first) !== null)
 				return await readImage(handle, pathArg, file, reservation, options);
-			const kind = documentKind(filePath, first);
+			const kind = detectDocumentKind(filePath, first);
 			if (kind !== null) {
 				const documentRequest = {
 					...request,
