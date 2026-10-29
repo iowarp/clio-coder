@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { shippedAdvisoryFindings } from "./release-audit.mjs";
+import { bundledGuiAuditLockfiles, shippedAdvisoryFindings } from "./release-audit.mjs";
 import { releaseVersionErrors, SNAPSHOT_VERSION } from "./release-version-policy.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -356,39 +356,39 @@ for (const name of readdirSync(recipeDir)
 	}
 }
 
-/** Audit only the root package's production graph, including optional dependencies.
- * pnpm audit visits every importer even with --filter; app-only dependencies
- * must not be described as dependencies of the published CLI.
+/** Audit the production CLI graph and the exact packages bundled into the GUI client.
+ * pnpm audit visits every importer even with --filter; separate lockfiles keep
+ * unshipped workspace dependencies outside the release boundary.
  */
 function checkShippedAdvisories() {
 	const auditRoot = mkdtempSync(join(tmpdir(), "clio-coder-release-audit-"));
 	try {
 		const lockfile = parseYaml(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"));
 		if (!lockfile?.importers?.["."]) throw new Error("pnpm lockfile has no root importer");
-		writeFileSync(
-			join(auditRoot, "pnpm-lock.yaml"),
-			stringifyYaml({
-				...lockfile,
-				importers: { ".": lockfile.importers["."] },
-			}),
+		const guiLockfiles = bundledGuiAuditLockfiles(
+			lockfile,
+			readFileSync(join(packageRoot, "dist/gui/client/THIRD_PARTY_LICENSES.md"), "utf8"),
 		);
 		writeFileSync(join(auditRoot, "package.json"), readFileSync(join(packageRoot, "package.json")));
-		let raw;
-		try {
-			raw = execFileSync("pnpm", [`--config.lockfile-dir=${auditRoot}`, "audit", "--prod", "--json"], {
-				cwd: root,
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-		} catch (error) {
-			// Advisories exit nonzero with a JSON report; command/registry failures
-			// are rejected by the same parser instead of being counted as zero.
-			raw = typeof error?.stdout === "string" ? error.stdout : "";
-			if (!raw.trim()) throw error;
+		for (const auditLockfile of [{ ...lockfile, importers: { ".": lockfile.importers["."] } }, ...guiLockfiles]) {
+			writeFileSync(join(auditRoot, "pnpm-lock.yaml"), stringifyYaml(auditLockfile));
+			let raw;
+			try {
+				raw = execFileSync("pnpm", [`--config.lockfile-dir=${auditRoot}`, "audit", "--prod", "--json"], {
+					cwd: root,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+			} catch (error) {
+				// Advisories exit nonzero with a JSON report; command/registry failures
+				// are rejected by the same parser instead of being counted as zero.
+				raw = typeof error?.stdout === "string" ? error.stdout : "";
+				if (!raw.trim()) throw error;
+			}
+			const findings = shippedAdvisoryFindings(JSON.parse(raw));
+			for (const note of findings.notes) process.stdout.write(`check-release: note: ${note}\n`);
+			errors.push(...findings.errors);
 		}
-		const findings = shippedAdvisoryFindings(JSON.parse(raw));
-		for (const note of findings.notes) process.stdout.write(`check-release: note: ${note}\n`);
-		errors.push(...findings.errors);
 	} catch (error) {
 		errors.push(`unable to establish shipped advisory state: ${error instanceof Error ? error.message : String(error)}`);
 	} finally {
