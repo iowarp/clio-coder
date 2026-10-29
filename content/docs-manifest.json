@@ -3,9 +3,9 @@
   "corpus": "public-guides",
   "corpusPolicy": "site/public-docs.json",
   "source": {
-    "version": "0.6.4",
-    "ref": "ebea72c9943fa75fc127bbd7d019204f3039eeb6",
-    "commit": "ebea72c9943fa75fc127bbd7d019204f3039eeb6",
+    "version": "0.6.5",
+    "ref": "aae8d3b51581c980c3c35d7efdf70fc170c2f25f",
+    "commit": "aae8d3b51581c980c3c35d7efdf70fc170c2f25f",
     "mode": "repository"
   },
   "files": [
@@ -13,7 +13,7 @@
       "path": "README.md",
       "source": "README.md",
       "sha256": "314a870d6a5e0a176db2f9adbea402a6f04200fb93b4ab23e6d6117d0ec92134",
-      "sourceSha256": "adfb45feaa346f84c653d6e8816ede58ade06efe95754f7aa2db4c1ca901ee4c"
+      "sourceSha256": "3f67eefd79e4ad3a393369d8c7f6c8cca64a5fbf5473d90fb4e7812fd14fa9d3"
     },
     {
       "path": "guide/hpc-clusters.md",
@@ -25,13 +25,13 @@
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
       "sha256": "1193355ade892006e090aeb0c98771d04fbc5e32c2e9bbeea6d88da39828fb7e",
-      "sourceSha256": "0ae980db39ac5b09d439d899157c3819bce99932c6a73ea8e4ff8a4d576f9884"
+      "sourceSha256": "2e7a8e127a37e2d7f9f12d77d8b2d42ee64536930beddcd61959ed46c1bb53da"
     },
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
       "sha256": "d496327dd19cf4108789613b332a69a6486e9cea9feadca6f19b46e8cd681d98",
-      "sourceSha256": "31593300f57ba7ea4052fe8a68193e87cae6c3778271b9c7d34eae20f75cd624"
+      "sourceSha256": "b3595d14d9f03445e6dea5d598d34761ed21d3a57faf47a2a9e052ce524880c6"
     },
     {
       "path": "guide/tool-usage.md",
@@ -61,7 +61,7 @@
       "path": "guide/fleet-dispatch.md",
       "source": "docs/guide/fleet-dispatch.md",
       "sha256": "b4a9732b4a641cd0748a8c83d2df07acefb15c72cf33e27cd1f5e803e3813245",
-      "sourceSha256": "8ee554711a014d8fd88df056c85f21b52e3b22c6ad37313f42a31df8e14aa4f1"
+      "sourceSha256": "2194fb47d3482612eb7d871394ae470e3f102199b22ccf6eb03c842baea47766"
     },
     {
       "path": "guide/resource-library.md",
@@ -109,7 +109,7 @@
       "path": "guide/configuration-reference.md",
       "source": "docs/guide/configuration-reference.md",
       "sha256": "c9ce99c8eb66392cfbe38acce3d6a7c8a76c5384c9c7e9eac9e6f16af8f7772f",
-      "sourceSha256": "61175f33cf0658b81b656ea2c9d77a82ac111af713aeb20ef6123d22571fa331"
+      "sourceSha256": "098e054f6e8b85d6abce7f62401b32309b8d437450185fb62b863af3fc15a78b"
     },
     {
       "path": "guide/environment-variables.md",
