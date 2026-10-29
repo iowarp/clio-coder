@@ -13,6 +13,8 @@ overrides:
   '@modelcontextprotocol/sdk@<1.31.0': 1.32.1
   proxy-addr@<2.0.8: 2.0.8
   katex@<0.18.2: 0.18.2
+  zod@<4.6.6: 4.6.6
+  body-parser@<2.4.0: 2.4.0
 
 patchedDependencies:
   '@earendil-works/pi-tui@1.1.0':
@@ -25,10 +27,10 @@ importers:
     dependencies:
       '@earendil-works/pi-agent-core':
         specifier: 1.1.0
-        version: 1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)
+        version: 1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.6)
       '@earendil-works/pi-ai':
         specifier: 1.1.0
-        version: 1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)
+        version: 1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.6)
       '@earendil-works/pi-tui':
         specifier: 1.1.0
         version: 1.1.0(patch_hash=782aff017226ea820f350ea094a6d4aaacccbcc2511ea75cfc2a1f0c73229d46)
@@ -44,7 +46,7 @@ importers:
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.292
-        version: 0.3.292(@anthropic-ai/sdk@0.129.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))(zod@4.5.4)
+        version: 0.3.292(@anthropic-ai/sdk@0.129.0(zod@4.6.6))(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))(zod@4.6.6)
       '@biomejs/biome':
         specifier: 2.5.1
         version: 2.5.1
@@ -240,13 +242,13 @@ packages:
     peerDependencies:
       '@anthropic-ai/sdk': '>=0.93.0'
       '@modelcontextprotocol/sdk': 1.32.1
-      zod: ^4.0.0
+      zod: 4.6.6
 
   '@anthropic-ai/sdk@0.129.0':
     resolution: {integrity: sha512-MH7LB20kNpGLUpPTe2OG5XvL/KhX8HUO9XyBaFjgFk6TLS4Xjt0VPIuMKywe7POKKPslX+QxSlVok9e+8kG5Nw==}
     hasBin: true
     peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
+      zod: 4.6.6
     peerDependenciesMeta:
       zod:
         optional: true
@@ -648,7 +650,7 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
-      zod: ^3.25 || ^4.0
+      zod: 4.6.6
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
@@ -1435,8 +1437,8 @@ packages:
     resolution: {integrity: sha512-sdleLVfCjBtgO5cNjA2HVRvWBJAHs4zwenaCPMNJAJU0yNxpzj80IpjOIimkpkr+mhlA+how5poQtt53PygbHA==}
     engines: {node: ^18.17.0 || >=20.5.0}
 
-  body-parser@2.3.0:
-    resolution: {integrity: sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==}
+  body-parser@2.4.0:
+    resolution: {integrity: sha512-Ifk1KcLrxaGt1occQagQNFNNOqRt1LFuehEnHHzB8Z6cRgIxRU1TBaiIsUiCdA+gy5PL7Y1IX31DNKkRmxtXjQ==}
     engines: {node: '>=18'}
 
   bowser@2.14.1:
@@ -2400,7 +2402,7 @@ packages:
       '@smithy/signature-v4': '>=5.4.0 <6'
       undici: '>=5 <9'
       ws: ^8.21.0
-      zod: ^3.25 || ^4.0
+      zod: 4.6.6
     peerDependenciesMeta:
       '@aws-sdk/credential-provider-node':
         optional: true
@@ -2570,6 +2572,10 @@ packages:
 
   qs@6.16.0:
     resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
+    engines: {node: '>=0.6'}
+
+  qs@6.17.1:
+    resolution: {integrity: sha512-jd3COkaKVgGUW+ZHyEHCG9bH7RoaaiWuMgzsIBjUMVjLAaWGWpoUAVwljVvBHxRu/2qEHnadLGZrkutYUBPQJA==}
     engines: {node: '>=0.6'}
 
   range-parser@1.3.0:
@@ -3024,10 +3030,10 @@ packages:
   zod-to-json-schema@3.25.2:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
     peerDependencies:
-      zod: ^3.25.28 || ^4
+      zod: 4.6.6
 
-  zod@4.5.4:
-    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
 snapshots:
 
@@ -3060,11 +3066,11 @@ snapshots:
   '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.292':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk@0.3.292(@anthropic-ai/sdk@0.129.0(zod@4.5.4))(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))(zod@4.5.4)':
+  '@anthropic-ai/claude-agent-sdk@0.3.292(@anthropic-ai/sdk@0.129.0(zod@4.6.6))(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))(zod@4.6.6)':
     dependencies:
-      '@anthropic-ai/sdk': 0.129.0(zod@4.5.4)
-      '@modelcontextprotocol/sdk': 1.32.1(zod@4.5.4)
-      zod: 4.5.4
+      '@anthropic-ai/sdk': 0.129.0(zod@4.6.6)
+      '@modelcontextprotocol/sdk': 1.32.1(zod@4.6.6)
+      zod: 4.6.6
     optionalDependencies:
       '@anthropic-ai/claude-agent-sdk-darwin-arm64': 0.3.292
       '@anthropic-ai/claude-agent-sdk-darwin-x64': 0.3.292
@@ -3075,12 +3081,12 @@ snapshots:
       '@anthropic-ai/claude-agent-sdk-win32-arm64': 0.3.292
       '@anthropic-ai/claude-agent-sdk-win32-x64': 0.3.292
 
-  '@anthropic-ai/sdk@0.129.0(zod@4.5.4)':
+  '@anthropic-ai/sdk@0.129.0(zod@4.6.6)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
     optionalDependencies:
-      zod: 4.5.4
+      zod: 4.6.6
 
   '@apidevtools/json-schema-ref-parser@15.3.6(@types/json-schema@7.0.15)':
     dependencies:
@@ -3330,9 +3336,9 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@earendil-works/pi-agent-core@1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)':
+  '@earendil-works/pi-agent-core@1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.6)':
     dependencies:
-      '@earendil-works/pi-ai': 1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)
+      '@earendil-works/pi-ai': 1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.6)
       typebox: 1.3.27
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
@@ -3347,16 +3353,16 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-ai@1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)':
+  '@earendil-works/pi-ai@1.1.0(@aws-sdk/credential-provider-node@3.972.82)(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.6)':
     dependencies:
-      '@anthropic-ai/sdk': 0.129.0(zod@4.5.4)
+      '@anthropic-ai/sdk': 0.129.0(zod@4.6.6)
       '@aws-sdk/client-bedrock-runtime': 3.1127.0
       '@earendil-works/pi-telemetry': 1.1.0
-      '@google/genai': 2.21.0(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))
+      '@google/genai': 2.21.0(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))
       '@smithy/node-http-handler': 4.12.1
       http-proxy-agent: 9.1.0
       https-proxy-agent: 9.1.0
-      openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4)
+      openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.6)
       partial-json: 0.1.7
       typebox: 1.3.27
     transitivePeerDependencies:
@@ -3457,14 +3463,14 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@google/genai@2.21.0(@modelcontextprotocol/sdk@1.32.1(zod@4.5.4))':
+  '@google/genai@2.21.0(@modelcontextprotocol/sdk@1.32.1(zod@4.6.6))':
     dependencies:
       google-auth-library: 10.9.1
       p-retry: 4.6.2
       protobufjs: 7.6.6
       ws: 8.21.3
     optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.32.1(zod@4.5.4)
+      '@modelcontextprotocol/sdk': 1.32.1(zod@4.6.6)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -3515,7 +3521,7 @@ snapshots:
     dependencies:
       '@chevrotain/types': 11.1.2
 
-  '@modelcontextprotocol/sdk@1.32.1(zod@4.5.4)':
+  '@modelcontextprotocol/sdk@1.32.1(zod@4.6.6)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.12)
       ajv: 8.20.0
@@ -3532,8 +3538,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 4.5.4
-      zod-to-json-schema: 3.25.2(zod@4.5.4)
+      zod: 4.6.6
+      zod-to-json-schema: 3.25.2(zod@4.6.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -4222,7 +4228,7 @@ snapshots:
       read-cmd-shim: 5.0.0
       write-file-atomic: 6.0.0
 
-  body-parser@2.3.0:
+  body-parser@2.4.0:
     dependencies:
       bytes: 3.1.2
       content-type: 2.1.0
@@ -4230,7 +4236,7 @@ snapshots:
       http-errors: 2.0.1
       iconv-lite: 0.7.3
       on-finished: 2.4.1
-      qs: 6.16.0
+      qs: 6.17.1
       raw-body: 3.0.2
       type-is: 2.1.0
     transitivePeerDependencies:
@@ -4655,7 +4661,7 @@ snapshots:
   express@5.2.1:
     dependencies:
       accepts: 2.0.0
-      body-parser: 2.3.0
+      body-parser: 2.4.0
       content-disposition: 1.1.0
       content-type: 1.0.5
       cookie: 0.7.2
@@ -5250,12 +5256,12 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@7.19.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.5.4):
+  openai@7.19.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.6):
     optionalDependencies:
       '@aws-sdk/credential-provider-node': 3.972.82
       '@smithy/signature-v4': 5.7.3
       ws: 8.21.3
-      zod: 4.5.4
+      zod: 4.6.6
 
   openapi-types@12.1.3: {}
 
@@ -5418,6 +5424,11 @@ snapshots:
   proxy-agent-negotiate@1.1.0: {}
 
   qs@6.16.0:
+    dependencies:
+      es-define-property: 1.0.1
+      side-channel: 1.1.1
+
+  qs@6.17.1:
     dependencies:
       es-define-property: 1.0.1
       side-channel: 1.1.1
@@ -5902,8 +5913,8 @@ snapshots:
 
   yaml@2.9.0: {}
 
-  zod-to-json-schema@3.25.2(zod@4.5.4):
+  zod-to-json-schema@3.25.2(zod@4.6.6):
     dependencies:
-      zod: 4.5.4
+      zod: 4.6.6
 
-  zod@4.5.4: {}
+  zod@4.6.6: {}
