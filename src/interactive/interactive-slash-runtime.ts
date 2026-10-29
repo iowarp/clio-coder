@@ -223,10 +223,23 @@ export interface InteractiveSlashRuntimeDeps {
 	now?: () => Date;
 }
 
+/**
+ * An editor line on its way through command dispatch. Pi already cleared the
+ * editor, so a chat submission takes the draft over: the line enters prompt
+ * history once its `@path` attachments expand, and a cancelled expansion puts
+ * it back in the editor instead.
+ */
+export interface ChatDraft {
+	/** Set when a chat submission took the draft over; the editor then leaves its history to it. */
+	claimed: boolean;
+	admitted(): void;
+	cancelled(): void;
+}
+
 export interface InteractiveSlashRuntime {
 	context: SlashCommandContext;
 	notice: SlashCommandContext["notice"];
-	dispatchCommand(text: string): SlashCommandDispatchResult;
+	dispatchCommand(text: string, draft?: ChatDraft): SlashCommandDispatchResult;
 	/** Admit captured Stage 0 input without waiting for the model turn to finish. */
 	admitCommand(text: string, signal?: AbortSignal): Promise<void>;
 }
@@ -259,6 +272,11 @@ export function resolveAvailableThinkingLevels(
 	return resolveThinkingCapability(providers, settings)?.supportedLevels ?? ["off"];
 }
 
+/** A cancelled `@path` expansion rejects with its signal's AbortError. */
+function isAbortError(err: unknown): boolean {
+	return err instanceof Error && err.name === "AbortError";
+}
+
 /** An operator `/skill` keeps the line they typed for its prompt row. */
 function typedSkillLine(sub: InteractiveSlashSubmitExpansion, typed: string): InteractiveSlashSubmitExpansion {
 	if (sub.display !== undefined || !sub.pendingSkillRequests.some((request) => request.source === "slash-command"))
@@ -272,6 +290,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	let latestLocalOperation: Promise<void> = Promise.resolve();
 	let activeAdmissionSignal: AbortSignal | undefined;
 	let activeOperatorText: string | undefined;
+	let activeDraft: ChatDraft | undefined;
 	// True while admitCommand drains a record captured before the shell was
 	// ready (DOGFOOD-F5). Only such a record waits for the end of a live turn.
 	let activeAdmissionCaptured = false;
@@ -394,7 +413,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		signal?: AbortSignal,
 		captured = false,
 		operatorText?: string,
+		draft?: ChatDraft,
 	): Promise<void> => {
+		let draftSettled = false;
+		const admitDraft = (): void => {
+			if (draftSettled) return;
+			draftSettled = true;
+			draft?.admitted();
+		};
 		try {
 			signal?.throwIfAborted();
 			// submitChat can be called directly, bypassing command dispatch. Keep
@@ -409,7 +435,20 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				(await deps.chat.discoverOperatorEgg?.(operatorText, deps.openTransientAskUser ?? deps.openAskUser))
 			)
 				return;
-			const submitted = typedSkillLine(await deps.expandSubmit(text), text);
+			let expanded: InteractiveSlashSubmitExpansion;
+			try {
+				expanded = await deps.expandSubmit(text);
+			} catch (err) {
+				if (!isAbortError(err)) throw err;
+				// The operator cancelled a slow attachment read. That is not a failed
+				// chat: nothing is sent and the line goes back to the editor.
+				draftSettled = true;
+				draft?.cancelled();
+				deps.requestRender();
+				return;
+			}
+			admitDraft();
+			const submitted = typedSkillLine(expanded, text);
 			signal?.throwIfAborted();
 			const uninstalled = submitted.pendingSkillRequests.find((request) => !request.installed);
 			if (uninstalled && !uninstalled.marketplaceRef) {
@@ -457,6 +496,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 								}
 								await submitExpanded(postInstallSubmitted);
 							} catch (err) {
+								if (isAbortError(err)) return;
 								deps.io.stderr(
 									`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
 								);
@@ -470,6 +510,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
 			deps.requestRender();
+		} finally {
+			admitDraft();
 		}
 	};
 	let context: SlashCommandContext;
@@ -845,7 +887,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		// worker's output name a file the operator never mentioned.
 		submitOperatorNote: (text) => submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
 		submitChat: (text) => {
-			latestAdmission = admitChat(text, activeAdmissionSignal, activeAdmissionCaptured, activeOperatorText);
+			const draft = activeDraft;
+			activeDraft = undefined;
+			if (draft) draft.claimed = true;
+			latestAdmission = admitChat(text, activeAdmissionSignal, activeAdmissionCaptured, activeOperatorText, draft);
 			void latestAdmission;
 		},
 		runLocalOperation: (operation) => {
@@ -857,15 +902,18 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	return {
 		context,
 		notice: appendCommandNotice,
-		dispatchCommand: (text) => {
+		dispatchCommand: (text, draft) => {
 			recordSlashFeature(text);
 			const command = parseSlashCommand(text);
 			const previous = activeOperatorText;
+			const previousDraft = activeDraft;
 			activeOperatorText = command.kind === "unknown" ? text : undefined;
+			activeDraft = draft;
 			try {
 				return dispatchSlashCommand(command, context);
 			} finally {
 				activeOperatorText = previous;
+				activeDraft = previousDraft;
 			}
 		},
 		admitCommand: async (text, signal) => {

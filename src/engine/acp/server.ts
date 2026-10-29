@@ -533,6 +533,7 @@ export interface ClioAcpServerOptions {
 	expandPrompt?: (
 		text: string,
 		images: ReadonlyArray<{ type: "image"; mimeType: string; data: string }>,
+		signal?: AbortSignal,
 	) => Promise<AcpPromptExpansion>;
 	toolRegistry?: ToolRegistry;
 	/**
@@ -687,6 +688,8 @@ interface ActivePrompt {
 	continuation: Promise<void> | null;
 	/** False once the request stopped waiting on runs; a send-now then has nothing to ride. */
 	acceptsContinuation: boolean;
+	/** Set while the prompt's `@path` attachments expand; session/cancel aborts a slow PDF read through it. */
+	expansionAbort?: AbortController;
 	/**
 	 * Set on a scheduled main turn, which no `session/prompt` brackets. The first frame it sends
 	 * opens the client's turn through `job.changed`, and releasing the lease closes it (#411).
@@ -6265,6 +6268,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			return true;
 		}
 		session.activePrompt.cancelled = true;
+		session.activePrompt.expansionAbort?.abort();
 		options.chat.cancel();
 		return true;
 	};
@@ -6980,33 +6984,44 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			} else if (options.expandPrompt === undefined) {
 				await options.chat.submit(withResources(sentText, resources));
 			} else {
-				let expansion: AcpPromptExpansion;
+				let expansion: AcpPromptExpansion | undefined;
+				const expansionAbort = new AbortController();
+				active.expansionAbort = expansionAbort;
+				// A cancel that landed while the egg discovery above awaited has no controller to reach yet.
+				if (active.cancelled) expansionAbort.abort();
 				try {
-					expansion = await options.expandPrompt(sentText, images);
+					expansion = await options.expandPrompt(sentText, images, expansionAbort.signal);
 				} catch (err) {
-					throw new AcpRequestError(-32602, err instanceof Error ? err.message : String(err), {
-						code: "invalid_params",
+					// A cancel during expansion is the operator's, not a bad prompt: the
+					// response below reports it cancelled and nothing reaches the chat.
+					if (!active.cancelled)
+						throw new AcpRequestError(-32602, err instanceof Error ? err.message : String(err), {
+							code: "invalid_params",
+						});
+				} finally {
+					delete active.expansionAbort;
+				}
+				if (expansion !== undefined && !active.cancelled) {
+					// The transcript paints what the operator typed and names attached files, not their bodies.
+					if (resources.names.length > 0) {
+						const attached = `attached ${resources.names.length} ${resources.names.length === 1 ? "file" : "files"}: ${resources.names.join(", ")}`;
+						expansion = {
+							...expansion,
+							text: withResources(expansion.text, resources),
+							display: {
+								text: expansion.display?.text ?? sentText,
+								note: expansion.display?.note ? `${expansion.display.note}; ${attached}` : attached,
+							},
+						};
+					}
+					await options.chat.submit(expansion.text, {
+						...(expansion.images.length > 0 ? { images: expansion.images } : {}),
+						...(expansion.workingContextPaths.length > 0 ? { workingContextPaths: expansion.workingContextPaths } : {}),
+						...(expansion.pendingSkillRequests.length > 0 ? { pendingSkillRequests: expansion.pendingSkillRequests } : {}),
+						...(expansion.display ? { display: expansion.display } : {}),
+						...(expansion.constraints ? { constraints: expansion.constraints } : {}),
 					});
 				}
-				// The transcript paints what the operator typed and names attached files, not their bodies.
-				if (resources.names.length > 0) {
-					const attached = `attached ${resources.names.length} ${resources.names.length === 1 ? "file" : "files"}: ${resources.names.join(", ")}`;
-					expansion = {
-						...expansion,
-						text: withResources(expansion.text, resources),
-						display: {
-							text: expansion.display?.text ?? sentText,
-							note: expansion.display?.note ? `${expansion.display.note}; ${attached}` : attached,
-						},
-					};
-				}
-				await options.chat.submit(expansion.text, {
-					...(expansion.images.length > 0 ? { images: expansion.images } : {}),
-					...(expansion.workingContextPaths.length > 0 ? { workingContextPaths: expansion.workingContextPaths } : {}),
-					...(expansion.pendingSkillRequests.length > 0 ? { pendingSkillRequests: expansion.pendingSkillRequests } : {}),
-					...(expansion.display ? { display: expansion.display } : {}),
-					...(expansion.constraints ? { constraints: expansion.constraints } : {}),
-				});
 			}
 			// A queue send-now interrupted the run this request started and
 			// resubmitted the entry. This request carries that run to its end, so

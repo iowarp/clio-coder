@@ -1051,6 +1051,39 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const recordFeature = (feature: string): void => {
 		if (deps.getSettings?.().interface.demo === true) recordHarnessFeature(feature);
 	};
+	// Every submit expansion in flight owns its controller, so a second submit
+	// never orphans the first. A huge `@file.pdf` could otherwise hold Enter for
+	// two 60 s poppler timeouts with no way out; Esc, Ctrl+C and shutdown abort
+	// it, and the status line names the file while it is read.
+	const submitExpansions = new Set<AbortController>();
+	const SUBMIT_EXPANSION_STATUS = "submit:expanding";
+	const expandSubmitCancellable = async (text: string): Promise<InteractiveSubmitExpansion> => {
+		const controller = new AbortController();
+		submitExpansions.add(controller);
+		try {
+			const expansion = await expandInteractiveSubmitAsync(text, deps.resources, process.cwd(), {
+				signal: controller.signal,
+				onExtract: (shortPath) =>
+					notifications.add({
+						level: "info",
+						text: `reading ${shortPath} · Esc cancels and keeps your message`,
+						key: SUBMIT_EXPANSION_STATUS,
+						ttlMs: 0,
+					}),
+			});
+			// A cancel that lands after the last read still wins; the operator asked for nothing to be sent.
+			controller.signal.throwIfAborted();
+			return expansion;
+		} finally {
+			submitExpansions.delete(controller);
+			if (submitExpansions.size === 0) notifications.dismiss(SUBMIT_EXPANSION_STATUS);
+		}
+	};
+	const cancelSubmitExpansions = (): boolean => {
+		if (submitExpansions.size === 0) return false;
+		for (const controller of submitExpansions) controller.abort();
+		return true;
+	};
 	const slashRuntime = createInteractiveSlashRuntime({
 		recordFeature,
 		keyboardActions: {
@@ -1205,7 +1238,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		dismissContextBootstrapNotices,
 		recordSubmittedTurn,
 		readStructuredEntries,
-		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
+		expandSubmit: expandSubmitCancellable,
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openTransientAskUser: (questions, options) => openTransientAskUserOverlayState(questions, options),
 		openSkillsHub: (request) => openSkillsHubState(request),
@@ -1278,7 +1311,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		dispatchCommand: slashRuntime.dispatchCommand,
 		dispatchCommandAsync: slashRuntime.admitCommand,
 		collapseLaunchpadBeforeSubmit: () => presentation.collapseWelcomeDashboard(),
-		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
+		expandSubmit: expandSubmitCancellable,
 		notify,
 		askEgg: (questions, options) => openTransientAskUserOverlayState(questions, options),
 		askSendNow: async (runningTools) => {
@@ -1309,6 +1342,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	// The lease drains the terminal; operator shell ownership outlives that
 	// surface and must settle before the session domain stops, on every exit.
 	getTerminationCoordinator().onDrain(() => editorSubmit.shutdownEditorBash(), { timeoutMs: EDITOR_BASH_SHUTDOWN_MS });
+	getTerminationCoordinator().onDrain(() => {
+		cancelSubmitExpansions();
+	});
 	editor.onSubmit = (text) => {
 		if (upgradeFlow?.isRunning()) {
 			// Pi clears the composer before invoking onSubmit. Package replacement
@@ -1827,7 +1863,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		watchSelectedDispatch,
 		steerSelectedDispatch,
 		cancelSelectedDispatch,
-		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
+		// The same Esc and Ctrl+C that stop a local command stop an attachment read.
+		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash() || cancelSubmitExpansions(),
 		isStreaming: () =>
 			deps.chat.isStreaming() ||
 			deps.chat.turnPreparation().phase !== "idle" ||

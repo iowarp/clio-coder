@@ -24,6 +24,8 @@ export interface FileReferenceOptions {
 	includeImages?: boolean;
 	autoResizeImages?: boolean;
 	signal?: AbortSignal;
+	/** Called before a PDF's text extraction starts, the one read slow enough to need a cancel hint. */
+	onExtract?: (filePath: string) => void;
 }
 
 /** Attachment refusals are input errors, including when expansion happens after boot (#438). */
@@ -169,6 +171,7 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 				import("../tools/read-documents/pdf.js"),
 				import("../tools/truncate-utf8.js"),
 			]);
+			options.onExtract?.(filePath);
 			const rendered = await renderPdf(filePath, {
 				numbered: false,
 				offset: 1,

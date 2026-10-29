@@ -236,18 +236,47 @@ export function explicitTargetMissing(targetId: string): boolean {
 	}
 }
 
-async function assemblePrompt(parsed: RunCliArgs): Promise<{
-	prompt: string;
-	images?: ReadonlyArray<ImageContent>;
-	workingContextPaths?: ReadonlyArray<string>;
-} | null> {
+/** Exit code for a run interrupted before its first request, by the 128+SIGINT convention. */
+const RUN_INTERRUPTED_EXIT = 130;
+
+async function assemblePrompt(parsed: RunCliArgs): Promise<
+	| {
+			prompt: string;
+			images?: ReadonlyArray<ImageContent>;
+			workingContextPaths?: ReadonlyArray<string>;
+	  }
+	| number
+> {
 	const messages = parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [];
 	const stdinContent = await readPipedStdin(messages.length > 0 || parsed.fileArgs.length > 0);
-	const fileRefs = await readFileArgsAsync(parsed.fileArgs, { cwd: process.cwd(), missing: "error" });
+	// Boot has not armed the termination coordinator yet, so without this listener
+	// SIGINT killed the process by default while a PDF extraction ran on.
+	const interrupt = new AbortController();
+	const onInterrupt = (): void => interrupt.abort();
+	process.on("SIGINT", onInterrupt);
+	let fileRefs: Awaited<ReturnType<typeof readFileArgsAsync>>;
+	try {
+		fileRefs = await readFileArgsAsync(parsed.fileArgs, {
+			cwd: process.cwd(),
+			missing: "error",
+			signal: interrupt.signal,
+		});
+	} catch (err) {
+		if (!interrupt.signal.aborted) throw err;
+		writeRunDiagnostic("clio-coder run: interrupted while reading file attachments; nothing was sent\n");
+		return RUN_INTERRUPTED_EXIT;
+	} finally {
+		process.off("SIGINT", onInterrupt);
+	}
+	// A SIGINT that landed after the last read still counts; the operator asked for nothing to be sent.
+	if (interrupt.signal.aborted) {
+		writeRunDiagnostic("clio-coder run: interrupted while reading file attachments; nothing was sent\n");
+		return RUN_INTERRUPTED_EXIT;
+	}
 	for (const diagnostic of fileRefs.diagnostics) {
 		writeRunDiagnostic(`error: ${diagnostic.message}\n`);
 	}
-	if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return null;
+	if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
 	const initial = buildInitialMessage({
 		messages,
 		...(stdinContent !== undefined ? { stdinContent } : {}),
@@ -257,7 +286,7 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<{
 	if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
 		writeRunDiagnostic("clio-coder run: empty task\n");
 		process.stderr.write(USAGE);
-		return null;
+		return 2;
 	}
 	return {
 		prompt: initial.initialMessage,
@@ -478,7 +507,7 @@ async function executeRunCommand(
 				}
 
 				const assembled = await assemblePrompt(parsed);
-				if (!assembled) return 2;
+				if (typeof assembled === "number") return assembled;
 
 				if (parsed.agentId === undefined) {
 					// Reject unknown and unsupported interactive commands before boot;

@@ -55,12 +55,20 @@ function attachmentNote(paths: ReadonlyArray<string>, cwd: string): string {
 	return `attached ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
 }
 
+export interface SubmitExpansionOptions {
+	/** Aborts a slow attachment read; the expansion then rejects with the signal's reason. */
+	signal?: AbortSignal;
+	/** Names an attachment, by its short path, as its slow extraction starts. */
+	onExtract?: (shortPath: string) => void;
+}
+
 export async function expandSubmitText(
 	text: string,
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
-	signal?: AbortSignal,
+	options: SubmitExpansionOptions = {},
 ): Promise<SubmitExpansion> {
+	const { signal, onExtract } = options;
 	const parsed = resources?.parsePendingSkillRequests(text, cwd) ?? {
 		text,
 		pendingSkillRequests: [],
@@ -83,6 +91,7 @@ export async function expandSubmitText(
 		includeImages: true,
 		missing: "leave",
 		...(signal ? { signal } : {}),
+		...(onExtract ? { onExtract: (filePath: string) => onExtract(shortAttachmentPath(filePath, cwd)) } : {}),
 	});
 	const attached =
 		fileExpansion.referencedPaths.length > 0 ? attachmentNote(fileExpansion.referencedPaths, cwd) : undefined;

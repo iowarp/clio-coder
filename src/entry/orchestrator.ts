@@ -5221,8 +5221,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// prompt templates and `@path` references expand the same way. Attached images
 				// are judged by their bytes, never by the client's label, and resized like a
 				// referenced image file before the model sees them.
-				expandPrompt: async (text, attached) => {
-					const expansion = await expandSubmitText(text, resources, process.cwd());
+				expandPrompt: async (text, attached, signal) => {
+					const expansion = await expandSubmitText(text, resources, process.cwd(), signal ? { signal } : {});
 					const images = [...expansion.images];
 					for (const image of attached) {
 						const mimeType = detectSupportedImageMimeType(Buffer.from(image.data, "base64"));

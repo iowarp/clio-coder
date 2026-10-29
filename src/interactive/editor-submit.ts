@@ -21,6 +21,7 @@ import {
 	type RunningDispatchRef,
 	resolveSteerTarget,
 } from "./editor-steer.js";
+import type { ChatDraft } from "./interactive-slash-runtime.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 
 /** Existing bash TERM-to-KILL grace (5s), plus settlement and session append. */
@@ -120,7 +121,7 @@ export interface EditorSubmitDeps {
 	chatPanel: Pick<ChatPanel, "appendReplayBlock">;
 	beforeSemanticBoundary?: (reason: string) => void;
 	settleVisibleFrame?: (reason: string) => Promise<void>;
-	dispatchCommand: (text: string) => SlashCommandDispatchResult;
+	dispatchCommand: (text: string, draft?: ChatDraft) => SlashCommandDispatchResult;
 	dispatchCommandAsync?: (text: string, signal?: AbortSignal) => Promise<void>;
 	/** Idempotently collapses a fresh-session launchpad before any handler can append output. */
 	collapseLaunchpadBeforeSubmit?: () => void;
@@ -391,6 +392,18 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		return true;
 	};
 
+	// A chat line enters history only once its attachments expand; a cancelled
+	// expansion returns it to the editor Pi cleared at Enter, unless the operator
+	// has started another line since.
+	const chatDraft = (literalText: string): ChatDraft => ({
+		claimed: false,
+		admitted: () => deps.editor.addToHistory(literalText),
+		cancelled: () => {
+			if (deps.editor.getText().trim().length === 0) setLiteralText(literalText);
+			deps.ui.requestRender();
+		},
+	});
+
 	const submitEditorText = (text: string): void => {
 		const literalText = unguardPastedEditorOperator(text);
 		const trimmed = literalText.trim();
@@ -435,17 +448,19 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.editor.setText(literalText);
 			deps.dispatchCommand(trimmed);
 		} else if (command.kind === "unknown-command") {
-			const result = deps.dispatchCommand(trimmed);
+			const draft = chatDraft(literalText);
+			const result = deps.dispatchCommand(trimmed, draft);
 			if (result === "rejected") {
 				deps.editor.setText(literalText);
 			} else {
-				deps.editor.addToHistory(literalText);
+				if (!draft.claimed) deps.editor.addToHistory(literalText);
 				deps.editor.setText("");
 			}
 		} else {
-			deps.editor.addToHistory(literalText);
+			const draft = chatDraft(literalText);
 			deps.editor.setText("");
-			deps.dispatchCommand(trimmed);
+			deps.dispatchCommand(trimmed, draft);
+			if (!draft.claimed) deps.editor.addToHistory(literalText);
 		}
 		deps.ui.requestRender();
 	};
@@ -640,6 +655,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			await deps.settleVisibleFrame?.("interrupt-submit-return");
 		})()
 			.catch((err) => {
+				// A cancelled attachment read sent nothing and left the draft in the editor.
+				if (err instanceof Error && err.name === "AbortError") return;
 				const msg = err instanceof Error ? err.message : String(err);
 				deps.io.stderr(`[interrupt] ${msg}\n`);
 			})
