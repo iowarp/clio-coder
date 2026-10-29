@@ -17,7 +17,12 @@ if (mode === "ignore-sigterm") {
 	process.on("SIGTERM", () => {
 		process.stderr.write("ignoring SIGTERM\n");
 	});
-	setInterval(() => {}, 1_000);
+	// SIGTERM is ignored on purpose, so a test killed by its timeout left this
+	// server running for hours; it exits once the process that spawned it is gone.
+	const parent = process.ppid;
+	setInterval(() => {
+		if (process.ppid !== parent) process.exit(0);
+	}, 1_000);
 }
 
 const PAGE_ONE = [
