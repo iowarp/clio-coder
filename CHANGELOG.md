@@ -4,6 +4,96 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+Clio Coder 0.6.5 keeps itself current and is easier to run on shared machines. Native installs update in the background under a new `interface.autoUpdate` switch, and on Linux and macOS, npm, pnpm, bun and volta installs whose prefix the operator owns update after an interactive session quits and no other process of that install remains (#436). `clio-coder session list` and `clio-coder session terminate` find and stop sessions from any host that shares the state directory (#439). Long Codex sessions can hand compaction to the provider with `context.compaction.provider: native` (#423). Several reported rough edges are fixed: copies that never reached the clipboard (#437), `@`-attached PDFs that blew past the context window (#438), a startup of nearly a minute in large C trees (#441), Codex runs ended by a rejected `tool_choice` or an expired OAuth token (#426, #427), and gpt-oss on vLLM losing its reasoning and tool calls (#435). Durable dispatch settlement and transcript rendering left the main thread's hot path, so the TUI stays within its 50 ms p99 and 250 ms maximum lag bounds with three streaming workers (#428).
+
+### Upgrade notes
+
+- `interface.autoUpdate` (default `true`, applies without a restart) controls background updates. `CLIO_CODER_AUTO_UPDATE=0` and an install made with `--no-auto-update` still turn them off, and a version pin in the installer record still holds an install at its version. `clio-coder doctor` names whichever of these holds updates off and the last background result.
+- `clio-coder upgrade` now prints the exact command it runs, or would run with `--dry-run`, and the version it installed. Installer upgrades no longer pass `--no-auto-update`, so an install whose auto-update was off only because it was pinned turns it back on when it moves to a channel.
+- The `tui.input.newLine` keybinding now defaults to `ctrl+j`, `shift+enter` and `alt+enter`, so Alt+Enter inserts a newline under the kitty keyboard protocol as it already did in legacy terminals (#389). An `interface.keybindings` entry for `tui.input.newLine` replaces the default list as before.
+- Every open session now writes a heartbeat record under `<stateDir>/live/` every 15 seconds; a record older than 180 seconds is stale.
+- The System One relevance engine is derived from `context.memory` only when the memory target is local (a `local-native` runtime or a localhost or private address). A remote memory target no longer gets an implicit relevance engine; declare one under `systemOne.engines` to keep it (#429).
+- `context.semantic.enabled` takes effect only when `context.semantic.target`, `context.semantic.model` and `context.semantic.assetIdentity` are all set. Otherwise semantic search stays off, the `context` tool does not offer it, and a one-time warning names the missing keys and `clio-coder semantic configure` (#432).
+- `--api-key` binds to the target the run resolves after `--target` and `--model`. When no target resolves, `clio-coder run` exits 2 instead of ignoring the key.
+- `clio-coder run` reads piped stdin even when a task argument or files are given, after the files. With another prompt source it waits 2 seconds for stdin and then continues with a note; redirect `</dev/null` to skip the wait.
+- A host-assigned result contract that fails validation is now `result_contract_invalid` and retried as a model-quality failure. `result_contract_exhausted` is reserved for a worker whose own repair loop ran out (#425).
+- A worker loop that ends without a final answer, including after a tool result or an aborted response, now fails with `worker_final_output_missing` and is retried on another runtime instead of ending the run as deterministic (#425).
+- Traces no longer store text, thinking or tool-call deltas, and trace writes are batched per tick (#428).
+- After a resume, eviction or compaction, replay resends the stored bytes of operator messages and tool results in full instead of the replay-capped copy, so a resumed context can be larger than in 0.6.4 (#423).
+- Session-scope `/settings` overrides stay with the conversation that made them: a resume uses that conversation's overrides and a fork copies them. Each conversation also records its starting thinking level, which a resume restores.
+
+### Updates
+
+- Native installs from the installer update in the background once a day per install root, outside the idle gate. The notice says when an update is installing, when it landed (the running session keeps its version until restart, and `upgrade --rollback` undoes it) and when it failed, with the installer's last error line (#436).
+- On Linux and macOS, npm, pnpm, bun and volta global installs whose prefix and `bin` directory belong to the operator now update after the session exits instead of only showing a notice; an in-place overwrite would break a running session's next lazy import. When an update is available, quitting an interactive session starts one detached wrapper that waits up to 30 minutes for every other process of that install to exit, runs the package manager for the exact version without sudo, and logs under the cache directory. The next launch reports `Updated` or the failure with its log path. A launch that starts while the update runs waits up to 120 seconds, then exits 75 and names the update log. Workspace panes and `/restart` children register with the launcher so the update waits for them too. Root-owned prefixes, Homebrew, winget and Windows keep the update notice with the exact command (#436).
+- The version check reads `npm_config_registry`, so a mirror announces the version its package manager installs.
+- `upgrade --post-install` migration notices are kept until the next interactive launch shows them.
+- `install.sh` and `install.ps1` reclaim an installer lock whose pid is dead on this host and that is older than 10 minutes, along with its dead staging prefixes.
+
+### Sessions and CLI
+
+- `clio-coder session list [--json] [--stale]` lists sessions with their host, pid and last heartbeat, across every host that shares the state directory (#439).
+- `clio-coder session terminate <id> [--reason <text>]` asks the owning process to exit; a session on another host sees the request on its next heartbeat and exits with the reason, and one on this host also gets SIGTERM. `--force` releases a session whose host stopped beating: it fences the old writer, frees the capacity leases and locks owned by that exact process and prints how to resume the session. It is refused while the owner is alive here, while a foreign heartbeat is fresh, or when the local clock disagrees with the state directory's file times (#439).
+- `run --session` accepts a unique id prefix, `--continue` skips sessions without a model turn, and resuming a session that another live process holds is refused with its host and pid.
+- A run that fails before any output still ends `run --json` with a `turn_end` frame, and `run --steer-channel` keeps UTF-8 split across writes and a final line with no newline.
+- Workspace snapshots restore a file that was replaced by a directory, and replay keeps tool calls paired with their results when it skips failed turns.
+- A session cost ceiling is persisted as a block that re-renders on resume and names the value to raise. A ceiling wait is no longer reported as a provider stall and retried (#424).
+- Project-type detection classifies at most 256 C headers, evenly sampled, from their first 64 KiB, so a session in the Linux kernel reaches its first event in about 2.5 seconds instead of 54 (#441).
+
+### Providers and models
+
+- `openai-codex`: a rejected forced `tool_choice` is retried once with `auto` and remembered per target and model; Codex sends `auto` on required rounds. Receipts and `run --json` record each forced round's kind, choice and downgrade (#426).
+- OAuth logins refresh five minutes before expiry, and a token the server rejects is refreshed once under the lock and the request retried, for main turns and for side calls such as compaction, `/btw` and memory. A failed refresh names the target and the login command (#427).
+- gpt-oss on vLLM: reasoning and tool calls that arrive as raw Harmony frames are recovered into thinking and tool calls. A HarmonyError 500 before any output ends in `provider_harmony_error`, and a stop with neither text nor a tool call, such as a reasoning-only reply, ends in `provider_harmony_incomplete` instead of an empty answer; each gets one engine retry first. `clio-coder targets --probe --tools` reports the server's Harmony parsing level and the vLLM flags it is missing (#435).
+- Inception targets serve Mercury 3 (`mercury-3`, the runtime's new default model) for chat and workers, and `mercury-decide` can back a System One decisions engine.
+- A Codex WebSocket session that fell back to SSE tries the WebSocket again at an idle request boundary, backing off from 30 seconds to 5 minutes.
+- A typed HTTP 408 is a transient target failure and retries on another target.
+- `anthropic-max` quota windows are read from the rate-limit headers of each response for the account in use, and the served model id from `message_start` is recorded.
+
+### Prompt cache and compaction
+
+- `context.compaction.provider` (`off` by default, `native` to opt in) compacts an `openai-codex` session with Codex's own compaction on models that support it and stores the provider checkpoint under the state directory. Any other route, a `context.compaction.model` override or an unsupported model falls back to Clio's portable summary, and turning the setting off rebuilds a portable summary from retained history (#423).
+- A mid-session autonomy change appends a policy message instead of recompiling the prompt, a Codex reasoning-effort change is sent as an inline configuration update, Anthropic required-tool rounds keep the full tool array, and the pinned prompt layer gets its own Anthropic cache breakpoint, so these no longer re-prefill the cached prefix (#423).
+- Each call records why its cache prefix broke, and `clio-coder usage report`, `/usage` and `doctor` show estimated re-prefilled tokens. The footer warns before a send when cache reuse is uncertain after 5 idle minutes or a pending recompile (#423).
+- Automatic compaction no longer runs on a session's first prompt, a split-turn summary states the active request as its goal, and working-set eviction is priced from the live request size (#422, #438).
+
+### TUI
+
+- Copy confirms through the system clipboard tools (`clip.exe` or `powershell.exe` on WSL and Windows, `pbcopy`, `wl-copy`, `xclip`, `xsel`, and the native clipboard on macOS and Windows) and flashes `Copied!` only when one succeeded. When OSC 52 is all it has, it flashes `Copy unconfirmed: <reason>; OSC 52 sent` (#437). A toolchain path the user cannot stat no longer crashes startup.
+- `@`-attached PDFs reach the model as extracted text bounded at 32 KiB. A truncated attachment names the pages it includes and points at `read` for the rest; a binary file is refused before any model call (#438).
+- Alt+Enter inserts a newline under the kitty keyboard protocol (#389), and Ctrl-Z suspends from overlays such as search, side questions, the context view and permission cards (#413).
+- Worker-card repaints are coalesced, and transcript prose, reasoning and worker cards are reused across frames (#428).
+
+### Dispatch and fleet
+
+- Receipt, ledger, assignment, capacity and reservation settlement fsync through libuv instead of blocking the main thread, keeping the same durability; a run's terminal row lands in the same step as its receipt (#428).
+- A read-only Scout may read one operator-approved checkout outside the workspace per run, with writes refused; headless runs refuse the read with `external_read_approval_required`. Worker write scope binds to the selected workspace under `run --cwd` and ACP (#433).
+- Canceling the main turn leaves detached workers running with a notice on how to collect or rerun them (#425).
+- A task merge into a checkout with a merge, rebase or other operation in progress is refused with `worktree_destination_busy` and leaves the operator's state alone.
+- A fleet check step without its own gate also runs the test files earlier code steps changed, and changed `node --test` files under `test/` count.
+
+### Tools and safety
+
+- `verify` refuses a `Makefile`, `justfile` or `package.json` that resolves outside the workspace, is not a regular file or exceeds the size cap, and lists it under "Skipped during discovery" with the reason instead of running it.
+- A project skills root (`.clio-coder/skills` or an interop root) that is a symlink pointing outside the repository loads nothing and warns, and a `SKILL.md` that is not a regular file is refused.
+- `run_script` refuses to keep run records when its records directory resolves outside the workspace, describing an MCP tool in a read-only turn starts the server read-only, and write-target parsing skips literal heredoc bodies.
+- Fuzzy `edit` no longer deletes the rest of a matched line, `find` and `grep` limits count visible results, typed git `diff`, `log` and `show` end revisions with `--`, and `web_fetch` honours the response charset.
+- The plan-close nudge ignores pasted documents and quoted text, and the exploration advisory is dropped after an edit or an unrelated turn (#431).
+
+### Settings
+
+- A cyclic YAML settings layer is refused instead of aborting startup, the project settings watcher reattaches after its directory is replaced, approved layer errors are surfaced, `config inspect` keeps dotted map keys and true origins, and `/settings` exposes `context.compaction.maxTokens` as the context token ceiling.
+
+### ACP
+
+- Board, jobs, session tree, usage, extensions, context ledger, settings, queue and artifact methods require authentication.
+- `session/load` restores the session's target and model, the model list includes catalog models, an undeclared model is refused with `model_not_declared` and a remedy, and malformed request ids, `initialize` calls, prompt blocks and permission replies are refused instead of crashing.
+
+### Usage and observability
+
+- Failed calls record whether they were sent and where they failed; usage reports separate calls with unknown usage from calls never sent, and never-sent calls no longer count toward spending or a resumed session's cost (#430).
+- Worker call counts and carried cost summaries fold correctly, and the exit summary covers only the current visit (#434).
+
 ## 0.6.4 - 2026-10-20
 
 Clio Coder 0.6.4 rebuilds autonomy around two levels. At `default`, the main session's shell commands run contained in the OS sandbox, destructive workspace steps run after a workspace snapshot that `/rewind` can restore, and a safety judge reviews what would otherwise ask against the operator's own messages, so Clio asks only when the judge has no verdict or the decision belongs to the operator. `yolo` becomes a true skip-permissions mode: nothing asks, and only a short catastrophe floor, approved project rules and the run's ceilings block. It needs a one-time acceptance and is refused as root outside a container. Approval cards and questions nobody answers resolve after `safety.unattendedAfterSeconds`, so a long job no longer parks while the operator is away (#407, #419, #421). Compaction no longer stalls behind a skill turn (#422), memory lessons rest on exact command receipts, and dispatch admission, worker output and long session histories take bounded, faster paths. Long sessions also cost less: automatic compaction stops at a 200,000-token economic ceiling that stays under long-context price boundaries, a turn's scope, newly approved memory and re-probed workspace facts no longer rewrite the cached system prompt between turns, and a Claude subscription's main thread keeps its prompt cache for an hour (#422, #423).
