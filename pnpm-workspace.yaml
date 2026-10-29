@@ -17,8 +17,8 @@ onlyBuiltDependencies:
 overrides:
   marked: "18.0.11"
   esbuild: "0.28.1"
-  # GHSA-p98j-92pf-mc4p: also fixes Mermaid's bundled sanitizer.
-  dompurify: "3.4.16"
+  # GHSA-p98j-92pf-mc4p, GHSA-cg2g-xh64-v4q7 and GHSA-mrv2-3pqr-j5jr: also fixes Mermaid's bundled sanitizer.
+  dompurify: "3.4.17"
   # Transitive via @modelcontextprotocol/sdk; moderate advisories fixed in these releases.
   fast-uri@<3.1.8: "3.1.8"
   ip-address@<10.7.1: "10.7.2"
