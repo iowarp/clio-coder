@@ -96,7 +96,8 @@ const SIZE_BUDGETS = [
 	{
 		class: "src",
 		match: (path) => path.startsWith("src/"),
-		maxBytes: 19_000_000,
+		// 0.6.4 shipped 18,567,179 bytes: 19.0 MB rounded up plus a 0.5 MB cycle allowance.
+		maxBytes: 19_500_000,
 	},
 	{
 		class: "docs",
