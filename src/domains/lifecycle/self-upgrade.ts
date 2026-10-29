@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
+import { type DeferredManager, deferredUpdateTarget, installHold } from "./deferred-update.js";
 import {
 	type Installation,
 	installationCommand,
@@ -9,12 +11,15 @@ import {
 	readInstallerRecord,
 } from "./install-method.js";
 import { compareReleaseVersions, fetchReleaseVersion, parseReleaseVersion } from "./release-version.js";
+import { createUpdateCheck } from "./update-check.js";
 
 const MAX_UPGRADE_REPORT_BYTES = 1024 * 1024;
 const MAX_UPGRADE_ERROR_BYTES = 16 * 1024;
 
 export type SelfUpgradePlan =
 	| { status: "available"; current: string; available: string; installation: Installation }
+	/** A package-manager install replaced in place: it updates only after every session of it quits (#436). */
+	| { status: "deferred"; current: string; available: string; installation: Installation }
 	| { status: "current"; current: string; available: string; installation: Installation }
 	| { status: "unavailable"; current: string; installation: Installation }
 	| { status: "manual"; current: string; installation: Installation; command: string }
@@ -49,16 +54,19 @@ export interface PlanSelfUpgradeOptions {
 }
 
 /**
- * Resolve what an in-session upgrade may safely do. Only an identified npm
- * global install has a stable package root and prefix after replacement, and an
- * install.sh install records its new prefix in its manifest; pnpm
- * and Bun global stores can move their package entry during the manager call,
- * so those installations keep the explicit manager handoff rather than
- * guessing which new entry should run post-install checks.
+ * Resolve what an in-session upgrade may safely do. A package-manager install
+ * that deferredUpdateTarget() accepts (user-writable npm, pnpm, bun or volta)
+ * is never replaced while this session runs: it is handed to the deferred
+ * wrapper for after quit (#436). Of the rest, only an identified npm global
+ * install has a stable package root and prefix after replacement, and an
+ * install.sh install records its new prefix in its manifest; other pnpm and
+ * Bun global stores keep the explicit manager handoff.
  */
 export async function planSelfUpgrade(options: PlanSelfUpgradeOptions): Promise<SelfUpgradePlan> {
 	const { installation, runningVersion, signal } = options;
-	if (!selfUpgradable(installation)) {
+	// The target's version only names the package spec; this asks whether the layout qualifies.
+	const deferred = !installation.installer && deferredUpdateTarget(installation, runningVersion) !== null;
+	if (!deferred && !selfUpgradable(installation)) {
 		return {
 			status: "manual",
 			current: runningVersion,
@@ -85,7 +93,43 @@ export async function planSelfUpgrade(options: PlanSelfUpgradeOptions): Promise<
 	const comparison = compareReleaseVersions(available, runningVersion);
 	if (comparison === null) return { status: "unavailable", current: runningVersion, installation };
 	if (comparison <= 0) return { status: "current", current: runningVersion, available, installation };
-	return { status: "available", current: runningVersion, available, installation };
+	return { status: deferred ? "deferred" : "available", current: runningVersion, available, installation };
+}
+
+export interface DeferredUpgrade {
+	manager: DeferredManager;
+	/** A wrapper, shell upgrade or background install for this install is already live. */
+	pending: boolean;
+	/** Other processes of this install the update waits for, as "pid@host". */
+	sessions: string[];
+	/** Starts the wrapper; synchronous, for the persist hook. */
+	start(): boolean;
+}
+
+/**
+ * What arming a deferred /upgrade finds now, and its starter. Null when the
+ * install no longer qualifies (a prefix turned read-only since the plan).
+ */
+export function prepareDeferredUpgrade(
+	plan: Extract<SelfUpgradePlan, { status: "deferred" }>,
+	cacheDir: string,
+): DeferredUpgrade | null {
+	const target = deferredUpdateTarget(plan.installation, plan.available);
+	if (target === null) return null;
+	const check = createUpdateCheck({
+		installation: plan.installation,
+		runningVersion: plan.current,
+		cacheDir,
+		processStartedAt: Date.now() - performance.now(),
+	});
+	const hold = installHold(target);
+	const held = hold.holders();
+	return {
+		manager: target.manager,
+		pending: hold.lease() !== null || check.updatePending(),
+		sessions: held.filter((holder) => !holder.startsWith("update ")),
+		start: () => check.spawnDeferred(plan.available),
+	};
 }
 
 interface LifecycleUpgradeReport {

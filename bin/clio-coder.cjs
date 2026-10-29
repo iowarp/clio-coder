@@ -159,11 +159,16 @@ function updatableRoot(path, root) {
  * case costs one stat; source checkouts, native installs, npx and
  * project-local copies skip all of it. Returns false to stop.
  */
-/* The wrapper's result counts only when written by this run: the path is fixed per install. */
+/*
+ * The wrapper's result counts only when written by this run: the path is fixed
+ * per install, and a second wrapper that yielded to this lease records its own
+ * deferred result there under its own pid (#436).
+ */
 function resultSince(fs, lease) {
 	if (!lease.result) return false;
 	try {
 		var result = JSON.parse(fs.readFileSync(String(lease.result), "utf8"));
+		if (typeof result.pid === "number" && result.pid !== lease.pid) return false;
 		return Number(result.at) >= Number(lease.startedAt);
 	} catch (_error) {
 		return false;

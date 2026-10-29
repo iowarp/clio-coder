@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { initializeClioHome } from "../core/init.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../core/xdg.js";
+import { createUpdateLog, deferredUpdateTarget, installHold } from "../domains/lifecycle/deferred-update.js";
 import { runDoctor } from "../domains/lifecycle/doctor.js";
 import type { Installation, UpgradeInvocation } from "../domains/lifecycle/install-method.js";
 import {
@@ -23,6 +25,7 @@ import {
 	parseReleaseVersion,
 } from "../domains/lifecycle/release-version.js";
 import { readStateInfo } from "../domains/lifecycle/state.js";
+import { updateFingerprint } from "../domains/lifecycle/update-check.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
@@ -170,13 +173,25 @@ async function runChild(
 	args: ReadonlyArray<string>,
 	label: string,
 	env: NodeJS.ProcessEnv = process.env,
+	run: { log?: string; signal?: AbortSignal } = {},
 ): Promise<string> {
+	const { log } = run;
 	return new Promise<string>((resolve, reject) => {
-		const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"], env });
+		const child = spawn(command, [...args], {
+			stdio: ["ignore", "pipe", "pipe"],
+			env,
+			...(run.signal ? { signal: run.signal } : {}),
+		});
 		let stdout = "";
 		let tail = "";
 		const keepTail = (chunk: Buffer): void => {
 			tail = `${tail}${chunk.toString("utf8")}`.slice(-16384);
+			if (log === undefined) return;
+			try {
+				appendFileSync(log, chunk);
+			} catch {
+				// The log is for a launch waiting on the lease; the run keeps its own tail.
+			}
 		};
 		child.stdout?.on("data", (chunk: Buffer) => {
 			stdout = `${stdout}${chunk.toString("utf8")}`.slice(0, 1024 * 1024);
@@ -222,11 +237,76 @@ function nodeFor(installation: Installation): string {
 	return node !== undefined && existsSync(node) ? node : process.execPath;
 }
 
-async function runNpmInstall(installation: Installation, invocation: UpgradeInvocation): Promise<void> {
-	await runChild(invocation.command, invocation.args, `npm install --prefix ${installation.prefix}`, {
-		...process.env,
-		...invocation.env,
+async function runNpmInstall(
+	installation: Installation,
+	invocation: UpgradeInvocation,
+	run: { log?: string; signal?: AbortSignal } = {},
+): Promise<void> {
+	await runChild(
+		invocation.command,
+		invocation.args,
+		`npm install --prefix ${installation.prefix}`,
+		{
+			...process.env,
+			...invocation.env,
+		},
+		run,
+	);
+}
+
+type InstallStake = { holders: string[] } | { log: string; signal: AbortSignal; release(): void };
+
+/**
+ * An npm prefix the deferred wrapper could update is replaced in place, so a
+ * shell upgrade follows the wrapper's sequence (#436): refuse while any other
+ * process or lease holds the install, stake the same lease launches wait on,
+ * look once more for a launch that raced it, and keep the lease for the whole
+ * manager run. SIGINT and SIGTERM release it; a SIGKILLed holder is reclaimed
+ * by pid and birth token like a dead wrapper.
+ */
+function stakeInstall(
+	target: NonNullable<ReturnType<typeof deferredUpdateTarget>>,
+	installation: Installation,
+	cacheDir: string,
+): InstallStake {
+	const hold = installHold(target);
+	const held = hold.holders();
+	if (held.length > 0) return { holders: held };
+	const log = createUpdateLog(cacheDir, updateFingerprint(installation));
+	appendFileSync(
+		log,
+		`[${new Date().toISOString()}] clio-coder upgrade pid ${process.pid} on ${hostname()} is replacing ${target.root} with npm\n`,
+		{ mode: 0o600 },
+	);
+	if (!hold.stake({ manager: "npm", log })) return { holders: [hold.lease()?.holder ?? "another update lease"] };
+	const late = hold.holders();
+	if (late.length > 0) {
+		hold.unstake();
+		return { holders: late };
+	}
+	// A signal stops npm before the lease goes, so no launch loads a half-written package.
+	const abort = new AbortController();
+	const signals = { SIGINT: 130, SIGTERM: 143 } as const;
+	const handlers = Object.entries(signals).map(([signal, code]) => {
+		const handler = () => {
+			abort.abort();
+			hold.unstake();
+			process.exit(code);
+		};
+		process.once(signal, handler);
+		return [signal, handler] as const;
 	});
+	const onExit = () => hold.unstake();
+	process.once("exit", onExit);
+	return {
+		log,
+		signal: abort.signal,
+		release() {
+			hold.unstake();
+			for (const [signal, handler] of handlers) process.off(signal, handler);
+			process.off("exit", onExit);
+		},
+	};
 }
 
 async function runInstallerUpgrade(installation: Installation, invocation: UpgradeInvocation): Promise<Installation> {
@@ -690,6 +770,21 @@ export async function runUpgradeCommand(
 	} else if (comparison === null || comparison > 0 || leavingPrerelease || channelSelectionNeeded) {
 		try {
 			const plan = await prepareInstall();
+			const target = method === "npm" ? deferredUpdateTarget(installation, plan.version ?? before) : null;
+			const stake = target === null ? null : stakeInstall(target, installation, dirs.cache);
+			if (stake !== null && "holders" in stake) {
+				presenter.fail(
+					"Other Clio Coder processes of this install are running; nothing was replaced",
+					stake.holders.join("\n"),
+				);
+				presenter.commandAdvice(
+					"npm replaces the install in place under them. Quit them and run this again, or run /upgrade in a session to install after every session quits:",
+					"clio-coder upgrade",
+				);
+				presenter.finish();
+				// EX_TEMPFAIL, as the launcher and install.sh exit for a held install.
+				return 75;
+			}
 			presenter.note(`Installing with: ${formatUpgradeInvocation(plan.invocation)}`);
 			let installedVersion = plan.version ?? opts.channel;
 			if (method === "installer") {
@@ -697,7 +792,13 @@ export async function runUpgradeCommand(
 				const current = activeInstallation.installer?.current;
 				const version = current ? installedVersionAt(current) : null;
 				installedVersion = version && parseReleaseVersion(version) ? version : opts.channel;
-			} else await deps.runNpmInstall(installation, plan.invocation);
+			} else {
+				try {
+					await deps.runNpmInstall(installation, plan.invocation, stake ? { log: stake.log, signal: stake.signal } : {});
+				} finally {
+					stake?.release();
+				}
+			}
 			presenter.completedStep(`Installed @iowarp/clio-coder@${installedVersion}`);
 		} catch (err) {
 			presenter.fail(

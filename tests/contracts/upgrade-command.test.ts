@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { initializeClioHome } from "../../src/core/init.js";
 import { readClioVersion } from "../../src/core/package-root.js";
+import { processBirthToken } from "../../src/core/process-identity.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import {
 	inspectInstallation,
@@ -296,4 +298,41 @@ test("rollback refuses manager-owned installs before any child command", (t) => 
 	assert.equal(result.status, 2, result.stdout + result.stderr);
 	assert.match(result.stdout, /native installer/i);
 	assert.throws(f.calls, /ENOENT/);
+});
+
+test("upgrade refuses while another registered session runs from an npm prefix the deferred wrapper owns", async (t) => {
+	const f = installedFixture();
+	t.after(f.home.cleanup);
+	// The layout deferredUpdateTarget accepts: the prefix's launcher is this package's, and npm sits in the prefix.
+	writeFileSync(join(f.root, "bin.cjs"), "");
+	mkdirSync(join(f.prefix, "bin"));
+	symlinkSync(join(f.root, "bin.cjs"), join(f.prefix, "bin", "clio-coder"));
+	const npmCli = join(f.prefix, "lib/node_modules/npm/bin/npm-cli.js");
+	mkdirSync(dirname(npmCli), { recursive: true });
+	writeFileSync(
+		npmCli,
+		"require('node:fs').appendFileSync(process.env.CALL_LOG, JSON.stringify({ command: 'npm-cli' })+'\\n');",
+	);
+	const session = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+	t.after(() => session.kill("SIGKILL"));
+	const pid = session.pid as number;
+	const hold = join(f.prefix, "lib/node_modules");
+	const machine = ["/etc/machine-id", "/var/lib/dbus/machine-id"]
+		.map((file) => (existsSync(file) ? readFileSync(file, "utf8").trim() : ""))
+		.find(Boolean);
+	mkdirSync(join(hold, ".clio-coder-active"));
+	writeFileSync(
+		join(hold, ".clio-coder-active", String(pid)),
+		JSON.stringify({
+			host: machine ? `${machine}:${hostname()}` : hostname(),
+			hostname: hostname(),
+			birth: processBirthToken(pid),
+			startedAt: Date.now(),
+		}),
+	);
+	const result = f.run([]);
+	assert.equal(result.status, 75, result.stderr + result.stdout);
+	assert.match(result.stdout + result.stderr, new RegExp(`${pid}@${hostname().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+	assert.throws(f.calls, /ENOENT/, "no package manager ran");
+	assert.equal(existsSync(join(hold, ".clio-coder-update.json")), false);
 });

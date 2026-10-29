@@ -91,7 +91,7 @@ export interface UpdateCheckOptions {
 }
 
 /** The cache file a check keeps per install root; `doctor` reads `lastUpdate` from it. */
-function updateFingerprint(installation: Installation): string {
+export function updateFingerprint(installation: Installation): string {
 	return createHash("sha256")
 		.update(installation.installer?.root ?? installation.root)
 		.digest("hex")
@@ -502,44 +502,68 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		});
 		return result.ok && !interrupted;
 	}
+	/** True while a background install or deferred wrapper of this install holds the shared lease. */
+	function updatePending(): boolean {
+		return leaseLive(readCacheSync());
+	}
 	/**
 	 * Called from a persist shutdown hook, so it is synchronous: the process
 	 * exits right after. Re-checks policy (the setting may have changed since
 	 * the notice), takes the shared lease for the wrapper's pid and starts it.
+	 * An explicit `version` comes from /upgrade: the operator's consent stands
+	 * in for `autoUpdate`, the monitor's cached answer and the day-long back-off.
 	 */
-	function spawnDeferred(): boolean {
-		if (installation.installer || !autoUpdateOn()) return false;
+	function spawnDeferred(version?: string): boolean {
+		if (installation.installer || (version === undefined && !autoUpdateOn())) return false;
 		try {
 			return withStateFileLockSync(
 				cachePath,
 				() => {
 					const cache = readCacheSync();
-					const version = cache.available;
+					const to = version ?? cache.available;
 					if (
-						typeof version !== "string" ||
-						compareReleaseVersions(version, runningVersion) !== 1 ||
+						typeof to !== "string" ||
+						compareReleaseVersions(to, runningVersion) !== 1 ||
 						leaseLive(cache) ||
-						settledToday(cache, version)
+						(version === undefined && settledToday(cache, to))
 					)
 						return false;
-					const target = targetFor(version);
+					const target = targetFor(to);
 					if (target === null) return false;
+					const {
+						updateAttemptedAt: _at,
+						updatePid: _pid,
+						updateHost: _host,
+						updateBirth: _birth,
+						updateLeaseMs: _ms,
+						...rest
+					} = cache;
+					const lease = {
+						updateAttemptedAt: now(),
+						updateHost: hostname(),
+						updateLeaseMs: DEFERRED_WAIT_MS + DEFERRED_RUN_MS + 60_000,
+					};
+					// The lease is down before the wrapper exists, so a failed write
+					// never leaves a wrapper unrecorded for the next quit to double.
+					// Until the pid is added it holds for its whole length.
+					writeCacheSync({ ...rest, ...lease });
 					const started = spawnDeferredUpdate(target, {
 						cacheDir: options.cacheDir,
 						fingerprint: updateFingerprint(installation),
 						resultPath,
 						from: runningVersion,
-						to: version,
+						to,
 					});
-					if (started === null) return false;
-					writeCacheSync({
-						...cache,
-						updateAttemptedAt: now(),
-						updatePid: started.pid,
-						updateHost: hostname(),
-						...(processBirthToken(started.pid) ? { updateBirth: processBirthToken(started.pid) as string } : {}),
-						updateLeaseMs: DEFERRED_WAIT_MS + DEFERRED_RUN_MS + 60_000,
-					});
+					if (started === null) {
+						writeCacheSync(rest);
+						return false;
+					}
+					try {
+						const birth = processBirthToken(started.pid);
+						writeCacheSync({ ...rest, ...lease, updatePid: started.pid, ...(birth ? { updateBirth: birth } : {}) });
+					} catch {
+						// The pid-less lease already holds until it ages out.
+					}
 					return true;
 				},
 				{ timeoutMs: 200 },
@@ -577,5 +601,5 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 			{ timeoutMs: 50, signal },
 		);
 	}
-	return { probe, claim, maybeInstall, spawnDeferred };
+	return { probe, claim, maybeInstall, spawnDeferred, updatePending };
 }

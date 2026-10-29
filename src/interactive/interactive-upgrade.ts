@@ -1,5 +1,12 @@
+import { resolveClioDirs } from "../core/xdg.js";
 import { inspectInstallation } from "../domains/lifecycle/install-method.js";
-import { planSelfUpgrade, runApprovedSelfUpgrade, type SelfUpgradePlan } from "../domains/lifecycle/self-upgrade.js";
+import {
+	type DeferredUpgrade,
+	planSelfUpgrade,
+	prepareDeferredUpgrade,
+	runApprovedSelfUpgrade,
+	type SelfUpgradePlan,
+} from "../domains/lifecycle/self-upgrade.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 
 export type InteractiveUpgradeNoticeLevel = "info" | "success" | "warning" | "error";
@@ -21,6 +28,13 @@ export interface InteractiveUpgradeFlowDeps {
 	cwd?: string;
 	plan?: () => Promise<SelfUpgradePlan>;
 	run?: typeof runApprovedSelfUpgrade;
+	/**
+	 * Hands the deferred update's starter to the owner's persist hook; false
+	 * when the session already armed one (the update monitor or an earlier
+	 * /upgrade). Absent, a deferred plan cannot be armed (#436).
+	 */
+	armDeferredUpdate?(start: () => boolean): boolean;
+	prepareDeferred?: (plan: Extract<SelfUpgradePlan, { status: "deferred" }>) => DeferredUpgrade | null;
 }
 
 export interface InteractiveUpgradeFlow {
@@ -32,6 +46,7 @@ const UPGRADE_NOW = "Upgrade now";
 const NOT_NOW = "Not now";
 const EXIT_NOW = "Exit now";
 const LATER = "Later";
+const AFTER_QUIT = "Install after quit";
 
 /**
  * Consent and execution for `/upgrade`.
@@ -112,6 +127,50 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 						"The session became busy while checking the release. Nothing changed; run /upgrade again when it is idle.",
 						"lifecycle:upgrade-busy",
 					);
+					return;
+				}
+
+				if (plan.status === "deferred") {
+					const prepare = deps.prepareDeferred ?? ((p) => prepareDeferredUpgrade(p, resolveClioDirs().cache));
+					const first = prepare(plan);
+					const manager = first?.manager ?? plan.installation.kind;
+					const pendingNotice = () => {
+						const text = `A Clio Coder update for this ${manager} install is already pending; it installs after every session of it quits. Nothing new was started.`;
+						deps.notify("info", text, "lifecycle:upgrade-pending");
+						deps.record?.("info", text);
+					};
+					if (first?.pending) return pendingNotice();
+					const approval = await deps.openAskUser([
+						{
+							header: "Upgrade",
+							question:
+								`Upgrade Clio Coder ${plan.current} → ${plan.available}? ` +
+								`${manager} replaces this install in place, so it runs only after this session and every other session of this install quit. ` +
+								"Settings, credentials, memory, evidence, and session history stay in their current directories.",
+							options: [
+								{ label: AFTER_QUIT, description: `Run ${manager} once the last session of this install exits.` },
+								{ label: NOT_NOW, description: "Keep working; leave the quiet footer reminder in place." },
+							],
+						},
+					]);
+					const answer = approval.answers[0];
+					if (approval.cancelled || !(answer?.answer === AFTER_QUIT || answer?.options?.includes(AFTER_QUIT) === true))
+						return;
+					deps.signal.throwIfAborted();
+					// Judged again: the question may have stayed open while another session armed or ran.
+					const deferred = prepare(plan);
+					if (deferred === null || !deps.armDeferredUpdate)
+						throw new Error(`this ${manager} install can no longer be updated after quit`);
+					if (deferred.pending || !deps.armDeferredUpdate(deferred.start)) return pendingNotice();
+					deps.dismissUpdateHint();
+					const others = deferred.sessions.length;
+					const waits =
+						others === 0
+							? "No other session of this install is running."
+							: `${others} other session${others === 1 ? " is" : "s are"} still running (${deferred.sessions.join(", ")}); it waits for ${others === 1 ? "it" : "them"} too.`;
+					const text = `Clio Coder ${plan.available} installs with ${manager} after you quit. ${waits}`;
+					deps.notify("success", text, "lifecycle:upgrade-deferred");
+					deps.record?.("info", text);
 					return;
 				}
 

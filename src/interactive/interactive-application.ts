@@ -573,6 +573,20 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let updateTimer: ReturnType<typeof setTimeout> | undefined;
 	let updateMonitor: ReturnType<typeof import("./update-monitor.js").startUpdateMonitor> | undefined;
 	let upgradeFlow: ReturnType<typeof import("./interactive-upgrade.js").createInteractiveUpgradeFlow> | undefined;
+	// One deferred package-manager update per session, armed by the update
+	// monitor or by /upgrade, whichever comes first (#436). The package manager
+	// replaces the install in place, so it runs only after this process has left
+	// persist. A /restart keeps this process alive as the new child's guardian,
+	// so a wrapper started then would wait on both for its full window.
+	let deferredUpdateArmed = false;
+	const armDeferredUpdate = (start: () => boolean): boolean => {
+		if (deferredUpdateArmed) return false;
+		deferredUpdateArmed = true;
+		getTerminationCoordinator().onPersist(() => {
+			if (!getTerminationCoordinator().hasExitHandoff()) start();
+		});
+		return true;
+	};
 	/**
 	 * Assigned after the presentation because it renders into it. The composer
 	 * rail reads it through the optional chain before then as "no prompt".
@@ -1174,6 +1188,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						},
 						signal: updateAbort.signal,
 						cwd: process.cwd(),
+						armDeferredUpdate,
 					});
 					upgradeFlow.start();
 				})
@@ -2166,14 +2181,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 							runningVersion,
 							signal: updateAbort.signal,
 							autoUpdate: () => deps.getSettings?.().interface.autoUpdate ?? true,
-							// The package manager replaces the install in place, so it runs
-							// only after this process has left persist (#436).
-							// A /restart keeps this process alive as the new child's guardian,
-							// so a wrapper started now would wait on both for its full window.
-							onDeferredUpdate: (start) =>
-								getTerminationCoordinator().onPersist(() => {
-									if (!getTerminationCoordinator().hasExitHandoff()) start();
-								}),
+							onDeferredUpdate: (start) => {
+								armDeferredUpdate(start);
+							},
 							onChange: () => {
 								footer.refresh();
 								tui.requestRender();

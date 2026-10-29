@@ -8,7 +8,9 @@
  * file the next launch reports.
  */
 
+import * as cp from "node:child_process";
 import { spawn } from "node:child_process";
+import * as fs from "node:fs";
 import {
 	closeSync,
 	existsSync,
@@ -22,7 +24,9 @@ import {
 	unlinkSync,
 	writeSync,
 } from "node:fs";
+import * as os from "node:os";
 import { homedir } from "node:os";
+import * as path from "node:path";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
 import { processBirthToken } from "../../core/process-identity.js";
 import type { Installation } from "./install-method.js";
@@ -75,6 +79,8 @@ export interface DeferredResult {
 	manager: DeferredManager;
 	/** The wrapper gave up waiting for running sessions; not a failed update. */
 	deferred?: boolean;
+	/** The wrapper that wrote it; the launcher ends its wait only on its lease holder's result. */
+	pid?: number;
 }
 
 function real(path: string): string | null {
@@ -265,20 +271,24 @@ function pruneLogs(dir: string, fingerprint: string): void {
 	}
 }
 
+/** Fixed word in every wrapper's argv: its JSON payload names the install root, so without it two wrappers held each other until their deadline. */
+export const WRAPPER_SENTINEL = "--clio-coder-deferred-update";
+
 /**
- * The detached wrapper, run as `node -e`. It loads no file from the package it
- * is about to replace and imports no Clio module, so the replacement cannot
- * pull code out from under it. Steps: prefetch (npm); wait for the parent
- * session; wait until no registered process, other wrapper lease or visible
- * process of this install remains; stake the launch lease exclusively; check
- * once more; run the manager; record the result.
+ * Holder judging, one source for the wrapper (pasted into its `node -e`
+ * script) and for the TypeScript callers (`installHold`), so the shell
+ * `upgrade`, `/upgrade` and the wrapper agree on host id, birth token, caps
+ * and skew by construction. Plain JavaScript over the `fs`, `path`, `cp` and
+ * `os` bindings its host supplies; it may import nothing (#436).
  *
  * Registration in `<hold>/.clio-coder-active` by bin/clio-coder.cjs is the
  * guard: process.title rewrites argv in the CLI and worker entries, so the
- * ps scan below only catches processes started without the launcher and not
- * yet retitled. The restart handoff and workspace panes relaunch through the
+ * ps scan only catches processes started without the launcher and not yet
+ * retitled. The restart handoff and workspace panes relaunch through the
  * launcher (core/relaunch-script.ts), because a pane outlives its launching
- * parent and a restart child outlives a killed guardian.
+ * parent and a restart child outlives a killed guardian. A wrapper carries
+ * WRAPPER_SENTINEL and is never a holder: a waiting one has staked nothing,
+ * and a staked one holds through its lease.
  *
  * Every record carries a host id (machine-id plus host name, else the host
  * name) and, on Linux, the pid's birth token. A record from this host is
@@ -293,84 +303,123 @@ function pruneLogs(dir: string, fingerprint: string): void {
  * replaced files on their next lazy import. A foreign record dated more than
  * five minutes ahead of this clock is judged stale, so a skewed or planted record
  * cannot hold the install forever. Same-host records never depend on either
- * cap.
+ * cap. bin/clio-coder.cjs repeats the lease cap and skew guard, because it
+ * must parse on any Node before it can load anything.
  */
-const WRAPPER = String.raw`
-const fs = require("fs"), path = require("path"), cp = require("child_process"), os = require("os");
-const p = JSON.parse(process.argv[1]);
-const say = (m) => process.stdout.write("[" + new Date().toISOString() + "] " + m + "\n");
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const hostId = () => { for (const f of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) { try { const v = fs.readFileSync(f, "utf8").trim(); if (v) return v + ":" + os.hostname(); } catch {} } return os.hostname(); };
-const HOST = hostId();
-const birth = (pid) => { try { const s = fs.readFileSync("/proc/" + pid + "/stat", "utf8"); return s.slice(s.lastIndexOf(")") + 2).split(" ")[19] || null; } catch { return null; } };
-const alive = (pid) => { if (!Number.isSafeInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
-const running = (r) => alive(r.pid) && (!r.birth || birth(r.pid) === null || birth(r.pid) === r.birth);
-const atomic = (file, value) => { const tmp = file + "." + process.pid + ".tmp"; fs.writeFileSync(tmp, JSON.stringify(value) + "\n", { mode: 0o600 }); fs.renameSync(tmp, file); };
-const marker = path.join(p.hold, ".clio-coder-update.json");
-const active = path.join(p.hold, ".clio-coder-active");
-let staked = false;
-const unstake = () => { if (staked) { try { fs.unlinkSync(marker); } catch {} staked = false; } };
-const finish = (r) => { atomic(p.result, Object.assign({ at: Date.now(), from: p.from, to: p.to, log: p.log, manager: p.manager }, r)); unstake(); process.exit(0); };
-const env = Object.assign({}, process.env, p.env);
-// Judge one record; a stale one is removed. Returns "pid@host" while it holds the install.
-function judge(file, r, ageMs, cap) {
-	if (r.host === HOST || (!r.host && r.hostname === os.hostname())) {
-		if (running(r)) return r.pid + "@" + (r.hostname || os.hostname());
-	} else if (ageMs <= cap && ageMs >= -p.skewMs) return r.pid + "@" + (r.hostname || r.host || "an unrecorded host");
-	try { fs.unlinkSync(file); } catch {}
-	return null;
-}
-function holders() {
-	const found = [];
-	let text = null, mtime = 0;
-	try { mtime = fs.statSync(marker).mtimeMs; text = fs.readFileSync(marker, "utf8"); } catch {}
-	if (text !== null) {
+const HOLD_SOURCE = String.raw`
+function holdOf(p) {
+	const marker = path.join(p.hold, ".clio-coder-update.json");
+	const active = path.join(p.hold, ".clio-coder-active");
+	const hostId = () => { for (const f of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) { try { const v = fs.readFileSync(f, "utf8").trim(); if (v) return v + ":" + os.hostname(); } catch {} } return os.hostname(); };
+	const HOST = hostId();
+	const birth = (pid) => { try { const s = fs.readFileSync("/proc/" + pid + "/stat", "utf8"); return s.slice(s.lastIndexOf(")") + 2).split(" ")[19] || null; } catch { return null; } };
+	const alive = (pid) => { if (!Number.isSafeInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
+	const running = (r) => alive(r.pid) && (!r.birth || birth(r.pid) === null || birth(r.pid) === r.birth);
+	const skip = new Set(p.skip || [process.pid]);
+	const psSkip = new Set([...skip, ...(p.psSkip || [])]);
+	let staked = false;
+	// Judge one record; a stale one is removed. Returns "pid@host" while it holds the install.
+	function judge(file, r, ageMs, cap) {
+		if (r.host === HOST || (!r.host && r.hostname === os.hostname())) {
+			if (running(r)) return r.pid + "@" + (r.hostname || os.hostname());
+		} else if (ageMs <= cap && ageMs >= -${FOREIGN_SKEW_MS}) return r.pid + "@" + (r.hostname || r.host || "an unrecorded host");
+		try { fs.unlinkSync(file); } catch {}
+		return null;
+	}
+	// The live update lease of another process, as "update pid@host"; an empty
+	// or torn one (a stake that died between create and write) holds only
+	// until the cap, judged by its file time.
+	function lease() {
+		let text = null, mtime = 0;
+		try { mtime = fs.statSync(marker).mtimeMs; text = fs.readFileSync(marker, "utf8"); } catch { return null; }
 		let m = null;
 		try { m = JSON.parse(text); } catch {}
 		if (!m || !Number.isSafeInteger(m.pid)) {
-			// A stake that died between create and write leaves an empty or torn
-			// lease; it holds only until the cap, judged by its file time.
-			if (Date.now() - mtime > p.leaseCapMs) { try { fs.unlinkSync(marker); } catch {} }
-			else found.push("update (unreadable lease)");
-		} else if (!(staked && m.pid === process.pid)) { const h = judge(marker, m, Date.now() - Number(m.startedAt), p.leaseCapMs); if (h) found.push("update " + h); }
+			if (Date.now() - mtime > ${DEFERRED_LEASE_CAP_MS}) { try { fs.unlinkSync(marker); } catch {} return null; }
+			return { holder: "update (unreadable lease)", readable: false };
+		}
+		if (staked && m.pid === process.pid) return null;
+		const h = judge(marker, m, Date.now() - Number(m.startedAt), ${DEFERRED_LEASE_CAP_MS});
+		return h ? { holder: "update " + h, readable: true } : null;
 	}
-	let names = [];
-	try { names = fs.readdirSync(active); } catch {}
-	for (const name of names) {
-		const pid = Number(name);
-		if (!Number.isSafeInteger(pid) || pid <= 0) continue;
-		const file = path.join(active, name);
-		let r, mtime = 0;
-		try { mtime = fs.statSync(file).mtimeMs; const text = fs.readFileSync(file, "utf8").trim(); r = text.startsWith("{") ? JSON.parse(text) : { hostname: text }; } catch { continue; }
-		// Live launches touch their file every few minutes; a foreign one that
-		// stopped beating crashed with its host.
-		const h = judge(file, Object.assign({ pid }, r), Date.now() - mtime, p.beatCapMs);
-		if (h) found.push(h);
+	function holders() {
+		const found = [];
+		const held = lease();
+		if (held) found.push(held.holder);
+		let names = [];
+		try { names = fs.readdirSync(active); } catch {}
+		for (const name of names) {
+			const pid = Number(name);
+			if (!Number.isSafeInteger(pid) || pid <= 0 || skip.has(pid)) continue;
+			const file = path.join(active, name);
+			let r, mtime = 0;
+			try { mtime = fs.statSync(file).mtimeMs; const text = fs.readFileSync(file, "utf8").trim(); r = text.startsWith("{") ? JSON.parse(text) : { hostname: text }; } catch { continue; }
+			// Live launches touch their file every few minutes; a foreign one that
+			// stopped beating crashed with its host.
+			const h = judge(file, Object.assign({ pid }, r), Date.now() - mtime, ${ACTIVE_BEAT_CAP_MS});
+			if (h) found.push(h);
+		}
+		const psEnv = Object.assign({}, process.env); delete psEnv.COLUMNS;
+		const ps = cp.spawnSync("ps", ["-Aww", "-o", "pid=", "-o", "args="], { encoding: "utf8", env: psEnv });
+		for (const line of (ps.stdout || "").split("\n")) {
+			const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+			if (m && !psSkip.has(Number(m[1])) && !m[2].includes(${JSON.stringify(WRAPPER_SENTINEL)}) && m[2].includes(p.root + path.sep)) found.push(m[1] + "@" + os.hostname());
+		}
+		return found;
 	}
-	const psEnv = Object.assign({}, process.env); delete psEnv.COLUMNS;
-	const ps = cp.spawnSync("ps", ["-Aww", "-o", "pid=", "-o", "args="], { encoding: "utf8", env: psEnv });
-	for (const line of (ps.stdout || "").split("\n")) {
-		const m = /^\s*(\d+)\s+(.*)$/.exec(line);
-		if (m && Number(m[1]) !== process.pid && m[2].includes(p.root + path.sep)) found.push(m[1]);
+	// Exclusive: EEXIST means another holder staked first. The record carries
+	// what bin/clio-coder.cjs reads (pid, host, birth, manager, startedAt, log).
+	function stake(fields) {
+		let fd = null;
+		try {
+			fd = fs.openSync(marker, "wx", 0o600);
+			fs.writeSync(fd, JSON.stringify(Object.assign({ pid: process.pid, host: HOST, hostname: os.hostname(), birth: birth(process.pid), startedAt: Date.now() }, fields)) + "\n");
+			fs.closeSync(fd);
+			staked = true;
+			return true;
+		} catch (e) {
+			if (e.code === "EEXIST") return false;
+			// We created it but could not fill it (quota, full disk): never leave
+			// an empty lease behind for every later launch to wait on.
+			if (fd !== null) { try { fs.closeSync(fd); } catch {} try { fs.unlinkSync(marker); } catch {} }
+			throw e;
+		}
 	}
-	return found;
-}
-function stake() {
-	let fd = null;
-	try {
-		fd = fs.openSync(marker, "wx", 0o600);
-		fs.writeSync(fd, JSON.stringify({ pid: process.pid, host: HOST, hostname: os.hostname(), birth: birth(process.pid), manager: p.manager, startedAt: Date.now(), log: p.log, result: p.result }) + "\n");
-		fs.closeSync(fd);
-		staked = true;
-		return true;
-	} catch (e) {
-		if (e.code === "EEXIST") return false;
-		// We created it but could not fill it (quota, full disk): never leave
-		// an empty lease behind for every later launch to wait on.
-		if (fd !== null) { try { fs.closeSync(fd); } catch {} try { fs.unlinkSync(marker); } catch {} }
-		throw e;
-	}
-}
+	const unstake = () => { if (staked) { try { fs.unlinkSync(marker); } catch {} staked = false; } };
+	return { marker, birth, alive, lease, holders, stake, unstake };
+}`;
+
+/**
+ * The detached wrapper, run as `node -e`. It loads no file from the package it
+ * is about to replace and imports no Clio module, so the replacement cannot
+ * pull code out from under it. Steps: prefetch (npm); wait for the parent
+ * session; exit at once while another holder's lease is live; wait until no
+ * registered or visible process of this install remains; stake the launch
+ * lease exclusively; check once more; run the manager; record the result.
+ *
+ * A result names its writer's pid, and the launcher ends its wait only on the
+ * result of the lease it waits on: the path is fixed per install root, and a
+ * wrapper that yields to a live lease must not read as that run finishing.
+ * The yielding wrapper also never replaces a result on disk, so the holder's
+ * own record (or an unmerged earlier one) survives it.
+ */
+const WRAPPER = String.raw`
+const fs = require("fs"), path = require("path"), cp = require("child_process"), os = require("os");
+${HOLD_SOURCE}
+const p = JSON.parse(process.argv[1]);
+const say = (m) => process.stdout.write("[" + new Date().toISOString() + "] " + m + "\n");
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const hold = holdOf({ hold: p.hold, root: p.root, skip: [process.pid] });
+const record = (r) => JSON.stringify(Object.assign({ at: Date.now(), pid: process.pid, from: p.from, to: p.to, log: p.log, manager: p.manager }, r)) + "\n";
+const tmp = p.result + "." + process.pid + ".tmp";
+const finish = (r) => { fs.writeFileSync(tmp, record(r), { mode: 0o600 }); fs.renameSync(tmp, p.result); hold.unstake(); process.exit(0); };
+const yieldTo = (holder) => {
+	say("deferred: " + holder + " already holds this install");
+	try { fs.writeFileSync(tmp, record({ ok: false, deferred: true, exitCode: null, detail: holder }), { mode: 0o600 }); fs.linkSync(tmp, p.result); } catch {}
+	try { fs.unlinkSync(tmp); } catch {}
+	process.exit(0);
+};
+const env = Object.assign({}, process.env, p.env);
 say("deferred " + p.manager + " update " + p.from + " -> " + p.to + " for " + p.root);
 say("command: " + [p.command].concat(p.args).join(" "));
 if (p.prefetch) {
@@ -378,29 +427,36 @@ if (p.prefetch) {
 	const pre = cp.spawnSync(p.command, p.prefetch, { stdio: ["ignore", "inherit", "inherit"], env, timeout: p.runMs, killSignal: "SIGKILL" });
 	say("prefetch " + (pre.status === 0 ? "done" : "failed (exit " + pre.status + "); the install fetches instead"));
 }
-// The result path is fixed per install root; a stale one from an earlier run
-// would tell a waiting launch that this run is done before it starts.
-try { fs.unlinkSync(p.result); say("removed a previous unmerged result"); } catch {}
 const deadline = Date.now() + p.waitMs;
 let last = "";
 for (;;) {
-	while (alive(p.parent) && (!p.parentBirth || birth(p.parent) === null || birth(p.parent) === p.parentBirth)) { if (Date.now() > deadline) finish({ ok: false, deferred: true, exitCode: null, detail: "the session did not exit" }); sleep(250); }
-	const held = holders();
+	while (hold.alive(p.parent) && (!p.parentBirth || hold.birth(p.parent) === null || hold.birth(p.parent) === p.parentBirth)) { if (Date.now() > deadline) finish({ ok: false, deferred: true, exitCode: null, detail: "the session did not exit" }); sleep(250); }
+	const held = hold.holders();
+	// Another wrapper or a shell upgrade staked first: it updates this
+	// install, so waiting out its run would only replace it a second time.
+	// Read after the scan, so a lease staked during it is caught on this pass.
+	const lease = hold.lease();
+	if (lease?.readable) yieldTo(lease.holder);
 	if (held.length === 0) {
-		if (stake()) {
-			const late = holders();
+		if (hold.stake({ manager: p.manager, log: p.log, result: p.result })) {
+			const late = hold.holders();
 			if (late.length === 0) break;
-			unstake();
+			hold.unstake();
 			say("a launch raced the lease: " + late.join(","));
 			continue;
 		}
-		held.push("another update lease");
+		// EEXIST: another holder staked between the scan and this stake. Wait
+		// a poll like any holder; the next pass yields if its lease is readable.
+		held.push(hold.lease()?.holder ?? "another update lease");
 	}
 	const now = held.join(",");
 	if (now !== last) { say("waiting for: " + now); last = now; }
 	if (Date.now() > deadline) finish({ ok: false, deferred: true, exitCode: null, detail: now });
 	sleep(p.pollMs);
 }
+// The result path is fixed per install root; anything on it now predates this
+// lease, and a launch from an older launcher would read it as this run's end.
+try { fs.unlinkSync(p.result); say("removed a previous unmerged result"); } catch {}
 say("no clio-coder process of this install remains; running " + p.manager);
 const run = cp.spawnSync(p.command, p.args, { stdio: ["ignore", "inherit", "inherit"], env, timeout: p.runMs, killSignal: "SIGKILL" });
 let version = "";
@@ -411,6 +467,47 @@ say((ok ? "updated to " : "update failed: ") + (ok ? p.to : detail));
 finish({ ok, exitCode: run.status, detail });
 `;
 
+export interface InstallHold {
+	/** Path of the update lease the launcher waits on. */
+	readonly marker: string;
+	/** Every lease, registration or visible process holding the install, as "pid@host" ("update pid@host" for a lease); this process excluded. */
+	holders(): string[];
+	/** Another process's live update lease, or null. */
+	lease(): { holder: string; readable: boolean } | null;
+	/** Stakes the lease exclusively; false when another holder staked first. */
+	stake(fields: { manager: string; log: string }): boolean;
+	unstake(): void;
+}
+
+type HoldParams = { hold: string; root: string; skip: number[]; psSkip: number[] };
+let holdFactory: ((p: HoldParams) => InstallHold) | undefined;
+
+/**
+ * The wrapper's own holder judging, for a process of this install, which
+ * excludes only its own registration. The ps scan also skips the parent: under
+ * CLIO_CODER_NODE the launcher that re-executed this process runs the package's
+ * bin by path and never registers, and any parent that is a Clio session
+ * registered itself through the launcher.
+ */
+export function installHold(target: Pick<DeferredTarget, "hold" | "root">): InstallHold {
+	holdFactory ??= new Function("fs", "path", "cp", "os", `${HOLD_SOURCE}\nreturn holdOf;`)(fs, path, cp, os) as (
+		p: HoldParams,
+	) => InstallHold;
+	return holdFactory({ hold: target.hold, root: target.root, skip: [process.pid], psSkip: [process.ppid] });
+}
+
+/** Opens a new log for one update run beside the earlier ones; at most LOG_RETENTION stay. */
+export function createUpdateLog(cacheDir: string, fingerprint: string): string {
+	const logDir = join(cacheDir, "update-logs");
+	mkdirSync(logDir, { recursive: true, mode: 0o700 });
+	pruneLogs(logDir, fingerprint);
+	const stamp = new Date()
+		.toISOString()
+		.replace(/[-:]/gu, "")
+		.replace(/\.\d+Z$/u, "Z");
+	return join(logDir, `${fingerprint}-${stamp}.log`);
+}
+
 /**
  * Starts the wrapper from a shutdown hook. Synchronous on purpose: the
  * process exits right after persist hooks, so nothing here may await.
@@ -420,16 +517,9 @@ export function spawnDeferredUpdate(
 	target: DeferredTarget,
 	options: { cacheDir: string; fingerprint: string; resultPath: string; from: string; to: string },
 ): { pid: number; log: string } | null {
-	const logDir = join(options.cacheDir, "update-logs");
 	let fd: number | null = null;
 	try {
-		mkdirSync(logDir, { recursive: true, mode: 0o700 });
-		pruneLogs(logDir, options.fingerprint);
-		const stamp = new Date()
-			.toISOString()
-			.replace(/[-:]/gu, "")
-			.replace(/\.\d+Z$/u, "Z");
-		const log = join(logDir, `${options.fingerprint}-${stamp}.log`);
+		const log = createUpdateLog(options.cacheDir, options.fingerprint);
 		fd = openSync(log, "a", 0o600);
 		writeSync(fd, `[${new Date().toISOString()}] session pid ${process.pid} quit; starting the deferred update\n`);
 		const payload = {
@@ -442,10 +532,7 @@ export function spawnDeferredUpdate(
 			env: target.env,
 			prefetch: target.prefetch ?? null,
 			versionFile: target.versionFile,
-			leaseCapMs: DEFERRED_LEASE_CAP_MS,
 			parentBirth: processBirthToken(),
-			beatCapMs: ACTIVE_BEAT_CAP_MS,
-			skewMs: FOREIGN_SKEW_MS,
 			from: options.from,
 			to: options.to,
 			log,
@@ -454,7 +541,7 @@ export function spawnDeferredUpdate(
 			runMs: DEFERRED_RUN_MS,
 			pollMs: 2000,
 		};
-		const child = spawn(process.execPath, ["-e", WRAPPER, JSON.stringify(payload)], {
+		const child = spawn(process.execPath, ["-e", WRAPPER, JSON.stringify(payload), WRAPPER_SENTINEL], {
 			detached: true,
 			stdio: ["ignore", fd, fd],
 			cwd: homedir(),
