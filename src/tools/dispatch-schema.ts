@@ -54,11 +54,7 @@ export function coordinatorDispatchParameters() {
 		// The Scout absolute-checkout form is taught on demand by the admission
 		// refusals for an outside read root (scout-workspace.ts, intent.ts) (#433).
 		read_roots: Type.Optional(Type.Array(Type.String())),
-		write_roots: Type.Optional(
-			Type.Array(Type.String(), {
-				description: "Allowed output paths; confines writes and disables worker bash/verify.",
-			}),
-		),
+		write_roots: Type.Optional(Type.Array(Type.String())),
 		expected_outputs: Type.Optional(Type.Array(Type.String())),
 		verification: Type.Optional(DispatchVerificationSchema),
 	});
@@ -89,7 +85,7 @@ export function coordinatorDispatchParameters() {
 			),
 		),
 		intent: Type.Optional(intent),
-		briefing: Type.Optional(Type.String({ description: "Relevant parent evidence, separate from instructions." })),
+		briefing: Type.Optional(Type.String()),
 		// A plain string: this schema is checked before the canonical one, so an
 		// enum here would refuse the compete and council modes describe teaches.
 		// The last clause is the only cue that those modes exist at all.
@@ -150,8 +146,7 @@ const DispatchVerificationSchema = Type.Array(
 	),
 	{
 		maxItems: 8,
-		description:
-			'Array of {check:"<declared id>"} entries from verify(); never invent ids such as "test suite" or pass a shell command.',
+		description: 'Array of {check:"id"} from verify(); never invent ids or pass shell commands.',
 	},
 );
 

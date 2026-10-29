@@ -9839,97 +9839,125 @@ export function createDispatchBundle(
 			...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
 			...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
 		};
-		const receipt = await l.recordReceiptAsync(
-			runId,
-			{
-				runId,
-				agentId: "council-synthesis",
-				executionRole: "judge",
-				requestOrigin: origin,
-				task,
-				targetId: input.template.targetId,
-				wireModelId: input.template.wireModelId,
-				runtimeId: input.template.runtimeId,
-				runtimeKind: input.template.runtimeKind,
-				startedAt: created.startedAt,
-				endedAt,
-				outcome: "succeeded",
-				outcomeDetail: null,
-				exitCode: 0,
-				tokenCount: 0,
-				inputTokenCount: 0,
-				outputTokenCount: 0,
-				reasoningTokenCount: 0,
-				cacheReadTokenCount: 0,
-				cacheWriteTokenCount: 0,
-				output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
-				costUsd: 0,
-				costProvenance: "unknown",
-				compiledPromptHash: null,
-				staticCompositionHash: null,
-				clioCoderVersion: readClioVersion(),
-				piMonoVersion: readPiMonoVersion(),
-				platform: process.platform,
-				nodeVersion: process.version,
-				toolCalls: 0,
-				toolStats: [],
-				verification: { state: "unverified", basis: "no-validation-tool" },
-				routingIntent: defaultRoutingIntent({}),
-				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
-				reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
-				sessionId: input.template.sessionId,
-				gate,
-				council,
-				...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
-				...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
-			},
-			terminalPatch,
-		);
-		await l.persist();
-		// The synthesis never ran as a worker, so nothing else publishes its
-		// lifecycle. The Fleet Runs board and /share are built from these
-		// events, and a council whose synthesis they cannot see is a council
-		// whose verdict the operator cannot read or share.
 		const identity: DispatchRunIdentity = {
 			runId,
 			agentId: "council-synthesis",
 			task,
 			requestOrigin: origin,
-			targetId: receipt.targetId,
-			wireModelId: receipt.wireModelId,
-			runtimeId: receipt.runtimeId,
-			runtimeKind: receipt.runtimeKind,
+			targetId: input.template.targetId,
+			wireModelId: input.template.wireModelId,
+			runtimeId: input.template.runtimeId,
+			runtimeKind: input.template.runtimeKind,
 			gate: { role: gate.role, cycle: gate.cycle },
 			council,
 		};
-		context.bus.emit(BusChannels.DispatchEnqueued, { ...identity, requestOrigin: origin });
-		context.bus.emit(BusChannels.DispatchStarted, {
-			...identity,
-			requestOrigin: origin,
-			pid: null,
-			assignmentId: runId,
-			attempt: 0,
-		});
-		context.bus.emit(BusChannels.DispatchCompleted, {
-			...identity,
-			requestOrigin: origin,
-			outcome: "succeeded",
-			outcomeCode: null,
-			outcomeDetail: null,
-			lineage: input.template.lineage ?? { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
-			tokenCount: 0,
-			inputTokenCount: 0,
-			outputTokenCount: 0,
-			cacheReadTokenCount: 0,
-			cacheWriteTokenCount: 0,
-			reasoningTokenCount: 0,
-			costUsd: 0,
-			costProvenance: "unknown",
-			durationMs: 0,
-			exitCode: 0,
-			toolActivity: null,
-		});
-		return receipt;
+		try {
+			const receipt = await l.recordReceiptAsync(
+				runId,
+				{
+					runId,
+					agentId: "council-synthesis",
+					executionRole: "judge",
+					requestOrigin: origin,
+					task,
+					targetId: input.template.targetId,
+					wireModelId: input.template.wireModelId,
+					runtimeId: input.template.runtimeId,
+					runtimeKind: input.template.runtimeKind,
+					startedAt: created.startedAt,
+					endedAt,
+					outcome: "succeeded",
+					outcomeDetail: null,
+					exitCode: 0,
+					tokenCount: 0,
+					inputTokenCount: 0,
+					outputTokenCount: 0,
+					reasoningTokenCount: 0,
+					cacheReadTokenCount: 0,
+					cacheWriteTokenCount: 0,
+					output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
+					costUsd: 0,
+					costProvenance: "unknown",
+					compiledPromptHash: null,
+					staticCompositionHash: null,
+					clioCoderVersion: readClioVersion(),
+					piMonoVersion: readPiMonoVersion(),
+					platform: process.platform,
+					nodeVersion: process.version,
+					toolCalls: 0,
+					toolStats: [],
+					verification: { state: "unverified", basis: "no-validation-tool" },
+					routingIntent: defaultRoutingIntent({}),
+					quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
+					reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
+					sessionId: input.template.sessionId,
+					gate,
+					council,
+					...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
+					...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
+				},
+				terminalPatch,
+			);
+			await l.persist();
+			// The synthesis never ran as a worker, so nothing else publishes its
+			// lifecycle. The Fleet Runs board and /share are built from these
+			// events, and a council whose synthesis they cannot see is a council
+			// whose verdict the operator cannot read or share.
+			context.bus.emit(BusChannels.DispatchEnqueued, { ...identity, requestOrigin: origin });
+			context.bus.emit(BusChannels.DispatchStarted, {
+				...identity,
+				requestOrigin: origin,
+				pid: null,
+				assignmentId: runId,
+				attempt: 0,
+			});
+			context.bus.emit(BusChannels.DispatchCompleted, {
+				...identity,
+				requestOrigin: origin,
+				outcome: "succeeded",
+				outcomeCode: null,
+				outcomeDetail: null,
+				lineage: input.template.lineage ?? { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
+				tokenCount: 0,
+				inputTokenCount: 0,
+				outputTokenCount: 0,
+				cacheReadTokenCount: 0,
+				cacheWriteTokenCount: 0,
+				reasoningTokenCount: 0,
+				costUsd: 0,
+				costProvenance: "unknown",
+				durationMs: 0,
+				exitCode: 0,
+				toolActivity: null,
+			});
+			return receipt;
+		} catch (error) {
+			reportDispatchDiagnostic(`finalize run ${runId}`, error);
+			const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
+			try {
+				l.update(runId, {
+					status: "failed",
+					outcome: "failed",
+					outcomeDetail: detail,
+					endedAt: new Date().toISOString(),
+					exitCode: 1,
+					gate,
+					council,
+				});
+				await l.persist();
+			} catch (ledgerError) {
+				reportDispatchDiagnostic(`persist failed row for run ${runId}`, ledgerError);
+			}
+			context.bus.emit(BusChannels.DispatchFailed, {
+				...identity,
+				outcome: "failed",
+				outcomeDetail: detail,
+				reason: "failed",
+				lineage: input.template.lineage ?? { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
+				exitCode: 1,
+			});
+			throw error;
+		}
 	}
 
 	const recordingJournal = createRecordingJournal();
