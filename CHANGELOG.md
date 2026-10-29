@@ -26,6 +26,8 @@ Clio Coder 0.6.5 keeps itself current and is easier to run on shared machines. N
 
 - Native installs from the installer update in the background once a day per install root, outside the idle gate. The notice says when an update is installing, when it landed (the running session keeps its version until restart, and `upgrade --rollback` undoes it) and when it failed, with the installer's last error line (#436).
 - On Linux and macOS, npm, pnpm, bun and volta global installs whose prefix and `bin` directory belong to the operator now update after the session exits instead of only showing a notice; an in-place overwrite would break a running session's next lazy import. When an update is available, quitting an interactive session starts one detached wrapper that waits up to 30 minutes for every other process of that install to exit, runs the package manager for the exact version without sudo, and logs under the cache directory. The next launch reports `Updated` or the failure with its log path. A launch that starts while the update runs waits up to 120 seconds, then exits 75 and names the update log. Workspace panes and `/restart` children register with the launcher so the update waits for them too. Root-owned prefixes, Homebrew, winget and Windows keep the update notice with the exact command (#436).
+- On those installs `/upgrade` no longer replaces the package while the session runs. It asks to install after you quit, arms the same deferred update, and names the other sessions of the install it will wait for, or says that an update is already pending. Qualifying pnpm, bun and volta installs get this too instead of only the manager command (#436).
+- `clio-coder upgrade` from a shell on such an npm install refuses with exit 75 while another session, update or process of the install holds it, and lists each holder as pid@host. Otherwise it holds the update lease for the whole npm run, so a launch waits for it, and releases the lease when npm ends or the command is interrupted (#436).
 - The version check reads `npm_config_registry`, so a mirror announces the version its package manager installs.
 - `upgrade --post-install` migration notices are kept until the next interactive launch shows them.
 - `install.sh` and `install.ps1` reclaim an installer lock whose pid is dead on this host and that is older than 10 minutes, along with its dead staging prefixes.
@@ -61,6 +63,7 @@ Clio Coder 0.6.5 keeps itself current and is easier to run on shared machines. N
 
 - Copy confirms through the system clipboard tools (`clip.exe` or `powershell.exe` on WSL and Windows, `pbcopy`, `wl-copy`, `xclip`, `xsel`, and the native clipboard on macOS and Windows) and flashes `Copied!` only when one succeeded. When OSC 52 is all it has, it flashes `Copy unconfirmed: <reason>; OSC 52 sent` (#437). A toolchain path the user cannot stat no longer crashes startup.
 - `@`-attached PDFs reach the model as extracted text bounded at 32 KiB. A truncated attachment names the pages it includes and points at `read` for the rest; a binary file is refused before any model call (#438).
+- Reading `@`-attached files can be canceled. While a PDF is extracted, the status line names it and the cancel key; Esc or Ctrl+C stops the read, sends nothing and puts the message back in the editor, and quitting stops it too. ACP `session/cancel` during the read ends the prompt with `stopReason: cancelled`, and Ctrl+C while `clio-coder run` reads its file arguments exits 130 before any model request (#438).
 - Alt+Enter inserts a newline under the kitty keyboard protocol (#389), and Ctrl-Z suspends from overlays such as search, side questions, the context view and permission cards (#413).
 - Worker-card repaints are coalesced, and transcript prose, reasoning and worker cards are reused across frames (#428).
 
@@ -92,6 +95,8 @@ Clio Coder 0.6.5 keeps itself current and is easier to run on shared machines. N
 ### Dependencies
 
 - Shipped dependencies move to zod 4.6.6 (GHSA-mrhx-c7xc-m3w5), body-parser 2.4.0 with qs 6.17.1 (GHSA-27r3-jxmh-p828), and DOMPurify 3.4.17 in the bundled desktop client (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr).
+- fast-uri moves to 3.1.9 (GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h, GHSA-333x-w4r6-6crp), ip-address to 10.7.4 (GHSA-rxp7-6hxx-x8q5) and @hono/node-server to 2.1.3 (GHSA-rmxm-3fg6-px4f), so `pnpm audit --prod` reports no advisories.
+- The release gate also audits every package bundled into the desktop client at the exact version it ships, under the same policy as the shipped CLI dependencies: a high or critical advisory fails the release, and moderate and low ones are reported as notes.
 
 ### Usage and observability
 
