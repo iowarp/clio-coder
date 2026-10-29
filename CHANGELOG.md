@@ -89,6 +89,10 @@ Clio Coder 0.6.5 keeps itself current and is easier to run on shared machines. N
 - Board, jobs, session tree, usage, extensions, context ledger, settings, queue and artifact methods require authentication.
 - `session/load` restores the session's target and model, the model list includes catalog models, an undeclared model is refused with `model_not_declared` and a remedy, and malformed request ids, `initialize` calls, prompt blocks and permission replies are refused instead of crashing.
 
+### Dependencies
+
+- Shipped dependencies move to zod 4.6.6 (GHSA-mrhx-c7xc-m3w5), body-parser 2.4.0 with qs 6.17.1 (GHSA-27r3-jxmh-p828), and DOMPurify 3.4.17 in the bundled desktop client (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr).
+
 ### Usage and observability
 
 - Failed calls record whether they were sent and where they failed; usage reports separate calls with unknown usage from calls never sent, and never-sent calls no longer count toward spending or a resumed session's cost (#430).
