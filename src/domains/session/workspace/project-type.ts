@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { classifyCHeaderLanguage } from "../../../core/c-header-language.js";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
@@ -114,27 +114,60 @@ function countManifest(name: string, manifestCounts: Partial<Record<SourceProjec
 	}
 }
 
+/**
+ * Reading and classifying every `.h` took about 50 s at session start in the
+ * Linux kernel's 27,291 headers (#441). The C or C++ split needs a sample:
+ * at most this many headers, evenly spaced over the sorted list so the result
+ * is deterministic, with the rest apportioned by the sampled ratio.
+ */
+const HEADER_SAMPLE_LIMIT = 256;
+/** C++ includes, classes and templates sit near the top of a header (#441). */
+const HEADER_READ_BYTES = 64 * 1024;
+
+function classifyHeaders(cwd: string, headers: string[], languageCounts: Record<SourceProjectType, number>): void {
+	if (headers.length === 0) return;
+	headers.sort();
+	const sampled = Math.min(headers.length, HEADER_SAMPLE_LIMIT);
+	const buffer = Buffer.alloc(HEADER_READ_BYTES);
+	let cpp = 0;
+	for (let index = 0; index < sampled; index += 1) {
+		const path = headers[Math.floor((index * headers.length) / sampled)] ?? "";
+		let fd: number | undefined;
+		try {
+			fd = openSync(join(cwd, path), "r");
+			const bytes = readSync(fd, buffer, 0, HEADER_READ_BYTES, 0);
+			if (classifyCHeaderLanguage(buffer.toString("utf8", 0, bytes)) === "c++") cpp += 1;
+		} catch {
+			// An unreadable header counts as C, as it did before sampling.
+		} finally {
+			if (fd !== undefined) closeSync(fd);
+		}
+	}
+	const cppTotal = Math.round((cpp * headers.length) / sampled);
+	languageCounts["c++"] += cppTotal;
+	languageCounts.c += headers.length - cppTotal;
+}
+
 function scanFiles(
 	cwd: string,
 	files: ReadonlyArray<string>,
 	languageCounts: Record<SourceProjectType, number>,
 	manifestCounts: Partial<Record<SourceProjectType, number>>,
 ): void {
+	const headers: string[] = [];
 	for (const path of files) {
 		const name = path.split("/").pop() ?? path;
 		countManifest(name, manifestCounts);
 		if (name.endsWith(".d.ts")) continue;
 		const extension = extensionOf(name);
-		let language = EXTENSION_LANGUAGES.get(extension);
 		if (extension === ".h") {
-			try {
-				language = classifyCHeaderLanguage(readFileSync(join(cwd, path), "utf8"));
-			} catch {
-				language = "c";
-			}
+			headers.push(path);
+			continue;
 		}
+		const language = EXTENSION_LANGUAGES.get(extension);
 		if (language) languageCounts[language] += 1;
 	}
+	classifyHeaders(cwd, headers, languageCounts);
 }
 
 function looksLikeDotfiles(files: ReadonlyArray<string>): boolean {
