@@ -21,6 +21,7 @@ import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usag
 import { estimatedUsageForInterruptedTurn } from "../../src/session-control/chat-loop-messages.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import { createTurnState } from "../../src/session-control/turn-state.js";
+import { checkCostRendering, runBoundaryCheck } from "../boundaries/check-boundaries.js";
 
 const zeroUsage = {
 	input: 0,
@@ -371,5 +372,23 @@ describe("contracts/metering integrity", () => {
 			{ provider: "local-cluster", model: "model-a", tokens: 0, missing: 1 },
 			{ provider: "local-cluster", model: "model-a", tokens: 150, missing: 0 },
 		]);
+	});
+});
+
+describe("canonical monetary presentation (#434)", () => {
+	it("rejects local dollar formatting while allowing time, counts and canonical rendering", () => {
+		for (const source of [
+			"const label = `$${value.toFixed(2)}`;",
+			"const label = costUsd.toLocaleString();",
+			'const label = "$0.00";',
+			'const label = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });',
+		])
+			ok(checkCostRendering("src/example.ts", source).some((line) => line.startsWith("rule10:")));
+		deepStrictEqual(
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: source fixture for the monetary boundary (#434).
+			checkCostRendering("src/example.ts", "const label = `${elapsed.toFixed(2)}s ${renderCostAggregate(cost)}`;"),
+			[],
+		);
+		deepStrictEqual(runBoundaryCheck(process.cwd()).violations, []);
 	});
 });

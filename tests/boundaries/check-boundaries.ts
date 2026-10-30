@@ -1,8 +1,59 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 
 export interface BoundaryCheckResult {
 	violations: string[];
+}
+
+/** Guard monetary presentation without confusing token/duration precision or shell dollars (#434). */
+export function checkCostRendering(file: string, source: string): string[] {
+	if (file === "src/domains/observability/cost.ts") return [];
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const violations: string[] = [];
+	const monetary = /cost|usd|price|spend|amount|dollars|ceiling|budget/i;
+	const visit = (node: ts.Node) => {
+		let bypass = false;
+		if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+			const method = node.expression;
+			bypass =
+				["toFixed", "toPrecision", "toLocaleString"].includes(method.name.text) &&
+				monetary.test(
+					ts.isPropertyAccessExpression(method.expression) ? method.expression.name.text : method.expression.getText(tree),
+				) &&
+				!/tokens|calls|bytes|percent|ms$/i.test(method.expression.getText(tree));
+		}
+		if (ts.isTemplateExpression(node)) {
+			let prefix = node.head.text;
+			for (const span of node.templateSpans) {
+				const expression = span.expression.getText(tree);
+				if (
+					prefix.endsWith("$") &&
+					(monetary.test(expression) || /\.(?:toFixed|toPrecision|toLocaleString)\(/.test(expression))
+				)
+					bypass = true;
+				prefix = span.literal.text;
+			}
+		}
+		if (
+			ts.isPropertyAssignment(node) &&
+			node.name.getText(tree) === "style" &&
+			ts.isStringLiteral(node.initializer) &&
+			node.initializer.text === "currency"
+		)
+			bypass = true;
+		if (ts.isStringLiteral(node) && (/^\$\d+\.\d+(?: local)?$/.test(node.text) || /^cost unknown$/i.test(node.text)))
+			bypass = true;
+		if (bypass) {
+			const line = tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+			violations.push(
+				`rule10: ${file}:${line} formats money outside domains/observability/cost.ts; use renderCostAggregate/renderCostAmount, or a server-rendered GUI display string`,
+			);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return [...new Set(violations)];
 }
 
 const jsSuffixRegex = /\.m?jsx?$/;
@@ -430,6 +481,8 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *      included. It is the one session contract the TUI, headless run and the
  *      ACP server all call, so a render module in its graph would make the
  *      terminal a dependency of every surface.
+ *  10. Root and GUI monetary display uses domains/observability/cost.ts;
+ *      browser code consumes display strings rendered by the server.
  *   9. src/engine/** never imports src/interactive/**, type-only included.
  *      The ACP server reaches session behavior through src/session-control.
  *   6. Any value importer outside the computed Stage 0 closure and its
@@ -461,6 +514,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 
 	for (const filePath of walk(srcRoot)) {
 		const source = readFileSync(filePath, "utf8");
+		violations.push(...checkCostRendering(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		const specifiers = extractSpecifiers(source);
 		const references = extractReferenceDirectives(source);
 
@@ -618,5 +672,12 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		);
 	}
 
+	for (const directory of ["client", "server"]) {
+		for (const file of walk(path.join(projectRoot, "apps/clio-coder-gui", directory))) {
+			violations.push(
+				...checkCostRendering(path.relative(projectRoot, file).split(path.sep).join("/"), readFileSync(file, "utf8")),
+			);
+		}
+	}
 	return { violations };
 }
