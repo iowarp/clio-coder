@@ -12,6 +12,7 @@ import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { TelemetryReadModel } from "../../domains/observability/contract.js";
 import type { CostAggregate } from "../../domains/observability/cost.js";
 import { accumulateCostAmount, emptyCostAggregate, renderCostAmount } from "../../domains/observability/cost.js";
+import { runTokenCount } from "../../domains/observability/read-model.js";
 import { usageCallsFromAttempts } from "../../domains/session/journal-usage.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
@@ -4193,6 +4194,30 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			return null;
 		}
 	};
+	/**
+	 * A terminal fleet frame's call coverage beside its token count: null where the run never recorded it, and the count
+	 * worded as a lower bound when calls went unreported, so a board never shows a partly counted run as whole (#434).
+	 */
+	const runTokenCoverage = (payload: {
+		tokenCount?: number;
+		apiCalls?: number;
+		missingTokenCalls?: number;
+	}): { apiCalls: number | null; missingTokenCalls: number | null; tokenDisplay: string | null } => {
+		const tokens = safeCount(payload.tokenCount);
+		const apiCalls = safeCount(payload.apiCalls);
+		const missingTokenCalls = safeCount(payload.missingTokenCalls);
+		return {
+			apiCalls,
+			missingTokenCalls,
+			tokenDisplay:
+				tokens === null
+					? null
+					: runTokenCount(tokens, {
+							...(apiCalls === null ? {} : { apiCalls }),
+							...(missingTokenCalls === null ? {} : { missingTokenCalls }),
+						}).display,
+		};
+	};
 	const receiptMeta = (runId: string, facts: RunReceiptFacts | null): Record<string, unknown> => ({
 		[ACP_RECEIPT_META_KEY]: receiptWireFacts(runId, facts),
 	});
@@ -4327,6 +4352,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
 						durationMs: safeCount(payload.durationMs),
 						tokenCount: safeCount(payload.tokenCount),
+						...runTokenCoverage(payload),
 					},
 					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
 				);
@@ -4349,6 +4375,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
 						outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
 						durationMs: safeCount(payload.durationMs),
+						...(typeof payload.tokenCount === "number"
+							? { tokenCount: safeCount(payload.tokenCount), ...runTokenCoverage(payload) }
+							: {}),
 					},
 					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
 				);

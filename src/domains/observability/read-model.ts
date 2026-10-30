@@ -1747,6 +1747,26 @@ export function runsTotal(fields: readonly RunTokenField[]): RunsTotal {
 	return { known: sum.measured + sum.estimated, unknownRuns: sum.unknownCount, display: renderCountSum(sum, "run") };
 }
 
+/**
+ * A finished run's token count as its terminal event or sealed receipt states it, worded with its call coverage: calls
+ * that reported no usage make it a lower bound beside them, and a run that never recorded its coverage says so, so a
+ * partly counted run never reads as whole (#434 §11.3).
+ */
+export function runTokenCount(
+	tokens: number,
+	coverage: { apiCalls?: number | undefined; missingTokenCalls?: number | undefined },
+): { fact: FactSum; display: string } {
+	const known = Number.isFinite(tokens) && tokens >= 0 ? tokens : 0;
+	const missing = coverage.missingTokenCalls;
+	if (missing === undefined || coverage.apiCalls === undefined)
+		return {
+			fact: sumFactSums([counted(known), unknownSum(1)]),
+			display: `≥${renderCount(known)} (call coverage not recorded)`,
+		};
+	const fact = missing > 0 ? sumFactSums([counted(known), unknownSum(missing)]) : counted(known);
+	return { fact, display: renderCountSum(fact, "call") };
+}
+
 /** A repository window's token fields: the session view's token quantities over the `repo` scope (#434 §11.1). */
 export function repoTokenQuantities(repo: RepoSource): SessionTelemetryV1["own"]["tokens"] {
 	return tokenQuantities({ repo }, { scope: "repo", owner: repo.owner });

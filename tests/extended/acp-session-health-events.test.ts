@@ -257,3 +257,39 @@ it("forwards bounded failure codes and reasons for withheld and idle workers", a
 	peer.transport.close();
 	strictEqual(await served, 0);
 });
+
+it("words a finished run's tokens with its call coverage, never a partly counted run as whole (#434 §11.3)", async () => {
+	const { bus, peer, served } = await openSession(["dispatch.completed"]);
+	const completed = (runId: string, coverage: Record<string, number>) =>
+		bus.emit(BusChannels.DispatchCompleted, {
+			runId,
+			agentId: "coder",
+			targetId: "fixture",
+			wireModelId: "fixture",
+			runtimeId: "fixture",
+			runtimeKind: "http",
+			requestOrigin: "agent",
+			outcome: "succeeded",
+			outcomeCode: null,
+			outcomeDetail: null,
+			durationMs: 10,
+			tokenCount: 1_200,
+			...coverage,
+		} as never);
+	completed("partial", { apiCalls: 3, missingTokenCalls: 1 });
+	completed("whole", { apiCalls: 3, missingTokenCalls: 0 });
+	completed("legacy", {});
+	deepStrictEqual(
+		eventsOf(peer).map((event) => {
+			const { apiCalls, missingTokenCalls, tokenDisplay } = event.payload as Record<string, unknown>;
+			return { apiCalls, missingTokenCalls, tokenDisplay };
+		}),
+		[
+			{ apiCalls: 3, missingTokenCalls: 1, tokenDisplay: "≥1,200 (1 call unknown)" },
+			{ apiCalls: 3, missingTokenCalls: 0, tokenDisplay: "1,200" },
+			{ apiCalls: null, missingTokenCalls: null, tokenDisplay: "≥1,200 (call coverage not recorded)" },
+		],
+	);
+	peer.transport.close();
+	strictEqual(await served, 0);
+});
