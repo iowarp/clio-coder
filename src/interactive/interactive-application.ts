@@ -502,8 +502,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	>();
 	let visibleEventSequence = 0;
 	let visibleEventGeneration = 0;
+	// isStreaming() holds until the submit settles, about 80 ms after agent_end
+	// painted the reply and its "Done" line; the exit guard waits that tail out.
+	let agentRunEnded = true;
 	const recordChatEventIngress = (event: ChatLoopEvent): void => {
+		if (event.type === "agent_end") agentRunEnded = true;
 		if (event.type === "agent_start") {
+			agentRunEnded = false;
 			visibleEventGeneration += 1;
 			renderTrace?.beginGeneration();
 			return;
@@ -1754,6 +1759,50 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 	});
 
+	const explainProtectedExit = (): void =>
+		notify(
+			"info",
+			`Work or queued messages remain. Cancel with Ctrl+C, recover with ${keybindings.actionLabel("clio-coder.message.dequeue")}, or use /quit.`,
+			"keyboard:exit",
+		);
+	const exitBlocker = (): "editor" | "work" | "settling" | null => {
+		if (editor.getText().length > 0) return "editor";
+		const queue = deps.chat.queuedMessages();
+		if (
+			deps.chat.turnPreparation().phase !== "idle" ||
+			deps.dispatch.snapshot().running.length > 0 ||
+			editorSubmit.hasActiveEditorBash() ||
+			operatorExtensions?.busy ||
+			queue.steer.length + queue.followUp.length > 0
+		)
+			return "work";
+		if (deps.chat.isStreaming()) return agentRunEnded ? "settling" : "work";
+		return null;
+	};
+	// A Ctrl+D in the settle tail exits once the turn settles instead of being
+	// refused with nothing visible left. The bound keeps a stuck settle from
+	// holding the exit; the guard runs again afterwards, so the wait never
+	// exits past work that started meanwhile.
+	let exitAwaitingSettle = false;
+	const exitAfterSettle = (): void => {
+		if (exitAwaitingSettle) return;
+		exitAwaitingSettle = true;
+		let bound: ReturnType<typeof setTimeout> | undefined;
+		void Promise.race([
+			deps.chat.whenSettled(),
+			new Promise<void>((resolve) => {
+				bound = setTimeout(resolve, 2_000);
+				bound.unref?.();
+			}),
+		]).then(() => {
+			clearTimeout(bound);
+			exitAwaitingSettle = false;
+			const blocker = exitBlocker();
+			if (blocker === null) void applicationController.shutdown();
+			else if (blocker !== "editor") explainProtectedExit();
+		});
+	};
+
 	applicationController = createInteractiveInputRuntime({
 		tui,
 		...(workspaceSurfaces ? { extraLeaderTargets: () => workspaceSurfaces.leaderTargets() } : {}),
@@ -1762,12 +1811,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			const queue = deps.chat.queuedMessages();
 			return queue.steer.length + queue.followUp.length > 0;
 		},
-		explainProtectedExit: () =>
-			notify(
-				"info",
-				`Work or queued messages remain. Cancel with Ctrl+C, recover with ${keybindings.actionLabel("clio-coder.message.dequeue")}, or use /quit.`,
-				"keyboard:exit",
-			),
+		explainProtectedExit,
 		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
 			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
@@ -1784,24 +1828,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				});
 			},
 			canExit: () => {
-				if (editor.getText().length > 0) return false;
-				const queue = deps.chat.queuedMessages();
-				if (
-					deps.chat.isStreaming() ||
-					deps.chat.turnPreparation().phase !== "idle" ||
-					deps.dispatch.snapshot().running.length > 0 ||
-					editorSubmit.hasActiveEditorBash() ||
-					operatorExtensions?.busy ||
-					queue.steer.length + queue.followUp.length > 0
-				) {
-					notify(
-						"info",
-						`Work or queued messages remain. Cancel with Ctrl+C, recover with ${keybindings.actionLabel("clio-coder.message.dequeue")}, or use /quit.`,
-						"keyboard:exit",
-					);
-					return false;
-				}
-				return true;
+				const blocker = exitBlocker();
+				if (blocker === "settling") exitAfterSettle();
+				else if (blocker === "work") explainProtectedExit();
+				return blocker === null;
 			},
 			recordFeature,
 			openQueueNavigator: () => overlayLifecycle.openQueueNavigatorState(),
