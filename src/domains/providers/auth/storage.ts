@@ -1,5 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
+import { telemetryContext } from "../../../core/telemetry/context.js";
 import { recordTelemetry } from "../../../core/telemetry/producer.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
 import type { AuthOperationOptions } from "../../../engine/types.js";
@@ -566,17 +567,25 @@ export class AuthStorage {
 			throw error;
 		} finally {
 			const before = held?.type === "oauth" ? held.updatedAt : undefined;
+			// A refresh outside any session or run, such as a quota read's, names no journal: recording it would only
+			// count as an unowned record (#434).
+			const ctx = telemetryContext();
 			try {
-				recordTelemetry("auth.event", {
-					provider: providerId,
-					trigger: rejectedApiKey === undefined ? "expiry" : "rejected",
-					attempted: outcome === "refreshed" || (outcome !== "adopted" && attempt.called),
-					outcome,
-					writerPid: outcome === "refreshed" ? process.pid : null,
-					...(before !== undefined && UTC_MS.test(before) ? { updatedAtBefore: before } : {}),
-					...(after !== undefined && UTC_MS.test(after) ? { updatedAtAfter: after } : {}),
-					durationMs: Math.max(0, performance.now() - started),
-				});
+				if (ctx)
+					recordTelemetry(
+						"auth.event",
+						{
+							provider: providerId,
+							trigger: rejectedApiKey === undefined ? "expiry" : "rejected",
+							attempted: outcome === "refreshed" || (outcome !== "adopted" && attempt.called),
+							outcome,
+							writerPid: outcome === "refreshed" ? process.pid : null,
+							...(before !== undefined && UTC_MS.test(before) ? { updatedAtBefore: before } : {}),
+							...(after !== undefined && UTC_MS.test(after) ? { updatedAtAfter: after } : {}),
+							durationMs: Math.max(0, performance.now() - started),
+						},
+						ctx,
+					);
 			} catch {
 				// Recording a refresh never changes the credential it describes (#434).
 			}

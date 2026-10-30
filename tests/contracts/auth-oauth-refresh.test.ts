@@ -17,7 +17,7 @@ import { isProviderAuthRejection } from "../../src/core/provider-auth-error.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
-import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import { registerTelemetrySink, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { AuthStorage, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
@@ -369,6 +369,11 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(refreshed.updatedAtBefore, "2026-01-01T00:00:00.000Z");
 		strictEqual((byOutcome.adopted as { attempted: boolean }).attempted, false);
 		ok(!JSON.stringify(events).includes("access-recorded") && !JSON.stringify(events).includes("refresh-"));
+		// A refresh outside any session or run, such as a quota read's, records nothing and loses nothing.
+		seed(-1000);
+		const unowned = telemetryProducerHealth().unownedRecords;
+		strictEqual((await open().resolveApiKey("alcf")).apiKey, "access-recorded");
+		strictEqual(telemetryProducerHealth().unownedRecords, unowned);
 	});
 
 	it("leaves the file byte-identical and reports no key when the refresh is rejected", async () => {
