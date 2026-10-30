@@ -28,7 +28,11 @@ import {
 	timeline,
 	whyStopped,
 } from "../domains/observability/read-model.js";
-import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../domains/session/telemetry-source.js";
+import {
+	loadRunReceiptEvidence,
+	loadRunTelemetrySource,
+	loadSessionTelemetrySource,
+} from "../domains/session/telemetry-source.js";
 import { formatColumns, printError } from "./shared.js";
 
 /**
@@ -171,6 +175,11 @@ function printRun(dto: RunTelemetryV1): string {
 			? `settled   ${dto.settled.terminalReason} at ${dto.settled.at} · exit ${dto.settled.processExitCode ?? "unknown"} · repair rounds ${show(dto.settled.repairRounds)}${dto.settled.boundKind ? ` · bound ${dto.settled.boundKind}` : ""}`
 			: "settled   not yet, or not recorded",
 	];
+	const receipt = dto.receipt;
+	if (receipt)
+		lines.push(
+			`receipt   ${receipt.receipt} · ${receipt.integrity.display}${receipt.integrity.detail ? ` (${receipt.integrity.detail})` : ""} · ${receipt.trust.validation}${receipt.sealed ? ` · outcome ${receipt.sealed.outcome}` : ""}`,
+		);
 	return `${lines.join("\n")}\n`;
 }
 
@@ -323,7 +332,8 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				printError(`no run journal for ${runId}`);
 				return 1;
 			}
-			if (args.command === "inspect") return emit(runTelemetry(runId, run), args.json, printRun);
+			if (args.command === "inspect")
+				return emit(runTelemetry(runId, run, {}, loadRunReceiptEvidence(stateDir, runId)), args.json, printRun);
 			if (args.command === "cost") {
 				const by = args.values.get("by") ?? "model";
 				if (by !== "label" && by !== "model" && by !== "turn") {

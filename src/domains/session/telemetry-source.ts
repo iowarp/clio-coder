@@ -2,12 +2,14 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
+import type { ReceiptEvidenceV1 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
+import { readReceiptEvidence } from "../dispatch/receipt-facts.js";
 import type { CallJournalRead } from "../observability/call-journal.js";
 import { readCallJournal, readCallJournalSync } from "../observability/call-journal.js";
 import type { OutOfTurnUsageRow } from "../observability/out-of-turn-usage.js";
 import { outOfTurnUsagePath, parseOutOfTurnUsageRows } from "../observability/out-of-turn-usage.js";
-import type { JournalSource, SessionSource } from "../observability/read-model.js";
+import type { JournalSource, ProcessIdentity, SessionSource } from "../observability/read-model.js";
 import { journalSourceFromRead } from "../observability/read-model.js";
 import type { SessionEntry, SessionHeader } from "./entries.js";
 import { isSessionEntry, isSessionHeader } from "./entries.js";
@@ -169,6 +171,29 @@ function* readLedger(directory: string): Load<{ header: SessionHeader | null; en
 	return { header, entries };
 }
 
+/** `meta.json`'s close and owner; absent when the file is missing or unreadable, so nothing claims a clean close. */
+function* readLifecycle(directory: string): Load<SessionSource["ledger"] | undefined> {
+	const raw = yield* text(join(directory, "meta.json"));
+	if (raw === null) return undefined;
+	let meta: { endedAt?: unknown; owner?: { host?: unknown; pid?: unknown; birth?: unknown } };
+	try {
+		meta = JSON.parse(raw) as typeof meta;
+	} catch {
+		// A torn meta.json cannot say whether the session closed; the journal's writer decides instead.
+		return undefined;
+	}
+	const owner = meta.owner;
+	const identity: ProcessIdentity | null =
+		owner && typeof owner.host === "string" && owner.host.length > 0 && Number.isSafeInteger(owner.pid)
+			? {
+					host: owner.host,
+					pid: owner.pid as number,
+					birthToken: typeof owner.birth === "string" ? owner.birth : null,
+				}
+			: null;
+	return { endedAt: typeof meta.endedAt === "string" ? meta.endedAt : null, owner: identity };
+}
+
 /** The run's sealed receipt as one `legacy-import` snapshot; null when it is absent or not this run's. */
 function* receiptSource(stateDir: string, runId: string): Load<JournalSource | null> {
 	const raw = yield* text(join(stateDir, "receipts", `${runId}.json`));
@@ -268,6 +293,7 @@ function* loadSession(
 		yield* exists(join(directory, "calls.jsonl")),
 	);
 	const { header, entries } = yield* readLedger(directory);
+	const ledger = yield* readLifecycle(directory);
 	const forked = own.records.find((record) => record.k === "session.forked_from");
 	const lineage =
 		forked?.k === "session.forked_from"
@@ -301,6 +327,7 @@ function* loadSession(
 		legacy: yield* legacyRecords(stateDir, sessionId, entries, own.records, copied),
 		runs,
 		parent: lineage ? { sessionId: lineage.sessionId, turnId: lineage.turnId, at: lineage.at, source: parent } : null,
+		...(ledger ? { ledger } : {}),
 	};
 }
 
@@ -311,6 +338,12 @@ export function loadRunTelemetrySource(stateDir: string, runId: string): Journal
 /** The same read off the event loop's critical path, for the live model and ACP (#434). */
 export function loadRunTelemetrySourceAsync(stateDir: string, runId: string): Promise<JournalSource> {
 	return runAsync(loadRun(stateDir, runId));
+}
+
+/** The run's sealed receipt through its integrity check, for the run DTO (#434 §11.1). */
+export function loadRunReceiptEvidence(stateDir: string, runId: string): ReceiptEvidenceV1 {
+	assertSafeId(runId, "run");
+	return readReceiptEvidence(runId, stateDir);
 }
 
 export function loadSessionTelemetrySource(

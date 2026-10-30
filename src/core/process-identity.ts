@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { hostname } from "node:os";
 
 /**
  * Process identity for durable owner records. A pid alone cannot tell "the
@@ -60,4 +61,21 @@ export function processAlive(pid: number): boolean {
 		// EPERM means the pid exists but belongs to another user.
 		return (error as NodeJS.ErrnoException).code === "EPERM";
 	}
+}
+
+/**
+ * Whether the process a record names is still the one running: true while its pid lives with the same birth token,
+ * false once it is gone or the pid was reused, and null for another host, which cannot be probed from here. A
+ * missing token cannot disprove a live pid, the same call `liveSessionOwner` makes.
+ */
+export function processIdentityAlive(identity: {
+	host: string;
+	pid: number;
+	birthToken: string | null;
+}): boolean | null {
+	if (identity.host !== hostname()) return null;
+	if (!processAlive(identity.pid)) return false;
+	if (identity.birthToken === null) return true;
+	const current = processBirthToken(identity.pid);
+	return current === null || current === identity.birthToken;
 }

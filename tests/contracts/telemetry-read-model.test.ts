@@ -6,7 +6,7 @@
  * same ones over the DTOs they serve.
  */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -16,12 +16,15 @@ import {
 	CacheReportSchema,
 	CallsReportSchema,
 	CostReportSchema,
+	ReceiptEvidenceSchema,
 	SessionTelemetrySchema,
 	TimelineSchema,
 	WhyStoppedSchema,
 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openCallJournal } from "../../src/domains/observability/call-journal.js";
 import type { SessionSource } from "../../src/domains/observability/read-model.js";
 import {
@@ -37,6 +40,7 @@ import { createLiveTelemetryModel } from "../../src/domains/observability/teleme
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
 import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import {
 	absentRenderedOtherwise,
 	quantitiesOf,
@@ -175,4 +179,58 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 		model.stop();
 		await writer.close();
 	}
+});
+
+test("a session's lifetime tells a clean close, an open owner, an abnormal end and an unprobeable host apart (#434 §6.1)", () => {
+	const owner = { host: "elsewhere", pid: 4242, birthToken: null };
+	const lifetime = (ledger: SessionSource["ledger"], alive: boolean | null) =>
+		sessionTelemetry({ ...source, ...(ledger ? { ledger } : {}) }, { ...now, alive: () => alive }).lifetime;
+	deepStrictEqual(
+		{ ...lifetime({ endedAt: "2099-01-01T00:00:00.000Z", owner }, true), firstRecordAt: null, lastRecordAt: null },
+		{
+			firstRecordAt: null,
+			lastRecordAt: null,
+			state: "closed",
+			closed: { at: "2099-01-01T00:00:00.000Z", reason: null },
+		},
+	);
+	// A ledger close older than the journal's last fact was reopened since; the owner decides.
+	strictEqual(lifetime({ endedAt: "2000-01-01T00:00:00.000Z", owner }, true).state, "open");
+	strictEqual(lifetime({ endedAt: null, owner }, true).state, "open");
+	strictEqual(lifetime({ endedAt: null, owner }, false).state, "ended-abnormally");
+	strictEqual(lifetime({ endedAt: null, owner }, null).state, "unverifiable");
+	strictEqual(lifetime(undefined, true).state, "unknown");
+	ok(Value.Check(SessionTelemetrySchema, sessionTelemetry({ ...source, ledger: { endedAt: null, owner } }, now)));
+});
+
+test("a run's receipt evidence carries sealed checks only under a seal that verifies (#434 §11.3)", () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-receipt-evidence-"));
+	mkdirSync(join(stateDir, "receipts"));
+	const envelope = fixtureEnvelope("run-evidence");
+	const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
+	const writeReceipt = (value: unknown) =>
+		writeFileSync(join(stateDir, "receipts", "run-evidence.json"), JSON.stringify(value));
+	const read = () => readReceiptEvidence("run-evidence", stateDir, now);
+
+	const missing = read();
+	strictEqual(missing.receipt, "missing");
+	strictEqual(missing.integrity.state, "unavailable");
+	strictEqual(missing.sealed, null);
+
+	writeReceipt(receipt);
+	writeFileSync(join(stateDir, "runs.json"), JSON.stringify([envelope]));
+	const verified = read();
+	ok(Value.Check(ReceiptEvidenceSchema, verified), [...Value.Errors(ReceiptEvidenceSchema, verified)][0]?.message);
+	strictEqual(verified.integrity.state, "verified");
+	strictEqual(verified.sealed?.outcome, "succeeded");
+
+	rmSync(join(stateDir, "runs.json"));
+	strictEqual(read().integrity.state, "verified-ledger-evicted");
+
+	writeReceipt({ ...receipt, outcome: "failed" });
+	const tampered = read();
+	strictEqual(tampered.integrity.state, "failed");
+	ok(tampered.integrity.detail);
+	strictEqual(tampered.sealed, null);
+	strictEqual(tampered.trust.artifactIntegrity.state, "failed");
 });

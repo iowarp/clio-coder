@@ -1,3 +1,4 @@
+import { processIdentityAlive } from "../../core/process-identity.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type {
 	CacheReportV1,
@@ -11,6 +12,7 @@ import type {
 	FactRef,
 	ParsedFactRef,
 	Quantity,
+	ReceiptEvidenceV1,
 	RunRowV1,
 	RunTelemetryV1,
 	SessionTelemetryV1,
@@ -19,7 +21,7 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
-import type { SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import {
 	renderCount,
@@ -62,6 +64,14 @@ export interface JournalSource {
 	damaged: number;
 	/** The live model has not merged this owner's cold read yet; whole-scope sums stay partial until it does (#434). */
 	seeding?: boolean;
+	/** The process that last owned the journal, from its last segment header (#434 §6.1). */
+	writer?: ClockOrigin;
+}
+/** The process a ledger names; `birthToken` is null where the platform gives none. */
+export interface ProcessIdentity {
+	host: string;
+	pid: number;
+	birthToken: string | null;
 }
 export interface SessionSource {
 	sessionId: string;
@@ -72,6 +82,11 @@ export interface SessionSource {
 	runs: ReadonlyMap<string, JournalSource>;
 	/** The fork parent; `source` is null when its journal and ledger could not be read. */
 	parent: { sessionId: string; turnId: string; at: string; source: SessionSource | null } | null;
+	/**
+	 * The ledger's own lifecycle: `endedAt` is set by a clean close and cleared by a reopen. Sessions that predate the
+	 * journal, and every session until the journal records its own close, end only here (#434 §6.1).
+	 */
+	ledger?: { endedAt: string | null; owner: ProcessIdentity | null };
 }
 /** Several sessions read as one scope: a repository's sessions over a window, already windowed by the loader (#434). */
 export interface RepoSource {
@@ -88,6 +103,8 @@ export function repoOwner(cwdHash: string | null, days: number): string {
 
 export interface ReadOptions {
 	now?: Date;
+	/** Whether a recorded process still runs; null when it cannot be probed. Defaults to {@link processIdentityAlive}. */
+	alive?: (identity: ProcessIdentity) => boolean | null;
 }
 
 /** A journal read as the read model holds it; a run's journal keeps only records its run owns (#434). */
@@ -97,6 +114,7 @@ export function journalSourceFromRead(
 		modes?: readonly Mode[];
 		skipped: number;
 		damaged: number;
+		writer?: ClockOrigin;
 	},
 	fileExists: boolean,
 	runId?: string,
@@ -108,6 +126,7 @@ export function journalSourceFromRead(
 		modes: read.modes ?? [],
 		skipped: read.skipped,
 		damaged: read.damaged,
+		...(read.writer ? { writer: read.writer } : {}),
 	};
 }
 
@@ -1225,14 +1244,11 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 	const analysis = analyze(source);
 	const id = source.sessionId;
 	const ownSelection = select(view, own(id, "usd"));
-	let closed: SessionTelemetryV1["lifetime"]["closed"] = null;
 	let firstAt: string | null = null;
 	let lastAt: string | null = null;
 	for (const record of source.journal.records) {
 		if (firstAt === null || record.t < firstAt) firstAt = record.t;
 		if (lastAt === null || record.t > lastAt) lastAt = record.t;
-		if (record.k === "session.closed" && (!closed || record.t >= closed.at))
-			closed = { at: record.t, reason: record.data.reason };
 	}
 	const labels = new Set(analysis.attempts.map((attempt) => attempt.started.label));
 	if (analysis.runs.size > 0) labels.add("worker");
@@ -1253,7 +1269,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 		sessionId: id,
 		modes: [...new Set(source.journal.modes)],
 		journal: journalCoverage(source.journal, analysis.fold, source.legacy.aggregates),
-		lifetime: { firstRecordAt: firstAt, lastRecordAt: lastAt, closed },
+		lifetime: { firstRecordAt: firstAt, lastRecordAt: lastAt, ...lifecycle(source, lastAt, options) },
 		lineage: source.parent
 			? {
 					parent: { sessionId: source.parent.sessionId, turnId: source.parent.turnId, at: source.parent.at },
@@ -1297,6 +1313,33 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 				}
 			: null,
 	};
+}
+
+/**
+ * Closed when the journal's latest lifecycle record is a close, or the ledger's close postdates every journal fact.
+ * Otherwise the session's owner decides: the ledger's, else the journal's last segment writer (#434 §6.1).
+ */
+function lifecycle(
+	source: SessionSource,
+	lastAt: string | null,
+	options: ReadOptions,
+): Pick<SessionTelemetryV1["lifetime"], "state" | "closed"> {
+	let latest: Extract<TelemetryRecord, { k: "session.opened" | "session.resumed" | "session.closed" }> | null = null;
+	for (const record of source.journal.records)
+		if (
+			(record.k === "session.opened" || record.k === "session.resumed" || record.k === "session.closed") &&
+			(!latest || record.t >= latest.t)
+		)
+			latest = record;
+	if (latest?.k === "session.closed") return { state: "closed", closed: { at: latest.t, reason: latest.data.reason } };
+	const ledger = source.ledger;
+	if (ledger?.endedAt && (lastAt === null || ledger.endedAt >= lastAt))
+		return { state: "closed", closed: { at: ledger.endedAt, reason: null } };
+	// The ledger restamps its owner on every reopen, before a new writer may have written anything.
+	const writer = ledger?.owner ?? source.journal.writer ?? null;
+	if (!writer) return { state: "unknown", closed: null };
+	const alive = (options.alive ?? processIdentityAlive)(writer);
+	return { state: alive === null ? "unverifiable" : alive ? "open" : "ended-abnormally", closed: null };
 }
 
 function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attempt): CallRowV1 {
@@ -1676,7 +1719,13 @@ export function runRowTelemetry(runId: string, source: JournalSource): RunRowV1 
 	return runRow({ run }, run);
 }
 
-export function runTelemetry(runId: string, source: JournalSource, options: ReadOptions = {}): RunTelemetryV1 {
+/** `receipt` is the run's sealed receipt read through its integrity check, which the caller's loader reads (#434 §11.1). */
+export function runTelemetry(
+	runId: string,
+	source: JournalSource,
+	options: ReadOptions = {},
+	receipt: ReceiptEvidenceV1 | null = null,
+): RunTelemetryV1 {
 	const run = analyzeRun(runId, source);
 	const view: View = { run };
 	const base = { scope: "run" as const, owner: runId };
@@ -1700,6 +1749,7 @@ export function runTelemetry(runId: string, source: JournalSource, options: Read
 					callIds: settled.data.callIds as NonNullable<RunTelemetryV1["settled"]>["callIds"],
 				}
 			: null,
+		receipt,
 	};
 }
 

@@ -15,10 +15,14 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ReceiptEvidenceV1 } from "../../core/telemetry/dto.js";
+import { TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { trustStateWord, validationClause } from "../evidence/trust-projection.js";
+import { integrityClause, trustStateWord, validationClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import { inspectRunReceiptTrustStatus, retiredIntegrityVersionOf } from "../evidence/trust-status.js";
+import { readEvidenceIndex } from "../observability/evidence-index.js";
+import { TELEMETRY_FOLD_VERSION } from "../observability/folds.js";
 import { receiptFilePath } from "../session/view-artifacts.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 
@@ -331,5 +335,211 @@ export function receiptWireFacts(runId: string, facts: RunReceiptFacts | null): 
 		// Only the replay fallback sets abandonedDetail: the outcome came from the
 		// ledger row because no receipt was sealed, which is still a missing receipt.
 		...(facts.abandonedDetail !== undefined ? { unavailable: true as const } : {}),
+	};
+}
+
+type ReceiptSealed = NonNullable<ReceiptEvidenceV1["sealed"]>;
+type ReceiptTrust = ReceiptEvidenceV1["trust"];
+
+const clip = (value: string, max = 4096) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
+const textOrNull = (value: unknown, max?: number) => (typeof value === "string" ? clip(value, max) : null);
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T | null =>
+	typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : null;
+const nonNegativeOrNull = (value: unknown) =>
+	typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+const integerOrNull = (value: unknown) => (typeof value === "number" && Number.isInteger(value) ? value : null);
+
+function trustAxis<Axis extends keyof Omit<ReceiptTrust, "validation">>(
+	status: CanonicalTrustStatus,
+	axis: Axis,
+): ReceiptTrust[Axis] {
+	const entry = status[axis];
+	return {
+		state: entry.state,
+		display: trustStateWord(axis, entry.state),
+		authority: entry.state === "absent" ? null : clip(entry.authority.id),
+	} as ReceiptTrust[Axis];
+}
+
+/**
+ * The checks a verified receipt sealed, read structurally: a receipt from an older build is valid history, so a field
+ * this build cannot read is null, never a pass (#434 §5.3).
+ */
+function sealedChecks(receipt: Record<string, unknown>): ReceiptSealed {
+	const quality = isRecord(receipt.quality) ? receipt.quality : null;
+	const verification = isRecord(receipt.verification) ? receipt.verification : null;
+	const verificationState = oneOf(verification?.state, ["verified", "unverified", "not_applicable", "unknown"] as const);
+	const verificationBasis = oneOf(verification?.basis, [
+		"validation-tool",
+		"read-only-agent",
+		"no-validation-tool",
+		"acp-external-unobserved",
+		"receipt-unavailable",
+	] as const);
+	const typed = Array.isArray(quality?.typedValidations)
+		? quality.typedValidations.flatMap((entry) =>
+				isRecord(entry) &&
+				typeof entry.sourceId === "string" &&
+				typeof entry.validatorDigest === "string" &&
+				typeof entry.passed === "boolean"
+					? [{ sourceId: clip(entry.sourceId), validatorDigest: clip(entry.validatorDigest, 256), passed: entry.passed }]
+					: [],
+			)
+		: null;
+	const host = isRecord(receipt.hostVerification) ? receipt.hostVerification : null;
+	const hostStatus = oneOf(host?.status, ["verified", "rejected", "skipped", "not_implicated"] as const);
+	const contractFact = quality && Object.hasOwn(quality, "resultContract") ? quality.resultContract : undefined;
+	const contract = isRecord(contractFact) ? contractFact : null;
+	const conformance = oneOf(contract?.conformance, ["pass", "fail", "not-reached"] as const);
+	const contractQuality = oneOf(contract?.quality, ["pass", "fail", "unmeasured"] as const);
+	const schema = isRecord(quality?.responseSchema) ? quality.responseSchema : null;
+	const grounding = isRecord(receipt.validationGrounding) ? receipt.validationGrounding : null;
+	const groundingBasis = oneOf(grounding?.basis, ["no-command-executed", "unmatched-command"] as const);
+	const claimed = integerOrNull(grounding?.claimed);
+	const grounded = integerOrNull(grounding?.grounded);
+	return {
+		outcome: clip(optionalString(receipt.outcome) ?? "unknown"),
+		outcomeCode: textOrNull(receipt.outcomeCode),
+		exitCode: integerOrNull(receipt.exitCode),
+		failureMessage: textOrNull(receipt.failureMessage),
+		verification: verificationState && verificationBasis ? { state: verificationState, basis: verificationBasis } : null,
+		typedValidations: typed,
+		hostVerification:
+			host && hostStatus
+				? {
+						status: hostStatus,
+						reason: textOrNull(host.reason),
+						strategy: host.strategy === "batch-settled" ? "batch-settled" : "single",
+						checks: (Array.isArray(host.checks) ? host.checks : []).flatMap((check) => {
+							if (!isRecord(check) || typeof check.check !== "string") return [];
+							const exitCode = integerOrNull(check.exitCode);
+							const durationMs = nonNegativeOrNull(check.durationMs);
+							if (exitCode === null || durationMs === null) return [];
+							return [
+								{
+									check: clip(check.check),
+									exitCode,
+									durationMs,
+									memo: check.memo === true,
+									outputTail: textOrNull(check.outputTail, 16_384) ?? "",
+									evidenceRunId: optionalString(check.evidenceRunId) ?? null,
+								},
+							];
+						}),
+					}
+				: null,
+		resultContract:
+			contractFact === null
+				? "unmeasured"
+				: contract && typeof contract.sourceId === "string" && conformance && contractQuality
+					? {
+							sourceId: clip(contract.sourceId),
+							validatorDigest: clip(optionalString(contract.validatorDigest) ?? "", 256),
+							kind: contractKindFrom(receipt) ?? null,
+							conformance,
+							quality: contractQuality,
+						}
+					: null,
+		responseSchema:
+			schema && typeof schema.runtimeEnforceable === "boolean"
+				? {
+						sourceId: textOrNull(schema.sourceId),
+						schemaDigest: textOrNull(schema.schemaDigest, 256),
+						runtimeEnforceable: schema.runtimeEnforceable,
+						enforcementPassed: typeof schema.enforcementPassed === "boolean" ? schema.enforcementPassed : null,
+					}
+				: null,
+		validationGrounding:
+			grounding && groundingBasis && claimed !== null && claimed >= 0 && grounded !== null && grounded >= 0
+				? {
+						claimed,
+						grounded,
+						ungrounded: (Array.isArray(grounding.ungrounded) ? grounding.ungrounded : [])
+							.filter((name): name is string => typeof name === "string")
+							.map((name) => clip(name)),
+						basis: groundingBasis,
+					}
+				: null,
+	};
+}
+
+/**
+ * A run's sealed receipt read through its integrity check, for every surface that shows what the receipt verified
+ * (#434 §11.3). The ledger row authenticates the seal; without it the seal verifies alone as `ledger evicted`.
+ */
+export function readReceiptEvidence(
+	runId: string,
+	stateDir = clioStateDir(),
+	options: { now?: Date } = {},
+): ReceiptEvidenceV1 {
+	let receipt: Record<string, unknown> | null = null;
+	let state: ReceiptEvidenceV1["receipt"] = "missing";
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8"));
+		if (isRecord(parsed) && optionalString(parsed.runId) === runId) {
+			receipt = parsed;
+			state = "sealed";
+		} else state = "unreadable";
+	} catch (error) {
+		// Any read or parse failure other than a missing file is a receipt that exists but cannot be read.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") state = "unreadable";
+	}
+	const row = receipt ? findRunRow(runId, stateDir) : null;
+	const inspection = inspectRunReceiptTrustStatus(
+		receipt as unknown as RunReceipt | null,
+		row as unknown as RunEnvelope | null,
+	);
+	const outcome = inspection.integrity;
+	const integrity: ReceiptEvidenceV1["integrity"] =
+		receipt === null
+			? { state: "unavailable", display: integrityClause(inspection.status), detail: `receipt ${state}` }
+			: outcome.ok
+				? {
+						state: outcome.ledgerEvicted ? "verified-ledger-evicted" : "verified",
+						display: integrityClause(inspection.status),
+						detail: null,
+					}
+				: {
+						state: outcome.retired ? "retired-format" : "failed",
+						display: integrityClause(inspection.status),
+						detail: clip(outcome.reason),
+					};
+	const status = inspection.status;
+	let evidence: ReceiptEvidenceV1["evidence"] = null;
+	try {
+		const filed = readEvidenceIndex(stateDir).filter((entry) => entry.runId === runId);
+		const newest = filed.reduce<(typeof filed)[number] | null>(
+			(latest, entry) => (latest === null || entry.generatedAt > latest.generatedAt ? entry : latest),
+			null,
+		);
+		if (newest && Number.isFinite(Date.parse(newest.generatedAt)))
+			evidence = {
+				evidenceId: newest.evidenceId,
+				findingCount: Math.max(0, Math.trunc(newest.findingCount)),
+				succeeded: newest.succeeded ?? null,
+				filedAt: new Date(newest.generatedAt).toISOString(),
+			};
+	} catch {
+		// An unreadable evidence index files the run under no bundle; the receipt's own facts still stand.
+		evidence = null;
+	}
+	return {
+		v: TELEMETRY_DTO_VERSION,
+		foldVersion: TELEMETRY_FOLD_VERSION,
+		generatedAt: (options.now ?? new Date()).toISOString(),
+		kind: "receipt-evidence",
+		runId,
+		receipt: state,
+		integrity,
+		trust: {
+			artifactIntegrity: trustAxis(status, "artifactIntegrity"),
+			validationGrounding: trustAxis(status, "validationGrounding"),
+			independentReview: trustAxis(status, "independentReview"),
+			contextProvenance: trustAxis(status, "contextProvenance"),
+			completionEvidence: trustAxis(status, "completionEvidence"),
+			validation: validationClause(status),
+		},
+		sealed: receipt && outcome.ok ? sealedChecks(receipt) : null,
+		evidence,
 	};
 }

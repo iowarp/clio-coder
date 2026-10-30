@@ -1,12 +1,13 @@
 import type {
 	HealthV1,
 	QuotaStateV1,
+	ReceiptEvidenceV1,
 	SessionTelemetryV1,
 	TelemetryTopic,
 	TelemetryUpdateV1,
 } from "../../core/telemetry/dto.js";
 import { parseFactRef, TELEMETRY_DTO_VERSION, TELEMETRY_TOPICS } from "../../core/telemetry/dto.js";
-import type { SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryProducerHealth } from "../../core/telemetry/producer.js";
 import { renderFact } from "../../core/telemetry/render.js";
@@ -51,6 +52,8 @@ type Mode = SegmentHeader["mode"];
 interface TelemetrySourceLoader {
 	loadSessionTelemetrySourceAsync(stateDir: string, sessionId: string): Promise<SessionSource | null>;
 	loadRunTelemetrySourceAsync(stateDir: string, runId: string): Promise<JournalSource>;
+	/** The run's sealed receipt through its integrity check; absent from a loader that does not read receipts. */
+	loadRunReceiptEvidence?(stateDir: string, runId: string): ReceiptEvidenceV1;
 }
 export interface LiveTelemetryOptions {
 	stateDir: () => string;
@@ -72,7 +75,13 @@ const EMPTY_LEGACY: SessionSource["legacy"] = { records: [], aggregates: 0 };
 const sessionOwner = (sessionId: string) => `session:${sessionId}`;
 const runOwner = (runId: string) => `run:${runId}`;
 
-export function telemetryView(source: SessionSource): TelemetryView {
+/** A view and whether its session references a run, without building the run's DTO or reading its receipt. */
+type LocalView = TelemetryView & { references(runId: string): boolean };
+
+export function telemetryView(
+	source: SessionSource,
+	receipt: (runId: string) => ReceiptEvidenceV1 | null = () => null,
+): LocalView {
 	let session: SessionTelemetryV1 | undefined;
 	return {
 		sessionId: source.sessionId,
@@ -85,8 +94,9 @@ export function telemetryView(source: SessionSource): TelemetryView {
 		runs: () => runsReport(source),
 		run: (runId) => {
 			const run = source.runs.get(runId);
-			return run ? runTelemetry(runId, run) : null;
+			return run ? runTelemetry(runId, run, {}, receipt(runId)) : null;
 		},
+		references: (runId) => source.runs.has(runId),
 		whyStopped: () => whyStopped(source),
 		explain: (ref) => explain(ref, { session: source }),
 		quantity: (ref) => quantityOf(ref, source),
@@ -113,11 +123,14 @@ interface Owned {
 	rewrittenWhileSeeding: boolean;
 	version: number;
 	snapshot?: { version: number; source: JournalSource };
+	/** The origin of the newest batch or cold read, which the session's lifecycle reads (#434 §6.1). */
+	writer?: ClockOrigin;
 }
 interface Node {
 	sessionId: string;
 	journal: Owned;
 	legacy: SessionSource["legacy"];
+	ledger?: SessionSource["ledger"];
 	runIds: Set<string>;
 	parent: { sessionId: string; turnId: string; at: string; node: Node | null } | null;
 	snapshot?: { journal: JournalSource; runs: JournalSource[]; parent: SessionSource | null; source: SessionSource };
@@ -130,7 +143,7 @@ interface Binding {
 	nodes: Map<string, Node>;
 	off: Array<() => void>;
 	version: number;
-	view?: { version: number; view: TelemetryView };
+	view?: { version: number; view: LocalView };
 	quota: QuotaCursor;
 	health: HealthCursor;
 }
@@ -180,6 +193,7 @@ function journalOf(entry: Owned | undefined): JournalSource {
 		skipped: entry.skipped,
 		damaged: entry.damaged,
 		...(entry.seeding ? { seeding: true } : {}),
+		...(entry.writer ? { writer: entry.writer } : {}),
 	};
 	entry.snapshot = { version: entry.version, source };
 	return source;
@@ -191,6 +205,7 @@ function append(entry: Owned, event: Extract<PersistedTelemetry, { kind: "append
 	appendPersistedTelemetry(read, event);
 	const batch = journalSourceFromRead(read, true, entry.runId);
 	entry.present = true;
+	if (batch.writer) entry.writer = batch.writer;
 	if (entry.seeding) {
 		entry.batches.push(batch.records);
 		entry.appendedWhileSeeding = true;
@@ -217,6 +232,9 @@ function merge(entry: Owned, cold: JournalSource): void {
 	entry.skipped += cold.skipped;
 	entry.damaged += cold.damaged;
 	entry.present ||= cold.present;
+	// A batch after the cold read was written later, so its origin is the newer writer.
+	const writer = after.length > 0 ? (entry.writer ?? cold.writer) : (cold.writer ?? entry.writer);
+	if (writer) entry.writer = writer;
 	entry.batches = [];
 	entry.overlap = after.length > 0 ? null : ids;
 	entry.seeding = false;
@@ -259,7 +277,11 @@ const localCount = (value: number) => {
 };
 
 export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTelemetryModel {
-	const load = options.loader ?? (() => import("../session/telemetry-source.js"));
+	const importLoader = options.loader ?? (() => import("../session/telemetry-source.js"));
+	let loaded: TelemetrySourceLoader | null = null;
+	const load = async () => (loaded ??= await importLoader());
+	// Receipts are read only once the cold loader is in; a run DTO before that names no receipt rather than guessing.
+	const receipt = (runId: string) => loaded?.loadRunReceiptEvidence?.(options.stateDir(), runId) ?? null;
 	/** The session `bind` named; nothing subscribes or reads until a reader first asks (`activate`). */
 	let bound: string | null = null;
 	let current: Binding | null = null;
@@ -382,6 +404,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 				sessionId: src.sessionId,
 				journal: adopt(owner, src.journal),
 				legacy: src.legacy,
+				...(src.ledger ? { ledger: src.ledger } : {}),
 				runIds: new Set(src.runs.keys()),
 				parent: null,
 			};
@@ -515,6 +538,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			parent: node.parent
 				? { sessionId: node.parent.sessionId, turnId: node.parent.turnId, at: node.parent.at, source: parent }
 				: null,
+			...(node.ledger ? { ledger: node.ledger } : {}),
 		};
 		// The node's journal only grows by appending after its seed, so the read model folds just the new batch (#434).
 		if (cached) continueSource(source, cached.source);
@@ -575,18 +599,18 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		return cursor.latest;
 	};
 
-	const live = (): TelemetryView | null => {
+	const live = (): LocalView | null => {
 		activate();
 		const binding = current;
 		if (!binding) return null;
 		if (binding.view?.version === binding.version) return binding.view.view;
-		const view = telemetryView(binding.root ? snapshot(binding, binding.root) : buffered(binding));
+		const view = telemetryView(binding.root ? snapshot(binding, binding.root) : buffered(binding), receipt);
 		binding.view = { version: binding.version, view };
 		return view;
 	};
 	const open = async (sessionId: string): Promise<TelemetryView | null> => {
 		const source = await (await load()).loadSessionTelemetrySourceAsync(options.stateDir(), sessionId);
-		return source ? telemetryView(source) : null;
+		return source ? telemetryView(source, receipt) : null;
 	};
 
 	return {
@@ -607,14 +631,20 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		live,
 		open,
 		async run(runId) {
-			return runTelemetry(runId, await (await load()).loadRunTelemetrySourceAsync(options.stateDir(), runId));
+			const loader = await load();
+			return runTelemetry(
+				runId,
+				await loader.loadRunTelemetrySourceAsync(options.stateDir(), runId),
+				{},
+				loader.loadRunReceiptEvidence?.(options.stateDir(), runId) ?? null,
+			);
 		},
 		async explain(ref) {
 			const parsed = parseFactRef(ref);
 			// A repository window is the usage report's own read; nothing live holds one (#434).
 			if (!parsed || parsed.scope === "repo") return null;
 			const view = live();
-			if (view && (parsed.scope === "run" ? view.run(parsed.owner) !== null : parsed.owner === view.sessionId))
+			if (view && (parsed.scope === "run" ? view.references(parsed.owner) : parsed.owner === view.sessionId))
 				return view.explain(ref);
 			if (parsed.scope === "run") {
 				const run = await (await load()).loadRunTelemetrySourceAsync(options.stateDir(), parsed.owner);

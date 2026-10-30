@@ -120,7 +120,7 @@ function authorityOf(status: CanonicalTrustStatus, axis: TrustStatusAxis): strin
  * release never reads as "seal broken" or as merely unchecked. The state
  * behind the clause is `unknown`, which is what it is: nothing was checked.
  */
-function integrityClause(status: CanonicalTrustStatus): string {
+export function integrityClause(status: CanonicalTrustStatus): string {
 	const retired = retiredIntegrityVersionOf(status.artifactIntegrity);
 	if (retired !== null) return `seal v${retired} retired (this build verifies v${RUN_RECEIPT_INTEGRITY_VERSION})`;
 	if (integrityLedgerEvicted(status.artifactIntegrity)) return "sealed (ledger evicted)";

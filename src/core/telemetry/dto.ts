@@ -235,9 +235,18 @@ export const SessionTelemetrySchema = Type.Object(
 			{
 				firstRecordAt: Type.Union([UtcSchema, Type.Null()]),
 				lastRecordAt: Type.Union([UtcSchema, Type.Null()]),
-				/** Null while open, or after an abnormal end; `lastRecordAt` dates the last fact either way. */
+				/**
+				 * `open` while the process that last wrote the session is alive, `ended-abnormally` once it is gone without a
+				 * close, `unverifiable` when it ran on another host, and `unknown` with no journal writer or ledger owner to
+				 * check (#434 §6.1). `lastRecordAt` dates the last fact either way.
+				 */
+				state: vocabulary(["open", "closed", "ended-abnormally", "unverifiable", "unknown"]),
+				/** Set only when `state` is `closed`; the reason is null for a close only the ledger recorded. */
 				closed: Type.Union([
-					Type.Object({ at: UtcSchema, reason: vocabulary(["completed", "cancelled", "error"]) }, closed),
+					Type.Object(
+						{ at: UtcSchema, reason: Type.Union([vocabulary(["completed", "cancelled", "error"]), Type.Null()]) },
+						closed,
+					),
 					Type.Null(),
 				]),
 			},
@@ -534,6 +543,169 @@ export const TimelineSchema = Type.Object(
 );
 export type TimelineV1 = Static<typeof TimelineSchema>;
 
+const trustAxis = (states: readonly string[]) =>
+	Type.Object(
+		{
+			state: vocabulary(states),
+			/** The canonical trust word for the state, as the TUI footer prints it. */
+			display: Type.String(),
+			/** Who stands behind the state, e.g. `receipt_integrity_verification`; null for an absent axis. */
+			authority: Type.Union([text, Type.Null()]),
+		},
+		closed,
+	);
+const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
+const digestText = Type.String({ maxLength: 256 });
+
+/**
+ * A dispatched run's sealed receipt read through its integrity check (#434 §5.3, §11.3). Trust comes from the canonical
+ * projection, and the checks the receipt sealed appear only under a seal that verified, so a claim the seal does not
+ * vouch for never reads as a check that ran (L1, L6). The receipt file itself stays a document; nothing here is a raw
+ * seal field.
+ */
+export const ReceiptEvidenceSchema = Type.Object(
+	{
+		...header,
+		kind: Type.Literal("receipt-evidence"),
+		runId: ExistingId,
+		/** `unreadable` is a file that is not JSON or not a receipt; `missing` is no file at all. */
+		receipt: vocabulary(["sealed", "missing", "unreadable"]),
+		integrity: Type.Object(
+			{
+				/**
+				 * `verified-ledger-evicted` checked the seal alone because the ledger row it was sealed from is gone;
+				 * `retired-format` is a seal version this build no longer verifies.
+				 */
+				state: vocabulary(["verified", "verified-ledger-evicted", "failed", "retired-format", "unavailable"]),
+				display: Type.String(),
+				/** The verifier's own reason when the seal did not verify. */
+				detail: nullable(text),
+			},
+			closed,
+		),
+		trust: Type.Object(
+			{
+				artifactIntegrity: trustAxis(["verified", "failed", "absent", "unknown", "not_applicable"]),
+				validationGrounding: trustAxis(["validated", "failed", "ungrounded", "absent", "unknown", "not_applicable"]),
+				independentReview: trustAxis([
+					"passed",
+					"failed",
+					"inconclusive",
+					"not_independent",
+					"absent",
+					"unknown",
+					"not_applicable",
+				]),
+				contextProvenance: trustAxis(["recorded", "invalid", "absent", "unknown", "not_applicable"]),
+				completionEvidence: trustAxis(["evidenced", "incomplete", "limited", "absent", "unknown", "not_applicable"]),
+				/** The validation clause the footer prints beside the integrity word. */
+				validation: Type.String(),
+			},
+			closed,
+		),
+		/** What the verified seal states; null unless `integrity.state` is `verified` or `verified-ledger-evicted`. */
+		sealed: nullable(
+			Type.Object(
+				{
+					outcome: text,
+					outcomeCode: nullable(text),
+					exitCode: nullable(Type.Integer()),
+					failureMessage: nullable(text),
+					verification: nullable(
+						Type.Object(
+							{
+								state: vocabulary(["verified", "unverified", "not_applicable", "unknown"]),
+								basis: vocabulary([
+									"validation-tool",
+									"read-only-agent",
+									"no-validation-tool",
+									"acp-external-unobserved",
+									"receipt-unavailable",
+								]),
+							},
+							closed,
+						),
+					),
+					/** Null when the receipt sealed no quality block; empty when it sealed one with no typed check. */
+					typedValidations: nullable(
+						Type.Array(Type.Object({ sourceId: text, validatorDigest: digestText, passed: Type.Boolean() }, closed)),
+					),
+					hostVerification: nullable(
+						Type.Object(
+							{
+								status: vocabulary(["verified", "rejected", "skipped", "not_implicated"]),
+								reason: nullable(text),
+								strategy: vocabulary(["single", "batch-settled"]),
+								checks: Type.Array(
+									Type.Object(
+										{
+											check: text,
+											exitCode: Type.Integer(),
+											durationMs: nonNegative,
+											memo: Type.Boolean(),
+											outputTail: Type.String({ maxLength: 16_384 }),
+											evidenceRunId: nullable(ExistingId),
+										},
+										closed,
+									),
+								),
+							},
+							closed,
+						),
+					),
+					/** `unmeasured` when the run had no typed result contract; null when the receipt sealed no quality block. */
+					resultContract: Type.Union([
+						Type.Object(
+							{
+								sourceId: text,
+								validatorDigest: digestText,
+								kind: nullable(text),
+								conformance: vocabulary(["pass", "fail", "not-reached"]),
+								quality: vocabulary(["pass", "fail", "unmeasured"]),
+							},
+							closed,
+						),
+						Type.Literal("unmeasured"),
+						Type.Null(),
+					]),
+					responseSchema: nullable(
+						Type.Object(
+							{
+								sourceId: nullable(text),
+								schemaDigest: nullable(digestText),
+								runtimeEnforceable: Type.Boolean(),
+								enforcementPassed: nullable(Type.Boolean()),
+							},
+							closed,
+						),
+					),
+					validationGrounding: nullable(
+						Type.Object(
+							{
+								claimed: count,
+								grounded: count,
+								ungrounded: Type.Array(text),
+								basis: vocabulary(["no-command-executed", "unmatched-command"]),
+							},
+							closed,
+						),
+					),
+				},
+				closed,
+			),
+		),
+		/** The evidence bundle the run was filed under, from the evidence index; null when none names it. */
+		evidence: nullable(
+			Type.Object(
+				{ evidenceId: ExistingId, findingCount: count, succeeded: nullable(Type.Boolean()), filedAt: UtcSchema },
+				closed,
+			),
+		),
+	},
+	closed,
+);
+export type ReceiptEvidenceV1 = Static<typeof ReceiptEvidenceSchema>;
+
 export const RunTelemetrySchema = Type.Object(
 	{
 		...header,
@@ -558,6 +730,8 @@ export const RunTelemetrySchema = Type.Object(
 			),
 			Type.Null(),
 		]),
+		/** The run's sealed receipt through its integrity check; null when the reader was given no receipt to check. */
+		receipt: Type.Union([ReceiptEvidenceSchema, Type.Null()]),
 	},
 	closed,
 );
@@ -712,6 +886,7 @@ export const TELEMETRY_DTO_SCHEMAS = {
 	timeline: TimelineSchema,
 	run: RunTelemetrySchema,
 	runs: Type.Array(RunRowSchema),
+	receiptEvidence: ReceiptEvidenceSchema,
 	whyStopped: WhyStoppedSchema,
 	explanation: ExplanationSchema,
 	quota: QuotaStateSchema,
