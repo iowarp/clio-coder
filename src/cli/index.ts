@@ -88,7 +88,7 @@ Usage:
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
-  clio-coder telemetry import-legacy|consent|export|import-bundle  rebuild pre-journal call facts; manage research content consent; export or verify a session's telemetry bundle
+  clio-coder telemetry import-legacy|consent|export|import-bundle|prune  rebuild pre-journal call facts; manage research content consent; export or verify a telemetry bundle; apply retention
   clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages

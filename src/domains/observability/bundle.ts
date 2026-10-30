@@ -21,7 +21,8 @@ export const BUNDLE_FORMAT = "clio-telemetry-bundle/1";
 const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const OBJECT_ID = /^obj_[0-9a-f]{64}$/;
-const CONTENT_SUBJECTS = new Set(["prompt-text", "request"]);
+/** Object subjects that hold content; research retention expires them before the records that cite them. */
+export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set(["prompt-text", "request"]);
 
 export interface BundleFile {
 	path: string;
@@ -39,7 +40,7 @@ export interface BundleManifest {
 		sessionId: string;
 		cwdHash: string;
 		/** Ancestor facts are not copied; a fork's bundle folds its own calls only. */
-		forkedFrom: { parentSessionId: string; parentTurnId: string } | null;
+		forkedFrom: { parentSessionId: string; parentTurnId: string; lineage: "not-included" } | null;
 		runs: string[];
 	};
 	/** The most any line or file in the bundle captured; content is true only when content was exported. */
@@ -174,7 +175,7 @@ async function readSegments(directory: string, fileName: JournalFileName): Promi
 }
 
 /** Resolvable references anywhere in a record's payload, by object id. */
-function collectRefs(value: unknown, refs: Map<string, string>): void {
+export function collectRefs(value: unknown, refs: Map<string, string>): void {
 	if (Array.isArray(value)) {
 		for (const item of value) collectRefs(item, refs);
 		return;
@@ -261,7 +262,12 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		const data = record.data as Record<string, unknown> | undefined;
 		if ((record.k === "call.ref" || record.k === "run.ref") && typeof data?.runId === "string") runs.add(data.runId);
 		if (record.k === "session.forked_from" && typeof data?.parentSessionId === "string")
-			forkedFrom = { parentSessionId: data.parentSessionId, parentTurnId: String(data.parentTurnId) };
+			forkedFrom = {
+				parentSessionId: data.parentSessionId,
+				parentTurnId: String(data.parentTurnId),
+				// A session's totals are child-only by decision, so the bundle folds to them without its ancestors (#434).
+				lineage: "not-included",
+			};
 	}
 	listed.push({
 		path: "calls.jsonl",

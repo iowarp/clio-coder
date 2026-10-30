@@ -52,6 +52,11 @@ import {
 	telemetryCommitment,
 	telemetryPromptStructure,
 } from "../../src/domains/observability/objects.js";
+import {
+	applyTelemetryPrune,
+	DEFAULT_PRUNE_POLICY,
+	planTelemetryPrune,
+} from "../../src/domains/observability/retention.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
 import { readAuditRows } from "../../src/domains/session/archive-readers.js";
@@ -808,6 +813,119 @@ test("a research export round-trips through import-bundle into a fixture with th
 		await run.close();
 		await journals.closeAll();
 		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("prune removes only idle, unreferenced telemetry past retention and says exactly what (#434)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-prune-"));
+	const sessions = join(stateDir, "sessions", "hash");
+	const old = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+	const ended = JSON.stringify({ endedAt: "2026-01-01T00:00:00.000Z", owner: null });
+	const journal = async (
+		id: string,
+		work: (ctx: NonNullable<Parameters<typeof recordTelemetry>[2]>) => void,
+		fileName?: "events.ndjson",
+	) => {
+		const directory = fileName ? join(stateDir, "runs", id) : join(sessions, id);
+		const ctx = fileName
+			? { sessionId: "kept", runId: id, label: "worker" as const }
+			: { sessionId: id, label: "main" as const };
+		const writerJournal = await openCallJournal({
+			sessionDirectory: directory,
+			context: ctx,
+			writer,
+			...(fileName ? { fileName } : {}),
+		});
+		work(ctx);
+		await writerJournal.close();
+		if (!fileName) await writeFile(join(directory, "meta.json"), ended);
+		return directory;
+	};
+	const age = async (path: string) => utimes(path, old, old);
+	try {
+		const expired = await journal("expired", (ctx) => recordTelemetry("session.opened", {}, ctx));
+		await writeFile(join(expired, "current.jsonl"), "{}\n");
+		await storeTelemetryObject(expired, "tool-schemas", [{ name: "read" }]);
+		await age(join(expired, "calls.jsonl"));
+		const live = await journal("live", (ctx) => recordTelemetry("session.opened", {}, ctx));
+		await age(join(live, "calls.jsonl"));
+		await writeFile(join(live, "calls.jsonl.lock"), "{}");
+		const parent = await journal("parent", (ctx) => recordTelemetry("session.opened", {}, ctx));
+		await age(join(parent, "calls.jsonl"));
+		await mkdir(join(sessions, "child"), { recursive: true });
+		seedForkCallJournal(join(sessions, "child"), "child", {
+			parentSessionId: "parent",
+			parentCwdHash: "hash",
+			parentTurnId: "t1",
+			parentTurnAt: "2026-01-01T00:00:00.000Z",
+		});
+		await writeFile(join(sessions, "child", "meta.json"), ended);
+		const keptDirectory = join(sessions, "kept");
+		await mkdir(keptDirectory, { recursive: true });
+		const structure = await storeTelemetryObject(keptDirectory, "tool-schemas", [{ name: "kept" }]);
+		const text = await storeTelemetryObject(keptDirectory, "prompt-text", { text: "old prompt" });
+		const orphan = await storeTelemetryObject(keptDirectory, "tool-schemas", [{ name: "orphan" }]);
+		const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
+		const keptJournal = await openCallJournal({
+			sessionDirectory: keptDirectory,
+			context: { sessionId: "kept", label: "main" },
+			writer,
+			capture: () => effectiveTelemetryCapture({ mode: "research", research }, true),
+		});
+		const keptContext = { sessionId: "kept", label: "main" as const };
+		recordTelemetry(
+			"prompt.text",
+			{ structure: { ...structure, subject: "prompt-structure" }, text, bytes: 10 },
+			keptContext,
+		);
+		recordTelemetry(
+			"call.started",
+			{
+				...{ callId: newCallId(), attemptId: newAttemptId(), attempt: 0, label: "main" },
+				objects: { toolSchemas: structure },
+				target: { targetId: "t", runtimeId: "r", api: "a", requestedModel: "m", reportedModel: unknown },
+				roundKind: "normal",
+				toolChoice: "auto",
+			},
+			keptContext,
+		);
+		recordTelemetry("run.ref", { runId: "cited" }, keptContext);
+		await keptJournal.close();
+		await writeFile(join(keptDirectory, "meta.json"), ended);
+		await age(join(keptDirectory, "objects", `${text.id}.json`));
+		for (const runId of ["unreferenced", "receipted", "cited"]) {
+			const run = await journal(runId, () => {}, "events.ndjson");
+			await age(join(run, "events.ndjson"));
+		}
+		await mkdir(join(stateDir, "receipts"), { recursive: true });
+		await writeFile(join(stateDir, "receipts", "receipted.json"), "{}");
+
+		const plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY);
+		const relative = (path: string) => path.slice(stateDir.length + 1);
+		deepStrictEqual(
+			plan.remove.map((action) => `${relative(action.path)}:${action.reason}`).sort(),
+			[
+				`sessions/hash/expired/calls.jsonl:expired`,
+				`sessions/hash/expired/objects/${(await readdir(join(expired, "objects")))[0]}:expired`,
+				`runs/unreferenced/events.ndjson:expired`,
+				`sessions/hash/kept/objects/${orphan.id}.json:unreferenced-object`,
+				`sessions/hash/kept/objects/${text.id}.json:research-expired`,
+			].sort(),
+		);
+		deepStrictEqual(plan.held.map((hold) => `${relative(hold.path)}:${hold.reason}`).sort(), [
+			"runs/cited:referenced-run",
+			"runs/receipted:receipt",
+			"sessions/hash/live:live",
+			"sessions/hash/parent:fork-parent",
+		]);
+		strictEqual((await readdir(join(keptDirectory, "objects"))).length, 3, "a plan removes nothing");
+		const result = await applyTelemetryPrune(plan);
+		deepStrictEqual(result.removed, plan.remove);
+		deepStrictEqual(result.skipped, []);
+		deepStrictEqual(await readdir(expired), ["current.jsonl", "meta.json"], "the ledger is not telemetry");
+		deepStrictEqual(await readdir(join(keptDirectory, "objects")), [`${structure.id}.json`]);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
 	}
 });
 
