@@ -299,14 +299,24 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 				await cli.waitFor(/Ask Clio/u, 30_000);
 				cli.child.stdin.write("AUTONOMY_DEFAULT_OVERRIDES_SAVED_YOLO\r");
 				await cli.waitFor(/Autonomy fixture confirmed/u, 30_000);
+				// The reply and its summary paint before the turn settles its ledger and
+				// journal writes, and Ctrl+D is refused until it has.
+				await cli.waitFor(/Done · /u, 30_000);
 				const chat = chatRequests.find((row) =>
 					JSON.stringify(row.messages).includes("AUTONOMY_DEFAULT_OVERRIDES_SAVED_YOLO"),
 				);
 				ok(chat);
 				const system = chat.messages.find((message) => message.role === "system");
 				match(String(system?.content), /Autonomy: default\./u);
+				const exited = cli.waitForExit();
 				cli.child.stdin.write("\u0004");
-				strictEqual((await cli.waitForExit()).code, 0);
+				// A press that lands in that settling tail is refused out loud; the next one exits.
+				const refused = cli.waitFor(/Work or queued messages remain/u, 3_000).then(
+					() => cli.child.stdin.write("\u0004"),
+					() => undefined,
+				);
+				strictEqual((await exited).code, 0);
+				await refused;
 			} finally {
 				await cli.stop();
 			}
