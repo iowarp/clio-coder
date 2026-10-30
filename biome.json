@@ -52,6 +52,7 @@
 			"!benchmarks",
 			"!social-campaigns",
 			"!**/*.html",
+			"!tests/fixtures/telemetry/golden",
 			"!tmp"
 		]
 	},

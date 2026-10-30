@@ -1,0 +1,1 @@
+{"chat":{"model":"gpt-6.1-sol","prewarm":true,"target":"openai-codex"},"fleet":{"default":{"model":"gpt-6-luna","target":"openai-codex"}},"safety":{"limits":{"sessionCostUsd":5}}}
