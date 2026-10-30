@@ -361,7 +361,8 @@ export const SessionPane = memo(function SessionPane({
 					</button>
 				</div>
 			)}
-			<div className="pane__body">
+			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: the body scrolls, so keyboard users must reach it even when a view holds no control. */}
+			<section className="pane__body" aria-label="Task details content" tabIndex={0}>
 				{PANE_VIEWS.map(({ id }) => (
 					<Activity key={`${sessionId}-${id}`} mode={open && view === id ? "visible" : "hidden"}>
 						<section className="pane__panel" aria-labelledby={`${headId}-title`}>
@@ -377,7 +378,7 @@ export const SessionPane = memo(function SessionPane({
 						</section>
 					</Activity>
 				))}
-			</div>
+			</section>
 		</div>
 	);
 	if (wide) {
