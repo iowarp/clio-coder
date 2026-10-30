@@ -780,13 +780,21 @@ describe("dispatch member controls", () => {
 			const canceledRetry = deferred<void>();
 			const retryStarted = deferred<void>();
 			const deliverFirst = deferred<void>();
-			const cancellations: number[] = [];
-			const f = await fixture(1, (worker, count) => {
+			const cancellations: string[] = [];
+			// Concurrent members spawn in no promised order, so each case finds its
+			// member's worker by task: attempts[0] is the first try, attempts[1] the retry.
+			const attempts = new Map<string, ReturnType<typeof controlledWorker>[]>();
+			const workerOf = (task: string, attempt = 0) => attempts.get(task)?.[attempt];
+			const f = await fixture(1, (worker, count, spec) => {
+				const tries = attempts.get(spec.task) ?? [];
+				tries.push(worker);
+				attempts.set(spec.task, tries);
 				if (count === 3) initial.resolve();
-				if (count === 2 || count > 3)
+				const role = tries.length > 1 ? "retry" : spec.task === "second" ? "peer" : null;
+				if (role !== null)
 					worker.worker.abort = () => {
-						cancellations.push(count);
-						if (count === 2) canceledPeer.resolve();
+						cancellations.push(role);
+						if (role === "peer") canceledPeer.resolve();
 						else canceledRetry.resolve();
 					};
 			});
@@ -805,7 +813,7 @@ describe("dispatch member controls", () => {
 				if (!isProgressEvent(event.event)) return;
 				if (event.event.type === "retry_scheduled" && phase === "admitting") {
 					timers.runNext();
-					f.workers[2]?.finish({ exitCode: 1, signal: null, stderrTail: "[worker] fatal: WorkerSpec invalid" });
+					workerOf("exhausted")?.finish({ exitCode: 1, signal: null, stderrTail: "[worker] fatal: WorkerSpec invalid" });
 				}
 				if (event.event.type === "attempt_start") retryStarted.resolve();
 			});
@@ -874,7 +882,7 @@ describe("dispatch member controls", () => {
 					},
 				);
 				await initial.promise;
-				f.workers[0]?.finish({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" });
+				workerOf("first")?.finish({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" });
 				if (phase !== "admitting") {
 					const first = await handleOf.first.promise;
 					ok(first);
@@ -885,7 +893,7 @@ describe("dispatch member controls", () => {
 						await retryStarted.promise;
 						deliverFirst.resolve();
 					}
-					f.workers[2]?.finish({ exitCode: 1, signal: null, stderrTail: "[worker] fatal: WorkerSpec invalid" });
+					workerOf("exhausted")?.finish({ exitCode: 1, signal: null, stderrTail: "[worker] fatal: WorkerSpec invalid" });
 				}
 				await canceledPeer.promise;
 				if (phase !== "queued") await canceledRetry.promise;
@@ -896,21 +904,21 @@ describe("dispatch member controls", () => {
 				strictEqual(readAgentLedger(ledgerId)?.closedAt, null);
 				strictEqual(returned, false);
 				strictEqual(released, false);
-				f.workers[1]?.finish({ exitCode: null, signal: "SIGTERM" });
+				workerOf("second")?.finish({ exitCode: null, signal: "SIGTERM" });
 				if (phase !== "queued") {
 					// The peer's terminal is insufficient while the continuation is owned.
 					const peer = await handleOf.second.promise;
 					ok(peer);
 					await peer.finalPromise;
 					strictEqual(released, false);
-					f.workers[3]?.finish({ exitCode: null, signal: "SIGTERM" });
+					workerOf("first", 1)?.finish({ exitCode: null, signal: "SIGTERM" });
 				}
 				const outcome = await pending;
 				strictEqual(outcome.cleanRun, false);
 				strictEqual(released, true);
 				strictEqual(getDispatchReservation(ownerId)?.status, "released");
 				ok(readAgentLedger(ledgerId)?.closedAt);
-				deepStrictEqual(cancellations.sort(), phase === "queued" ? [2] : [2, 4]);
+				deepStrictEqual(cancellations.sort(), phase === "queued" ? ["peer"] : ["peer", "retry"]);
 				const first = await handleOf.first.promise;
 				ok(first);
 				const receipt = await first.finalPromise;
