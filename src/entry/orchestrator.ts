@@ -9,7 +9,7 @@ import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
-import { BusChannels, type PluginsReloadedPayload } from "../core/bus-events.js";
+import { BusChannels, type ConfigChangeSource, type PluginsReloadedPayload } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
@@ -4179,13 +4179,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * settings lock, so two processes saving defaults at the same time cannot
 	 * interleave and drop each other's patches.
 	 */
-	const persistSavedMutation = (mutator: SettingsMutator): void => {
-		if (config?.update) config.update(mutator);
+	const persistSavedMutation = (mutator: SettingsMutator, source: ConfigChangeSource): void => {
+		if (config?.update) config.update(mutator, source);
 		else updateSettings(mutator);
 		bumpSessionState();
 	};
-	const persistProjectMutation = (mutator: SettingsMutator): void => {
-		if (config?.updateProject) config.updateProject(mutator);
+	const persistProjectMutation = (mutator: SettingsMutator, source: ConfigChangeSource): void => {
+		if (config?.updateProject) config.updateProject(mutator, source);
 		else updateProjectLocalSettings(process.cwd(), mutator);
 		bumpSessionState();
 	};
@@ -4196,15 +4196,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * sessions cannot clobber each other's saved defaults wholesale. A save the
 	 * file refuses puts the live route back (commitRoutingPatch) and rethrows.
 	 */
-	const updateSessionRouting = (patch: RoutingPatch, mutateSaved?: (saved: ClioSettings) => void): void => {
+	const updateSessionRouting = (patch: RoutingPatch, source: ConfigChangeSource): void => {
 		commitRoutingPatch(
 			sessionRouting,
 			patch,
-			() =>
-				persistSavedMutation((saved) => {
-					mergeRoutingPatchIntoSettings(saved, patch);
-					mutateSaved?.(saved);
-				}),
+			() => persistSavedMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch), source),
 			bumpSessionState,
 		);
 		persistCurrentThinkingLevel();
@@ -4215,13 +4211,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * endpoint dies with the session that made it; "global" is the historical
 	 * write-through. Nothing on this path writes durably without a scope.
 	 */
-	const applyRoutingAtScope = (patch: RoutingPatch, scope: "session" | "project" | "global"): void => {
+	const applyRoutingAtScope = (
+		patch: RoutingPatch,
+		scope: "session" | "project" | "global",
+		source: ConfigChangeSource = "unattributed",
+	): void => {
 		if (scope === "global") {
-			updateSessionRouting(patch);
+			updateSessionRouting(patch, source);
 			return;
 		}
 		if (scope === "project") {
-			persistProjectMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch));
+			persistProjectMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch), source);
 		}
 		applyRoutingPatch(sessionRouting, patch);
 		bumpSessionState();
@@ -4252,7 +4252,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		persistSavedMutation((saved) => {
 			if (routingPatch !== null) mergeRoutingPatchIntoSettings(saved, routingPatch);
 			if (patch["safety.autonomy"] !== undefined) saved.safety.autonomy = patch["safety.autonomy"];
-		});
+		}, "acp");
 		if (routingPatch !== null) {
 			applyRoutingPatch(sessionRouting, routingPatch);
 			bumpSessionState();
@@ -4266,7 +4266,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * absorbed into the session state and written through; everything else is
 	 * persisted without leaking this session's routing into the saved defaults.
 	 */
-	const applySettingsBlob = (next: ClioSettings): void => {
+	const applySettingsBlob = (next: ClioSettings, source: ConfigChangeSource): void => {
 		const patch = diffRouting(getCurrentSettings(), next);
 		commitRoutingPatch(
 			sessionRouting,
@@ -4283,7 +4283,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					}
 					if (patch) mergeRoutingPatchIntoSettings(persisted, patch);
 					return persisted;
-				}),
+				}, source),
 			bumpSessionState,
 		);
 		persistCurrentThinkingLevel();
@@ -4300,7 +4300,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * live, so the overlay only offers "global" for them; the file write is what
 	 * a later restart picks up.
 	 */
-	const commitSetting = (id: string, next: ClioSettings, scope: "session" | "project" | "global"): void => {
+	const commitSetting = (
+		id: string,
+		next: ClioSettings,
+		scope: "session" | "project" | "global",
+		source: ConfigChangeSource,
+	): void => {
 		if (isRoutingPath(id)) {
 			// Build the patch from `next` keyed by the edited id, not by diffing
 			// against the live view: a prior session-only apply already moved the
@@ -4310,10 +4315,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const patch = routingPatchForId(id, next);
 			if (!patch) return;
 			if (scope === "global") {
-				updateSessionRouting(patch);
+				updateSessionRouting(patch, source);
 				return;
 			}
-			applyRoutingAtScope(patch, scope);
+			applyRoutingAtScope(patch, scope, source);
 			return;
 		}
 		getCurrentSettings();
@@ -4324,7 +4329,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return;
 		}
 		if (scope === "project") {
-			persistProjectMutation((saved) => setAtPath(saved, id, value));
+			persistProjectMutation((saved) => setAtPath(saved, id, value), source);
 			sessionOverrides.delete(id);
 			bumpSessionState();
 			return;
@@ -4336,7 +4341,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		sessionOverrides.delete(id);
 		bumpSessionState();
 		try {
-			persistSavedMutation((saved) => setAtPath(saved, id, value));
+			persistSavedMutation((saved) => setAtPath(saved, id, value), source);
 		} catch (error) {
 			if (hadOverride) sessionOverrides.set(id, priorOverride);
 			bumpSessionState();
@@ -6200,7 +6205,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const current = getCurrentSettings();
 			const nextLevel = clampThinkingLevel(providers, current.chat.target, current.chat.model, level);
 			// An unscoped caller gets the scope that cannot outlive this session.
-			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "session");
+			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "session", "settings-ui");
 		},
 		onCycleThinking: () => routingGestures.cycleThinking(),
 		onSelectModel: ({ target, model }, scope) => {
@@ -6208,12 +6213,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			selectModel(
 				providers,
 				{ target, model, thinkingLevel: settings.chat.thinkingLevel },
-				(selected) => applyRoutingAtScope({ orchestrator: selected }, scope),
+				(selected) => applyRoutingAtScope({ orchestrator: selected }, scope, "settings-ui"),
 				settings.chat.modelPicker.recentLimit,
 			);
 		},
-		writeSettings: (next) => applySettingsBlob(next),
-		commitSetting: (id, next, scope) => commitSetting(id, next, scope),
+		// The terminal saves settings only from its overlays; slash commands and gestures change this session alone.
+		writeSettings: (next) => applySettingsBlob(next, "settings-ui"),
+		commitSetting: (id, next, scope) => commitSetting(id, next, scope, "settings-ui"),
 		...(session
 			? {
 					onResumeSession: (sessionId) => {

@@ -2,6 +2,7 @@ import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
 import {
 	CallLabel,
+	ConfigChangeSource,
 	Disposition,
 	FailureCause,
 	RoundKind,
@@ -560,7 +561,6 @@ const shown = Type.Object(
 );
 /** A configured amount such as a ceiling: a setting, not spend, so it carries no provenance. */
 const limit = Type.Object({ usd: nonNegative, display: Type.String() }, closed);
-const settingsSource = vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]);
 /**
  * Priced spend reaching a ceiling (`crossing`), or a paid request held there until the hold ended (`wait`). `spend`
  * is what admission saw, marked estimated when any call settled before it was, with the unpriced calls beside it.
@@ -579,7 +579,7 @@ export const BudgetEntrySchema = Type.Object(
 		outcome: Type.Union([vocabulary(["raised", "removed", "cleared", "refused", "aborted"]), Type.Null()]),
 		waited: Type.Union([shown, Type.Null()]),
 		raisedTo: Type.Union([limit, Type.Null()]),
-		raisedBy: Type.Union([settingsSource, Type.Null()]),
+		raisedBy: Type.Union([ConfigChangeSource, Type.Null()]),
 	},
 	closed,
 );
@@ -651,7 +651,7 @@ export const TimelineEntrySchema = Type.Union([
 			kind: Type.Literal("config"),
 			...at,
 			event: vocabulary(["snapshot", "changed"]),
-			source: Type.Union([settingsSource, Type.Null()]),
+			source: Type.Union([ConfigChangeSource, Type.Null()]),
 			paths: Type.Union([
 				Type.Object({ hotReload: Type.Array(text), nextTurn: Type.Array(text), restartRequired: Type.Array(text) }, closed),
 				Type.Null(),

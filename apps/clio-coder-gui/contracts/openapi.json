@@ -18183,9 +18183,6 @@
 			"Enum_44ee915d": {
 				"enum": ["auth_rejection", "transport_failure", "post_stream_or_unknown_failure"]
 			},
-			"Enum_46944da1": {
-				"enum": ["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]
-			},
 			"Enum_46fc9e94": {
 				"enum": [
 					"budget_wait_aborted",
@@ -18210,6 +18207,9 @@
 			},
 			"Enum_5f1647f2": {
 				"enum": ["never_sent", "sent_unsettled", "settled_no_usage", "settled"]
+			},
+			"Enum_77c0e69d": {
+				"enum": ["file", "settings-ui", "cli", "session-override", "slash-command", "acp", "unattributed"]
 			},
 			"Enum_82e04794": {
 				"enum": [
@@ -20726,7 +20726,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_at_attemptId_callId_8ba578df": {
+			"Object_at_attemptId_callId_2ad2e9c3": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -20744,7 +20744,7 @@
 					"raisedBy"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_35d00657"
+					"$ref": "#/components/schemas/Shape_3a8d2b8f"
 				},
 				"additionalProperties": false
 			},
@@ -24382,7 +24382,30 @@
 					"$ref": "#/components/schemas/Union_54e98030"
 				}
 			},
-			"Shape_35d00657": {
+			"Shape_39fec1f7": {
+				"resource": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"turnId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"text": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"provenance": {
+					"$ref": "#/components/schemas/Array_721a7562"
+				}
+			},
+			"Shape_3a8d2b8f": {
 				"kind": {
 					"type": "string",
 					"const": "budget"
@@ -24422,30 +24445,7 @@
 					"$ref": "#/components/schemas/Union_f4020539"
 				},
 				"raisedBy": {
-					"$ref": "#/components/schemas/Union_443a81ed"
-				}
-			},
-			"Shape_39fec1f7": {
-				"resource": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"turnId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"text": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"provenance": {
-					"$ref": "#/components/schemas/Array_721a7562"
+					"$ref": "#/components/schemas/Union_7668f561"
 				}
 			},
 			"Shape_3d21f4f2": {
@@ -26799,7 +26799,7 @@
 											"enum": ["snapshot", "changed"]
 										},
 										"source": {
-											"$ref": "#/components/schemas/Union_443a81ed"
+											"$ref": "#/components/schemas/Union_7668f561"
 										},
 										"paths": {
 											"anyOf": [
@@ -26857,7 +26857,7 @@
 									"additionalProperties": false
 								},
 								{
-									"$ref": "#/components/schemas/Object_at_attemptId_callId_8ba578df"
+									"$ref": "#/components/schemas/Object_at_attemptId_callId_2ad2e9c3"
 								},
 								{
 									"$ref": "#/components/schemas/Object_at_kind_limitReached_13ddc75a"
@@ -27767,16 +27767,6 @@
 					}
 				]
 			},
-			"Union_443a81ed": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Enum_46944da1"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_44dc2328": {
 				"anyOf": [
 					{
@@ -28062,6 +28052,16 @@
 					{
 						"type": "string",
 						"const": "failure"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_7668f561": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Enum_77c0e69d"
 					},
 					{
 						"type": "null"
@@ -29169,7 +29169,7 @@
 					"budget": {
 						"type": "array",
 						"items": {
-							"$ref": "#/components/schemas/Object_at_attemptId_callId_8ba578df"
+							"$ref": "#/components/schemas/Object_at_attemptId_callId_2ad2e9c3"
 						}
 					},
 					"quota": {

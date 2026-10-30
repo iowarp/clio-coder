@@ -5,6 +5,7 @@ import type { CaptureFlag } from "./capture.js";
 import type { ContentClass, Tier } from "./enums.js";
 import {
 	CallLabel,
+	ConfigChangeSource,
 	Disposition,
 	FailureCause,
 	RoundKind,
@@ -535,9 +536,7 @@ export const KIND_REGISTRY = {
 				waitedMs: duration,
 				raisedToUsd: Type.Optional(duration),
 				/** Who changed the ceiling, when a settings change during the wait set the one that released it. */
-				raisedBy: Type.Optional(
-					vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]),
-				),
+				raisedBy: Type.Optional(ConfigChangeSource),
 			},
 			closed,
 		),
@@ -556,7 +555,7 @@ export const KIND_REGISTRY = {
 		cc: "structural",
 		schema: Type.Object(
 			{
-				source: vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]),
+				source: ConfigChangeSource,
 				paths: Type.Object(
 					{
 						hotReload: Type.Array(text),

@@ -510,7 +510,14 @@ export interface DomainFailedPayload {
  * `settings` is the freshly validated snapshot.
  */
 /** Who changed the settings: a file write the watcher saw, or an in-process edit that named its surface (#434). */
-export type ConfigChangeSource = "file" | "settings-ui" | "cli" | "session-override" | "slash-command" | "unattributed";
+export type ConfigChangeSource =
+	| "file"
+	| "settings-ui"
+	| "cli"
+	| "session-override"
+	| "slash-command"
+	| "acp"
+	| "unattributed";
 
 export interface ConfigChangePayload {
 	diff: ConfigDiff;

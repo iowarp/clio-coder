@@ -71,4 +71,14 @@ export const RunTerminalReason = vocabulary([
 ]);
 export type RunTerminalReason = Static<typeof RunTerminalReason>;
 export const RunBoundKind = vocabulary(["turns", "tokens", "cost", "time", "tools"]);
+/** Who changed the settings: the watcher's reload of a file write, or the in-process surface that made the edit (#434). */
+export const ConfigChangeSource = vocabulary([
+	"file",
+	"settings-ui",
+	"cli",
+	"session-override",
+	"slash-command",
+	"acp",
+	"unattributed",
+]);
 export type RunBoundKind = Static<typeof RunBoundKind>;
