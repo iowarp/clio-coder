@@ -103,7 +103,7 @@ export interface RouteObservation {
 	firstPass: boolean;
 	completedCostUsd: number | null;
 	completedEndToEndMs: number | null;
-	cacheRead: boolean;
+	cacheRead: boolean | null;
 	queueWaitMs: number | null;
 }
 
@@ -114,7 +114,8 @@ export function routeObservationFromHistory(record: RouteHistoryRecord): RouteOb
 		firstPass: record.firstPass,
 		completedCostUsd: record.completedCostUsd,
 		completedEndToEndMs: record.completedPhaseTiming?.totalEndToEndMs ?? null,
-		cacheRead: record.cacheRead,
+		// v3 conflates missing cache measurements with misses; v4 separates them (#434).
+		cacheRead: record.cacheRead ? true : null,
 		queueWaitMs: record.completedPhaseTiming?.queueWaitMs ?? null,
 	};
 }
@@ -165,12 +166,14 @@ export function estimateRoute(
 	const labeled = samples.filter((sample) => sample.qualityLabel !== "unmeasured");
 	const qualityPasses = labeled.filter((sample) => sample.qualityLabel === "pass").length;
 	const attributable = samples.filter((sample) => sample.reliability !== "neutral");
-	const completed = samples.filter((sample) => sample.completedCostUsd !== null && sample.completedEndToEndMs !== null);
+	// Unpriced completions still provide timing and cache evidence (#434).
+	const completed = samples.filter((sample) => sample.completedEndToEndMs !== null);
 	const costs = completed.flatMap((sample) => (sample.completedCostUsd === null ? [] : [sample.completedCostUsd]));
 	const latencies = completed.flatMap((sample) =>
 		sample.completedEndToEndMs === null ? [] : [sample.completedEndToEndMs],
 	);
 	const queueWaits = completed.flatMap((sample) => (sample.queueWaitMs === null ? [] : [sample.queueWaitMs]));
+	const cacheReads = completed.flatMap((sample) => (sample.cacheRead === null ? [] : [sample.cacheRead]));
 	const completedCount = completed.length;
 	const reliabilityCount = attributable.length;
 	const qualityMean = labeled.length === 0 ? prior.qualityMean : qualityPasses / labeled.length;
@@ -190,7 +193,7 @@ export function estimateRoute(
 			prior.firstPassSuccessProbability,
 			reliabilityCount,
 		),
-		expectedCostUsd: shrink(completedCosts, prior.costUpperBoundUsd, completedCount),
+		expectedCostUsd: shrink(completedCosts, prior.costUpperBoundUsd, costs.length),
 		costUpperBoundUsd: Math.max(prior.costUpperBoundUsd, quantile(costs, 0.95, prior.costUpperBoundUsd)),
 		expectedEndToEndMs: shrink(completedLatency, prior.expectedEndToEndMs, completedCount),
 		p95EndToEndMs: Math.max(completedLatency, quantile(latencies, 0.95, prior.expectedEndToEndMs)),
@@ -202,7 +205,7 @@ export function estimateRoute(
 			prior.reliability,
 			reliabilityCount,
 		),
-		cacheHitProbability: completedCount === 0 ? 0 : rate(completed.map((sample) => sample.cacheRead)),
+		cacheHitProbability: rate(cacheReads),
 		queueWaitMs: shrink(mean(queueWaits, prior.queueWaitMs), prior.queueWaitMs, completedCount),
 		sampleCount: samples.length,
 		confidence: labeled.length / (labeled.length + ROUTE_ESTIMATE_SHRINKAGE),

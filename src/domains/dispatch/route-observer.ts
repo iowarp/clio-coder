@@ -462,7 +462,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				// always available.
 				const settled = routeSettledLabel(outcome.receipt);
 				const unpriced = receiptHasUnknownCost(outcome.receipt);
-				const cacheRead = (outcome.receipt.cacheReadTokenCount ?? 0) > 0;
+				const cacheRead = outcome.receipt.cacheReadTokenCount == null ? null : outcome.receipt.cacheReadTokenCount > 0;
 				const sample: RouteObservation = {
 					qualityLabel: outcome.quality.label,
 					reliability,
@@ -498,7 +498,8 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 									totalEndToEndMs: outcome.phaseTiming.totalEndToEndMs,
 								}
 							: null,
-					cacheRead: sample.cacheRead,
+					// Keep v3 writable until nullable cache history ships in P1.12 (#434).
+					cacheRead: sample.cacheRead ?? false,
 					sourceDigests: outcome.quality.sourceDigests,
 					settledAt: outcome.receipt.endedAt,
 				});
