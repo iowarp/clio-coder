@@ -116,10 +116,13 @@ export function foldPromptCacheTelemetry(entries: ReadonlyArray<SessionEntry>): 
 		if (!isRecord(promptCache)) continue;
 
 		const observation = promptCache.observation;
+		// An `unknown` verdict is written only for a cache read the provider omitted. Ledgers written before #434 still
+		// carry a shortfall computed against a zero read there, which is no measurement.
 		if (
 			isRecord(observation) &&
 			typeof observation.cause === "string" &&
-			finiteNonNegative(observation.shortfallTokens)
+			finiteNonNegative(observation.shortfallTokens) &&
+			promptCache.backendVerdict !== "unknown"
 		) {
 			cacheObservationCalls += 1;
 			// #423: historical unknown calls also include healthy appends, so apply the same calibrated band.

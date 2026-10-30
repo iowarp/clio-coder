@@ -3281,7 +3281,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const model = state.runtime?.agent.state.model;
 			const lifetimeSeconds = model ? cacheLifetimeSeconds(model, undefined) : undefined;
 			const observation = buildCacheCallObservation(
-				{ input, cacheRead, cacheWrite },
+				{ input, cacheRead: usage.cacheReadReported === false ? null : cacheRead, cacheWrite },
 				cacheCallBaseline,
 				nextAssistantColdReasons,
 				now,

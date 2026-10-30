@@ -90,7 +90,8 @@ export type CacheBreakCause =
 
 export interface CacheCallObservation {
 	expectedCachedTokens: number | null;
-	cacheReadTokens: number;
+	/** Null when the provider omitted its cache-read count; an omitted read is never a zero read. */
+	cacheReadTokens: number | null;
 	cacheWriteTokens: number;
 	inclusiveInputTokens: number;
 	shortfallTokens: number | null;
@@ -139,9 +140,12 @@ export interface CacheCallBaseline {
 	transportRequest?: CacheCallTransport["request"];
 }
 
-/** #423: keep provider usage unchanged and compare only within one context generation. */
+/**
+ * #423: keep provider usage unchanged and compare only within one context generation. A cache read the provider
+ * omitted leaves the shortfall unknown and infers no break (#434).
+ */
 export function buildCacheCallObservation(
-	usage: { input: number; cacheRead: number; cacheWrite: number },
+	usage: { input: number; cacheRead: number | null; cacheWrite: number },
 	previous: CacheCallBaseline | null,
 	hostColdReasons: readonly string[],
 	now: number,
@@ -159,10 +163,11 @@ export function buildCacheCallObservation(
 		working_set_evict: "working_set_evict",
 	};
 	const expected = previous?.inclusiveInputTokens ?? null;
-	const shortfall = expected === null ? null : Math.max(0, expected - usage.cacheRead);
+	const read = usage.cacheRead;
+	const shortfall = expected === null || read === null ? null : Math.max(0, expected - read);
 	// #423: healthy appends lost 91–849 tokens at the provider's 128-token boundaries.
 	// Require both >1,024 lost tokens and >10% loss before declaring a break.
-	const broke = expected !== null && shortfall !== null && shortfall > 1_024 && usage.cacheRead < 0.9 * expected;
+	const broke = expected !== null && read !== null && shortfall !== null && shortfall > 1_024 && read < 0.9 * expected;
 	const prior = previous?.requestFingerprint;
 	const fingerprintCause =
 		prior && requestFingerprint
@@ -198,7 +203,7 @@ export function buildCacheCallObservation(
 		expectedCachedTokens: expected,
 		cacheReadTokens: usage.cacheRead,
 		cacheWriteTokens: usage.cacheWrite,
-		inclusiveInputTokens: usage.input + usage.cacheRead + usage.cacheWrite,
+		inclusiveInputTokens: usage.input + (read ?? 0) + usage.cacheWrite,
 		shortfallTokens: shortfall,
 		cause: broke ? (cause ?? "unknown") : "none",
 		causeBasis: broke && cause !== undefined && cause !== "idle_expiry" ? "host" : "inferred",

@@ -7,6 +7,8 @@ import {
 } from "../../src/core/cache-telemetry.js";
 import type { CallUsage } from "../../src/core/telemetry/schemas.js";
 import { cachePhysics, firstDivergentSection } from "../../src/domains/observability/cache-physics.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { foldPromptCacheTelemetry } from "../../src/domains/session/prompt-cache.js";
 
 // #423: a break the host cannot name is attributed to the route lifetime it outlived, or to a continuation
 // the transport rebuilt, before it is left unknown.
@@ -107,4 +109,22 @@ test("the journal names the first divergence in request order and leaves an unre
 		pricing,
 	});
 	deepStrictEqual(resumed.cache.rePrefilledTokens, { kind: "unknown", reason: "not-observed" });
+});
+
+test("an omitted cache read leaves the shortfall unknown and is never a break, in new and old ledger rows (#434)", () => {
+	const omitted = buildCacheCallObservation({ input: 10_000, cacheRead: null, cacheWrite: 0 }, baseline, [], 60_000);
+	strictEqual(omitted.shortfallTokens, null);
+	strictEqual(omitted.cacheReadTokens, null);
+	strictEqual(omitted.cause, "none");
+	const legacy = buildCacheCallObservation(broken, baseline, [], 60_000);
+	const row = (backendVerdict: string, observation: unknown) =>
+		({
+			kind: "message",
+			role: "assistant",
+			payload: { promptCache: { backendVerdict, observation } },
+		}) as unknown as SessionEntry;
+	const folded = foldPromptCacheTelemetry([row("unknown", legacy), row("unknown", omitted)]);
+	strictEqual(folded.reprefilledTokens, null);
+	strictEqual(folded.cacheBreakCalls, 0);
+	strictEqual(foldPromptCacheTelemetry([row("cold", legacy)]).cacheBreakCalls, 1);
 });
