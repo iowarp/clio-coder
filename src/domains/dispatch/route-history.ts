@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
@@ -216,11 +217,22 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 	let snapshot = readHistory(path);
 	let records = snapshot.records;
 	let loaded = fileIdentity(path);
+	let reportedUnwritable = false;
+	// A preserved file this version cannot write silently stops route learning; say so once (#434).
+	const reportUnwritable = (): void => {
+		if (snapshot.writable || reportedUnwritable) return;
+		reportedUnwritable = true;
+		writeDiagnostic(
+			`[clio-coder:dispatch] route history ${path} holds ${snapshot.skipped} record(s) this version does not read; it is preserved unchanged and no new route observations are written until it is moved aside\n`,
+		);
+	};
+	reportUnwritable();
 
 	const reload = (): void => {
 		snapshot = readHistory(path);
 		records = snapshot.records;
 		loaded = fileIdentity(path);
+		reportUnwritable();
 	};
 	// Other Clio processes append to the same file. Reads pick up their writes
 	// when the file's identity moved, which costs one stat per read.
