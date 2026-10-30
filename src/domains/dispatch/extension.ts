@@ -5874,6 +5874,37 @@ export function createDispatchBundle(
 				throw error;
 			}
 		})();
+		const telemetryContext = req.runIdHint
+			? {
+					sessionId: req.ownerSessionId ?? null,
+					runId: req.runIdHint,
+					label: "worker" as const,
+					...(req.lineage?.parentRunId ? { parentRunId: req.lineage.parentRunId } : {}),
+				}
+			: undefined;
+		const callUsage = telemetryContext ? createRunCallUsage(telemetryContext) : undefined;
+		let runJournal: RunTelemetryJournal | undefined;
+		let parentJournal: TelemetrySessionLease | undefined;
+		const closeRunJournal = async () => {
+			try {
+				await runJournal?.close();
+			} finally {
+				await parentJournal?.release();
+			}
+		};
+		if (telemetryContext) {
+			try {
+				runJournal = await openRunTelemetry(telemetryContext, join(runEventJournalRoot(), telemetryContext.runId));
+				if (req.ownerSessionId && req.ownerSessionCwdHash) {
+					parentJournal = await context
+						.getContract<ObservabilityContract>("observability")
+						?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, "worker");
+					if (parentJournal) runJournal.linkSession(parentJournal.context);
+				}
+			} catch (error) {
+				reportDispatchDiagnostic("open ACP run telemetry journal", error);
+			}
+		}
 		let acp: AcpDelegationRunHandle;
 		try {
 			let environment: Record<string, string> | undefined;
@@ -5885,6 +5916,20 @@ export function createDispatchBundle(
 				credentialExpiresAt = credential?.expiresAt;
 			}
 			acp = startAcpRun({
+				...(telemetryContext
+					? {
+							telemetry: {
+								context: telemetryContext,
+								target: {
+									targetId,
+									runtimeId,
+									api: "acp",
+									requestedModel: req.model ?? wireModelId,
+									reportedModel: { kind: "unknown" as const, reason: "not-observed" as const },
+								},
+							},
+						}
+					: {}),
 				agent: lifecycle.agentConfig,
 				...(environment ? { environment } : {}),
 				...(credentialExpiresAt !== undefined ? { credentialExpiresAt } : {}),
@@ -5901,6 +5946,7 @@ export function createDispatchBundle(
 				monotonicNow,
 			});
 		} catch (error) {
+			await closeRunJournal();
 			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
@@ -5933,6 +5979,16 @@ export function createDispatchBundle(
 			),
 		});
 		const foldAcpEvent = (raw: unknown): void => {
+			if (isRecord(raw) && raw.type === "clio_coder_telemetry") {
+				if (runJournal && !runJournal.worker(raw)) runJournal.gap("invalid-record");
+				if (callUsage && !callUsage.observe(raw)) callUsage.gap();
+				const usage = callUsage?.snapshot();
+				if (usage) {
+					Object.assign(tokenMeter, usage);
+					stopRunsAtRunCostCap();
+				}
+				return;
+			}
 			outputCapture.observe(raw);
 			const event = raw as {
 				type?: string;
@@ -6013,7 +6069,7 @@ export function createDispatchBundle(
 					// A message Clio wrote into the loop (a result-contract repair, a
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
-					accumulateNativeUsage(tokenMeter, u, null, failure);
+					if (!callUsage?.snapshot()) accumulateNativeUsage(tokenMeter, u, null, failure);
 					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
@@ -6023,7 +6079,8 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
-					if (failure?.invoked === true) accumulateNativeUsage(tokenMeter, { usageReported: false }, null, failure);
+					if (failure?.invoked === true && !callUsage?.snapshot())
+						accumulateNativeUsage(tokenMeter, { usageReported: false }, null, failure);
 					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, null);
 					if (row !== null) upstreamResponses.push(row);
 				}
@@ -6183,6 +6240,7 @@ export function createDispatchBundle(
 			} catch (killError) {
 				reportDispatchDiagnostic("kill orphaned ACP agent after ledger failure", killError);
 			}
+			await closeRunJournal();
 			leaseSlot.release();
 			throw error;
 		}
@@ -6265,8 +6323,9 @@ export function createDispatchBundle(
 			// The adapter's aggregate usage is authoritative; event metering saw
 			// the same messages, so adding both would double-count. Event-metered
 			// values survive only when the adapter reported nothing.
-			const usage = result.usage;
-			const adapterReportedUsage = usage.tokensReported;
+			const canonical = callUsage?.snapshot();
+			const usage = canonical ? { ...result.usage, ...canonical } : result.usage;
+			const adapterReportedUsage = canonical !== undefined || usage.tokensReported;
 			if (adapterReportedUsage) {
 				tokenMeter.inputTokens = usage.inputTokens;
 				tokenMeter.outputTokens = usage.outputTokens;
@@ -6323,12 +6382,14 @@ export function createDispatchBundle(
 						: result.exitCode,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
-				apiCalls: adapterReportedUsage ? (usage.apiCalls ?? 1) : (tokenMeter.apiCalls ?? 0),
+				apiCalls: adapterReportedUsage ? (usage.apiCalls ?? 0) : (tokenMeter.apiCalls ?? 0),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
 				missingTokenCalls: (adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? 0,
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
-				cacheReadTokenCount: tokenMeter.cacheReadTokens,
+				...(canonical && canonical.usageFacts.cacheRead.unknownCount > 0
+					? {}
+					: { cacheReadTokenCount: tokenMeter.cacheReadTokens }),
 				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
 				...(tokenMeter.cacheWrite1hTokens === undefined ? {} : { cacheWrite1hTokenCount: tokenMeter.cacheWrite1hTokens }),
 				reasoningTokenCount: tokenMeter.reasoningTokens,
@@ -6490,6 +6551,8 @@ export function createDispatchBundle(
 				// the source stream, whether or not an external consumer ever
 				// subscribed, so a fast peer cannot seal a zero-token receipt.
 				if (!(await awaitEventDrain(eventPump.done))) {
+					runJournal?.gap("writer-drop");
+					callUsage?.gap();
 					recordingJournal.gap(envelope.id, 1);
 					toolTelemetryIngestionErrors += 1;
 					reportDispatchDiagnostic(
@@ -6699,6 +6762,7 @@ export function createDispatchBundle(
 				});
 				throw error;
 			} finally {
+				await closeRunJournal();
 				leaseSlot.release();
 			}
 		})().then(resolveFinal, rejectFinal);

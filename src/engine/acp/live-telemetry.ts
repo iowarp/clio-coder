@@ -191,6 +191,7 @@ export function sessionUsageTotals(session: {
 		costUsd: count(session.cost.knownUsd),
 		costProvenance: provenanceOf(session.cost),
 		calls: count(session.cost.calls),
+		missingTokenCalls: 0,
 		...(session.cost.hasEstimated ? { hasEstimatedCost: true } : {}),
 	};
 	for (const row of session.rows) {

@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { emptyUsage, mergeUsage } from "../../src/engine/acp/adapter.js";
+import { acpUsageFacts, emptyUsage, mergeUsage } from "../../src/engine/acp/adapter.js";
 
 describe("ACP delegation usage accumulator carries cost and a combined total", () => {
 	it("starts totalTokens and costUsd at zero beside the token counters", () => {
@@ -24,6 +24,8 @@ describe("ACP delegation usage accumulator carries cost and a combined total", (
 			cost: { total: 0.0123 },
 		});
 		strictEqual(usage.totalTokens, 100);
+		strictEqual(usage.apiCalls, 0);
+		strictEqual(usage.costSummary?.unknownCallCoverageRuns, 1);
 		strictEqual(usage.inputTokens, 10);
 		strictEqual(usage.outputTokens, 5);
 		strictEqual(usage.costUsd, 0.0123);
@@ -121,7 +123,36 @@ describe("ACP usage presence and provenance", () => {
 			hasEstimated: true,
 			hasUnknown: true,
 			allKnownFree: false,
-			calls: 4,
+			calls: 0,
+			unknownCallCoverageRuns: 4,
 		});
 	});
+});
+
+it("captures ACP field presence, amount provenance and count coverage independently", () => {
+	const facts = acpUsageFacts({
+		totalTokens: 0,
+		costUsd: 0.5,
+		costProvenance: "known",
+		apiCalls: 0,
+		missingTokenCalls: 0,
+	});
+	deepStrictEqual(facts.totalTokens, { kind: "measured", value: 0, source: "provider" });
+	strictEqual(facts.usage.input.kind, "unknown");
+	strictEqual(facts.apiCalls.kind, "measured");
+	strictEqual(facts.pricing.usd.kind, "measured");
+	const partial = acpUsageFacts({
+		totalTokens: 20,
+		unknownCallCoverageRuns: 1,
+		apiCalls: 3,
+		missingTokenCalls: 1,
+		costProvenance: "unknown",
+		costSummary: { knownUsd: 0.5, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 3 },
+	});
+	deepStrictEqual(partial.pricing.usd, { kind: "estimated", value: 0.5, method: "peer-report" });
+	strictEqual(partial.coverage, "complete");
+	strictEqual(partial.pricingCoverage, "partial");
+	strictEqual(partial.callCountCoverage, "partial");
+	deepStrictEqual(partial.totalTokens, { kind: "measured", value: 20, source: "provider" });
+	strictEqual(acpUsageFacts({}).apiCalls.kind, "unknown");
 });

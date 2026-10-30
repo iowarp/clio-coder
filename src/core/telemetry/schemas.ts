@@ -169,6 +169,8 @@ export const RunUsageSchema = Type.Object(
 		scope: vocabulary(["run", "peer-session"]),
 		revision: count,
 		coverage: vocabulary(["complete", "partial", "unknown"]),
+		pricingCoverage: vocabulary(["complete", "partial", "unknown"]),
+		callCountCoverage: vocabulary(["complete", "partial", "unknown"]),
 		target,
 		usage: UsageSchema,
 		totalTokens: factSchema(count),

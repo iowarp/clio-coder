@@ -59,6 +59,7 @@ export function createTelemetryForwarder(
 	origin: ClockOrigin,
 	emit: (frame: WorkerTelemetryFrame) => void,
 	capacity = 4096,
+	registerOwner = true,
 ) {
 	if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1_000_000)
 		throw new Error("invalid telemetry forwarder queue capacity");
@@ -95,19 +96,20 @@ export function createTelemetryForwarder(
 			);
 		}
 	};
-	const release = registerRunTelemetrySink(context.runId, {
-		enqueue(record) {
-			if (closed || telemetryOwner(record.ctx) !== telemetryOwner(context)) return false;
-			if (!scheduled) scheduled = setImmediate(flush);
-			if (pending.length >= capacity) {
-				dropped += 1;
-				return false;
-			}
-			pending.push(record);
-			return true;
-		},
-	});
+	const enqueue = (record: PendingTelemetry): boolean => {
+		if (closed || telemetryOwner(record.ctx) !== telemetryOwner(context)) return false;
+		if (!scheduled) scheduled = setImmediate(flush);
+		if (pending.length >= capacity) {
+			dropped += 1;
+			return false;
+		}
+		pending.push(record);
+		return true;
+	};
+	// In-process ACP queues into the host pump; the run journal already owns the global sink (#434).
+	const release = registerOwner ? registerRunTelemetrySink(context.runId, { enqueue }) : () => {};
 	return {
+		enqueue,
 		flush,
 		close(): void {
 			if (closed) return;

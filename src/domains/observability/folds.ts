@@ -220,6 +220,10 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 	const apiCalls = callTotals.settled + callTotals.settledNoUsage + callTotals.sentUnsettled;
 	const missingCalls = foldCalls(calls.attempts.filter((attempt) => attempt.settled !== null)).totalTokens.unknownCount;
 	const choose = (fact: Fact<number>) => fromFact(conflict ? unknown : fact);
+	const chooseCount = (fact: Fact<number>) =>
+		!conflict && aggregate?.callCountCoverage !== "complete" && fact.kind !== "unknown"
+			? foldFacts([fact, unknown])
+			: choose(fact);
 	const usage = aggregate
 		? (Object.fromEntries(fields.map((field) => [field, choose(aggregate.usage[field])])) as Record<
 				keyof CallUsage,
@@ -244,14 +248,18 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 				? aggregateTokenSubtotal
 				: choose(aggregate.totalTokens)
 			: callTotals.totalTokens,
-		usd: aggregate ? choose(aggregate.pricing.usd) : callTotals.usd,
+		usd: aggregate
+			? !conflict && aggregate.pricingCoverage !== "complete" && aggregate.pricing.usd.kind !== "unknown"
+				? foldFacts([aggregate.pricing.usd, unknown])
+				: choose(aggregate.pricing.usd)
+			: callTotals.usd,
 		// Identified constituent calls provide a lower bound even when the aggregate omits its count (#434).
 		apiCalls: aggregate
 			? !conflict && aggregate.apiCalls.kind === "unknown"
 				? foldFacts([observed(apiCalls), aggregate.apiCalls])
-				: choose(aggregate.apiCalls)
+				: chooseCount(aggregate.apiCalls)
 			: fromFact(observed(apiCalls)),
-		missingTokenCalls: aggregate ? choose(aggregate.missingTokenCalls) : fromFact(observed(missingCalls)),
+		missingTokenCalls: aggregate ? chooseCount(aggregate.missingTokenCalls) : fromFact(observed(missingCalls)),
 		amountCoverageUnknown: aggregate
 			? conflict || aggregate.coverage !== "complete"
 			: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0,
@@ -259,6 +267,7 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 			conflict ||
 			(aggregate
 				? aggregate.coverage !== "complete" ||
+					aggregate.callCountCoverage !== "complete" ||
 					aggregate.apiCalls.kind === "unknown" ||
 					aggregate.apiCalls.kind === "absent" ||
 					aggregate.missingTokenCalls.kind === "unknown" ||

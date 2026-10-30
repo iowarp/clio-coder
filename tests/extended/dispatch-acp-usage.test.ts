@@ -1,10 +1,13 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -118,7 +121,7 @@ for (const scenario of [
 		response: meta({ totalTokens: 7, costUsd: 0.04, costProvenance: "measured" }),
 		total: 7,
 		split: zero,
-		cost: 0.04,
+		cost: 0,
 		provenance: "unknown",
 	},
 	{
@@ -162,6 +165,15 @@ for (const scenario of [
 			deepStrictEqual(persisted, receipt);
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;
 			ok(stateDir);
+			const journal = await readCallJournal(join(stateDir, "runs", run.runId), "events.ndjson");
+			const aggregate = journal.records.find(({ record }) => record.k === "run.usage")?.record;
+			ok(aggregate?.k === "run.usage");
+			strictEqual(aggregate.ctx.sessionId, null);
+			const replayed = runUsageFromCallRecords(journal.records.map(({ record }) => record));
+			strictEqual(receipt.tokenCount, replayed.totalTokens);
+			strictEqual(receipt.costUsd, replayed.costUsd);
+			if (aggregate.data.usage.cacheRead.kind === "unknown") strictEqual(receipt.cacheReadTokenCount, undefined);
+			if (aggregate.data.apiCalls.kind === "unknown") strictEqual(receipt.apiCalls, 0);
 			const integrity = verifyReceiptFileReport(stateDir, run.runId);
 			ok(integrity.ok, JSON.stringify(integrity));
 			const facts = {
@@ -169,7 +181,7 @@ for (const scenario of [
 				split: [
 					receipt.inputTokenCount,
 					receipt.outputTokenCount,
-					receipt.cacheReadTokenCount,
+					receipt.cacheReadTokenCount ?? 0,
 					receipt.cacheWriteTokenCount,
 					receipt.reasoningTokenCount,
 				],

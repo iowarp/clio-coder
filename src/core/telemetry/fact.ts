@@ -8,6 +8,7 @@ export const EstimateMethod = vocabulary([
 	"catalog",
 	"prompt-side-only",
 	"shared-account-window-delta",
+	"peer-report",
 ]);
 export type EstimateMethod = Static<typeof EstimateMethod>;
 export const UnknownReason = vocabulary([

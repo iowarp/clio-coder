@@ -31,7 +31,17 @@ export function bindExternalUsage<T extends object>(message: T, observation: Ext
 
 export function externalUsageFacts(
 	observation: ExternalUsageObservation,
-): Pick<RunUsage, "usage" | "totalTokens" | "apiCalls" | "missingTokenCalls" | "pricing" | "coverage"> {
+): Pick<
+	RunUsage,
+	| "usage"
+	| "totalTokens"
+	| "apiCalls"
+	| "missingTokenCalls"
+	| "pricing"
+	| "coverage"
+	| "pricingCoverage"
+	| "callCountCoverage"
+> {
 	const raw = observation.usage;
 	const external = record(raw.clioExternal);
 	const tokensVerified =
@@ -74,6 +84,9 @@ export function externalUsageFacts(
 						: "none",
 		},
 		coverage: observation.coverage,
+		pricingCoverage: estimatedUsd.kind === "unknown" ? "unknown" : "complete",
+		callCountCoverage:
+			typeof raw.unknownCallCoverageRuns === "number" && raw.unknownCallCoverageRuns > 0 ? "partial" : "complete",
 	};
 }
 
@@ -106,6 +119,7 @@ export function observeExternalWorkerRun(
 		)
 			return {
 				...facts,
+				pricingCoverage: "complete" as const,
 				pricing: {
 					usd: { kind: "measured" as const, value: 0, source: "local-count" as const },
 					pricedBy: "free" as const,
@@ -118,6 +132,7 @@ export function observeExternalWorkerRun(
 		) as Record<(typeof keys)[number], number>;
 		return {
 			...facts,
+			pricingCoverage: "complete" as const,
 			pricing: {
 				usd: {
 					kind: "estimated" as const,

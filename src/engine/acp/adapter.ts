@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { performance } from "node:perf_hooks";
 import { Value } from "typebox/value";
 import { watchCredentialExpiry } from "../../core/credential-expiry.js";
@@ -6,13 +7,18 @@ import {
 	DEFAULT_DELEGATION_TURN_TIMEOUT_MS,
 	type DelegationAgentConfig,
 } from "../../core/defaults.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
+import { processBirthToken } from "../../core/process-identity.js";
+import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import { createTelemetryForwarder } from "../../core/telemetry/forwarder.js";
+import type { RunUsage } from "../../core/telemetry/schemas.js";
+import { hasTokenUsageCounts, normalizeTokenUsage } from "../../core/token-split.js";
 import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
-import { accumulateCostAmount, emptyCostAggregate } from "../../domains/observability/cost.js";
+import { accumulateCostAmount, callCoverageForRun, emptyCostAggregate } from "../../domains/observability/cost.js";
 import { isBuiltinClaudeAcp } from "../../domains/providers/auth/index.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
+import { externalUsageFacts } from "../external-call-telemetry.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import { withInstalledCodex } from "./codex-launch.js";
@@ -33,6 +39,7 @@ type AcpRunEvent = AgentEvent | ClioWorkerEvent;
 export const DEFAULT_CANCEL_GRACE_MS = 1_000;
 
 export interface AcpDelegationRunInput {
+	telemetry?: { context: WorkerTelemetryContext; target: RunUsage["target"] };
 	agent: DelegationAgentConfig;
 	/** Resolved launch secrets are separate from the persisted agent recipe. */
 	environment?: Record<string, string>;
@@ -214,9 +221,56 @@ function nonnegative(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+/** ACP reports describe a delegated scope; omitted call counts and provenance stay unknown (#434). */
+export function acpUsageFacts(value: unknown, coverage: RunUsage["coverage"] = "complete") {
+	const raw = isRecord(value) ? value : {};
+	const summary = Value.Check(AcpUsageMetaSchema.properties.costSummary, raw.costSummary) ? raw.costSummary : undefined;
+	const cost = summary?.knownUsd ?? (isRecord(raw.cost) ? raw.cost.total : raw.costUsd);
+	const provenance = summary
+		? summary.hasUnknown && summary.knownUsd === 0
+			? "unknown"
+			: summary.hasEstimated
+				? "estimated"
+				: summary.allKnownFree
+					? "known_free"
+					: "known"
+		: resolveCostProvenance(raw.costProvenance, "unknown");
+	const facts = externalUsageFacts({
+		coverage,
+		usage: {
+			input: raw.input ?? raw.inputTokens ?? raw.input_tokens ?? raw.prompt_tokens,
+			output: raw.output ?? raw.outputTokens ?? raw.output_tokens ?? raw.completion_tokens,
+			cacheRead: raw.cacheRead ?? raw.cacheReadTokens ?? raw.cache_read_tokens,
+			cacheWrite: raw.cacheWrite ?? raw.cacheWriteTokens ?? raw.cache_write_tokens,
+			reasoning: raw.reasoning ?? raw.reasoningTokens ?? raw.reasoning_tokens,
+			totalTokens: raw.totalTokens ?? raw.total_tokens,
+			apiCalls: raw.apiCalls,
+			missingTokenCalls: raw.missingTokenCalls,
+			unknownCallCoverageRuns: raw.unknownCallCoverageRuns ?? summary?.unknownCallCoverageRuns,
+			costUsd: cost,
+			costProvenance: provenance,
+			clioExternal: {
+				tokenUsage: raw.estimated === true ? "unverified" : "provider-reported",
+				cost:
+					provenance === "known" || provenance === "known_free"
+						? "provider-reported"
+						: provenance === "unknown"
+							? "unverified"
+							: undefined,
+			},
+		},
+	});
+	if (facts.pricing.usd.kind === "estimated")
+		facts.pricing = { usd: { ...facts.pricing.usd, method: "peer-report" }, pricedBy: "provider" };
+	if (provenance === "known_free" && facts.pricing.usd.kind === "measured") facts.pricing.pricedBy = "free";
+	if (summary?.hasUnknown) facts.pricingCoverage = summary.knownUsd > 0 ? "partial" : "unknown";
+	return facts;
+}
+
 export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
 	if (!isRecord(raw)) return;
-	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens, observed } = normalizeTokenUsage(raw);
+	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens } = normalizeTokenUsage(raw);
+	const coverage = callCoverageForRun(raw);
 	const tokensReported =
 		raw.estimated !== true &&
 		[
@@ -244,8 +298,8 @@ export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
 	into.cacheWriteTokens += cacheWrite;
 	into.reasoningTokens += reasoning;
 	into.totalTokens += totalTokens;
-	into.apiCalls = (into.apiCalls ?? 0) + (nonnegative(raw.apiCalls) ?? 1);
-	into.missingTokenCalls = (into.missingTokenCalls ?? 0) + (nonnegative(raw.missingTokenCalls) ?? (observed ? 0 : 1));
+	into.apiCalls = (into.apiCalls ?? 0) + coverage.apiCalls;
+	into.missingTokenCalls = (into.missingTokenCalls ?? 0) + coverage.missingTokenCalls;
 	// Clio metadata uses costUsd; legacy message usage uses cost.total. These
 	// are alternate representations of one amount, never additive sources.
 	const cost = (isRecord(raw.cost) ? nonnegative(raw.cost.total) : undefined) ?? nonnegative(raw.costUsd);
@@ -259,8 +313,7 @@ export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
 				: cost === undefined
 					? "unknown"
 					: resolveCostProvenance(raw.costProvenance, "unknown"),
-		apiCalls: nonnegative(raw.apiCalls) ?? 1,
-		missingTokenCalls: nonnegative(raw.missingTokenCalls) ?? (observed ? 0 : 1),
+		...coverage,
 		...(summary ? { costSummary: summary } : {}),
 	});
 	if (tokensReported || cost !== undefined) {
@@ -362,6 +415,38 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		heartbeatAt.monotonic = stamp;
 		heartbeatAt.current = heartbeatWallAnchor + (stamp - heartbeatMonotonicAnchor);
 		queue.push(event);
+	};
+	const telemetry = input.telemetry;
+	const forwarder = telemetry
+		? createTelemetryForwarder(
+				telemetry.context,
+				{ host: hostname(), pid: process.pid, birthToken: processBirthToken(), monoEpochWallMs: performance.timeOrigin },
+				emit,
+				4096,
+				false,
+			)
+		: undefined;
+	if (telemetry) {
+		forwarder?.enqueue({
+			kind: "process.started",
+			data: {},
+			ctx: telemetry.context,
+			wallMs: Date.now(),
+			mono: performance.now(),
+		});
+		forwarder?.flush();
+	}
+	let usageRecorded = false;
+	const recordUsage = (raw: unknown, scope: RunUsage["scope"], coverage: RunUsage["coverage"]) => {
+		if (!telemetry) return;
+		forwarder?.enqueue({
+			kind: "run.usage",
+			data: { ...acpUsageFacts(raw, coverage), source: "acp", scope, revision: 0, target: telemetry.target },
+			ctx: telemetry.context,
+			wallMs: Date.now(),
+			mono: performance.now(),
+		});
+		usageRecorded = true;
 	};
 	const mediator = new AcpToolMediator({
 		safety: input.safety,
@@ -536,9 +621,16 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				// This adapter creates one fresh peer session and submits one prompt.
 				// Clio's session subtotal includes that peer's helpers and workers.
 				const session = isRecord(metaUsage) && isRecord(metaUsage.session) ? metaUsage.session : null;
-				mergeUsage(usage, session ? { ...session, apiCalls: session.calls } : metaUsage);
+				const metadata = session ? { ...session, apiCalls: session.calls } : metaUsage;
+				const fallback = promptResponse?.usage ?? promptResponse?.tokenUsage;
+				const fallbackTokens = isRecord(metadata) && !hasTokenUsageCounts(metadata) && isRecord(fallback);
+				const raw = fallbackTokens ? { ...fallback, ...metadata } : metadata;
+				mergeUsage(usage, raw);
+				recordUsage(raw, session ? "peer-session" : "run", session && fallbackTokens ? "partial" : "complete");
 			} else {
-				mergeUsage(usage, promptResponse?.usage ?? promptResponse?.tokenUsage);
+				const raw = promptResponse?.usage ?? promptResponse?.tokenUsage;
+				mergeUsage(usage, raw);
+				recordUsage(raw, "run", "complete");
 			}
 			const reportedFailure =
 				authFailure ??
@@ -622,6 +714,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					await beginForceTermination();
 				}
 			}
+			if (!usageRecorded) recordUsage(undefined, "run", "unknown");
+			forwarder?.close();
 			queue.close();
 			finished = true;
 		}

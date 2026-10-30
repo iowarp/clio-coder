@@ -516,6 +516,8 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
 	const aggregate: RunUsage = {
 		source: "acp",
+		pricingCoverage: "complete",
+		callCountCoverage: "complete",
 		scope: "peer-session",
 		revision: 1,
 		coverage: "complete",
@@ -542,6 +544,17 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const aggregateOnly = runUsageFromCallRecords([aggregateRecord]);
 	strictEqual(aggregateOnly.apiCalls, 0);
 	strictEqual(aggregateOnly.costProvenance, "known");
+	const partialCounts = runUsageFromCallRecords([
+		{
+			...aggregateRecord,
+			data: { ...aggregate, apiCalls: measured(3), missingTokenCalls: measured(0), callCountCoverage: "partial" },
+		},
+	]);
+	strictEqual(partialCounts.apiCalls, 3);
+	strictEqual(partialCounts.costSummary.unknownCallCoverageRuns, 1);
+	strictEqual(partialCounts.totalTokens, 100);
+	strictEqual(partialCounts.tokenUsageMissing, false);
+	strictEqual(partialCounts.costProvenance, "known");
 	const withAggregate = [...rows, aggregateRecord, aggregateRecord];
 	const runAggregate = runUsageFromCallRecords(withAggregate);
 	strictEqual(runAggregate.totalTokens, 100, "the snapshot includes per-call usage; never add both");
