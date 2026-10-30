@@ -478,7 +478,8 @@ export function readReceiptEvidence(
 		const parsed: unknown = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8"));
 		if (isRecord(parsed) && optionalString(parsed.runId) === runId) {
 			receipt = parsed;
-			state = "sealed";
+			// Whether the seal verifies is the integrity check's to say; this only tells a file that carries none.
+			state = isRecord(parsed.integrity) ? "sealed" : "unsealed";
 		} else state = "unreadable";
 	} catch (error) {
 		// Any read or parse failure other than a missing file is a receipt that exists but cannot be read.

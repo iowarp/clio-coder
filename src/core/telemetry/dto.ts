@@ -698,8 +698,11 @@ export const ReceiptEvidenceSchema = Type.Object(
 		...header,
 		kind: Type.Literal("receipt-evidence"),
 		runId: ExistingId,
-		/** `unreadable` is a file that is not JSON or not a receipt; `missing` is no file at all. */
-		receipt: vocabulary(["sealed", "missing", "unreadable"]),
+		/**
+		 * `unsealed` is this run's receipt with no integrity block, `unreadable` is a file that is not JSON or not a receipt,
+		 * and `missing` is no file at all.
+		 */
+		receipt: vocabulary(["sealed", "unsealed", "missing", "unreadable"]),
 		integrity: Type.Object(
 			{
 				/**

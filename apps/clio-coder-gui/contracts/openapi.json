@@ -23763,7 +23763,7 @@
 										"maxLength": 512
 									},
 									"receipt": {
-										"enum": ["sealed", "missing", "unreadable"]
+										"enum": ["sealed", "unsealed", "missing", "unreadable"]
 									},
 									"integrity": {
 										"type": "object",
