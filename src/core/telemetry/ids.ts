@@ -30,6 +30,7 @@ export function derivedTelemetryIds(seed: string, epochMs: number) {
 		attemptId: `att_${id("attempt")}` as AttemptId,
 		startedRecordId: `rec_${id("call.started")}` as RecordId,
 		settledRecordId: `rec_${id("call.settled")}` as RecordId,
+		usageRecordId: `rec_${id("run.usage")}` as RecordId,
 	};
 }
 

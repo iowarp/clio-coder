@@ -11,7 +11,7 @@ import type { JournalSource, SessionSource } from "../observability/read-model.j
 import { journalSourceFromRead } from "../observability/read-model.js";
 import type { SessionEntry, SessionHeader } from "./entries.js";
 import { isSessionEntry, isSessionHeader } from "./entries.js";
-import { importLegacySession } from "./legacy-import.js";
+import { importLegacyReceipt, importLegacySession } from "./legacy-import.js";
 
 /**
  * Cold-path loader for the telemetry read model (#434 §11): a session's own journal, the ledger rows the journal
@@ -169,12 +169,29 @@ function* readLedger(directory: string): Load<{ header: SessionHeader | null; en
 	return { header, entries };
 }
 
+/** The run's sealed receipt as one `legacy-import` snapshot; null when it is absent or not this run's. */
+function* receiptSource(stateDir: string, runId: string): Load<JournalSource | null> {
+	const raw = yield* text(join(stateDir, "receipts", `${runId}.json`));
+	if (raw === null) return null;
+	let value: unknown;
+	try {
+		value = JSON.parse(raw);
+	} catch {
+		// A torn receipt holds no totals to keep; the run stays unknown coverage.
+		return null;
+	}
+	const record = importLegacyReceipt(runId, value);
+	return record ? { present: true, records: [record], modes: [], skipped: 0, damaged: 0 } : null;
+}
+
 function* loadRun(stateDir: string, runId: string): Load<JournalSource> {
 	assertSafeId(runId, "run");
 	const directory = join(stateDir, "runs", runId);
 	try {
 		const read = yield* journal(directory, "events.ndjson");
-		return journalSourceFromRead(read, yield* exists(join(directory, "events.ndjson")), runId);
+		const source = journalSourceFromRead(read, yield* exists(join(directory, "events.ndjson")), runId);
+		// A run with no journal keeps its sealed receipt's known totals rather than leaving the report smaller (#434).
+		return source.present ? source : ((yield* receiptSource(stateDir, runId)) ?? source);
 	} catch {
 		// An unreadable run journal stays visible as unknown coverage (#434).
 		return { present: false, records: [], modes: [], skipped: 1, damaged: 0 };
@@ -484,16 +501,45 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 		}
 	const runs = new Map<string, JournalSource>();
 	const runsRoot = join(stateDir, "runs");
-	for (const runId of ((yield* list(runsRoot)) ?? []).filter(safeId).sort()) {
+	const receiptsRoot = join(stateDir, "receipts");
+	const receipted = ((yield* list(receiptsRoot)) ?? []).flatMap((name) =>
+		name.endsWith(".json") ? [name.slice(0, -".json".length)] : [],
+	);
+	const runIds = new Set([...((yield* list(runsRoot)) ?? []), ...receipted]);
+	for (const runId of [...runIds].filter(safeId).sort()) {
 		if (referenced.has(runId) || (window.standaloneRuns !== "all" && !window.standaloneRuns.has(runId))) continue;
-		if ((yield* newestWrite(join(runsRoot, runId), RUN_FILES)) < from) continue;
+		const journaled = yield* newestWrite(join(runsRoot, runId), RUN_FILES);
+		const receiptOnly = journaled === Number.NEGATIVE_INFINITY;
+		// A receipt is written once, at seal, after the run ended, so an older file cannot hold an in-window run.
+		const written = receiptOnly ? ((yield* mtime(join(receiptsRoot, `${runId}.json`))) ?? journaled) : journaled;
+		if (written < from) continue;
 		const source = yield* loadRun(stateDir, runId);
+		if (receiptOnly) {
+			// No session journal references a run from before run journals, so its receipt counts here, unless it only
+			// mirrors a session's own spend: a headless main agent's run, or an ACP peer that was a Clio session (#434).
+			if (!source.present || (yield* mirroredSession(stateDir, join(receiptsRoot, `${runId}.json`)))) continue;
+		}
 		// A run a session owns belongs to that session's accounting, in or out of this window (#434).
-		if (source.records.some((record) => record.ctx.sessionId !== null)) continue;
+		else if (source.records.some((record) => record.ctx.sessionId !== null)) continue;
 		const windowed = { ...source, records: windowRecords(source.records, from, to) };
 		if (windowed.records.some(accounting) || !source.present) runs.set(runId, windowed);
 	}
 	return { sessions, runs };
+}
+
+/** True when the receipt's spend is a session's own, which that session's ledger and journal already hold. */
+function* mirroredSession(stateDir: string, path: string): Load<boolean> {
+	const raw = yield* text(path);
+	let receipt: { agentId?: unknown; sessionId?: unknown; delegation?: { acpSessionId?: unknown } | null };
+	try {
+		receipt = raw === null ? {} : JSON.parse(raw);
+	} catch {
+		// loadRun already read this file as a receipt; a torn second read keeps the run counted.
+		return false;
+	}
+	const sessionId = receipt.agentId === "main-agent" ? receipt.sessionId : receipt.delegation?.acpSessionId;
+	if (typeof sessionId !== "string" || !safeId(sessionId)) return false;
+	return (yield* findSessionDirectory(stateDir, sessionId)) !== null;
 }
 
 /** Every session and standalone run a `usage report` window covers, windowed; a cold, synchronous read for the CLI. */

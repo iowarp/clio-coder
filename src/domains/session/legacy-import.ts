@@ -2,8 +2,9 @@ import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import { derivedTelemetryIds, newAttemptId, newCallId } from "../../core/telemetry/ids.js";
-import type { CallStarted } from "../../core/telemetry/schemas.js";
+import type { CallStarted, CallUsage, RunUsage } from "../../core/telemetry/schemas.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../observability/call-facts.js";
 import type { OutOfTurnUsageRow } from "../observability/out-of-turn-usage.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
@@ -164,4 +165,101 @@ export function importLegacySession(
 		);
 	}
 	return result;
+}
+
+const legacyUnknown = { kind: "unknown", reason: "legacy-record" } as const;
+
+function receiptCount(value: unknown): Fact<number> {
+	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+		? { kind: "measured", value, source: "provider" }
+		: legacyUnknown;
+}
+
+function receiptPricing(raw: Record<string, unknown>): Pick<RunUsage, "pricing" | "pricingCoverage"> {
+	const summary =
+		raw.costSummary && typeof raw.costSummary === "object" ? (raw.costSummary as Record<string, unknown>) : null;
+	const external = (raw.externalTelemetry ?? {}) as Record<string, unknown>;
+	const costProvenance = provenance(raw.costProvenance, "unknown");
+	if (costProvenance === "known_free" || summary?.allKnownFree === true)
+		return {
+			pricing: { usd: { kind: "measured", value: 0, source: "local-count" }, pricedBy: "free" },
+			pricingCoverage: "complete",
+		};
+	const amount = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null);
+	// A host that met an unpriced call sealed `unknown` provenance over its priced subtotal; the summary keeps it.
+	const usd = summary ? amount(summary.knownUsd) : costProvenance === "unknown" ? null : amount(raw.costUsd);
+	const hasUnknown = summary?.hasUnknown === true;
+	if (usd === null || (hasUnknown && usd === 0))
+		return { pricing: { usd: legacyUnknown, pricedBy: "none" }, pricingCoverage: "unknown" };
+	const pricingCoverage = hasUnknown ? "partial" : "complete";
+	if (summary ? summary.hasEstimated === true : costProvenance === "estimated")
+		return {
+			pricing: { usd: { kind: "estimated", value: usd, method: "catalog" }, pricedBy: "catalog" },
+			pricingCoverage,
+		};
+	if (external.cost === "provider-reported")
+		return {
+			pricing: { usd: { kind: "measured", value: usd, source: "provider" }, pricedBy: "provider" },
+			pricingCoverage,
+		};
+	return {
+		pricing: { usd: { kind: "measured", value: usd, source: "local-count" }, pricedBy: "target-rates" },
+		pricingCoverage,
+	};
+}
+
+/**
+ * A sealed receipt whose run left no journal, written before run journals existed or after retention pruned one,
+ * keeps its known totals (#434). Its sealed token counts and USD become one `legacy-import` snapshot of the run. A
+ * receipt never shows which calls it folded, so its call counts stay unknown coverage and a sum over it reads as a
+ * lower bound. Null when the value is not a receipt for this run.
+ */
+export function importLegacyReceipt(runId: string, value: unknown): TelemetryRecord | null {
+	if (!value || typeof value !== "object") return null;
+	const raw = value as Record<string, unknown>;
+	const endedAt = typeof raw.endedAt === "string" ? Date.parse(raw.endedAt) : Number.NaN;
+	if (raw.runId !== runId || !Number.isFinite(endedAt)) return null;
+	const external = raw.externalTelemetry;
+	const verified =
+		!external || typeof external !== "object" || (external as Record<string, unknown>).tokenUsage === "provider-reported";
+	const token = (field: unknown) => (verified ? receiptCount(field) : legacyUnknown);
+	const usage: CallUsage = {
+		input: token(raw.inputTokenCount),
+		output: token(raw.outputTokenCount),
+		cacheRead: token(raw.cacheReadTokenCount),
+		cacheWrite: token(raw.cacheWriteTokenCount),
+		cacheWrite1h: token(raw.cacheWrite1hTokenCount),
+		reasoning: token(raw.reasoningTokenCount),
+	};
+	const missingTokenCalls = receiptCount(raw.missingTokenCalls);
+	const data: RunUsage = {
+		source: "legacy-import",
+		scope: "run",
+		revision: 0,
+		coverage: !verified
+			? "unknown"
+			: missingTokenCalls.kind === "measured" && missingTokenCalls.value === 0
+				? "complete"
+				: "partial",
+		callCountCoverage: "unknown",
+		...receiptPricing(raw),
+		target: {
+			targetId: text(raw.targetId) ?? "unknown",
+			runtimeId: text(raw.runtimeId) ?? "unknown",
+			api: "unknown",
+			requestedModel: text(raw.wireModelId) ?? "unknown",
+			reportedModel: legacyUnknown,
+		},
+		usage,
+		totalTokens: token(raw.tokenCount),
+		apiCalls: receiptCount(raw.apiCalls),
+		missingTokenCalls,
+	};
+	const sessionId = text(raw.sessionId);
+	const ctx: TelemetryContext = sessionId
+		? { sessionId, runId, label: "worker" }
+		: { sessionId: null, runId, label: "worker" };
+	const usageRecord = makeTelemetryRecord("run.usage", data, ctx, { t: new Date(endedAt).toISOString(), mono: 0 });
+	usageRecord.id = derivedTelemetryIds(`receipt\0${runId}`, endedAt).usageRecordId;
+	return readTelemetryRecord(usageRecord).kind === "record" ? usageRecord : null;
 }
