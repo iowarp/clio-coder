@@ -76,7 +76,7 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	safeResourceWrite(target, Buffer.concat([header, ...imported.records].map(encodeTelemetryLine)), { mode: 0o600 });
 	const calls = imported.records.filter((record) => record.k === "call.settled").length;
 	process.stdout.write(
-		`imported ${calls} call(s) to ${target}; ${imported.aggregates} checkpoint aggregate(s) not split into calls; ${imported.invalid} invalid record(s) skipped\n`,
+		`imported ${calls} call(s) to ${target}; ${imported.aggregates} checkpoint aggregate(s) not split into calls; ${imported.invalid} invalid record(s) skipped; ${outOfTurn.errors.length} out-of-turn usage read error(s)\n`,
 	);
 	return 0;
 }
