@@ -757,7 +757,8 @@ export const KIND_REGISTRY = {
 			{
 				label: Type.Literal("commitment"),
 				function: Type.Literal("sha256"),
-				canonicalization: Type.Literal("utf8-text-v1"),
+				/** A system section hashes its trimmed UTF-8 text; the tool set and each message hash their JSON. */
+				canonicalization: Type.Literal("clio-prefix-v1"),
 				blocks: Type.Array(
 					Type.Object(
 						{

@@ -1,4 +1,5 @@
-import { createHistogram } from "node:perf_hooks";
+import type { EventLoopUtilization } from "node:perf_hooks";
+import { createHistogram, performance as perf } from "node:perf_hooks";
 import type { Payload } from "../../core/telemetry/schemas.js";
 import type { JournalHealth } from "./call-journal.js";
 
@@ -17,6 +18,10 @@ const ms = (nanoseconds: number) => Math.round(nanoseconds / 1e3) / 1e3;
 export function createHealthWindows(input: {
 	writers: () => ReadonlyArray<{ sessionId: string; health: JournalHealth }>;
 	record: (sessionId: string, data: Payload<"health.window">) => void;
+	/** The window's full distribution, for writers whose mode keeps health.samples (#434). */
+	recordSamples?: (sessionId: string, data: Payload<"health.samples">) => void;
+	/** Whether any open writer would keep health.samples, so standard mode never assembles them. */
+	samplesWanted?: (sessionId: string) => boolean;
 	windowMs?: number;
 }) {
 	const lag = createHistogram();
@@ -24,6 +29,7 @@ export function createHealthWindows(input: {
 	let windows: NodeJS.Timeout | undefined;
 	let lastTick = 0;
 	let windowStart = 0;
+	let utilization: EventLoopUtilization | undefined;
 	const stop = () => {
 		clearInterval(sampler);
 		clearInterval(windows);
@@ -48,6 +54,22 @@ export function createHealthWindows(input: {
 		};
 		for (const { sessionId, health } of writers)
 			input.record(sessionId, { ...shared, writer: { queueDepth: health.queueDepth, dropped: health.dropped } });
+		const sampled = input.recordSamples
+			? writers.filter(({ sessionId }) => input.samplesWanted?.(sessionId) ?? false)
+			: [];
+		const elu = perf.eventLoopUtilization(utilization);
+		utilization = perf.eventLoopUtilization();
+		if (sampled.length > 0 && input.recordSamples) {
+			const memory = process.memoryUsage();
+			const samples: Payload<"health.samples"> = {
+				windowMs: shared.windowMs,
+				lagPercentiles: lag.count > 0 ? [...lag.percentiles].slice(0, 64).map(([p, value]) => ({ p, ms: ms(value) })) : [],
+				eventLoopUtilization: Math.min(1, Math.max(0, elu.utilization)),
+				heapUsedBytes: memory.heapUsed,
+				externalBytes: memory.external,
+			};
+			for (const { sessionId } of sampled) input.recordSamples(sessionId, samples);
+		}
 		lag.reset();
 		windowStart = now;
 		if (writers.length === 0) stop();
@@ -57,6 +79,7 @@ export function createHealthWindows(input: {
 		start(): void {
 			if (sampler) return;
 			lag.reset();
+			utilization = perf.eventLoopUtilization();
 			lastTick = windowStart = performance.now();
 			sampler = setInterval(() => {
 				const tick = performance.now();

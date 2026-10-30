@@ -91,6 +91,9 @@ export interface ContextSnapshot {
 	promptHash?: string | undefined;
 	toolSignature?: string | undefined;
 	messageRange?: { start: number; end: number } | undefined;
+	/** The journal call this snapshot was last reconciled against (#434). */
+	callId?: string | undefined;
+	attemptId?: string | undefined;
 }
 
 export function ceilChars(chars: number): number {

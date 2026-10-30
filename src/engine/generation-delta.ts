@@ -17,16 +17,22 @@ export function hasAssistantGenerationDelta(update: unknown): boolean {
 }
 
 /** Marks the first generated delta without changing what the consumer reads (#434). */
-export function onFirstGeneration(stream: AssistantMessageEventStream, mark: () => void): AssistantMessageEventStream {
+export function onFirstGeneration(
+	stream: AssistantMessageEventStream,
+	mark: () => void,
+	/** Called for every generated delta, the first included; only research delta capture passes it (#434). */
+	each?: () => void,
+): AssistantMessageEventStream {
 	return new Proxy(stream, {
 		get(target, key) {
 			if (key === Symbol.asyncIterator)
 				return async function* () {
 					let seen = false;
 					for await (const event of target) {
-						if (!seen && hasAssistantGenerationDelta(event)) {
+						if ((!seen || each) && hasAssistantGenerationDelta(event)) {
+							if (!seen) mark();
 							seen = true;
-							mark();
+							each?.();
 						}
 						yield event;
 					}

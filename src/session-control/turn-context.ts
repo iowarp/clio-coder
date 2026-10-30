@@ -5,6 +5,7 @@ import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/c
 import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
+import { recordTelemetry } from "../core/telemetry/producer.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
@@ -348,7 +349,8 @@ export interface TurnContext {
 	persistContextSnapshot(snapshot: ContextSnapshot): void;
 	flushReconciledSnapshot(): void;
 	/** Reconcile the live snapshot against one API call's provider usage. */
-	reconcileUsage(usage: Usage): void;
+	/** `call` names the journal call the usage came from, so the persisted snapshot can cite it (#434). */
+	reconcileUsage(usage: Usage, call?: { callId: string; attemptId: string }): void;
 	/**
 	 * Prompt-side tokens the current snapshot accounts for. The prompt of an
 	 * in-flight call is spent whatever the operator does next, so an interrupted
@@ -506,6 +508,46 @@ function messageListDigest(messages: ReadonlyArray<AgentMessage>): string {
 
 // #423: five idle minutes warrants a reminder, without claiming a provider cache lifetime.
 const CACHE_REUSE_IDLE_NOTICE_MS = 5 * 60 * 1000;
+
+const tokenCount = (value: number): number => (Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0);
+
+/** The persisted snapshot's split as a journal record, under the real session and turn (#434). */
+function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): void {
+	const split = snapshot.categories;
+	recordTelemetry(
+		"context.snapshot",
+		{
+			snapshotId: snapshot.snapshotId,
+			categories: {
+				system: tokenCount(split.system),
+				tools: tokenCount(split.tools),
+				...(split.toolResults !== undefined ? { toolResults: tokenCount(split.toolResults) } : {}),
+				agents: tokenCount(split.agents),
+				skills: tokenCount(split.skills),
+				memory: tokenCount(split.memory),
+				project: tokenCount(split.project),
+				messages: tokenCount(split.messages),
+				reserve: tokenCount(split.reserve),
+				free: tokenCount(split.free),
+				streaming: tokenCount(split.streaming),
+			},
+			window: {
+				desired: tokenCount(snapshot.desiredContextWindow),
+				effective: tokenCount(snapshot.effectiveContextWindow),
+				source: snapshot.contextWindowSource || "unknown",
+			},
+			source: snapshot.sources.total,
+			...(snapshot.estimatedTokens !== undefined ? { estimatedTokens: tokenCount(snapshot.estimatedTokens) } : {}),
+			...(snapshot.reconciledTokens !== undefined ? { reconciledTokens: tokenCount(snapshot.reconciledTokens) } : {}),
+		},
+		{
+			sessionId,
+			label: "main",
+			...(snapshot.turnId ? { turnId: snapshot.turnId } : {}),
+			...(snapshot.callId && snapshot.attemptId ? { callId: snapshot.callId, attemptId: snapshot.attemptId } : {}),
+		},
+	);
+}
 
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
@@ -803,7 +845,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	const persistContextSnapshot = (snapshot: ContextSnapshot): void => {
 		const currentSession = deps.session?.current();
-		if (currentSession) appendContextSnapshot(currentSession, snapshot);
+		if (currentSession) {
+			appendContextSnapshot(currentSession, snapshot);
+			recordContextSnapshot(currentSession.id, snapshot);
+		}
 		snapshotPersistPending = false;
 	};
 
@@ -2495,7 +2540,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			refreshLiveBudget();
 		},
 
-		reconcileUsage(usage: Usage): void {
+		reconcileUsage(usage: Usage, call?: { callId: string; attemptId: string }): void {
 			// Cached prompt tokens still occupy the window; providers report them
 			// outside `input`, so the attested prompt is the three summed.
 			const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
@@ -2550,7 +2595,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					},
 				);
 			}
-			currentContextSnapshot = reconcileSnapshot(currentContextSnapshot, usage);
+			currentContextSnapshot = {
+				...reconcileSnapshot(currentContextSnapshot, usage),
+				callId: call?.callId,
+				attemptId: call?.attemptId,
+			};
 			snapshotPersistPending = true;
 			// A reconcile moves the anchor and therefore the figure the next
 			// request budgets against, so it is a publication point of its own.

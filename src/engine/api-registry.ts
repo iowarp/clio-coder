@@ -241,7 +241,7 @@ function scopedEngineStreamSimple(
 	if (!call) return stream;
 	// Pi's provider owns the request from here under transport option B; TTFT is firstToken minus send.end.
 	call.stage("send", "end");
-	return onFirstGeneration(stream, () => call.mark("firstToken"));
+	return onFirstGeneration(stream, () => call.mark("firstToken"), call.delta);
 }
 
 export async function completeEngineSimple(

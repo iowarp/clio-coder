@@ -106,6 +106,13 @@ Pricing is separate from token provenance: `pricing.usd` is a fact, and `pricing
 | `budget.crossing`, `budget.wait` | accountability | content-free | The session's priced spend reaching a ceiling, once per ceiling, and each paid request held at one: how long it waited, how the hold ended, and the raise that released it. |
 | `config.snapshot`, `config.changed` | operational | structural | The effective settings when a session's writer opens, and each settings change with the paths it touched by effect kind. Both documents are `config` objects, beside the settings fingerprint a worker spec carries. |
 | `health.window` | operational | content-free | One window of this process's health every 10 s, written to each open session writer: event-loop lag p50/p99/max past a 10 ms sampler, RSS, and the writer's queue depth and drops. Absent loop lag means no sample landed in the window. |
+| `tool.settled` | operational | content-free | Each tool call the model's tool wrapper settles, in a session or a worker's run: the tool, `ok`, `error` or `blocked` and which refusal blocked it, its own duration without an approval wait, the wait itself, and the bytes of the result text the model receives. `ctx` names the turn, the tool call and the model call that asked for it; the safety audit keeps the decision. |
+| `prompt.compiled` | operational | structural | The first call of a writer to cite a compiled prompt structure, which `ctx` names: the `prompt-structure` object, the layout version, the token estimate, the section count and the thinking level. A writer reopened after an idle close records it again, so a reader keeps the earliest per structure. |
+| `middleware.fired` | operational | content-free | Each middleware rule that emitted effects at a hook, in a session or a worker's run: the hook, the sync, async or awaited phase, the rule id, its effect kinds, its strongest reminder severity, the tool at a tool hook, and the evidence class the rule names, such as `regex:PLAN_REQUEST@operator-request` for plan-close or `count:read-only-calls@prior-turn` for the exploration advisory. |
+| `context.snapshot` | operational | content-free | Each persisted context snapshot's token split, window and source, under the real session and turn, and the call it was reconciled against. |
+| `health.samples` | research | content-free | The same window's full lag percentile curve, event-loop utilization and heap, in research mode. |
+| `call.timing.deltas` | research | content-free | One call's inter-delta gaps as a histogram with power-of-two bounds from 1 ms to 8,192 ms, never a row per delta. Recorded for main-loop and side calls under `deltas`; worker calls do not record it. |
+| `prefix.blocks` | research | structural | The request's prefix as it was sent, as commitment hashes: the compiled sections (one block when the sent system prompt is not the compiled one), the tool set, then each message, with token estimates. Main-loop calls, in research mode. |
 | `prompt.text` | research | content-bearing | Each distinct compiled system prompt, stored as a `prompt-text` object. Needs `telemetry.research.content` and consent. |
 | `memory.trace` | research | content-bearing | A task-memory step's decision, counts and sizes, with its prompt and reply in a `memory-trace` object. Needs `content` and consent. |
 | `memory.observation` | research | content-bearing | One memory or compaction observation event, with its facts in an `observation-trace` object. Needs `content` and consent. |
@@ -119,7 +126,7 @@ There is no transport-state record. Each `call.settled` carries its own transpor
 `telemetry.mode` is `standard` (the default) or `research` ([settings inventory](../guide/configuration-and-targets.md#telemetry)). Accountability records are written in both modes; there is no off.
 
 - **Standard** admits accountability and operational records, all of them content-free or structural. It writes no content-bearing record.
-- **Research** also admits the research-tier kinds that the `telemetry.research` flags turn on. `content` additionally needs the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. `systemOneDataset` needs `content` and consent too, and `busTrace` writes `<stateDir>/telemetry/research/bus-trace.jsonl`. `deltas` and `providerHeaders` record nothing in this build.
+- **Research** also admits the research-tier kinds that the `telemetry.research` flags turn on. `content` additionally needs the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. `systemOneDataset` needs `content` and consent too, `busTrace` writes `<stateDir>/telemetry/research/bus-trace.jsonl`, and `deltas` records `call.timing.deltas`. `providerHeaders` records nothing in this build.
 - A project or local settings layer can lower capture but never raise it.
 - Research capture is capped at 256 MiB per session, counting its research records and the preimages they store. A refusal is a `gap{research-cap}`, and accountability records continue.
 - The journal writer stores a research record's content in `objects/`, reserving it against the cap first, before writing the record that cites it. Content that could not be stored drops its record as a `gap{writer-drop}`.
@@ -158,12 +165,10 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 These parts of the design are not in this build and are planned for 0.6.7:
 
-- The records `auth.event`, `middleware.fired`, `system_one.decision` and `worker.channel`.
+- The records `auth.event`, `system_one.decision` and `worker.channel`.
 - Research capture of request bodies and allow-listed provider response headers.
 - Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
 - `clio-coder telemetry rebuild`, which rebuilds projections from journals and reports rule drift.
 - The GUI explain popover and timeline view.
-
-The `tool.settled` record is not built, and no release is set for it.
 
 Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.

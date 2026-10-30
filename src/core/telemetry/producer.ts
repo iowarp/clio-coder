@@ -5,6 +5,7 @@ import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted, Kind, Payload, PreimageData, PreimageKind } from "./schemas.js";
+import { DELTA_GAP_BOUNDS_MS } from "./schemas.js";
 
 export type PendingTelemetry<K extends Kind = Kind> = K extends Kind
 	? {
@@ -62,6 +63,20 @@ export function telemetryProducerHealth(): { unownedRecords: number; sinkFailure
 
 function sinkAdmits(sink: TelemetrySink, kind: Kind): boolean {
 	return sink.admits ? sink.admits(kind) : captureAdmits(STANDARD_CAPTURE, kind);
+}
+
+/**
+ * Whether a record of this kind would be captured under ctx now, so a producer can skip assembling research data
+ * the mode drops (#434). It answers for this moment only: the record itself is still filtered when it is enqueued.
+ */
+export function telemetryCaptures(kind: Kind, ctx = telemetryContext()): boolean {
+	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
+	if (!sink) return false;
+	try {
+		return sinkAdmits(sink, kind);
+	} catch {
+		return false;
+	}
 }
 
 /** No serialization, filesystem access, or locks may enter this call stack (#434, rule13). */
@@ -124,6 +139,11 @@ export interface TelemetryCall {
 	withContext<T>(fn: () => T): T;
 	stage(stage: Stage, phase: "start" | "end", facts?: StageFacts): void;
 	mark(mark: "firstByte" | "firstToken"): void;
+	/**
+	 * One generated delta. Present only under research delta capture, so a stream that has no histogram to feed never
+	 * inspects its deltas: the attempt records the gaps as call.timing.deltas after it settles (#428, #434).
+	 */
+	delta?(): void;
 	/**
 	 * Feed a provider HTTP response. The first 2xx response opens the stream and marks firstByte; the last one stays
 	 * on the attempt, in memory only, for the quota reading and research capture to read (#434).
@@ -214,6 +234,7 @@ export function beginCall(
 		let entered = false;
 		let successor: TelemetryCall | undefined;
 		let response: ObservedResponse | undefined;
+		const gaps = scope && telemetryCaptures("call.timing.deltas", scope) ? newGapHistogram() : undefined;
 		recordTelemetry("call.started", metadata, scope);
 		const handle: TelemetryCall = {
 			callId,
@@ -269,6 +290,8 @@ export function beginCall(
 					stages,
 				};
 				recordTelemetry("call.settled", facts, scope);
+				const timing = gaps?.payload();
+				if (timing) recordTelemetry("call.timing.deltas", timing, scope);
 				return facts;
 			},
 			abandon(cause) {
@@ -280,8 +303,39 @@ export function beginCall(
 				return successor;
 			},
 		};
+		if (gaps)
+			handle.delta = () => {
+				if (!settled) gaps.tick(performance.now());
+			};
 		liveAttempts.set(attemptId, handle);
 		return handle;
 	};
 	return attempt(0);
+}
+
+const round = (ms: number) => Math.round(ms * 1000) / 1000;
+
+function newGapHistogram() {
+	const gapCounts = new Array<number>(DELTA_GAP_BOUNDS_MS.length + 1).fill(0);
+	let deltas = 0;
+	let first = 0;
+	let last = 0;
+	let maxGapMs = 0;
+	return {
+		tick(now: number): void {
+			if (deltas === 0) first = now;
+			else {
+				const gap = now - last;
+				let bucket = 0;
+				while (bucket < DELTA_GAP_BOUNDS_MS.length && gap > (DELTA_GAP_BOUNDS_MS[bucket] ?? 0)) bucket += 1;
+				gapCounts[bucket] = (gapCounts[bucket] ?? 0) + 1;
+				if (gap > maxGapMs) maxGapMs = gap;
+			}
+			last = now;
+			deltas += 1;
+		},
+		payload(): Payload<"call.timing.deltas"> | undefined {
+			return deltas === 0 ? undefined : { deltas, gapCounts, maxGapMs: round(maxGapMs), spanMs: round(last - first) };
+		},
+	};
 }

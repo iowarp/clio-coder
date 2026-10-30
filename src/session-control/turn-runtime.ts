@@ -2,7 +2,7 @@ import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
-import { beginCall, recordTelemetry } from "../core/telemetry/producer.js";
+import { beginCall, recordTelemetry, telemetryCaptures } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -15,6 +15,7 @@ import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { QuotaReading } from "../domains/quota/index.js";
 import { quotaReadingFingerprint, quotaReadingFromMessage } from "../domains/quota/index.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
+import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import { recordUsageCall } from "../domains/session/usage-record.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
@@ -23,6 +24,7 @@ import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import { requestStructure } from "../engine/request-structure.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
+import { prefixBlocksOf } from "./prefix-blocks.js";
 /**
  * Turn runtime ownership: orchestrator target resolution, model synthesis,
  * live-agent construction and model hot-swap, thinking-level reconciliation,
@@ -827,6 +829,19 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				},
 				journalLease.context,
 			);
+			if (objects?.promptStructure && compiled)
+				journalLease.recordPromptCompiled?.(
+					objects.promptStructure,
+					{
+						layoutVersion: PROMPT_MANIFEST_VERSION,
+						tokenEstimate: Math.max(0, Math.round(compiled.tokenEstimate)),
+						sections: compiled.sections.length,
+						...(localRuntime.agent.state.thinkingLevel
+							? { thinkingLevel: String(localRuntime.agent.state.thinkingLevel) }
+							: {}),
+					},
+					{ ...journalLease.context, callId: modelCall.callId, attemptId: modelCall.attemptId },
+				);
 			modelCall.stage("transform", "start");
 		};
 		let apiCallFirstDeltaAt: number | null = null;
@@ -915,6 +930,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								coldReasons: [...new Set([...unsentColdReasons, ...(context.takeCallColdReasons?.() ?? [])])],
 							};
 							unsentColdReasons = [];
+							// Research capture: the prefix exactly as this attempt sends it, hashed (#423, #434).
+							attempt.withContext(() => {
+								if (!telemetryCaptures("prefix.blocks")) return;
+								const blocks = prefixBlocksOf(context.compiledSessionPrompt?.() ?? null, sent);
+								if (blocks) recordTelemetry("prefix.blocks", blocks);
+							});
 						}
 						// The provider stream runs inside the attempt's context, so the engine seam and every observer below it
 						// find this call; the seam's marks agree with the ones taken here because each keeps its first (#434).
@@ -1747,7 +1768,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					);
 				}
 				if (usage) {
-					context.reconcileUsage(usage);
+					const origin = enrichedEvent.message as { callId?: unknown; attemptId?: unknown };
+					context.reconcileUsage(
+						usage,
+						typeof origin.callId === "string" && typeof origin.attemptId === "string"
+							? { callId: origin.callId, attemptId: origin.attemptId }
+							: undefined,
+					);
 				}
 			}
 			if (enrichedEvent.type === "tool_execution_start") {

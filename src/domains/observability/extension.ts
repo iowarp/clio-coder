@@ -16,7 +16,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
-import { recordTelemetry, recordTelemetryContent } from "../../core/telemetry/producer.js";
+import { recordTelemetry, recordTelemetryContent, telemetryCaptures } from "../../core/telemetry/producer.js";
 import type { Payload } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
@@ -215,6 +215,8 @@ export function createObservabilityBundle(
 	const healthWindows = createHealthWindows({
 		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
 		record: (sessionId, data) => recordTelemetry("health.window", data, sessionContext(sessionId)),
+		recordSamples: (sessionId, data) => recordTelemetry("health.samples", data, sessionContext(sessionId)),
+		samplesWanted: (sessionId) => telemetryCaptures("health.samples", sessionContext(sessionId)),
 	});
 	const journals = createSessionJournals(
 		clioStateDir(),

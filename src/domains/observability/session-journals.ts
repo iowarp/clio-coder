@@ -7,7 +7,7 @@ import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
-import type { CallStarted } from "../../core/telemetry/schemas.js";
+import type { CallStarted, ObjectRef, Payload } from "../../core/telemetry/schemas.js";
 import type { CallJournal, JournalHealth } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
 import { storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
@@ -29,6 +29,15 @@ export interface TelemetrySessionLease {
 		prompt?: Parameters<typeof telemetryPromptStructure>[0] & { systemPrompt?: string };
 		tools?: unknown;
 	}): Promise<NonNullable<CallStarted["objects"]>>;
+	/**
+	 * prompt.compiled for the first call of this writer to cite a prompt structure; ctx names that call. A writer
+	 * reopened after an idle close records it again, so a reader keeps the earliest per structure (#434).
+	 */
+	recordPromptCompiled?(
+		structure: ObjectRef,
+		facts: Omit<Payload<"prompt.compiled">, "structure">,
+		ctx: TelemetryContext,
+	): void;
 	release(): Promise<void>;
 }
 
@@ -44,6 +53,8 @@ interface Entry {
 	journal: Promise<CallJournal | null>;
 	/** Prompt texts this writer already recorded, by digest, so a repeated prompt costs no research bytes. */
 	promptTexts: Set<string>;
+	/** Prompt structures this writer already announced as prompt.compiled, by object id. */
+	promptStructures: Set<string>;
 	/** Set once the writer has opened, until it starts closing. */
 	open?: boolean;
 	/** The opened writer, read synchronously by health windows (#434). */
@@ -129,6 +140,7 @@ export function createSessionJournals(
 				users: 0,
 				origin,
 				promptTexts: new Set(),
+				promptStructures: new Set(),
 				journal: Promise.resolve()
 					.then(writer)
 					.then((writer) =>
@@ -203,6 +215,11 @@ export function createSessionJournals(
 					}
 				}
 				return refs;
+			},
+			recordPromptCompiled(structure, facts, callContext) {
+				if (released || owned.promptStructures.has(structure.id)) return;
+				if (recordTelemetry("prompt.compiled", { ...facts, structure }, callContext))
+					owned.promptStructures.add(structure.id);
 			},
 			async release() {
 				if (released) return;
