@@ -1,7 +1,7 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
+import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import {
 	approvedIdentityForSpec,
 	CONTROL_FRAME_PREFIX,
@@ -546,7 +547,95 @@ describe("bulk-lane backpressure", () => {
 		strictEqual(result.exitCode, 1);
 		match(result.evidenceIncomplete ?? "", /consumer detached/u);
 	});
+
+	// #425: in 0.6.3 two detached coders finished while the orchestrator's main
+	// thread was starved. Each gave up its stdout drain after 2 s and exited 0,
+	// the final frames were lost, and dispatch sealed the clean exit as a
+	// missing final result that was never retried. Blocking this process from
+	// the admit until the worker exits reproduces that stall.
+	it("fails a finished worker whose output the orchestrator could not drain", {
+		timeout: 90_000,
+		skip: process.platform !== "linux",
+	}, async () => {
+		const env = await isolateClioEnv("clio-worker-starved-drain-");
+		try {
+			process.env.CLIO_CODER_WORKER_FAUX = "1";
+			// message_end and agent_end each carry the whole answer, more than a
+			// stdio socket buffers, so the tail waits in the worker for a reader.
+			process.env.CLIO_CODER_WORKER_FAUX_TEXT = "final answer ".repeat(9000);
+			await withModelFixture(async (url, requests) => {
+				const settings = structuredClone(DEFAULT_SETTINGS);
+				settings.fleet.retry.maxRetries = 0;
+				settings.targets = [{ id: "fixture", runtime: "litellm", url, defaultModel: "fixture" }];
+				settings.fleet.default.target = "fixture";
+				settings.fleet.default.model = "fixture";
+				let exitedWhileStalled = false;
+				const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
+					spawnWorker: (spec, options) => {
+						const worker = spawnWorkerProcess(
+							process.execPath,
+							["--import", import.meta.resolve("tsx"), WORKER_ENTRY],
+							spec,
+							{
+								...options,
+								onAnnounce: (attestation) => {
+									options?.onAnnounce?.(attestation);
+									// The admit is written in this tick; the stall starts in the next.
+									setImmediate(() => {
+										exitedWhileStalled = stallUntilExited(worker.pid as number, 12_000);
+									});
+								},
+							},
+						);
+						return worker;
+					},
+				});
+				try {
+					await bundle.extension.start();
+					const run = await bundle.contract.dispatch({
+						agentId: "scout",
+						executionRole: "researcher",
+						task: "Reply with a short response.",
+						cwd: env.dir,
+						requestOrigin: "internal",
+						resultContractOverride: { kind: "external-delegation" },
+					});
+					const receipt = await run.finalPromise;
+					ok(exitedWhileStalled, "the worker exits on its own drain bound while nothing reads it");
+					strictEqual(requests(), 0);
+					strictEqual(receipt.outcome, "failed");
+					strictEqual(receipt.exitCode, 1);
+					match(receipt.outcomeDetail ?? "", /bulk output incomplete: stdout did not drain within 2000 ms/u);
+					strictEqual(isDeterministicOutcomeCode(receipt.outcomeCode), false);
+				} finally {
+					await bundle.extension.stop?.();
+				}
+			});
+		} finally {
+			env.restore();
+		}
+	});
 });
+
+/**
+ * Hold this thread the way a saturated orchestrator did, reading nothing,
+ * until `pid` is a zombie. Returns false when `capMs` passes first.
+ */
+function stallUntilExited(pid: number, capMs: number): boolean {
+	const startedAt = performance.now();
+	const pause = new Int32Array(new SharedArrayBuffer(4));
+	while (performance.now() - startedAt < capMs) {
+		let state: string | undefined;
+		try {
+			state = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0];
+		} catch {
+			return true;
+		}
+		if (state === "Z") return true;
+		Atomics.wait(pause, 0, 0, 25);
+	}
+	return false;
+}
 
 describe("worker admission", () => {
 	it("uses faux responses through dispatch only when the env flag is enabled", { timeout: 90_000 }, async () => {
