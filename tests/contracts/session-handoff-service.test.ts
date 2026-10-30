@@ -20,6 +20,8 @@ import { createOverlaySessionLifecycle } from "../../src/interactive/overlay-ses
 import type { OverlayTransitions } from "../../src/interactive/overlay-transitions.js";
 
 const CWD = "/workspace/project";
+/** Production metas always carry the hash; the lifecycle locates the session call journal by it (#434). */
+const CWD_HASH = "0123456789abcdef";
 const GOAL = "finish the parser migration and its tests";
 const EXTRACTION = JSON.stringify({
 	decisions: [{ summary: "keep the lexer", rationale: "it is tested" }],
@@ -59,6 +61,7 @@ function fakeSession(options: { failNote?: boolean; failSeed?: boolean } = {}) {
 			{
 				id: "from",
 				cwd: CWD,
+				cwdHash: CWD_HASH,
 				pinnedLeafTurnId: "c1",
 				skillActivations: [activation],
 			} as unknown as SessionMeta,
@@ -73,7 +76,7 @@ function fakeSession(options: { failNote?: boolean; failSeed?: boolean } = {}) {
 		create: () => {
 			minted += 1;
 			const id = `to-${minted}`;
-			metas.set(id, { id, cwd: CWD } as unknown as SessionMeta);
+			metas.set(id, { id, cwd: CWD, cwdHash: CWD_HASH } as unknown as SessionMeta);
 			current = id;
 			return metas.get(id);
 		},
