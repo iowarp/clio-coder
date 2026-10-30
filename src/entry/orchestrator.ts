@@ -182,6 +182,11 @@ import { recordFailedCompactionCalls } from "../domains/observability/compaction
 import { TELEMETRY_FOLD_VERSION } from "../domains/observability/folds.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
+import {
+	appendResearchTraceLine,
+	RESEARCH_TRACE_FILES,
+	researchTracePath,
+} from "../domains/observability/research-files.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
@@ -2096,7 +2101,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
 	// Domain loading emits before the config contract exists; the trace asks for the mode on every event (#434).
-	let researchBusTrace: () => string | null = () => null;
+	let researchBusTrace: () => ((record: Record<string, unknown>) => void) | null = () => null;
 	installBusTracer(() => researchBusTrace());
 	termination.installSignalHandlers();
 
@@ -2391,9 +2396,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const config = result.getContract<ConfigContract>("config");
 	researchBusTrace = () => {
 		const telemetry = config?.get().telemetry;
-		return telemetry?.mode === "research" && telemetry.research.busTrace
-			? join(clioStateDir(), "telemetry", "research", "bus-trace.jsonl")
-			: null;
+		if (telemetry?.mode !== "research" || !telemetry.research.busTrace) return null;
+		const path = researchTracePath(clioStateDir(), "bus-trace");
+		return (record) => appendResearchTraceLine(path, record, RESEARCH_TRACE_FILES["bus-trace"]);
 	};
 	const providers = result.getContract<ProvidersContract>("providers");
 	timer.mark("providers resolved");

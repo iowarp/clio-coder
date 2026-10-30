@@ -16,9 +16,9 @@
  * prior. It never contributes a hard constraint or durable raw task text.
  */
 
-import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
+import { appendResearchTraceLine, RESEARCH_TRACE_FILES, researchTracePath } from "../observability/research-files.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import {
 	createDurableQualitySourceCache,
@@ -165,9 +165,6 @@ function createRouteLearner(capacity = LEARNER_CAPACITY): RouteLearner {
 // Observer adapter (shadow mode, bounded JSONL)
 // ---------------------------------------------------------------------------
 
-/** Rotate the observation log once it crosses this size; one prior generation is kept. */
-const OBSERVATION_LOG_MAX_BYTES = 1024 * 1024;
-
 export interface RouteObserveInput {
 	task: string;
 	/** Decision already produced by the shared joint resolver. */
@@ -256,15 +253,7 @@ function gateEvidenceKey(sources: DurableQualitySources, serialOf: (value: objec
 
 function appendObservationLine(path: string | null, record: Record<string, unknown>): void {
 	if (path === null) return;
-	mkdirSync(dirname(path), { recursive: true });
-	try {
-		if (statSync(path).size > OBSERVATION_LOG_MAX_BYTES) {
-			renameSync(path, `${path}.1`);
-		}
-	} catch {
-		// Missing file: first append creates it.
-	}
-	appendFileSync(path, `${JSON.stringify(record)}\n`);
+	appendResearchTraceLine(path, record, RESEARCH_TRACE_FILES["route-observations"]);
 }
 
 /** The compact log projection; the sealed receipt keeps the full evaluation. */
@@ -296,7 +285,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 	const logDir = (): string | null => {
 		if (options.logDir !== undefined) return join(options.logDir, "observations.jsonl");
 		return options.research?.() === true
-			? join(options.stateDir ?? clioStateDir(), "telemetry", "research", "route-observations.jsonl")
+			? researchTracePath(options.stateDir ?? clioStateDir(), "route-observations")
 			: null;
 	};
 	let qualitySources: DurableQualitySourceCache | undefined;
