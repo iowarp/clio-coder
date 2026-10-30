@@ -114,6 +114,9 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 		});
 		// Without the workspace hash there is no journal to name; nothing is recorded and nothing throws.
 		bus.emit(BusChannels.SessionParked, { sessionId: origin.id, reason: "close", at: Date.now() });
+		// Shutdown stops this domain before the session domain parks the live session, so stop() journals its close.
+		const live = { id: "lifecycle-live", cwdHash: origin.cwdHash };
+		bus.emit(BusChannels.SessionOpened, { sessionId: live.id, cwdHash: live.cwdHash, at: Date.now() });
 		await extension.stop?.();
 		const records = (await readCallJournal(join(clioStateDir(), "sessions", origin.cwdHash, origin.id))).records.map(
 			({ record }) => record,
@@ -124,6 +127,11 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 			"session.resumed",
 		]);
 		ok(records.every((record) => record.ctx.sessionId === origin.id));
+		const liveRecords = (await readCallJournal(join(clioStateDir(), "sessions", live.cwdHash, live.id))).records;
+		deepStrictEqual(
+			liveRecords.flatMap(({ record }) => (record.k.startsWith("session.") ? [record.k] : [])),
+			["session.opened", "session.closed"],
+		);
 	} finally {
 		env.restore();
 	}

@@ -230,6 +230,9 @@ export function createObservabilityBundle(
 			.finally(() => pendingSettingsRecords.delete(write));
 		pendingSettingsRecords.add(write);
 	};
+	// The session the lifecycle records left open. Shutdown stops this domain before the session domain parks it,
+	// so stop() journals its close while the writers still accept records (#434).
+	let liveSession: TelemetrySessionOrigin | null = null;
 	// Writers still storing the settings they opened under. A change arriving meanwhile is journaled after that
 	// snapshot, so the session neither loses the change nor reads it before the settings it changed (#434).
 	const openingSnapshots = new Map<
@@ -372,13 +375,16 @@ export function createObservabilityBundle(
 				unsubscribes.push(context.bus.on(channel, (payload) => trace.enqueue(channel, payload)));
 			}
 			unsubscribes.push(
-				context.bus.on(BusChannels.SessionOpened, ({ sessionId, cwdHash }) =>
-					recordLifecycle({ id: sessionId, cwdHash }, "session.opened", {}),
-				),
+				context.bus.on(BusChannels.SessionOpened, ({ sessionId, cwdHash }) => {
+					liveSession = { id: sessionId, cwdHash };
+					recordLifecycle(liveSession, "session.opened", {});
+				}),
 				context.bus.on(BusChannels.SessionResumed, ({ sessionId, cwdHash }) => {
-					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.resumed", {});
+					liveSession = cwdHash === undefined ? null : { id: sessionId, cwdHash };
+					if (liveSession) recordLifecycle(liveSession, "session.resumed", {});
 				}),
 				context.bus.on(BusChannels.SessionParked, ({ sessionId, cwdHash }) => {
+					if (liveSession?.id === sessionId) liveSession = null;
 					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.closed", { reason: "completed" });
 				}),
 			);
@@ -407,6 +413,8 @@ export function createObservabilityBundle(
 		},
 		async stop() {
 			healthWindows.stop();
+			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "completed" });
+			liveSession = null;
 			await Promise.all(pendingSettingsRecords);
 			await journals.closeAll();
 			telemetry.stop();
