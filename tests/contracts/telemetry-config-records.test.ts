@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { ConfigChangePayload } from "../../src/core/bus-events.js";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -84,6 +85,45 @@ it("a session writer opens with its settings and journals each change once, with
 			42,
 			"the after document resolves from objects/",
 		);
+	} finally {
+		env.restore();
+	}
+});
+
+it("a session's lifecycle events become session.opened, session.resumed and session.closed records (#434)", async () => {
+	const env = await isolateClioEnv("clio-coder-lifecycle-records-");
+	const bus = createSafeEventBus();
+	const { extension } = createObservabilityBundle({ bus, getContract: () => undefined } as unknown as DomainContext, {
+		dispatchTrace: false,
+	});
+	const origin = { id: "lifecycle-session", cwdHash: "lifecycle-repo" };
+	try {
+		await extension.start();
+		bus.emit(BusChannels.SessionOpened, { sessionId: origin.id, cwdHash: origin.cwdHash, at: Date.now() });
+		bus.emit(BusChannels.SessionParked, {
+			sessionId: origin.id,
+			reason: "resume_other",
+			cwdHash: origin.cwdHash,
+			at: Date.now(),
+		});
+		bus.emit(BusChannels.SessionResumed, {
+			sessionId: origin.id,
+			via: "resume",
+			cwdHash: origin.cwdHash,
+			at: Date.now(),
+		});
+		// Without the workspace hash there is no journal to name; nothing is recorded and nothing throws.
+		bus.emit(BusChannels.SessionParked, { sessionId: origin.id, reason: "close", at: Date.now() });
+		await extension.stop?.();
+		const records = (await readCallJournal(join(clioStateDir(), "sessions", origin.cwdHash, origin.id))).records.map(
+			({ record }) => record,
+		);
+		deepStrictEqual(records.flatMap((record) => (record.k.startsWith("session.") ? [record.k] : [])).sort(), [
+			"session.closed",
+			"session.opened",
+			"session.resumed",
+		]);
+		ok(records.every((record) => record.ctx.sessionId === origin.id));
 	} finally {
 		env.restore();
 	}

@@ -96,7 +96,7 @@ Pricing is separate from token provenance: `pricing.usd` is a fact, and `pricing
 | `call.ref` | accountability | content-free | A session's pointer to a call recorded in a run journal. |
 | `compaction.closed` | accountability | content-free | A compaction's calls and its outcome. |
 | `gap` | accountability | content-free | Lost or refused records, by sink and reason. |
-| `session.opened`, `session.resumed`, `session.forked_from`, `session.closed` | accountability | content-free | Session lifecycle. A fork records its parent and starts an empty journal; lineage folds deduplicate by call id. |
+| `session.opened`, `session.resumed`, `session.forked_from`, `session.closed` | accountability | content-free | Session lifecycle: a new session records `session.opened`, a session the operator reopens `session.resumed`, and a session replaced or closed `session.closed`. A fork records its parent and starts an empty journal; lineage folds deduplicate by call id. A session from before these records reads its end from `meta.json` `endedAt`. |
 | `segment.closed` | accountability | content-free | `rotation`, `mode-change` or `shutdown`. |
 | `turn.settled` | accountability | content-free | A turn's settlement. |
 | `run.settled`, `run.usage`, `run.ref` | accountability | content-free (`run.usage` structural) | A run's settlement, its reported usage aggregate, and a session's pointer to it. |

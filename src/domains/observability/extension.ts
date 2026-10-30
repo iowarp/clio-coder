@@ -206,6 +206,30 @@ export function createObservabilityBundle(
 		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");
 	// Writes of config.changed still storing their documents; shutdown waits for them before closing writers (#434).
 	const pendingSettingsRecords = new Set<Promise<void>>();
+	/**
+	 * A session's lifecycle as journal records: opened, resumed and closed. A writer opens for each, so a session
+	 * idle past its writer's close still records them; shutdown waits for them before closing writers (#434).
+	 */
+	const recordLifecycle = <K extends "session.opened" | "session.resumed" | "session.closed">(
+		origin: TelemetrySessionOrigin,
+		kind: K,
+		data: Payload<K>,
+	): void => {
+		const write = journals
+			.acquire(origin, "main")
+			.then(async (lease) => {
+				try {
+					if (lease.journaled) recordTelemetry(kind, data, lease.context);
+				} finally {
+					await lease.release();
+				}
+			})
+			.catch(() => {
+				// The writer reports its own failure; meta.json keeps endedAt for readers either way.
+			})
+			.finally(() => pendingSettingsRecords.delete(write));
+		pendingSettingsRecords.add(write);
+	};
 	// Writers still storing the settings they opened under. A change arriving meanwhile is journaled after that
 	// snapshot, so the session neither loses the change nor reads it before the settings it changed (#434).
 	const openingSnapshots = new Map<
@@ -347,6 +371,17 @@ export function createObservabilityBundle(
 			] as const) {
 				unsubscribes.push(context.bus.on(channel, (payload) => trace.enqueue(channel, payload)));
 			}
+			unsubscribes.push(
+				context.bus.on(BusChannels.SessionOpened, ({ sessionId, cwdHash }) =>
+					recordLifecycle({ id: sessionId, cwdHash }, "session.opened", {}),
+				),
+				context.bus.on(BusChannels.SessionResumed, ({ sessionId, cwdHash }) => {
+					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.resumed", {});
+				}),
+				context.bus.on(BusChannels.SessionParked, ({ sessionId, cwdHash }) => {
+					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.closed", { reason: "completed" });
+				}),
+			);
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchCompleted, (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};

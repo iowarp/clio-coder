@@ -5,6 +5,7 @@ import {
 } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { flushPackageActivities, PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
+import { cwdHash } from "../../engine/session.js";
 import { aggregateCostAmounts } from "../observability/cost.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
@@ -43,12 +44,23 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 	let state: SessionManagerState | null = null;
 	let currentTurnId: string | null = null;
 
-	function emitPark(sessionId: string, reason: ParkReason): void {
-		context.bus.emit(BusChannels.SessionParked, { sessionId, reason, at: Date.now() });
+	// The workspace hash rides on lifecycle events so the call journal can record them (#434).
+	const hashOf = (cwd: string | undefined): { cwdHash?: string } => {
+		if (cwd === undefined) return {};
+		try {
+			return { cwdHash: cwdHash(cwd) };
+		} catch {
+			// A meta without a usable cwd still parks; only its journal record is skipped.
+			return {};
+		}
+	};
+
+	function emitPark(sessionId: string, reason: ParkReason, cwd?: string): void {
+		context.bus.emit(BusChannels.SessionParked, { sessionId, reason, at: Date.now(), ...hashOf(cwd) });
 	}
 
-	function emitResume(sessionId: string, via: ResumeVia): void {
-		context.bus.emit(BusChannels.SessionResumed, { sessionId, via, at: Date.now() });
+	function emitResume(sessionId: string, via: ResumeVia, cwd?: string): void {
+		context.bus.emit(BusChannels.SessionResumed, { sessionId, via, at: Date.now(), ...hashOf(cwd) });
 	}
 
 	function emitTurnSwitched(sessionId: string, turnId: string): void {
@@ -74,7 +86,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 	async function closeCurrent(reason: ParkReason = "close"): Promise<void> {
 		if (!state) return;
 		const s = state;
-		emitPark(s.meta.id, reason);
+		emitPark(s.meta.id, reason, s.meta.cwd);
 		state = null;
 		currentTurnId = null;
 		await s.writer.close();
@@ -171,7 +183,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// every append since the last checkpoint.
 			if (state) {
 				const prior = state;
-				emitPark(prior.meta.id, "create_new");
+				emitPark(prior.meta.id, "create_new", prior.meta.cwd);
 				state = null;
 				void prior.writer.close();
 			}
@@ -181,6 +193,9 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			state = next;
 			currentTurnId = null;
 			flushPackageActivities();
+			const opened = hashOf(next.meta.cwd).cwdHash;
+			if (opened !== undefined)
+				context.bus.emit(BusChannels.SessionOpened, { sessionId: next.meta.id, cwdHash: opened, at: Date.now() });
 			return next.meta;
 		},
 		append(turn: TurnInput) {
@@ -271,13 +286,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			const leafTurnId = resolveLeafOnOpen(resumed);
 			if (state) {
 				const prior = state;
-				emitPark(prior.meta.id, "resume_other");
+				emitPark(prior.meta.id, "resume_other", prior.meta.cwd);
 				void prior.writer.close();
 			}
 			context.bus.emit(BusChannels.SessionResuming, { sessionId, at: Date.now() });
 			state = resumed.state;
 			currentTurnId = leafTurnId;
-			emitResume(resumed.state.meta.id, "resume");
+			emitResume(resumed.state.meta.id, "resume", resumed.state.meta.cwd);
 			return resumed.state.meta;
 		},
 		fork(parentTurnId, input) {
@@ -296,7 +311,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				from: prior,
 				parentTurnId,
 				...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
-				beforeClose: () => emitPark(prior.meta.id, "fork"),
+				beforeClose: () => emitPark(prior.meta.id, "fork", prior.meta.cwd),
 			});
 			state = next;
 			currentTurnId = computeLeafId(nodes);
@@ -324,13 +339,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			const leafTurnId = resolveLeafOnOpen(resumed);
 			if (state) {
 				const prior = state;
-				emitPark(prior.meta.id, "switch_branch");
+				emitPark(prior.meta.id, "switch_branch", prior.meta.cwd);
 				void prior.writer.close();
 			}
 			context.bus.emit(BusChannels.SessionResuming, { sessionId, at: Date.now() });
 			state = resumed.state;
 			currentTurnId = leafTurnId;
-			emitResume(resumed.state.meta.id, "switch_branch");
+			emitResume(resumed.state.meta.id, "switch_branch", resumed.state.meta.cwd);
 			return resumed.state.meta;
 		},
 		switchTurn(turnId) {

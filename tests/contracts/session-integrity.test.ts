@@ -256,6 +256,8 @@ describe("session integrity", () => {
 					bus: { emit: (...args: unknown[]) => events.push(args) },
 				} as unknown as DomainContext).contract;
 				const old = current.create({ cwd: scratch.dir });
+				// Opening the old session publishes session.opened; only the failed transition must publish nothing.
+				events.length = 0;
 				current.append(turn("old"));
 				const bad = createSession({ cwd: scratch.dir });
 				bad.writer.append(turn("candidate"));
@@ -648,6 +650,8 @@ describe("session integrity", () => {
 					bus: { emit: (...args: unknown[]) => events.push(args) },
 				} as unknown as DomainContext).contract;
 				const old = current.create({ cwd: scratch.dir });
+				// Opening the old session publishes session.opened; only the failed transition must publish nothing.
+				events.length = 0;
 				current.append(turn("old"));
 				const candidate = createSession({ cwd: scratch.dir });
 				candidate.writer.append(turn("candidate"));
@@ -722,6 +726,8 @@ describe("session integrity", () => {
 					bus: { emit: (...args: unknown[]) => events.push(args) },
 				} as unknown as DomainContext).contract;
 				const old = current.create({ cwd: scratch.dir });
+				// Opening the old session publishes session.opened; only the failed transition must publish nothing.
+				events.length = 0;
 				current.append(turn("old"));
 				const candidate = createSession({ cwd: scratch.dir });
 				await candidate.writer.close();

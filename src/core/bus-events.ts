@@ -39,6 +39,7 @@ export const BusChannels = {
 	EggsChanged: "session.eggsChanged",
 	SessionStart: "session.start",
 	SessionEnd: "session.end",
+	SessionOpened: "session.opened",
 	SessionParked: "session.parked",
 	SessionResuming: "session.resuming",
 	SessionResumed: "session.resumed",
@@ -440,11 +441,20 @@ export interface SessionEndPayload {
 export type SessionParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
 export type SessionResumeVia = "resume" | "switch_branch";
 
+/** Published on {@link BusChannels.SessionOpened} when a new session becomes current; a fork records its own lineage. */
+export interface SessionOpenedPayload {
+	sessionId: string;
+	/** The session directory's workspace hash, so a journal can be opened for it (#434). */
+	cwdHash: string;
+	at: number;
+}
+
 /** Published on {@link BusChannels.SessionParked} when the current session is replaced or closed. */
 export interface SessionParkedPayload {
 	sessionId: string;
 	reason: SessionParkReason;
 	at: number;
+	cwdHash?: string;
 }
 
 /** Published on {@link BusChannels.SessionResuming} after a load validates, immediately before replacing the current session. */
@@ -458,6 +468,7 @@ export interface SessionResumedPayload {
 	sessionId: string;
 	via: SessionResumeVia;
 	at: number;
+	cwdHash?: string;
 }
 
 /**
@@ -961,6 +972,7 @@ export type BusPayloadMap = {
 	[BusChannels.EggsChanged]: { sessionId: string | null; active: readonly string[] };
 	[BusChannels.SessionStart]: SessionStartPayload;
 	[BusChannels.SessionEnd]: SessionEndPayload;
+	[BusChannels.SessionOpened]: SessionOpenedPayload;
 	[BusChannels.SessionParked]: SessionParkedPayload;
 	[BusChannels.SessionResuming]: SessionResumingPayload;
 	[BusChannels.SessionResumed]: SessionResumedPayload;
