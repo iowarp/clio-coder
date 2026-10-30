@@ -164,7 +164,7 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 ## Planned
 
-These parts of the design are not in this build and are planned for 0.6.7:
+These parts of the design are not in this build yet:
 
 - The records `system_one.decision` and `worker.channel`.
 - Research capture of request bodies and allow-listed provider response headers.
