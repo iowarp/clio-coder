@@ -73,6 +73,13 @@ Clio Coder divides worker output into two isolated streams to protect control si
 
    The orchestrator reads the bulk lane through a bounded queue of 4096 frames ([worker-protocol.ts](../../src/domains/dispatch/worker-protocol.ts)). At the bound it drops the oldest display-only frame, such as a `message_update`. It never drops a receipt-bearing frame: `message_end`, the tool frames (`tool_execution_start`, `tool_execution_end`, `clio_coder_tool_start`, `clio_coder_tool_finish`), `clio_coder_run_outcome`, `clio_coder_helper_result`, `clio_coder_flow_restrictions`, the permission escalation, resolution, and grant execution frames, `clio_coder_steer_received`, and `spawn_error`. The set is `RECEIPT_BEARING_BULK_TYPES` in [protocol.ts](../../src/worker/protocol.ts). When the queue holds only evidence, it accepts one more receipt-bearing frame past the bound and refuses the new display frame instead. A bulk line over `WORKER_BULK_FRAME_MAX_BYTES` is discarded before parsing and counted as malformed.
 
+   A trail with a gap cannot seal as a complete run. Two stderr lines name the gap:
+
+   * **`[worker] bulk output incomplete: <reason>`** is written by the worker (`WORKER_STDOUT_INCOMPLETE_MARKER`, [ndjson.ts](../../src/worker/ndjson.ts)) when its own stdout cannot carry a frame: an event that cannot be serialized, a frame over `WORKER_BULK_FRAME_MAX_BYTES`, an unwritten backlog that would pass 16 MiB (`WORKER_STDOUT_BACKLOG_MAX_BYTES`), a write error such as `EPIPE`, or stdout that did not drain within 2 seconds at exit. The worker reports the first such failure only, aborts the run, writes nothing further and cannot exit 0.
+   * **`[worker] bulk evidence incomplete: <reason>`** is written by the orchestrator ([worker-spawn.ts](../../src/domains/dispatch/worker-spawn.ts)) when it knows the trail it received has a gap, for the first reason only. The reasons are an unparsable bulk frame, a frame over the lane limit, the queue reaching its hard bound of 8192 frames or 16 MiB (`WORKER_EVENT_QUEUE_HARD_FRAMES` and `WORKER_EVENT_QUEUE_HARD_BYTES`), the event consumer detaching before the lane ended, a truncated final frame, a worker killed by a signal before it finished its output, and a relayed `bulk output incomplete` line from the worker. A queue overflow also stops the worker through its process owner and drains the rest of the pipe unretained.
+
+   Either line turns an exit code of 0 into 1, so a gap is never a clean success. The receipt counts it as a tool-telemetry ingestion error, which reports tool telemetry coverage as `partial`.
+
 2. **Control Lane (`stderr`)**:
    Emits out-of-band control frames prefixed by `@clio-control/1 `, capped at `WORKER_CONTROL_FRAME_MAX_BYTES` (16 KiB). Because control frames travel over `stderr`, they bypass backpressured bulk stdout streams and reach orchestrator watchdogs immediately. Control frame kinds include:
    * **Announce:** `{"kind": "announce", "attestation": ...}` sent immediately upon startup.
@@ -251,8 +258,8 @@ infrastructure breakers.
 | 1 | `operator-cancel` | Operator abort or outcome `canceled`. | No | None | None |
 | 2 | `policy` | Admission, budget, scope or cooldown rejection, or outcome `denied_by_policy`. | No | None | None |
 | 3 | `permission` | Permission failure or worker exit code `3`. | No | None | None |
-| 4 | `deterministic-task` | A typed outcome code that retrying unchanged cannot heal: `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked`. Order 9 also assigns this class from diagnostic text. | No | None | None |
-| 5 | `model-quality` | The coordinator's quality or verification gate rejected an otherwise successful completion. | Yes | `agent`, `model`; the decision also carries typed authority to change agent | None |
+| 4 | `deterministic-task` | A typed outcome code that retrying unchanged cannot heal: `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked`. Order 9 also assigns this class from diagnostic text. | No | None | None |
+| 5 | `model-quality` | The coordinator's quality or verification gate rejected an otherwise successful completion, or its result validator found the final result nonconforming (outcome code `result_contract_invalid`, see below). | Yes | `agent`, `model`; the decision also carries typed authority to change agent | None |
 | 6 | `node-version` | WorkerSpec version-skew diagnostic, including the released older wording. The request is valid but this node runs an incompatible build. | Yes | `node` | None |
 | 7 | `node-channel` | A typed control-channel failure, a reconciler stall kill, outcome `stalled` or `spawn_failed`, or process exit code `255` (SSH). | Yes | `node` | None |
 | 8 | `provider-refusal` | Outcome `failed` and the provider's content filter answered. The endpoint is healthy. | Yes | None | None |
@@ -266,6 +273,12 @@ infrastructure breakers.
 | 16 | `internal` | No more specific termination evidence. | Yes | None | None |
 
 The diagnostic text is the lower-cased join of the worker's `stderrTail` (last 4096 bytes) and the worker's last provider error message. An ACP delegation passes the provider message in place of stderr, and so does a structured-handoff run, which writes nothing to stderr.
+
+#### Unrepaired result contracts
+
+A worker whose recipe carries a result contract repairs a nonconforming terminal result in its own loop. When it spends its two repair rounds, the worker attests that and the run seals `result_contract_exhausted`, a deterministic failure. When the worker exits successfully but the coordinator's own validator finds the final result nonconforming, no worker attested exhaustion, so the host seals `outcomeCode: "result_contract_invalid"` with the detail `result contract failed: <reason>` (`src/domains/dispatch/extension.ts`). A worker cannot assert that code itself: the dispatch listener drops it from a worker-authored outcome event, as it drops `host_verification_rejected` and `merge_withheld`.
+
+`classifyFailure` maps `result_contract_invalid` to `model-quality` at order 5, ahead of the evidence tests below it, so the failure is retryable and the retry excludes the agent and the model. The class says nothing about the endpoint, so it neither penalizes the target breaker nor excludes a node or target. A retry still waits behind the rules that suppress it for any class, such as a failed attempt that ran a state-changing call.
 
 #### Provider 4xx is not retried
 
@@ -456,7 +469,7 @@ The store is `<stateDir>/route-history.json`: `{ version: 3, records: [...] }`, 
 | Label | Meaning |
 | --- | --- |
 | `success` | The receipt's outcome is `succeeded`. |
-| A typed outcome code, such as `worker_tool_call_cap_exhausted`, `result_contract_exhausted`, `worker_no_work`, or `merge_withheld` | The receipt carries that `outcomeCode`. The twelve codes are listed in the `deterministic-task` row of [Failure classification and retries](#51-failure-classification-and-retries). |
+| A typed outcome code, such as `worker_tool_call_cap_exhausted`, `result_contract_exhausted`, `worker_no_work`, or `merge_withheld` | The receipt carries that `outcomeCode`. The deterministic codes are listed in the `deterministic-task` row of [Failure classification and retries](#51-failure-classification-and-retries); `result_contract_invalid` is the one code that does not suppress retry. |
 | `permission_required` | A failed receipt with no outcome code whose outcome detail begins `permission_required`. |
 | `failure` | A failed receipt with neither an outcome code nor a permission detail. |
 | `timed_out`, `stalled`, `canceled`, `denied_by_policy`, `spawn_failed` | Any other outcome keeps its own name. |

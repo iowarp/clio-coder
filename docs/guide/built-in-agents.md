@@ -116,7 +116,7 @@ answer reaches the main agent the way `/share` puts a worker result there, as an
 operator-authored note on the ordinary user-turn path. `/oracle` during an
 in-flight turn is refused rather than queued.
 
-Every contract-bearing agent gets bounded in-worker repair. When the terminal result misses its contract, the worker replays the validator's own reason, the exact accepted shape, and the `path:line` locations this run actually read, then asks for the result again. Two repair rounds is the whole allowance; after that the run fails with `result_contract_exhausted`. This is what keeps a small local model that gathered the right evidence from being failed for a shape mistake nobody told it about.
+Every contract-bearing agent gets bounded in-worker repair. When the terminal result misses its contract, the worker replays the validator's own reason, the exact accepted shape, and the `path:line` locations this run actually read, then asks for the result again. Two repair rounds is the whole allowance; after that the run fails with `result_contract_exhausted`. A worker that exits successfully with a result the host's own validator still rejects seals `result_contract_invalid` instead, which is retried on another agent or model. This is what keeps a small local model that gathered the right evidence from being failed for a shape mistake nobody told it about.
 
 Two rounds only help when the reason is actionable, so a validator reason names the mistake and shows the value that would have passed. A `mutation-report` with `"validations":[]` is told the array was empty and is given one entry shaped like `{"name":"npm test","passed":true,"evidence":"exit 0"}`, and a report whose entries are malformed is told which keys each entry carries. Naming the requirement alone left a small model re-emitting the same empty array through both rounds.
 
@@ -203,7 +203,7 @@ An assignment may request `agent: auto`, but agent choice is advisory by default
 
 Active agent selection requires an exact `{agentId, executionRole}` entry in `fleet.adaptiveRouting.agentRoles` and a passing readiness report for that same agent and role. Empty activation settings are the default. If no eligible agent is ready, active automation fails closed instead of falling back to the fixed requested recipe.
 
-Scout is the bounded escalation path for broad reconnaissance, not an authority shortcut. Its strict `scout-report` may return grounded findings or a split recommendation with typed subtasks. The coordinator validates the transition, assigns fresh authority and an absolute deadline to each child, and records the decision. A recovery attempt uses the dedicated recovery role and may not silently inherit broader builder authority.
+Scout is the bounded escalation path for broad reconnaissance, not an authority shortcut. Its strict `scout-report` may return grounded findings or a split recommendation with typed subtasks. The coordinator validates the transition, assigns fresh authority and an absolute deadline to each child, and records the decision. A recovery attempt uses the dedicated recovery role and may not silently inherit broader builder authority. A read-only Scout can also inspect one checkout outside the workspace when the operator approves that root for the run; the approval grants no writes or commands, and headless runs cannot give it. See [External Scout read](../architecture/dispatch-typed-intent.md#67-external-scout-read).
 
 ### ACP Delegation Agents as First-Class Workers
 

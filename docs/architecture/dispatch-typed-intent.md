@@ -254,7 +254,11 @@ producer.
 | `intent_outputs_outside_write_roots` | refuse | A declared output lies outside every declared write root. The diagnostic tells the caller to list file paths within the roots, never an action such as commit. |
 | `intent_write_without_authority` | refuse | Write roots declared on a read-only request. |
 | `intent_scope_widening` | refuse | A narrowed intent reaches outside the intent it narrows. |
-| `intent_path_absolute` | refuse | A declared path is absolute rather than repository-relative. |
+| `intent_path_absolute` | refuse | A declared path is absolute rather than repository-relative, or an outside-checkout read was requested from an agent other than a read-only `scout`. See [6.7](#67-external-scout-read). |
+| `external_read_write_scope` | refuse | An external Scout declared write roots, expected outputs, verification, a gate or a task worktree. |
+| `external_read_root_invalid` | refuse | The external read root is not an existing directory, or it cannot be resolved. |
+| `external_read_mode_unsupported` | refuse | An external Scout was detached, or its dispatch is not independent parallel tasks without review. |
+| `external_read_approval_required` | refuse | The operator did not approve the external root for this run, or no approval was available. |
 | `intent_path_escapes_root` | refuse | A declared path escapes the repository root. |
 | `intent_path_malformed` | refuse | A declared path fails the boundary grammar, including an `expected_outputs` entry that normalizes to `.`. Outputs are file paths, and the host commits worktree tasks. |
 | `intent_path_over_cap` | refuse | A list exceeds 32 entries or an entry exceeds 512 bytes. |
@@ -377,6 +381,14 @@ approval artifact, so an operator sees the declared scope before an external
 agent starts. It grants nothing on that transport: the external agent runs its
 own tool surface, Clio Coder mediates no per-tool call, and any resolved `writeRoots`
 is refused outright rather than accepted and left unenforced.
+
+### 6.7 External Scout read
+
+A read-only `scout` task can inspect one checkout outside the workspace. The task names one absolute POSIX directory in `intent.read_roots` (at most 512 bytes, no backslashes) or sets a `cwd` outside the workspace. The host resolves the real path, requires an existing directory, rebases every declared `read_roots` and `relevant_paths` entry to a path relative to that root, and runs the Scout read-only with the root as its working directory. A declared path that leaves the root is refused with `Use one external checkout per Scout task`. Any other agent, or a Scout that is not read-only, gets `intent_path_absolute`.
+
+An external Scout cannot declare `write_roots`, `expected_outputs` or `verification`, cannot ask for a task worktree, and cannot carry a `gate` (`external_read_write_scope`). It must be an attached `mode: parallel` task without `review`, so a detached or reviewed dispatch is refused with `external_read_mode_unsupported`.
+
+The host then asks the operator once per run and root, whatever the session's autonomy level: `Allow one read-only Scout run to inspect external root "<root>"? This grants no writes, commands, or access to other external roots.` The TUI or an ACP permission request answers it, and the approval expires with that run. A headless run, a worker and any host without a permission listener cannot approve, so the task is rejected with `external_read_approval_required: Scout root <root> was not approved for this run; approve it in the TUI or ACP permission request. Headless runs cannot approve external roots.` In a batch the approved tasks still run and each rejected one is listed by position, and when every task is rejected the call returns the error with `rejectedTasks`. Admission re-checks that the approval names this run and the canonical root, and refuses a request without it with the same code.
 
 ---
 

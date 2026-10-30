@@ -494,7 +494,7 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 | `routing` | Hard bounds: positive `maxCostUsd`, positive `deadlineMs`, `requiredCapabilities`. Configured adaptive routing adds `posture` (`manual`, `quality`, `balanced`, `latency`, `economy`), `minimumQuality` (0–1), `locality` (`local-only`, `prefer-local`, `any`), and `failover` (`none`, `approved`). Exact pins require manual posture and do not fail over; model-authored candidate lists are rejected. |
 | `timeout_ms` | Abort the whole dispatch after this duration; remaining sequential tasks are skipped. |
 | `briefing` | Optional parent context, not a task or worker instruction; trimmed, max 12,000 UTF-8 bytes, and recorded as byte/hash provenance. A task-level briefing overrides the batch value. |
-| `intent` | Top-level or task-level `{read_roots, write_roots, relevant_paths, expected_outputs, verification}` scope. Path arrays allow up to 32 entries. `verification` is an array of up to 8 `{check,timeout_ms?}` entries using only declared check IDs from `verify()` discovery; a single object, shell command, or invented label such as `test suite` is refused. Paths normalize repository-relative, and `expected_outputs` are file paths, never `.` or an action such as commit; task intent can narrow, not widen, the top-level ceiling. Parallel write roots must be disjoint; expected outputs do not confine access. See [typed dispatch intent](../architecture/dispatch-typed-intent.md). |
+| `intent` | Top-level or task-level `{read_roots, write_roots, relevant_paths, expected_outputs, verification}` scope. Path arrays allow up to 32 entries. `verification` is an array of up to 8 `{check,timeout_ms?}` entries using only declared check IDs from `verify()` discovery; a single object, shell command, or invented label such as `test suite` is refused. Paths normalize repository-relative, and `expected_outputs` are file paths, never `.` or an action such as commit; task intent can narrow, not widen, the top-level ceiling. Parallel write roots must be disjoint; expected outputs do not confine access. A read-only `scout` task may name one absolute directory in `read_roots` to inspect a checkout outside the workspace, after the operator approves that root for the run; headless runs refuse it with `external_read_approval_required`. See [typed dispatch intent](../architecture/dispatch-typed-intent.md#67-external-scout-read). |
 | `gate` | Shorthand for `intent.verification=[{check: gate}]`; refused when both forms are supplied. |
 | `budget`, `max_output_bytes`, `result_summary_max_bytes` | Budget is `{toolCalls>=1,readReserve>=0,retryRevision?}`; `retryRevision` uses the same two fields. They are estimates, but a native worker stops at a hard tool-call ceiling, which in the default advisory mode is never below `toolCalls` or `retryRevision.toolCalls`. `readReserve` applies only to native scout, provenance and context-bootstrap runs. Requests are not range-checked, so a larger `toolCalls` raises the advisory ceiling ([budget admission](fleet-dispatch.md#worker-prompt-and-budget-admission)). Returned preview defaults to 20000 bytes. Inline summary defaults to 16384 bytes; mutation-report workers accept 1–32768, with per-task override. Explicit mutation summary limits on other steps are refused. |
 
@@ -550,6 +550,10 @@ When a repository declares its checks outside `package.json`, `verify` derives t
 Python entries resolve their interpreter once per derivation, so every Python check in a listing uses the same one. A `uv.lock` at the root prefixes each runner with `uv run --no-sync` when a `.venv` exists, because a bare `python` does not see the uv project environment and a bare `uv run` may provision dependencies. A uv project without `.venv` is refused as needing provisioning: the entry is listed as `needs-provisioning` and names `uv sync` as the operator's command, and `verify` runs nothing for it. Without `uv.lock` the interpreter is `.venv/bin/python` when that exists, then `$VIRTUAL_ENV/bin/python`, then the first executable `python` or `python3` on the worker `PATH`. When none resolves, the entries are `unavailable`. A package script or catalog entry with the same ID wins, and identical argv is listed once. The listing prints each derived argv. When nothing is declared or derivable, the error names every source it read and directs the agent to run the documented command through `bash`. A check string that names no declared or derived check runs nothing.
 
 A check that cannot start is reported as `unavailable`, with `judgement.execution` set to `unavailable` and `validation` to `not-run`. That covers a runner `verify` refuses up front (`needs-provisioning`, no interpreter) and a startup failure such as a missing executable, a sandbox refusal or a missing `pytest`, `tox` or `nox` module. The result tells the agent that rerunning the entry with other arguments or a different cwd cannot help. In a worker run the loop guard enforces that: a second `verify` call for the same check in the run is blocked, and the worker reports the limitation instead of retrying.
+
+### Skipped declaration files
+
+Discovery reads declaration files without blocking on them, so a named pipe at `Makefile` cannot stall `verify` past `timeout_ms`. It opens each file nonblocking and requires a regular file of at most 1 MiB (`DECLARED_FILE_CAP_BYTES`) whose real path stays inside the workspace root. A file that exists but fails that test, or is malformed (invalid JSON in `package.json`, invalid TOML in `pyproject.toml` or `Cargo.toml`), is skipped rather than aborting discovery. The skip is named as `<file>: <reason>; <kind> discovery skipped.`, for example `package.json: resolves outside the workspace root to <path>; package script discovery skipped.` Both the check listing and the refusal that follows a discovery with nothing declared carry those lines under `Skipped during discovery:`. A `package.json` read that fails when a check runs names the file in its error.
 
 ### Changed test files
 
@@ -783,7 +787,8 @@ Arguments:
 - `source` (optional). `workspace` (default) or `clio` for the installed product source. `project` and `wiki` describe the workspace.
 - `mode` (required). `symbol`, `path`, `entries`, `outline`, `deps`, `dependents`, `wiki`, or `project`.
 - `query` (required for every mode except `entries`, `wiki`, and `project`). Symbol name, indexed path, path pattern, or path substring.
-- `limit` (optional). Default 50 (25 for `entries`), max 200.
+- `limit` (optional). Default 50 (25 for `entries`, 40 for `related`), max 200.
+- `related` (optional boolean). Only valid with `mode=symbol` or `mode=outline`; any other mode, or a non-boolean value, is an error. See [Related bundle](#related-bundle).
 
 Modes:
 
@@ -798,11 +803,21 @@ Modes:
 
 For `outline`, `deps`, and `dependents` the query must resolve to exactly one indexed file: an exact path or a substring matching one path. An ambiguous substring errors with the match count. Output is always parseable JSON (empty results carry empty arrays, an `omitted` count, and `next`); an omitted remainder suggests `next: limit=<2x>`. 16KB cap with the JSON stub on overflow.
 
+### Related bundle
+
+`related=true` answers "what surrounds this definition" in one call, in place of chaining `outline`, `deps` and `dependents`. With `mode=symbol` it needs a symbol defined in exactly one indexed file. With `mode=outline` the `query` must be the exact indexed path, and a partial match errors with the exact path to retry. The result is one JSON bundle: the matching `definitions` (name, kind, line, signature), the owning `file`, its direct `imports` (`internal` and `external`), its `importers`, and its `testImporters` (importers whose role is `test`).
+
+`limit` is one item budget for the whole bundle. Categories fill round-robin in that order, so a heavily imported module cannot crowd out its own definitions. When the call's 16KB byte cap is lower than the item budget, the budget shrinks until the JSON fits and the result sets `byteLimited: true`. `omitted` counts what the budget left out, and `more` names the single-relation call (`mode=deps` or `mode=dependents` with a larger `limit`) that lists each cut category in full. Importers are import edges, not call sites, and test importers are a hint for which checks to run, not coverage.
+
+A symbol defined in several files has no single owning file, so the call returns `ambiguous: true` with a `candidates` list and `next: mode=outline related=true query=<path>` instead of choosing one. A symbol with no definition returns empty `definitions` and a `next` that searches paths.
+
 Reach for code_nav instead of grep when you want a definition site, a file's structure, change-impact fan-out, or wiki inventory; it returns bounded navigation results and reconciles current source on demand.
 
 ```text
 code_nav(mode="symbol", query="finalizeObservation")
 code_nav(mode="outline", query="src/tools/grep.ts")
+code_nav(mode="outline", query="src/tools/grep.ts", related=true)
+code_nav(mode="symbol", query="finalizeObservation", related=true)
 code_nav(mode="dependents", query="src/tools/observation.ts")
 code_nav(mode="entries")
 code_nav(mode="wiki")

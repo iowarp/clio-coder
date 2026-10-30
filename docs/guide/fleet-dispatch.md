@@ -549,7 +549,7 @@ or 403 retries on another target. A 429 retries on another target after at least
 one second. A 408 is not deterministic and retries. Cancellation, policy denials,
 permission failures and the deterministic outcome codes (`worker_tool_call_cap_exhausted`,
 `worker_no_work`, `merge_withheld`, `result_contract_exhausted` and the others in
-`isDeterministicOutcomeCode`) never retry. No automatic retry follows a failed attempt
+`isDeterministicOutcomeCode`) never retry. `result_contract_invalid` is the exception: the host's validator found an otherwise successful worker's final result nonconforming, so the failure is classed `model-quality` and the retry avoids that agent and model without penalizing the target. No automatic retry follows a failed attempt
 that ran a state-changing call or whose tool telemetry cannot prove the checkout
 unchanged. Backoff starts at 500 ms, doubles per attempt and stops at 60 seconds.
 The full class table is in
@@ -1381,7 +1381,7 @@ Independent quality evidence arrives late or never, so every record also carries
 | `settled` | Meaning for the operator |
 | --- | --- |
 | `success` | The receipt outcome is `succeeded`. |
-| An outcome code | The receipt's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
+| An outcome code | The receipt's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `result_contract_invalid`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
 | `permission_required` | No outcome code, and the outcome detail opens with `permission_required`: the worker ended on its refusal limit or the `fail` posture. |
 | `failure` | The outcome is `failed` with neither of the above. |
 | An outcome | Any other receipt outcome, unchanged: `timed_out`, `stalled`, `canceled`, `denied_by_policy` or `spawn_failed`. |
@@ -1541,15 +1541,18 @@ include:
   successfully written steers; steering prose is never stored.
 - `outcomeCode`: the stable terminal classifier. The codes are
   `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`,
-  `worker_context_exhausted`, `loop_guard_tools_disabled_exhausted`,
-  `result_contract_exhausted`, `worker_final_output_missing` (an otherwise
+  `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`,
+  `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`,
+  `result_contract_invalid` (the host's validator found an otherwise successful
+  worker's final result nonconforming, which a worker cannot assert itself),
+  `worker_final_output_missing` (an otherwise
   successful worker exited without a nonempty receipt-sealed final answer),
   `host_verification_rejected` (a declared host check rejected the settled tree),
   `worker_no_work` (an edit worker finished without doing its assignment),
   `worker_mutation_blocked`, `merge_withheld` (a task worktree was preserved instead
   of merged because of one of the four gate cases above), `worker_removed_tests` (a
   run in the current checkout removed existing test cases that the task did not ask to
-  remove) and `information_flow_blocked`. Every code suppresses automatic retry.
+  remove) and `information_flow_blocked`. Every code except `result_contract_invalid` suppresses automatic retry; that one is retried on another agent or model.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and
   readiness evidence, and digest-covered quality sources.
