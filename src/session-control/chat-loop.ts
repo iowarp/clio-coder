@@ -589,6 +589,12 @@ export interface ChatSubmitOptions {
  * the turn runtime's own local fallback, so a `/btw` round against a local
  * server authenticates exactly the way a turn against it does.
  */
+/** The endpoint stream slot an out-of-turn round holds; both calls are idempotent (#250). */
+interface EndpointSlot {
+	acquire(): void;
+	release(): void;
+}
+
 const LOCAL_SIDE_QUESTION_API_KEY = "clio-coder-local-target";
 
 /** Closing notice an operator interrupt leaves in the transcript and the ledger. */
@@ -1909,10 +1915,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	/**
 	 * Budget admission for each attempt of a side round, a schema or auth retry included. It runs inside the attempt's
 	 * call, so a hold at the ceiling reads as its admission stage with `waitedOn: "budget"` and journals the crossing
-	 * and the wait for that call; a session that changed during the wait refuses the request (#424, #434).
+	 * and the wait for that call; a session that changed during the wait refuses the request (#424, #434). A held
+	 * request gives its endpoint slot back for the hold, because a paused request must not hold capacity.
 	 */
 	const sideCallAdmission =
-		(runtime: AgentRuntime, origin: ReturnType<SessionContract["current"]>, signal?: AbortSignal) =>
+		(runtime: AgentRuntime, origin: ReturnType<SessionContract["current"]>, slot: EndpointSlot, signal?: AbortSignal) =>
 		async (hold: AdmissionHold): Promise<void> => {
 			const provenance = runtime.runtimeResolution.costProvenance;
 			if (provenance === "known" || provenance === "estimated") {
@@ -1922,6 +1929,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
 					onBlocked: () => {
 						hold.waitedOn = "budget";
+						slot.release();
 					},
 					...(telemetry ? { telemetry } : {}),
 					...(signal ? { signal } : {}),
@@ -1929,6 +1937,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if ((deps.session?.current()?.id ?? null) !== (origin?.id ?? null))
 				throw new Error("session changed before the request");
+			slot.acquire();
 		};
 
 	/**
@@ -1936,15 +1945,26 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * to, exactly as the turn and the pre-warm do. A `/btw` or `/handoff` round
 	 * is a full request against the same inference scheduler, so endpoint
 	 * capacity (#250) has to count it for as long as it is out, and the
-	 * background-memory tier has to read that endpoint as busy (#229).
+	 * background-memory tier has to read that endpoint as busy (#229). The round
+	 * may release the slot while it waits and take it back before it sends.
 	 */
-	const withEndpointSlot = async <T>(runtime: AgentRuntime, round: () => Promise<T>): Promise<T> => {
+	const withEndpointSlot = async <T>(runtime: AgentRuntime, round: (slot: EndpointSlot) => Promise<T>): Promise<T> => {
 		const endpointKey = modelEndpointKey(runtime.runtimeResolution.target, runtime.wireModelId);
-		const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+		let held: (() => void) | null = null;
+		const slot: EndpointSlot = {
+			acquire: () => {
+				if (endpointKey !== null && held === null) held = registerForegroundStream(endpointKey);
+			},
+			release: () => {
+				held?.();
+				held = null;
+			},
+		};
+		slot.acquire();
 		try {
-			return await round();
+			return await round(slot);
 		} finally {
-			release();
+			slot.release();
 		}
 	};
 
@@ -3866,10 +3886,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const messages = [...prepared.runtime.agent.state.messages];
 			let result: SideQuestionResult;
 			try {
-				result = await withEndpointSlot(prepared.runtime, () =>
+				result = await withEndpointSlot(prepared.runtime, (slot) =>
 					sideQuestionRound({
 						...sideCallJournal(prepared.runtime, "btw", prepared.origin),
-						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, options.signal),
+						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
 						onUsage: (usage, observation) =>
 							recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
@@ -3910,14 +3930,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					try {
 						// One endpoint slot per round: each is a full request against the
 						// same scheduler, and capacity has to count every one of them.
-						const result = await withEndpointSlot(prepared.runtime, () =>
+						const result = await withEndpointSlot(prepared.runtime, (slot) =>
 							runDraftWithSamplerFallback(
 								index,
 								samplingTemperature,
 								(sampling) =>
 									draftRound({
 										...sideCallJournal(prepared.runtime, "helper", prepared.origin),
-										beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, options.signal),
+										beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
 										onUsage: (usage, observation) =>
 											recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
@@ -3964,10 +3984,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			let result: SideQuestionResult;
 			try {
-				result = await withEndpointSlot(prepared.runtime, () =>
+				result = await withEndpointSlot(prepared.runtime, (slot) =>
 					handoffRound({
 						...sideCallJournal(prepared.runtime, "handoff", prepared.origin),
-						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, options.signal),
+						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
 						onUsage: (usage, observation) =>
 							recordOutOfTurnUsage(prepared.runtime, usage, "handoff", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
