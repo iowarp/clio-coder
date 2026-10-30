@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import { isWorkerTelemetryContext } from "../../core/telemetry/context.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
@@ -84,6 +85,39 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
 	return ready;
 }
 
+/**
+ * Journal the run.settled a run's host died before writing, from recovery's verdict. Only a journal that exists and
+ * holds none is written, under the worker context its own run records carry, so its turn stops reading as running
+ * (#425, #434).
+ */
+export async function settleOrphanedRunJournal(directory: string, facts: Payload<"run.settled">): Promise<void> {
+	const { openCallJournal, readCallJournal } = await import("../observability/call-journal.js");
+	const read = await readCallJournal(directory, "events.ndjson");
+	if (read.records.some(({ record }) => record.k === "run.settled")) return;
+	const context = read.records.map(({ record }) => record.ctx).find(isWorkerTelemetryContext);
+	if (!context) return;
+	// The run's owner is gone, so this one record gets a writer of its own rather than the run's owned journal.
+	const writer = await openCallJournal({
+		sessionDirectory: directory,
+		fileName: "events.ndjson",
+		context,
+		writer: await clioWriterVersions(),
+	});
+	writer.enqueue({ kind: "run.settled", data: facts, ctx: context, wallMs: Date.now(), mono: performance.now() });
+	await writer.close();
+}
+
+function clioWriterVersions(): Promise<{ clioCoderVersion: string; piVersion: string }> {
+	writerVersions ??= import("node:fs/promises").then(async ({ readFile }) => {
+		const pkg = JSON.parse(await readFile(join(resolvePackageRoot(), "package.json"), "utf8")) as {
+			version: string;
+			dependencies: Record<string, string>;
+		};
+		return { clioCoderVersion: pkg.version, piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown" };
+	});
+	return writerVersions;
+}
+
 /** Only dispatch opens owners. Viewers and the display registry never acquire a second writer (#434). */
 async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory: string): Promise<RunTelemetryJournal> {
 	const existing = journals.get(context.runId);
@@ -92,15 +126,8 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			throw new Error("run telemetry owner changed or closed");
 		return existing;
 	}
-	const [{ openCallJournal, readCallJournal }, { readFile }] = await Promise.all([
-		import("../observability/call-journal.js"),
-		import("node:fs/promises"),
-	]);
-	writerVersions ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8").then((text) => {
-		const pkg = JSON.parse(text) as { version: string; dependencies: Record<string, string> };
-		return { clioCoderVersion: pkg.version, piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown" };
-	});
-	const versions = await writerVersions;
+	const { openCallJournal, readCallJournal } = await import("../observability/call-journal.js");
+	const versions = await clioWriterVersions();
 	const previous = await readCallJournal(directory, "events.ndjson");
 	let seq = previous.records.reduce(
 		(max, { record }) => (record.k === "run.feed" ? Math.max(max, record.data.seq) : max),

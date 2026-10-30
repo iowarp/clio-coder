@@ -9,6 +9,7 @@
  */
 
 import type { RunBoundKind, RunTerminalReason } from "../../core/telemetry/enums.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import type { AbortReason } from "./contract.js";
 import type { RunOutcome, RunOutcomeCode, RunStatus } from "./types.js";
@@ -164,6 +165,26 @@ export function resolveRunTerminalReason(
 	if (outcomeCode === "worker_final_output_missing") return { terminalReason: "final_output_missing_no_repair" };
 	if (evidence.permissionFailure || evidence.exitCode !== 0) return { terminalReason: "worker_failed" };
 	return { terminalReason: "completed" };
+}
+
+/**
+ * run.settled the host writes outside the worker's own finish: after a failed finalization, or at recovery for a run
+ * whose host died. How the loop ended when it was resolved, else a failed worker; the calls only a receipt names
+ * (#425, #434).
+ */
+export function hostRunSettledFacts(
+	terminal: ResolvedTerminalReason | undefined,
+	processExitCode: number | null = null,
+	callIds: readonly string[] | null = null,
+): Payload<"run.settled"> {
+	return {
+		terminalReason: terminal?.terminalReason ?? "worker_failed",
+		callIds: callIds === null ? null : [...callIds],
+		processExitCode,
+		...(terminal?.boundKind ? { boundKind: terminal.boundKind } : {}),
+		repairRounds: { kind: "unknown", reason: "not-observed" },
+		frameType: null,
+	};
 }
 
 /** A main-agent run has no worker loop evidence beyond its resolved outcome (#434). */

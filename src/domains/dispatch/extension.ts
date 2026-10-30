@@ -354,6 +354,7 @@ import {
 import { mergeGateVerdict, mergeWithheldDetail, removedTestCases, taskRequestsTestRemoval } from "./merge-gate.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import {
+	hostRunSettledFacts,
 	type ResolvedTerminalReason,
 	type RunTerminationEvidence,
 	resolveRunOutcome,
@@ -413,7 +414,7 @@ import { defaultRunEventJournal, runEventJournalRoot } from "./run-event-journal
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
-import { openRunTelemetry } from "./run-telemetry.js";
+import { openRunTelemetry, settleOrphanedRunJournal } from "./run-telemetry.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
 import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.js";
 import {
@@ -5947,6 +5948,8 @@ export function createDispatchBundle(
 		const callUsage = telemetryContext ? createRunCallUsage(telemetryContext) : undefined;
 		let runJournal: RunTelemetryJournal | undefined;
 		let parentJournal: TelemetrySessionLease | undefined;
+		// How the worker loop ended, once known; a failed finalization still settles the run journal with it.
+		let resolvedTerminal: ResolvedTerminalReason | undefined;
 		const closeRunJournal = async () => {
 			try {
 				await runJournal?.close();
@@ -6728,6 +6731,7 @@ export function createDispatchBundle(
 				const contextOverflow = isContextOverflowFailure(failureClass, classifiedResult, outcomeCode);
 				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
+				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
@@ -6800,6 +6804,8 @@ export function createDispatchBundle(
 				// "running" forever, no receipt or terminal event exists, and the
 				// active entry leaks until restart.
 				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
+				// The journal still ends with how the worker loop ended, so no reader waits on this run (#425, #434).
+				runJournal?.settle(hostRunSettledFacts(resolvedTerminal));
 				const endedAt = new Date().toISOString();
 				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
@@ -7380,6 +7386,8 @@ export function createDispatchBundle(
 		const callUsage = spec.telemetryContext ? createRunCallUsage(spec.telemetryContext) : undefined;
 		let runJournal: RunTelemetryJournal | undefined;
 		let parentJournal: TelemetrySessionLease | undefined;
+		// How the worker loop ended, once known; a failed finalization still settles the run journal with it.
+		let resolvedTerminal: ResolvedTerminalReason | undefined;
 		const closeRunJournal = async () => {
 			try {
 				await runJournal?.close();
@@ -9042,6 +9050,7 @@ export function createDispatchBundle(
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
+				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
 				if (checkoutBefore !== null) {
 					const checkoutAfter = snapshotCheckout(lifecycle.cwd);
@@ -9202,6 +9211,8 @@ export function createDispatchBundle(
 				// "running" forever, no receipt or terminal event exists, and the
 				// active entry leaks until restart.
 				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
+				// The journal still ends with how the worker loop ended, so no reader waits on this run (#425, #434).
+				runJournal?.settle(hostRunSettledFacts(resolvedTerminal));
 				const endedAt = new Date().toISOString();
 				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
@@ -10277,6 +10288,10 @@ export function createDispatchBundle(
 			// recordReceipt() and persist(); quarantine tampered ones.
 			try {
 				const recovery = recoverOrphanReceipts(ledger);
+				for (const { runId, facts } of recovery.unsettled)
+					void trackDurableWrite(settleOrphanedRunJournal(join(runEventJournalRoot(), runId), facts)).catch((error) =>
+						reportDispatchDiagnostic(`settle the journal of run ${runId}`, error),
+					);
 				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0 || recovery.sealed > 0) {
 					await ledger.persist();
 					if (process.env.CLIO_CODER_INTERACTIVE !== "1") {

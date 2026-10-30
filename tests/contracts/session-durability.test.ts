@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
-import { readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
+import { readRunEventJournal, runEventJournalRoot } from "../../src/domains/dispatch/run-event-journal.js";
+import { openRunTelemetry, settleOrphanedRunJournal } from "../../src/domains/dispatch/run-telemetry.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { appendTurn, persistSessionMeta, resumeSessionState, startSession } from "../../src/domains/session/manager.js";
 import {
 	reconcilePendingProtectedArtifacts,
@@ -215,6 +217,10 @@ describe("session durability boundary", () => {
 		});
 		ledger.update(run.id, { status: "running", pid: 999_999, heartbeatAt: run.startedAt });
 		await ledger.persist();
+		const directory = join(runEventJournalRoot(), run.id);
+		const journal = await openRunTelemetry({ sessionId: null, runId: run.id, label: "worker" }, directory);
+		journal.feed({ kind: "open", runId: run.id, agentId: "coder" }, 1_000_000);
+		await journal.close();
 
 		const reopened = openLedger({ maxRuns: 10 });
 		const recovered = recoverOrphanReceipts(reopened);
@@ -222,5 +228,14 @@ describe("session durability boundary", () => {
 		strictEqual(reopened.get(run.id)?.status, "dead");
 		strictEqual(reopened.get(run.id)?.outcome, "stalled");
 		ok(reopened.get(run.id)?.endedAt !== null);
+		// The run's journal gets the settlement its dead host never wrote, so no reader waits on it.
+		const [unsettled] = recovered.unsettled;
+		strictEqual(unsettled?.runId, run.id);
+		if (unsettled) await settleOrphanedRunJournal(directory, unsettled.facts);
+		const settled = (await readCallJournal(directory, "events.ndjson")).records.filter(
+			({ record }) => record.k === "run.settled",
+		);
+		strictEqual(settled.length, 1);
+		strictEqual((settled[0]?.record.data as { terminalReason?: string }).terminalReason, "stalled");
 	});
 });

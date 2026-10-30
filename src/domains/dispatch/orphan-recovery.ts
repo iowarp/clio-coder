@@ -16,8 +16,9 @@
 import { existsSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
+import type { Payload } from "../../core/telemetry/schemas.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { runStatusForOutcome } from "./outcome.js";
+import { hostRunSettledFacts, runStatusForOutcome } from "./outcome.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "./receipt-integrity.js";
 import type { Ledger } from "./state.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
@@ -30,6 +31,11 @@ export interface OrphanRecoverySummary {
 	abandoned: number;
 	/** Non-terminal rows whose worker process is gone but whose own receipt verified, sealed from it. */
 	sealed: number;
+	/**
+	 * The run.settled each abandoned or sealed run's journal may lack because its host died first; the caller journals
+	 * them (#425, #434).
+	 */
+	unsettled: Array<{ runId: string; facts: Payload<"run.settled"> }>;
 }
 
 /**
@@ -153,7 +159,7 @@ const NON_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["queued", "running",
  * ledger, so this window is exactly where a crash or a clobbered persist leaves
  * the truth on disk in the receipt and a lie in the row.
  */
-function sealedEnvelopeFor(runId: string): RunEnvelope | null {
+function sealedEnvelopeFor(runId: string): { envelope: RunEnvelope; receipt: RunReceipt } | null {
 	const path = join(receiptsDir(), `${runId}.json`);
 	if (!existsSync(path)) return null;
 	let receipt: RunReceipt;
@@ -165,7 +171,8 @@ function sealedEnvelopeFor(runId: string): RunEnvelope | null {
 	if (receipt?.runId !== runId) return null;
 	if (!isReceiptIntegrity(receipt.integrity)) return null;
 	if (receipt.reproducibility?.cwd === undefined) return null;
-	return verifyOrphan(receipt, path);
+	const envelope = verifyOrphan(receipt, path);
+	return envelope === null ? null : { envelope, receipt };
 }
 
 /**
@@ -173,13 +180,18 @@ function sealedEnvelopeFor(runId: string): RunEnvelope | null {
  * false, leaving the row alone, when there is no receipt or it does not verify.
  */
 export function sealRowFromVerifiedReceipt(ledger: Ledger, runId: string): boolean {
-	const envelope = sealedEnvelopeFor(runId);
-	if (envelope === null) return false;
+	return sealRowFromReceipt(ledger, runId) !== null;
+}
+
+/** The verified receipt a row was sealed from, or null when there was none to seal it with. */
+function sealRowFromReceipt(ledger: Ledger, runId: string): RunReceipt | null {
+	const sealed = sealedEnvelopeFor(runId);
+	if (sealed === null) return null;
 	// Patch rather than replace: the row carries phase timings and lineage
 	// the receipt does not, and pid/heartbeatAt are this row's own history.
-	const { id: _id, pid: _pid, heartbeatAt: _heartbeatAt, ...settled } = envelope;
+	const { id: _id, pid: _pid, heartbeatAt: _heartbeatAt, ...settled } = sealed.envelope;
 	ledger.update(runId, settled);
-	return true;
+	return sealed.receipt;
 }
 
 /** Row states that still claim a live run. */
@@ -212,9 +224,10 @@ export function isOpenRunRow(row: RunEnvelope): boolean {
  * host-scoped pid and uses the persisted wall-clock heartbeat only as this
  * display/evidence bound after that process is known to be gone.
  */
-function closeAbandonedRows(ledger: Ledger): { closed: number; sealed: number } {
+function closeAbandonedRows(ledger: Ledger): Pick<OrphanRecoverySummary, "sealed" | "unsettled"> & { closed: number } {
 	let closed = 0;
 	let sealed = 0;
+	const unsettled: OrphanRecoverySummary["unsettled"] = [];
 	const localHost = hostname();
 	for (const row of ledger.list()) {
 		if (!isOpenRunRow(row)) continue;
@@ -226,8 +239,18 @@ function closeAbandonedRows(ledger: Ledger): { closed: number; sealed: number } 
 		// for that host's own recovery pass.
 		if (row.identity !== undefined && row.identity.host !== localHost) continue;
 		if (isProcessAlive(row.pid)) continue;
-		if (sealRowFromVerifiedReceipt(ledger, row.id)) {
+		const receipt = sealRowFromReceipt(ledger, row.id);
+		if (receipt !== null) {
 			sealed += 1;
+			// The receipt sealed before the host died; its journal may still lack the settlement it names.
+			unsettled.push({
+				runId: row.id,
+				facts: hostRunSettledFacts(
+					receipt.terminalReason ? { terminalReason: receipt.terminalReason } : undefined,
+					receipt.exitCode ?? null,
+					receipt.callIds ?? null,
+				),
+			});
 			continue;
 		}
 		ledger.update(row.id, {
@@ -238,15 +261,21 @@ function closeAbandonedRows(ledger: Ledger): { closed: number; sealed: number } 
 			exitCode: row.exitCode ?? 1,
 		});
 		closed += 1;
+		unsettled.push({ runId: row.id, facts: hostRunSettledFacts({ terminalReason: "stalled" }, row.exitCode ?? null) });
 	}
-	return { closed, sealed };
+	return { closed, sealed, unsettled };
 }
 
 export function recoverOrphanReceipts(ledger: Ledger): OrphanRecoverySummary {
-	const summary: OrphanRecoverySummary = { recovered: 0, corrupt: 0, skipped: 0, abandoned: 0, sealed: 0 };
 	const abandoned = closeAbandonedRows(ledger);
-	summary.abandoned = abandoned.closed;
-	summary.sealed = abandoned.sealed;
+	const summary: OrphanRecoverySummary = {
+		recovered: 0,
+		corrupt: 0,
+		skipped: 0,
+		abandoned: abandoned.closed,
+		sealed: abandoned.sealed,
+		unsettled: abandoned.unsettled,
+	};
 	const dir = receiptsDir();
 	if (!existsSync(dir)) return summary;
 	// Retention horizon: the ledger is a bounded ring, so a receipt older than
