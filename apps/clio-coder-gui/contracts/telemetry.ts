@@ -61,9 +61,11 @@ export type TelemetryRequest =
 	| ({ kind: "timeline"; range: { from: string; to: string } | null } & SessionRead)
 	| { kind: "runs"; limit: number; cursor?: string }
 	| { kind: "run"; runId: string }
+	| { kind: "run-timeline"; runId: string }
 	| { kind: "explain"; ref: string };
 
 export const TelemetryRun = TELEMETRY_DTO_SCHEMAS.run;
+export const TelemetryRunTimeline = TELEMETRY_DTO_SCHEMAS.runTimeline;
 export const TelemetryRunRow = TELEMETRY_DTO_SCHEMAS.runs.items;
 /** Run journals newest write first; a run directory with no journal lists last with unknown coverage (R9). */
 export const TelemetryRuns = Type.Object(

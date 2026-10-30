@@ -10,6 +10,7 @@ import {
 	explain,
 	runRowTelemetry,
 	runTelemetry,
+	runTimeline,
 	sessionTelemetry,
 	timeline,
 	whyStopped,
@@ -51,11 +52,12 @@ export function readTelemetry(input: TelemetryRequest): unknown {
 			nextCursor: page.nextBefore ? Buffer.from(JSON.stringify(page.nextBefore)).toString("base64url") : null,
 		};
 	}
-	if (input.kind === "run") {
+	if (input.kind === "run" || input.kind === "run-timeline") {
 		if (!Value.Check(Id, input.runId)) throw new AppProblem("validation", "Invalid run identifier.");
 		// A run that never had a directory is not found; one whose journal is missing or torn is unknown coverage.
 		if (!existsSync(join(state, "runs", input.runId))) throw new AppProblem("not_found", "No run journal holds that id.");
-		return runTelemetry(input.runId, loadRunTelemetrySource(state, input.runId));
+		const source = loadRunTelemetrySource(state, input.runId);
+		return input.kind === "run" ? runTelemetry(input.runId, source) : runTimeline(input.runId, source);
 	}
 	if (!Value.Check(Id, input.sessionId)) throw new AppProblem("validation", "Invalid session identifier.");
 	if (!preflightLedger() && !input.knownSession) throw notFound();

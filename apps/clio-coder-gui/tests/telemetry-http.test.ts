@@ -114,7 +114,49 @@ test("run routes list run journals newest first as read-model rows and serve one
 		routes.telemetryExplain.response,
 	);
 	assert.deepEqual(explained.value, run.row.usd);
+	assert.match(explained.coverage, /no contributions|contribution/);
 	assert.equal((await h.request("/api/telemetry/runs/run-absent")).status, 404);
 	assert.equal((await h.request("/api/telemetry/runs?cursor=not-a-cursor")).status, 422);
 	assert.equal((await h.request("/api/telemetry/runs?limit=0")).status, 422);
+});
+
+test("a run's timeline orders its process, feed and settlement, with a feed duration the server words", async (t) => {
+	const h = await harness();
+	t.after(() => h.close());
+	const state = join(h.home.path, "state");
+	await seedRunJournal(state, "run-gamma", [
+		{ kind: "process.started", data: {}, at: "2026-10-30T10:00:00.000Z" },
+		{
+			kind: "run.feed",
+			data: {
+				seq: 1,
+				body: { kind: "event", type: "clio_coder_tool_finish", tool: "read", outcome: "ok", durationMs: 1250 },
+			},
+			at: "2026-10-30T10:00:01.000Z",
+		},
+		{ kind: "process.exited", data: { exitCode: 0 }, at: "2026-10-30T10:00:02.000Z" },
+		{
+			kind: "run.settled",
+			data: {
+				terminalReason: "completed",
+				callIds: null,
+				processExitCode: 0,
+				repairRounds: { kind: "unknown", reason: "not-observed" },
+				frameType: null,
+			},
+			at: "2026-10-30T10:00:03.000Z",
+		},
+	]);
+	const timeline = await json(
+		await h.request("/api/telemetry/runs/run-gamma/timeline"),
+		routes.telemetryRunTimeline.response,
+	);
+	assert.equal(timeline.kind, "run-timeline");
+	assert.deepEqual(
+		timeline.entries.map((entry) => entry.kind),
+		["process", "feed", "process", "run"],
+	);
+	const feed = timeline.entries.find((entry) => entry.kind === "feed");
+	assert.equal(feed?.kind === "feed" ? feed.duration?.display : null, "1.25s");
+	assert.equal((await h.request("/api/telemetry/runs/run-absent/timeline")).status, 404);
 });

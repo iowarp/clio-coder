@@ -17424,6 +17424,64 @@
 				}
 			}
 		},
+		"/api/telemetry/runs/{runId}/timeline": {
+			"get": {
+				"operationId": "telemetryRunTimeline",
+				"summary": "One run journal in time order: calls with stages, the run feed, the worker process and the settlement",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "runId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RunTimelineV1"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/telemetry/explain": {
 			"get": {
 				"operationId": "telemetryExplain",
@@ -18909,6 +18967,9 @@
 			},
 			"Enum_96cd94f8": {
 				"enum": ["stop", "toolUse", "length", "error", "aborted", "unknown"]
+			},
+			"Enum_a31a8781": {
+				"enum": ["succeeded", "failed", "timed_out", "stalled", "canceled", "denied_by_policy", "spawn_failed", "unknown"]
 			},
 			"Enum_a9cf21a6": {
 				"enum": [
@@ -20530,7 +20591,7 @@
 			},
 			"ExplanationV1": {
 				"type": "object",
-				"required": ["v", "foldVersion", "generatedAt", "kind", "ref", "value", "rule", "from"],
+				"required": ["v", "foldVersion", "generatedAt", "kind", "ref", "value", "coverage", "rule", "from"],
 				"properties": {
 					"v": {
 						"type": "number",
@@ -20555,6 +20616,9 @@
 					},
 					"value": {
 						"$ref": "#/components/schemas/Object_display_fact_ref_b6182503"
+					},
+					"coverage": {
+						"type": "string"
 					},
 					"rule": {
 						"type": "string"
@@ -21330,6 +21394,30 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_at_attemptId_cacheVerdict_f93a9979": {
+				"type": "object",
+				"required": [
+					"kind",
+					"at",
+					"endAt",
+					"callId",
+					"attemptId",
+					"label",
+					"turnId",
+					"runId",
+					"disposition",
+					"failure",
+					"stages",
+					"timing",
+					"tokens",
+					"usd",
+					"cacheVerdict"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_0aca8e0a"
+				},
+				"additionalProperties": false
+			},
 			"Object_at_attemptId_continuation_ec9e55ef": {
 				"type": "object",
 				"required": [
@@ -21348,11 +21436,65 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_at_count_kind_41cc2a47": {
+				"type": "object",
+				"required": ["kind", "at", "sink", "reason", "count"],
+				"properties": {
+					"kind": {
+						"type": "string",
+						"const": "gap"
+					},
+					"at": {
+						"type": "string",
+						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+					},
+					"sink": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 512
+					},
+					"reason": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"count": {
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_at_current_detail_a4cc3422": {
 				"type": "object",
 				"required": ["kind", "phase", "status", "message", "at"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_74fd8979"
+				},
+				"additionalProperties": false
+			},
+			"Object_at_event_kind_258f6023": {
+				"type": "object",
+				"required": ["kind", "at", "runId", "event", "terminalReason"],
+				"properties": {
+					"kind": {
+						"type": "string",
+						"const": "run"
+					},
+					"at": {
+						"type": "string",
+						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+					},
+					"runId": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 512
+					},
+					"event": {
+						"enum": ["referenced", "settled"]
+					},
+					"terminalReason": {
+						"$ref": "#/components/schemas/Union_069a7c9b"
+					}
 				},
 				"additionalProperties": false
 			},
@@ -24133,6 +24275,253 @@
 				},
 				"additionalProperties": false
 			},
+			"RunTimelineV1": {
+				"type": "object",
+				"required": ["v", "foldVersion", "generatedAt", "kind", "runId", "sessionId", "entries"],
+				"properties": {
+					"v": {
+						"type": "number",
+						"const": 1
+					},
+					"foldVersion": {
+						"type": "integer",
+						"minimum": 1
+					},
+					"generatedAt": {
+						"type": "string",
+						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+					},
+					"kind": {
+						"type": "string",
+						"const": "run-timeline"
+					},
+					"runId": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 512
+					},
+					"sessionId": {
+						"$ref": "#/components/schemas/Union_21b008c5"
+					},
+					"entries": {
+						"type": "array",
+						"items": {
+							"anyOf": [
+								{
+									"$ref": "#/components/schemas/Object_at_attemptId_cacheVerdict_f93a9979"
+								},
+								{
+									"$ref": "#/components/schemas/Object_at_event_kind_258f6023"
+								},
+								{
+									"$ref": "#/components/schemas/Object_at_count_kind_41cc2a47"
+								},
+								{
+									"type": "object",
+									"required": ["kind", "at", "seq", "body", "duration"],
+									"properties": {
+										"kind": {
+											"type": "string",
+											"const": "feed"
+										},
+										"at": {
+											"type": "string",
+											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+										},
+										"seq": {
+											"type": "integer",
+											"minimum": 1
+										},
+										"body": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["kind", "runId", "agentId"],
+													"properties": {
+														"kind": {
+															"type": "string",
+															"const": "open"
+														},
+														"runId": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512
+														},
+														"agentId": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"required": ["kind", "type"],
+													"properties": {
+														"kind": {
+															"type": "string",
+															"const": "event"
+														},
+														"type": {
+															"enum": [
+																"agent_start",
+																"agent_end",
+																"attempt_start",
+																"message_end",
+																"thinking",
+																"route_warning",
+																"clio_coder_tool_start",
+																"clio_coder_tool_finish",
+																"clio_coder_tool_observation",
+																"clio_coder_permission_escalated",
+																"clio_coder_permission_resolved",
+																"clio_coder_run_outcome",
+																"clio_coder_steer_received",
+																"unknown"
+															]
+														},
+														"tool": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512
+														},
+														"callId": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512
+														},
+														"outcome": {
+															"enum": ["ok", "error", "blocked"]
+														},
+														"durationMs": {
+															"type": "number",
+															"minimum": 0
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"required": ["kind", "reason", "droppedFromSeq"],
+													"properties": {
+														"kind": {
+															"type": "string",
+															"const": "journal_truncated"
+														},
+														"reason": {
+															"type": "string",
+															"const": "per-run size cap"
+														},
+														"droppedFromSeq": {
+															"type": "integer",
+															"minimum": 1
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"required": ["kind", "outcome", "exitCode"],
+													"properties": {
+														"kind": {
+															"type": "string",
+															"const": "receipt"
+														},
+														"outcome": {
+															"$ref": "#/components/schemas/Enum_a31a8781"
+														},
+														"exitCode": {
+															"anyOf": [
+																{
+																	"type": "integer"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"attemptRunId": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"required": ["kind", "outcome"],
+													"properties": {
+														"kind": {
+															"type": "string",
+															"const": "terminal"
+														},
+														"outcome": {
+															"$ref": "#/components/schemas/Enum_a31a8781"
+														}
+													},
+													"additionalProperties": false
+												}
+											]
+										},
+										"duration": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["fact", "display"],
+													"properties": {
+														"fact": {
+															"$ref": "#/components/schemas/Union_b6d42669"
+														},
+														"display": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								},
+								{
+									"type": "object",
+									"required": ["kind", "at", "event", "exitCode"],
+									"properties": {
+										"kind": {
+											"type": "string",
+											"const": "process"
+										},
+										"at": {
+											"type": "string",
+											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+										},
+										"event": {
+											"enum": ["started", "exited"]
+										},
+										"exitCode": {
+											"anyOf": [
+												{
+													"type": "integer"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							]
+						}
+					}
+				},
+				"additionalProperties": false
+			},
 			"SessionTelemetryV1": {
 				"type": "object",
 				"required": [
@@ -24207,6 +24596,57 @@
 				},
 				"dispositions": {
 					"$ref": "#/components/schemas/Object_incomplete_neverSent_sentUnsettled_e06bca33"
+				}
+			},
+			"Shape_0aca8e0a": {
+				"kind": {
+					"type": "string",
+					"const": "call"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"endAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"callId": {
+					"type": "string",
+					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attemptId": {
+					"type": "string",
+					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"label": {
+					"$ref": "#/components/schemas/Enum_a9cf21a6"
+				},
+				"turnId": {
+					"$ref": "#/components/schemas/Union_21b008c5"
+				},
+				"runId": {
+					"$ref": "#/components/schemas/Union_21b008c5"
+				},
+				"disposition": {
+					"$ref": "#/components/schemas/Union_f0839e51"
+				},
+				"failure": {
+					"$ref": "#/components/schemas/Union_274f9516"
+				},
+				"stages": {
+					"$ref": "#/components/schemas/Union_71874828"
+				},
+				"timing": {
+					"$ref": "#/components/schemas/Object_admissionWait_modelTime_settle_19de43b9"
+				},
+				"tokens": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b6182503"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b6182503"
+				},
+				"cacheVerdict": {
+					"enum": ["hot", "partial", "cold", "small", "unknown"]
 				}
 			},
 			"Shape_0c7d4ebb": {
@@ -26463,72 +26903,7 @@
 						"items": {
 							"anyOf": [
 								{
-									"type": "object",
-									"required": [
-										"kind",
-										"at",
-										"endAt",
-										"callId",
-										"attemptId",
-										"label",
-										"turnId",
-										"runId",
-										"disposition",
-										"failure",
-										"stages",
-										"tokens",
-										"usd",
-										"cacheVerdict"
-									],
-									"properties": {
-										"kind": {
-											"type": "string",
-											"const": "call"
-										},
-										"at": {
-											"type": "string",
-											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-										},
-										"endAt": {
-											"$ref": "#/components/schemas/Union_9d36f13d"
-										},
-										"callId": {
-											"type": "string",
-											"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-										},
-										"attemptId": {
-											"type": "string",
-											"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-										},
-										"label": {
-											"$ref": "#/components/schemas/Enum_a9cf21a6"
-										},
-										"turnId": {
-											"$ref": "#/components/schemas/Union_21b008c5"
-										},
-										"runId": {
-											"$ref": "#/components/schemas/Union_21b008c5"
-										},
-										"disposition": {
-											"$ref": "#/components/schemas/Union_f0839e51"
-										},
-										"failure": {
-											"$ref": "#/components/schemas/Union_274f9516"
-										},
-										"stages": {
-											"$ref": "#/components/schemas/Union_71874828"
-										},
-										"tokens": {
-											"$ref": "#/components/schemas/Object_display_fact_ref_b6182503"
-										},
-										"usd": {
-											"$ref": "#/components/schemas/Object_display_fact_ref_b6182503"
-										},
-										"cacheVerdict": {
-											"enum": ["hot", "partial", "cold", "small", "unknown"]
-										}
-									},
-									"additionalProperties": false
+									"$ref": "#/components/schemas/Object_at_attemptId_cacheVerdict_f93a9979"
 								},
 								{
 									"type": "object",
@@ -26573,30 +26948,7 @@
 									"additionalProperties": false
 								},
 								{
-									"type": "object",
-									"required": ["kind", "at", "runId", "event", "terminalReason"],
-									"properties": {
-										"kind": {
-											"type": "string",
-											"const": "run"
-										},
-										"at": {
-											"type": "string",
-											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-										},
-										"runId": {
-											"type": "string",
-											"minLength": 1,
-											"maxLength": 512
-										},
-										"event": {
-											"enum": ["referenced", "settled"]
-										},
-										"terminalReason": {
-											"$ref": "#/components/schemas/Union_069a7c9b"
-										}
-									},
-									"additionalProperties": false
+									"$ref": "#/components/schemas/Object_at_event_kind_258f6023"
 								},
 								{
 									"type": "object",
@@ -26649,32 +27001,7 @@
 									"additionalProperties": false
 								},
 								{
-									"type": "object",
-									"required": ["kind", "at", "sink", "reason", "count"],
-									"properties": {
-										"kind": {
-											"type": "string",
-											"const": "gap"
-										},
-										"at": {
-											"type": "string",
-											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-										},
-										"sink": {
-											"type": "string",
-											"minLength": 1,
-											"maxLength": 512
-										},
-										"reason": {
-											"type": "string",
-											"maxLength": 4096
-										},
-										"count": {
-											"type": "integer",
-											"minimum": 0
-										}
-									},
-									"additionalProperties": false
+									"$ref": "#/components/schemas/Object_at_count_kind_41cc2a47"
 								},
 								{
 									"type": "object",

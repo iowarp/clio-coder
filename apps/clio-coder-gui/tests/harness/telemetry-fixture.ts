@@ -1,6 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { PendingTelemetry } from "../../../../src/core/telemetry/producer.js";
+import type { Kind } from "../../../../src/core/telemetry/schemas.js";
 import { openCallJournal } from "../../../../src/domains/observability/call-journal.js";
 
 export { quantitiesOf, telemetryLies } from "../../../../tests/harness/telemetry-lies.js";
@@ -19,14 +21,30 @@ export function seedGoldenSession(state: string, sessionId = "golden-p0"): strin
 	return sessionId;
 }
 
-/** A worker run journal with only its segment header: a run the read model knows, with no calls to fold. */
-export async function seedRunJournal(state: string, runId: string): Promise<string> {
+/**
+ * A worker run journal: its segment header, then `records` under the run's context. With none, a run the read model
+ * knows with no calls to fold.
+ */
+export async function seedRunJournal(
+	state: string,
+	runId: string,
+	records: ReadonlyArray<{ kind: Kind; data: unknown; at: string }> = [],
+): Promise<string> {
+	const context = { sessionId: null, runId, label: "worker" } as const;
 	const journal = await openCallJournal({
 		sessionDirectory: join(state, "runs", runId),
 		fileName: "events.ndjson",
-		context: { sessionId: null, runId, label: "worker" },
+		context,
 		writer: { clioCoderVersion: "test", piVersion: "test" },
 	});
+	for (const record of records)
+		journal.enqueue({
+			kind: record.kind,
+			data: record.data,
+			ctx: context,
+			wallMs: Date.parse(record.at),
+			mono: Date.parse(record.at),
+		} as PendingTelemetry);
 	await journal.close();
 	return runId;
 }

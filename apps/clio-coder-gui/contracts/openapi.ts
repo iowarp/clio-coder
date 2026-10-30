@@ -29,6 +29,7 @@ const components = {
 	TimelineV1: TELEMETRY_DTO_SCHEMAS.timeline,
 	RunRowV1: TELEMETRY_DTO_SCHEMAS.runs.items,
 	RunTelemetryV1: TELEMETRY_DTO_SCHEMAS.run,
+	RunTimelineV1: TELEMETRY_DTO_SCHEMAS.runTimeline,
 	WhyStoppedV1: TELEMETRY_DTO_SCHEMAS.whyStopped,
 	ExplanationV1: TELEMETRY_DTO_SCHEMAS.explanation,
 	TelemetryUpdateV1: TELEMETRY_DTO_SCHEMAS.update,

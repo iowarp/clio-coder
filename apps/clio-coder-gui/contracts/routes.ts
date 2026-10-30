@@ -98,6 +98,7 @@ import {
 	TelemetryRun,
 	TelemetryRuns,
 	TelemetryRunsQuery,
+	TelemetryRunTimeline,
 	TelemetrySession,
 	TelemetryTimeline,
 	TelemetryWhyStopped,
@@ -1089,6 +1090,13 @@ export const routes = {
 		params: Type.Object({ runId: Id }, { additionalProperties: false }),
 		response: TelemetryRun,
 		summary: "One run's telemetry: its row, journal coverage, counts, tokens and settlement",
+	}),
+	telemetryRunTimeline: defineRoute({
+		...get,
+		path: "/api/telemetry/runs/:runId/timeline",
+		params: Type.Object({ runId: Id }, { additionalProperties: false }),
+		response: TelemetryRunTimeline,
+		summary: "One run journal in time order: calls with stages, the run feed, the worker process and the settlement",
 	}),
 	telemetryExplain: defineRoute({
 		...get,
