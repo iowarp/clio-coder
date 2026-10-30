@@ -1,5 +1,5 @@
 import { workerData } from "node:worker_threads";
-import { closeMachines, readMachines } from "../clio/adapters/machines.js";
+import { closeMachines, readMachineEndpoints, readMachines } from "../clio/adapters/machines.js";
 import { runtimeInfo } from "../clio/adapters/runtime.js";
 import { sessionWorkspaces } from "../clio/adapters/sessions.js";
 import { toolchainAdapter } from "../clio/adapters/toolchain.js";
@@ -20,6 +20,7 @@ const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
 serveWorker(async (call) => {
 	if (call.method === "machines.list") return readMachines(call.params.cwd);
+	if (call.method === "machines.endpoints") return readMachineEndpoints(call.params.cwd);
 	if (call.method === "runtime.info" && process.env.NODE_ENV === "test") return runtimeInfo(import.meta.url);
 	if (call.method === "system.read" || call.method === "interop.read") {
 		const { inspectSystem, inspectInterop } = await import("../clio/adapters/system.js");

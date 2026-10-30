@@ -1,8 +1,10 @@
+import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { MachineMutation } from "../../../contracts/machines.js";
-import { Machine } from "../../../contracts/machines.js";
+import { Machine, MachineId } from "../../../contracts/machines.js";
 import { CliRunner } from "../../services/cli-runner.js";
 import { AppProblem } from "../../services/problem.js";
+import type { MachineEndpoint } from "../../worker/protocol.js";
 
 // Fleet-node imports are not an approved root seam. The fixed CLI commands call the
 // same registry and preflight functions, in the worker's canonical project cwd.
@@ -44,6 +46,42 @@ export async function readMachines(cwd: string): Promise<Machine[]> {
 		if (!Value.Check(Machine, projected))
 			throw new AppProblem("unavailable", "Clio returned an invalid machine projection.");
 		return projected;
+	});
+}
+
+const nullableText = Type.Union([Type.String(), Type.Null()]);
+const Endpoint = Type.Object(
+	{
+		id: MachineId,
+		host: Type.String({ minLength: 1 }),
+		user: nullableText,
+		port: Type.Union([Type.Integer({ minimum: 1, maximum: 65535 }), Type.Null()]),
+		identityFile: nullableText,
+		connectTimeoutSec: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+		clioCoderEntry: nullableText,
+	},
+	{ additionalProperties: false },
+);
+
+/** The SSH destinations of every registered node, for the attach supervisor; readiness is not read here. */
+export async function readMachineEndpoints(cwd: string): Promise<MachineEndpoint[]> {
+	const raw = object(await runner.run({ kind: "machines.list" }, cwd));
+	if (!Array.isArray(raw.nodes) || raw.nodes.length > 10_000)
+		throw new AppProblem("unavailable", "Clio returned an invalid machine inventory.");
+	return raw.nodes.map((entry) => {
+		const node = object(object(entry).node);
+		const endpoint = Value.Clean(Endpoint, {
+			id: node.id,
+			host: node.host,
+			user: node.user ?? null,
+			port: node.port ?? null,
+			identityFile: node.identityFile ?? null,
+			connectTimeoutSec: node.connectTimeoutSec ?? null,
+			clioCoderEntry: node.clioCoderEntry ?? null,
+		});
+		if (!Value.Check(Endpoint, endpoint))
+			throw new AppProblem("unavailable", "Clio returned an invalid machine endpoint.");
+		return endpoint;
 	});
 }
 

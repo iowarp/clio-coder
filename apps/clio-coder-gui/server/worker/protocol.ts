@@ -21,9 +21,20 @@ export type WorkerSettings = {
 	crashRead?: boolean;
 };
 export type RawTool = Tool;
+/** A registered node's SSH destination, as the attach supervisor needs it; unset fields are null. */
+export type MachineEndpoint = {
+	id: string;
+	host: string;
+	user: string | null;
+	port: number | null;
+	identityFile: string | null;
+	connectTimeoutSec: number | null;
+	clioCoderEntry: string | null;
+};
 export type RuntimeInfo = { entry: string; packageRoot: string; execArgv: string[]; threadId: number };
 export interface Methods {
 	"machines.list": { params: { cwd: string }; result: Machine[] };
+	"machines.endpoints": { params: { cwd: string }; result: MachineEndpoint[] };
 	"machines.mutate": { params: { cwd: string; mutation: MachineMutation }; result: { id: string; message: string } };
 	"setup.status": { params: { cwd?: string }; result: unknown };
 	"runtime.info": { params: Record<string, never>; result: RuntimeInfo };

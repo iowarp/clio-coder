@@ -35,6 +35,7 @@ import { ToolchainService } from "./services/toolchain.js";
 import { TraceService } from "./services/traces.js";
 import { WorkspaceService } from "./services/workspaces.js";
 import { AppFiles } from "./state/files.js";
+import { readStdinToken } from "./token-stdin.js";
 import { WorkerHost } from "./worker/host.js";
 
 export { prepareGuiUninstall } from "./launcher/uninstall.js";
@@ -157,6 +158,8 @@ export async function main(args = process.argv.slice(2)) {
 	const persistent = values.persistent ? await readBackgroundConfig(values.persistent) : undefined;
 	if (persistent) Object.assign(process.env, backgroundEnvironment(persistent));
 	const port = persistent?.port ?? values.port;
+	// Read before anything starts, so a parent that sends nothing costs no workers or children.
+	const stdinToken = values.tokenStdin ? await readStdinToken(process.stdin) : undefined;
 	restrictNetwork();
 	if (!existsSync(join(clientDir, "index.html")))
 		throw new Error("Client build is missing. Run pnpm --filter @iowarp/clio-coder-gui build before start.");
@@ -194,7 +197,7 @@ export async function main(args = process.argv.slice(2)) {
 	const cli = new CliRunner(env);
 	const settingsService = new SettingsService(reads, workspaces, ops);
 	const setup = new SetupService(reads, env, workspaces);
-	const token = persistent?.token ?? values.token ?? randomBytes(32).toString("base64url");
+	const token = persistent?.token ?? values.token ?? stdinToken ?? randomBytes(32).toString("base64url");
 	let log: Awaited<ReturnType<typeof lifecycleLog>>;
 	try {
 		log = await lifecycleLog(values.logFile);
@@ -247,7 +250,14 @@ export async function main(args = process.argv.slice(2)) {
 		origin = `http://127.0.0.1:${info.port}`;
 		const launchUrl = `${origin}${values.path}#token=${token}`;
 		if (scratch) console.log(`[clio-coder:gui] Fabricated tool fixture; isolated state: ${scratch}`);
-		console.log(persistent ? `[clio-coder:gui] Background app ready at ${origin}.` : `[clio-coder:gui] ${launchUrl}`);
+		// A parent that wrote the token over stdin already holds it; its ready line carries only the address.
+		console.log(
+			persistent
+				? `[clio-coder:gui] Background app ready at ${origin}.`
+				: values.tokenStdin
+					? `[clio-coder:gui] ${origin}${values.path}`
+					: `[clio-coder:gui] ${launchUrl}`,
+		);
 		void log.write(`Listening at ${origin}; idle exit ${values.idleMs ?? "disabled"}.`).catch(fail);
 		if (!persistent) {
 			hint(
@@ -332,6 +342,12 @@ export async function main(args = process.argv.slice(2)) {
 	};
 	process.once("SIGINT", stop);
 	process.once("SIGTERM", stop);
+	if (values.tokenStdin) {
+		// The parent holds stdin open for the server's lifetime; its end means the parent is gone.
+		process.stdin.once("end", stop);
+		process.stdin.once("error", stop);
+		process.stdin.resume();
+	}
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
 	void main().catch((error: unknown) => {

@@ -14,6 +14,7 @@ import {
 	resolvePackageRoot,
 } from "./clio/http-shims.js";
 import { AppProblem } from "./services/problem.js";
+import { type SshEndpoint, sshCommandArgs, sshForwardArgs } from "./ssh-model.js";
 import type { WorkerKind, WorkerSettings } from "./worker/protocol.js";
 
 /** All application-owned process/thread creation enters here. Root seams own their internal probes. */
@@ -114,6 +115,37 @@ export async function startConfigureChild(env: NodeJS.ProcessEnv = process.env) 
 		shell: false,
 		detached: process.platform !== "win32",
 		stdio: ["pipe", "pipe", "pipe"],
+	});
+	return { child, birthToken: child.pid ? processBirthToken(child.pid) : "" };
+}
+
+/**
+ * The command channel to a fleet node's own GUI: a fixed ssh argv in its own process group, the
+ * launch token written to its stdin and the ready line read from its stdout. The ssh client is the
+ * operator's own, found on PATH like every other tool this app runs.
+ */
+export function startSshCommand(endpoint: SshEndpoint, remoteCommand: string, env: NodeJS.ProcessEnv = process.env) {
+	const child = spawn("ssh", sshCommandArgs(endpoint, remoteCommand), {
+		env,
+		shell: false,
+		detached: process.platform !== "win32",
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	return { child, birthToken: child.pid ? processBirthToken(child.pid) : "" };
+}
+
+/** The forward that carries proxied traffic to the node's GUI; it runs no remote command. */
+export function startSshForward(
+	endpoint: SshEndpoint,
+	localPort: number,
+	remotePort: number,
+	env: NodeJS.ProcessEnv = process.env,
+) {
+	const child = spawn("ssh", sshForwardArgs(endpoint, localPort, remotePort), {
+		env,
+		shell: false,
+		detached: process.platform !== "win32",
+		stdio: ["ignore", "ignore", "pipe"],
 	});
 	return { child, birthToken: child.pid ? processBirthToken(child.pid) : "" };
 }
