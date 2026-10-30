@@ -8,12 +8,18 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder agents [--json] [--all]
+clio-coder agents validate [--json]
 
 List user-facing agent specs from built-in, plugin, user, and project recipes.
 
 Flags:
   --json   emit specs as JSON instead of the formatted table
   --all    include shadow/internal specs reserved for Clio orchestration
+
+validate checks this repository's harness: project and user agent recipes,
+project and user skills, and the fleet bindings in .clio-coder/settings.local.yaml.
+It prints every problem as one "file: field: message" line and exits 1 when
+there is any, so the whole list can be handed back to whoever wrote the files.
 `;
 
 export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<number> {
@@ -21,6 +27,7 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 		process.stdout.write(HELP);
 		return 0;
 	}
+	if (args[0] === "validate") return runAgentsValidate(args.slice(1));
 	const json = args.includes("--json");
 	const all = args.includes("--all");
 	const unknown = args.find((arg) => arg !== "--json" && arg !== "--all");
@@ -48,6 +55,28 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 	}
 	await result.stop();
 	return 0;
+}
+
+async function runAgentsValidate(args: ReadonlyArray<string>): Promise<number> {
+	const json = args.includes("--json");
+	const unknown = args.find((arg) => arg !== "--json");
+	if (unknown) {
+		printError(`unknown flag: ${unknown}`);
+		process.stderr.write(HELP);
+		return 2;
+	}
+	ensureClioState();
+	const { formatHarnessIssues, validateHarnessAt } = await import("../domains/agents/harness-validate.js");
+	const workspaceRoot = process.cwd();
+	const issues = validateHarnessAt(workspaceRoot);
+	if (json) {
+		process.stdout.write(`${JSON.stringify({ ok: issues.length === 0, workspaceRoot, issues }, null, 2)}\n`);
+	} else if (issues.length === 0) {
+		process.stdout.write(`harness: no problems found in ${workspaceRoot}\n`);
+	} else {
+		process.stdout.write(`${formatHarnessIssues(issues)}\n`);
+	}
+	return issues.length === 0 ? 0 : 1;
 }
 
 function renderLine(spec: AgentSpec): void {

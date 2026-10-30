@@ -16,6 +16,7 @@ import {
 	isUninitializedHome,
 	runDoctor,
 	runDoctorFleetChecks,
+	runDoctorHarnessChecks,
 	runDoctorInteropChecks,
 	runDoctorModelChecks,
 	runDoctorRuntimeChecks,
@@ -415,6 +416,10 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// Fleet preflight probes each configured node over SSH and persists the
 	// per-node eligibility verdicts dispatch placement enforces.
 	const fleetChecks = untouched ? [] : await runDoctorFleetChecks(workspaceRoot, { fix });
+	// The harness sweep reads the workspace's recipes, skills and local settings
+	// and the catalog they bind against; it creates nothing, but discovery
+	// resolves the config root, so it waits for a home Clio has written.
+	const harnessChecks = untouched ? [] : runDoctorHarnessChecks(workspaceRoot);
 	// Resolution reads PATH and the vendor root and creates nothing, but on an
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.
@@ -456,6 +461,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 		...modelChecks,
 		...interopChecks,
 		...fleetChecks,
+		...harnessChecks,
 		...toolChecks,
 		...hpcChecks,
 		...slurmChecks,

@@ -148,6 +148,29 @@ const DECISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Consult]);
 const VISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Vision]);
 /** Registered only on the orchestrator registry, which owns the session task bank. */
 const MEMORY_RECALL_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryRecall]);
+
+/**
+ * Builtin tools a native worker registry never registers on any host: the
+ * dispatch, interactive, pane, music, decision, vision and memory-recall planes
+ * plus the two continuity tools only an attended parent supplies (the same
+ * exclusions `validateBuiltinToolPolicy` applies to a worker registration).
+ * The harness validator reads this so a recipe naming one is told before
+ * dispatch admission refuses the run. Bash and the network plane are host
+ * conditions rather than recipe errors and stay out.
+ */
+export function isWorkerSurfaceExcludedTool(name: ToolName): boolean {
+	return (
+		name === ToolNames.SelfCompact ||
+		name === ToolNames.Job ||
+		DISPATCH_BOUND_TOOLS.has(name) ||
+		INTERACTIVE_BOUND_TOOLS.has(name) ||
+		PANES_BOUND_TOOLS.has(name) ||
+		MUSIC_BOUND_TOOLS.has(name) ||
+		DECISION_BOUND_TOOLS.has(name) ||
+		VISION_BOUND_TOOLS.has(name) ||
+		MEMORY_RECALL_BOUND_TOOLS.has(name)
+	);
+}
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
 const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebRead, ToolNames.WebFetch]);
 /** Registered only where a bash resolves (core/bash-shell.ts). */

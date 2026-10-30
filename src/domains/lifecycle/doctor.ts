@@ -1,5 +1,5 @@
 import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative as relativePath } from "node:path";
 import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
@@ -10,6 +10,12 @@ import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/s
 import { shellQuote } from "../../core/shell-quote.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
+import {
+	collectHarnessInput,
+	type HarnessInput,
+	type HarnessIssue,
+	validateHarness,
+} from "../agents/harness-validate.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
 import { credentialsPresent } from "../providers/credentials.js";
@@ -722,11 +728,13 @@ export function withDoctorCommand(finding: DoctorFinding): DoctorFinding {
 			? "clio-coder configure"
 			: name.startsWith("interop")
 				? "clio-coder configure --interop"
-				: name.startsWith("GUI")
-					? "clio-coder gui background status"
-					: /^(?:install method|engine runtime|node version)/.test(name)
-						? "clio-coder upgrade"
-						: "clio-coder config inspect --json";
+				: name.startsWith("harness")
+					? "clio-coder agents validate"
+					: name.startsWith("GUI")
+						? "clio-coder gui background status"
+						: /^(?:install method|engine runtime|node version)/.test(name)
+							? "clio-coder upgrade"
+							: "clio-coder config inspect --json";
 	return { ...finding, detail: `${finding.detail}; next: \`${command}\`` };
 }
 
@@ -1486,4 +1494,63 @@ function datasetFinding(
 			`${formatBytes(bytes)}; ${limits}` +
 			(over ? "; over the cap, the next write prunes the oldest days" : ""),
 	};
+}
+
+/**
+ * Harness: the repository's own agent recipes, its project and user skills,
+ * and the fleet bindings in `.clio-coder/settings.local.yaml`. Each of those
+ * loads silently and does nothing when it names a tool, skill, recipe, target,
+ * model or script that does not exist, so doctor reports one row per file
+ * with problems, folded to one line; `clio-coder agents validate` prints the
+ * same issues one per line for feeding back to whoever wrote the file.
+ */
+export function runDoctorHarnessChecks(workspaceRoot: string = process.cwd()): DoctorFinding[] {
+	let input: HarnessInput;
+	let issues: HarnessIssue[];
+	try {
+		input = collectHarnessInput(workspaceRoot);
+		issues = validateHarness(input);
+	} catch (err) {
+		return [
+			{
+				ok: false,
+				name: "harness",
+				detail: `could not be validated: ${err instanceof Error ? err.message : String(err)}`,
+			},
+		];
+	}
+	const ownedSkills = input.skills.items.filter((skill) =>
+		input.ownedSkillRoots.some((root) => {
+			const relative = relativePath(root, skill.filePath);
+			return relative !== "" && !relative.startsWith("..") && !isAbsolute(relative);
+		}),
+	).length;
+	const artifacts = input.recipes.length + ownedSkills + (input.localSettings === null ? 0 : 1);
+	if (issues.length === 0) {
+		if (artifacts === 0) return [];
+		const parts = [
+			`${input.recipes.length} custom recipe${input.recipes.length === 1 ? "" : "s"}`,
+			`${ownedSkills} skill${ownedSkills === 1 ? "" : "s"}`,
+			...(input.localSettings === null ? [] : ["settings.local.yaml"]),
+		];
+		return [{ ok: true, name: "harness", detail: `${parts.join(", ")}: every reference resolves` }];
+	}
+	const byFile = new Map<string, HarnessIssue[]>();
+	for (const issue of issues) {
+		const list = byFile.get(issue.file) ?? [];
+		list.push(issue);
+		byFile.set(issue.file, list);
+	}
+	const findings: DoctorFinding[] = [...byFile].map(([file, list]) => ({
+		ok: false,
+		name: `harness ${file}`,
+		detail: foldDetail(list.map((issue) => `${issue.field}: ${issue.message}`).join("; ")),
+	}));
+	findings.push({
+		ok: true,
+		level: "info",
+		name: "harness",
+		detail: `${issues.length} problem${issues.length === 1 ? "" : "s"} in ${byFile.size} file${byFile.size === 1 ? "" : "s"}; \`clio-coder agents validate\` prints each on its own line`,
+	});
+	return findings;
 }

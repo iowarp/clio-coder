@@ -11,6 +11,7 @@ import {
 	stripBom,
 } from "./edit-diff.js";
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
+import { harnessRecipeWriteNote } from "./harness-note.js";
 import { resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { hookLandingRefusal, publishTargetAdmission } from "./tool-landing.js";
@@ -199,6 +200,7 @@ export const editTool: ToolSpec = {
 						}
 					}
 					const file = await publishFileAtomically(filePath, finalContent, admitTarget ? { admitTarget } : {});
+					const harnessNote = await harnessRecipeWriteNote(filePath);
 					// The validation nudge is point-of-failure conditioning: measured on
 					// a live 35B coder worker, the model edited correctly and then spent
 					// its remaining calls "validating" with navigation tools (code_nav
@@ -207,7 +209,7 @@ export const editTool: ToolSpec = {
 					// every agent sees at exactly the moment it matters.
 					return {
 						kind: "ok",
-						output: `edited ${pathArg}: ${edits.length} replacement(s). Validate now: rerun the failing test or verify; navigation tools do not validate edits.${!diff ? "\nnote: diff skipped because the previous or new file exceeds 1 MiB" : ""}${file.durabilityWarning ? `\n${file.durabilityWarning}` : ""}`,
+						output: `edited ${pathArg}: ${edits.length} replacement(s). Validate now: rerun the failing test or verify; navigation tools do not validate edits.${!diff ? "\nnote: diff skipped because the previous or new file exceeds 1 MiB" : ""}${file.durabilityWarning ? `\n${file.durabilityWarning}` : ""}${harnessNote !== null ? `\n${harnessNote}` : ""}`,
 						details: {
 							file: { before: file.before, after: file.after },
 							diff: diff?.diff,

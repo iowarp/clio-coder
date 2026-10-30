@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { type EditDiffResult, generateDiffString } from "./edit-diff.js";
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
+import { harnessRecipeWriteNote } from "./harness-note.js";
 import { resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { hookLandingRefusal, publishTargetAdmission } from "./tool-landing.js";
@@ -101,6 +102,8 @@ export const writeTool: ToolSpec = {
 				output += `\nnote: ${pathArg} no longer ends with a newline; the previous content did`;
 			}
 			if (partialRewrite !== null) output += `\nnote: ${partialRewrite}`;
+			const harnessNote = await harnessRecipeWriteNote(filePath);
+			if (harnessNote !== null) output += `\n${harnessNote}`;
 			// The transcript ledger sizes a call from details.observation.shownBytes
 			// before it falls back to the length of the returned text. A write's
 			// text is a confirmation sentence, so without this the ledger printed
