@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createCostTracker } from "../../src/domains/observability/cost.js";
-import { aggregateCostEntries } from "../../src/domains/observability/cost-rows.js";
+import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { ContextLedger } from "../../src/domains/session/context-ledger.js";
 import { projectContextLedger } from "../../src/engine/acp/context-ledger.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { readModelOf, telemetryCall } from "../harness/telemetry-view.js";
 
 const LEDGER: ContextLedger = {
 	provider: "mini",
@@ -145,8 +145,13 @@ test("a long turn streams usage_update per model response with the meter rising 
 	let close: () => void = () => {};
 	let onEvent: (event: unknown) => void = () => {};
 	let used = 1000;
-	const costs = createCostTracker();
-	costs.accumulate("fixture", "baseline", 0, 1, { apiCalls: 2 }, "known");
+	// The session's journal as the read model folds it, a call landing with each response (#434 §11.3).
+	const records: TelemetryRecord[] = [];
+	const land = (options: Parameters<typeof telemetryCall>[1]) => records.push(...telemetryCall("usage-update", options));
+	// Two priced calls before the turn, with no tokens.
+	land({ usage: {}, usd: 0.5 });
+	land({ usage: {}, usd: 0.5 });
+	let bound: string | null = null;
 	const transport: AcpJsonRpcPeerTransport = {
 		closed: false,
 		request: async () => ({}) as never,
@@ -175,30 +180,29 @@ test("a long turn streams usage_update per model response with the meter rising 
 		cwd: process.cwd(),
 		autonomy: () => "default",
 		contextLedger: () => ({ ...LEDGER, usedTokens: used }),
-		usage: {
-			session: () => ({
-				cost: costs.sessionCost(),
-				rows: aggregateCostEntries(costs.entries()),
-			}),
-			quota: async () => [],
-		},
+		usage: { quota: async () => [] },
+		telemetryReadModel: readModelOf(
+			() => bound,
+			() => records,
+		),
 		chat: {
 			submit: async () => {
+				const main = () => land({ usage: { input: 100, output: 20, cacheRead: 50 }, usd: 0.25 });
 				for (const text of ["one", "two", "three"]) {
 					used += 4000;
-					costs.accumulate("fixture", "main", 170, 0.25, { input: 100, output: 20, cacheRead: 50, apiCalls: 1 }, "known");
+					main();
 					if (text === "two") {
-						costs.accumulate("fixture", "decision", 60, 0.1, { input: 40, output: 20 }, "estimated", undefined, "system-one");
-						costs.accumulate("fixture", "memory", 0, 0, { missingTokenCalls: 1 }, "unknown", undefined, "background-memory");
+						land({ label: "system-one", usage: { input: 40, output: 20 }, usd: 0.25, pricedBy: "catalog" });
+						land({ label: "memory", usage: { input: null, output: null }, usd: null });
 					}
 					onEvent({ type: "message_end", message: response(text) });
 					await new Promise((resolve) => setImmediate(resolve));
 				}
 				// A burst in one tick is one frame.
 				used += 4000;
-				costs.accumulate("fixture", "main", 170, 0.25, { input: 100, output: 20, cacheRead: 50 }, "known");
+				main();
 				onEvent({ type: "message_end", message: response("four") });
-				costs.accumulate("fixture", "main", 170, 0.25, { input: 100, output: 20, cacheRead: 50 }, "known");
+				main();
 				onEvent({ type: "message_end", message: response("five") });
 			},
 			cancel: () => {},
@@ -215,6 +219,7 @@ test("a long turn streams usage_update per model response with the meter rising 
 	const call = async (method: string, params: unknown) => await handlers.get(method)?.(params);
 	await call("initialize", { protocolVersion: 1 });
 	const { sessionId } = (await call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	bound = sessionId;
 	assert.equal(updates.filter((update) => update.sessionUpdate === "usage_update").length, 0, "a new session is quiet");
 	const result = (await call("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] })) as {
 		_meta: Record<string, unknown>;
@@ -236,7 +241,7 @@ test("a long turn streams usage_update per model response with the meter rising 
 	const { session: replySession, ...replyTurn } = result._meta["clio-coder/usage"] as Record<string, unknown>;
 	assert.deepEqual(turn, replyTurn);
 	assert.deepEqual((replySession as { costSummary: unknown }).costSummary, {
-		knownUsd: 2.35,
+		knownUsd: 2.5,
 		hasEstimated: true,
 		hasUnknown: true,
 		allKnownFree: false,
@@ -250,8 +255,8 @@ test("a long turn streams usage_update per model response with the meter rising 
 		cacheWrite: 0,
 		reasoning: 0,
 		totalTokens: 910,
-		costUsd: 2.35,
-		costDisplay: "~$2.35 +?",
+		costUsd: 2.5,
+		costDisplay: "~$2.50 +?",
 		costProvenance: "unknown",
 		calls: 9,
 		missingTokenCalls: 1,

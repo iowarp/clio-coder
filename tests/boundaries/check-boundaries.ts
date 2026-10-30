@@ -215,16 +215,6 @@ const SURFACE_TOTAL_ROOTS = ["src/interactive/", "src/engine/acp/", "src/cli/"];
  */
 const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonly string[]; reason: string }> = [
 	{
-		file: "src/engine/acp/usage.ts",
-		functions: ["projectSessionUsage"],
-		reason: "the ACP v1 usage read projects the cost tracker's rows; it retires with CostTracker (P5)",
-	},
-	{
-		file: "src/engine/acp/live-telemetry.ts",
-		functions: ["sessionUsageTotals"],
-		reason: "ACP usage_update totals fold the same v1 cost tracker rows and retire with CostTracker (P5)",
-	},
-	{
 		file: "src/engine/acp/server.ts",
 		functions: ["mergeUsage", "mergeMessageUsage"],
 		reason: "the v1 usage on an ACP prompt response folds that prompt's own messages; it retires with CostTracker (P5)",

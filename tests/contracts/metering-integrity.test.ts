@@ -8,12 +8,10 @@ import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/observability/cost.js";
-import { aggregateCostEntries } from "../../src/domains/observability/cost-rows.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
 import { ledgerCallFailureCounts } from "../../src/domains/session/usage.js";
-import { projectSessionUsage } from "../../src/engine/acp/usage.js";
 import {
 	remainingContextMaxTokens,
 	resolveReservedOutputTokens,
@@ -204,13 +202,8 @@ describe("contracts/metering integrity", () => {
 			deepStrictEqual(coverage, expected);
 			tracker.accumulate("target", "model", 0, 0, coverage, "known_free", undefined, "worker");
 		}
-		const rows = aggregateCostEntries(tracker.entries());
-		const usage = projectSessionUsage({ cost: tracker.sessionCost(), rows });
-		strictEqual(usage.cost.calls, 5);
-		strictEqual(usage.cost.unknownCallCoverageRuns, 2);
-		strictEqual(usage.missingTokenCalls, 1);
-		strictEqual(usage.rows[0]?.calls, 5);
-		deepStrictEqual(usage.rows[0]?.cost, usage.cost);
+		strictEqual(tracker.sessionCost().calls, 5);
+		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, 2);
 		strictEqual(renderCostAggregate(tracker.sessionCost()), "$0.00 local");
 		tracker.reset();
 		strictEqual(tracker.sessionTokens().unknownCallCoverageRuns, undefined);

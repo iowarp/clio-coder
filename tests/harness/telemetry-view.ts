@@ -4,7 +4,7 @@ import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { Fact } from "../../src/core/telemetry/fact.js";
 import { newAttemptId, newCallId, newRecordId } from "../../src/core/telemetry/ids.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
-import type { TelemetryView } from "../../src/domains/observability/contract.js";
+import type { TelemetryReadModel, TelemetryView } from "../../src/domains/observability/contract.js";
 import type { JournalSource } from "../../src/domains/observability/read-model.js";
 import { telemetryView } from "../../src/domains/observability/telemetry-live.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
@@ -132,4 +132,29 @@ export function runUsageOf(
 ): DispatchRunUsage {
 	const records = calls.flatMap((call) => telemetryCall(sessionId, call));
 	return dispatchRunUsage(telemetryViewOf(sessionId, [], new Map([[runId, records]])), runId);
+}
+
+/**
+ * A live read model over records a test appends as its scenario runs, for surfaces that take the read model rather
+ * than one view (#434 §11.3). `sessionId` names the session it is bound to once the surface opens one.
+ */
+export function readModelOf(
+	sessionId: () => string | null,
+	records: () => readonly TelemetryRecord[],
+	runs: () => ReadonlyMap<string, readonly TelemetryRecord[]> = () => new Map(),
+): TelemetryReadModel {
+	const viewOf = (id: string) =>
+		telemetryViewOf(
+			id,
+			records().map((record) => ({ ...record, ctx: { ...record.ctx, sessionId: id } }) as TelemetryRecord),
+			runs(),
+		);
+	return {
+		live: () => {
+			const id = sessionId();
+			return id === null ? null : viewOf(id);
+		},
+		open: async (id: string) => viewOf(id),
+		subscribe: () => () => {},
+	} as unknown as TelemetryReadModel;
 }

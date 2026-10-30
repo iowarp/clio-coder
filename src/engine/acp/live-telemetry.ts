@@ -23,13 +23,17 @@ export { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
  * meter frame is not a model saying something.
  */
 
+import type { FactMetric } from "../../core/telemetry/dto.js";
+import { factRef } from "../../core/telemetry/dto.js";
+import type { TelemetryView } from "../../domains/observability/contract.js";
 import type { CostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import { ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
+import type { AcpCostAggregate } from "./types.js";
 import { ACP_USAGE_META_KEY } from "./types.js";
-import type { AcpCostAggregate, AcpUsageRow } from "./usage.js";
+import { knownFree, knownPart } from "./usage.js";
 
 const MAX_PLAN_ENTRIES = 100;
 const MAX_TEXT_BYTES = 1024;
@@ -150,7 +154,6 @@ function projectAcpPlan(plan: TaskBoardSnapshot | null) {
 const EMPTY_PLAN_SIGNATURE = JSON.stringify(projectAcpPlan(null));
 
 interface SessionTotals {
-	unknownCallCoverageRuns?: number;
 	costDisplay: string;
 	costSummary: AcpCostAggregate;
 	input: number;
@@ -166,44 +169,45 @@ interface SessionTotals {
 	hasEstimatedCost?: boolean;
 }
 
-const count = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0);
-
 function provenanceOf(cost: AcpCostAggregate): CostProvenance {
 	if (!costWasMeasured(cost) || cost.hasUnknown) return "unknown";
 	if (cost.hasEstimated) return "estimated";
 	return cost.allKnownFree ? "known_free" : "known";
 }
 
-export function sessionUsageTotals(session: {
-	cost: AcpCostAggregate;
-	rows: ReadonlyArray<AcpUsageRow>;
-}): SessionTotals {
-	const totals: SessionTotals = {
-		costSummary: session.cost,
-		costDisplay: renderCostAggregate(session.cost),
-		...(session.cost.unknownCallCoverageRuns ? { unknownCallCoverageRuns: session.cost.unknownCallCoverageRuns } : {}),
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoning: 0,
-		totalTokens: 0,
-		costUsd: count(session.cost.knownUsd),
-		costProvenance: provenanceOf(session.cost),
-		calls: count(session.cost.calls),
-		missingTokenCalls: 0,
-		...(session.cost.hasEstimated ? { hasEstimatedCost: true } : {}),
+/**
+ * The session's whole spend for `usage_update` and the prompt response, read from the telemetry read model: its own
+ * calls and the worker runs it referenced (#434 §11.3). Each number is a quantity's known part; the cost's
+ * provenance and `missingTokenCalls` say what it leaves out.
+ */
+export function sessionUsageTotals(view: TelemetryView): SessionTotals {
+	const read = (metric: FactMetric) => view.quantity(factRef({ scope: "session", owner: view.sessionId, metric }));
+	const total = view.cost("label").total;
+	const usd = total.usd;
+	const fact = usd.fact;
+	const summary: AcpCostAggregate = {
+		knownUsd: knownPart(usd),
+		hasEstimated: "kind" in fact ? fact.kind === "estimated" : fact.coverage.estimated > 0,
+		hasUnknown: "kind" in fact ? fact.kind === "unknown" : fact.unknownCount > 0,
+		allKnownFree: knownFree(total.pricedBy, usd),
+		calls: knownPart(total.calls),
 	};
-	for (const row of session.rows) {
-		if (row.missingTokenCalls) totals.missingTokenCalls = (totals.missingTokenCalls ?? 0) + row.missingTokenCalls;
-		totals.input += count(row.input);
-		totals.output += count(row.output);
-		totals.cacheRead += count(row.cacheRead);
-		totals.cacheWrite += count(row.cacheWrite);
-		totals.reasoning += count(row.reasoningTokens);
-		totals.totalTokens += count(row.tokens);
-	}
-	return totals;
+	const missingTokenCalls = knownPart(read("missingTokenCalls"));
+	return {
+		costSummary: summary,
+		costDisplay: usd.display,
+		input: knownPart(read("input")),
+		output: knownPart(read("output")),
+		cacheRead: knownPart(read("cacheRead")),
+		cacheWrite: knownPart(read("cacheWrite")),
+		reasoning: knownPart(read("reasoning")),
+		totalTokens: knownPart(total.tokens),
+		costUsd: summary.knownUsd,
+		costProvenance: provenanceOf(summary),
+		calls: summary.calls,
+		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
+		...(summary.hasEstimated ? { hasEstimatedCost: true } : {}),
+	};
 }
 
 export interface AcpLiveTelemetryDeps {
@@ -212,8 +216,8 @@ export interface AcpLiveTelemetryDeps {
 	/** The one session this process hosts, or null between sessions. */
 	sessionId(): string | null;
 	contextLedger?: () => ContextLedger;
-	/** The cost ledger the `/usage` view folds; read after each model response including auxiliary calls. */
-	sessionUsage?: () => { cost: AcpCostAggregate; rows: ReadonlyArray<AcpUsageRow> };
+	/** The read model's live view of the bound session; read after each model response and each folded batch. */
+	sessionTelemetry?: () => TelemetryView | null;
 	plan?: () => TaskBoardSnapshot | null;
 	workspace?: (cwd: string) => Promise<WorkspaceSnapshot>;
 	cwd: string;
@@ -262,7 +266,8 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			return null;
 		}
 		const context = projectContextLedger(ledger);
-		const session = deps.sessionUsage === undefined ? null : sessionUsageTotals(deps.sessionUsage());
+		const view = deps.sessionTelemetry?.() ?? null;
+		const session = view === null ? null : sessionUsageTotals(view);
 		accountingSignature = JSON.stringify(session);
 		// ACP `cost` is a plain amount, so an unknown price stays absent rather than reading as zero.
 		const knownCost = session !== null && session.calls > 0;
@@ -291,7 +296,6 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 									costDisplay: session.costDisplay,
 									costProvenance: session.costProvenance,
 									calls: session.calls,
-									...(session.unknownCallCoverageRuns ? { unknownCallCoverageRuns: session.unknownCallCoverageRuns } : {}),
 									...(session.missingTokenCalls ? { missingTokenCalls: session.missingTokenCalls } : {}),
 									...(session.hasEstimatedCost ? { hasEstimatedCost: true } : {}),
 								},
@@ -367,9 +371,11 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 	// The session/new response waits on this probe; starting it at construction usually has it landed by then.
 	void refreshWorkspace();
 
+	// A model response can land before the writer's batch holding its call is folded, so a folded batch flushes again.
 	const unsubscribeUsage = deps.subscribeUsage?.(() => {
-		if (disposed || !deps.sessionUsage || deps.sessionId() === null || pendingUsage !== null) return;
-		if (JSON.stringify(sessionUsageTotals(deps.sessionUsage())) === accountingSignature) return;
+		if (disposed || !deps.sessionTelemetry || deps.sessionId() === null || pendingUsage !== null) return;
+		const view = deps.sessionTelemetry();
+		if (view === null || JSON.stringify(sessionUsageTotals(view)) === accountingSignature) return;
 		pendingUsage = setImmediate(() => {
 			pendingUsage = null;
 			flushUsage(true);

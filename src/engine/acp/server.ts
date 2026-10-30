@@ -9,7 +9,7 @@ import type { JobRecord } from "../../core/job-types.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../../core/message-accounting.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
-import type { TelemetryReadModel } from "../../domains/observability/contract.js";
+import type { TelemetryReadModel, TelemetryView } from "../../domains/observability/contract.js";
 import type { CostAggregate } from "../../domains/observability/cost.js";
 import { accumulateCostAmount, emptyCostAggregate, renderCostAmount } from "../../domains/observability/cost.js";
 import { runTokenCount } from "../../domains/observability/read-model.js";
@@ -281,7 +281,7 @@ import {
 	ACP_USAGE_READ_METHOD,
 	type AcpUsageSource,
 	projectQuota,
-	projectSessionUsage,
+	sessionUsageV1,
 } from "./usage.js";
 
 type AcpServerEvent = unknown;
@@ -1814,11 +1814,6 @@ function sendToolProgress(
 		toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)),
 	);
 }
-
-const EMPTY_SESSION_USAGE: ReturnType<AcpUsageSource["session"]> = {
-	cost: { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 0 },
-	rows: [],
-};
 
 /** Kinds that only look; any other settled call may have moved the branch or the worktree. */
 const READ_ONLY_TOOL_KINDS: ReadonlySet<AcpToolKind> = new Set<AcpToolKind>(["read", "search", "fetch"]);
@@ -3994,6 +3989,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	 * that outcome so its board does not leave the run running forever.
 	 */
 	let boundSessionId: string | null = null;
+	/** The read model's live view of the bound session; null while it holds another session or is still seeding. */
+	const liveSessionView = (): TelemetryView | null => {
+		const view = options.telemetryReadModel?.live() ?? null;
+		return view !== null && !view.seeding && view.sessionId === boundSessionId ? view : null;
+	};
 	let activePromptState: ActivePrompt | null = null;
 	/**
 	 * The prompt state a scheduled main turn holds while it runs. Token-owned: only the lease's own
@@ -4039,8 +4039,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		sessionId: () => boundSessionId,
 		cwd: canonicalCwd,
 		...(options.contextLedger !== undefined ? { contextLedger: options.contextLedger } : {}),
-		...(options.usage !== undefined ? { sessionUsage: () => options.usage?.session() ?? EMPTY_SESSION_USAGE } : {}),
-		...(options.usage?.subscribe ? { subscribeUsage: options.usage.subscribe } : {}),
+		...(options.usage !== undefined ? { sessionTelemetry: () => liveSessionView() } : {}),
+		...(options.usage?.subscribe || options.telemetryReadModel
+			? {
+					// The cost ledger's change, or a folded batch: a model response can land before its call is folded.
+					subscribeUsage: (listener: () => void) => {
+						const offs = [options.usage?.subscribe?.(listener), options.telemetryReadModel?.subscribe("session", listener)];
+						return () => {
+							for (const off of offs) off?.();
+						};
+					},
+				}
+			: {}),
 		...(options.plan !== undefined ? { plan: options.plan } : {}),
 		...(options.workspace !== undefined ? { workspace: options.workspace } : {}),
 		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
@@ -5560,20 +5570,21 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		if (options.usage === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		const bound = getSession(request);
-		const session = projectSessionUsage(options.usage.session());
 		let quota: ReturnType<typeof projectQuota> | { status: "failed"; reason: string };
 		try {
 			quota = projectQuota(await options.usage.quota());
 		} catch (err) {
 			quota = { status: "failed", reason: boundString(err instanceof Error ? err.message : String(err), 256) };
 		}
-		// The read model's whole-session DTOs ride beside the v1 counts, which cannot carry an unknown (#434 §11.3).
+		// The v1 counts are the read model's known parts, and its whole-session DTOs ride beside them with the unknowns
+		// the v1 numbers cannot carry (#434 §11.3).
 		let view: Awaited<ReturnType<typeof telemetryViewFor>> = null;
 		try {
 			view = options.telemetryReadModel ? await telemetryViewFor(options.telemetryReadModel, bound.id) : null;
 		} catch (error) {
 			options.diagnostics?.(`telemetry view failed: ${acpErrorMessage(error)}`);
 		}
+		const session = sessionUsageV1(view);
 		return {
 			version: 1,
 			session,
@@ -7086,7 +7097,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				? ceilingMeta(applyCeilings([session.ceiling, promptCeiling], "prompt"))
 				: undefined;
 		const respond = (stopReason: string): AcpPromptResponse =>
-			promptResponse(stopReason, active, options.usage?.session(), ceilingEcho);
+			promptResponse(stopReason, active, options.usage === undefined ? null : liveSessionView(), ceilingEcho);
 		telemetry.turnStarted(active.usage);
 		const unsubscribe = attachTurnObserver(session.id, active);
 		try {
@@ -7300,7 +7311,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 function promptResponse(
 	stopReason: string,
 	active: ActivePrompt,
-	session?: ReturnType<AcpUsageSource["session"]>,
+	session: TelemetryView | null,
 	ceiling?: Record<string, unknown>,
 ): AcpPromptResponse {
 	return {

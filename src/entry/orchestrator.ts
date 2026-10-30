@@ -178,7 +178,6 @@ import type { BackgroundMemoryUsageSink } from "../domains/observability/backgro
 import type { AdmissionHold, CallJournalOptions } from "../domains/observability/call-scope.js";
 import { openCallScope } from "../domains/observability/call-scope.js";
 import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
-import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
@@ -5708,10 +5707,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							usage: {
 								resetSession: (sessionId: string) => observability.resetSession(sessionId),
 								subscribe: (listener: () => void) => observability.subscribe(listener),
-								session: () => ({
-									cost: observability.sessionCostSummary(),
-									rows: aggregateCostEntries(observability.costEntries()),
-								}),
 								quota: async () => {
 									if (acpQuota === null) {
 										const { createQuotaService } = await import("../domains/quota/service.js");
