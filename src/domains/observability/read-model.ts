@@ -2224,7 +2224,10 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	}
 	budget.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 	const quota = [...latestQuota.values()].sort(
-		(a, b) => Number(quotaLimited(b)) - Number(quotaLimited(a)) || (a.provider < b.provider ? -1 : 1),
+		(a, b) =>
+			Number(quotaLimited(b)) - Number(quotaLimited(a)) ||
+			a.provider.localeCompare(b.provider) ||
+			a.targetId.localeCompare(b.targetId),
 	);
 	const terminal = last?.record.data;
 	const lastCallIds = new Set(terminal?.terminal.callIds ?? []);
