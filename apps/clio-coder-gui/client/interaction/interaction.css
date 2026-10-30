@@ -279,12 +279,12 @@
 	text-underline-offset: 3px;
 }
 
+/* The stack takes the app layout's own bottom row, so it can never cover a control such as Send or
+   Save; it keeps its width and its place at the right. */
 .notice-region {
-	position: fixed;
-	inset-inline-end: var(--space-4);
-	inset-block-end: var(--space-4);
-	z-index: 20;
+	justify-self: end;
 	width: min(480px, calc(100vw - 2 * var(--space-4)));
+	margin: 0 var(--space-4) var(--space-4);
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
