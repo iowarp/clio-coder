@@ -1,3 +1,10 @@
+const TOKEN_CHARS = 4;
+
+/** The chars/4 token estimate Clio uses wherever no tokenizer counted the text (`EstimateMethod` "chars/4"). */
+export function ceilChars(chars: number): number {
+	return Math.ceil(Math.max(0, chars) / TOKEN_CHARS);
+}
+
 export interface TokenSplit {
 	readonly inputTokens: number;
 	readonly outputTokens: number;

@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isHostPolicyMessage } from "../../core/host-policy-message.js";
+import { ceilChars } from "../../core/token-split.js";
 import { cwdHash, sessionPaths } from "../../engine/session.js";
 import type { AgentMessage, Usage } from "../../engine/types.js";
 import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
@@ -8,7 +9,6 @@ import { categoryForSegment } from "./context-ledger.js";
 import type { SessionMeta } from "./contract.js";
 
 const IMAGE_CHAR_ESTIMATE = 4800;
-const TOKEN_CHARS = 4;
 const MESSAGE_OVERHEAD_TOKENS = 16;
 
 export interface AgentContextEstimateInput {
@@ -96,9 +96,7 @@ export interface ContextSnapshot {
 	attemptId?: string | undefined;
 }
 
-export function ceilChars(chars: number): number {
-	return Math.ceil(Math.max(0, chars) / TOKEN_CHARS);
-}
+export { ceilChars };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);

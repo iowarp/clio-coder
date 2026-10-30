@@ -2,7 +2,7 @@ import { responseModelIdObservationFromRecord } from "../../core/response-model-
 import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { CallSettled, CallStarted, CallUsage, Payload } from "../../core/telemetry/schemas.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
+import { ceilChars, normalizeTokenUsage } from "../../core/token-split.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 
 const unknown = { kind: "unknown", reason: "provider-omitted" } as const;
@@ -144,13 +144,14 @@ export function callSettlementFromMessage(
 		return unknown;
 	};
 	const total = breakdownIncomplete ? read("totalTokens") : undefined;
+	const output = read("output");
 	const counts: CallUsage = {
 		input: read("input"),
-		output: read("output"),
+		output,
 		cacheRead: read("cacheRead"),
 		cacheWrite: read("cacheWrite"),
 		cacheWrite1h: read("cacheWrite1h"),
-		reasoning: read("reasoning"),
+		reasoning: reasoningFact(read("reasoning"), raw.content, output),
 		...(total?.kind === "measured" ? { total } : {}),
 	};
 	const observed = Object.values(counts).some((fact) => fact.kind === "measured");
@@ -198,6 +199,28 @@ export function callSettlementFromMessage(
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),
 		...(interruptedEstimate ? { interruptedEstimate } : {}),
+	};
+}
+
+/**
+ * A provider that reports no reasoning count still streamed the thinking it shows, so that text is estimated at
+ * chars/4, never above the output the provider measured, since reasoning is part of it. A measured count, zero
+ * included, is the provider's word and stands (#434).
+ */
+function reasoningFact(reported: Fact<number>, content: unknown, output: Fact<number>): Fact<number> {
+	if (reported.kind === "measured") return reported;
+	const chars = (Array.isArray(content) ? content : [])
+		.map(record)
+		.reduce(
+			(sum, block) => sum + (block.type === "thinking" && typeof block.thinking === "string" ? block.thinking.length : 0),
+			0,
+		);
+	if (chars === 0) return reported;
+	const estimate = ceilChars(chars);
+	return {
+		kind: "estimated",
+		value: output.kind === "measured" ? Math.min(estimate, output.value) : estimate,
+		method: "chars/4",
 	};
 }
 

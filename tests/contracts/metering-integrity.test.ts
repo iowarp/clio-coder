@@ -95,6 +95,9 @@ describe("contracts/metering integrity", () => {
 			...callSettlementFromMessage(message, "known"),
 		});
 		const first = settled(0, { stopReason: "stop", usage });
+		// Thinking the provider counted no reasoning for is estimated at chars/4, never above the measured output.
+		const thought = settled(0, { stopReason: "stop", usage, content: [{ type: "thinking", thinking: "x".repeat(40) }] });
+		deepStrictEqual(thought.usage?.reasoning, { kind: "estimated", value: 2, method: "chars/4" });
 		for (const invoked of [false, true]) {
 			const message = {
 				role: "assistant",
