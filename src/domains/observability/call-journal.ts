@@ -31,15 +31,30 @@ export interface CallJournal extends TelemetrySink {
 }
 export interface CallJournalOptions {
 	sessionDirectory: string;
+	fileName?: JournalFileName;
 	context: TelemetryContext;
 	writer: SegmentHeader["writer"];
 	queueCapacity?: number;
 	segmentBytes?: number;
 }
 
+export type JournalFileName = "calls.jsonl" | "events.ndjson";
+
+function rotatedName(fileName: JournalFileName, id: string): string {
+	return fileName === "calls.jsonl" ? `calls.${id}.jsonl` : `events.${id}.ndjson`;
+}
+
+function journalFiles(names: string[], fileName: JournalFileName): string[] {
+	const pattern = fileName === "calls.jsonl" ? /^calls\.rec_[0-9a-f-]+\.jsonl$/ : /^events\.rec_[0-9a-f-]+\.ndjson$/;
+	const files = names.filter((name) => pattern.test(name)).sort();
+	if (names.includes(fileName)) files.push(fileName);
+	return files;
+}
+
 /** One lease for the writer's lifetime, adjudicated by host, pid and birth token (#434). */
 export async function openCallJournal(options: CallJournalOptions): Promise<CallJournal> {
-	const path = join(options.sessionDirectory, "calls.jsonl");
+	const fileName = options.fileName ?? "calls.jsonl";
+	const path = join(options.sessionDirectory, fileName);
 	await mkdir(dirname(path), { recursive: true });
 	let ready!: (journal: CallJournal) => void;
 	let reject!: (error: unknown) => void;
@@ -90,7 +105,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				throw new Error("call journal segment header is unsupported");
 			}
 			const gap = (reason: "torn-tail" | "writer-drop" | "invalid-record", count: number) =>
-				makeTelemetryRecord("gap", { sink: "calls.jsonl", reason, count }, options.context, {
+				makeTelemetryRecord("gap", { sink: fileName, reason, count }, options.context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
 				});
@@ -194,7 +209,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							await handle.sync();
 							await handle.close();
 							handle = undefined;
-							await rename(path, join(options.sessionDirectory, `calls.${newRecordId()}.jsonl`));
+							await rename(path, join(options.sessionDirectory, rotatedName(fileName, newRecordId())));
 							await safeResourceWriteAsync(path, encodeTelemetryLine(header), { mode: 0o600 });
 							handle = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
 							size = encodeTelemetryLine(header).length;
@@ -276,11 +291,18 @@ export interface CallJournalRead {
 }
 
 /** Read-only readers preserve future records and never repair a writer's file (#434). */
-export async function readCallJournal(sessionDirectory: string): Promise<CallJournalRead> {
-	return readCallJournalSnapshot(sessionDirectory, 3);
+export async function readCallJournal(
+	sessionDirectory: string,
+	fileName: JournalFileName = "calls.jsonl",
+): Promise<CallJournalRead> {
+	return readCallJournalSnapshot(sessionDirectory, fileName, 3);
 }
 
-async function readCallJournalSnapshot(sessionDirectory: string, retries: number): Promise<CallJournalRead> {
+async function readCallJournalSnapshot(
+	sessionDirectory: string,
+	fileName: JournalFileName,
+	retries: number,
+): Promise<CallJournalRead> {
 	const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 	let names: string[];
 	try {
@@ -289,24 +311,21 @@ async function readCallJournalSnapshot(sessionDirectory: string, retries: number
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
 		throw error;
 	}
-	const files = names.filter((name) => /^calls\.rec_[0-9a-f-]+\.jsonl$/.test(name)).sort();
-	if (names.includes("calls.jsonl")) files.push("calls.jsonl");
+	const files = journalFiles(names, fileName);
 	for (const file of files) {
 		let bytes: Buffer;
 		try {
 			bytes = await readFile(join(sessionDirectory, file));
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT" && retries > 0)
-				return readCallJournalSnapshot(sessionDirectory, retries - 1);
+				return readCallJournalSnapshot(sessionDirectory, fileName, retries - 1);
 			throw error;
 		}
 		appendReadSegment(result, bytes);
 	}
-	const after = (await readdir(sessionDirectory))
-		.filter((name) => name === "calls.jsonl" || /^calls\.rec_[0-9a-f-]+\.jsonl$/.test(name))
-		.sort();
+	const after = journalFiles(await readdir(sessionDirectory), fileName).sort();
 	if (after.join("\n") !== [...files].sort().join("\n")) {
-		if (retries > 0) return readCallJournalSnapshot(sessionDirectory, retries - 1);
+		if (retries > 0) return readCallJournalSnapshot(sessionDirectory, fileName, retries - 1);
 		throw new Error("call journal rotated repeatedly during read");
 	}
 	return result;
@@ -328,11 +347,11 @@ function appendReadSegment(result: CallJournalRead, bytes: Buffer): void {
 }
 
 /** Session switches already read their ledger synchronously; take the journal snapshot in that same cold path (#434). */
-export function readCallJournalSync(sessionDirectory: string): CallJournalRead {
-	const names = () =>
-		readdirSync(sessionDirectory)
-			.filter((name) => name === "calls.jsonl" || /^calls\.rec_[0-9a-f-]+\.jsonl$/.test(name))
-			.sort((left, right) => (left === "calls.jsonl" ? 1 : right === "calls.jsonl" ? -1 : left.localeCompare(right)));
+export function readCallJournalSync(
+	sessionDirectory: string,
+	fileName: JournalFileName = "calls.jsonl",
+): CallJournalRead {
+	const names = () => journalFiles(readdirSync(sessionDirectory), fileName);
 	for (let retry = 0; retry < 3; retry += 1) {
 		const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 		let files: string[];

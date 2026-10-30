@@ -83,7 +83,13 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, runId: "different-run" }), null);
 		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, sessionId: "different-session" }), null);
 		const directory = await mkdtemp(join(tmpdir(), "telemetry-forwarded-"));
-		const journal = await openCallJournal({ sessionDirectory: directory, context: run, writer });
+		const journal = await openCallJournal({
+			sessionDirectory: directory,
+			fileName: "events.ndjson",
+			context: run,
+			writer,
+			segmentBytes: 1,
+		});
 		try {
 			for (const frame of frames) {
 				const pending = readWorkerTelemetryFrame(frame, run);
@@ -91,12 +97,16 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 				ok(journal.enqueue(pending));
 			}
 			await journal.flush();
-			const saved = await readCallJournal(directory);
+			const saved = await readCallJournal(directory, "events.ndjson");
+			deepStrictEqual(readCallJournalSync(directory, "events.ndjson"), saved);
+			strictEqual((await readCallJournal(directory)).records.length, 0, "standalone runs create no session call store");
+			const forwarded = saved.records.filter((row) => row.origin.host === "remote-worker");
 			deepStrictEqual(
-				saved.records.map(({ record }) => record.id),
+				forwarded.map(({ record }) => record.id),
 				frames.map((frame) => frame.record.id),
 			);
-			ok(saved.records.every((row) => row.origin.host === "remote-worker" && row.record.ctx.sessionId === null));
+			ok(forwarded.every((row) => row.record.ctx.sessionId === null));
+			ok(saved.records.some((row) => row.record.k === "segment.closed" && row.origin.host !== "remote-worker"));
 			const folded = foldCallJournal(saved.records.map(({ record }) => record));
 			strictEqual(folded.totals.neverSent, 1);
 			strictEqual(folded.coverage.droppedRecords, 1);
