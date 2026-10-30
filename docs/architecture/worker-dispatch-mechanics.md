@@ -475,7 +475,7 @@ The store is `<stateDir>/route-history.json`: `{ version: 3, records: [...] }`, 
 | `failure` | A failed receipt with neither an outcome code nor a permission detail. |
 | `timed_out`, `stalled`, `canceled`, `denied_by_policy`, `spawn_failed` | Any other outcome keeps its own name. |
 
-A record that lacks a label is backfilled when route readiness is evaluated. The observer takes the label from the matching receipt in the durable receipt sources and never overwrites an existing label. A record whose receipt is no longer among those sources stays unlabeled. The observer also writes the label on each outcome line of `<stateDir>/route-decisions/observations.jsonl`.
+A record that lacks a label is backfilled when route readiness is evaluated. The observer takes the label from the matching receipt in the durable receipt sources and never overwrites an existing label. A record whose receipt is no longer among those sources stays unlabeled. In research telemetry mode the observer also writes the label on each outcome line of `<stateDir>/telemetry/research/route-observations.jsonl`.
 
 Adaptive routing does not read `settled`. Route policy and readiness read `qualityLabel`, `reliability`, `firstPass`, completed cost, and completed timing. Do not route on `settled` without a decision recorded first. The operator-facing view of route history is described in [fleet-dispatch.md](../guide/fleet-dispatch.md).
 

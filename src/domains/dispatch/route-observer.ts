@@ -17,7 +17,7 @@
  */
 
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import {
@@ -222,8 +222,14 @@ export interface CreateRouteObserverOptions {
 	history?: RouteHistoryStore;
 	/** Test-only estimator input seam. Production does not use this store. */
 	samples?: RouteSampleStore;
-	/** Log directory override; defaults to `<state>/route-decisions`. */
+	/** Log directory override, written always; tests use it. */
 	logDir?: string;
+	/**
+	 * Without `logDir`, observations are a research record: written to
+	 * `<state>/telemetry/research/route-observations.jsonl` only while this says research mode, where
+	 * research retention prunes them. Nothing reads them back (#434, P5).
+	 */
+	research?: () => boolean;
 	/** Durable source directory override, primarily for restart/replay tests. */
 	stateDir?: string;
 }
@@ -248,9 +254,9 @@ function gateEvidenceKey(sources: DurableQualitySources, serialOf: (value: objec
 	return parts.join(",");
 }
 
-function appendObservationLine(dir: string, record: Record<string, unknown>): void {
-	mkdirSync(dir, { recursive: true });
-	const path = join(dir, "observations.jsonl");
+function appendObservationLine(path: string | null, record: Record<string, unknown>): void {
+	if (path === null) return;
+	mkdirSync(dirname(path), { recursive: true });
 	try {
 		if (statSync(path).size > OBSERVATION_LOG_MAX_BYTES) {
 			renameSync(path, `${path}.1`);
@@ -287,7 +293,12 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 	const PENDING_LIMIT = 512;
 	let totalObservations = 0;
 	let sequence = 0;
-	const logDir = (): string => options.logDir ?? join(clioStateDir(), "route-decisions");
+	const logDir = (): string | null => {
+		if (options.logDir !== undefined) return join(options.logDir, "observations.jsonl");
+		return options.research?.() === true
+			? join(options.stateDir ?? clioStateDir(), "telemetry", "research", "route-observations.jsonl")
+			: null;
+	};
 	let qualitySources: DurableQualitySourceCache | undefined;
 	const readSources = (): DurableQualitySources => {
 		qualitySources ??= createDurableQualitySourceCache({ stateDir: options.stateDir ?? clioStateDir() });

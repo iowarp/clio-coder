@@ -102,7 +102,7 @@ problem.
 | `dispatch-admission.json`, `checkout-writer-leases/`, `cancel-requests/`, `code-steps/`, `write-boundaries/`, `runs/` | Capacity leases, writer leases, cancel requests, code-step state, write-boundary records and the run event journal |
 | `dispatch-verification-memo.json`, `artifacts/<runId>/verification/` | Host verification memo and its captured artifacts |
 | `route-history.json` | Route outcome history, a ring of 4,096 records, each with a `settled` label |
-| `route-decisions/observations.jsonl` | Shadow-mode route observations, rotated to `.1` past a size bound |
+| `telemetry/research/route-observations.jsonl` | Shadow-mode route observations, written only in research telemetry mode and rotated to `.1` past a size bound; older homes may keep a `route-decisions/observations.jsonl` nothing reads |
 | `evidence-index.json` | One row per built run bundle, a ring of 1,000 rows |
 | `memory/steps.jsonl` | Proactive-memory step log, rotated to `.1` past 1 MiB |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |

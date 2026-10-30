@@ -3692,7 +3692,9 @@ export function createDispatchBundle(
 		threshold: () => getEffectiveSettings()?.fleet?.retry.breakerThreshold ?? 1,
 	});
 	// Durable evidence owner used by shadow observation and active readiness.
-	const routeObserver: RouteObserver = options?.routeObserver ?? createRouteObserver({});
+	const routeObserver: RouteObserver =
+		options?.routeObserver ??
+		createRouteObserver({ research: () => getEffectiveSettings()?.telemetry?.mode === "research" });
 	const heldWorkers: HeldWorkerPool | null =
 		options?.spawnHeldWorker !== undefined || options?.spawnWorker === undefined
 			? createHeldWorkerPool({
