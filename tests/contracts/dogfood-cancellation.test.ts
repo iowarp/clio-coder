@@ -383,6 +383,18 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			// The ledger is the conversation record; the journal owns the call's accounting and estimate (#434 §5.3).
 			strictEqual(payload.callAccounting, undefined);
 			strictEqual(payload.estimatedUsage, undefined);
+			// The live message keeps the display estimate that call.settled journals as interruptedEstimate. A hollow
+			// message_end is suppressed, so the run's window is where the live message is read.
+			const ended = f.events.filter((event) => event.type === "agent_end").at(-1);
+			ok(ended?.type === "agent_end");
+			const sent = ended.messages.filter((message) => message.role === "assistant");
+			strictEqual(sent.length, 1);
+			const estimatedUsage = recordValue((sent[0] as unknown as Record<string, unknown>).estimatedUsage);
+			ok(estimatedUsage);
+			strictEqual(estimatedUsage.estimated, true);
+			ok(Number(estimatedUsage.input) > 0);
+			if (mode !== "empty") ok(Number(estimatedUsage.output) > 0);
+			else strictEqual(estimatedUsage.output, 0);
 			const serialized = JSON.stringify(assistant);
 			doesNotMatch(serialized, /LiteLLM route|\/model/u);
 			if (mode === "partial") ok(serialized.includes(PARTIAL));
