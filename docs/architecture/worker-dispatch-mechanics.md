@@ -472,11 +472,11 @@ Workers compile their system prompt as the third tier, after the attended and he
 1. `identity.clio-coder-worker`
 2. `operating.contract` and `operating.worker`, rendered as one operating contract section
 3. `operating.steering`, only when live steering is available
-4. `safety.default`, rendered with the worker's permit
+4. `safety.default`, or `safety.yolo-worker` when the permit inherited the operator's yolo, rendered with the worker's permit
 5. `dispatch.read-only`, only for a read-only dispatch
 6. The persona, which is the recipe body or a caller `persona` override, followed by the block for any bound skills
 
-The compiler also places a tool-contract block after the steering section, appends the rule fragments scoped to the run, and ends with the turn-scope guidance. Per-run context never enters the stable prompt. It travels as dynamic prompt messages, listed in [built-in-agents.md](../guide/built-in-agents.md#worker-context-injection), so the stable prompt stays fixed for a recipe and tool surface, apart from the path-scoped rule fragments.
+The compiler also places a tool-contract block after the steering section, and appends the rule fragments scoped to the run. The turn-scope guidance is not compiled: dispatch sends it as a separate `dispatch-turn-scope` task message. Per-run context never enters the stable prompt. It travels as dynamic prompt messages, listed in [built-in-agents.md](../guide/built-in-agents.md#worker-context-injection), so the stable prompt stays fixed for a recipe and tool surface, apart from the path-scoped rule fragments.
 
 `liveSteering === false` drops `operating.steering`. The dispatch extension passes it when its host reports `workerSteering: false`, which means no steer channel reaches the worker. `src/cli/fleet.ts` always sets it. `src/cli/run.ts` sets it unless `--steer-channel` was given. `src/entry/orchestrator.ts` sets it for a headless session. The same flag drops the steering fragment from a headless main prompt when that run has no steer channel.
 

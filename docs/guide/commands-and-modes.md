@@ -348,7 +348,7 @@ Headless runs can explicitly constrain one submitted turn and its continuations 
 - **Capability allowlist (`--allow-tools <names|none>`):** Restricts executable tools to an explicit comma-separated list of capability names, or disables all tools when passed `none`. Mechanically enforced by `turnAllowsTool` and tool execution admission. Naming a secondary capability (such as `data` or `clio_docs`) automatically admits its gateway transport wrapper, while naming `gateway` alone never admits every capability behind it.
 - **Skill discovery suppression (`--no-skills`):** Suppresses automatic skill discovery from catalog roots and marketplace guidance while still honoring explicitly specified skill paths (such as `--skill <path>`). Programmatic turn constraints can also set `skills: "disabled"`, which mechanically rejects `context(scope="skills")` calls at the tool boundary.
 
-In prompt generation, turn constraints render as the final `# Current task scope` section of the system prompt ([compiler.ts](../../src/domains/prompts/compiler.ts)). Because they appear after identity, role, context, and memory, adjusting turn constraints between turns preserves the preceding `stablePrefix` for models with prefix caching.
+Turn constraints render as a `# Current task scope` block through `turnScopeGuidance` ([turn-constraints.ts](../../src/core/turn-constraints.ts)). The block rides in the `<system-reminder>` of the turn's user message, is repeated on continuations, and never enters the compiled system prompt, so adjusting constraints between turns leaves the prompt and its cache prefix untouched. Admission still enforces the constraints whether or not the model reads the block.
 
 ### Operator tool allowlists in interactive sessions
 

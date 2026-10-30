@@ -40,9 +40,9 @@ Resolution takes the first applicable layer, most authoritative first:
 1. **Requested window**: a runtime that asks for a window on every request (Ollama `num_ctx`) uses it, still capped by a smaller `targets[].capabilities.contextWindow` override or probed window.
 2. **Loaded window**: the context a backend reports having the model open at, unless the target override is smaller. A larger override never enlarges it.
 3. **Target override**: `targets[].capabilities.contextWindow` in `settings.yaml`, capped by a smaller probed window.
-4. **Live probe**: the window the target reported through its model listing or props endpoints, capped for cold-start runtimes by the runtime's cold cap. A hosted route whose runtime reports windows keeps its last reported window through a failed or windowless re-probe, so a network blip does not turn it `unknown` and switch threshold compaction off. A local server can restart at another window, so it still goes unknown.
+4. **Live probe**: the window the target reported through its model listing or props endpoints, capped for cold-start runtimes by the runtime's cold cap. A hosted route whose runtime reports windows keeps its last reported window through a failed or windowless re-probe, so a network blip does not turn it `unknown` and drop the window-based trigger. A local server can restart at another window, so it still goes unknown.
 5. **Cloud catalog estimate**: a cloud route whose runtime has no serving-window endpoint plans against the model maximum, most live first: a maximum the server reported, a live model hint, the model profile's `modelMaxContext`, then Pi's catalog row. The source is `catalog`, an estimate and never a server report. A route with a window endpoint, and every local route, skips this layer.
-6. **Unknown**: otherwise the window is `unknown` and the effective window is 0. Threshold compaction stays off until a limit is known, and a server overflow triggers one compact-and-retry.
+6. **Unknown**: otherwise the window is `unknown` and the effective window is 0. The window-based threshold has nothing to measure, so automatic compaction fires when the request reaches the `context.compaction.maxTokens` ceiling instead (see [Threshold and ceiling compaction](#threshold-and-ceiling-compaction)). A server overflow triggers one compact-and-retry.
 
 `clio-coder run --max-context-tokens` lowers the result for one run, or supplies it when the window is unknown, and marks the source `target-override`. An unknown window produces a `context-window-unverified` diagnostic. No minimum-size warning is emitted, and `descriptor-default` survives only in older snapshots. Run `clio-coder targets --probe` to read the real value.
 
@@ -93,13 +93,15 @@ While `safety.limits.observationBytesPerTurn` keeps its default and the effectiv
 
 ---
 
-## Single-Threshold Compaction
+## Threshold and Ceiling Compaction
 
-Automatic reduction is checked before operator submission and at settled tool-batch boundaries before each continuation request. Live pressure includes the full prompt and uses `context.compaction.threshold` (default 0.8 of the context window). Working-set eviction runs first; summary handoff follows when more reduction is needed.
+Automatic reduction is checked before operator submission and at settled tool-batch boundaries before each continuation request. A fresh prompt that has no session yet has no history to shrink, so the check returns at once and request-fit admission reports the budget. Live pressure includes the full prompt. Working-set eviction runs first; summary handoff follows when more reduction is needed.
+
+Two limits decide when a reduction starts. `context.compaction.threshold` (default 0.8) is a fraction of the effective window. `context.compaction.maxTokens` (default 200,000) is an economic ceiling on request size that holds whatever the window is. A model whose input price steps up above a token count lowers the ceiling to 98% of the lowest such boundary, so a request stays under the price step; built-in boundaries cover Claude Haiku 5.5 (100,000) and the GPT-6 astra, sol and luna models (272,000) when the catalog row carries no tiers. The trigger fires at the smaller of `threshold × window` and the ceiling (`compactionBudget` in [catalog.ts](../../src/domains/providers/catalog.ts)). With an unknown window the ceiling stands in for the window. The working-set target and the rearm band scale down with the same ceiling when it is below the window. The ceiling drives reduction only and never changes request-fit admission.
 
 ```mermaid
 flowchart TD
-    A["Pressure checkpoint"] --> B{"Auto on, not paused, over threshold and outside the rearm band?"}
+    A["Pressure checkpoint"] --> B{"Auto on, not paused, over threshold or ceiling and outside the rearm band?"}
     B -- No --> C["Continue to request-fit admission"]
     B -- Yes --> D["Working-set eviction"]
     X["Request does not fit, overflow rejection, or self_compact"] --> D
@@ -110,13 +112,13 @@ flowchart TD
     F --> C
 ```
 
-Three paths reach a reduction. The threshold path needs `context.compaction.auto: true`, a known window, no failure pause, and projected tokens outside the rearm band. The forced fit path runs when estimated input plus output reservation exceeds the window, before a submit or a continuation, and it ignores `auto`, the pause and the band. Server overflow recovery and `self_compact` use the same forced fit path. With an unknown window these skip eviction and summarize directly. `/context compact` is always a direct summary. See [Context continuity](../guide/context-continuity.md#automatic-compaction-and-its-failure-pause) for the pause after 3 consecutive automatic failures and for the rule that an automatic run does not resend a summary request that would not reduce context.
+Three paths reach a reduction. The threshold path needs `context.compaction.auto: true`, no failure pause, and a request outside the rearm band that has reached the threshold or the ceiling. The forced fit path runs when estimated input plus output reservation exceeds the window, before a submit or a continuation, and it ignores `auto`, the pause and the band. Server overflow recovery and `self_compact` use the same forced fit path. With an unknown window these skip eviction and summarize directly. `/context compact` is always a direct summary. See [Context continuity](../guide/context-continuity.md#automatic-compaction-and-its-failure-pause) for the pause after 3 consecutive automatic failures and for the rule that an automatic run does not resend a summary request that would not reduce context.
 
 ### 1. Working-Set Eviction (Reversible)
 
 `structural-v2` replaces selected tool-result bodies with stable markers and removes eligible closed-step thinking. Operator messages, recent assistant steps, refused calls, unresolved failures, active mutations and profile pins stay protected. A failed command is not a refusal: a rerun or a later success evicts it. Markers name the ref, reason, tool, path, size, recall call and optional preview or offload pointer. The ledger keeps the original bytes. Eviction runs only under pressure. A per-round trigger is not used, because it saved 4.3% of message bytes and raised reprocessed cached bytes by 59% (see [Working Set](context-working-set.md#why-eviction-waits-for-pressure)).
 
-The rearm band (`context.workingSet.rearmFraction`, default 0.1) postpones another automatic eviction or summary until the projection has grown by that fraction of the window since the last event. Summaries reset the baseline; overflow fit recovery bypasses it. Selection and rearm arithmetic use projected visible-ledger tokens, while admission continues to account for the full prompt.
+The rearm band (`context.workingSet.rearmFraction`, default 0.1) postpones another automatic eviction or summary until the request has grown by that fraction of the window (of the ceiling when that is smaller) since the last event. Summaries reset the baseline; overflow fit recovery bypasses it. Eviction is priced on the live request: `tokensBefore` is the complete request estimate with the system prompt and tool schemas, `tokensAfter` subtracts only the freed bodies, and each `contextEviction` entry records `basis: request-context`. The rearm band compares the live request estimate with the last event's `tokensAfter`. An event without that basis, which older sessions hold, sets no band.
 
 ### 2. Exact Recall
 
@@ -126,9 +128,11 @@ Profiles add numeric-output or edited-component pins to structural policies. See
 
 ### 3. LLM Summary Handoff (Last Resort)
 
-When working-set eviction cannot reclaim sufficient space, or an operator runs `/context compact`, Clio Coder summarizes the older conversation using the current model or the dedicated route configured under `context.compaction.model`. The summary captures objectives, constraints, modified files, decisions, and next steps. It persists as a `compactionSummary` ledger entry carrying the trigger (`auto`, `force` or `overflow`), the figures before and after, and the first kept turn. Earlier turns leave active model context and remain in the session ledger and `/view transcript`.
+When working-set eviction cannot reclaim sufficient space, or an operator runs `/context compact`, Clio Coder summarizes the older conversation using the current model or the dedicated route configured under `context.compaction.model`. The summary captures objectives, constraints, modified files, decisions, and next steps. When the cut falls inside a turn, the summarizer request carries that turn's operator message in an `<active-request>` block, and the summary's Goal section must state it even when the earlier conversation has a different goal. It persists as a `compactionSummary` ledger entry carrying the trigger (`auto`, `force` or `overflow`), the figures before and after, and the first kept turn. Earlier turns leave active model context and remain in the session ledger and `/view transcript`.
 
-The summarizer is configured by `context.compaction.model` (a unique `target/model` reference, blank for the chat route) and `context.compaction.systemPrompt` (a file replacing the built-in instructions). It runs with thinking off, its output is capped at 8,192 tokens, and a checkpoint that would not shrink the context is discarded while its usage stays recorded. `/compact` instructions, operator notes, the failure pause, the notices and the route-source line that survives a summary are specified in [Context continuity and recovery](../guide/context-continuity.md).
+The summarizer is configured by `context.compaction.model` (a unique `target/model` reference, blank for the chat route) and `context.compaction.systemPrompt` (a file replacing the built-in instructions). It runs with thinking off. A route that reports no output limit gets no explicit cap. Otherwise the cap is sized from the model's output limit and the share of recent summary output that route spent on reasoning: a non-reasoning model gets room for about 13,000 summary tokens, a reasoning model with no observed share gets its whole output limit, and an observed share widens the room to cover the reasoning, never beyond the limit. A checkpoint that would not shrink the context is discarded while its usage stays recorded. `/compact` instructions, operator notes, the failure pause, the notices and the route-source line that survives a summary are specified in [Context continuity and recovery](../guide/context-continuity.md).
+
+With `context.compaction.provider: native` and the `openai-codex` runtime, the summary step asks the Codex backend for an opaque checkpoint instead of writing a portable summary. The checkpoint is stored as a private file at `<stateDir>/provider-checkpoints/<digest>.json`, and the session ledger holds only its handle. Clio replays the checkpoint only while the provider, model and Codex account still match. When the setting is turned off, a checkpoint no longer matches or the native call fails, it falls back to a portable summary and emits a `Native compaction used Clio's portable path` notice. Unreferenced checkpoint files are pruned after an hour. The default is `off`.
 
 Separately, the assistant can request reduction with `self_compact` and an exact `note_to_self`. Clio preserves that note as assistant-authored recall and records the handoff's prepare, reduction, and delivery phases. See [context continuity and recovery](../guide/context-continuity.md) for its limits and recovery commands.
 
@@ -153,7 +157,7 @@ Prompt sections have different update boundaries:
 | **System identity, operating contract and safety** | Low | Prefix | Recompiled when effective settings or prompt inputs change. |
 | **Tool and gateway schemas** | Infrequent | Request tool list | Changes with the admitted tool surface. |
 | **Project handbook and bounded orientation** | Low | After the tool contract | Captured for the session and workspace; context-source invalidation or configuration hot reload recaptures it. The full codemap is retrieved separately. |
-| **Durable memories and lessons, then the Runtime block** | Medium | After the project handbook | Memory is selected and frozen at turn boundaries. The Runtime block carries the route-source line and is recompiled with the prompt. |
+| **Durable memories and lessons, then the Runtime block** | Medium | After the project handbook | Memory is selected at each prepared turn but frozen into the compiled prompt until a completed compaction or a session switch. A later approval or revision arrives as a `# Memory update` block in the turn's reminder. The Runtime block carries the route-source line, frozen per route identity. |
 | **Session working set and turns** | High | Suffix | Changes with new turns, eviction, recall, and compaction. |
 
 Section order and fragments are specified in [Prompt compilation](prompt-compilation.md).
@@ -166,12 +170,14 @@ Section order and fragments are specified in [Prompt compilation](prompt-compila
 
 ## Configuration Settings
 
-Settings configured under `context.*` in `settings.yaml`. All of them take effect on the next turn.
+Settings configured under `context.*` in `settings.yaml`. `context.compaction.maxTokens` and `context.compaction.provider` apply live, and the rest take effect on the next turn.
 
 | Setting | Default | Purpose |
 | :--- | :--- | :--- |
 | `context.compaction.auto` | `true` | Enable automatic reduction when the threshold is crossed. Forced fit reductions ignore it. |
-| `context.compaction.threshold` | `0.8` | Context occupancy ratio from 0 to 1 that triggers compaction. 0 never triggers. |
+| `context.compaction.threshold` | `0.8` | Context occupancy ratio from 0 to 1 that triggers compaction. 0 never triggers on a known window. |
+| `context.compaction.maxTokens` | `200000` | Input token ceiling that triggers compaction whatever the window is, and the stand-in window when it is unknown. A price-tier boundary below it lowers it. |
+| `context.compaction.provider` | `off` | `native` uses Codex checkpoints on the `openai-codex` runtime. `off` keeps portable Clio summaries. |
 | `context.compaction.model` | unset | Optional `target/model` reference used for summary handoffs. Blank uses the chat model. |
 | `context.compaction.systemPrompt` | unset | Optional path to a UTF-8 file of at most 64 KiB that replaces the summarizer's built-in system prompt. Relative paths resolve against the session workspace. |
 | `context.toolResultMaxBytes` | `65536` | Maximum bytes of one tool result kept in context before it is offloaded to scratch. Minimum 4096. |

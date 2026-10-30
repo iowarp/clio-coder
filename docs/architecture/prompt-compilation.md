@@ -1,6 +1,6 @@
 # Prompt Compilation
 
-Clio Coder compiles every system prompt from typed inputs and disk fragments. The pure compiler is [compiler.ts](../../src/domains/prompts/compiler.ts). The prompts domain in [extension.ts](../../src/domains/prompts/extension.ts) owns the per-session source snapshots and the dynamic sections that surround the compiled fragments. The fragment files live under `src/domains/prompts/fragments/`. No natural-language parser decides what renders: every condition is a typed input, a registered tool name or a host-supplied turn constraint.
+Clio Coder compiles every system prompt from typed inputs and disk fragments. The pure compiler is [compiler.ts](../../src/domains/prompts/compiler.ts). The prompts domain in [extension.ts](../../src/domains/prompts/extension.ts) owns the per-session source snapshots and the dynamic sections that surround the compiled fragments. The fragment files live under `src/domains/prompts/fragments/`. No natural-language parser decides what renders: every condition is a typed input, a registered tool name or a session-standing tool limit.
 
 This page owns which fragments each prompt carries and how they are selected. The cache identity, section order and tool delivery around the compiled text are in [Prompt Envelope and Tools](prompt-envelope-and-tools.md).
 
@@ -33,7 +33,7 @@ Fragments are Markdown files under `src/domains/prompts/fragments/`, loaded by `
 
 ## Fragment inventory by tier
 
-There are 24 fragments. Sections that are not fragments (`tool-contract`, `retrieval-hints`, `runtime`, `project-context`, `memory`, `turn-scope`, and the one-line header of the safety section) are rendered inline from typed inputs.
+There are 27 fragments. Sections that are not fragments (`tool-contract`, `retrieval-hints`, `runtime`, `project-context`, `memory`, and the one-line header of the safety section) are rendered inline from typed inputs. The current task scope is not a compiled section at all; it rides in the turn's reminder, as described under [Task scope](#task-scope).
 
 | Fragment | Attended main | Headless main | Worker | Renders when |
 | --- | --- | --- | --- | --- |
@@ -50,14 +50,15 @@ There are 24 fragments. Sections that are not fragments (`tool-contract`, `retri
 | `operating.contract-headless` | no | yes | no | Headless main only. |
 | `operating.user-control` | yes | no | no | Attended. |
 | `operating.steering` | yes | only with a steer channel | yes | `liveSteering` is not `false`. |
-| `operating.coordinator` | yes | yes | no | The provider does not lack tool support, `dispatch` is on the attached surface and admitted by the turn constraints, and the turn mode is not `answer`. |
+| `operating.coordinator` | yes | yes | no | The provider does not lack tool support, `dispatch` is on the attached surface and admitted by the session's standing tool limits, and a standing mode is not `answer`. |
 | `operating.fleet` | yes | yes | no | The coordinator fragment rendered and the session has SSH nodes in `fleet.nodes`. |
 | `operating.discovered-skills` | yes | yes | no | Skills are usable: `context` is reachable, skill discovery is on, the turn does not disable skills, the mode is not `answer`, and the ready-skill count is not zero. |
 | `operating.skill-installs` | yes | no | no | Attended and `operating.discovered-skills` rendered. |
 | `operating.worker` | no | no | yes | Always. |
 | `dispatch.read-only` | no | no | yes | The dispatch is read-only. |
 | `safety.default`, `safety.yolo`, `safety.yolo-worker` | by autonomy | by autonomy | `safety.default` or `safety.yolo-worker` | The main prompt selects `safety.<level>` from the effective autonomy. A worker reads `safety.yolo-worker` when its permit inherited the operator's yolo, else `safety.default`. |
-| `wiki.page`, `wiki.plan` | no | no | no | Never part of a system prompt. See [Wiki generation fragments](#wiki-generation-fragments). |
+| `model.anthropic-5-5` | yes, in the runtime section | yes, in the runtime section | no | The provider supports tools and the wire model id names a Claude 5.5 model (`modelGuidanceFragmentId` in `src/domains/prompts/model-guidance.ts`). |
+| `wiki.page`, `wiki.plan`, `wiki.repair` | no | no | no | Never part of a system prompt. See [Wiki generation fragments](#wiki-generation-fragments). |
 
 For a given autonomy level the safety body is shared by all three tiers; only the lines above it differ.
 
@@ -95,7 +96,7 @@ These fragments are not attended-only. Their tiers are in the inventory above.
 - `dispatch.read-only` restricts a run to inspection inside the workspace.
 - `safety.default` and `safety.yolo` describe what runs, what is approval-required and what is blocked, in the safety net's action-class vocabulary. `safety.default` describes containment, workspace snapshots and the safety judge; `safety.yolo` says the operator is away by contract, names the floor, and tells the model to take reasonable defaults and state its assumptions. `safety.yolo-worker` is the worker form of the yolo statement. They are the model-facing mirror of the enforced admission and grant nothing themselves.
 
-The safety section opens with `Autonomy: <level>.` and a one-line directive, then one approval sentence, then the fragment body. The attended approval sentence says that approval-required calls pause for one operator confirmation. At `yolo` nothing parks, so the section carries no approval sentence. A worker has no autonomy level, so its section opens with a line naming its permit and ends the line with its `onPermission` routing:
+The safety section opens with `Autonomy: <level>.` and a one-line directive, then one approval sentence, then the fragment body. The attended approval sentence says that approval-required calls pause for one operator confirmation. At `yolo` nothing parks, so the section carries no approval sentence. A worker has no autonomy level, so its section opens with a line naming its permit and, unless the permit inherited yolo, ends the line with its `onPermission` routing:
 
 | `onPermission` | Sentence in the worker prompt |
 | --- | --- |
@@ -127,11 +128,12 @@ Other differences from the attended tier:
 2. The operating-contract section: `operating.contract`, `operating.worker`, then a fixed sentence forbidding claims of completions, validations or file changes that no tool call in the run supports.
 3. `operating.steering`, unless `liveSteering === false`.
 4. The tool contract, rendered inline from the final admitted tool names plus one registry-owned hint per admitted tool.
-5. The safety section: a line naming the run's permit, the `onPermission` sentence, then the `safety.default` body.
+5. The safety section: a line naming the run's permit, the `onPermission` sentence, then the `safety.default` body. When the worker's permit inherited the operator's yolo, the section carries the permit line and the `safety.yolo-worker` body, and no `onPermission` sentence.
 6. `dispatch.read-only`, when the dispatch is read-only.
 7. The persona: the recipe body or a bounded request override, with bound-skill mechanics. The manifest records it as `persona.<recipe id>`.
 8. Additional fragments: project rules scoped to the run's working-context paths, then the operator profile.
-9. The current task scope, when turn constraints exist.
+
+The turn's scope reaches a worker as a separate `dispatch-turn-scope` task message, so the compiled worker prompt does not vary with it.
 
 `compileWorker` throws when the persona is dynamic or empty, when `hasCanonicalContext` disagrees with the final attached tool surface, or when bound skills are requested without canonical `context`.
 
@@ -168,37 +170,48 @@ The compiler fills these tokens by plain string replacement, one occurrence per 
 | `{SETTINGS_CHANGE_POLICY}` | `identity.settings-routing` | The `configure_clio` preview and apply instruction where that capability is registered and autonomy is `default` or `yolo`, otherwise a sentence handing the change to `/settings` or `clio-coder configure` |
 | `{SKILL_ACTIVATION_POLICY}` | `operating.discovered-skills` | Instructions to load a matching ready skill through the gateway, or to suggest `/skill <name>` when the model may not activate skills |
 
-`wiki.page` and `wiki.plan` use a different placeholder family, double-brace tokens such as `{{pagePath}}`. They are filled by the wiki generator, not the compiler.
+`wiki.page`, `wiki.plan` and `wiki.repair` use a different placeholder family, double-brace tokens such as `{{pagePath}}`. They are filled by the wiki generator, not the compiler.
 
 ## Wiki generation fragments
 
-`wiki.page` and `wiki.plan` load through the same fragment loader and carry the same id, version and content-hash contract. `src/domains/context/wiki/prompts.ts` reads them by id on every call, replaces each `{{token}}` with a per-dispatch value (a page's path, relative path and title; the plan file's path), and sends the result as a wiki-generation dispatch's `task`. They never become a compiled system prompt. The loader hands back the raw body, so the one caller that needs live values fills them in. Both bodies begin and end with a standalone `---` line that is ordinary body text.
+`wiki.page`, `wiki.plan` and `wiki.repair` load through the same fragment loader and carry the same id, version and content-hash contract. `src/domains/context/wiki/prompts.ts` reads them by id on every call, replaces each `{{token}}` with a per-dispatch value (a page's path, relative path and title; the plan file's path), and sends the result as a wiki-generation dispatch's `task`. `wiki.repair` assigns bounded edits to an existing draft after a publication validation failure. They never become a compiled system prompt. The loader hands back the raw body, so the one caller that needs live values fills them in. The `wiki.page` and `wiki.plan` bodies begin and end with a standalone `---` line that is ordinary body text.
 
 ## Dynamic sections
 
-The compiled prompt has fixed sections in this order: identity, operating-contract, delegation, skills, safety, tool-contract, retrieval-hints, harness-awareness, project-context, memory, runtime. Additional fragments follow, then the current task scope. Each section belongs to a cache layer in `PROMPT_SECTION_LAYER`:
+The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_ORDER`): identity, operating-contract, delegation, skills, safety, tool-contract, harness-awareness, retrieval-hints, project-context, memory, runtime. Additional fragments follow, then a context-operation update that summarizes the operator's recent context operations (initialize, refresh, reset and the like) in this session. The compiler records `pinnedPrefix` (a character count and SHA-256) at the end of harness-awareness, so a provider that splits its system prompt for caching can place a breakpoint where the install-wide bytes end. Each section belongs to a cache layer in `PROMPT_SECTION_LAYER`:
 
 - Pinned: fixed by the install, the autonomy level and the admitted tool surface. Every session on the install shares these bytes. Covers identity through harness-awareness.
 - Session: captured once per session and stable across its turns. Covers project context, runtime and the dynamic fragments below that are marked session.
-- Turn: may change between turns. Covers memory, path-scoped project rules and the task scope. An id missing from the table counts as turn.
+- Turn: may change between turns. Covers retrieval hints, memory and path-scoped project rules. An id missing from the table counts as turn.
 
 | Section or fragment id | Content | Layer | Source and caching |
 | --- | --- | --- | --- |
 | `project-context` | The project handbook text under a `# Project` heading. | session | Captured in the session source snapshot and sized by `selectProjectPreload`. |
-| `memory` | The task-scored memory section. | turn | Computed each turn and part of the cache identity. |
-| `runtime` | Provider, model, the `Routes:` line, the context window, thinking guidance. | session | Recomputed on every compile. |
-| `context.workspace-root` | Absolute workspace root, local OS account, hostname, and session-start facts. | session | Snapshot. |
+| `memory` | The task-scored memory section. | turn | Selected at each prepared turn but frozen into the compiled prompt until a completed compaction, a session switch or a recompile that another input forces. Later changes arrive as a `# Memory update` block in the turn's reminder. See [Memory in the prompt](#memory-in-the-prompt). |
+| `runtime` | Provider, model, the `Routes:` line, the context window, thinking guidance, and the `model.anthropic-5-5` notes for a Claude 5.5 model. | session | Rendered on every compile. The `Routes:` line is frozen per route identity. |
+| `context.workspace-root` | Absolute workspace root, local OS account, hostname, and session-start facts. | session | Snapshot. The workspace facts stay pinned for the session while the process lives, even when another source is recaptured. They include the session-start facts: git branch and tree state, the last commit, the last recorded session in this workspace, and the declared rigor. |
 | `context.fleet` | Observed SSH node readiness and capacity. | turn | Rendered only when `fleet.nodes` is non-empty and `dispatch` is attached. It is absent from the layer table, so it counts as turn, and its hash is part of `inputEpoch()`. |
 | `context.clio-repo-awareness` | The note that the workspace is Clio Coder's own source tree. | session | Snapshot. |
 | `context.self-development-skills` | The skill-loading note above. | session | Built per compile from session inputs. |
 | `context.catalogs` | Installed skills, agents and playbooks by name and a short purpose, plus user-scope MCP server ids. Each list is capped at 60 entries. | session | Snapshot. Grants nothing. |
 | `context.project-rules` | Unconditional `.clio-coder/rules` plus path-scoped rules matching the working context. | turn | Rules load into the snapshot. Selection re-runs against the working-context paths. |
 | `context.operator-profile` | The capped operator profile. | session | Snapshot. |
-| `turn-scope` | Turn mode, delegation, skills and allowed-tool constraints from the host. | turn | Built from the turn constraints. |
 
 ### Route provenance
 
-The runtime block carries one line, `Routes: chat <source>, memory <source>, compaction <source>, fleet <source>.`, built by `formatRouteSources` in `src/core/route-provenance.ts`. A source is `session`, `project`, `user` or `built-in`, and `=chat` marks a route that is unset and follows the chat route. A session source means an override that lives in process memory, including a CLI flag. The orchestrator recomputes the sources from live settings state on every compile, so a compaction summary that drops a session route cannot decide what Clio says about it. Only attended sessions pass route sources, and they are part of the session inputs that the cache identity hashes, so a changed source recompiles the prompt.
+The runtime block carries one line, `Routes: chat <source>, memory <source>, compaction <source>, fleet <source>.`, built by `formatRouteSources` in `src/core/route-provenance.ts`. A source is `session`, `project`, `user` or `built-in`, and `=chat` marks a route that is unset and follows the chat route. A session source means an override that lives in process memory, including a CLI flag. The orchestrator reads the sources from live settings state, so a compaction summary that drops a session route cannot decide what Clio says about it. It freezes them per route identity (target, runtime and wire model), so a thinking-only override does not rewrite the line, and it reads them again after a completed compaction or a session switch. Only attended sessions pass route sources, and they are part of the session inputs that the cache identity hashes, so a changed source recompiles the prompt.
+
+### Task scope
+
+The turn's scope (mode, delegation, skills, read-only, allowed tools and delegated tools) renders as a `# Current task scope` block from `turnScopeGuidance` in `src/core/turn-constraints.ts`. It is not part of the compiled system prompt. A main turn carries it in the `<system-reminder>` of that turn's user message, kept verbatim in history and repeated on continuations. A dispatched worker receives it as a task message. Only the session's standing tool limits, such as an operator flag or an ACP ceiling, enter compilation, so a scope change between turns does not recompile the prompt. Admission still enforces the scope.
+
+### Memory in the prompt
+
+The compiled `# Memory` section stays in the prompt until a completed compaction, a session switch or a recompile forced by another input. A record approved or revised later reaches the model in the next turn's reminder as a `# Memory update` block, and a record rejected or deleted since arrives as a withdrawn line. A record that only dropped out of the ranking is not withdrawn. See [Evidence and Memory](evidence-and-memory.md).
+
+### Mid-session autonomy changes
+
+A change of autonomy level during a session does not recompile the prompt. The host appends a durable policy message, built by `renderSessionPostureUpdate`, that supersedes the compiled safety posture and the posture-dependent turn-ending and settings-change guidance. The session ledger records it as a `clio_coder_posture_update` entry under the generation recorded by `clio_coder_posture_generation` (`src/session-control/posture-policy.ts`).
 
 ### Project context
 
@@ -212,8 +225,8 @@ Operator notes are not part of the compiled system prompt. They live in the comp
 
 - Every compile returns `systemPrompt`, its SHA-256 `systemPromptHash`, a token estimate, a per-section token breakdown, and a `fragmentManifest` of `{id, relPath, contentHash, dynamic}` for each fragment that rendered. Inline dynamic fragments use `relPath` values under `inline/` and `dynamic: true`.
 - `stablePrefix` is the byte count and SHA-256 of the trimmed identity section and operating-contract section plus their separators. Workers expose the same measurement over their own identity and contract.
-- The chat reuses the compiled prompt byte-for-byte while `mainPromptCacheIdentity` is unchanged. That identity is version 2 and hashes the target, runtime and wire model ids, autonomy, session id, working directory, sorted working-context paths, the context-window source, `inputEpoch()`, the full session inputs (which include route sources, turn constraints, ready-skill count, memory section, `headless` and `liveSteering`), and the exact attached tool-schema bytes.
+- The chat reuses the compiled prompt byte-for-byte while `mainPromptCacheIdentity` is unchanged. That identity is version 2 and hashes the target, runtime and wire model ids, autonomy, session id, working directory, sorted working-context paths, the context-window source, `inputEpoch()`, the full session inputs (which include route sources, the session's standing tool limits, ready-skill count, the frozen memory section, `headless` and `liveSteering`), and the exact attached tool-schema bytes.
 - `inputEpoch()` joins the fragment epoch, the agent-catalog revision, the session-source epoch and the hash of the fleet inventory.
-- The session source snapshot freezes project context, rules, the operator profile, the workspace facts, repo awareness and catalogs. A context operation in the workspace or an ancestor, and a config hot-reload, invalidate it. A new session captures its own. The first prompt of a fresh session compiles before the session exists, under an empty id; that capture is parked and adopted by the session created after it, so turns one and two stay byte-identical.
+- The session source snapshot freezes project context, rules, the operator profile, the workspace facts, repo awareness and catalogs. A context operation in the workspace or an ancestor, and a config hot-reload, invalidate it, and the next compile captures them again. The workspace root, its git facts and the capture time are carried over from the invalidated snapshot, so git state that changed mid-session does not rewrite the prompt. A new session captures its own. The first prompt of a fresh session compiles before the session exists, under an empty id; that capture is parked and adopted by the session created after it, so turns one and two stay byte-identical.
 - A recompile that changes the text appends a `promptRecompiled` ledger entry (previous hash, new hash, token estimate) and a `prompt-manifest.jsonl` record with the section and fragment breakdown.
 - Workers have no snapshot. `compileWorkerPrompt` loads rules and the operator profile for the run's working-context paths on each compile and returns `rulesApplied` and `operatorProfileApplied` for receipt provenance.

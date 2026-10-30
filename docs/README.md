@@ -70,7 +70,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Settings keys with defaults, the version 1 to 2 key map, retired keys, project files, local stdio MCP trust, and CLI flag and tool argument contracts | [Configuration Reference](guide/configuration-reference.md) |
 | Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](architecture/model-catalog.md) |
 | Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](architecture/alcf-provider.md) |
-| Context windows, token accounting, single-threshold compaction, prefix caching, project handbooks, and the codemap | [Context Engine](architecture/context-engine.md) |
+| Context windows, token accounting, compaction against a window threshold and a token ceiling, prefix caching, project handbooks, and the codemap | [Context Engine](architecture/context-engine.md) |
 | Codemap, bounded orientation, current project evidence, and artifact compatibility | [Project Context](architecture/project-context.md) |
 | Choose compaction and recover interrupted handoffs | [Context Continuity](guide/context-continuity.md) |
 | Index code, scientific artifacts, memory, evidence, and recorded work by meaning | [Semantic Context Beta](guide/semantic-context.md) |
@@ -180,26 +180,26 @@ otherwise the nearest directory holding a `package.json` above the running code
 ### What clio_docs indexes
 
 `clio_docs` ([docs-engine.ts](../src/tools/context/docs-engine.ts))
-walks `<package root>/docs` for every `.md` file in name order and skips only
-`docs/html`. It then adds the package root's `README.md`, `CHANGELOG.md` and
-`CLIO-CODER.md`, each only when it exists. In an installed package that is this
-map, `docs/guide/**`, `docs/architecture/**`, `README.md` and `CHANGELOG.md`,
-because `package.json` ships `docs/**/*.md` and leaves out `docs/wiki/**`.
-`CLIO-CODER.md` is a source-checkout handbook and is not shipped. A source
-checkout therefore also indexes the generated `docs/wiki/**` pages: the engine
-has no wiki exclusion, and `scripts/check-hygiene.ts` requires every Markdown
-file under `docs/` except `docs/html` to appear in the listing. A search returns
-sections, one per heading, ranked by BM25 over headings and bodies with Clio Coder
-vocabulary aliases and phrase boosts. The index is deterministic and needs no
-network or embedding service.
+walks `<package root>/docs` for every `.md` file in name order and skips
+`docs/html` and `docs/wiki`. It then adds the package root's `README.md`,
+`CHANGELOG.md` and `CLIO-CODER.md`, each only when it exists. In an installed
+package that is this map, `docs/guide/**`, `docs/architecture/**`, `README.md`
+and `CHANGELOG.md`. `CLIO-CODER.md` is a source-checkout handbook and is not
+shipped. The generated `docs/wiki/**` pages stay out of the index in a source
+checkout too, and `package.json` leaves them out of the npm package.
+`scripts/check-hygiene.ts` requires every other Markdown file under `docs/` to
+appear in the listing. A search returns sections, one per heading, ranked by
+BM25 over headings and bodies with Clio Coder vocabulary aliases and phrase
+boosts. The index is deterministic and needs no network or embedding service.
 
 ### What docs/corpus.json controls
 
 `docs/corpus.json` declares the product corpus: roots relative
 to `docs/` (this map, `architecture/`, `guide/`), the package-root files that
-also count, and the trees left out (`html/**` by retrieval, `wiki/**` by
-packaging). It ships in the package and the installed-package smoke test checks
-that it exists. No retrieval, build or website code reads it. Adding or removing
+also count, and the trees left out (`html/**` and `wiki/**`, both skipped by
+retrieval, with `wiki/**` also omitted from the package). It ships in the
+package and the installed-package smoke test checks that it exists. No
+retrieval, build or website code reads it. Adding or removing
 a page changes the corpus through the Markdown file alone, and editing
 `corpus.json` does not change what `clio_docs` returns.
 
@@ -260,5 +260,6 @@ Use the [contributor guidance](../CONTRIBUTING.md) when updating these pages. In
 - Link to the detailed contract instead of duplicating a large schema in
   several places.
 - Link every new page from this map. `clio_docs` indexes any Markdown file under
-  `docs/` without registration, and `scripts/check-hygiene.ts` checks relative
-  links, heading anchors, cited source paths and the corpus listing.
+  `docs/` outside `docs/html` and `docs/wiki` without registration, and
+  `scripts/check-hygiene.ts` checks relative links, heading anchors, cited
+  source paths and the corpus listing.
