@@ -1019,7 +1019,7 @@ panes(action="close", target="all")
 
 ## evidence: inspect canonical evidence and trust status
 
-Reads evidence bundles as JSON. Source: [evidence.ts](../../src/tools/evidence.ts). Read class; sequential, because `run` mode may materialize a bundle under Clio Coder's data directory. It shares the inventory and trust projections behind `clio-coder evidence inventory` and `clio-coder evidence inspect`, so the model and the operator read the same record.
+Reads evidence bundles as JSON. Source: [evidence.ts](../../src/tools/evidence.ts). Read class; sequential, because `run` mode may materialize a bundle under Clio Coder's data directory. It shares the trust projection behind `clio-coder evidence inspect`, so the model and the operator read the same record.
 
 Arguments:
 

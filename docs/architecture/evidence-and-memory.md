@@ -15,7 +15,6 @@ clio-coder evidence build --run <runId>
 clio-coder evidence build --session <sessionId>
 clio-coder evidence inspect <evidenceId> [--json]
 clio-coder evidence list
-clio-coder evidence inventory --json
 ```
 
 | Command | Behavior |
@@ -24,9 +23,8 @@ clio-coder evidence inventory --json
 | `inspect <evidenceId>` | Prints the evidence ID, source, generation time, run, receipt and tool-call totals, tags, finding count, one `trust <runId>:` summary and axis line per run, a `provenance <runId>:` block per run whose seal verified, and the file list. |
 | `inspect <evidenceId> --json` | Prints a bounded record of at most 16 runs: each run's verdict tier and canonical axis states, with no task text, paths or finding prose. A bundle without `trust-status.json` reports `canonical: false`. |
 | `list` | Prints `N evidence artifacts`, then one row per bundle: ID, source, run count and tags. Incomplete directories are skipped. |
-| `inventory --json` | Prints the newest 12 bundles as a fixed projection (tags, totals, redaction count, the worst run verdict, up to 8 run IDs) with no task text and no working directories. It accepts no other argument. |
 
-`inspect` and `inventory` are the two fixed reads the [graphical application](../guide/gui.md) invokes. Exit codes are 0 on success, 1 for a runtime failure, and 2 for a usage error or an invalid ID (usage text goes to stderr). `clio-coder evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it exits with code 1 and prints the error and remedy on separate lines:
+Exit codes are 0 on success, 1 for a runtime failure, and 2 for a usage error or an invalid ID (usage text goes to stderr). `clio-coder evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it exits with code 1 and prints the error and remedy on separate lines:
 
 ```text
 error: evidence artifact not found: <id>

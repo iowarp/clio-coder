@@ -85,7 +85,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder dev components [list] [--json]` | List behavior-affecting harness components. |
 | `clio-coder dev components snapshot --out <path>` | Write a component snapshot JSON file. |
 | `clio-coder dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
-| `clio-coder evidence build\|inspect\|list\|inventory` | Build (`build --run <runId>` or `--session <sessionId>`) and inspect deterministic evidence artifacts. `inventory --json` is the fixed GUI read. |
+| `clio-coder evidence build\|inspect\|list` | Build (`build --run <runId>` or `--session <sessionId>`) and inspect deterministic evidence artifacts. |
 | `clio-coder memory list\|propose\|promote\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. `propose --from-evidence <evidenceId>`, `promote --from-handoff <path> --scope <scope>` (with `--entry <id>` to pick entries), `approve <memoryId>`, `reject <memoryId>` and `prune --stale`. Scopes are `repo` (`--repository <canonical-absolute-path>`), `global` (`--acknowledge-global`), `runtime` (`--runtime <source-runtime-id>`) and `agent` (`--agent <source-agent-id>`). Promotion always needs an explicit scope and creates unapproved records for review. |
 | `clio-coder interop inspect [--json]` | Show the host inventory of detected coding agents and how far each one is wired. Changes no host or project files and starts no agent session. |
 | `clio-coder interop adopt <host> [--kind skill\|agent\|prompt\|plugin] [--project\|--user] [--yes] [--dry-run]` | Review and adopt safe resources from a detected host. Wiring a host as a delegation peer is `clio-coder configure --interop`. |
