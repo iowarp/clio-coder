@@ -1741,6 +1741,8 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		toolStats: readToolStats(value, source, "toolStats"),
 		sessionId: readNullableString(value, source, "sessionId"),
 		integrity: {
+			// The ledger commitment stays as written; the verifier checks its shape (#434).
+			...(integrity as unknown as RunReceiptIntegrity),
 			version: readNumber(integrity, `${source}.integrity`, "version") as RunReceiptIntegrity["version"],
 			algorithm: readString(integrity, `${source}.integrity`, "algorithm") as "sha256",
 			digest: readString(integrity, `${source}.integrity`, "digest"),

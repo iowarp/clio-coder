@@ -303,14 +303,21 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			equal(journal.damaged, 0);
 			deepStrictEqual(
 				journal.records.map(({ record }) => record.k),
-				["call.started", "call.settled"],
+				["call.started", "call.settled", "run.settled"],
 			);
+			const settled = journal.records[2]?.record;
+			ok(settled?.k === "run.settled");
+			equal(settled.data.terminalReason, receipt.terminalReason);
+			deepStrictEqual(settled.data.callIds, receipt.callIds);
+			deepStrictEqual(receipt.callIds, [journal.records[0]?.record.ctx.callId]);
 			ok(
-				journal.records.every(
-					({ record, origin }) =>
-						record.ctx.sessionId === (placed ? null : "original-session") &&
-						origin.host === (placed ? "remote-worker" : "local-worker"),
-				),
+				journal.records
+					.slice(0, 2)
+					.every(
+						({ record, origin }) =>
+							record.ctx.sessionId === (placed ? null : "original-session") &&
+							origin.host === (placed ? "remote-worker" : "local-worker"),
+					),
 			);
 			deepStrictEqual(readRunEventJournal(handle.runId).lines, [], "disabled display history never suppresses call facts");
 			const session = await readCallJournal(join(clioStateDir(), "sessions", "original-cwd", "original-session"));

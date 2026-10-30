@@ -355,10 +355,11 @@ export interface DispatchSnapshot {
  * An operator cancel that arrives from another process (`fleet cancel`) passes
  * the operator cause so the receipt names where the cancel came from.
  * Admission passes the capacity cause when a renewal finds the run's lease gone
- * from the shared store.
+ * from the shared store. A canceled dispatching tool call passes the parent
+ * cause, because no operator command reached this run directly (#425).
  */
 export interface AbortReason {
-	cause: "timeout" | "operator" | "budget" | "capacity";
+	cause: "timeout" | "operator" | "budget" | "capacity" | "parent";
 	detail: string;
 }
 

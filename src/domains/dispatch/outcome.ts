@@ -8,7 +8,9 @@
  * records all derive from the resolved outcome.
  */
 
+import type { RunBoundKind, RunTerminalReason } from "../../core/telemetry/enums.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
+import type { AbortReason } from "./contract.js";
 import type { RunOutcome, RunOutcomeCode, RunStatus } from "./types.js";
 
 export interface RunTerminationEvidence {
@@ -34,6 +36,10 @@ export interface RunTerminationEvidence {
 	qualityGateFailure?: boolean;
 	/** ACP stopReason when the peer reported one. */
 	stopReason: string | null;
+	/** Cause recorded by `abort(runId, reason)`; absent for an operator cancel (#425). */
+	abortCause?: AbortReason["cause"] | null;
+	/** Control operation whose write could not reach the worker (#425). */
+	channelFailure?: string | null;
 }
 
 export interface ResolvedOutcome {
@@ -106,4 +112,74 @@ export function runStatusForOutcome(outcome: RunOutcome): RunStatus {
  */
 export function resultContractWasDue(outcome: RunOutcome, outcomeCode: RunOutcomeCode | null): boolean {
 	return outcome === "succeeded" || outcomeCode === "result_contract_exhausted";
+}
+
+export interface ResolvedTerminalReason {
+	terminalReason: RunTerminalReason;
+	boundKind?: RunBoundKind;
+}
+
+const BOUND_OUTCOME_CODES: Partial<Record<RunOutcomeCode, RunBoundKind>> = {
+	worker_tool_call_cap_exhausted: "tools",
+	loop_guard_tools_disabled_exhausted: "tools",
+	worker_context_exhausted: "tokens",
+	worker_output_cap_exhausted: "tokens",
+	worker_turn_timeout: "time",
+};
+
+/**
+ * How the worker loop ended, in the closed `run.settled` vocabulary. Host
+ * verdicts applied after a normal ending (host verification, result-contract
+ * conformance, no-work and blocked-mutation checks) leave the loop
+ * `completed`; they live in outcome and outcomeCode (#425, #434).
+ */
+export function resolveRunTerminalReason(
+	evidence: RunTerminationEvidence,
+	outcomeCode: RunOutcomeCode | null,
+): ResolvedTerminalReason {
+	if (evidence.policyDenied !== null) return { terminalReason: "denied_by_policy" };
+	if (evidence.stallKilled) return { terminalReason: "stalled" };
+	if (evidence.abortedByOperator || evidence.stopReason === "cancelled") {
+		switch (evidence.abortedByOperator ? evidence.abortCause : "operator") {
+			case "timeout":
+				return { terminalReason: "bound_reached", boundKind: "time" };
+			case "budget":
+				return { terminalReason: "bound_reached", boundKind: "cost" };
+			case "capacity":
+				return { terminalReason: "preempted" };
+			case "parent":
+				return { terminalReason: "cancelled_by_parent" };
+			default:
+				return { terminalReason: "cancelled_by_operator" };
+		}
+	}
+	if (evidence.timedOut) return { terminalReason: "bound_reached", boundKind: "time" };
+	if (evidence.exitCode === null) return { terminalReason: "spawn_error" };
+	if (evidence.channelFailure) return { terminalReason: "channel_failure" };
+	const bound = outcomeCode === null ? undefined : BOUND_OUTCOME_CODES[outcomeCode];
+	if (bound !== undefined) return { terminalReason: "bound_reached", boundKind: bound };
+	if (outcomeCode === "result_contract_exhausted") return { terminalReason: "contract_exhausted_after_repair" };
+	if (outcomeCode === "worker_final_output_missing") return { terminalReason: "final_output_missing_no_repair" };
+	if (evidence.permissionFailure || evidence.exitCode !== 0) return { terminalReason: "worker_failed" };
+	return { terminalReason: "completed" };
+}
+
+/** A main-agent run has no worker loop evidence beyond its resolved outcome (#434). */
+export function terminalReasonForOutcome(outcome: RunOutcome): RunTerminalReason {
+	switch (outcome) {
+		case "succeeded":
+			return "completed";
+		case "canceled":
+			return "cancelled_by_operator";
+		case "timed_out":
+			return "bound_reached";
+		case "stalled":
+			return "stalled";
+		case "denied_by_policy":
+			return "denied_by_policy";
+		case "spawn_failed":
+			return "spawn_error";
+		case "failed":
+			return "worker_failed";
+	}
 }

@@ -68,6 +68,7 @@ import {
 	workerSandboxReceipt,
 } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
 import { isTestFilePath } from "../../core/test-paths.js";
 import { rawDurationMs } from "../../core/timers.js";
 import {
@@ -133,6 +134,7 @@ import type { AgentRecipe } from "../agents/recipe.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	mutationReportFailures,
+	RESULT_CONTRACT_REPAIR_LIMIT,
 	resultContractAuthorship,
 	validateRecipeResult,
 	validateStructuredHelperResult,
@@ -270,6 +272,7 @@ import {
 } from "./capacity-lease.js";
 import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
+	AbortReason,
 	DispatchAdmissionObserver,
 	DispatchContract,
 	DispatchDerivedGrants,
@@ -345,8 +348,10 @@ import {
 import { mergeGateVerdict, mergeWithheldDetail, removedTestCases, taskRequestsTestRemoval } from "./merge-gate.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import {
+	type ResolvedTerminalReason,
 	type RunTerminationEvidence,
 	resolveRunOutcome,
+	resolveRunTerminalReason,
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
@@ -565,6 +570,8 @@ interface ActiveRun {
 	aborted: boolean;
 	/** Non-operator abort cause (e.g. a dispatch timeout); null for operator cancels. */
 	abortDetail: string | null;
+	/** Typed cause behind `abortDetail`; null for an operator cancel (#425). */
+	abortCause: AbortReason["cause"] | null;
 	/** Set by the reconciler before terminating a dead/stalled worker. */
 	stallKilled: boolean;
 	/**
@@ -739,6 +746,33 @@ const ACP_SPEC_FINGERPRINT = "acp:unobservable";
  * that happened to have a placement object.
  */
 const LOCAL_RUN_NODE: RunNodeIdentity = { id: "local", kind: "local" };
+/** v21 receipt fields; call ids are omitted, never empty, when no call telemetry reached the host (#434). */
+function runSettlementReceiptFields(
+	terminal: ResolvedTerminalReason,
+	usage: RunCallUsage | undefined,
+): Pick<RunReceiptDraft, "terminalReason" | "callIds"> {
+	return { terminalReason: terminal.terminalReason, ...(usage ? { callIds: [...usage.callIds] } : {}) };
+}
+
+function runSettledFacts(
+	terminal: ResolvedTerminalReason,
+	receipt: RunReceipt,
+	processExitCode: number | null,
+	frameType: string | null,
+): Payload<"run.settled"> {
+	return {
+		terminalReason: terminal.terminalReason,
+		callIds: receipt.callIds ?? [],
+		processExitCode,
+		...(terminal.boundKind ? { boundKind: terminal.boundKind } : {}),
+		repairRounds:
+			terminal.terminalReason === "contract_exhausted_after_repair"
+				? { kind: "measured", value: RESULT_CONTRACT_REPAIR_LIMIT, source: "local-count" }
+				: { kind: "unknown", reason: "not-observed" },
+		frameType,
+	};
+}
+
 function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): RunReceiptDraft {
 	return { ...draft, routeDecision: decision };
 }
@@ -6301,6 +6335,7 @@ export function createDispatchBundle(
 			node: null,
 			aborted: false,
 			abortDetail: null,
+			abortCause: null,
 			stallKilled: false,
 			stallTimeoutMs: lifecycle.agentConfig.stallTimeoutMs ?? DEFAULT_ACP_STALL_TIMEOUT_MS,
 			lineage,
@@ -6582,6 +6617,7 @@ export function createDispatchBundle(
 					exitCode: result.exitCode,
 					abortedByOperator: activeRun.aborted,
 					abortDetail: activeRun.abortDetail,
+					abortCause: activeRun.abortCause,
 					stallKilled: activeRun.stallKilled,
 					timedOut: result.timedOut === true,
 					permissionFailure: false,
@@ -6663,6 +6699,8 @@ export function createDispatchBundle(
 				const failureClass = classifyFailure(evidence, classifiedResult, finalOutcome, outcomeCode);
 				const contextOverflow = isContextOverflowFailure(failureClass, classifiedResult, outcomeCode);
 				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
+				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
+				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
@@ -6697,6 +6735,7 @@ export function createDispatchBundle(
 					sealRouteDecision(receiptDraft, routeDecision),
 					ledgerPatch,
 				);
+				runJournal?.settle(runSettledFacts(terminal, receipt, result.exitCode, null));
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
@@ -8147,6 +8186,7 @@ export function createDispatchBundle(
 			node: placement?.node ?? null,
 			aborted: false,
 			abortDetail: null,
+			abortCause: null,
 			stallKilled: false,
 			stallTimeoutMs: null,
 			lineage,
@@ -8492,6 +8532,8 @@ export function createDispatchBundle(
 					exitCode: result.exitCode ?? null,
 					abortedByOperator: activeRun.aborted,
 					abortDetail: activeRun.abortDetail,
+					abortCause: activeRun.abortCause,
+					channelFailure: result.channelFailure ?? null,
 					stallKilled: activeRun.stallKilled,
 					timedOut: false,
 					permissionFailure: false,
@@ -8963,6 +9005,8 @@ export function createDispatchBundle(
 					sealedResultContractFact,
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
+				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
+				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
 				if (checkoutBefore !== null) {
 					const checkoutAfter = snapshotCheckout(lifecycle.cwd);
 					if (checkoutAfter !== null && checkoutAfter.root === checkoutBefore.root) {
@@ -9024,6 +9068,7 @@ export function createDispatchBundle(
 					sealRouteDecision(receiptDraft, routeObservation.decision),
 					ledgerPatch,
 				);
+				runJournal?.settle(runSettledFacts(terminal, receipt, result.exitCode, result.channelFailure ?? null));
 				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {
 					void appendAgentLedgerReport(agentLedgerId, agentLedgerAttribution, receipt)
 						.then((posted) => {
@@ -10897,7 +10942,10 @@ export function createDispatchBundle(
 			grantBroker.revokeRun(run.runId, "the run was canceled");
 			// A timeout kill rides the abort path but must not launder into an
 			// operator abort: record the cause so the receipt names the timeout.
-			if (reason) run.abortDetail = reason.detail;
+			if (reason) {
+				run.abortDetail = reason.detail;
+				run.abortCause = reason.cause;
+			}
 			try {
 				run.abort();
 			} catch {

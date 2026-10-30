@@ -14,6 +14,7 @@ import type { GatewayRoutingObservation } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { WorkerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
+import type { RunTerminalReason } from "../../core/telemetry/enums.js";
 import type { CallUsage } from "../../core/token-split.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
@@ -25,6 +26,7 @@ import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { DispatchIntent } from "./intent.js";
 import type { DispatchPathScopeProvenance } from "./path-scope.js";
+import type { RECEIPT_HASH_SET } from "./receipt-hashes.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingIntent } from "./routing-intent.js";
 import type { DispatchFailoverMode } from "./validation.js";
@@ -393,8 +395,23 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 20;
+	version: 21;
 	algorithm: "sha256";
+	digest: string;
+	/**
+	 * The run-ledger projection this receipt was sealed against. The digest covers
+	 * the commitment, so the receipt still verifies after the ring evicts its row,
+	 * reported as verified with the ledger evicted (#434).
+	 */
+	ledger: RunReceiptLedgerCommitment;
+}
+
+/** An R7-labelled commitment: the preimage lives in `runs.json` only while the ring keeps the row (#434). */
+export interface RunReceiptLedgerCommitment {
+	label: "commitment";
+	function: "sha256";
+	canonicalization: "json-sorted-v1";
+	subject: "run-ledger-projection";
 	digest: string;
 }
 
@@ -1224,6 +1241,15 @@ export interface RunReceipt {
 	 * regret be recomputed offline from receipts alone.
 	 */
 	routeDecision?: RouteDecisionV1;
+	/**
+	 * Logical call ids this run's accounting folded, sorted. Absent when no call
+	 * telemetry reached the host, which is unknown rather than zero calls (#434).
+	 */
+	callIds?: string[];
+	/** How the worker loop ended; the verdict on its result stays in `outcome` and `outcomeCode` (#425, #434). */
+	terminalReason?: RunTerminalReason;
+	/** The R7 declaration set naming every hash this receipt carries (`receipt-hashes.ts`, #434). */
+	hashSet?: typeof RECEIPT_HASH_SET;
 	sessionId: string | null;
 	integrity: RunReceiptIntegrity;
 }

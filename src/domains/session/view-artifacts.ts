@@ -478,9 +478,9 @@ function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult
 	if (!isReceiptIntegrity(r.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
+	// A row the ring evicted leaves the seal verifiable on its own (#434).
 	const ledger = readRunEnvelope(stateDir, runId);
-	if (!ledger.ok) return ledger;
-	return verifyReceiptIntegrity(r as unknown as RunReceipt, ledger.envelope);
+	return verifyReceiptIntegrity(r as unknown as RunReceipt, ledger.ok ? ledger.envelope : null);
 }
 
 const RECEIPT_FILE_FAILURE = /^(?:receipt file not found|read error:)/u;
@@ -543,6 +543,17 @@ export function verifyReceiptFileReport(stateDir: string, runId: string): Receip
 			});
 			if (!result.ok && LEDGER_FAILURE.test(result.reason)) {
 				checks.push({ name: "run ledger", ok: false, evidence: result.reason });
+			} else if (result.ok && result.ledgerEvicted) {
+				checks.push({
+					name: "run ledger",
+					ok: true,
+					evidence: `run ${runId} evicted from the ledger ring; sealed ledger commitment not compared`,
+				});
+				checks.push({
+					name: "sealed digest",
+					ok: true,
+					evidence: `${sealedDigest ?? "digest unavailable"} matches receipt and its sealed ledger commitment`,
+				});
 			} else {
 				checks.push({ name: "run ledger", ok: true, evidence: `run ${runId} fields match` });
 				checks.push({

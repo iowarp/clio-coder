@@ -131,6 +131,8 @@ export type {
 } from "./dispatch-background.js";
 
 const TRUNCATION_MARKER = "\n[agent output truncated]";
+/** The canceled tool call owns the dispatch; no operator command reached the run itself (#425). */
+const PARENT_CANCEL: AbortReason = { cause: "parent", detail: "parent tool call canceled" };
 
 /**
  * One-shot latch an attached executor races against its runs. Firing it never
@@ -920,7 +922,7 @@ async function runReviewGated(
 		if (activeRunId !== null) {
 			deps.dispatch.abort(
 				activeRunId,
-				bySignal ? undefined : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
+				bySignal ? PARENT_CANCEL : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
 			);
 		}
 	};
@@ -2142,7 +2144,7 @@ async function runCouncil(
 				timeoutMs,
 			);
 		}
-		const abort = (): void => deps.dispatch.abort(handle.runId);
+		const abort = (): void => deps.dispatch.abort(handle.runId, PARENT_CANCEL);
 		signal?.addEventListener("abort", abort, { once: true });
 		try {
 			const [summary, receipt] = await Promise.all([
@@ -2854,7 +2856,7 @@ async function runSequential(
 		if (activeRunId !== null) {
 			deps.dispatch.abort(
 				activeRunId,
-				bySignal ? undefined : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
+				bySignal ? PARENT_CANCEL : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
 			);
 		}
 	};
@@ -2936,7 +2938,7 @@ async function runPipeline(
 		if (activeRunId !== null) {
 			deps.dispatch.abort(
 				activeRunId,
-				bySignal ? undefined : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
+				bySignal ? PARENT_CANCEL : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
 			);
 		}
 	};
@@ -3017,7 +3019,7 @@ async function runBatch(
 	// The operator signal is a cancel; the timer is a timeout. The timeout
 	// carries a cause so each killed run's receipt names it.
 	const abort = (bySignal: boolean): void => {
-		const reason = bySignal ? undefined : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
+		const reason = bySignal ? PARENT_CANCEL : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
 		for (const runId of handle.assignmentIds) deps.dispatch.abort(runId, reason);
 	};
 	const onSignalAbort = (): void => abort(true);
@@ -3105,7 +3107,7 @@ async function runWriterLimitedBatch(
 		return run;
 	};
 	const abort = (bySignal: boolean): void => {
-		const reason = bySignal ? undefined : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
+		const reason = bySignal ? PARENT_CANCEL : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
 		for (const runId of activeIds) deps.dispatch.abort(runId, reason);
 	};
 	const onSignalAbort = (): void => abort(true);

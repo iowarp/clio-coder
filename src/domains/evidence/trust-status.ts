@@ -457,7 +457,17 @@ export interface RetiredReceiptIntegrity {
  * verifier's own verdict: a malformed seal, a ledger mismatch, or a digest
  * that does not match the receipt's contents.
  */
-export type ReceiptIntegrityOutcome = { ok: true } | { ok: false; reason: string; retired?: RetiredReceiptIntegrity };
+export type ReceiptIntegrityOutcome =
+	| { ok: true; ledgerEvicted?: true }
+	| { ok: false; reason: string; retired?: RetiredReceiptIntegrity };
+
+/** Authority id for a seal that verified on its own after the run ledger ring evicted its row (#434). */
+export const LEDGER_EVICTED_INTEGRITY_AUTHORITY = "receipt-integrity-ledger-evicted";
+
+/** True when the integrity axis verified the seal without its ledger row. */
+export function integrityLedgerEvicted(status: ArtifactIntegrityStatus): boolean {
+	return status.state === "verified" && status.authority.id === LEDGER_EVICTED_INTEGRITY_AUTHORITY;
+}
 
 /** The retired-version diagnosis for a receipt's integrity block, or null when the block is current or unreadable. */
 export function retiredReceiptIntegrity(integrity: unknown): RetiredReceiptIntegrity | null {
@@ -479,7 +489,10 @@ export function retiredReceiptIntegrityReason(retired: RetiredReceiptIntegrity):
  * verification goes through here so the CLI, the bundle, and the TUI receipt
  * view agree on what a retired receipt is.
  */
-export function verifyReceiptIntegrityOutcome(receipt: RunReceipt, envelope: RunEnvelope): ReceiptIntegrityOutcome {
+export function verifyReceiptIntegrityOutcome(
+	receipt: RunReceipt,
+	envelope: RunEnvelope | null,
+): ReceiptIntegrityOutcome {
 	const retired = retiredReceiptIntegrity(receipt.integrity);
 	if (retired !== null) return { ok: false, reason: retiredReceiptIntegrityReason(retired), retired };
 	return verifyReceiptIntegrity(receipt, envelope);
@@ -535,7 +548,10 @@ export function adaptReceiptIntegrityStatus(
 	return attributed(
 		verification.ok ? "verified" : "failed",
 		{ kind: "receipt_integrity_verification", id: receipt.runId },
-		{ kind: "clio", id: "receipt-integrity" },
+		{
+			kind: "clio",
+			id: verification.ok && verification.ledgerEvicted ? LEDGER_EVICTED_INTEGRITY_AUTHORITY : "receipt-integrity",
+		},
 		artifacts,
 	);
 }
@@ -839,11 +855,10 @@ export function inspectRunReceiptTrustStatus(
 	let integrity: ReceiptIntegrityOutcome;
 	if (receipt === null || receipt === undefined) {
 		integrity = { ok: false, reason: "receipt unavailable" };
-	} else if (envelope === null || envelope === undefined) {
-		integrity = { ok: false, reason: "run ledger envelope unavailable" };
 	} else {
 		try {
-			integrity = verifyReceiptIntegrityOutcome(receipt, envelope);
+			// A missing row verifies the seal alone and says the ledger was evicted (#434).
+			integrity = verifyReceiptIntegrityOutcome(receipt, envelope ?? null);
 		} catch (error) {
 			integrity = {
 				ok: false,

@@ -1,6 +1,7 @@
 import { RUN_RECEIPT_INTEGRITY_VERSION } from "../dispatch/receipt-integrity.js";
 import {
 	type CanonicalTrustStatus,
+	integrityLedgerEvicted,
 	retiredIntegrityVersionOf,
 	TRUST_STATUS_AXES,
 	type TRUST_STATUS_STATES,
@@ -122,6 +123,7 @@ function authorityOf(status: CanonicalTrustStatus, axis: TrustStatusAxis): strin
 function integrityClause(status: CanonicalTrustStatus): string {
 	const retired = retiredIntegrityVersionOf(status.artifactIntegrity);
 	if (retired !== null) return `seal v${retired} retired (this build verifies v${RUN_RECEIPT_INTEGRITY_VERSION})`;
+	if (integrityLedgerEvicted(status.artifactIntegrity)) return "sealed (ledger evicted)";
 	return trustStateWord("artifactIntegrity", status.artifactIntegrity.state);
 }
 

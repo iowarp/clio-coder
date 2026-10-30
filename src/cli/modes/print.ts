@@ -17,7 +17,7 @@ import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
-import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
+import { runStatusForOutcome, terminalReasonForOutcome } from "../../domains/dispatch/outcome.js";
 import {
 	createRunReceiptQuality,
 	deriveReceiptVerification,
@@ -830,6 +830,8 @@ async function recordHeadlessMainAgentReceipt(input: {
 		noop: headlessNoop(input.stats),
 		...(input.costCap !== undefined ? { costCap: input.costCap } : {}),
 		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
+		// Call ids stay omitted: this receipt folds cost entries, not the session journal's attempts (#434).
+		terminalReason: terminalReasonForOutcome(outcome),
 		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
 	};
 	ledger.recordReceipt(envelope.id, receipt);

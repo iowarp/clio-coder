@@ -31,7 +31,7 @@ export const CLIO_DECISION_TRAILER_CAP = 32;
 export const DECISION_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\/[a-z0-9]+(?:[_-][a-z0-9]+)*$/u;
 
 export interface CommitReceiptEvidence {
-	version: 20;
+	version: 21;
 	algorithm: "sha256";
 	digest: string;
 	/** The receipt was checked against its run-ledger envelope. */
@@ -81,7 +81,8 @@ const KNOWN_CLIO_TRAILERS = new Set(
 function isClioTrailer(key: string): boolean {
 	return (
 		KNOWN_CLIO_TRAILERS.has(key) ||
-		key.startsWith("clio-evidence:receipt-v20/sha256:") ||
+		// Earlier seals stay recognized so an amended message never keeps a stale managed trailer (#434).
+		/^clio-evidence:receipt-v\d+\/sha256:/u.test(key) ||
 		key.startsWith(`${CLIO_DECISION_TRAILER_KEY.toLowerCase()}:`)
 	);
 }
@@ -126,7 +127,7 @@ function trailerBlockStart(lines: ReadonlyArray<string>): number | null {
 
 function receiptTrailer(receipt: CommitReceiptEvidence | undefined): string | null {
 	if (
-		receipt?.version !== 20 ||
+		receipt?.version !== 21 ||
 		receipt.algorithm !== "sha256" ||
 		receipt.integrityValid !== true ||
 		receipt.directlyRelevant !== true ||
@@ -134,7 +135,7 @@ function receiptTrailer(receipt: CommitReceiptEvidence | undefined): string | nu
 	) {
 		return null;
 	}
-	return `Clio-Evidence: receipt-v20/sha256:${receipt.digest}`;
+	return `Clio-Evidence: receipt-v${receipt.version}/sha256:${receipt.digest}`;
 }
 
 /**

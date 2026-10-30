@@ -48,13 +48,21 @@ export const Tier = vocabulary(["accountability", "operational", "research"]);
 export type Tier = Static<typeof Tier>;
 export const ContentClass = vocabulary(["content-free", "structural", "content-bearing"]);
 export type ContentClass = Static<typeof ContentClass>;
+/** How the worker loop ended; the host's verdict on its result stays in outcome and outcomeCode (#425, #434). */
 export const RunTerminalReason = vocabulary([
 	"completed",
 	"cancelled_by_parent",
 	"cancelled_by_operator",
+	"preempted",
 	"bound_reached",
 	"final_output_missing_no_repair",
 	"contract_exhausted_after_repair",
 	"channel_failure",
 	"spawn_error",
+	"stalled",
+	"denied_by_policy",
+	"worker_failed",
 ]);
+export type RunTerminalReason = Static<typeof RunTerminalReason>;
+export const RunBoundKind = vocabulary(["turns", "tokens", "cost", "time", "tools"]);
+export type RunBoundKind = Static<typeof RunBoundKind>;

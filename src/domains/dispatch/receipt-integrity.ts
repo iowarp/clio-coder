@@ -1,20 +1,29 @@
 import { createHash } from "node:crypto";
 import { isExecutionRole } from "./execution-role.js";
+import { RECEIPT_HASH_SET, undeclaredReceiptHashes } from "./receipt-hashes.js";
 import { isRouteDecisionAgentSelection } from "./route-decision.js";
 import { ROUTE_POLICY_VERSION } from "./route-policy.js";
 import { isRoutingIntent } from "./routing-intent.js";
-import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, RunReceiptQuality } from "./types.js";
+import type {
+	RunEnvelope,
+	RunReceipt,
+	RunReceiptDraft,
+	RunReceiptIntegrity,
+	RunReceiptLedgerCommitment,
+	RunReceiptQuality,
+} from "./types.js";
 
 /**
  * The single receipt integrity contract. Historical receipts sealed under
  * this version retain their digest coverage when optional fields change.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 20;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 21;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
-export type ReceiptIntegrityResult = { ok: true } | { ok: false; reason: string };
+/** `ledgerEvicted` means the receipt's own seal verified while its ledger row was no longer available (#434). */
+export type ReceiptIntegrityResult = { ok: true; ledgerEvicted?: true } | { ok: false; reason: string };
 
 function sha256(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -178,6 +187,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	// Absent unless `clio-coder run --max-cost-usd` capped the run, so every
 	// other receipt digests exactly as it did before the field existed.
 	costCap: true,
+	callIds: true,
+	terminalReason: true,
+	hashSet: true,
 } as const satisfies Record<ReceiptIntegrityField, true> & { autonomyEnforcement: true };
 
 const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];
@@ -195,14 +207,8 @@ function selectedReceiptFields(
 	return result;
 }
 
-function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, legacyNaming = false): Record<string, unknown> {
+function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
 	const result = selectedReceiptFields(receipt, RECEIPT_FIELDS);
-	if (legacyNaming) {
-		const source = receipt as unknown as Record<string, unknown>;
-		const version = source.clioVersion ?? source.clioCoderVersion;
-		delete result.clioCoderVersion;
-		if (version !== undefined) result.clioVersion = version;
-	}
 	result.briefing = receipt.briefing ?? null;
 	result.outcomeCode = receipt.outcomeCode ?? null;
 	result.steering = receipt.steering ?? null;
@@ -262,29 +268,42 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 	};
 }
 
-function integrityPayload(
-	receipt: RunReceipt | RunReceiptDraft,
-	envelope: RunEnvelope,
-	legacyNaming = false,
-): Record<string, unknown> {
+function ledgerCommitment(envelope: RunEnvelope): RunReceiptLedgerCommitment {
 	return {
-		contract: legacyNaming ? "clio.runReceipt.integrity" : "clio-coder.runReceipt.integrity",
-		version: RUN_RECEIPT_INTEGRITY_VERSION,
-		sources: ["receipt", "run-ledger"],
-		receipt: receiptDigestFields(receipt, legacyNaming),
-		ledger: ledgerDigestFields(envelope),
+		label: "commitment",
+		function: "sha256",
+		canonicalization: "json-sorted-v1",
+		subject: "run-ledger-projection",
+		digest: sha256(
+			canonicalJson({
+				contract: "clio-coder.runLedger.projection",
+				version: RUN_RECEIPT_INTEGRITY_VERSION,
+				ledger: ledgerDigestFields(envelope),
+			}),
+		),
 	};
 }
 
-function computeReceiptIntegrity(
-	receipt: RunReceipt | RunReceiptDraft,
-	envelope: RunEnvelope,
-	legacyNaming = false,
-): RunReceiptIntegrity {
+/** The seal covers the receipt and a commitment to its ledger row, never the row itself (#434). */
+function receiptDigest(receipt: RunReceipt | RunReceiptDraft, ledger: RunReceiptLedgerCommitment): string {
+	return sha256(
+		canonicalJson({
+			contract: "clio-coder.runReceipt.integrity",
+			version: RUN_RECEIPT_INTEGRITY_VERSION,
+			sources: ["receipt", "run-ledger-commitment"],
+			receipt: receiptDigestFields(receipt),
+			ledger,
+		}),
+	);
+}
+
+function computeReceiptIntegrity(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): RunReceiptIntegrity {
+	const ledger = ledgerCommitment(envelope);
 	return {
 		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayload(receipt, envelope, legacyNaming))),
+		digest: receiptDigest(receipt, ledger),
+		ledger,
 	};
 }
 
@@ -353,21 +372,34 @@ export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnve
 	if (receipt.routeDecision !== undefined && !isCurrentRouteDecision(receipt.routeDecision)) {
 		throw new Error("receipt integrity: route decision is invalid or retired");
 	}
+	// R7: a hash without a declared function, canonicalization, subject and label is never sealed (#434).
+	const undeclared = undeclaredReceiptHashes(receipt, receipt.agentId);
+	if (undeclared.length > 0) throw new Error(`receipt integrity: undeclared hashes ${undeclared.join(", ")}`);
+	const declared: RunReceiptDraft = { ...receipt, hashSet: RECEIPT_HASH_SET };
 	return {
-		...receipt,
+		...declared,
 		routingIntent: receipt.routingIntent,
-		integrity: computeReceiptIntegrity(receipt, envelope),
+		integrity: computeReceiptIntegrity(declared, envelope),
 	};
 }
 
 export function isReceiptIntegrity(value: unknown): value is RunReceiptIntegrity {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
+	const ledger = candidate.ledger as Record<string, unknown> | null | undefined;
 	return (
 		candidate.version === RUN_RECEIPT_INTEGRITY_VERSION &&
 		candidate.algorithm === RUN_RECEIPT_INTEGRITY_ALGORITHM &&
 		typeof candidate.digest === "string" &&
-		/^[0-9a-f]{64}$/.test(candidate.digest)
+		/^[0-9a-f]{64}$/.test(candidate.digest) &&
+		typeof ledger === "object" &&
+		ledger !== null &&
+		ledger.label === "commitment" &&
+		ledger.function === "sha256" &&
+		ledger.canonicalization === "json-sorted-v1" &&
+		ledger.subject === "run-ledger-projection" &&
+		typeof ledger.digest === "string" &&
+		/^[0-9a-f]{64}$/.test(ledger.digest)
 	);
 }
 
@@ -416,7 +448,12 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 	return null;
 }
 
-export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelope): ReceiptIntegrityResult {
+/**
+ * Verify the receipt's own seal, then its ledger row when the ring still holds
+ * it. A null envelope is an evicted row: the seal alone verifies, and the
+ * result says the ledger could not be compared (#434).
+ */
+export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelope | null): ReceiptIntegrityResult {
 	if (!isReceiptQuality(receipt.quality) || !isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
@@ -427,14 +464,16 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 	if (receipt.routeDecision !== undefined && !isCurrentRouteDecision(receipt.routeDecision)) {
 		return { ok: false, reason: "route decision invalid" };
 	}
+	if (receiptDigest(receipt, receipt.integrity.ledger) !== receipt.integrity.digest) {
+		return { ok: false, reason: "integrity mismatch" };
+	}
+	if (envelope === null) return { ok: true, ledgerEvicted: true };
 	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };
 	}
-	const expected = computeReceiptIntegrity(receipt, envelope);
-	const legacyExpected = computeReceiptIntegrity(receipt, envelope, true);
-	if (expected.digest !== receipt.integrity.digest && legacyExpected.digest !== receipt.integrity.digest) {
-		return { ok: false, reason: "integrity mismatch" };
+	if (ledgerCommitment(envelope).digest !== receipt.integrity.ledger.digest) {
+		return { ok: false, reason: "ledger mismatch: commitment" };
 	}
 	return { ok: true };
 }

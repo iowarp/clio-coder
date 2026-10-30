@@ -4,7 +4,7 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
-import type { StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
+import type { Payload, StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
 import { RUN_FEED_EVENTS, RUN_FEED_OUTCOMES } from "../../core/telemetry/schemas.js";
 import type { CallJournal } from "../observability/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
@@ -15,6 +15,8 @@ export interface RunTelemetryJournal {
 	worker(frame: unknown): boolean;
 	linkSession(context: TelemetryContext): void;
 	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
+	/** The run's one terminal accountability record, written beside its call facts (#425, #434). */
+	settle(data: Payload<"run.settled">): void;
 	feed(body: RunEventJournalBody, capBytes: number): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
@@ -112,6 +114,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 		({ record }) => record.k === "run.feed" && record.data.body.kind === "journal_truncated",
 	);
 	let reported = false;
+	let settled = previous.records.some(({ record }) => record.k === "run.settled");
 	const reportHealth = () => {
 		const health = writer.health();
 		if (!reported && (health.writeErrors > 0 || health.dropped > 0 || health.invalid > 0)) {
@@ -153,6 +156,11 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 				wallMs: Date.now(),
 				mono: performance.now(),
 			});
+		},
+		settle(data) {
+			if (journal.closed || settled) return;
+			settled = true;
+			writer.enqueue({ kind: "run.settled", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
 		},
 		feed(body, capBytes) {
 			if (journal.closed || feedClosed) return;
