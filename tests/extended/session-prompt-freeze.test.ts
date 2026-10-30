@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import type { Context, StreamOptions } from "@earendil-works/pi-ai";
+import type { Context, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
@@ -38,8 +38,9 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 const codex = openaiCodex.synthesizeModel({ id: "openai-codex", runtime: "openai-codex" }, "gpt-6-luna", null);
 const token = `e30.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } })).toString("base64url")}.sig`;
 
+/** The engine's streamSimple options carry the thinking level; plain StreamOptions do not. */
 interface BodyOptions {
-	reasoning?: StreamOptions["reasoning"];
+	reasoning?: SimpleStreamOptions["reasoning"];
 	codexConfiguration?: CodexConfiguration;
 }
 
