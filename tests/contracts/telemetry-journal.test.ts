@@ -1039,3 +1039,65 @@ test("a crash-orphaned main call counts only when its user turn is on the active
 	);
 	deepStrictEqual(ledgerUsageCalls([user("other-branch")], {}, rows), [], "another branch's turn keeps its own calls");
 });
+
+test("usage report discovers a standalone run journal that has no session and no receipt (#434)", async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "telemetry-standalone-report-"));
+	const stateDir = join(scratch, "state");
+	const owner = { sessionId: null, runId: "orphan-run", label: "worker" as const };
+	const run = await openRunTelemetry(owner, join(stateDir, "runs", owner.runId));
+	const measured = { kind: "measured" as const, value: 21, source: "provider" as const };
+	const usage: RunUsage = {
+		source: "acp",
+		scope: "run",
+		revision: 0,
+		coverage: "complete",
+		pricingCoverage: "unknown",
+		callCountCoverage: "complete",
+		target: { targetId: "target", runtimeId: "acp", api: "acp", requestedModel: "model", reportedModel: unknown },
+		usage: {
+			input: unknown,
+			output: unknown,
+			cacheRead: unknown,
+			cacheWrite: unknown,
+			cacheWrite1h: unknown,
+			reasoning: unknown,
+		},
+		totalTokens: measured,
+		apiCalls: unknown,
+		missingTokenCalls: unknown,
+		pricing: { usd: unknown, pricedBy: "none" },
+	};
+	try {
+		ok(
+			run.worker({
+				type: "clio_coder_telemetry",
+				record: {
+					...makeTelemetryRecord("run.usage", usage, owner, { t: new Date().toISOString(), mono: 1 }),
+					origin: { host: "fixture", pid: 1, birthToken: "fixture", monoEpochWallMs: 1 },
+				},
+			}),
+		);
+		await run.close();
+		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
+		const report = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				"--input-type=module",
+				"-e",
+				`import {runUsageCommand} from ${JSON.stringify(cli)}; await runUsageCommand(['report','--json']);`,
+			],
+			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
+		);
+		strictEqual(report.status, 0, report.stderr);
+		const rows = report.stdout
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as Record<string, unknown>);
+		strictEqual(rows.find((row) => row.fact === "worker-tokens")?.totalTokens, 21);
+	} finally {
+		await run.close();
+		await rm(scratch, { recursive: true, force: true });
+	}
+});

@@ -9,6 +9,7 @@ import {
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
+import { readCallJournal } from "../domains/observability/call-journal.js";
 import {
 	failedCompactionUsageFromCalls,
 	summarizeFailedCompactionUsage,
@@ -163,6 +164,71 @@ type WorkerUsageContribution = Pick<
 	| "modelId"
 	| "audience"
 > & { missingBreakdownUsage?: boolean };
+
+/** One run's journal-folded usage as a worker contribution; the journal outranks receipt totals (#434). */
+function runCallContribution(call: LedgerUsageCall, audience: string): WorkerUsageContribution {
+	return {
+		targetId: call.providerId,
+		modelId: call.attributedModelId,
+		audience,
+		apiCalls: call.apiCalls ?? 0,
+		missingTokenCalls: call.missingTokenCalls ?? 0,
+		unknownCallCoverageRuns: call.costSummary?.unknownCallCoverageRuns ?? 0,
+		...(call.costSummary ? { costSummary: call.costSummary } : {}),
+		costProvenance: call.costProvenance ?? "unknown",
+		tokenCount: call.totalTokens,
+		inputTokenCount: call.input,
+		outputTokenCount: call.output,
+		cacheReadTokenCount: call.cacheRead,
+		cacheWriteTokenCount: call.cacheWrite,
+		reasoningTokenCount: call.reasoningTokens,
+		costUsd: call.costUsd,
+		missingTokenUsage: call.tokenUsageMissing ?? true,
+		missingBreakdownUsage:
+			!call.usageFacts ||
+			[call.usageFacts.input, call.usageFacts.output, call.usageFacts.cacheRead, call.usageFacts.cacheWrite].some(
+				(sum) => sum.unknownCount > 0,
+			),
+	};
+}
+
+/**
+ * A run with no parent session and no receipt (a standalone `run` that crashed before sealing, say) still spent
+ * money; only its own journal says how much. Parented runs belong to their session's accounting (#434).
+ */
+async function standaloneRunCalls(
+	stateDir: string,
+	from: number,
+	to: number,
+	known: (runId: string) => boolean,
+	repoRunIds: ReadonlySet<string> | null,
+	diagnostics: Diagnostics,
+): Promise<LedgerUsageCall[]> {
+	const root = join(stateDir, "runs");
+	let names: string[];
+	try {
+		names = await readdir(root);
+	} catch {
+		// No run journals were ever written.
+		return [];
+	}
+	const runs: SessionCallJournalRead["runs"] = new Map();
+	for (const runId of names) {
+		if (!/^[a-zA-Z0-9_-]+$/u.test(runId) || known(runId) || (repoRunIds !== null && !repoRunIds.has(runId))) continue;
+		const directory = join(root, runId);
+		try {
+			if ((await stat(directory)).mtimeMs < from) continue;
+			const journal = await readCallJournal(directory, "events.ndjson");
+			if (journal.records.some(({ record }) => record.ctx.sessionId !== null)) continue;
+			runs.set(runId, { ...journal, throughMs: to });
+		} catch (error) {
+			diagnostics.notes.push(`run journal ${runId} unreadable: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	return usageCallsFromRunJournals(
+		runJournalsInWindow({ records: [], skipped: 0, damaged: 0, runs }, from, to + USAGE_WINDOW_FUTURE_SKEW_MS),
+	);
+}
 
 function addWorkerReceipt(totals: WorkerUsageTotals, receipt: WorkerUsageContribution): void {
 	totals.runs += 1;
@@ -548,30 +614,11 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		if (!call.runId || excludedRuns.has(call.runId)) continue;
 		const receipt = contributions.get(call.runId);
 		if (call.runJournalUnavailable && receipt) continue;
-		contributions.set(call.runId, {
-			targetId: call.providerId,
-			modelId: call.attributedModelId,
-			audience: receipt?.audience ?? "unknown",
-			apiCalls: call.apiCalls ?? 0,
-			missingTokenCalls: call.missingTokenCalls ?? 0,
-			unknownCallCoverageRuns: call.costSummary?.unknownCallCoverageRuns ?? 0,
-			...(call.costSummary ? { costSummary: call.costSummary } : {}),
-			costProvenance: call.costProvenance ?? "unknown",
-			tokenCount: call.totalTokens,
-			inputTokenCount: call.input,
-			outputTokenCount: call.output,
-			cacheReadTokenCount: call.cacheRead,
-			cacheWriteTokenCount: call.cacheWrite,
-			reasoningTokenCount: call.reasoningTokens,
-			costUsd: call.costUsd,
-			missingTokenUsage: call.tokenUsageMissing ?? true,
-			missingBreakdownUsage:
-				!call.usageFacts ||
-				[call.usageFacts.input, call.usageFacts.output, call.usageFacts.cacheRead, call.usageFacts.cacheWrite].some(
-					(sum) => sum.unknownCount > 0,
-				),
-		});
+		contributions.set(call.runId, runCallContribution(call, receipt?.audience ?? "unknown"));
 	}
+	const known = (runId: string) => contributions.has(runId) || excludedRuns.has(runId);
+	for (const call of await standaloneRunCalls(stateDir, windowStart, now, known, repoRunIds, diagnostics))
+		if (call.runId) contributions.set(call.runId, runCallContribution(call, "unknown"));
 	for (const receipt of contributions.values()) {
 		addWorkerReceipt(workerUsage, receipt);
 		const audience = workerUsageByAudience.get(receipt.audience) ?? emptyWorkerUsageTotals();
@@ -730,6 +777,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	// session store is gone can still have recorded out-of-turn spend, and
 	// dropping those rows would report money that was spent as nothing at all.
 	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
+	// Standalone run journals count even where no receipt store exists yet (#434).
+	const workerMeasurable = presence.receiptsPresent || workerUsage.runs > 0;
 	const missingSessionCalls = sessionCalls.reduce((missing, call) => missing + (call.missingTokenCalls ?? 0), 0);
 	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows, sessionCalls);
 	const compactionRows = [...outOfTurnRows, ...failedCompactionUsageFromCalls(sessionCalls)];
@@ -917,7 +966,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				});
 			}
 		}
-		if (usageMeasurable || presence.receiptsPresent) {
+		if (usageMeasurable || workerMeasurable) {
 			emit({
 				kind: "fact",
 				fact: "all-recorded-tokens",
@@ -937,7 +986,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				unknownCallCoverageRuns: workerUsage.unknownCallCoverageRuns,
 			});
 		}
-		if (presence.receiptsPresent) {
+		if (workerMeasurable) {
 			emit({ kind: "fact", fact: "worker-tokens", ...workerUsage });
 			for (const [audience, totals] of workerUsageByAudience) {
 				emit({ kind: "fact", fact: "worker-audience-usage", audience, ...totals });
@@ -999,7 +1048,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		`  permission decisions: ${permissions.requested} requested, ${permissions.granted} granted, ${permissions.denied} denied, ${permissions.expired} expired; approval rate ${permissions.approvalRate === null ? "n/a" : `${(permissions.approvalRate * 100).toFixed(1)}%`}`,
 	);
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
-	if (usageMeasurable || presence.receiptsPresent) {
+	if (usageMeasurable || workerMeasurable) {
 		out(`  all recorded cost in window: ${renderCostAggregate(allCost)} (${allCost.calls} recorded model calls)`);
 		if (workerUsage.unknownCallCoverageRuns > 0)
 			out(
