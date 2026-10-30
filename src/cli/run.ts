@@ -274,7 +274,7 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		return RUN_INTERRUPTED_EXIT;
 	}
 	for (const diagnostic of fileRefs.diagnostics) {
-		writeRunDiagnostic(`error: ${diagnostic.message}\n`);
+		writeRunDiagnostic(`${diagnostic.type}: ${diagnostic.message}\n`);
 	}
 	if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
 	const initial = buildInitialMessage({

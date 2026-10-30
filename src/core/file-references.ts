@@ -1,6 +1,9 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { open } from "node:fs/promises";
 import path from "node:path";
 import type { ImageContent } from "../engine/types.js";
+import type { DocumentKind } from "../tools/read-documents/index.js";
+import { formatSize } from "../tools/truncate.js";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize.js";
 import { expandConfigPath } from "./resolve-config-value.js";
 
@@ -32,7 +35,18 @@ export interface FileReferenceOptions {
 export class FileReferenceError extends Error {}
 
 const DEFAULT_IMAGE_MAX_BASE64_BYTES = 4.5 * 1024 * 1024;
-const PDF_ATTACHMENT_MAX_BYTES = 32 * 1024;
+/** Rendered PDF or archive text an attachment carries; read continues past it. */
+const DOCUMENT_ATTACHMENT_MAX_BYTES = 32 * 1024;
+
+/** Enough of a file to recognise an image or document signature (tar's sits at offset 257). */
+const SIGNATURE_BYTES = 4096;
+
+/**
+ * Largest text file an `@path` reference inlines whole, the same ceiling the ACP
+ * server puts on an embedded resource. A bigger file is named instead, so one
+ * reference cannot fill the context window before the turn starts (#438).
+ */
+export const INLINE_TEXT_MAX_BYTES = 256 * 1024;
 
 interface InlineFileReference {
 	start: number;
@@ -104,6 +118,26 @@ function renderImageFile(filePath: string, content = ""): string {
 	return `<file name="${filePath}">${content}</file>\n`;
 }
 
+/** A referenced file whose bytes are not inlined: the block says what it is and how to read it. */
+function notInlined(filePath: string, note: string, warning: string): FileReferenceResult {
+	return result(
+		`<file name="${filePath}">[${note}]</file>\n`,
+		[{ type: "warning", message: warning, path: filePath }],
+		[],
+		[filePath],
+	);
+}
+
+function readSignature(filePath: string, size: number): Buffer {
+	const bytes = Buffer.alloc(Math.min(size, SIGNATURE_BYTES));
+	const fd = openSync(filePath, "r");
+	try {
+		return bytes.subarray(0, readSync(fd, bytes, 0, bytes.length, 0));
+	} finally {
+		closeSync(fd);
+	}
+}
+
 function result(
 	text: string,
 	diagnostics: FileReferenceDiagnostic[] = [],
@@ -130,6 +164,59 @@ export function detectSupportedImageMimeType(bytes: Buffer): string | null {
 		return "image/webp";
 	}
 	return null;
+}
+
+/** Documents read renders to text before windowing: by extension for notebooks, by magic bytes otherwise. */
+export function detectDocumentKind(filePath: string, first: Buffer): DocumentKind | null {
+	if (path.extname(filePath).toLowerCase() === ".ipynb") return "notebook";
+	if (first.toString("latin1", 0, 5) === "%PDF-") return "pdf";
+	if (
+		first[0] === 0x50 &&
+		first[1] === 0x4b &&
+		(first[2] === 3 || first[2] === 5) &&
+		(first[3] === 4 || first[3] === 6)
+	) {
+		return "zip";
+	}
+	if (first[0] === 0x1f && first[1] === 0x8b) return "gzip";
+	if (first.length >= 262 && first.toString("latin1", 257, 262) === "ustar") return "tar";
+	return null;
+}
+
+/**
+ * An archive reference becomes the listing `read` would show on its first call,
+ * bounded like a PDF attachment, with the read call that continues it. A
+ * damaged archive names the file and the reason instead.
+ */
+async function renderArchiveReference(
+	filePath: string,
+	kind: "zip" | "tar" | "gzip",
+	size: number,
+	signal: AbortSignal | undefined,
+): Promise<FileReferenceResult> {
+	const { renderDocument, windowDocument } = await import("../tools/read-documents/index.js");
+	const request = { numbered: false, offset: 1, limit: null, tail: null, signal };
+	const handle = await open(filePath, "r");
+	let rendered: Awaited<ReturnType<typeof renderDocument>>;
+	try {
+		rendered = await renderDocument(kind, filePath, handle, size, request);
+	} finally {
+		await handle.close();
+	}
+	signal?.throwIfAborted();
+	const view = "error" in rendered ? rendered : windowDocument(rendered.text, request, DOCUMENT_ATTACHMENT_MAX_BYTES);
+	if ("error" in view) {
+		return notInlined(
+			filePath,
+			`${kind} archive (${formatSize(size)}), not inlined: ${view.error}`,
+			`${kind} archive could not be rendered: ${view.error}`,
+		);
+	}
+	const more =
+		view.next === undefined
+			? ""
+			: `\n[showing ${view.shownCount} of ${view.totalCount} rendered lines; continue with read on this path, ${view.next}]`;
+	return result(renderTextFile(filePath, `${view.output}${more}`), [], [], [filePath]);
 }
 
 /** Shared tool image encoding; the cap counts base64 bytes actually sent. */
@@ -161,10 +248,11 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 	}
 	if (stat.size === 0) return result("", [], [], [filePath]);
 	let isPdf = path.extname(filePath).toLowerCase() === ".pdf";
-	let binary = false;
 	try {
-		const bytes = readFileSync(filePath);
-		isPdf ||= bytes.subarray(0, 5).toString("ascii") === "%PDF-";
+		// Classify from the first bytes, so a large file is not read into memory just to be named (#438).
+		const signature = readSignature(filePath, stat.size);
+		const kind = detectDocumentKind(filePath, signature);
+		isPdf ||= kind === "pdf";
 		if (isPdf) {
 			// PDF bytes are not text context; share read's bounded page extraction (#438).
 			const [{ pdfTextHeader, renderPdf }, { truncateUtf8 }] = await Promise.all([
@@ -182,10 +270,10 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 			options.signal?.throwIfAborted();
 			if ("error" in rendered) throw new Error(rendered.error);
 			let content = rendered.text;
-			if (Buffer.byteLength(content) > PDF_ATTACHMENT_MAX_BYTES) {
+			if (Buffer.byteLength(content) > DOCUMENT_ATTACHMENT_MAX_BYTES) {
 				const marker = (lastPage: string) =>
 					`\n[PDF attachment truncated at 32 KiB; included pages 1-${lastPage}, final page may be partial; use read with pages to inspect more.]`;
-				content = truncateUtf8(content, PDF_ATTACHMENT_MAX_BYTES - Buffer.byteLength(marker("50")), "");
+				content = truncateUtf8(content, DOCUMENT_ATTACHMENT_MAX_BYTES - Buffer.byteLength(marker("50")), "");
 				const lastPage = rendered.pageStarts?.filter((page) => page.offset <= content.length).at(-1)?.page ?? 0;
 				// The header must agree with the marker; the rebuilt one is never longer, so the cap holds (#438).
 				const firstPage = rendered.pageStarts?.[0]?.page;
@@ -198,10 +286,11 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 			}
 			return result(renderTextFile(filePath, content), [], [], [filePath]);
 		}
-		const imageMimeType = detectSupportedImageMimeType(bytes);
+		const imageMimeType = detectSupportedImageMimeType(signature);
 		if (imageMimeType) {
 			if (options.includeImages !== true) return result(`@${fileArg}`);
 
+			const bytes = readFileSync(filePath);
 			const originalImage: ImageContent = {
 				type: "image",
 				mimeType: imageMimeType,
@@ -231,15 +320,33 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 				[filePath],
 			);
 		}
+		if (kind === "zip" || kind === "tar" || kind === "gzip") {
+			return await renderArchiveReference(filePath, kind, stat.size, options.signal);
+		}
+		// A binary or oversized file is named, not refused, so the model can still inspect it with its tools (#438).
+		const size = formatSize(stat.size);
+		const binary = () =>
+			notInlined(
+				filePath,
+				`binary file (${size}), not inlined; inspect it with run_script and a library for its format`,
+				`binary file not inlined (${size})`,
+			);
+		if (signature.includes(0)) return binary();
+		if (stat.size > INLINE_TEXT_MAX_BYTES) {
+			return notInlined(
+				filePath,
+				`text file (${size}) is larger than the ${formatSize(INLINE_TEXT_MAX_BYTES)} inline limit, not inlined; read it in windows with read and offset/limit`,
+				`text file not inlined (${size})`,
+			);
+		}
+		const bytes = readFileSync(filePath);
 		// Match read's NUL-based binary check; encoding mismatches and ANSI logs remain text (#438).
-		binary = bytes.includes(0);
-		if (binary) throw new Error("contains binary control bytes");
+		if (bytes.includes(0)) return binary();
 		return result(renderTextFile(filePath, bytes.toString("utf8")), [], [], [filePath]);
 	} catch (err) {
 		options.signal?.throwIfAborted();
 		const reason = err instanceof Error ? err.message : String(err);
 		if (isPdf) throw new FileReferenceError(`PDF attachment ${filePath} could not be extracted: ${reason}`);
-		if (binary) throw new FileReferenceError(`Binary attachment ${filePath} cannot be inlined as text: ${reason}`);
 		return result("", [{ type: "error", message: `file could not be read: ${reason}`, path: filePath }]);
 	}
 }
