@@ -484,23 +484,25 @@ function formattedThroughput(theme: ClioTheme, throughput: TokenThroughputSnapsh
 	return joinChips(theme, parts);
 }
 
+/**
+ * The streaming run's live chip: output as it streams, and the prompt it sent, from the context meter or else the
+ * read model's newest turn, never a tally of the run's own messages (#434 §11.3).
+ */
 function liveTokenValue(
 	theme: ClioTheme,
-	status: AgentStatus,
 	throughput: TokenThroughputSnapshot | null | undefined,
-	lastTurn: TurnSummary | null,
+	telemetry: FooterTelemetry | undefined,
 	contextUsed: number | null | undefined,
 ): string | null {
 	const output = finiteNonNegative(throughput?.outputTokens);
-	const input =
-		finiteNonNegative(contextUsed) ||
-		finiteNonNegative(status.summary?.inputTokens) ||
-		finiteNonNegative(lastTurn?.inputTokens);
+	const context = finiteNonNegative(contextUsed);
+	const turnInput = telemetry?.kind === "ready" ? (telemetry.turn?.input ?? null) : null;
+	const input = context > 0 ? formatFooterTokens(context) : turnInput !== null && turnInput !== "0" ? turnInput : null;
 	const parts = [
 		output > 0
 			? theme.fg("counter", `${GLYPH.down} ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`)
 			: null,
-		input > 0 ? theme.fg("counter", `${GLYPH.up} ${formatFooterTokens(input)}`) : null,
+		input !== null ? theme.fg("counter", `${GLYPH.up} ${input}`) : null,
 	];
 	const joined = joinChips(theme, parts);
 	return joined.length > 0 ? joined : null;
@@ -595,7 +597,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	if (isStreaming && facts.statusText) rows.push(kv("state", facts.statusText, "activity"));
 	if (isStreaming) {
 		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput)));
-		rows.push(styledKv("live", liveTokenValue(theme, status, options.throughput, facts.lastTurn, options.contextUsed)));
+		rows.push(styledKv("live", liveTokenValue(theme, options.throughput, options.telemetry, options.contextUsed)));
 	} else if (facts.lastTurn) {
 		rows.push(styledKv("last", lastTurnOutcome(theme, facts.lastTurn)));
 		rows.push(styledKv("turn", lastTurnDetails(theme, facts.lastTurn, options.telemetry)));

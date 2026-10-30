@@ -242,12 +242,13 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 	{
 		file: "src/interactive/status/summary.ts",
 		functions: ["foldMessageIntoRunTally"],
-		reason: "the live last-turn TurnSummary tally behind the reasoning chip and transcript summary, folded per message",
+		reason:
+			"the run's own reasoning count and chars/4 estimate behind the reasoning chip and the receipt, which the call journal does not record; its token fields only pick between a live and a rebuilt summary, and every token display reads the read model",
 	},
 	{
 		file: "src/interactive/session-last-turn.ts",
 		functions: ["lastTurnSummaryFromLedger"],
-		reason: "rebuilds that same last-turn TurnSummary from the ledger on resume, so the two tallies agree",
+		reason: "rebuilds that same run tally from the ledger on resume, for the reasoning chip the call journal cannot feed",
 	},
 	{
 		file: "src/cli/fleet-board-model.ts",
