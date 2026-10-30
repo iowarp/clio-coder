@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -174,6 +174,24 @@ describe("contracts/route identity keying", () => {
 		strictEqual(retired.length, 1);
 		strictEqual(readFileSync(join(stateDir, retired[0] ?? ""), "utf8"), bytes);
 		history.upsert(record(route(), "fresh"));
+		strictEqual(JSON.parse(readFileSync(path, "utf8")).version, 4);
+	});
+
+	it("a v2 file that cannot be set aside is preserved and the store still opens (#434)", () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-pinned-"));
+		const path = join(stateDir, "route-history.json");
+		const bytes = JSON.stringify({ version: 2, records: [{ version: 2, receiptDigest: hash("old") }] });
+		writeFileSync(path, bytes);
+		// A read-only directory refuses the rename the way Windows refuses an open file.
+		chmodSync(stateDir, 0o555);
+		try {
+			const history = createRouteHistoryStore({ stateDir });
+			deepStrictEqual(history.health(), { skipped: 1, writable: false });
+			strictEqual(readFileSync(path, "utf8"), bytes);
+		} finally {
+			chmodSync(stateDir, 0o755);
+		}
+		createRouteHistoryStore({ stateDir }).upsert(record(route(), "fresh"));
 		strictEqual(JSON.parse(readFileSync(path, "utf8")).version, 4);
 	});
 });

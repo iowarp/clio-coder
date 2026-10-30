@@ -166,6 +166,8 @@ interface HistoryRead {
 	records: RouteHistoryRecord[];
 	writable: boolean;
 	skipped: number;
+	/** Why an older file is still in place: it could not be set aside (#434). */
+	retireError?: string;
 }
 
 function readHistory(path: string): HistoryRead {
@@ -178,8 +180,10 @@ function readHistory(path: string): HistoryRead {
 	// An older format was retired by 0.6.5 too: set it aside and keep learning. A newer file belongs to another
 	// installation, so it is preserved and this version writes nothing over it (R12, #434).
 	if (typeof parsed.version === "number" && parsed.version < 3) {
-		retireHistory(path, parsed.version);
-		return empty;
+		const retireError = retireHistory(path, parsed.version);
+		return retireError === null
+			? empty
+			: { records: [], writable: false, skipped: Math.max(1, parsed.records.length), retireError };
 	}
 	if (parsed.version !== 3 && parsed.version !== ROUTE_HISTORY_VERSION)
 		return { records: [], writable: false, skipped: Math.max(1, parsed.records.length) };
@@ -195,7 +199,7 @@ function readHistory(path: string): HistoryRead {
 	return { records: records.sort(compareRecords), writable: skipped === 0, skipped };
 }
 
-function retireHistory(path: string, version: number): void {
+function retireHistory(path: string, version: number): string | null {
 	const stamp = new Date()
 		.toISOString()
 		.replace(/[-:]/gu, "")
@@ -205,12 +209,15 @@ function retireHistory(path: string, version: number): void {
 		renameSync(path, retired);
 	} catch (error) {
 		// A sibling process set the same file aside first.
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-		throw error;
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		// Windows refuses to rename a file another process holds open. The store keeps serving with the old file
+		// preserved and unwritten, and a later read sets it aside (#434).
+		return error instanceof Error ? error.message : String(error);
 	}
 	writeDiagnostic(
 		`[clio-coder:dispatch] route history v${version} is retired; starting empty at v${ROUTE_HISTORY_VERSION}. Prior observations: ${retired}\n`,
 	);
+	return null;
 }
 
 /** Inode, size and mtime; every write is tmp-and-rename, so a rewrite always moves it. */
@@ -246,6 +253,12 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 	const reportUnwritable = (): void => {
 		if (snapshot.writable || reportedUnwritable) return;
 		reportedUnwritable = true;
+		if (snapshot.retireError !== undefined) {
+			writeDiagnostic(
+				`[clio-coder:dispatch] route history ${path} is an older format that could not be set aside (${snapshot.retireError}); it is preserved unchanged and no new route observations are written until it is moved aside\n`,
+			);
+			return;
+		}
 		writeDiagnostic(
 			`[clio-coder:dispatch] route history ${path} holds ${snapshot.skipped} record(s) this version does not read; it is preserved unchanged and no new route observations are written until it is moved aside\n`,
 		);
