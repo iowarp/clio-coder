@@ -27,19 +27,11 @@ export function routeSettledLabel(receipt: Pick<RunReceipt, "outcome" | "outcome
 
 /** One reconstructable, terminal observation for a concrete route identity. */
 /**
- * The persisted phase-timing shape of a version 3 route history record. Route
- * policy reads `queueWaitMs` and `totalEndToEndMs`; the other seven keys are
- * written as null so records stay valid for readers that require all nine.
+ * The phase timing route policy reads. Version 3 records and early version 4 records also carry seven keys that
+ * were only ever written as null; reading drops them, and version 4 writes only these two (#434, P5).
  */
 export interface RouteHistoryPhaseTiming {
-	requestToDecisionMs: number | null;
-	decisionMs: number | null;
-	admissionWaitMs: number | null;
 	queueWaitMs: number | null;
-	spawnSetupMs: number | null;
-	timeToFirstModelTokenMs: number | null;
-	timeToFirstToolMs: number | null;
-	executionMs: number | null;
 	totalEndToEndMs: number | null;
 }
 
@@ -154,7 +146,13 @@ function validateRecord(value: unknown, allowLegacy = false): RouteHistoryRecord
 		firstPass: value.firstPass,
 		// Old zero costs could be adapter placeholders. An authenticated receipt can restore measured zero (#434).
 		completedCostUsd: value.version === 3 && value.completedCostUsd === 0 ? null : value.completedCostUsd,
-		completedPhaseTiming: value.completedPhaseTiming === null ? null : { ...value.completedPhaseTiming },
+		completedPhaseTiming:
+			value.completedPhaseTiming === null
+				? null
+				: {
+						queueWaitMs: value.completedPhaseTiming.queueWaitMs,
+						totalEndToEndMs: value.completedPhaseTiming.totalEndToEndMs,
+					},
 		cacheRead: value.version === 3 ? (value.cacheRead === true ? true : null) : value.cacheRead,
 		pricedCoverage: value.version === 3 ? "unknown" : (value.pricedCoverage as RouteHistoryRecord["pricedCoverage"]),
 		sourceDigests: [...value.sourceDigests].sort(),
@@ -352,17 +350,10 @@ function isRouteCandidate(value: unknown): value is RouteCandidate {
 	].every((field) => typeof field === "string");
 }
 
+/** Only the two read keys are checked; the retired null keys of older records are ignored, never required. */
 function isPhaseTiming(value: unknown): value is RouteHistoryPhaseTiming {
 	if (!isRecord(value)) return false;
-	return [
-		"requestToDecisionMs",
-		"decisionMs",
-		"admissionWaitMs",
-		"queueWaitMs",
-		"spawnSetupMs",
-		"timeToFirstModelTokenMs",
-		"timeToFirstToolMs",
-		"executionMs",
-		"totalEndToEndMs",
-	].every((field) => value[field] === null || (typeof value[field] === "number" && Number.isFinite(value[field])));
+	return ["queueWaitMs", "totalEndToEndMs"].every(
+		(field) => value[field] === null || (typeof value[field] === "number" && Number.isFinite(value[field])),
+	);
 }

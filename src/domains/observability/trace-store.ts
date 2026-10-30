@@ -509,6 +509,8 @@ CREATE TABLE gate_results (
 );
 CREATE INDEX gate_results_phase_attempt ON gate_results(phase_id, attempt);
 
+-- Retired (#434, P5): nothing read it, and runs and phases hold the same agent, model and context. The table stays
+-- because older builds sharing this database still write it inside their run-start transaction.
 CREATE TABLE agent_sessions (
   run_id TEXT NOT NULL REFERENCES runs(run_id),
   agent TEXT NOT NULL,
@@ -831,19 +833,6 @@ export class TraceStore {
 					processBirthToken(input.pid),
 				);
 			}
-			this.prepare(`INSERT INTO agent_sessions
-          (run_id, agent, runtime, model, session_id, context_tokens, context_window, created_at, last_used_at)
-          VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?)
-          ON CONFLICT(run_id, agent) DO UPDATE SET runtime=excluded.runtime, model=excluded.model,
-            context_window=excluded.context_window, last_used_at=excluded.last_used_at`).run(
-				input.runId,
-				traceText(input.agentId, 256),
-				traceText(input.runtimeId, 256),
-				traceText(input.wireModelId, 256),
-				input.contextWindow ?? null,
-				at,
-				at,
-			);
 		});
 	}
 
@@ -872,15 +861,13 @@ export class TraceStore {
 		);
 	}
 
-	recordContext(runId: string, contextTokens: number, contextWindow: number | null, at: string): void {
+	recordContext(runId: string, contextTokens: number, contextWindow: number | null): void {
 		this.transaction(() => {
 			this.prepare("UPDATE phases SET context_tokens=?, context_window=COALESCE(?, context_window) WHERE run_id=?").run(
 				contextTokens,
 				contextWindow,
 				runId,
 			);
-			this.prepare(`UPDATE agent_sessions SET context_tokens=?, context_window=COALESCE(?, context_window),
-          last_used_at=? WHERE run_id=?`).run(contextTokens, contextWindow, at, runId);
 		});
 	}
 
@@ -1881,7 +1868,7 @@ function recordProgress(
 			[usage.input, usage.output, usage.cacheRead, usage.cacheWrite]
 				.map((value) => finiteNonNegative(value) ?? 0)
 				.reduce((sum, value) => sum + value, 0);
-		store.recordContext(payload.runId, contextTokens, contextWindows.get(payload.runId) ?? null, at);
+		store.recordContext(payload.runId, contextTokens, contextWindows.get(payload.runId) ?? null);
 	}
 	let gate = gateRuns.get(payload.runId);
 	if (!announced && type === "message_end") {

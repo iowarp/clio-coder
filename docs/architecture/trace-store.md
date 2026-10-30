@@ -32,7 +32,7 @@ The six Clio Coder trace tables are `runs`, `phases`, `events`, `gate_results`, 
 | `phases` | `phase_id` (primary key), `run_id`, `seq`, `name`, `kind`, `owner`, `description`, `status`, `attempt`, `retries`, `error`, `started_at`, `ended_at`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cache_write_1h_tokens`, `reasoning_tokens`, `total_tokens`, `total_cost_usd`, `context_tokens`, `context_window`. |
 | `events` | `event_id` (primary key), `run_id`, `phase_id`, `parent_id`, `type`, `name`, `payload_json`, `tokens`, `started_at`, `ended_at`. |
 | `gate_results` | `id` (autoincrement), `run_id`, `phase_id`, `attempt`, `gate`, `passed`, `violations_json`, `checks_json`, `created_at`. |
-| `agent_sessions` | `run_id` and `agent` (composite key), `runtime`, `model`, `session_id`, `context_tokens`, `context_window`, `created_at`, `last_used_at`. |
+| `agent_sessions` | `run_id` and `agent` (composite key), `runtime`, `model`, `session_id`, `context_tokens`, `context_window`, `created_at`, `last_used_at`. Retired: this build writes nothing to it (see [Additive columns and legacy tables](#additive-columns-and-legacy-tables)). |
 | `processes` | `id` (autoincrement), `run_id`, `kind`, `name`, `pid`, `command`, `command_digest`, `started_at`, `ended_at`, `host`, `birth_token`. |
 
 `runs.status` and `phases.status` are one of `queued`, `running`, `success`, or `fail`. `runs.source` is `dispatch` or `session`. `gate_results.passed` is `0` or `1`. `run_id` in the other tables references `runs`, and `phase_id` in `events` and `gate_results` references `phases`. The indexes are `phases_run_seq (run_id, seq)`, `events_run_rowid (run_id)`, `events_phase_rowid (phase_id)`, `gate_results_phase_attempt (phase_id, attempt)`, and `processes_run_live (run_id, ended_at)`.
@@ -48,6 +48,8 @@ Four columns were added without a schema version bump, and the writer adds each 
 A read-only reader cannot alter a database no writer has opened since a column arrived. It derives `source` from the sentinel and leaves out a missing phase column instead of failing.
 
 A database written by an earlier build also has an `envelopes` table and four itemized phase cost columns (`input_cost_usd`, `output_cost_usd`, `cache_read_cost_usd`, `cache_write_cost_usd`). No writer ever filled them, so new databases do not create them. Older databases keep them without a version bump. Readers name the phase columns they return (`PHASE_COLUMNS`), and pruning deletes legacy envelope rows before their run.
+
+`agent_sessions` is retired. Nothing read it, and `runs` (`agent`, `model`, `runtime`) and `phases` (`context_tokens`, `context_window`) hold the same facts. New databases still create it because older builds sharing the database write it inside their run-start transaction, but this build writes no rows to it. Pruning still deletes the rows older builds wrote, with their run.
 
 ### Runs and phases
 
@@ -103,7 +105,7 @@ A payload larger than the limit is replaced by `{"truncated":true,"snippet":"...
 
 ### Gates and processes
 
-Gate checks are stored as `checks_json` arrays of `{item, ok, note}`. They are projected only from successfully parsed typed reviewer or judge results (a JSON object whose `checks` array holds `{name, passed, evidence}` entries, plus a `verdict` or `winner`), never by scraping prose. `violations_json` is derived from failed checks. Worker, model, and session occupancy is mirrored in `agent_sessions`. A run whose start payload carried a pid gets one `processes` row of `kind` `worker`.
+Gate checks are stored as `checks_json` arrays of `{item, ok, note}`. They are projected only from successfully parsed typed reviewer or judge results (a JSON object whose `checks` array holds `{name, passed, evidence}` entries, plus a `verdict` or `winner`), never by scraping prose. `violations_json` is derived from failed checks. The worker's agent, model and runtime are on its `runs` row, and its last context occupancy is on its `phases` row. A run whose start payload carried a pid gets one `processes` row of `kind` `worker`.
 
 `processes.command` is a redacted display projection of the argv observed when a pid was registered. `command_digest` is the SHA-256 identity of the exact JSON-encoded argv. Consumers must compare the digest of the pid's current argv before ever signalling it. The trace CLI and the graphical application are listing and read-only surfaces and never signal processes. `host` and `birth_token` identify the owning host and process incarnation so a reused pid is not mistaken for the worker.
 

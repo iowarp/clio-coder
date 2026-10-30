@@ -504,14 +504,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					completedPhaseTiming:
 						completed && outcome.phaseTiming !== undefined
 							? {
-									requestToDecisionMs: null,
-									decisionMs: null,
-									admissionWaitMs: null,
 									queueWaitMs: outcome.phaseTiming.queueWaitMs,
-									spawnSetupMs: null,
-									timeToFirstModelTokenMs: null,
-									timeToFirstToolMs: null,
-									executionMs: null,
 									totalEndToEndMs: outcome.phaseTiming.totalEndToEndMs,
 								}
 							: null,
