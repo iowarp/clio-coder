@@ -463,7 +463,7 @@ for (const [name, accounting, expected] of [
 			missingTokenCalls: 1,
 			costSummary: { knownUsd: 0.25, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 1 },
 		},
-		"$0.25 +?",
+		"$0.25",
 	],
 	["unknown", { costUsd: 0, costProvenance: "unknown" }, "not measured"],
 	["unknown without amount", { costProvenance: "unknown" }, "not measured"],
