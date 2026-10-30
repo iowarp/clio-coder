@@ -83,6 +83,8 @@ import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState, PreInvocationStage } from "./turn-state.js";
 
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
+type StreamAdmission = NonNullable<NonNullable<Parameters<typeof createEngineAgent>[0]>["beforeStreamRequest"]>;
+type AdmissionHold = { waitedOn?: "budget" };
 
 const PRE_INVOCATION_STAGE_LABEL: Readonly<Record<PreInvocationStage, string>> = {
 	transform: "request transform",
@@ -684,6 +686,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
 		const currentRun = (): boolean => runIdentity === deps.turnIdentity?.();
+		// One span covers Pi's whole pre-invocation gate; `waitedOn` names the ceiling that held it, so a
+		// budget wait reads as admission and never as a stall (#424, #434).
+		const stageAdmission =
+			(admit: (request: Parameters<StreamAdmission>[0], hold: AdmissionHold) => ReturnType<StreamAdmission>) =>
+			async (request: Parameters<StreamAdmission>[0]): Promise<Awaited<ReturnType<StreamAdmission>>> => {
+				const call = modelCall;
+				const hold: AdmissionHold = {};
+				call?.stage("admission", "start");
+				try {
+					return await admit(request, hold);
+				} finally {
+					call?.stage("admission", "end", hold);
+				}
+			};
 		const handle = deps.createAgent({
 			transcriptStreamFn: (currentModel, currentContext, options) => {
 				const middlewareChoice = middlewareToolChoice.current();
@@ -712,6 +728,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					(request) => {
 						if (invokedAttempt && modelCall) modelCall = modelCall.nextAttempt({ toolChoice: "auto" }) ?? modelCall;
 						invokedAttempt = true;
+						const attempt = modelCall;
+						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
+						attempt?.stage("send", "start");
 						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
 						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"));
 						delete localRuntime.lastProviderStatus;
@@ -722,6 +741,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof request.options>["onResponse"]>>) => {
 								// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
 								localRuntime.lastProviderStatus = args[0].status;
+								// Pi retries a retryable status inside one attempt; the first byte is the response that
+								// opens the stream. Transports that never report a response leave it unobserved (#434).
+								if (args[0].status >= 200 && args[0].status < 300) attempt?.mark("firstByte");
 								await request.options?.onResponse?.(...args);
 							},
 						};
@@ -731,6 +753,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							sent = { ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") };
 						}
 						const stream = engineMainStreamSimple(currentModel, sent, requestOptions);
+						// send.end is the handoff to Pi's provider, which owns serialization and the socket under
+						// transport option B. The journal's TTFT is firstToken minus this mark (#434).
+						attempt?.stage("send", "end");
 						// #423: a cache keepalive replays exactly this request, without this turn's call tracker or status hook.
 						const { fetch: _tracked, onResponse: _status, ...replayed } = requestOptions;
 						deps.noteMainRequest?.(
@@ -790,7 +815,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				return undefined;
 			},
-			beforeStreamRequest: async ({ context: request, options: streamOptions }) => {
+			beforeStreamRequest: stageAdmission(async ({ context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				callTracking = null;
 				delete localRuntime.lastProviderStatus;
@@ -828,6 +853,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						localRuntime.runtimeResolution.costProvenance === "estimated")
 				) {
 					const recordBlock = (block: BudgetAlertPayload): void => {
+						hold.waitedOn = "budget";
 						persistence.appendBudgetBlock({
 							...block,
 							raiseToUsd: suggestedSessionCostCeilingUsd(block.currentUsd, block.ceilingUsd),
@@ -888,35 +914,48 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				admittedMessages = admission.block ? [] : resolved.messages;
 				admittedSystemPrompt = admission.block ? "" : (resolved.systemPrompt ?? "");
 				return admission;
-			},
+			}),
 			onStreamInvocation: () => {
 				deps.onMemoryRequestSubmitted?.(admittedMessages, admittedSystemPrompt);
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
+				// Legacy ttftMs counts from here, so it includes Clio's request shaping and any provider-replay
+				// rebuild; the journal's TTFT starts at send.end, the handoff to Pi's provider (#434).
 				apiCallStartedAt = performance.now();
 				apiCallFirstDeltaAt = null;
+				modelCall?.stage("send", "start");
 			},
 			getApiKey: async () => {
+				// Pi converts the conversation between turn_start and this call; that is the transform stage (#434).
+				const call = modelCall;
+				call?.stage("transform", "end");
 				if (!targetRequiresAuth(target.target, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
 				preInvocationStage = "auth";
-				const signal = getCurrentAgentSignal();
-				const resolved = await deps.providers.auth.resolveForTarget(
-					target.target,
-					target.runtime,
-					signal ? { signal } : undefined,
-				);
-				if (!currentRun() || signal?.aborted) throw new Error("Request ownership changed while resolving authentication.");
-				localRuntime.lastAuthResolution = resolved;
-				// A failed OAuth refresh carries its remedy in detail; Pi's own "No API key" error would drop it.
-				if (
-					resolved.apiKey === undefined &&
-					resolved.source === "stored-oauth" &&
-					resolved.detail &&
-					resolved.detail !== resolved.providerId
-				)
-					throw new Error(resolved.detail);
-				return resolved.apiKey;
+				call?.stage("auth", "start");
+				let refreshed: boolean | undefined;
+				try {
+					const signal = getCurrentAgentSignal();
+					const resolved = await deps.providers.auth.resolveForTarget(
+						target.target,
+						target.runtime,
+						signal ? { signal } : undefined,
+					);
+					refreshed = resolved.refreshed;
+					if (!currentRun() || signal?.aborted) throw new Error("Request ownership changed while resolving authentication.");
+					localRuntime.lastAuthResolution = resolved;
+					// A failed OAuth refresh carries its remedy in detail; Pi's own "No API key" error would drop it.
+					if (
+						resolved.apiKey === undefined &&
+						resolved.source === "stored-oauth" &&
+						resolved.detail &&
+						resolved.detail !== resolved.providerId
+					)
+						throw new Error(resolved.detail);
+					return resolved.apiKey;
+				} finally {
+					call?.stage("auth", "end", refreshed === undefined ? {} : { refreshed });
+				}
 			},
 		});
 		getCurrentAgentSignal = () => handle.agent.signal;
@@ -1205,6 +1244,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						},
 						journalLease.context,
 					);
+					modelCall.stage("transform", "start");
 				}
 			}
 			// Every span below is measured on the monotonic frame, so an NTP
@@ -1379,6 +1419,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const hasDelta = hasAssistantGenerationDelta(publicEvent.assistantMessageEvent);
 				if (hasDelta && apiCallFirstDeltaAt === null) {
 					apiCallFirstDeltaAt = eventClock;
+					modelCall?.mark("firstToken");
 					// The timer may be armed for the longer first-token window; the
 					// stream is live now, so the mid-stream window applies from here.
 					const stallMs = deps.retrySettings().streamStallMs;

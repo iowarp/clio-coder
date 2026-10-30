@@ -99,6 +99,8 @@ export const CallSettledSchema = Type.Object(
 		stop,
 		usage: Type.Union([UsageSchema, Type.Null()]),
 		pricing: PricingSchema,
+		// Offsets from the attempt's start. TTFT is firstToken minus send.end; the legacy ledger ttftMs counts from
+		// send.start and so includes Clio's request shaping (#434).
 		stages: Type.Object(
 			{
 				admission: Type.Optional(
