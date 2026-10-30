@@ -1014,11 +1014,23 @@ nav a:hover {
 .trace-panel .trace-bar.fail {
 	background: var(--status-fail-line);
 }
-.trace-tool-span {
+.trace-lane__label {
+	font-size: var(--text-exact);
+	overflow-wrap: anywhere;
+}
+/* A call's recorded stages inside its bar; the model segment runs from the first token to settle (#434). */
+.trace-stage {
 	position: absolute;
-	bottom: 3px;
-	height: 5px;
+	top: 0;
+	bottom: 0;
+	min-width: 2px;
 	background: var(--action-line);
+}
+.trace-stage[data-stage="admission"] {
+	background: var(--status-warn-line);
+}
+.trace-stage[data-stage="model"] {
+	background: var(--status-success-line);
 }
 .trace-run-detail h1 {
 	overflow-wrap: anywhere;

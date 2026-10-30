@@ -1,19 +1,13 @@
-// What a run's durable accounting says, before any of it is drawn. Status, the four totals, the
-// phases in their recorded order, and how many events and processes there were of each kind. Pure,
-// so the ordering and the wording are testable without a browser.
+// What a run's journal says, before any of it is drawn: its status, the read model's totals, where each call and
+// stage falls on the run's span, and what each timeline entry is called. Pure, so ordering and wording are testable
+// without a browser. Every number shown is a server display; geometry is the only arithmetic here (#434).
 
-import type { TraceCaptureCoverage, TracePhase, TraceRun } from "../../../contracts/traces.js";
+import type { TraceRun, TraceRunStatus } from "../../../contracts/traces.js";
+import type { RunTelemetryV1, RunTimelineEntry } from "../../../contracts/wire.js";
 import { formatDuration } from "../../api/clock.js";
 import { omittedSentence } from "../../design/facts-model.js";
 import type { StatusTone } from "../../design/status.js";
-import { toneForOutcome } from "../../design/status.js";
 import { quantityText } from "../../telemetry/quantity-model.js";
-
-export function captureCoverageLabel(coverage: TraceCaptureCoverage | null): string {
-	if (coverage === null || coverage.status === "unreported")
-		return "Capture coverage unreported. Recorded activity does not establish complete capture.";
-	return `Database-wide capture: ${coverage.status === "known_loss" ? "known loss" : "degraded"}. Dropped progress: ${coverage.droppedProgress ?? "unreported"}; dropped package activity: ${coverage.droppedPackageActivity ?? "unreported"}; failed rows: ${coverage.failedRows ?? "unreported"}. Per-run and remaining coverage is unreported.`;
-}
 
 export interface RunTotal {
 	label: string;
@@ -35,35 +29,48 @@ export interface Histogram {
 
 export const HISTOGRAM_KINDS = 8;
 
-/** The trace database records `success`/`fail`; the shared ramp knows the rest of the vocabulary. */
-export function runTone(status: string): StatusTone {
-	if (status === "success") return "success";
-	if (status === "fail") return "fail";
-	if (status === "queued") return "warn";
-	return toneForOutcome(status);
+const TONES: Record<TraceRunStatus, StatusTone> = {
+	queued: "warn",
+	running: "running",
+	success: "success",
+	fail: "fail",
+	unknown: "neutral",
+};
+export function runTone(status: TraceRunStatus): StatusTone {
+	return TONES[status];
 }
 
-/** Tokens, cost and model calls from the run journal, wall time and the runtime. A live run measures wall time to now. */
-export function runTotals(run: TraceRun, now: number): RunTotal[] {
-	const ended = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? now : Number.NaN;
+/** A run the ledger still lists as in flight, so its journal and timeline keep growing. */
+export const runIsLive = (status: TraceRunStatus | undefined) => status === "running" || status === "queued";
+
+/** Where the run's span starts and ends: the ledger's times, else the journal's first and last records. */
+export function runSpan(run: TraceRun, now: number): { start: number; end: number } | null {
+	const start = Date.parse(run.identity?.startedAt ?? run.telemetry.firstAt ?? "");
+	const ended = run.identity ? run.identity.endedAt : run.telemetry.lastAt;
+	const end = ended ? Date.parse(ended) : runIsLive(run.status) ? now : Number.NaN;
+	return Number.isFinite(start) && Number.isFinite(end) && end >= start ? { start, end } : null;
+}
+
+/** Tokens, cost and model calls from the run journal; wall time from the run's span; the runtime from the ledger. */
+export function runTotals(run: TraceRun, detail: RunTelemetryV1 | undefined, now: number): RunTotal[] {
+	const span = runSpan(run, now);
 	return [
-		{ label: "Tokens", value: quantityText(run.telemetry?.tokens) },
-		{ label: "Cost", value: quantityText(run.telemetry?.usd) },
-		{ label: "Model calls", value: quantityText(run.telemetry?.apiCalls) },
-		{
-			label: "Wall time",
-			value:
-				Number.isFinite(ended - Date.parse(run.started_at)) && ended >= Date.parse(run.started_at)
-					? formatDuration(ended - Date.parse(run.started_at))
-					: "not recorded",
-		},
-		{ label: "Runtime", value: run.runtime || "not recorded" },
+		{ label: "Tokens", value: quantityText(detail?.tokens.total ?? run.telemetry.tokens) },
+		{ label: "Cost", value: quantityText(run.telemetry.usd) },
+		{ label: "Model calls", value: quantityText(detail?.counts.calls ?? run.telemetry.apiCalls) },
+		{ label: "Wall time", value: span ? formatDuration(span.end - span.start) : "not recorded" },
+		{ label: "Runtime", value: run.identity?.runtimeId || "not recorded" },
 	];
 }
 
-/** Recorded order, which is `seq`. A wire that returns them shuffled still renders the run's shape. */
-export function orderedPhases(phases: readonly TracePhase[]): TracePhase[] {
-	return [...phases].sort((a, b) => a.seq - b.seq || a.name.localeCompare(b.name));
+/** What the journal can and cannot vouch for, in one sentence; null when it read whole. */
+export function journalNote(detail: RunTelemetryV1 | undefined): string | null {
+	if (!detail) return null;
+	const journal = detail.journal;
+	if (!journal.present) return "No run journal was written for this run, so its calls and spend are unknown.";
+	if (journal.skipped > 0 || journal.damaged > 0 || journal.gapRecords > 0 || journal.droppedRecords > 0)
+		return "Part of this run's journal could not be read or was dropped; its totals are lower bounds.";
+	return null;
 }
 
 /**
@@ -108,25 +115,124 @@ export function provenanceFacts(receipt: Record<string, unknown>): Array<[string
 	];
 }
 
-/** Missing phase timestamps stay missing; no bar is inferred from the parent run. */
-export function phasePosition(
-	phase: TracePhase,
-	run: TraceRun,
+type CallEntry = Extract<RunTimelineEntry, { kind: "call" }>;
+/** A stable key per timeline entry: an attempt, a feed sequence, or the record's kind and time. */
+export function entryKey(entry: RunTimelineEntry): string {
+	switch (entry.kind) {
+		case "call":
+			return entry.attemptId;
+		case "feed":
+			return `feed:${entry.seq}`;
+		case "process":
+			return `process:${entry.event}:${entry.at}`;
+		case "gap":
+			return `gap:${entry.sink}:${entry.reason}:${entry.at}`;
+		case "run":
+			return `run:${entry.event}:${entry.at}`;
+	}
+}
+
+const FEED_NAMES: Record<string, string> = {
+	agent_start: "Agent started",
+	agent_end: "Agent finished",
+	attempt_start: "Attempt started",
+	message_end: "Message finished",
+	thinking: "Thinking",
+	route_warning: "Route warning",
+	clio_coder_tool_start: "Tool started",
+	clio_coder_tool_finish: "Tool finished",
+	clio_coder_tool_observation: "Tool observation",
+	clio_coder_permission_escalated: "Permission escalated",
+	clio_coder_permission_resolved: "Permission resolved",
+	clio_coder_run_outcome: "Run outcome",
+	clio_coder_steer_received: "Steering received",
+	unknown: "Unclassified event",
+};
+
+/** An entry's kind label and title, from the closed vocabularies the journal records. */
+export function entryLabel(entry: RunTimelineEntry): { kind: string; title: string; tone: StatusTone } {
+	switch (entry.kind) {
+		case "call":
+			return {
+				kind: "call",
+				title: `${entry.label} call · ${entry.disposition.replaceAll("_", " ")}${entry.failure ? ` (${entry.failure})` : ""}`,
+				tone: entry.failure || entry.disposition === "settled_no_usage" ? "fail" : "neutral",
+			};
+		case "feed": {
+			const body = entry.body;
+			if (body.kind === "event") {
+				const name = FEED_NAMES[body.type] ?? body.type;
+				return {
+					kind: body.type,
+					title: body.tool ? `${name}: ${body.tool}` : name,
+					tone: body.outcome === "error" || body.outcome === "blocked" ? "fail" : "neutral",
+				};
+			}
+			if (body.kind === "open") return { kind: "open", title: `Run opened for ${body.agentId}`, tone: "neutral" };
+			if (body.kind === "journal_truncated")
+				return { kind: "journal_truncated", title: "Feed truncated at the per-run size cap", tone: "warn" };
+			return {
+				kind: body.kind,
+				title: `${body.kind === "receipt" ? "Receipt" : "Terminal outcome"}: ${body.outcome.replaceAll("_", " ")}`,
+				tone: body.outcome === "succeeded" ? "success" : body.outcome === "unknown" ? "neutral" : "fail",
+			};
+		}
+		case "process":
+			return {
+				kind: "process",
+				title: entry.event === "started" ? "Worker process started" : `Worker process exited with code ${entry.exitCode}`,
+				tone: entry.event === "exited" && entry.exitCode !== 0 ? "fail" : "neutral",
+			};
+		case "gap":
+			return { kind: "gap", title: `Journal gap: ${entry.reason} in ${entry.sink}`, tone: "warn" };
+		case "run":
+			return {
+				kind: "run",
+				title: `Run ${entry.event}${entry.terminalReason ? `: ${entry.terminalReason.replaceAll("_", " ")}` : ""}`,
+				tone: entry.terminalReason === "completed" ? "success" : entry.terminalReason ? "fail" : "neutral",
+			};
+	}
+}
+
+/** A call's place on the run's span, as percentages of it; null when either end is missing. */
+export function callPosition(
+	call: CallEntry,
+	span: { start: number; end: number },
 	now: number,
-): { left: number; width: number; duration: number } | null {
-	const start = Date.parse(run.started_at);
-	const end = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? now : Number.NaN;
-	const phaseStart = phase.started_at ? Date.parse(phase.started_at) : Number.NaN;
-	const phaseEnd = phase.ended_at
-		? Date.parse(phase.ended_at)
-		: phase.status === "running" && run.status === "running"
-			? now
-			: Number.NaN;
-	if (![start, end, phaseStart, phaseEnd].every(Number.isFinite) || end <= start || phaseEnd < phaseStart) return null;
-	const left = Math.max(0, Math.min(100, ((phaseStart - start) / (end - start)) * 100));
-	return {
-		left,
-		width: Math.max(0, Math.min(100 - left, ((phaseEnd - phaseStart) / (end - start)) * 100)),
-		duration: phaseEnd - phaseStart,
-	};
+): { left: number; width: number } | null {
+	const start = Date.parse(call.at);
+	const end = call.endAt ? Date.parse(call.endAt) : call.disposition === "incomplete" ? now : Number.NaN;
+	const total = span.end - span.start;
+	if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || total <= 0) return null;
+	const left = Math.max(0, Math.min(100, ((start - span.start) / total) * 100));
+	return { left, width: Math.max(0, Math.min(100 - left, ((end - start) / total) * 100)) };
+}
+
+export interface StageBar {
+	stage: string;
+	/** Percentages of the call's own bar. */
+	left: number;
+	width: number;
+}
+
+const STAGE_ORDER = ["admission", "auth", "transform", "connect", "send"] as const;
+/**
+ * A call's recorded stages as segments of its bar, from the offsets the journal holds; the model's time runs from
+ * the first token to settle. An unrecorded stage draws nothing, so no stage is ever inferred.
+ */
+export function stageBars(call: CallEntry): StageBar[] {
+	const stages = call.stages;
+	if (!stages || stages.settle === null || stages.settle <= 0) return [];
+	const total = stages.settle;
+	const bar = (stage: string, from: number, to: number): StageBar[] =>
+		to > from && from >= 0
+			? [{ stage, left: (from / total) * 100, width: ((Math.min(to, total) - Math.min(from, total)) / total) * 100 }]
+			: [];
+	return [
+		...STAGE_ORDER.flatMap((stage) => {
+			const span = stages[stage];
+			return span ? bar(stage, span.start, span.end) : [];
+		}),
+		...(stages.firstToken !== undefined ? bar("model", stages.firstToken, total) : []),
+	];
 }

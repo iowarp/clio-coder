@@ -1,120 +1,59 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import { PageCursor } from "./common.js";
+import { Id, PageCursor } from "./common.js";
 import { TelemetryRunRow } from "./telemetry.js";
 
+/**
+ * Trace history is the run journals (#434 §11.3): each run's read-model row, joined to the dispatch ledger's row for
+ * the identity a content-free journal does not hold. A run's calls, feed and process lifecycle are its run timeline;
+ * nothing here reads trace.sqlite.
+ */
 const closed = { additionalProperties: false };
 const text = Type.String();
-/** Database identifiers include canonical session:<turn UUID> namespaces. These never authorize filesystem artifacts. */
-export const TraceId = Type.String({ minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9:._-]*$" });
 const optionalText = Type.Union([text, Type.Null()]);
-const count = Type.Union([Type.Number(), Type.Null()]);
-export const TraceCaptureCoverage = Type.Object(
+/** `unknown` is a run the ledger does not hold whose journal has not settled; never read as success or failure. */
+export const TraceRunStatus = Type.Union([
+	Type.Literal("queued"),
+	Type.Literal("running"),
+	Type.Literal("success"),
+	Type.Literal("fail"),
+	Type.Literal("unknown"),
+]);
+export type TraceRunStatus = Static<typeof TraceRunStatus>;
+/** The dispatch ledger's row for a run: what was asked, of whom, on which route. */
+export const TraceIdentity = Type.Object(
 	{
-		status: Type.Union([Type.Literal("known_loss"), Type.Literal("degraded"), Type.Literal("unreported")]),
-		droppedProgress: count,
-		droppedPackageActivity: count,
-		failedRows: count,
+		agentId: text,
+		task: text,
+		targetId: text,
+		model: text,
+		runtimeId: text,
+		node: optionalText,
+		status: text,
+		outcome: optionalText,
+		startedAt: text,
+		endedAt: optionalText,
+		sessionId: optionalText,
+		parentRunId: optionalText,
+		rootRunId: optionalText,
 	},
 	closed,
 );
-export type TraceCaptureCoverage = Static<typeof TraceCaptureCoverage>;
-export const TraceStatus = Type.Object(
-	{
-		available: Type.Boolean(),
-		captureCoverage: Type.Union([TraceCaptureCoverage, Type.Null()]),
-		schemaVersion: Type.Union([Type.Integer(), Type.Null()]),
-		retentionPolicy: Type.Object({ maxAgeDays: Type.Integer(), maxBytes: Type.Integer() }, closed),
-	},
-	closed,
-);
+export type TraceIdentity = Static<typeof TraceIdentity>;
 export const TraceRun = Type.Object(
 	{
-		run_id: TraceId,
-		assignment_id: text,
-		session_id: Type.Optional(optionalText),
-		request: optionalText,
-		status: text,
-		agent: text,
-		target: text,
-		model: text,
-		runtime: text,
-		node: optionalText,
-		started_at: text,
-		ended_at: optionalText,
-		/** Tokens and spend come from the run journal through the read model, never from index columns (#434). */
-		telemetry: Type.Union([TelemetryRunRow, Type.Null()]),
-		source: Type.Union([Type.Literal("dispatch"), Type.Literal("session")]),
+		runId: Id,
+		status: TraceRunStatus,
+		/** The journal's last write, the history's order; null for a run directory with no journal. */
+		writtenAt: optionalText,
+		/** Null for a run the ledger does not hold: a standalone run, or a row the ledger has since dropped. */
+		identity: Type.Union([TraceIdentity, Type.Null()]),
+		/** Tokens and spend come from the run journal through the read model (#434). */
+		telemetry: TelemetryRunRow,
 	},
 	closed,
 );
 export type TraceRun = Static<typeof TraceRun>;
-export const TracePhase = Type.Object(
-	{
-		phase_id: TraceId,
-		run_id: TraceId,
-		seq: Type.Integer(),
-		name: text,
-		kind: text,
-		owner: text,
-		description: optionalText,
-		status: text,
-		attempt: Type.Integer(),
-		retries: Type.Integer(),
-		error: optionalText,
-		started_at: optionalText,
-		ended_at: optionalText,
-	},
-	closed,
-);
-export type TracePhase = Static<typeof TracePhase>;
-export const TraceEvent = Type.Object(
-	{
-		rowid: Type.Integer({ minimum: 1 }),
-		event_id: text,
-		run_id: TraceId,
-		phase_id: TraceId,
-		parent_id: optionalText,
-		type: text,
-		name: text,
-		payload_json: optionalText,
-		tokens: count,
-		started_at: text,
-		ended_at: optionalText,
-	},
-	closed,
-);
-export type TraceEvent = Static<typeof TraceEvent>;
-export const TraceGate = Type.Object(
-	{
-		id: Type.Integer(),
-		run_id: TraceId,
-		phase_id: TraceId,
-		attempt: Type.Integer(),
-		gate: text,
-		passed: Type.Integer({ minimum: 0, maximum: 1 }),
-		violations_json: text,
-		checks_json: optionalText,
-		created_at: text,
-	},
-	closed,
-);
-export const TraceProcess = Type.Object(
-	{
-		id: Type.Integer(),
-		run_id: TraceId,
-		kind: text,
-		name: text,
-		pid: Type.Integer(),
-		command: text,
-		command_digest: text,
-		started_at: text,
-		ended_at: optionalText,
-		host: Type.Optional(optionalText),
-		birth_token: Type.Optional(optionalText),
-	},
-	closed,
-);
 export const JsonRecord = Type.Record(Type.String(), Type.Unknown());
 export const TraceReceipt = Type.Object(
 	{ receipt: Type.Union([JsonRecord, Type.Null()]), evidence: Type.Union([JsonRecord, Type.Null()]) },
@@ -124,10 +63,7 @@ export const TraceRunsQuery = Type.Object(
 	{
 		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
 		cursor: Type.Optional(PageCursor),
-		source: Type.Optional(Type.Union([Type.Literal("dispatch"), Type.Literal("session")])),
-		status: Type.Optional(
-			Type.Union([Type.Literal("queued"), Type.Literal("running"), Type.Literal("success"), Type.Literal("fail")]),
-		),
+		status: Type.Optional(TraceRunStatus),
 		q: Type.Optional(Type.String({ maxLength: 256 })),
 	},
 	closed,
@@ -136,22 +72,8 @@ export const TraceRunsPage = Type.Object(
 	{ runs: Type.Array(TraceRun), nextCursor: Type.Union([PageCursor, Type.Null()]) },
 	closed,
 );
-export const RowCursor = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
-export const TraceEventsQuery = Type.Object(
-	{ after: Type.Optional(RowCursor), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })) },
-	closed,
-);
-export const TraceEventsPage = Type.Object(
-	{ events: Type.Array(TraceEvent), cursor: RowCursor, hasMore: Type.Boolean() },
-	closed,
-);
-export const TraceParams = Type.Object({ runId: TraceId }, closed);
-export const TraceLiveBatch = Type.Object(
-	{ run: TraceRun, events: Type.Array(TraceEvent), cursor: RowCursor, hasMore: Type.Boolean() },
-	closed,
-);
+export const TraceParams = Type.Object({ runId: Id }, closed);
 export type TraceRequest =
-	| { kind: "status" }
 	| { kind: "runs"; query: Static<typeof TraceRunsQuery> }
-	| { kind: "run" | "phases" | "gates" | "processes" | "receipt"; runId: string; full?: boolean }
-	| { kind: "events" | "live"; runId: string; after: number; limit: number };
+	| { kind: "run"; runId: string }
+	| { kind: "receipt"; runId: string; full?: boolean };

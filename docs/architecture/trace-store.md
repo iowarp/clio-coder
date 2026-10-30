@@ -193,24 +193,18 @@ When resolving the SQLite database path:
 6. **`prune`** applies the resolved retention policy (defaults from `DEFAULT_TRACE_RETENTION_POLICY`, overridable with `CLIO_CODER_TRACE_RETENTION_DAYS` and `CLIO_CODER_TRACE_MAX_BYTES`, or per command with `--max-age-days` and `--max-bytes`) while protecting queued and running runs. Text output reports runs and rows removed, bytes reclaimed from `trace.sqlite` and its WAL and shared-memory sidecars, whether `VACUUM` ran, and how many live runs were protected. `--json` emits `{policy, runsRemoved, rowsRemoved, bytesBefore, bytesAfter, bytesRemoved, vacuumed, protectedRuns}`. An invalid environment value exits 1.
 7. **`sql`** executes one read-only statement against the database and prints the rows as a JSON array, with BigInt values as strings. The statement must start with `SELECT` or `WITH`. It is rejected with exit 2 when it contains a semicolon or any of `INSERT`, `UPDATE`, `DELETE`, `REPLACE`, `CREATE`, `ALTER`, `DROP`, `ATTACH`, `DETACH`, `VACUUM`, or `PRAGMA`. The check runs before the database opens, and the connection is read-only as well.
 
-### Web Trace API
+### Web Trace History
 
-The graphical application in `apps/clio-coder-gui/` serves the trace API. It binds to `127.0.0.1` and requires a bearer token, random per launch unless the background app or `--token` supplies one. The CLI trace commands above work independently of the web process. See [the GUI guide](../guide/gui.md) for the application itself.
+The graphical application in `apps/clio-coder-gui/` does not read this database. Its trace history lists run journals through the telemetry read model ([Telemetry](telemetry.md)), newest journal write first, joined to the dispatch ledger for each run's task, agent and route. It binds to `127.0.0.1` and requires a bearer token, random per launch unless the background app or `--token` supplies one. The CLI trace commands above work independently of the web process. See [the GUI guide](../guide/gui.md) for the application itself.
 
 | Endpoint | Source |
 | --- | --- |
-| `GET /api/traces/status` | Availability, schema version, and the resolved retention policy. |
-| `GET /api/traces/runs` | Keyset-paginated runs, with `source`, `status`, and text filters. |
-| `GET /api/traces/runs/:runId` | One run. |
-| `GET /api/traces/runs/:runId/phases` | Phases ordered by sequence. |
-| `GET /api/traces/runs/:runId/events` | Rowid-cursor event history. |
-| `GET /api/traces/runs/:runId/live` | SSE event tail, polled every 500 ms. |
-| `GET /api/traces/runs/:runId/gates` | Gate results. |
-| `GET /api/traces/runs/:runId/processes` | Process records. |
+| `GET /api/traces/runs` | Run journals, keyset-paginated by write time, with `status` and text filters over the ledger's identity. |
+| `GET /api/traces/runs/:runId` | One run's read-model row and ledger identity. |
 | `GET /api/traces/runs/:runId/receipt` | Receipt and evidence-index sidecars. |
+| `GET /api/telemetry/runs/:runId` | The run's telemetry: journal coverage, counts, tokens and settlement. |
+| `GET /api/telemetry/runs/:runId/timeline` | The run's calls with their stages, the run feed, the worker process and the settlement. |
 
-The receipt endpoint reads sidecars beside the database. Missing or malformed sidecars yield a null half without failing the run page. The default projection omits `output`, `upstreamResponses`, `routeDecision`, `briefing`, and `steering`, and `?include=full` explicitly requests the full receipt. The authenticated operator can inspect trace payloads. The browser renders all model content through its safe rich-content renderer.
+The receipt endpoint reads sidecars from the state directory. Missing or malformed sidecars yield a null half without failing the run page. The default projection omits `output`, `upstreamResponses`, `routeDecision`, `briefing`, and `steering`, and `?include=full` explicitly requests the full receipt. The browser renders all model content through its safe rich-content renderer.
 
-The run page shows the request, phase waterfall, duration, costs, events with payloads, gate decisions, processes, and receipt provenance. Unrecorded fields remain absent rather than becoming zero. The typed route table and OpenAPI document in `apps/clio-coder-gui/contracts/` define query parameters and response schemas.
-
-`TraceReader.runsPage({before, limit, filter})` owns run-list pagination for the web API. It orders by `started_at DESC, run_id DESC`, returns a bounded page and `nextBefore`, and combines `source`, `status`, and text-search filters with bound SQL parameters. The application validates and encodes the cursor and does not duplicate pagination SQL.
+The run page replays the run timeline, draws each call attempt on the run's span with its recorded stages, and shows the receipt's checks. Every number is the read model's display, and unrecorded fields remain absent rather than becoming zero. A run from before run journals has no timeline. The typed route table and OpenAPI document in `apps/clio-coder-gui/contracts/` define query parameters and response schemas.

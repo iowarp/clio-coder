@@ -19,6 +19,8 @@ export type {
 	Quantity,
 	RunRowV1,
 	RunTelemetryV1,
+	RunTimelineEntry,
+	RunTimelineV1,
 	SessionTelemetryV1,
 	TelemetryTopic,
 	TelemetryUpdateV1,

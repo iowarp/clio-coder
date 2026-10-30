@@ -58,8 +58,7 @@ await seedFleet(h.home.path, h.home.env);
 await seedEvidence(h.home.path, h.home.env);
 await seedReports(h.home.path, h.home.env);
 await seedLibrary(h.home.path, h.home.env);
-const fixture = traceFixture(join(h.home.path, "state"));
-fixture.finish();
+await traceFixture(join(h.home.path, "state"));
 const server = serve({ fetch: h.app.fetch, hostname: "127.0.0.1", port: 0 });
 await new Promise<void>((resolve) => server.on("listening", resolve));
 const address = server.address();
@@ -74,7 +73,6 @@ const browser = await chromium
 	.catch(async (error: unknown) => {
 		if ("closeAllConnections" in server) server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
-		fixture.close();
 		await h.close();
 		throw error;
 	});
@@ -150,14 +148,13 @@ try {
 		page.on("pageerror", (error) => errors.push(error.message));
 		page.on("requestfailed", (request) => {
 			const path = new URL(request.url()).pathname;
-			// Closing a tab or leaving a trace intentionally closes its EventSource. An image the page
+			// Closing a tab intentionally closes its EventSource. An image the page
 			// replaced before its bytes arrived is cancelled, not broken; a missing one is a 404 below. A
 			// read the client cancels itself, because its view left or a newer read superseded it, is not
 			// broken either.
 			if (
 				request.failure()?.errorText === "net::ERR_ABORTED" &&
 				(path === "/api/events" ||
-					/^\/api\/traces\/runs\/[^/]+\/live$/.test(path) ||
 					request.resourceType() === "image" ||
 					(request.resourceType() === "fetch" && request.method() === "GET" && path.startsWith("/api/")))
 			)
@@ -347,7 +344,12 @@ try {
 		await check("traces");
 		await page.locator('main a[href^="/traces/run-0000"]').click();
 		await page.locator("main").getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
-		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
+		// The replay steps through the run journal: the worker process, the run feed and the call (#434).
+		await page.getByText("Tool finished: read", { exact: true }).first().waitFor({ state: "attached" });
+		await page.getByText("worker call · settled", { exact: true }).first().waitFor({ state: "attached" });
+		await page.getByRole("tab", { name: /^Execution · 1 call$/ }).click();
+		await page.locator("main .trace-lane .trace-stage").first().waitFor({ state: "attached" });
+		await page.getByRole("tab", { name: /^Replay/ }).click();
 		// The cost cell is the server's render; a legacy row may read partial or unmeasured, so only
 		// its presence is checked here.
 		const costCell = page
@@ -1752,6 +1754,5 @@ try {
 	if (zoomProfile) await rm(zoomProfile, { recursive: true, force: true });
 	if ("closeAllConnections" in server) server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
-	fixture.close();
 	await h.close();
 }

@@ -39,6 +39,8 @@ const wireDtoNames = new Set([
 	"Quantity",
 	"RunRowV1",
 	"RunTelemetryV1",
+	"RunTimelineEntry",
+	"RunTimelineV1",
 	"SessionTelemetryV1",
 	"TelemetryTopic",
 	"TelemetryUpdateV1",
@@ -80,7 +82,6 @@ const adapters = new Set([
 	"src/domains/toolchain/index.ts",
 	"src/core/xdg.ts",
 	"src/core/workspace-files.ts",
-	"src/domains/observability/trace-store.ts",
 	"src/domains/observability/evidence-index.ts",
 	"src/domains/session/history.ts",
 	// The telemetry read model and its cold loader; the adapter serves their DTOs unchanged (#434).
@@ -105,8 +106,8 @@ const testModules = new Set([
 	"src/cli/config-inspect.ts",
 	"src/domains/providers/auth/index.ts",
 	"src/domains/toolchain/index.ts",
-	"src/domains/observability/trace-store.ts",
 	"tests/harness/openai-compat-fixture.ts",
+	"tests/harness/telemetry-view.ts",
 	"tests/harness/telemetry-lies.ts",
 	"src/domains/observability/call-journal.ts",
 ]);

@@ -1,18 +1,18 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The replay region supports scoped keyboard playback and has a visible focus ring.
 import type { KeyboardEvent } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { TraceEvent, TracePhase, TraceRun } from "../../../contracts/traces.js";
-import { formatDuration, formatTime } from "../../api/clock.js";
+import type { TraceRun } from "../../../contracts/traces.js";
+import type { RunTimelineEntry } from "../../../contracts/wire.js";
+import { clock, formatDuration, formatTime } from "../../api/clock.js";
 import { Icon } from "../../design/icons.js";
-import { EventRow, Facts, Json, parseJson } from "./panels.js";
-import type { TraceLiveState } from "./trace-live-model.js";
+import { EntryRow, Json } from "./panels.js";
+import { entryLabel, runSpan } from "./trace-model.js";
 import {
-	filterReplayEvents,
-	latestReplayEvent,
+	filterReplayEntries,
 	REPLAY_SPEEDS,
 	replayDelay,
 	replayEntries,
-	replayEventKinds,
+	replayEntryKinds,
 	replayIndex,
 	replayWindow,
 } from "./trace-replay-model.js";
@@ -20,43 +20,36 @@ import "./trace-replay.css";
 
 interface TraceReplayProps {
 	run: TraceRun;
-	events: TraceEvent[];
-	phases: TracePhase[];
-	phaseId: string | null;
-	selectPhase: (id: string) => void;
-	live: TraceLiveState;
+	timeline: RunTimelineEntry[];
+	/** The run is still live, so the timeline grows as its journal is re-read. */
+	live: boolean;
 }
 
-export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }: TraceReplayProps) {
+export function TraceReplay({ run, timeline, live }: TraceReplayProps) {
 	const id = useId();
 	const root = useRef<HTMLElement>(null);
 	const [query, setQuery] = useState("");
 	const [kind, setKind] = useState("");
-	const kinds = useMemo(() => replayEventKinds(events), [events]);
+	const kinds = useMemo(() => replayEntryKinds(timeline), [timeline]);
+	const runStart = runSpan(run, clock.now())?.start ?? null;
 	const entries = useMemo(
-		() => replayEntries(filterReplayEvents(events, query, kind), run.started_at, phaseId),
-		[events, run.started_at, phaseId, query, kind],
+		() => replayEntries(filterReplayEntries(timeline, query, kind), runStart),
+		[timeline, runStart, query, kind],
 	);
-	const latestId = useMemo(() => latestReplayEvent(entries), [entries]);
-	const phaseNames = useMemo(() => new Map(phases.map((phase) => [phase.phase_id, phase.name])), [phases]);
-	const phaseCounts = useMemo(() => {
-		const counts = new Map<string, number>();
-		for (const event of events) counts.set(event.phase_id, (counts.get(event.phase_id) ?? 0) + 1);
-		return counts;
-	}, [events]);
-	const [eventId, setEventId] = useState<string | null>(() => entries[0]?.event.event_id ?? null);
+	const latestId = entries.at(-1)?.key ?? null;
+	const [eventId, setEventId] = useState<string | null>(() => entries[0]?.key ?? null);
 	const [playing, setPlaying] = useState(false);
 	const [following, setFollowing] = useState(false);
 	const [speed, setSpeed] = useState(1);
 	const [visible, setVisible] = useState(() => !document.hidden);
 	const [reducedMotion, setReducedMotion] = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
-	const capturing = run.status === "running" && live === "live";
+	const capturing = live;
 	const index = replayIndex(entries, following && capturing ? latestId : eventId);
 	const current = entries[index];
 	const next = entries[index + 1];
 	const nearby = replayWindow(entries, index);
-	const currentId = current?.event.event_id ?? null;
-	const nextId = next?.event.event_id ?? null;
+	const currentId = current?.key ?? null;
+	const nextId = next?.key ?? null;
 	const delay = current && next ? replayDelay(current, next, speed, reducedMotion) : null;
 	const atEnd = index === entries.length - 1;
 
@@ -110,7 +103,7 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 	const seek = (position: number) => {
 		setPlaying(false);
 		setFollowing(false);
-		setEventId(entries[Math.max(0, Math.min(entries.length - 1, position))]?.event.event_id ?? null);
+		setEventId(entries[Math.max(0, Math.min(entries.length - 1, position))]?.key ?? null);
 	};
 	const toggle = () => {
 		if (following) {
@@ -119,7 +112,7 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 		}
 		if (!current || entries.length < 2) return;
 		setFollowing(false);
-		setEventId(playing ? currentId : atEnd ? (entries[0]?.event.event_id ?? null) : currentId);
+		setEventId(playing ? currentId : atEnd ? (entries[0]?.key ?? null) : currentId);
 		setPlaying(!playing);
 	};
 	const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -161,9 +154,11 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 					{following && capturing ? "Following capture" : playing ? "Playing recording" : "Recording paused"}
 				</span>
 			</div>
-			<p className="panel-note">Inspect captured activity and its payloads. Playback never executes commands.</p>
+			<p className="panel-note">
+				Step through the run journal: calls, the run feed and the worker process. Playback never executes commands.
+			</p>
 			<div className="trace-replay__controls">
-				<button type="button" onClick={() => seek(index - 1)} disabled={index <= 0} title="Previous event">
+				<button type="button" onClick={() => seek(index - 1)} disabled={index <= 0} title="Previous entry">
 					<Icon name="arrowLeft" />
 					<span>Back</span>
 				</button>
@@ -172,12 +167,12 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 					className="trace-replay__play"
 					onClick={toggle}
 					disabled={entries.length < 2 && !following}
-					aria-label={following || playing ? "Pause replay" : atEnd ? "Replay from first event" : "Play recorded events"}
+					aria-label={following || playing ? "Pause replay" : atEnd ? "Replay from first entry" : "Play recorded entries"}
 				>
 					<Icon name={following || playing ? "stop" : "play"} />
 					{following || playing ? "Pause" : atEnd && entries.length > 1 ? "Replay" : "Play"}
 				</button>
-				<button type="button" onClick={() => seek(index + 1)} disabled={!next} title="Next event">
+				<button type="button" onClick={() => seek(index + 1)} disabled={!next} title="Next entry">
 					<span>Step</span>
 					<Icon name="chevronRight" />
 				</button>
@@ -211,8 +206,7 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 			</div>
 			<div className="trace-replay__position">
 				<label htmlFor={`${id}-scrubber`}>
-					Event <strong>{index < 0 ? 0 : index + 1}</strong> / {entries.length.toLocaleString("en-US")} recorded
-					{phaseId ? " in phase" : ""}
+					Entry <strong>{index < 0 ? 0 : index + 1}</strong> / {entries.length.toLocaleString("en-US")} recorded
 				</label>
 				<span>
 					<Icon name="clock" />
@@ -228,37 +222,19 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 				step={1}
 				value={Math.max(0, index)}
 				disabled={entries.length < 2}
-				aria-valuetext={current ? `Event ${index + 1} of ${entries.length}: ${current.event.name}` : "No recorded events"}
+				aria-valuetext={
+					current ? `Entry ${index + 1} of ${entries.length}: ${entryLabel(current.entry).title}` : "No recorded entries"
+				}
 				onChange={(event) => seek(Number(event.target.value))}
 			/>
-			<section className="trace-replay__phases" aria-label="Filter replay by phase">
-				<button type="button" aria-pressed={phaseId === null} onClick={() => selectPhase("all")}>
-					All phases <small>{events.length}</small>
-				</button>
-				{phases.map((phase) => (
-					<button
-						key={phase.phase_id}
-						type="button"
-						aria-pressed={phaseId === phase.phase_id}
-						data-current={current?.event.phase_id === phase.phase_id}
-						onClick={() => selectPhase(phase.phase_id)}
-					>
-						{phase.name}
-						<small>{phaseCounts.get(phase.phase_id) ?? 0}</small>
-						{current?.event.phase_id === phase.phase_id ? (
-							<span className="trace-replay__phase-cursor">Current event</span>
-						) : null}
-					</button>
-				))}
-			</section>
 			<div className="trace-filters trace-replay__filters">
 				<label>
-					Find recorded events
+					Find recorded entries
 					<input
 						type="search"
 						value={query}
 						maxLength={256}
-						placeholder="Event name, ID or payload text"
+						placeholder="Entry, tool or call ID"
 						onChange={(event) => {
 							setPlaying(false);
 							setFollowing(false);
@@ -268,7 +244,7 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 					/>
 				</label>
 				<label>
-					Event kind
+					Entry kind
 					<select
 						value={kind}
 						onChange={(event) => {
@@ -295,30 +271,31 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 							setEventId(null);
 						}}
 					>
-						Reset event filters
+						Reset entry filters
 					</button>
 				)}
 			</div>
 			{current ? (
 				<div className="trace-replay__workspace">
 					<div className="trace-replay__sequence">
-						<h3>Event navigator</h3>
+						<h3>Entry navigator</h3>
 						<p className="panel-note">
-							Showing {nearby.start + 1}–{nearby.start + nearby.entries.length} of {entries.length}. Scrub to any event.
+							Showing {nearby.start + 1}–{nearby.start + nearby.entries.length} of {entries.length}. Scrub to any entry.
 						</p>
 						<ol start={nearby.start + 1}>
 							{nearby.entries.map((entry, offset) => (
-								<li key={entry.event.event_id}>
+								<li key={entry.key}>
 									<button
 										type="button"
-										aria-current={entry.event.event_id === currentId ? "step" : undefined}
+										aria-current={entry.key === currentId ? "step" : undefined}
 										onClick={() => seek(nearby.start + offset)}
 									>
 										<span className="trace-replay__ordinal">{nearby.start + offset + 1}</span>
 										<span>
-											<strong>{entry.event.name || entry.event.type}</strong>
+											<strong>{entryLabel(entry.entry).title}</strong>
 											<small>
-												{entry.event.type} · {entry.elapsedMs === null ? "time unavailable" : `+${formatDuration(entry.elapsedMs)}`}
+												{entryLabel(entry.entry).kind} ·{" "}
+												{entry.elapsedMs === null ? "time unavailable" : `+${formatDuration(entry.elapsedMs)}`}
 											</small>
 										</span>
 									</button>
@@ -327,44 +304,24 @@ export function TraceReplay({ run, events, phases, phaseId, selectPhase, live }:
 						</ol>
 					</div>
 					<div className="trace-replay__detail" key={currentId}>
-						<p className="eyebrow">Selected event / {phaseNames.get(current.event.phase_id) ?? current.event.phase_id}</p>
-						<EventRow event={current.event} start={run.started_at} payload={false} />
-						<details>
-							<summary>Exact event record</summary>
-							<Facts
-								entries={[
-									["Event ID", current.event.event_id],
-									["Row", current.event.rowid],
-									["Phase ID", current.event.phase_id],
-									["Parent event", current.event.parent_id],
-									["Started", current.event.started_at],
-									["Ended", current.event.ended_at ?? "not recorded"],
-									["Recorded time", formatTime(current.event.started_at)],
-								]}
-							/>
-						</details>
-						<h3>Recorded payload</h3>
-						<Json value={parseJson(current.event.payload_json)} />
-						<details>
-							<summary>Raw recorded payload</summary>
-							<pre className="trace-replay__raw">{current.event.payload_json ?? "No payload recorded."}</pre>
-						</details>
+						<p className="eyebrow">Selected entry · {formatTime(current.entry.at)}</p>
+						<EntryRow entry={current.entry} start={runStart} />
+						<h3>Exact journal entry</h3>
+						<Json value={current.entry} />
 					</div>
 				</div>
 			) : (
 				<p className="trace-replay__empty">
 					{query || kind
-						? "No recorded event matches these filters. Reset event filters to restore the sequence."
-						: phaseId
-							? "No events were recorded for this phase."
-							: "No events have been recorded for this run."}
+						? "No recorded entry matches these filters. Reset entry filters to restore the sequence."
+						: "Nothing has been journaled for this run."}
 				</p>
 			)}
 			<p className="trace-replay__timing">
-				Ordered by recorded start, then row. Events without a valid start appear last. Idle gaps are capped at 5s; equal or
-				missing times advance every 0.5s before speed adjustment.{" "}
-				{reducedMotion ? "Reduced motion limits playback to two events per second. " : ""}
-				Live span details may update as capture arrives; earlier span versions are not reconstructed.
+				Ordered by recorded time, in journal order within an instant. Idle gaps are capped at 5s; equal or missing times
+				advance every 0.5s before speed adjustment.{" "}
+				{reducedMotion ? "Reduced motion limits playback to two entries per second. " : ""}A live run's timeline grows as
+				its journal is re-read.
 			</p>
 			<p id={`${id}-keys`} className="trace-replay__keys">
 				Focus this player: <kbd>Space</kbd> / <kbd>K</kbd> play or pause · <kbd>←</kbd> <kbd>→</kbd> step · <kbd>Home</kbd>{" "}

@@ -104,20 +104,7 @@ import {
 	TelemetryWhyStopped,
 } from "./telemetry.js";
 import { Install, Tools } from "./toolchain.js";
-import {
-	RowCursor,
-	TraceEventsPage,
-	TraceEventsQuery,
-	TraceGate,
-	TraceParams,
-	TracePhase,
-	TraceProcess,
-	TraceReceipt,
-	TraceRun,
-	TraceRunsPage,
-	TraceRunsQuery,
-	TraceStatus,
-} from "./traces.js";
+import { TraceParams, TraceReceipt, TraceRun, TraceRunsPage, TraceRunsQuery } from "./traces.js";
 import { SessionUsage } from "./usage.js";
 import {
 	AcpAutonomyLevelSchema as AutonomyLevel,
@@ -962,54 +949,19 @@ export const routes = {
 		response: Empty,
 		summary: "Report that a window shows the session, which keeps its child and resumes a parked one",
 	}),
-	traceStatus: defineRoute({
-		...get,
-		path: "/api/traces/status",
-		response: TraceStatus,
-		summary: "Trace availability and retention",
-	}),
 	traceRuns: defineRoute({
 		...get,
 		path: "/api/traces/runs",
 		query: TraceRunsQuery,
 		response: TraceRunsPage,
-		summary: "Paginated trace history",
+		summary: "Run journals newest write first, joined to the dispatch ledger's identity",
 	}),
 	traceRun: defineRoute({
 		...get,
 		path: "/api/traces/runs/:runId",
 		params: TraceParams,
 		response: TraceRun,
-		summary: "Trace run",
-	}),
-	tracePhases: defineRoute({
-		...get,
-		path: "/api/traces/runs/:runId/phases",
-		params: TraceParams,
-		response: Type.Array(TracePhase),
-		summary: "Run phases",
-	}),
-	traceGates: defineRoute({
-		...get,
-		path: "/api/traces/runs/:runId/gates",
-		params: TraceParams,
-		response: Type.Array(TraceGate),
-		summary: "Run gates",
-	}),
-	traceProcesses: defineRoute({
-		...get,
-		path: "/api/traces/runs/:runId/processes",
-		params: TraceParams,
-		response: Type.Array(TraceProcess),
-		summary: "Run processes",
-	}),
-	traceEvents: defineRoute({
-		...get,
-		path: "/api/traces/runs/:runId/events",
-		params: TraceParams,
-		query: TraceEventsQuery,
-		response: TraceEventsPage,
-		summary: "Run events by rowid",
+		summary: "One run's journal row and ledger identity",
 	}),
 	traceReceipt: defineRoute({
 		...get,
@@ -1018,18 +970,6 @@ export const routes = {
 		query: Type.Object({ include: Type.Optional(Type.Literal("full")) }, { additionalProperties: false }),
 		response: TraceReceipt,
 		summary: "Receipt and evidence summary; full payload on request",
-	}),
-	traceLive: defineRoute({
-		...get,
-		path: "/api/traces/runs/:runId/live",
-		params: TraceParams,
-		query: Type.Object(
-			{ after: Type.Optional(RowCursor), token: Type.Optional(Type.String({ maxLength: 256 })) },
-			{ additionalProperties: false },
-		),
-		response: Type.String(),
-		stream: true,
-		summary: "Live rowid event tail",
 	}),
 	telemetrySession: defineRoute({
 		...get,

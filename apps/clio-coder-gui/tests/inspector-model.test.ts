@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { reportedCount } from "../client/design/facts-model.js";
 import { toolCandidateNote, toolResolution } from "../client/pages/toolchain-model.js";
-import { histogram, orderedPhases, runTone, runTotals } from "../client/pages/traces/trace-model.js";
-import { NOT_JOURNALED } from "../client/telemetry/quantity-model.js";
-import type { TracePhase, TraceRun } from "../contracts/traces.js";
+import { histogram, runTone, runTotals } from "../client/pages/traces/trace-model.js";
+import type { TraceRun } from "../contracts/traces.js";
 
 const tool = (supported: boolean, source: "path" | "vendored" | "none") => ({
 	supported,
@@ -58,25 +57,8 @@ test("an offline inventory reports a capability or says it did not, and never re
 	assert.equal(reportedCount(Number.NaN), "Not reported");
 });
 
-const run = (over: Partial<TraceRun> = {}): TraceRun => ({
-	run_id: "run-0",
-	assignment_id: "a-0",
-	request: "Inspect fixture 0",
-	status: "success",
-	agent: "coder",
-	target: "local",
-	model: "model-a",
-	runtime: "openai",
-	node: null,
-	started_at: "2026-09-20T10:00:00.000Z",
-	ended_at: "2026-09-20T10:00:30.000Z",
-	telemetry: null,
-	source: "dispatch",
-	...over,
-});
-
 /** A run row as the read model serves it: every quantity already carries its display (#434). */
-const journaled = (tokens: string, usd: string, apiCalls: string): NonNullable<TraceRun["telemetry"]> => {
+const journaled = (tokens: string, usd: string, apiCalls: string): TraceRun["telemetry"] => {
 	const quantity = (display: string, metric: string, value: number) => ({
 		fact: {
 			measured: value,
@@ -91,8 +73,8 @@ const journaled = (tokens: string, usd: string, apiCalls: string): NonNullable<T
 	return {
 		runId: "run-0",
 		sessionId: null,
-		firstAt: null,
-		lastAt: null,
+		firstAt: "2026-09-20T10:00:00.000Z",
+		lastAt: "2026-09-20T10:00:30.000Z",
 		terminalReason: null,
 		source: "calls",
 		apiCalls: quantity(apiCalls, "apiCalls", 1),
@@ -100,50 +82,57 @@ const journaled = (tokens: string, usd: string, apiCalls: string): NonNullable<T
 		usd: quantity(usd, "usd", 0),
 	};
 };
+const run = (over: Partial<TraceRun> = {}): TraceRun => ({
+	runId: "run-0",
+	status: "success",
+	writtenAt: "2026-09-20T10:00:30.000Z",
+	identity: {
+		agentId: "coder",
+		task: "Inspect fixture 0",
+		targetId: "local",
+		model: "model-a",
+		runtimeId: "openai",
+		node: null,
+		status: "completed",
+		outcome: "succeeded",
+		startedAt: "2026-09-20T10:00:00.000Z",
+		endedAt: "2026-09-20T10:00:30.000Z",
+		sessionId: null,
+		parentRunId: null,
+		rootRunId: null,
+	},
+	telemetry: journaled("4,200", "$0.00 local", "1"),
+	...over,
+});
 
 test("a run's totals are its journal's tokens, cost and model calls, then wall time and the runtime", () => {
-	assert.deepEqual(
-		runTotals(run({ telemetry: journaled("4,200", "$0.00 local", "1") }), Date.parse("2026-09-20T10:05:00.000Z")),
-		[
-			{ label: "Tokens", value: "4,200" },
-			{ label: "Cost", value: "$0.00 local" },
-			{ label: "Model calls", value: "1" },
-			{ label: "Wall time", value: "30s" },
-			{ label: "Runtime", value: "openai" },
-		],
-	);
-	// A live run measures against now, not against a missing end; a session row has no run journal to show.
+	assert.deepEqual(runTotals(run(), undefined, Date.parse("2026-09-20T10:05:00.000Z")), [
+		{ label: "Tokens", value: "4,200" },
+		{ label: "Cost", value: "$0.00 local" },
+		{ label: "Model calls", value: "1" },
+		{ label: "Wall time", value: "30s" },
+		{ label: "Runtime", value: "openai" },
+	]);
+	// A live run measures against now; a run the ledger does not hold spans its journal and names no runtime.
+	const base = run();
 	const live = runTotals(
-		run({ status: "running", ended_at: null, source: "session" }),
+		run({ status: "running", identity: base.identity ? { ...base.identity, endedAt: null } : null }),
+		undefined,
 		Date.parse("2026-09-20T10:01:00.000Z"),
 	);
-	assert.deepEqual(live.slice(0, 4), [
-		{ label: "Tokens", value: NOT_JOURNALED },
-		{ label: "Cost", value: NOT_JOURNALED },
-		{ label: "Model calls", value: NOT_JOURNALED },
-		{ label: "Wall time", value: "1m 0s" },
+	assert.deepEqual(live[3], { label: "Wall time", value: "1m 0s" });
+	assert.deepEqual(runTotals(run({ identity: null }), undefined, 0).slice(3), [
+		{ label: "Wall time", value: "30s" },
+		{ label: "Runtime", value: "not recorded" },
 	]);
 });
 
-test("run status keeps the trace database's own vocabulary on the shared ramp", () => {
+test("run status reads on the shared ramp, and an unknown status is neither success nor failure", () => {
 	assert.equal(runTone("success"), "success");
 	assert.equal(runTone("fail"), "fail");
 	assert.equal(runTone("queued"), "warn");
 	assert.equal(runTone("running"), "running");
-	assert.equal(runTone("something-else"), "neutral");
-});
-
-test("phases render in their recorded order whatever order the wire returned them in", () => {
-	const phase = (seq: number, name: string) => ({ seq, name }) as TracePhase;
-	assert.deepEqual(
-		orderedPhases([phase(3, "c"), phase(1, "a"), phase(2, "b")]).map((item) => item.name),
-		["a", "b", "c"],
-	);
-	assert.deepEqual(
-		orderedPhases([phase(1, "b"), phase(1, "a")]).map((item) => item.name),
-		["a", "b"],
-		"a tie orders by name so two runs with the same shape render the same",
-	);
+	assert.equal(runTone("unknown"), "neutral");
 });
 
 test("a histogram counts kinds, commonest first, and says how many rarer kinds it left out", () => {

@@ -4551,7 +4551,14 @@
 														]
 													},
 													"telemetry": {
-														"$ref": "#/components/schemas/Union_9ecc9604"
+														"anyOf": [
+															{
+																"$ref": "#/components/schemas/RunRowV1"
+															},
+															{
+																"type": "null"
+															}
+														]
 													},
 													"parentRunId": {
 														"anyOf": [
@@ -4735,7 +4742,14 @@
 											]
 										},
 										"telemetry": {
-											"$ref": "#/components/schemas/Union_9ecc9604"
+											"anyOf": [
+												{
+													"$ref": "#/components/schemas/RunRowV1"
+												},
+												{
+													"type": "null"
+												}
+											]
 										},
 										"parentRunId": {
 											"anyOf": [
@@ -15577,148 +15591,10 @@
 				}
 			}
 		},
-		"/api/traces/status": {
-			"get": {
-				"operationId": "traceStatus",
-				"summary": "Trace availability and retention",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"required": ["available", "captureCoverage", "schemaVersion", "retentionPolicy"],
-									"properties": {
-										"available": {
-											"type": "boolean"
-										},
-										"captureCoverage": {
-											"anyOf": [
-												{
-													"type": "object",
-													"required": ["status", "droppedProgress", "droppedPackageActivity", "failedRows"],
-													"properties": {
-														"status": {
-															"anyOf": [
-																{
-																	"type": "string",
-																	"const": "known_loss"
-																},
-																{
-																	"type": "string",
-																	"const": "degraded"
-																},
-																{
-																	"type": "string",
-																	"const": "unreported"
-																}
-															]
-														},
-														"droppedProgress": {
-															"anyOf": [
-																{
-																	"type": "number"
-																},
-																{
-																	"type": "null"
-																}
-															]
-														},
-														"droppedPackageActivity": {
-															"anyOf": [
-																{
-																	"type": "number"
-																},
-																{
-																	"type": "null"
-																}
-															]
-														},
-														"failedRows": {
-															"anyOf": [
-																{
-																	"type": "number"
-																},
-																{
-																	"type": "null"
-																}
-															]
-														}
-													},
-													"additionalProperties": false
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"schemaVersion": {
-											"anyOf": [
-												{
-													"type": "integer"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"retentionPolicy": {
-											"type": "object",
-											"required": ["maxAgeDays", "maxBytes"],
-											"properties": {
-												"maxAgeDays": {
-													"type": "integer"
-												},
-												"maxBytes": {
-													"type": "integer"
-												}
-											},
-											"additionalProperties": false
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"$ref": "#/components/schemas/Problem"
-								}
-							}
-						}
-					}
-				}
-			}
-		},
 		"/api/traces/runs": {
 			"get": {
 				"operationId": "traceRuns",
-				"summary": "Paginated trace history",
+				"summary": "Run journals newest write first, joined to the dispatch ledger's identity",
 				"security": [
 					{
 						"bearer": []
@@ -15746,36 +15622,11 @@
 						}
 					},
 					{
-						"name": "source",
-						"in": "query",
-						"required": false,
-						"schema": {
-							"$ref": "#/components/schemas/Union_f71033b0"
-						}
-					},
-					{
 						"name": "status",
 						"in": "query",
 						"required": false,
 						"schema": {
-							"anyOf": [
-								{
-									"type": "string",
-									"const": "queued"
-								},
-								{
-									"type": "string",
-									"const": "running"
-								},
-								{
-									"type": "string",
-									"const": "success"
-								},
-								{
-									"type": "string",
-									"const": "fail"
-								}
-							]
+							"$ref": "#/components/schemas/Union_8010cbdb"
 						}
 					},
 					{
@@ -15801,67 +15652,16 @@
 											"type": "array",
 											"items": {
 												"type": "object",
-												"required": [
-													"run_id",
-													"assignment_id",
-													"request",
-													"status",
-													"agent",
-													"target",
-													"model",
-													"runtime",
-													"node",
-													"started_at",
-													"ended_at",
-													"telemetry",
-													"source"
-												],
+												"required": ["runId", "status", "writtenAt", "identity", "telemetry"],
 												"properties": {
-													"run_id": {
+													"runId": {
 														"type": "string",
-														"minLength": 1,
-														"maxLength": 256,
-														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-													},
-													"assignment_id": {
-														"type": "string"
-													},
-													"session_id": {
-														"anyOf": [
-															{
-																"type": "string"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"request": {
-														"anyOf": [
-															{
-																"type": "string"
-															},
-															{
-																"type": "null"
-															}
-														]
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 													},
 													"status": {
-														"type": "string"
+														"$ref": "#/components/schemas/Union_8010cbdb"
 													},
-													"agent": {
-														"type": "string"
-													},
-													"target": {
-														"type": "string"
-													},
-													"model": {
-														"type": "string"
-													},
-													"runtime": {
-														"type": "string"
-													},
-													"node": {
+													"writtenAt": {
 														"anyOf": [
 															{
 																"type": "string"
@@ -15871,13 +15671,109 @@
 															}
 														]
 													},
-													"started_at": {
-														"type": "string"
-													},
-													"ended_at": {
+													"identity": {
 														"anyOf": [
 															{
-																"type": "string"
+																"type": "object",
+																"required": [
+																	"agentId",
+																	"task",
+																	"targetId",
+																	"model",
+																	"runtimeId",
+																	"node",
+																	"status",
+																	"outcome",
+																	"startedAt",
+																	"endedAt",
+																	"sessionId",
+																	"parentRunId",
+																	"rootRunId"
+																],
+																"properties": {
+																	"agentId": {
+																		"type": "string"
+																	},
+																	"task": {
+																		"type": "string"
+																	},
+																	"targetId": {
+																		"type": "string"
+																	},
+																	"model": {
+																		"type": "string"
+																	},
+																	"runtimeId": {
+																		"type": "string"
+																	},
+																	"node": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"status": {
+																		"type": "string"
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"startedAt": {
+																		"type": "string"
+																	},
+																	"endedAt": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"sessionId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"parentRunId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"rootRunId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
 															},
 															{
 																"type": "null"
@@ -15885,10 +15781,7 @@
 														]
 													},
 													"telemetry": {
-														"$ref": "#/components/schemas/Union_9ecc9604"
-													},
-													"source": {
-														"$ref": "#/components/schemas/Union_f71033b0"
+														"$ref": "#/components/schemas/RunRowV1"
 													}
 												},
 												"additionalProperties": false
@@ -15933,7 +15826,7 @@
 		"/api/traces/runs/{runId}": {
 			"get": {
 				"operationId": "traceRun",
-				"summary": "Trace run",
+				"summary": "One run's journal row and ledger identity",
 				"security": [
 					{
 						"bearer": []
@@ -15946,9 +15839,7 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1,
-							"maxLength": 256,
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 						}
 					}
 				],
@@ -15959,67 +15850,16 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": [
-										"run_id",
-										"assignment_id",
-										"request",
-										"status",
-										"agent",
-										"target",
-										"model",
-										"runtime",
-										"node",
-										"started_at",
-										"ended_at",
-										"telemetry",
-										"source"
-									],
+									"required": ["runId", "status", "writtenAt", "identity", "telemetry"],
 									"properties": {
-										"run_id": {
+										"runId": {
 											"type": "string",
-											"minLength": 1,
-											"maxLength": 256,
-											"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-										},
-										"assignment_id": {
-											"type": "string"
-										},
-										"session_id": {
-											"anyOf": [
-												{
-													"type": "string"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"request": {
-											"anyOf": [
-												{
-													"type": "string"
-												},
-												{
-													"type": "null"
-												}
-											]
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 										},
 										"status": {
-											"type": "string"
+											"$ref": "#/components/schemas/Union_8010cbdb"
 										},
-										"agent": {
-											"type": "string"
-										},
-										"target": {
-											"type": "string"
-										},
-										"model": {
-											"type": "string"
-										},
-										"runtime": {
-											"type": "string"
-										},
-										"node": {
+										"writtenAt": {
 											"anyOf": [
 												{
 													"type": "string"
@@ -16029,13 +15869,109 @@
 												}
 											]
 										},
-										"started_at": {
-											"type": "string"
-										},
-										"ended_at": {
+										"identity": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "object",
+													"required": [
+														"agentId",
+														"task",
+														"targetId",
+														"model",
+														"runtimeId",
+														"node",
+														"status",
+														"outcome",
+														"startedAt",
+														"endedAt",
+														"sessionId",
+														"parentRunId",
+														"rootRunId"
+													],
+													"properties": {
+														"agentId": {
+															"type": "string"
+														},
+														"task": {
+															"type": "string"
+														},
+														"targetId": {
+															"type": "string"
+														},
+														"model": {
+															"type": "string"
+														},
+														"runtimeId": {
+															"type": "string"
+														},
+														"node": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"status": {
+															"type": "string"
+														},
+														"outcome": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"startedAt": {
+															"type": "string"
+														},
+														"endedAt": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"sessionId": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"parentRunId": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"rootRunId": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
 												},
 												{
 													"type": "null"
@@ -16043,589 +15979,7 @@
 											]
 										},
 										"telemetry": {
-											"$ref": "#/components/schemas/Union_9ecc9604"
-										},
-										"source": {
-											"$ref": "#/components/schemas/Union_f71033b0"
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"$ref": "#/components/schemas/Problem"
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/traces/runs/{runId}/phases": {
-			"get": {
-				"operationId": "tracePhases",
-				"summary": "Run phases",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [
-					{
-						"name": "runId",
-						"in": "path",
-						"required": true,
-						"schema": {
-							"type": "string",
-							"minLength": 1,
-							"maxLength": 256,
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-						}
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "array",
-									"items": {
-										"type": "object",
-										"required": [
-											"phase_id",
-											"run_id",
-											"seq",
-											"name",
-											"kind",
-											"owner",
-											"description",
-											"status",
-											"attempt",
-											"retries",
-											"error",
-											"started_at",
-											"ended_at"
-										],
-										"properties": {
-											"phase_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-											},
-											"run_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-											},
-											"seq": {
-												"type": "integer"
-											},
-											"name": {
-												"type": "string"
-											},
-											"kind": {
-												"type": "string"
-											},
-											"owner": {
-												"type": "string"
-											},
-											"description": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"status": {
-												"type": "string"
-											},
-											"attempt": {
-												"type": "integer"
-											},
-											"retries": {
-												"type": "integer"
-											},
-											"error": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"started_at": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"ended_at": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											}
-										},
-										"additionalProperties": false
-									}
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"$ref": "#/components/schemas/Problem"
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/traces/runs/{runId}/gates": {
-			"get": {
-				"operationId": "traceGates",
-				"summary": "Run gates",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [
-					{
-						"name": "runId",
-						"in": "path",
-						"required": true,
-						"schema": {
-							"type": "string",
-							"minLength": 1,
-							"maxLength": 256,
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-						}
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "array",
-									"items": {
-										"type": "object",
-										"required": [
-											"id",
-											"run_id",
-											"phase_id",
-											"attempt",
-											"gate",
-											"passed",
-											"violations_json",
-											"checks_json",
-											"created_at"
-										],
-										"properties": {
-											"id": {
-												"type": "integer"
-											},
-											"run_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-											},
-											"phase_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-											},
-											"attempt": {
-												"type": "integer"
-											},
-											"gate": {
-												"type": "string"
-											},
-											"passed": {
-												"type": "integer",
-												"minimum": 0,
-												"maximum": 1
-											},
-											"violations_json": {
-												"type": "string"
-											},
-											"checks_json": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"created_at": {
-												"type": "string"
-											}
-										},
-										"additionalProperties": false
-									}
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"$ref": "#/components/schemas/Problem"
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/traces/runs/{runId}/processes": {
-			"get": {
-				"operationId": "traceProcesses",
-				"summary": "Run processes",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [
-					{
-						"name": "runId",
-						"in": "path",
-						"required": true,
-						"schema": {
-							"type": "string",
-							"minLength": 1,
-							"maxLength": 256,
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-						}
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "array",
-									"items": {
-										"type": "object",
-										"required": ["id", "run_id", "kind", "name", "pid", "command", "command_digest", "started_at", "ended_at"],
-										"properties": {
-											"id": {
-												"type": "integer"
-											},
-											"run_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-											},
-											"kind": {
-												"type": "string"
-											},
-											"name": {
-												"type": "string"
-											},
-											"pid": {
-												"type": "integer"
-											},
-											"command": {
-												"type": "string"
-											},
-											"command_digest": {
-												"type": "string"
-											},
-											"started_at": {
-												"type": "string"
-											},
-											"ended_at": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"host": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"birth_token": {
-												"anyOf": [
-													{
-														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											}
-										},
-										"additionalProperties": false
-									}
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"$ref": "#/components/schemas/Problem"
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/traces/runs/{runId}/events": {
-			"get": {
-				"operationId": "traceEvents",
-				"summary": "Run events by rowid",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [
-					{
-						"name": "runId",
-						"in": "path",
-						"required": true,
-						"schema": {
-							"type": "string",
-							"minLength": 1,
-							"maxLength": 256,
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-						}
-					},
-					{
-						"name": "after",
-						"in": "query",
-						"required": false,
-						"schema": {
-							"type": "integer",
-							"minimum": 0,
-							"maximum": 9007199254740991
-						}
-					},
-					{
-						"name": "limit",
-						"in": "query",
-						"required": false,
-						"schema": {
-							"type": "integer",
-							"minimum": 1,
-							"maximum": 500
-						}
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"required": ["events", "cursor", "hasMore"],
-									"properties": {
-										"events": {
-											"type": "array",
-											"items": {
-												"type": "object",
-												"required": [
-													"rowid",
-													"event_id",
-													"run_id",
-													"phase_id",
-													"parent_id",
-													"type",
-													"name",
-													"payload_json",
-													"tokens",
-													"started_at",
-													"ended_at"
-												],
-												"properties": {
-													"rowid": {
-														"type": "integer",
-														"minimum": 1
-													},
-													"event_id": {
-														"type": "string"
-													},
-													"run_id": {
-														"type": "string",
-														"minLength": 1,
-														"maxLength": 256,
-														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-													},
-													"phase_id": {
-														"type": "string",
-														"minLength": 1,
-														"maxLength": 256,
-														"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-													},
-													"parent_id": {
-														"anyOf": [
-															{
-																"type": "string"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"type": {
-														"type": "string"
-													},
-													"name": {
-														"type": "string"
-													},
-													"payload_json": {
-														"anyOf": [
-															{
-																"type": "string"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"tokens": {
-														"anyOf": [
-															{
-																"type": "number"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"started_at": {
-														"type": "string"
-													},
-													"ended_at": {
-														"anyOf": [
-															{
-																"type": "string"
-															},
-															{
-																"type": "null"
-															}
-														]
-													}
-												},
-												"additionalProperties": false
-											}
-										},
-										"cursor": {
-											"type": "integer",
-											"minimum": 0,
-											"maximum": 9007199254740991
-										},
-										"hasMore": {
-											"type": "boolean"
+											"$ref": "#/components/schemas/RunRowV1"
 										}
 									},
 									"additionalProperties": false
@@ -16676,9 +16030,7 @@
 						"required": true,
 						"schema": {
 							"type": "string",
-							"minLength": 1,
-							"maxLength": 256,
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 						}
 					},
 					{
@@ -16708,97 +16060,6 @@
 										}
 									},
 									"additionalProperties": false
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"$ref": "#/components/schemas/Problem"
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/traces/runs/{runId}/live": {
-			"get": {
-				"operationId": "traceLive",
-				"summary": "Live rowid event tail",
-				"security": [
-					{
-						"bearer": []
-					},
-					{
-						"eventToken": []
-					}
-				],
-				"parameters": [
-					{
-						"name": "runId",
-						"in": "path",
-						"required": true,
-						"schema": {
-							"type": "string",
-							"minLength": 1,
-							"maxLength": 256,
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]*$"
-						}
-					},
-					{
-						"name": "after",
-						"in": "query",
-						"required": false,
-						"schema": {
-							"type": "integer",
-							"minimum": 0,
-							"maximum": 9007199254740991
-						}
-					},
-					{
-						"name": "token",
-						"in": "query",
-						"required": false,
-						"schema": {
-							"type": "string",
-							"maxLength": 256
-						}
-					},
-					{
-						"name": "Last-Event-ID",
-						"in": "header",
-						"schema": {
-							"type": "string",
-							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}:[0-9]{1,16}$",
-							"maxLength": 145
-						}
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"text/event-stream": {
-								"schema": {
-									"type": "string"
 								}
 							}
 						},
@@ -28582,6 +27843,30 @@
 					}
 				]
 			},
+			"Union_8010cbdb": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "queued"
+					},
+					{
+						"type": "string",
+						"const": "running"
+					},
+					{
+						"type": "string",
+						"const": "success"
+					},
+					{
+						"type": "string",
+						"const": "fail"
+					},
+					{
+						"type": "string",
+						"const": "unknown"
+					}
+				]
+			},
 			"Union_8170a8ee": {
 				"anyOf": [
 					{
@@ -28708,16 +27993,6 @@
 					{
 						"type": "string",
 						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_9ecc9604": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/RunRowV1"
 					},
 					{
 						"type": "null"
@@ -29348,18 +28623,6 @@
 					},
 					{
 						"type": "null"
-					}
-				]
-			},
-			"Union_f71033b0": {
-				"anyOf": [
-					{
-						"type": "string",
-						"const": "dispatch"
-					},
-					{
-						"type": "string",
-						"const": "session"
 					}
 				]
 			},

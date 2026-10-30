@@ -28,7 +28,7 @@ export function seedGoldenSession(state: string, sessionId = "golden-p0"): strin
 export async function seedRunJournal(
 	state: string,
 	runId: string,
-	records: ReadonlyArray<{ kind: Kind; data: unknown; at: string }> = [],
+	records: ReadonlyArray<{ kind: Kind; data: unknown; at: string; ctx?: Record<string, string> }> = [],
 ): Promise<string> {
 	const context = { sessionId: null, runId, label: "worker" } as const;
 	const journal = await openCallJournal({
@@ -41,7 +41,7 @@ export async function seedRunJournal(
 		journal.enqueue({
 			kind: record.kind,
 			data: record.data,
-			ctx: context,
+			ctx: { ...context, ...record.ctx },
 			wallMs: Date.parse(record.at),
 			mono: Date.parse(record.at),
 		} as PendingTelemetry);

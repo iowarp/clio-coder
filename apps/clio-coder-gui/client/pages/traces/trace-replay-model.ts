@@ -1,50 +1,37 @@
-import type { TraceEvent } from "../../../contracts/traces.js";
+import type { RunTimelineEntry } from "../../../contracts/wire.js";
 import { matchesText } from "../run-inspection-model.js";
+import { entryKey, entryLabel } from "./trace-model.js";
 
 export const REPLAY_SPEEDS = [0.5, 1, 2, 4, 8] as const;
 export const REPLAY_WINDOW = 9;
 
 export interface ReplayEntry {
-	event: TraceEvent;
+	key: string;
+	entry: RunTimelineEntry;
 	startedMs: number | null;
 	elapsedMs: number | null;
 }
 
-/** Recorded starts establish order, with rowid and event identity breaking ties. Unknown starts stay at the end. */
-export function replayEntries(events: readonly TraceEvent[], runStart: string, phaseId: string | null): ReplayEntry[] {
-	const start = Date.parse(runStart);
-	return events
-		.filter((event) => phaseId === null || event.phase_id === phaseId)
-		.map((event) => {
-			const timestamp = Date.parse(event.started_at);
-			return {
-				event,
-				startedMs: Number.isFinite(timestamp) ? timestamp : null,
-				elapsedMs: Number.isFinite(timestamp - start) && timestamp >= start ? timestamp - start : null,
-			};
-		})
-		.sort(
-			(a, b) =>
-				(a.startedMs ?? Number.POSITIVE_INFINITY) - (b.startedMs ?? Number.POSITIVE_INFINITY) ||
-				a.event.rowid - b.event.rowid ||
-				(a.event.event_id < b.event.event_id ? -1 : a.event.event_id > b.event.event_id ? 1 : 0),
-		);
+/** The run timeline's own order, which the read model sorts by time; elapsed positions are from the run's start. */
+export function replayEntries(entries: readonly RunTimelineEntry[], runStart: number | null): ReplayEntry[] {
+	return entries.map((entry) => {
+		const timestamp = Date.parse(entry.at);
+		const startedMs = Number.isFinite(timestamp) ? timestamp : null;
+		return {
+			key: entryKey(entry),
+			entry,
+			startedMs,
+			elapsedMs: startedMs !== null && runStart !== null && startedMs >= runStart ? startedMs - runStart : null,
+		};
+	});
 }
 
-export function replayIndex(entries: readonly ReplayEntry[], eventId: string | null): number {
+export function replayIndex(entries: readonly ReplayEntry[], key: string | null): number {
 	if (!entries.length) return -1;
 	return Math.max(
 		0,
-		entries.findIndex((entry) => entry.event.event_id === eventId),
+		entries.findIndex((entry) => entry.key === key),
 	);
-}
-
-export function latestReplayEvent(entries: readonly ReplayEntry[]): string | null {
-	let latest: ReplayEntry | undefined;
-	for (const entry of entries) {
-		if (!latest || entry.event.rowid > latest.event.rowid) latest = entry;
-	}
-	return latest?.event.event_id ?? null;
 }
 
 export function replayWindow(
@@ -62,12 +49,16 @@ export function replayDelay(current: ReplayEntry, next: ReplayEntry, speed: numb
 	return Math.max(reducedMotion ? 500 : 80, (gap > 0 ? Math.min(gap, 5000) : 500) / rate);
 }
 
-export function filterReplayEvents(events: readonly TraceEvent[], query: string, kind: string): TraceEvent[] {
-	return events.filter(
-		(event) =>
-			(!kind || event.type === kind) && matchesText(query, [event.name, event.type, event.event_id, event.payload_json]),
-	);
+export function filterReplayEntries(
+	entries: readonly RunTimelineEntry[],
+	query: string,
+	kind: string,
+): RunTimelineEntry[] {
+	return entries.filter((entry) => {
+		const label = entryLabel(entry);
+		return (!kind || label.kind === kind) && matchesText(query, [label.title, label.kind, entryKey(entry)]);
+	});
 }
-export function replayEventKinds(events: readonly TraceEvent[]): string[] {
-	return [...new Set(events.map((event) => event.type))].sort();
+export function replayEntryKinds(entries: readonly RunTimelineEntry[]): string[] {
+	return [...new Set(entries.map((entry) => entryLabel(entry).kind))].sort();
 }

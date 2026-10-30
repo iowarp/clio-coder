@@ -1,14 +1,15 @@
-import { Fragment, useMemo } from "react";
+import { Fragment } from "react";
 import { Link } from "react-router";
 import type { Static } from "typebox";
-import type { TraceEvent, TraceGate, TracePhase, TraceReceipt, TraceRun } from "../../../contracts/traces.js";
-import { clock, formatDuration, formatTime } from "../../api/clock.js";
+import type { TraceReceipt, TraceRun } from "../../../contracts/traces.js";
+import type { RunTimelineEntry } from "../../../contracts/wire.js";
+import { clock, formatDuration } from "../../api/clock.js";
+import { tokensText } from "../../chat/session-usage-model.js";
 import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
-import { countText } from "../../telemetry/quantity-model.js";
 import { ReceiptChecks } from "./receipt-checks.js";
-import { phasePosition, provenanceFacts } from "./trace-model.js";
+import { callPosition, entryLabel, provenanceFacts, runSpan, stageBars } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -37,151 +38,89 @@ export function Facts({ entries }: { entries: [string, unknown][] }) {
 		</dl>
 	);
 }
-export function Waterfall({
-	run,
-	phases,
-	events,
-	selected,
-	select,
-}: {
-	run: TraceRun;
-	phases: TracePhase[];
-	events: TraceEvent[];
-	selected: string | null;
-	select: (id: string) => void;
-}) {
-	const toolSpans = useMemo(() => {
-		const grouped = new Map<string, TraceEvent[]>();
-		let count = 0;
-		for (const event of events) {
-			if (event.type !== "tool_call" || !Number.isFinite(Date.parse(event.started_at))) continue;
-			const group = grouped.get(event.phase_id) ?? [];
-			if (group.length >= 64 || count >= 256) continue;
-			group.push(event);
-			grouped.set(event.phase_id, group);
-			count += 1;
-		}
-		return grouped;
-	}, [events]);
-	const start = Date.parse(run.started_at),
-		end = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? clock.now() : Number.NaN,
-		knownDuration = Number.isFinite(end - start) && end >= start,
-		duration = knownDuration ? Math.max(1, end - start) : 1;
+type CallEntry = Extract<RunTimelineEntry, { kind: "call" }>;
+/**
+ * Each call attempt as a lane on the run's span, its recorded stages as segments of its bar. Bars use recorded
+ * times and offsets and imply no causality; every label is the server's display (#434).
+ */
+export function CallWaterfall({ run, entries }: { run: TraceRun; entries: readonly RunTimelineEntry[] }) {
+	const calls = entries.filter((entry): entry is CallEntry => entry.kind === "call");
+	const now = clock.now();
+	const span = runSpan(run, now);
 	return (
 		<section className="trace-panel">
 			<div className="page-heading">
-				<h2>Phase waterfall</h2>
-				<small>{knownDuration ? formatDuration(end - start) : "Run timing not recorded"}</small>
+				<h2>Model calls</h2>
+				<small>{span ? formatDuration(span.end - span.start) : "Run timing not recorded"}</small>
 			</div>
 			<p className="panel-note">
-				Select a phase to inspect its events, checks and accounting. Bars use recorded timestamps; they do not imply
-				causality. Up to 64 tool spans per phase and 256 in total are drawn; every recorded event is available in replay.
+				One lane per call attempt, placed on the run's span. Segments are the stages the journal recorded: admission, auth,
+				transform, connect, send, then the model from its first token to settle.
 			</p>
 			<div className="trace-waterfall">
-				{phases.map((phase) => {
-					const position = phasePosition(phase, run, clock.now());
+				{calls.map((call) => {
+					const position = span ? callPosition(call, span, now) : null;
+					const label = entryLabel(call);
 					return (
-						<div className="trace-lane" key={phase.phase_id}>
-							<button type="button" aria-pressed={selected === phase.phase_id} onClick={() => select(phase.phase_id)}>
-								{phase.name}
+						<div className="trace-lane" key={call.attemptId}>
+							<div className="trace-lane__label">
+								<StatusMark tone={label.tone} label={label.title} />
 								<small>
-									{phase.status} · {position ? formatDuration(position.duration) : "Timing not recorded"}
+									{tokensText(call.tokens.display)} · {call.usd.display} · first token {call.timing.ttft.display} · model{" "}
+									{call.timing.modelTime.display}
 								</small>
-							</button>
+							</div>
 							<div className="trace-track">
 								{position ? (
-									<button
-										className={`trace-bar ${phase.status}`}
-										type="button"
-										aria-label={`Select phase ${phase.name}`}
-										title={`${phase.name}: ${phase.status}`}
-										aria-pressed={selected === phase.phase_id}
+									<span
+										className={`trace-bar${label.tone === "fail" ? " fail" : ""}`}
+										title={label.title}
 										style={{ left: `${position.left}%`, width: `${Math.max(0.5, position.width)}%` }}
-										onClick={() => select(phase.phase_id)}
-									/>
+									>
+										{stageBars(call).map((bar) => (
+											<i
+												key={bar.stage}
+												className="trace-stage"
+												data-stage={bar.stage}
+												title={bar.stage}
+												style={{ left: `${bar.left}%`, width: `${Math.max(0.5, bar.width)}%` }}
+											/>
+										))}
+									</span>
 								) : (
 									<span className="trace-timing-missing">No recorded timing</span>
 								)}
-								{(knownDuration ? (toolSpans.get(phase.phase_id) ?? []) : []).map((event) => (
-									<i
-										key={event.event_id}
-										className="trace-tool-span"
-										title={`${event.name} · ${event.ended_at ? formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at)) : "end not recorded"}`}
-										style={{
-											left: `${Math.max(0, Math.min(99, ((Date.parse(event.started_at) - start) / duration) * 100))}%`,
-											width: `${Math.max(0.4, Math.min(100, ((event.ended_at ? Math.max(0, Date.parse(event.ended_at) - Date.parse(event.started_at)) : 0) / duration) * 100))}%`,
-										}}
-									/>
-								))}
 							</div>
 						</div>
 					);
 				})}
 			</div>
-			{phases.length === 0 ? <p>No phases recorded.</p> : null}
+			{calls.length === 0 ? <p>No model call was journaled for this run.</p> : null}
 		</section>
 	);
 }
-export function EventRow({ event, start, payload = true }: { event: TraceEvent; start: string; payload?: boolean }) {
-	const parsed = parseJson(event.payload_json),
-		record = object(parsed),
-		elapsed = Date.parse(event.started_at) - Date.parse(start),
-		duration = event.ended_at ? Date.parse(event.ended_at) - Date.parse(event.started_at) : Number.NaN;
+/** One timeline entry: what it is, when it fell in the run, and the displays it carries. */
+export function EntryRow({ entry, start }: { entry: RunTimelineEntry; start: number | null }) {
+	const label = entryLabel(entry);
+	const at = Date.parse(entry.at);
+	const elapsed = start !== null && Number.isFinite(at) && at >= start ? `+${formatDuration(at - start)}` : null;
+	const details =
+		entry.kind === "call"
+			? `${tokensText(entry.tokens.display)} · ${entry.usd.display} · settle ${entry.timing.settle.display}`
+			: entry.kind === "feed" && entry.duration
+				? entry.duration.display
+				: null;
 	return (
 		<article className="trace-event">
 			<div className="trace-event-head">
-				<StatusMark
-					tone={record.ok === false || event.type === "error" ? "fail" : "neutral"}
-					label={record.ok === false ? `${event.type} · failed` : event.type}
-				/>
-				<strong>{event.name}</strong>
+				<StatusMark tone={label.tone} label={label.kind} />
+				<strong>{label.title}</strong>
 				<small>
-					{Number.isFinite(elapsed) && elapsed >= 0 ? `+${formatDuration(elapsed)}` : "Elapsed time unavailable"}
-					{Number.isFinite(duration) && duration >= 0
-						? ` · ${formatDuration(duration)}`
-						: event.ended_at
-							? " · duration unavailable"
-							: " · end not recorded"}
-					{event.tokens == null ? "" : ` · ${countText(event.tokens)} tokens`}
+					{elapsed ?? "Elapsed time unavailable"}
+					{details ? ` · ${details}` : ""}
 				</small>
 			</div>
-			{record.truncated === true ? <p className="trace-warning">Payload exceeded the trace limit; snippet only.</p> : null}
-			{typeof record.message === "string" && (
-				<p>
-					{record.message.slice(0, 400)}
-					{record.message.length > 400 ? "…" : ""}
-				</p>
-			)}
-
-			{payload ? (
-				<details>
-					<summary>Event payload</summary>
-					<Json value={parsed} />
-				</details>
-			) : null}
 		</article>
-	);
-}
-export function Gates({ gates }: { gates: Static<typeof TraceGate>[] }) {
-	return (
-		<section className="trace-panel">
-			<h2>Gate evidence</h2>
-			{gates.map((gate) => (
-				<article className="trace-event" key={gate.id}>
-					<h3>
-						{gate.gate} <StatusMark tone={gate.passed ? "success" : "fail"} label={gate.passed ? "passed" : "failed"} />
-					</h3>
-					<p>
-						Attempt {gate.attempt} · {formatTime(gate.created_at)}
-					</p>
-					<h4>Checks</h4>
-					<Json value={parseJson(gate.checks_json)} />
-					<h4>Violations</h4>
-					<Json value={parseJson(gate.violations_json)} />
-				</article>
-			))}
-			{!gates.length ? <p>No gates recorded.</p> : null}
-		</section>
 	);
 }
 export function ReceiptPanel({

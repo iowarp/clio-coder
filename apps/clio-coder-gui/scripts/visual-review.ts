@@ -84,14 +84,12 @@ const h = await harness(
 		...(values.route || values.serve ? { env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } } : {}),
 	},
 );
-let trace: ReturnType<typeof traceFixture> | undefined;
 if (values.state !== "empty") {
 	await seedSettings(h.home.path, h.home.env);
 	await seedFleet(h.home.path, h.home.env);
 	await seedEvidence(h.home.path, h.home.env);
 	await seedLibrary(h.home.path, h.home.env);
-	trace = traceFixture(join(h.home.path, "state"));
-	trace.finish();
+	await traceFixture(join(h.home.path, "state"));
 }
 const project = join(h.home.path, "field-notes");
 await mkdir(project, { recursive: true });
@@ -106,7 +104,6 @@ if (!address || typeof address === "string") throw new Error("The review server 
 const stop = async () => {
 	if ("closeAllConnections" in server) server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
-	trace?.close();
 	await h.close();
 };
 
