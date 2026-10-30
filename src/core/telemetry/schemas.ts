@@ -315,6 +315,7 @@ export const KIND_NAMES = [
 	"config.changed",
 	"memory.trace",
 	"memory.observation",
+	"health.window",
 ] as const;
 export type Kind = (typeof KIND_NAMES)[number];
 interface KindDefinition {
@@ -551,6 +552,27 @@ export const KIND_REGISTRY = {
 		capture: "content",
 		schema: Type.Object(
 			{ event: Type.String({ minLength: 1, maxLength: 64 }), content: ObjectRefSchema, bytes: count },
+			closed,
+		),
+	},
+	// One window of this process's health, written to each open session writer, so the loop-lag budget is measured
+	// in the field and not only in tests (#428, #434).
+	"health.window": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				/** The span the lag samples cover; the first window after the sampler starts is shorter. */
+				windowMs: duration,
+				/** Event-loop delay past the sampler's resolution; absent when no sample landed in the window. */
+				loopLag: Type.Optional(
+					Type.Object({ samples: Type.Integer({ minimum: 1 }), p50Ms: duration, p99Ms: duration, maxMs: duration }, closed),
+				),
+				rssBytes: count,
+				/** This session's writer: records queued now, and records it dropped since it opened. */
+				writer: Type.Object({ queueDepth: count, dropped: count }, closed),
+			},
 			closed,
 		),
 	},

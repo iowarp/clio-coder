@@ -55,6 +55,7 @@ import {
 } from "../../src/domains/observability/consent.js";
 import { createCostTracker } from "../../src/domains/observability/cost.js";
 import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
+import { createHealthWindows } from "../../src/domains/observability/health-window.js";
 import {
 	readTelemetryObject,
 	storeTelemetryObject,
@@ -785,6 +786,46 @@ test("memory and observation traces journal content only under research capture 
 		strictEqual((traced.value as { userPrompt: string }).userPrompt, "task api_key=[redacted:assignment]");
 	} finally {
 		unregister();
+		await journals.closeAll();
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("each open session writer receives health windows carrying loop lag, RSS and its own writer pressure (#434)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const health = createHealthWindows({
+		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
+		record: (sessionId, data) => recordTelemetry("health.window", data, { sessionId, label: "main" }),
+		windowMs: 50,
+	});
+	const journals = createSessionJournals(
+		stateDir,
+		() => {},
+		undefined,
+		async () => health.start(),
+	);
+	const origins = [
+		{ id: "health-a", cwdHash: "healthhash" },
+		{ id: "health-b", cwdHash: "healthhash" },
+	];
+	try {
+		for (const origin of origins) await (await journals.acquire(origin, "main")).release();
+		await new Promise((resolve) => setTimeout(resolve, 130));
+		await journals.closeAll();
+		for (const origin of origins) {
+			const journal = await readCallJournal(join(stateDir, "sessions", origin.cwdHash, origin.id));
+			strictEqual(journal.damaged, 0);
+			ok(!journal.records.some(({ record }) => record.k === "gap"), "every window passes its own schema");
+			const windows = journal.records.flatMap(({ record }) => (record.k === "health.window" ? [record.data] : []));
+			ok(windows.length >= 1);
+			for (const window of windows) {
+				ok(window.windowMs > 0 && window.rssBytes > 0);
+				ok((window.loopLag?.samples ?? 0) > 0);
+				strictEqual(window.writer.dropped, 0);
+			}
+		}
+	} finally {
+		health.stop();
 		await journals.closeAll();
 		await rm(stateDir, { recursive: true, force: true });
 	}

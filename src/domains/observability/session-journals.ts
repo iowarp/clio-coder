@@ -8,7 +8,7 @@ import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
 import type { CallStarted } from "../../core/telemetry/schemas.js";
-import type { CallJournal } from "./call-journal.js";
+import type { CallJournal, JournalHealth } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
 import { storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
 
@@ -41,6 +41,8 @@ interface Entry {
 	promptTexts: Set<string>;
 	/** Set once the writer has opened, until it starts closing. */
 	open?: boolean;
+	/** The opened writer, read synchronously by health windows (#434). */
+	writer?: CallJournal;
 	closing?: Promise<void>;
 	/** Pending close of a writer no work holds; the next lease cancels it (#434). */
 	idle?: NodeJS.Timeout | undefined;
@@ -138,6 +140,7 @@ export function createSessionJournals(
 						} catch {
 							report();
 						}
+						created.writer = journal;
 						if (!created.closing) created.open = true;
 						return journal;
 					})
@@ -218,10 +221,12 @@ export function createSessionJournals(
 	return {
 		acquire,
 		/** Sessions whose writer is open now; a closed writer records its settings again when it reopens (#434). */
-		openSessions(): Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string }> {
-			return [...entries.values()]
-				.filter((entry) => entry.open === true)
-				.map(({ origin }) => ({ origin, sessionDirectory: join(stateDir, "sessions", origin.cwdHash, origin.id) }));
+		openSessions(): Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string; health: JournalHealth }> {
+			return [...entries.values()].flatMap(({ open, origin, writer }) =>
+				open === true && writer
+					? [{ origin, sessionDirectory: join(stateDir, "sessions", origin.cwdHash, origin.id), health: writer.health() }]
+					: [],
+			);
 		},
 		async flush(): Promise<void> {
 			await Promise.all(

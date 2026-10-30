@@ -27,6 +27,7 @@ import { createConsentView } from "./consent.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
+import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
@@ -205,12 +206,17 @@ export function createObservabilityBundle(
 		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");
 	// Writes of config.changed still storing their documents; shutdown waits for them before closing writers (#434).
 	const pendingSettingsRecords = new Set<Promise<void>>();
+	const healthWindows = createHealthWindows({
+		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
+		record: (sessionId, data) => recordTelemetry("health.window", data, sessionContext(sessionId)),
+	});
 	const journals = createSessionJournals(
 		clioStateDir(),
 		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
 		sessionCapture,
 		// Each writer opens with the settings it records under, so its records never read against unknown settings.
 		async (origin, sessionDirectory) => {
+			healthWindows.start();
 			let settings: Readonly<ClioSettings> | undefined;
 			try {
 				settings = config()?.get();
@@ -343,6 +349,7 @@ export function createObservabilityBundle(
 			);
 		},
 		async stop() {
+			healthWindows.stop();
 			await Promise.all(pendingSettingsRecords);
 			await journals.closeAll();
 			telemetry.stop();
