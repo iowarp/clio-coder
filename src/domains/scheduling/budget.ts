@@ -54,8 +54,7 @@ export function readBudgetBlock(value: unknown): BudgetBlockView | null {
 
 /** `$5.00 of $5.00 ceiling`, with more digits for a sub-cent ceiling. */
 export function budgetBlockSpendText(block: Pick<BudgetBlockView, "currentUsd" | "ceilingUsd">): string {
-	const digits = block.ceilingUsd < 0.01 ? Math.min(8, Math.max(4, Math.ceil(-Math.log10(block.ceilingUsd)))) : 2;
-	return `$${block.currentUsd.toFixed(digits)} of $${block.ceilingUsd.toFixed(digits)} ceiling`;
+	return `${renderCostAmount(block.currentUsd, "known")} of ${renderCostAmount(block.ceilingUsd, "known")} ceiling`;
 }
 
 /** The one-line operator notice for a ceiling stop; `error` once spend has passed the ceiling. */

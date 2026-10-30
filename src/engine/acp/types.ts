@@ -693,6 +693,9 @@ export type AcpWire<T> =
 /** `_meta["clio-coder/budget"]` beside `_meta["clio-coder/notice"]` on the chunk that reports a ceiling stop. */
 export interface AcpBudgetBlock {
 	version: 1;
+	currentDisplay?: string;
+	ceilingDisplay?: string;
+	raiseDisplay?: string;
 	/** `over` once spend has passed the ceiling, `at` when it reached it exactly. */
 	level: "at" | "over";
 	currentUsd: number;

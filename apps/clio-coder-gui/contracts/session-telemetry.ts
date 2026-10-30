@@ -103,6 +103,9 @@ export const ActiveEggs = Type.Array(Type.Literal("duck"), { maxItems: 1 });
  */
 export const BudgetBlock = Type.Object(
 	{
+		currentDisplay: Type.Optional(text),
+		ceilingDisplay: Type.Optional(text),
+		raiseDisplay: Type.Optional(text),
 		level: Type.Union([Type.Literal("at"), Type.Literal("over")]),
 		currentUsd: Type.Number({ minimum: 0 }),
 		ceilingUsd: Type.Number({ minimum: 0 }),

@@ -12,12 +12,6 @@ export interface BudgetBannerView {
 	settingsHref: string;
 }
 
-/** `$5.00`, with more digits for a sub-cent ceiling, matching the engine's notice. */
-export function formatUsd(amount: number, ceilingUsd: number): string {
-	const digits = ceilingUsd < 0.01 ? Math.min(8, Math.max(4, Math.ceil(-Math.log10(ceilingUsd)))) : 2;
-	return `$${amount.toFixed(digits)}`;
-}
-
 /** The text form the settings write takes; the engine's suggestion is already rounded to four decimals. */
 export function raiseSettingWrite(budget: BudgetBlock): { path: string; value: string } {
 	return { path: budget.setting, value: String(budget.raiseToUsd) };
@@ -36,12 +30,15 @@ export function budgetBannerView(
 	budget: BudgetBlock,
 	outcome: { raisedTo: string | null; error: string | null },
 ): BudgetBannerView {
-	const spend = `${formatUsd(budget.currentUsd, budget.ceilingUsd)} of ${formatUsd(budget.ceilingUsd, budget.ceilingUsd)}`;
+	const spend = `${budget.currentDisplay ?? "not measured"} of ${budget.ceilingDisplay ?? "not measured"}`;
 	const href = settingsHref(budget);
 	if (outcome.raisedTo !== null) {
 		return {
 			tone: "quiet",
-			title: `Ceiling raised to $${outcome.raisedTo}.`,
+			title:
+				outcome.raisedTo === String(budget.raiseToUsd) && budget.raiseDisplay
+					? `Ceiling raised to ${budget.raiseDisplay}.`
+					: "Ceiling updated.",
 			detail: "Clio resumes the paused request within a second.",
 			raise: null,
 			settingsHref: href,
@@ -59,7 +56,10 @@ export function budgetBannerView(
 				? "Paid requests are paused above the session cost ceiling."
 				: "Paid requests are paused at the session cost ceiling.",
 		detail: `This session spent ${spend}.${perCall} Raise ${budget.setting} to continue.${failure}`,
-		raise: { label: `Raise ceiling to $${budget.raiseToUsd}`, ...raiseSettingWrite(budget) },
+		raise: {
+			label: budget.raiseDisplay ? `Raise ceiling to ${budget.raiseDisplay}` : "Raise ceiling",
+			...raiseSettingWrite(budget),
+		},
 		settingsHref: href,
 	};
 }

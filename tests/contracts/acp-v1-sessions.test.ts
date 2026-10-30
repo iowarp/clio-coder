@@ -772,6 +772,9 @@ test("ACP carries a session cost ceiling stop as a notice chunk with its figures
 		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/notice"], { level: "warning" });
 		deepStrictEqual(budgetMeta(frame), {
 			version: 1,
+			currentDisplay: "$5.00",
+			ceilingDisplay: "$5.00",
+			raiseDisplay: "$5.50",
 			level: "at",
 			currentUsd: 5.0008,
 			ceilingUsd: 5,
@@ -827,7 +830,13 @@ test("ACP carries a session cost ceiling stop as a notice chunk with its figures
 		strictEqual(text(frame), `${budgetAlertNotice(block)?.text}\n`);
 		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1 });
 		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/notice"], { level: "error" });
-		deepStrictEqual(budgetMeta(frame), { version: 1, ...block });
+		deepStrictEqual(budgetMeta(frame), {
+			version: 1,
+			...block,
+			currentDisplay: "$5.20",
+			ceilingDisplay: "$5.00",
+			raiseDisplay: "$5.72",
+		});
 		strictEqual(
 			loaded.updates.filter(
 				(candidate) => (candidate.update as { sessionUpdate: string }).sessionUpdate !== "user_message_chunk",

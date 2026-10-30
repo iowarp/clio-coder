@@ -22221,6 +22221,18 @@
 													"type": "object",
 													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
 													"properties": {
+														"currentDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"ceilingDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"raiseDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
 														"level": {
 															"anyOf": [
 																{
@@ -27296,6 +27308,18 @@
 													"type": "object",
 													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
 													"properties": {
+														"currentDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"ceilingDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"raiseDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
 														"level": {
 															"anyOf": [
 																{
@@ -30956,6 +30980,18 @@
 													"type": "object",
 													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
 													"properties": {
+														"currentDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"ceilingDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"raiseDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
 														"level": {
 															"anyOf": [
 																{
@@ -34580,6 +34616,18 @@
 														"type": "object",
 														"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
 														"properties": {
+															"currentDisplay": {
+																"type": "string",
+																"maxLength": 4096
+															},
+															"ceilingDisplay": {
+																"type": "string",
+																"maxLength": 4096
+															},
+															"raiseDisplay": {
+																"type": "string",
+																"maxLength": 4096
+															},
 															"level": {
 																"anyOf": [
 																	{
@@ -38451,6 +38499,18 @@
 													"type": "object",
 													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
 													"properties": {
+														"currentDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"ceilingDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
+														"raiseDisplay": {
+															"type": "string",
+															"maxLength": 4096
+														},
 														"level": {
 															"anyOf": [
 																{
@@ -48283,6 +48343,18 @@
 												"type": "object",
 												"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
 												"properties": {
+													"currentDisplay": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"ceilingDisplay": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"raiseDisplay": {
+														"type": "string",
+														"maxLength": 4096
+													},
 													"level": {
 														"anyOf": [
 															{

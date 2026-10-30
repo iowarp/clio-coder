@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../../domains/observability/cost.js";
 import type { AcpBudgetBlock, AcpBudgetCapability } from "./types.js";
 
 export type { AcpBudgetBlock } from "./types.js";
@@ -44,6 +45,9 @@ export function budgetBlockFrame(payload: unknown): AcpBudgetFrame | null {
 			[ACP_NOTICE_META_KEY]: { level: notice.level === "error" ? "error" : "warning" },
 			[ACP_BUDGET_META_KEY]: {
 				version: 1,
+				currentDisplay: renderCostAmount(block.currentUsd, "known"),
+				ceilingDisplay: renderCostAmount(block.ceilingUsd, "known"),
+				raiseDisplay: renderCostAmount(block.raiseToUsd, "known"),
 				level: block.level,
 				currentUsd: block.currentUsd,
 				ceilingUsd: block.ceilingUsd,
