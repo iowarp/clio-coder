@@ -27,7 +27,12 @@ import { createSessionJournals } from "../../src/domains/observability/session-j
 import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
 import { readAuditRows } from "../../src/domains/session/archive-readers.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { usageCallsFromAttempts, usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
+import { readSessionCallJournalSync, seedForkCallJournal } from "../../src/domains/session/fork-journal.js";
+import {
+	uniqueUsageCalls,
+	usageCallsFromAttempts,
+	usageCallsFromJournal,
+} from "../../src/domains/session/journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
@@ -621,6 +626,134 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	]);
 	deepStrictEqual(facts.coverage, { measured: 1, estimated: 0, unknown: 1 });
 	strictEqual(facts.absentCount, 1);
+});
+
+test("fork lineage resolves the inherited prefix without copying facts or double-counting shared attempts", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-fork-"));
+	const parentDirectory = join(root, "workspace", "parent");
+	const childDirectory = join(root, "workspace", "child");
+	const at = Date.parse("2026-10-30T12:00:00.000Z");
+	await mkdir(childDirectory, { recursive: true });
+	const parent = await openCallJournal({
+		sessionDirectory: parentDirectory,
+		context: { sessionId: "parent", label: "main" },
+		writer,
+	});
+	const contribute = (
+		journal: typeof parent,
+		sessionId: string,
+		label: "main" | "helper",
+		tokens: number,
+		wallMs: number,
+	) => {
+		const callId = newCallId();
+		const attemptId = newAttemptId();
+		journal.enqueue({
+			kind: "call.settled",
+			ctx: { sessionId, label, callId, attemptId },
+			wallMs,
+			mono: 1,
+			data: {
+				...callSettlementFromMessage(
+					{
+						stopReason: "stop",
+						usage: {
+							input: tokens,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							clioExternal: { tokenUsage: "provider-reported" },
+						},
+					},
+					"unknown",
+				),
+				callId,
+				attemptId,
+				attempt: 0,
+				label,
+				stages: { settle: 1 },
+				roundKind: "normal",
+				toolChoice: "auto",
+				target: {
+					targetId: "fixture",
+					runtimeId: "fixture",
+					api: "fixture",
+					requestedModel: "model",
+					reportedModel: unknown,
+				},
+			},
+		});
+		return callId;
+	};
+	try {
+		const inheritedId = contribute(parent, "parent", "main", 5, at - 10);
+		contribute(parent, "parent", "helper", 7, at - 5);
+		contribute(parent, "parent", "helper", 9, at + 5);
+		await parent.close();
+		const parentBytes = await readFile(join(parentDirectory, "calls.jsonl"));
+		seedForkCallJournal(childDirectory, "child", {
+			parentSessionId: "parent",
+			parentCwdHash: "workspace",
+			parentTurnId: "turn",
+			parentTurnAt: new Date(at).toISOString(),
+		});
+		const child = await openCallJournal({
+			sessionDirectory: childDirectory,
+			context: { sessionId: "child", label: "main" },
+			writer,
+		});
+		const childId = contribute(child, "child", "main", 11, at + 10);
+		await child.close();
+		const entry = (id: string, turnId: string): SessionEntry => ({
+			kind: "message",
+			role: "assistant",
+			turnId,
+			parentTurnId: null,
+			timestamp: new Date(at).toISOString(),
+			payload: { callId: id, usage: null },
+		});
+		const entries = [entry(inheritedId, "turn"), entry(childId, "child-turn")];
+		const parentCalls = ledgerUsageCalls(
+			entries.slice(0, 1),
+			{},
+			readSessionCallJournalSync(parentDirectory, entries).records.map(({ record }) => record),
+		);
+		const childCalls = ledgerUsageCalls(
+			entries,
+			{},
+			readSessionCallJournalSync(childDirectory, entries).records.map(({ record }) => record),
+		);
+		strictEqual(
+			childCalls.reduce((sum, call) => sum + call.totalTokens, 0),
+			23,
+		);
+		const total = (calls: typeof childCalls) => uniqueUsageCalls(calls).reduce((sum, call) => sum + call.totalTokens, 0);
+		strictEqual(total([...parentCalls, ...childCalls]), 32);
+		strictEqual(total([...childCalls, ...parentCalls]), 32);
+		strictEqual(
+			readCallJournalSync(childDirectory).records.filter(({ record }) => record.k === "call.settled").length,
+			1,
+		);
+		deepStrictEqual(await readFile(join(parentDirectory, "calls.jsonl")), parentBytes);
+		await rm(parentDirectory, { recursive: true });
+		const unavailable = readSessionCallJournalSync(childDirectory, entries);
+		ok(unavailable.skipped > 0);
+		const remaining = ledgerUsageCalls(
+			entries,
+			{},
+			unavailable.records.map(({ record }) => record),
+		);
+		const inherited = remaining.find((call) => call.callId === inheritedId);
+		strictEqual(inherited?.apiCalls, 0);
+		strictEqual(inherited?.costSummary?.unknownCallCoverageRuns, 1);
+		strictEqual(
+			remaining.reduce((sum, call) => sum + call.totalTokens, 0),
+			11,
+		);
+	} finally {
+		await parent.close();
+		await rm(root, { recursive: true, force: true });
+	}
 });
 
 test("session objects retain canonical redacted preimages, distinguish commitments, and reject damaged objects", async () => {

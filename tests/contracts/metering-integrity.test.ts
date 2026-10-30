@@ -156,7 +156,11 @@ describe("contracts/metering integrity", () => {
 				},
 				{ responseModelIdObservation: payload.responseModelIdObservation },
 			);
-			deepStrictEqual(ledgerUsageCalls([legacy]), calls);
+			strictEqual(calls[0]?.callId, "call-fixture");
+			deepStrictEqual(
+				ledgerUsageCalls([legacy]).map((call) => ({ ...call, callId: "call-fixture" })),
+				calls,
+			);
 		}
 		for (const source of [
 			"message.usage.input = 0;",

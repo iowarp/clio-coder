@@ -155,7 +155,42 @@ export function ledgerUsageCalls(
 			continue;
 		}
 		const rawUsage = messageUsageForAccounting(record);
-		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) continue;
+		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) {
+			if (
+				typeof record.callId === "string" &&
+				!projected.has(record.callId) &&
+				record.callInvoked !== false &&
+				(record.failure as { invoked?: boolean } | undefined)?.invoked !== false
+			) {
+				projected.add(record.callId);
+				calls.push({
+					callId: record.callId,
+					providerId: currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
+					requestedModelId: currentModel ?? stringAt(record, "model") ?? "unknown",
+					attributedModelId: "unknown",
+					responseModelIdObservation: { state: "not-observed" },
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					reasoningTokens: 0,
+					totalTokens: 0,
+					apiCalls: 0,
+					missingTokenCalls: 0,
+					costUsd: 0,
+					costProvenance: "unknown",
+					costSummary: {
+						knownUsd: 0,
+						hasEstimated: false,
+						hasUnknown: true,
+						allKnownFree: false,
+						calls: 0,
+						unknownCallCoverageRuns: 1,
+					},
+				});
+			}
+			continue;
+		}
 		const usage = rawUsage as Record<string, unknown>;
 		if (usage.callInvoked === false || (record.failure as { invoked?: boolean } | undefined)?.invoked === false) continue;
 		const { input, output, cacheRead, cacheWrite, totalTokens, reasoning, observed } = normalizeTokenUsage(usage);
@@ -168,6 +203,7 @@ export function ledgerUsageCalls(
 		const differingResponseModelId = stringAt(record, "responseModel");
 		const responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
 		calls.push({
+			...(typeof record.callId === "string" ? { callId: record.callId } : {}),
 			providerId: stringAt(usage, "targetId") ?? currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
 			attributedModelId: attributedModelId(responseModelIdObservation, requestedModelId, differingResponseModelId),
 			requestedModelId,
@@ -202,6 +238,7 @@ export function ledgerUsageCalls(
 export function ledgerCallFailureCounts(
 	entries: ReadonlyArray<SessionEntry>,
 	journal: ReadonlyArray<TelemetryRecord> = [],
+	seen?: Set<string>,
 ) {
 	const linked = new Set(
 		entries.flatMap((entry) => {
@@ -217,13 +254,18 @@ export function ledgerCallFailureCounts(
 	}
 	const folded = foldCallJournal(journal, linked);
 	const projected = new Set(folded.attempts.map(({ started }) => started.callId));
-	let invokedUnknownCalls = folded.attempts.filter(
+	const unique = folded.attempts.filter(({ started }) => {
+		if (seen?.has(started.attemptId)) return false;
+		seen?.add(started.attemptId);
+		return true;
+	});
+	let invokedUnknownCalls = unique.filter(
 		(attempt) =>
 			attempt.settled !== null &&
 			attempt.settled.disposition !== "never_sent" &&
 			foldCalls([attempt]).totalTokens.unknownCount > 0,
 	).length;
-	let neverInvokedCalls = folded.totals.neverSent;
+	let neverInvokedCalls = foldCalls(unique).neverSent;
 	for (const entry of entries) {
 		if (entry.kind !== "message" || entry.role !== "assistant") continue;
 		const payload = entry.payload as {
@@ -233,6 +275,9 @@ export function ledgerCallFailureCounts(
 			failure?: { invoked?: boolean };
 		} | null;
 		if (payload?.callId && projected.has(payload.callId)) continue;
+		const key = `legacy:${payload?.callId ?? entry.turnId}`;
+		if (seen?.has(key)) continue;
+		seen?.add(key);
 		const usage = payload?.usage;
 		if (payload?.callInvoked === false || usage?.callInvoked === false || payload?.failure?.invoked === false)
 			neverInvokedCalls += 1;

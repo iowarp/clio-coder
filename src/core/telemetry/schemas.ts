@@ -311,7 +311,15 @@ export const KIND_REGISTRY = {
 	"session.opened": accountability(empty),
 	"session.resumed": accountability(empty),
 	"session.forked_from": accountability(
-		Type.Object({ parentSessionId: ExistingId, throughRecordId: Type.Optional(ExistingId) }, closed),
+		Type.Object(
+			{
+				parentSessionId: ExistingId,
+				parentCwdHash: ExistingId,
+				parentTurnId: ExistingId,
+				parentTurnAt: text,
+			},
+			closed,
+		),
 	),
 	"session.closed": accountability(Type.Object({ reason: vocabulary(["completed", "cancelled", "error"]) }, closed)),
 	"segment.closed": accountability(Type.Object({ reason: vocabulary(["rotation", "mode-change", "shutdown"]) }, closed)),

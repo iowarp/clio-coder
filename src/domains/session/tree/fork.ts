@@ -1,8 +1,10 @@
+import { dirname } from "node:path";
 import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
 import type { SessionMeta } from "../contract.js";
 import { isSessionHeader, type SessionEntry } from "../entries.js";
+import { seedForkCallJournal } from "../fork-journal.js";
 import { enrichForkMeta } from "../history.js";
 import { type SessionManagerState, startSession } from "../manager.js";
 import { entryBelongsToPath } from "./active-path.js";
@@ -126,7 +128,7 @@ function branchEntriesFromParent(
 	leafTurnId: string,
 ): {
 	parentCurrentPath: string;
-	entries: unknown[];
+	entries: SessionEntry[];
 	tree: SessionTreeNode[];
 } {
 	const parentCurrentPath = sessionPaths(parentMeta).current;
@@ -186,6 +188,14 @@ export function forkFromState(input: ForkInput): ForkResult {
 		parentTurnId: input.parentTurnId,
 	});
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
+	const parentTurnAt = branch.entries.find((entry) => entry.turnId === input.parentTurnId)?.timestamp;
+	if (!parentTurnAt) throw new Error("fork boundary timestamp unavailable");
+	seedForkCallJournal(dirname(sessionPaths(next.meta).current), next.meta.id, {
+		parentSessionId: parentMeta.id,
+		parentCwdHash: parentMeta.cwdHash,
+		parentTurnId: input.parentTurnId,
+		parentTurnAt,
+	});
 	// Only now is the child known good: created, seeded, and stamped with its
 	// parent pointers. Close (and stamp endedAt on) the parent last, after the
 	// caller's hook, which is the parent's final chance to append.

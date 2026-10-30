@@ -22,6 +22,20 @@ const labels: Record<CallLabel, CostEntryLabel | undefined> = {
 };
 const known = (sum: FactSum) => sum.measured + sum.estimated;
 
+/** A report spanning parent and child sessions counts a shared attempt once (#434). */
+export function uniqueUsageCalls(calls: readonly LedgerUsageCall[]): LedgerUsageCall[] {
+	const canonical = new Set(calls.filter((call) => call.attemptId).map((call) => call.callId));
+	const unique = new Map<string | LedgerUsageCall, LedgerUsageCall>();
+	for (const call of calls) {
+		if (call.callId && !call.attemptId && canonical.has(call.callId)) continue;
+		const key = call.attemptId ?? call.callId ?? call;
+		const prior = unique.get(key);
+		// A frozen ancestor cut may contain only the start; a later owner snapshot can contain its settlement (#434).
+		if (!prior || ((prior.facts?.incomplete ?? 0) > 0 && call.facts?.incomplete === 0)) unique.set(key, call);
+	}
+	return [...unique.values()];
+}
+
 /** Compatibility projection for existing consumers. All arithmetic and coverage come from the journal fold (#434). */
 export function usageCallsFromJournal(
 	records: Iterable<TelemetryRecord>,
@@ -75,7 +89,8 @@ export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): Ledg
 			hasEstimated: facts.usd.coverage.estimated > 0,
 			hasUnknown: facts.usd.unknownCount > 0,
 			allKnownFree: settled?.pricing.pricedBy === "free",
-			calls: facts.attempts,
+			calls: settled === null ? 0 : 1,
+			...(settled === null ? { unknownCallCoverageRuns: 1 } : {}),
 		};
 		const label = labels[started.label];
 		return [

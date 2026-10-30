@@ -1,11 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { clioStatePath } from "../../src/core/xdg.js";
+import { readCallJournalSync } from "../../src/domains/observability/call-journal.js";
 import type {
 	AcceptedNote,
 	ContinuityCheckpointPayload,
@@ -217,6 +218,12 @@ describe("continuity through real forks, replay and export", () => {
 		const child = contract.fork("m4");
 		ok(child.id !== parent.sessionId);
 		strictEqual(child.parentSessionId, parent.sessionId);
+		const journal = readCallJournalSync(dirname(sessionPaths(child).current));
+		strictEqual(journal.records.length, 1);
+		const fork = journal.records[0]?.record;
+		ok(fork?.k === "session.forked_from");
+		strictEqual(fork.data.parentSessionId, parent.sessionId);
+		strictEqual(fork.data.parentTurnId, "m4");
 
 		const entries = childEntries(child.id);
 		// The child's actual JSONL holds the inherited records under their

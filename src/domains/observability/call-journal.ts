@@ -51,6 +51,24 @@ function journalFiles(names: string[], fileName: JournalFileName): string[] {
 	return files;
 }
 
+/** Fork initialization and live owners use the same segment and clock contract (#434). */
+export function callJournalHeader(writer: SegmentHeader["writer"]): SegmentHeader {
+	return {
+		v: 1,
+		k: "segment.open",
+		schemaSet: "clio-telemetry/1",
+		mode: "standard",
+		capture: { content: false, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false },
+		clockOrigin: {
+			host: hostname(),
+			pid: process.pid,
+			birthToken: processBirthToken(),
+			monoEpochWallMs: performance.timeOrigin,
+		},
+		writer: writer,
+	};
+}
+
 /** One lease for the writer's lifetime, adjudicated by host, pid and birth token (#434). */
 export async function openCallJournal(options: CallJournalOptions): Promise<CallJournal> {
 	const fileName = options.fileName ?? "calls.jsonl";
@@ -71,20 +89,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 	const owner = withStateFileLock(
 		path,
 		async () => {
-			const header: SegmentHeader = {
-				v: 1,
-				k: "segment.open",
-				schemaSet: "clio-telemetry/1",
-				mode: "standard",
-				capture: { content: false, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false },
-				clockOrigin: {
-					host: hostname(),
-					pid: process.pid,
-					birthToken: processBirthToken(),
-					monoEpochWallMs: performance.timeOrigin,
-				},
-				writer: options.writer,
-			};
+			const header = callJournalHeader(options.writer);
 			let bytes: Buffer;
 			try {
 				const existing = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);

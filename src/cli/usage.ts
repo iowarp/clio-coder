@@ -10,7 +10,6 @@ import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
 import type { CallJournalRead } from "../domains/observability/call-journal.js";
-import { readCallJournal } from "../domains/observability/call-journal.js";
 import {
 	failedCompactionUsageFromCalls,
 	summarizeFailedCompactionUsage,
@@ -28,6 +27,7 @@ import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/obser
 import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { loadSkills } from "../domains/resources/index.js";
+import { readSessionCallJournalSync } from "../domains/session/fork-journal.js";
 import {
 	foldPromptCacheTelemetry,
 	foldRecallTelemetry,
@@ -41,7 +41,7 @@ import {
 	type RecallTelemetry,
 	readAuditRows,
 } from "../domains/session/index.js";
-import { journalUsageWindow } from "../domains/session/journal-usage.js";
+import { journalUsageWindow, uniqueUsageCalls } from "../domains/session/journal-usage.js";
 import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
@@ -633,7 +633,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	>();
 	const usageTotals = emptyUsageTotals();
-	const sessionCalls = sessions.flatMap((session) => session.usageCalls);
+	const sessionCalls = uniqueUsageCalls(sessions.flatMap((session) => session.usageCalls));
 	const callOrigins = emptyCallOrigins();
 	const foldCall = (call: LedgerUsageCall): void => {
 		addUsageCall(usageTotals, call);
@@ -650,18 +650,16 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		addUsageCall(entry.totals, call);
 		usageByModel.set(key, entry);
 	};
-	for (const session of sessions) {
-		for (const call of session.usageCalls) {
-			foldCall(call);
-			callOrigins.rows += 1;
-			if (call.label === "side-question" || call.label === "helper") callOrigins.sideQuestions += 1;
-			else if (call.label === "handoff") callOrigins.handoffs += 1;
-			else if (call.label === "prewarm") callOrigins.prewarms += 1;
-			else if (call.label === "system-one") callOrigins.systemOne += 1;
-			else if (call.label === "safety-judge") callOrigins.safetyJudge += 1;
-			else if (call.label === "background-memory") callOrigins.backgroundMemory += 1;
-			else if (call.label === "failed-compaction") callOrigins.failedCompaction += 1;
-		}
+	for (const call of sessionCalls) {
+		foldCall(call);
+		callOrigins.rows += 1;
+		if (call.label === "side-question" || call.label === "helper") callOrigins.sideQuestions += 1;
+		else if (call.label === "handoff") callOrigins.handoffs += 1;
+		else if (call.label === "prewarm") callOrigins.prewarms += 1;
+		else if (call.label === "system-one") callOrigins.systemOne += 1;
+		else if (call.label === "safety-judge") callOrigins.safetyJudge += 1;
+		else if (call.label === "background-memory") callOrigins.backgroundMemory += 1;
+		else if (call.label === "failed-compaction") callOrigins.failedCompaction += 1;
 	}
 	for (const row of outOfTurnRows) {
 		if (row.failure?.invoked === false) continue;
@@ -672,10 +670,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	// session store is gone can still have recorded out-of-turn spend, and
 	// dropping those rows would report money that was spent as nothing at all.
 	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
-	const missingSessionCalls = sessions.reduce(
-		(sum, session) => sum + session.usageCalls.reduce((missing, call) => missing + (call.missingTokenCalls ?? 0), 0),
-		0,
-	);
+	const missingSessionCalls = sessionCalls.reduce((missing, call) => missing + (call.missingTokenCalls ?? 0), 0);
 	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows, sessionCalls);
 	const compactionRows = [...outOfTurnRows, ...failedCompactionUsageFromCalls(sessionCalls)];
 	const failedCompaction = summarizeFailedCompactionUsage(compactionRows);
@@ -1374,6 +1369,7 @@ async function readSessions(
 ): Promise<SessionUsage[]> {
 	const refs = await listSessionLedgerRefs(stateDir, repoHash);
 	const sessions: SessionUsage[] = [];
+	const seenFailures = new Set<string>();
 	for (const ref of refs) {
 		let mtimeMs: number;
 		try {
@@ -1399,7 +1395,7 @@ async function readSessions(
 		);
 		let journal: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 		try {
-			journal = await readCallJournal(dirname(ref.path));
+			journal = readSessionCallJournalSync(dirname(ref.path), accountingEntries);
 		} catch {
 			diagnostics.notes.push(`session ${ref.sessionId}: call journal unavailable; using legacy ledger coverage`);
 		}
@@ -1424,7 +1420,7 @@ async function readSessions(
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
 			usageCalls: ledgerUsageCalls(accountingEntries, {}, usageRecords),
-			failureCounts: ledgerCallFailureCounts(accountingEntries, usageRecords),
+			failureCounts: ledgerCallFailureCounts(accountingEntries, usageRecords, seenFailures),
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
 			recall: foldRecallTelemetry(accountingEntries),
 		};
