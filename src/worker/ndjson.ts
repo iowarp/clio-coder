@@ -16,6 +16,9 @@ import {
 	WORKER_STDOUT_INCOMPLETE_MARKER,
 } from "./protocol.js";
 
+/** Start of the drain-timeout reason; failure classification reads it as the orchestrator falling behind (#425). */
+export const WORKER_STDOUT_UNDRAINED_REASON = "stdout did not drain within";
+
 let failure: string | null = null;
 let failureHandler: ((reason: string) => void) | null = null;
 let errorListenerInstalled = false;
@@ -96,7 +99,7 @@ export function drainStdout(timeoutMs = 2000): Promise<boolean> {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
-			if (!drained) failOutput(`stdout did not drain within ${timeoutMs} ms`);
+			if (!drained) failOutput(`${WORKER_STDOUT_UNDRAINED_REASON} ${timeoutMs} ms`);
 			resolve(failure === null);
 		};
 		const timer = setTimeout(() => finish(false), timeoutMs);

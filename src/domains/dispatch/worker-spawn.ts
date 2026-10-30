@@ -249,6 +249,9 @@ export const WORKER_PROCESS_CLEANUP_BOUND_MS =
  */
 const DEFAULT_ATTESTATION_GRACE_MS = 2000;
 const STDERR_TAIL_BYTES = 4096;
+/** Evidence-incomplete reason wording that failure classification reads (#425). */
+export const ORCHESTRATOR_STDOUT_UNREAD_REASON = "orchestrator did not read worker stdout within";
+export const WORKER_REPORTED_EVIDENCE_PREFIX = "the worker reported ";
 
 /**
  * Signal a whole process group when the platform has one, so a runtime that
@@ -795,7 +798,7 @@ function attachWorkerChannel(
 				}
 				appendStderr(`${line}\n`);
 				if (line.startsWith(WORKER_STDOUT_INCOMPLETE_MARKER)) {
-					markEvidenceIncomplete(`the worker reported ${line.slice(WORKER_STDOUT_INCOMPLETE_MARKER.length)}`);
+					markEvidenceIncomplete(`${WORKER_REPORTED_EVIDENCE_PREFIX}${line.slice(WORKER_STDOUT_INCOMPLETE_MARKER.length)}`);
 				}
 			},
 			() => appendStderr("[worker] dropped an oversized stderr line\n"),
@@ -943,9 +946,7 @@ function attachWorkerChannel(
 			// #425: the worker drained before its clean exit, so frames still unread
 			// here are lost on this side and the trail cannot seal as whole.
 			if (leaderExit?.code === 0 && child.stdout && !child.stdout.readableEnded) {
-				markEvidenceIncomplete(
-					`orchestrator did not read worker stdout within ${SAFE_EXEC_PIPE_DRAIN_BOUND_MS} ms after exit`,
-				);
+				markEvidenceIncomplete(`${ORCHESTRATOR_STDOUT_UNREAD_REASON} ${SAFE_EXEC_PIPE_DRAIN_BOUND_MS} ms after exit`);
 			}
 			child.stdout?.destroy();
 			child.stderr?.destroy();

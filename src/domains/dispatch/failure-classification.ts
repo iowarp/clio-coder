@@ -1,5 +1,6 @@
 import { isResponseSchemaRejection } from "../../core/response-schema.js";
 import { isEngineContextOverflow, isProviderContentFilter } from "../../engine/ai.js";
+import { WORKER_STDOUT_UNDRAINED_REASON } from "../../worker/ndjson.js";
 import {
 	WORKER_EXIT_PERMISSION_REQUIRED,
 	WORKER_PROVIDER_HTTP_STATUS_MARKER,
@@ -8,7 +9,11 @@ import {
 import { isDeterministicOutcomeCode } from "./backoff.js";
 import type { RunTerminationEvidence } from "./outcome.js";
 import type { RunOutcome, RunOutcomeCode } from "./types.js";
-import type { SpawnedWorkerResult } from "./worker-spawn.js";
+import {
+	ORCHESTRATOR_STDOUT_UNREAD_REASON,
+	type SpawnedWorkerResult,
+	WORKER_REPORTED_EVIDENCE_PREFIX,
+} from "./worker-spawn.js";
 
 export type FailureClass =
 	| "operator-cancel"
@@ -135,6 +140,16 @@ export function classifyFailure(
 	if (result?.channelFailure !== undefined && result.channelFailure !== "hook_result") return "node-channel";
 	if (evidence.stallKilled || outcome === "stalled" || outcome === "spawn_failed" || result?.exitCode === 255) {
 		return "node-channel";
+	}
+	// #425: an output gap left because this host read the worker's stdout too
+	// slowly says nothing about the route, so it retries unchanged and charges
+	// no breaker, whichever side noticed the gap.
+	const gap = result?.evidenceIncomplete;
+	if (
+		gap?.startsWith(ORCHESTRATOR_STDOUT_UNREAD_REASON) === true ||
+		gap?.startsWith(`${WORKER_REPORTED_EVIDENCE_PREFIX}${WORKER_STDOUT_UNDRAINED_REASON}`) === true
+	) {
+		return "internal";
 	}
 	const diagnostic = resultText(result, providerError);
 	// The provider's content filter answered, so the endpoint is up and the

@@ -258,19 +258,20 @@ infrastructure breakers.
 | 1 | `operator-cancel` | Operator abort or outcome `canceled`. | No | None | None |
 | 2 | `policy` | Admission, budget, scope or cooldown rejection, or outcome `denied_by_policy`. | No | None | None |
 | 3 | `permission` | Permission failure or worker exit code `3`. | No | None | None |
-| 4 | `deterministic-task` | A typed outcome code that retrying unchanged cannot heal: `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked`. Order 9 also assigns this class from diagnostic text. | No | None | None |
+| 4 | `deterministic-task` | A typed outcome code that retrying unchanged cannot heal: `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked`. Order 10 also assigns this class from diagnostic text. | No | None | None |
 | 5 | `model-quality` | The coordinator's quality or verification gate rejected an otherwise successful completion, or its result validator found the final result nonconforming (outcome code `result_contract_invalid`, see below). | Yes | `agent`, `model`; the decision also carries typed authority to change agent | None |
 | 6 | `node-version` | WorkerSpec version-skew diagnostic, including the released older wording. The request is valid but this node runs an incompatible build. | Yes | `node` | None |
 | 7 | `node-channel` | A typed control-channel failure, a reconciler stall kill, outcome `stalled` or `spawn_failed`, or process exit code `255` (SSH). | Yes | `node` | None |
-| 8 | `provider-refusal` | Outcome `failed` and the provider's content filter answered. The endpoint is healthy. | Yes | None | None |
-| 9 | `deterministic-task` | Diagnostic text (see below): a rejected response schema, a malformed WorkerSpec other than version skew, an ACP model admission or HTTP 400 or 404 prompt verdict, a context overflow, or a provider 4xx. | No | None | None |
-| 10 | `target-auth` | Diagnostic matches `401`, `403`, `unauthorized`, `forbidden`, `invalid api key`, or `authentication`. | Yes | `target` | None |
-| 11 | `target-rate-limit` | Diagnostic matches `429`, `rate limit`, or `too many requests`. | Yes | `target` | 1 second |
-| 12 | `node-resource` | Diagnostic matches `vram`, `gpu`, `cuda`, `oom`, or `out of memory`. | Yes | `node` | None |
-| 13 | `capacity` | Diagnostic matches `capacity`, `overloaded`, or `queue full`. | Yes | `node` | None |
-| 14 | `target-transient` | Run timeout or outcome `timed_out`, or diagnostic matches `timeout`, `timed out`, `temporar`, `unavailable`, `500`, `502`, `503`, `504`, `internal server error`, `econnrefused`, `econnreset`, `fetch failed`, or `connection error`. | Yes | `target` | None |
-| 15 | `worker-runtime` | Outcome `failed` that no earlier test matched. | Yes | `runtime` | None |
-| 16 | `internal` | No more specific termination evidence. | Yes | None | None |
+| 8 | `internal` | Bulk evidence incomplete because this host read the worker's stdout too slowly: the orchestrator did not read it to its end within 1 second of a clean exit, or the worker reported that its stdout did not drain within 2 seconds. The route that ran the worker is not at fault. | Yes | None | None |
+| 9 | `provider-refusal` | Outcome `failed` and the provider's content filter answered. The endpoint is healthy. | Yes | None | None |
+| 10 | `deterministic-task` | Diagnostic text (see below): a rejected response schema, a malformed WorkerSpec other than version skew, an ACP model admission or HTTP 400 or 404 prompt verdict, a context overflow, or a provider 4xx. | No | None | None |
+| 11 | `target-auth` | Diagnostic matches `401`, `403`, `unauthorized`, `forbidden`, `invalid api key`, or `authentication`. | Yes | `target` | None |
+| 12 | `target-rate-limit` | Diagnostic matches `429`, `rate limit`, or `too many requests`. | Yes | `target` | 1 second |
+| 13 | `node-resource` | Diagnostic matches `vram`, `gpu`, `cuda`, `oom`, or `out of memory`. | Yes | `node` | None |
+| 14 | `capacity` | Diagnostic matches `capacity`, `overloaded`, or `queue full`. | Yes | `node` | None |
+| 15 | `target-transient` | Run timeout or outcome `timed_out`, or diagnostic matches `timeout`, `timed out`, `temporar`, `unavailable`, `500`, `502`, `503`, `504`, `internal server error`, `econnrefused`, `econnreset`, `fetch failed`, or `connection error`. | Yes | `target` | None |
+| 16 | `worker-runtime` | Outcome `failed` that no earlier test matched. | Yes | `runtime` | None |
+| 17 | `internal` | No more specific termination evidence. | Yes | None | None |
 
 The diagnostic text is the lower-cased join of the worker's `stderrTail` (last 4096 bytes) and the worker's last provider error message. An ACP delegation passes the provider message in place of stderr, and so does a structured-handoff run, which writes nothing to stderr.
 

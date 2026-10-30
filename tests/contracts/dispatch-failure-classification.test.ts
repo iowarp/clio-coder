@@ -143,4 +143,31 @@ describe("dispatch failure classification", () => {
 			strictEqual(classifyTail(tail), "target-transient", tail);
 		}
 	});
+
+	it("retries an output gap the host failed to drain on the same route without charging a breaker", () => {
+		const classifyGap = (evidenceIncomplete: string) =>
+			classifyFailure(
+				evidence,
+				{
+					exitCode: 1,
+					signal: null,
+					stderrTail: `[worker] bulk evidence incomplete: ${evidenceIncomplete}`,
+					evidenceIncomplete,
+				},
+				"failed",
+				null,
+			);
+		for (const gap of [
+			"orchestrator did not read worker stdout within 1000 ms after exit",
+			"the worker reported stdout did not drain within 2000 ms",
+		]) {
+			const failureClass = classifyGap(gap);
+			strictEqual(failureClass, "internal", gap);
+			strictEqual(affectsTargetBreaker(failureClass), false, gap);
+			const decision = decideRetry(failureClass, 0, 2);
+			strictEqual(decision.retry, true, gap);
+			strictEqual(decision.excludedRouteParts.length, 0, gap);
+		}
+		strictEqual(classifyGap("the final bulk frame was truncated"), "worker-runtime");
+	});
 });
