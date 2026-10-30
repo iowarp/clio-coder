@@ -745,10 +745,15 @@ function malformedToolArgsMessage(
 	model: Model<"openai-completions">,
 	toolName: string,
 	requiredFields: ReadonlyArray<string>,
+	argumentsError: string | undefined,
 ): string {
 	const metadata = runtimeMetadata(model);
 	const target = metadata?.targetId ?? model.provider;
 	const runtime = metadata?.runtimeId ?? model.provider;
+	// Pi 1.3 empties the arguments of a call whose JSON did not parse and names the fault (upstream #10897). The
+	// call still fails closed here, but as malformed JSON rather than as the empty-arguments template fault.
+	if (argumentsError !== undefined)
+		return `Tool-call arguments are not valid JSON for target '${target}' model '${model.id}' tool '${toolName}' on an OpenAI-compatible runtime: ${argumentsError.split("\n", 1)[0]}`;
 	const required = requiredFields.length > 0 ? ` Required fields: ${requiredFields.join(", ")}.` : "";
 	const workaround =
 		model.provider === "llamacpp" || runtime === "llamacpp"
@@ -922,7 +927,12 @@ function guardMalformedToolCalls(
 						(block) => block.type === "toolCall" && requiredByTool.has(block.name) && hasEmptyArguments(block.arguments),
 					);
 					if (malformed?.type === "toolCall") {
-						const message = malformedToolArgsMessage(model, malformed.name, requiredByTool.get(malformed.name) ?? []);
+						const message = malformedToolArgsMessage(
+							model,
+							malformed.name,
+							requiredByTool.get(malformed.name) ?? [],
+							malformed.argumentsError,
+						);
 						const error = finalErrorFromPartial(event.message, message);
 						guarded.push({ type: "error", reason: "error", error });
 						guarded.end(error);
