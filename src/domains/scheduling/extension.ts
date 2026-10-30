@@ -5,7 +5,12 @@
  */
 
 import { performance } from "node:perf_hooks";
-import { type BudgetAlertPayload, BusChannels, type ConfigChangeSource } from "../../core/bus-events.js";
+import {
+	type BudgetAlertPayload,
+	BusChannels,
+	type ConfigChangePayload,
+	type ConfigChangeSource,
+} from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
@@ -86,15 +91,18 @@ export function createSchedulingBundle(
 
 	const extension: DomainExtension = {
 		async start() {
+			const noteCeilingChange = ({ diff, settings, source }: ConfigChangePayload): void => {
+				if (!diff.hotReload.includes("safety.limits.sessionCostUsd")) return;
+				ceilingChange = {
+					ceilingUsd: settings.safety.limits.sessionCostUsd,
+					source: source ?? "unattributed",
+					at: performance.now(),
+				};
+			};
+			// A raise saved to settings, or one made for this session alone, can release a hold (#424, #434).
 			unsubscribes.push(
-				config.onChange("hotReload", ({ diff, settings, source }) => {
-					if (!diff.hotReload.includes("safety.limits.sessionCostUsd")) return;
-					ceilingChange = {
-						ceilingUsd: settings.safety.limits.sessionCostUsd,
-						source: source ?? "unattributed",
-						at: performance.now(),
-					};
-				}),
+				config.onChange("hotReload", noteCeilingChange),
+				context.bus.on(BusChannels.ConfigSessionChanged, noteCeilingChange),
 			);
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchEnqueued, () => {

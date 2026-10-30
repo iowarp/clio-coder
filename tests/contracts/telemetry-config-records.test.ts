@@ -117,6 +117,17 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 		// Shutdown stops this domain before the session domain parks the live session, so stop() journals its close.
 		const live = { id: "lifecycle-live", cwdHash: origin.cwdHash };
 		bus.emit(BusChannels.SessionOpened, { sessionId: live.id, cwdHash: live.cwdHash, at: Date.now() });
+		// An edit for this session alone is journaled into its journal with the surface and scope that made it.
+		const sessionAfter = structuredClone(DEFAULT_SETTINGS);
+		sessionAfter.chat.thinkingLevel = "high";
+		bus.emit(BusChannels.ConfigSessionChanged, {
+			sessionId: live.id,
+			diff: { hotReload: [], nextTurn: ["chat.thinkingLevel"], restartRequired: [] },
+			settings: sessionAfter,
+			previous: DEFAULT_SETTINGS,
+			source: "slash-command",
+			scope: "session",
+		});
 		await extension.stop?.();
 		const records = (await readCallJournal(join(clioStateDir(), "sessions", origin.cwdHash, origin.id))).records.map(
 			({ record }) => record,
@@ -132,6 +143,12 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 			liveRecords.flatMap(({ record }) => (record.k.startsWith("session.") ? [record.k] : [])),
 			["session.opened", "session.closed"],
 		);
+		const sessionChange = liveRecords.find(({ record }) => record.k === "config.changed")?.record.data as
+			| Payload<"config.changed">
+			| undefined;
+		strictEqual(sessionChange?.source, "slash-command");
+		strictEqual(sessionChange?.scope, "session");
+		deepStrictEqual(sessionChange?.paths.nextTurn, ["chat.thinkingLevel"]);
 	} finally {
 		env.restore();
 	}

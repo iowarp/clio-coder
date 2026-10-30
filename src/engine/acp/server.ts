@@ -455,9 +455,12 @@ export interface AcpSafeSettingsSnapshot extends AcpRoutingSnapshot {
 	autonomy: AutonomyLevel;
 }
 
+/** Who a settings change from an ACP client is attributed to: the Clio GUI names itself, any other client is acp (#434). */
+export type AcpSettingsSource = "acp" | "gui";
+
 export interface AcpSettingsControl {
 	read(): AcpSafeSettingsSnapshot;
-	commit(patch: AcpSafeSettingsPatch): AcpSafeSettingsSnapshot;
+	commit(patch: AcpSafeSettingsPatch, source: AcpSettingsSource): AcpSafeSettingsSnapshot;
 }
 
 export interface ClioAcpServerOptions {
@@ -608,7 +611,10 @@ export interface ClioAcpServerOptions {
 		scope?: "leaf" | "upto",
 	) => ReadonlyArray<AgentMessage>;
 	/** Apply a route change only to this hosted session, leaving saved defaults alone. */
-	setSessionRouting?: (patch: { target?: string; model?: string; thinkingLevel?: AcpThinkingLevel }) => void;
+	setSessionRouting?: (
+		patch: { target?: string; model?: string; thinkingLevel?: AcpThinkingLevel },
+		source: AcpSettingsSource,
+	) => void;
 	onActiveSessionAutonomyChange?: (level: AutonomyLevel | null) => void;
 	/**
 	 * Why yolo cannot run in this process (root outside a container), or null
@@ -3526,6 +3532,8 @@ export interface AcpHandshake {
 	/** The client advertised `clio-coder/queue` and is sent `_clio-coder/session/queue_changed`. */
 	readonly queueEventsEnabled: boolean;
 	readonly workspaceInstanceId: string;
+	/** The surface a settings change from this client is attributed to, from `clientInfo.name` (#434). */
+	readonly settingsSource: AcpSettingsSource;
 	initialize(params: unknown): AcpInitializeResponse;
 	authenticate(params: unknown): never;
 	logout(params: unknown): Record<string, never>;
@@ -3539,6 +3547,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 	let interviewsEnabled = false;
 	let workerPermissionsEnabled = false;
 	let queueEventsEnabled = false;
+	let settingsSource: AcpSettingsSource = "acp";
 	const enabledEventKinds = new Set<AcpForwardableEventKind>();
 	const workspaceInstanceId = randomUUID();
 	const requireInitialized = (): void => {
@@ -3574,6 +3583,9 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 			return queueEventsEnabled;
 		},
 		workspaceInstanceId,
+		get settingsSource() {
+			return settingsSource;
+		},
 		initialize(params) {
 			if (initialized) throw new AcpRequestError(-32600, "already initialized", { code: "already_initialized" });
 			if (
@@ -3584,6 +3596,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 			) {
 				throw new AcpRequestError(-32602, "protocolVersion must be a non-negative integer", { code: "invalid_params" });
 			}
+			settingsSource = isRecord(params.clientInfo) && params.clientInfo.name === "clio-coder-gui" ? "gui" : "acp";
 			const clientCapabilities =
 				isRecord(params) && isRecord(params.clientCapabilities) ? params.clientCapabilities : null;
 			const clientMeta =
@@ -6093,7 +6106,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					if (session.model !== value) {
 						if (!options.setSessionRouting)
 							throw new AcpRequestError(-32601, "model selection is unavailable", { code: "method_not_found" });
-						options.setSessionRouting({ model: value });
+						options.setSessionRouting({ model: value }, handshake.settingsSource);
 						session.model = value;
 						notifyConfigOptions(session);
 					}
@@ -6121,7 +6134,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					const selected = selectModel(
 						options.providers,
 						{ target, model, thinkingLevel: session.thinkingLevel },
-						options.setSessionRouting,
+						(selected) => options.setSessionRouting?.(selected, handshake.settingsSource),
 					);
 					session.target = selected.target;
 					session.model = selected.model;
@@ -6147,7 +6160,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						session.model,
 						value as AcpThinkingLevel,
 					);
-					options.setSessionRouting({ thinkingLevel });
+					options.setSessionRouting({ thinkingLevel }, handshake.settingsSource);
 					session.thinkingLevel = thinkingLevel;
 					notifyConfigOptions(session);
 				}
@@ -6226,7 +6239,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "model requires a configured target", { code: "invalid_params" });
 		}
 		try {
-			const committed = options.settings.commit(patch);
+			const committed = options.settings.commit(patch, handshake.settingsSource);
 			const session = boundSessionId === null ? undefined : sessions.get(boundSessionId);
 			if (
 				session &&

@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import type { BudgetAlertPayload, ConfigChangePayload } from "../../src/core/bus-events.js";
+import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
@@ -28,8 +29,9 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 		},
 	} as unknown as ConfigContract;
 	const observability = { sessionCost: () => 1.25 };
+	const bus = createSafeEventBus();
 	const { contract, extension } = createSchedulingBundle({
-		bus: createSafeEventBus(),
+		bus,
 		getContract: (<T>(name: string) =>
 			(name === "config" ? config : name === "observability" ? observability : undefined) as T | undefined) as never,
 	});
@@ -52,18 +54,33 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 		await held;
 		settings.safety.limits.sessionCostUsd = 1;
 		await contract.admitPaidRequest?.({ waitForRaise: false, telemetry }).catch(() => undefined);
+		// A raise made for this session alone arrives as a session settings change, not a saved one (#434).
+		const sessionHeld = contract.admitPaidRequest?.({ waitForRaise: true, telemetry });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const beforeSession = structuredClone(settings);
+		settings.safety.limits.sessionCostUsd = 3;
+		bus.emit(BusChannels.ConfigSessionChanged, {
+			...change,
+			settings,
+			previous: beforeSession,
+			sessionId: "budget-session",
+			scope: "session",
+		});
+		await sessionHeld;
 		const crossings = records.filter((record) => record.kind === "budget.crossing");
 		const holds = records.flatMap((record) => (record.kind === "budget.wait" ? [record.data] : []));
 		strictEqual(crossings.length, 1, "a crossing is journaled once per ceiling");
 		deepStrictEqual(crossings[0]?.data, { level: "over", spendUsd: 1.25, ceilingUsd: 1, contextTokens: 900 });
 		strictEqual(crossings[0]?.ctx.callId, "cal_held");
-		strictEqual(holds.length, 2);
-		const [raised, refused] = holds;
+		strictEqual(holds.length, 3);
+		const [raised, refused, sessionRaised] = holds;
 		strictEqual(raised?.outcome, "raised");
 		strictEqual(raised?.raisedToUsd, 5);
 		strictEqual(raised?.raisedBy, "settings-ui");
 		ok((raised?.waitedMs ?? 0) > 0);
 		strictEqual(refused?.outcome, "refused");
+		strictEqual(sessionRaised?.raisedToUsd, 3);
+		strictEqual(sessionRaised?.raisedBy, "settings-ui");
 		ok(records.every((record) => validPayload(record.kind, record.data)));
 	} finally {
 		release();

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { BusChannels } from "../core/bus-events.js";
+import { BusChannels, type ConfigChangeSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
@@ -127,9 +127,22 @@ export interface InteractiveSlashRuntimeDeps {
 	 * Slash commands use scope "session": they change the running session, and
 	 * making a value permanent stays the Settings overlay's explicit choice.
 	 */
-	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
-	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "project" | "global") => void;
-	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "project" | "global") => void;
+	commitSetting?: (
+		id: string,
+		next: ClioSettings,
+		scope: "session" | "project" | "global",
+		source?: ConfigChangeSource,
+	) => void;
+	onSelectModel?: (
+		ref: { target: string; model: string },
+		scope: "session" | "project" | "global",
+		source?: ConfigChangeSource,
+	) => void;
+	onSetThinkingLevel?: (
+		level: ThinkingLevel,
+		scope?: "session" | "project" | "global",
+		source?: ConfigChangeSource,
+	) => void;
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	onRecoverHandoff?: (handoffId: string, action: "reduce" | "deliver") => Promise<void>;
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<unknown>;
@@ -635,9 +648,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			if (deps.commitSetting) {
 				const next = structuredClone(settings) as ClioSettings;
 				next.chat.thinkingLevel = match;
-				deps.commitSetting("chat.thinkingLevel", next, "session");
+				deps.commitSetting("chat.thinkingLevel", next, "session", "slash-command");
 			} else {
-				deps.onSetThinkingLevel(match, "session");
+				deps.onSetThinkingLevel(match, "session", "slash-command");
 			}
 			deps.refreshFooter();
 			return { status: "applied", level: match, display: labelFor(match) };
@@ -685,8 +698,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			}
 			// No overlay layer to ask with: session scope is the answer that cannot
 			// outlive the session that chose it.
-			deps.onSelectModel?.({ target: ref.target, model: ref.model }, "session");
-			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, "session");
+			deps.onSelectModel?.({ target: ref.target, model: ref.model }, "session", "slash-command");
+			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, "session", "slash-command");
 			deps.requestRender();
 			return "applied";
 		},

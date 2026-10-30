@@ -50,6 +50,7 @@ export const BusChannels = {
 	ConfigNextTurn: "config.nextTurn",
 	ConfigRestartRequired: "config.restartRequired",
 	ConfigReloadFailed: "config.reloadFailed",
+	ConfigSessionChanged: "config.sessionChanged",
 	PermissionRequested: "permission.requested",
 	PermissionResolved: "permission.resolved",
 	SafetyBlocked: "safety.blocked",
@@ -517,7 +518,11 @@ export type ConfigChangeSource =
 	| "session-override"
 	| "slash-command"
 	| "acp"
+	| "gui"
+	| "keybinding"
 	| "unattributed";
+/** The layer a change landed in: this session only, the workspace's private settings, or the user's (#434). */
+export type ConfigChangeScope = "session" | "project" | "user";
 
 export interface ConfigChangePayload {
 	diff: ConfigDiff;
@@ -525,6 +530,19 @@ export interface ConfigChangePayload {
 	/** The settings the change replaced. */
 	previous?: Readonly<ClioSettings>;
 	source?: ConfigChangeSource;
+	/** Absent for a file reload, which cannot tell which layer's file changed. */
+	scope?: ConfigChangeScope;
+}
+
+/**
+ * Published on {@link BusChannels.ConfigSessionChanged} when an edit moves only the current session's effective
+ * settings. The saved layers did not change, so the config domain's change events do not fire for it (#434).
+ */
+export interface ConfigSessionChangePayload extends ConfigChangePayload {
+	sessionId: string;
+	previous: Readonly<ClioSettings>;
+	source: ConfigChangeSource;
+	scope: "session";
 }
 
 /**
@@ -992,6 +1010,7 @@ export type BusPayloadMap = {
 	[BusChannels.ConfigNextTurn]: ConfigChangePayload;
 	[BusChannels.ConfigRestartRequired]: ConfigChangePayload;
 	[BusChannels.ConfigReloadFailed]: ConfigReloadFailedPayload;
+	[BusChannels.ConfigSessionChanged]: ConfigSessionChangePayload;
 	[BusChannels.PermissionRequested]: PermissionRequestedPayload;
 	[BusChannels.PermissionResolved]: PermissionResolvedPayload;
 	[BusChannels.SafetyBlocked]: SafetyBlockedPayload;

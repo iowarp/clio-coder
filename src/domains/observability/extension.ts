@@ -10,7 +10,12 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BusChannels, type ConfigChangePayload, type DispatchCompletedPayload } from "../../core/bus-events.js";
+import {
+	BusChannels,
+	type ConfigChangePayload,
+	type ConfigSessionChangePayload,
+	type DispatchCompletedPayload,
+} from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
@@ -234,6 +239,32 @@ export function createObservabilityBundle(
 	// The session the lifecycle records left open. Shutdown stops this domain before the session domain parks it,
 	// so stop() journals its close while the writers still accept records (#434).
 	let liveSession: TelemetrySessionOrigin | null = null;
+	/**
+	 * An edit that moved only the current session's effective settings belongs to that session's journal alone. A
+	 * writer opens for it, so a session idle past its writer's close still records it (#434).
+	 */
+	const recordSessionSettingsChange = (payload: ConfigSessionChangePayload): void => {
+		const origin = liveSession;
+		if (!origin || origin.id !== payload.sessionId) return;
+		const sessionDirectory = join(clioStateDir(), "sessions", origin.cwdHash, origin.id);
+		const write: Promise<void> = journals
+			.acquire(origin, "main")
+			.then(async (lease) => {
+				try {
+					if (!lease.journaled) return;
+					const [before, after] = await Promise.all([
+						storeTelemetryObject(sessionDirectory, "config", payload.previous),
+						storeTelemetryObject(sessionDirectory, "config", payload.settings),
+					]);
+					recordTelemetry("config.changed", { ...settingsChangeData(payload), before, after }, lease.context);
+				} finally {
+					await lease.release();
+				}
+			})
+			.catch(settingsUnavailable)
+			.finally(() => pendingSettingsRecords.delete(write));
+		pendingSettingsRecords.add(write);
+	};
 	// Writers still storing the settings they opened under. A change arriving meanwhile is journaled after that
 	// snapshot, so the session neither loses the change nor reads it before the settings it changed (#434).
 	const openingSnapshots = new Map<
@@ -278,19 +309,21 @@ export function createObservabilityBundle(
 	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir });
 	// A change touching several effect kinds reaches each listener with one payload; it is one change (#434).
 	const recordedChanges = new WeakSet<object>();
+	const settingsChangeData = (payload: ConfigChangePayload): Omit<Payload<"config.changed">, "before" | "after"> => ({
+		source: payload.source ?? "unattributed",
+		...(payload.scope ? { scope: payload.scope } : {}),
+		paths: {
+			hotReload: [...payload.diff.hotReload],
+			nextTurn: [...payload.diff.nextTurn],
+			restartRequired: [...payload.diff.restartRequired],
+		},
+		settingsFingerprint: computeSettingsFingerprint(payload.settings),
+	});
 	const recordSettingsChange = (payload: ConfigChangePayload): void => {
 		const previous = payload.previous;
 		if (!previous || recordedChanges.has(payload)) return;
 		recordedChanges.add(payload);
-		const data: Omit<Payload<"config.changed">, "before" | "after"> = {
-			source: payload.source ?? "unattributed",
-			paths: {
-				hotReload: [...payload.diff.hotReload],
-				nextTurn: [...payload.diff.nextTurn],
-				restartRequired: [...payload.diff.restartRequired],
-			},
-			settingsFingerprint: computeSettingsFingerprint(payload.settings),
-		};
+		const data = settingsChangeData(payload);
 		const targets: Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string; stored?: Promise<void> }> = [
 			...journals.openSessions(),
 			...openingSnapshots.values(),
@@ -376,6 +409,7 @@ export function createObservabilityBundle(
 				unsubscribes.push(context.bus.on(channel, (payload) => trace.enqueue(channel, payload)));
 			}
 			unsubscribes.push(
+				context.bus.on(BusChannels.ConfigSessionChanged, recordSessionSettingsChange),
 				context.bus.on(BusChannels.SessionOpened, ({ sessionId, cwdHash }) => {
 					liveSession = { id: sessionId, cwdHash };
 					recordLifecycle(liveSession, "session.opened", {});

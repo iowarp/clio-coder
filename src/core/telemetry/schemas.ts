@@ -5,6 +5,7 @@ import type { CaptureFlag } from "./capture.js";
 import type { ContentClass, Tier } from "./enums.js";
 import {
 	CallLabel,
+	ConfigChangeScope,
 	ConfigChangeSource,
 	Disposition,
 	FailureCause,
@@ -563,6 +564,8 @@ export const KIND_REGISTRY = {
 		schema: Type.Object(
 			{
 				source: ConfigChangeSource,
+				/** The layer the change landed in; absent for a file reload, which cannot tell which file changed. */
+				scope: Type.Optional(ConfigChangeScope),
 				paths: Type.Object(
 					{
 						hotReload: Type.Array(text),

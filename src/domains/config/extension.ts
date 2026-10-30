@@ -1,4 +1,9 @@
-import { BusChannels, type ConfigChangePayload, type ConfigChangeSource } from "../../core/bus-events.js";
+import {
+	BusChannels,
+	type ConfigChangePayload,
+	type ConfigChangeScope,
+	type ConfigChangeSource,
+} from "../../core/bus-events.js";
 import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -88,9 +93,10 @@ export function createConfigBundle(
 		previous: Readonly<ClioSettings>,
 		settings: Readonly<ClioSettings>,
 		source: ConfigChangeSource,
+		scope?: ConfigChangeScope,
 	): void {
 		const diff = diffSettings(previous, settings);
-		const payload: ConfigChangePayload = { diff, settings, previous, source };
+		const payload: ConfigChangePayload = { diff, settings, previous, source, ...(scope ? { scope } : {}) };
 		if (diff.hotReload.length > 0) dispatch("hotReload", payload);
 		if (diff.nextTurn.length > 0) dispatch("nextTurn", payload);
 		if (diff.restartRequired.length > 0) dispatch("restartRequired", payload);
@@ -193,7 +199,7 @@ export function createConfigBundle(
 			});
 			snapshot = retainSessionTargets(normalized);
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
-			dispatchChange(previous, normalized, source);
+			dispatchChange(previous, normalized, source, "user");
 		},
 		updateProject(mutate, source = "unattributed") {
 			if (!snapshot) throw new Error("config domain not started");
@@ -205,7 +211,7 @@ export function createConfigBundle(
 			});
 			snapshot = retainSessionTargets(normalized);
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
-			dispatchChange(previous, normalized, source);
+			dispatchChange(previous, normalized, source, "project");
 		},
 		onChange(kind, listener) {
 			listeners.get(kind)?.add(listener);

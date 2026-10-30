@@ -1,3 +1,4 @@
+import type { ConfigChangeSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { AskUserHandler, AskUserQuestion } from "../tools/ask-user.js";
 
@@ -38,8 +39,8 @@ export interface YoloActivationDeps {
 	getSettings(): ClioSettings | undefined;
 	/** The root refusal read once at boot, or null when yolo may run here. */
 	refusal: string | null;
-	/** The ungated settings commit. */
-	commitSetting(id: string, next: ClioSettings, scope: SettingScope): void;
+	/** The ungated settings commit; `source` names the surface the edit came from (#434). */
+	commitSetting(id: string, next: ClioSettings, scope: SettingScope, source?: ConfigChangeSource): void;
 	/** Shows the acceptance card; the existing transient ask_user card. */
 	ask: AskUserHandler;
 	/** Frees the screen for the card, closing an overlay such as /settings. */
@@ -51,7 +52,7 @@ export interface YoloActivationDeps {
 
 export interface YoloActivation {
 	/** The settings commit every interactive surface uses, with yolo gated. */
-	commit(id: string, next: ClioSettings, scope: SettingScope): void;
+	commit(id: string, next: ClioSettings, scope: SettingScope, source?: ConfigChangeSource): void;
 	/** Ask for acceptance of a yolo the session was started with and is holding at default. */
 	requestHeldAtBoot(): Promise<void>;
 }
@@ -59,7 +60,7 @@ export interface YoloActivation {
 export function createYoloActivation(deps: YoloActivationDeps): YoloActivation {
 	let asking = false;
 
-	const accept = async (scope: SettingScope, takeScreen: boolean): Promise<void> => {
+	const accept = async (scope: SettingScope, takeScreen: boolean, source?: ConfigChangeSource): Promise<void> => {
 		if (asking) return;
 		asking = true;
 		try {
@@ -84,10 +85,10 @@ export function createYoloActivation(deps: YoloActivationDeps): YoloActivation {
 			const accepted = structuredClone(current);
 			accepted.safety.yoloAccepted = true;
 			// The acceptance is the operator's own, so it is saved to user settings.
-			deps.commitSetting("safety.yoloAccepted", accepted, "global");
+			deps.commitSetting("safety.yoloAccepted", accepted, "global", source);
 			const switched = structuredClone(deps.getSettings() ?? accepted);
 			switched.safety.autonomy = "yolo";
-			deps.commitSetting("safety.autonomy", switched, scope);
+			deps.commitSetting("safety.autonomy", switched, scope, source);
 			deps.afterCommit?.();
 		} catch (error) {
 			deps.notify(
@@ -101,11 +102,11 @@ export function createYoloActivation(deps: YoloActivationDeps): YoloActivation {
 	};
 
 	return {
-		commit(id, next, scope) {
+		commit(id, next, scope, source) {
 			const current = deps.getSettings();
 			const turningOn = id === "safety.autonomy" && next.safety.autonomy === "yolo" && current?.safety.autonomy !== "yolo";
 			if (!turningOn) {
-				deps.commitSetting(id, next, scope);
+				deps.commitSetting(id, next, scope, source);
 				return;
 			}
 			if (deps.refusal !== null) {
@@ -113,12 +114,12 @@ export function createYoloActivation(deps: YoloActivationDeps): YoloActivation {
 				return;
 			}
 			if (current?.safety.yoloAccepted === true) {
-				deps.commitSetting(id, next, scope);
+				deps.commitSetting(id, next, scope, source);
 				return;
 			}
 			// The caller (a keypress, the /settings overlay) finishes its own frame
 			// first; the card then takes the screen.
-			void Promise.resolve().then(() => accept(scope, true));
+			void Promise.resolve().then(() => accept(scope, true, source));
 		},
 		requestHeldAtBoot() {
 			if (deps.getSettings() === undefined || deps.refusal !== null) return Promise.resolve();

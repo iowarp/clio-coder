@@ -79,6 +79,10 @@ export const ConfigChangeSource = vocabulary([
 	"session-override",
 	"slash-command",
 	"acp",
+	"gui",
+	"keybinding",
 	"unattributed",
 ]);
+/** The layer a settings change landed in (#434). */
+export const ConfigChangeScope = vocabulary(["session", "project", "user"]);
 export type RunBoundKind = Static<typeof RunBoundKind>;

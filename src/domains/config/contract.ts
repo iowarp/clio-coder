@@ -1,4 +1,4 @@
-import type { ConfigChangeSource } from "../../core/bus-events.js";
+import type { ConfigChangeScope, ConfigChangeSource } from "../../core/bus-events.js";
 import type { ClioSettings, SettingsMutator } from "../../core/config.js";
 import type { SettingsOrigin } from "../../core/settings-layers.js";
 import type { ChangeKind, ConfigDiff } from "./classify.js";
@@ -32,6 +32,7 @@ export interface ConfigContract {
 			settings: Readonly<ClioSettings>;
 			previous?: Readonly<ClioSettings>;
 			source?: ConfigChangeSource;
+			scope?: ConfigChangeScope;
 		}) => void,
 	): () => void;
 	/**

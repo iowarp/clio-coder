@@ -18208,9 +18208,6 @@
 			"Enum_5f1647f2": {
 				"enum": ["never_sent", "sent_unsettled", "settled_no_usage", "settled"]
 			},
-			"Enum_77c0e69d": {
-				"enum": ["file", "settings-ui", "cli", "session-override", "slash-command", "acp", "unattributed"]
-			},
 			"Enum_82e04794": {
 				"enum": [
 					"chars/4",
@@ -18280,6 +18277,19 @@
 			},
 			"Enum_bd7ae760": {
 				"enum": ["open", "closed", "ended-abnormally", "unverifiable", "unknown"]
+			},
+			"Enum_c8cf9948": {
+				"enum": [
+					"file",
+					"settings-ui",
+					"cli",
+					"session-override",
+					"slash-command",
+					"acp",
+					"gui",
+					"keybinding",
+					"unattributed"
+				]
 			},
 			"Enum_d6fd3d9d": {
 				"enum": [
@@ -20726,7 +20736,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_at_attemptId_callId_2ad2e9c3": {
+			"Object_at_attemptId_callId_f55ebd12": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -20744,7 +20754,7 @@
 					"raisedBy"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_3a8d2b8f"
+					"$ref": "#/components/schemas/Shape_2b8b3dc8"
 				},
 				"additionalProperties": false
 			},
@@ -24348,44 +24358,7 @@
 					"$ref": "#/components/schemas/Array_de2d36b0"
 				}
 			},
-			"Shape_33da2f86": {
-				"firstRecordAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"lastRecordAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Enum_bd7ae760"
-				},
-				"closed": {
-					"$ref": "#/components/schemas/Union_54e98030"
-				}
-			},
-			"Shape_39fec1f7": {
-				"resource": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"turnId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"text": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"provenance": {
-					"$ref": "#/components/schemas/Array_721a7562"
-				}
-			},
-			"Shape_3a8d2b8f": {
+			"Shape_2b8b3dc8": {
 				"kind": {
 					"type": "string",
 					"const": "budget"
@@ -24425,7 +24398,44 @@
 					"$ref": "#/components/schemas/Union_f4020539"
 				},
 				"raisedBy": {
-					"$ref": "#/components/schemas/Union_7668f561"
+					"$ref": "#/components/schemas/Union_e56cdbfe"
+				}
+			},
+			"Shape_33da2f86": {
+				"firstRecordAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"lastRecordAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Enum_bd7ae760"
+				},
+				"closed": {
+					"$ref": "#/components/schemas/Union_54e98030"
+				}
+			},
+			"Shape_39fec1f7": {
+				"resource": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"turnId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"text": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"provenance": {
+					"$ref": "#/components/schemas/Array_721a7562"
 				}
 			},
 			"Shape_3d21f4f2": {
@@ -26813,7 +26823,7 @@
 											"enum": ["snapshot", "changed"]
 										},
 										"source": {
-											"$ref": "#/components/schemas/Union_7668f561"
+											"$ref": "#/components/schemas/Union_e56cdbfe"
 										},
 										"paths": {
 											"anyOf": [
@@ -26871,7 +26881,7 @@
 									"additionalProperties": false
 								},
 								{
-									"$ref": "#/components/schemas/Object_at_attemptId_callId_2ad2e9c3"
+									"$ref": "#/components/schemas/Object_at_attemptId_callId_f55ebd12"
 								},
 								{
 									"$ref": "#/components/schemas/Object_at_kind_limitReached_13ddc75a"
@@ -28072,16 +28082,6 @@
 					}
 				]
 			},
-			"Union_7668f561": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Enum_77c0e69d"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_76c8bc43": {
 				"anyOf": [
 					{
@@ -28800,6 +28800,16 @@
 					}
 				]
 			},
+			"Union_e56cdbfe": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Enum_c8cf9948"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_e60bfcab": {
 				"anyOf": [
 					{
@@ -29183,7 +29193,7 @@
 					"budget": {
 						"type": "array",
 						"items": {
-							"$ref": "#/components/schemas/Object_at_attemptId_callId_2ad2e9c3"
+							"$ref": "#/components/schemas/Object_at_attemptId_callId_f55ebd12"
 						}
 					},
 					"quota": {

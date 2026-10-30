@@ -79,7 +79,7 @@ import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.j
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AGENT_CATEGORY_PURPOSE, AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
-import { ConfigDomainModule, createConfigDomainModule } from "../domains/config/index.js";
+import { ConfigDomainModule, createConfigDomainModule, diffSettings } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
@@ -4210,10 +4210,22 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * endpoint dies with the session that made it; "global" is the historical
 	 * write-through. Nothing on this path writes durably without a scope.
 	 */
+	/**
+	 * An edit that moved only this session's effective settings. The saved layers did not change, so the config
+	 * domain publishes nothing; this tells the journal and a held budget admission which surface made it (#434).
+	 */
+	const publishSessionSettingsChange = (previous: ClioSettings, source: ConfigChangeSource): void => {
+		const sessionId = session?.current()?.id;
+		if (!sessionId) return;
+		const settings = getCurrentSettings();
+		const diff = diffSettings(previous, settings);
+		if (diff.hotReload.length + diff.nextTurn.length + diff.restartRequired.length === 0) return;
+		bus.emit(BusChannels.ConfigSessionChanged, { sessionId, diff, settings, previous, source, scope: "session" });
+	};
 	const applyRoutingAtScope = (
 		patch: RoutingPatch,
 		scope: "session" | "project" | "global",
-		source: ConfigChangeSource = "unattributed",
+		source: ConfigChangeSource,
 	): void => {
 		if (scope === "global") {
 			updateSessionRouting(patch, source);
@@ -4222,8 +4234,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (scope === "project") {
 			persistProjectMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch), source);
 		}
+		const previous = getCurrentSettings();
 		applyRoutingPatch(sessionRouting, patch);
 		bumpSessionState();
+		if (scope === "session") publishSessionSettingsChange(previous, source);
 		persistCurrentThinkingLevel();
 	};
 	const readAcpSafeSettings = (): AcpSafeSettingsSnapshot => {
@@ -4240,7 +4254,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * in-process routing assignment. Persisting first avoids reporting a live
 	 * route that failed to become the future-session default.
 	 */
-	const commitAcpSafeSettings = (patch: AcpSafeSettingsPatch): AcpSafeSettingsSnapshot => {
+	const commitAcpSafeSettings = (patch: AcpSafeSettingsPatch, source: "acp" | "gui"): AcpSafeSettingsSnapshot => {
 		const orchestrator: NonNullable<RoutingPatch["orchestrator"]> = {};
 		if (patch["chat.target"] !== undefined) orchestrator.target = patch["chat.target"];
 		if (patch["chat.model"] !== undefined) orchestrator.model = patch["chat.model"];
@@ -4251,7 +4265,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		persistSavedMutation((saved) => {
 			if (routingPatch !== null) mergeRoutingPatchIntoSettings(saved, routingPatch);
 			if (patch["safety.autonomy"] !== undefined) saved.safety.autonomy = patch["safety.autonomy"];
-		}, "acp");
+		}, source);
 		if (routingPatch !== null) {
 			applyRoutingPatch(sessionRouting, routingPatch);
 			bumpSessionState();
@@ -4320,11 +4334,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			applyRoutingAtScope(patch, scope, source);
 			return;
 		}
-		getCurrentSettings();
+		const previous = getCurrentSettings();
 		const value = getAtPath(next, id);
 		if (scope === "session") {
 			sessionOverrides.set(id, value);
 			bumpSessionState();
+			publishSessionSettingsChange(previous, source);
 			return;
 		}
 		if (scope === "project") {
@@ -4361,7 +4376,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return advanceThinkingLevel(thinking?.effectiveLevel ?? current.chat.thinkingLevel ?? "off", effectiveAvailable);
 		},
 		nextScopedTarget: (direction) => advanceScopedTarget(getCurrentSettings(), direction),
-		apply: applyRoutingAtScope,
+		apply: (patch, scope) => applyRoutingAtScope(patch, scope, "keybinding"),
 	});
 	/**
 	 * Put the live route back on the one the current, just-resumed session last
@@ -5752,7 +5767,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						model: settings.chat.model,
 					};
 				},
-				setSessionRouting: (patch) => {
+				setSessionRouting: (patch, source) => {
 					const current = getCurrentSettings();
 					const target = patch.target ?? current.chat.target;
 					const model = patch.model ?? current.chat.model;
@@ -5760,7 +5775,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						selectModel(
 							providers,
 							{ target, model, thinkingLevel: patch.thinkingLevel ?? current.chat.thinkingLevel },
-							(selected) => applyRoutingAtScope({ orchestrator: selected }, "session"),
+							(selected) => applyRoutingAtScope({ orchestrator: selected }, "session", source),
 							current.chat.modelPicker.recentLimit,
 						);
 						// ACP acknowledges choices before a turn; resume must see them even without inference (Y4 finding 4).
@@ -5787,6 +5802,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								},
 							},
 							"session",
+							source,
 						);
 					}
 				},
@@ -6196,25 +6212,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					},
 				}
 			: {}),
-		onSetThinkingLevel: (level, scope) => {
+		onSetThinkingLevel: (level, scope, source) => {
 			const current = getCurrentSettings();
 			const nextLevel = clampThinkingLevel(providers, current.chat.target, current.chat.model, level);
 			// An unscoped caller gets the scope that cannot outlive this session.
-			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "session", "settings-ui");
+			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "session", source ?? "settings-ui");
 		},
 		onCycleThinking: () => routingGestures.cycleThinking(),
-		onSelectModel: ({ target, model }, scope) => {
+		onSelectModel: ({ target, model }, scope, source) => {
 			const settings = getCurrentSettings();
 			selectModel(
 				providers,
 				{ target, model, thinkingLevel: settings.chat.thinkingLevel },
-				(selected) => applyRoutingAtScope({ orchestrator: selected }, scope, "settings-ui"),
+				(selected) => applyRoutingAtScope({ orchestrator: selected }, scope, source ?? "settings-ui"),
 				settings.chat.modelPicker.recentLimit,
 			);
 		},
-		// The terminal saves settings only from its overlays; slash commands and gestures change this session alone.
+		// An edit names its surface; one that names none came from an overlay.
 		writeSettings: (next) => applySettingsBlob(next, "settings-ui"),
-		commitSetting: (id, next, scope) => commitSetting(id, next, scope, "settings-ui"),
+		commitSetting: (id, next, scope, source) => commitSetting(id, next, scope, source ?? "settings-ui"),
 		...(session
 			? {
 					onResumeSession: (sessionId) => {
