@@ -13840,7 +13840,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
 								}
 							}
 						},
@@ -14743,7 +14743,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
 								}
 							}
 						},
@@ -14838,7 +14838,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
 								}
 							}
 						},
@@ -14888,7 +14888,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
+										"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
 									}
 								}
 							}
@@ -15379,7 +15379,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
 								}
 							}
 						},
@@ -18414,7 +18414,7 @@
 										"minimum": 1
 									},
 									"telemetry": {
-										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_b77c5ef9"
+										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_878ab071"
 									}
 								},
 								"additionalProperties": false
@@ -20910,10 +20910,10 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_autonomy_budget_eggs_b77c5ef9": {
+			"Object_autonomy_budget_eggs_878ab071": {
 				"type": "object",
 				"properties": {
-					"$ref": "#/components/schemas/Shape_f78c6c1c"
+					"$ref": "#/components/schemas/Shape_3ba5560c"
 				},
 				"additionalProperties": false
 			},
@@ -21193,33 +21193,75 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_cacheRead_cacheWrite_calls_40803965": {
+			"Object_cacheRead_cacheWrite_calls_25e3d2e1": {
 				"type": "object",
 				"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "costUsd", "costProvenance"],
 				"properties": {
 					"input": {
-						"type": "integer",
-						"minimum": 0
+						"anyOf": [
+							{
+								"type": "integer",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"output": {
-						"type": "integer",
-						"minimum": 0
+						"anyOf": [
+							{
+								"type": "integer",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"cacheRead": {
-						"type": "integer",
-						"minimum": 0
+						"anyOf": [
+							{
+								"type": "integer",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"cacheWrite": {
-						"type": "integer",
-						"minimum": 0
+						"anyOf": [
+							{
+								"type": "integer",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"reasoning": {
-						"type": "integer",
-						"minimum": 0
+						"anyOf": [
+							{
+								"type": "integer",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"totalTokens": {
-						"type": "integer",
-						"minimum": 0
+						"anyOf": [
+							{
+								"type": "integer",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"calls": {
 						"type": "integer",
@@ -21237,8 +21279,15 @@
 						"type": "boolean"
 					},
 					"costUsd": {
-						"type": "number",
-						"minimum": 0
+						"anyOf": [
+							{
+								"type": "number",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
 					},
 					"costDisplay": {
 						"type": "string",
@@ -21631,7 +21680,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_costDisplay_5420e8c3": {
+			"Object_config_contextWork_costDisplay_1c48324b": {
 				"type": "object",
 				"required": [
 					"id",
@@ -21648,7 +21697,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_9634ada1"
+					"$ref": "#/components/schemas/Shape_a7c47c31"
 				},
 				"additionalProperties": false
 			},
@@ -21755,11 +21804,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_context_cost_session_60818c3b": {
+			"Object_context_cost_session_04c368df": {
 				"type": "object",
 				"required": ["used", "size"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_2fce9459"
+					"$ref": "#/components/schemas/Shape_8974e1b5"
 				},
 				"additionalProperties": false
 			},
@@ -24146,25 +24195,6 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
 				}
 			},
-			"Shape_2fce9459": {
-				"used": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"size": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"cost": {
-					"$ref": "#/components/schemas/Object_amount_currency_ca1db74c"
-				},
-				"context": {
-					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_bf3f55ca"
-				},
-				"session": {
-					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_calls_40803965"
-				}
-			},
 			"Shape_33da2f86": {
 				"firstRecordAt": {
 					"$ref": "#/components/schemas/Union_9d36f13d"
@@ -24243,6 +24273,35 @@
 				},
 				"provenance": {
 					"$ref": "#/components/schemas/Array_721a7562"
+				}
+			},
+			"Shape_3ba5560c": {
+				"autonomy": {
+					"$ref": "#/components/schemas/Object_level_source_ac199f39"
+				},
+				"eggs": {
+					"$ref": "#/components/schemas/Array_9e16c3c4"
+				},
+				"memory": {
+					"$ref": "#/components/schemas/Object_state_e373222f"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_context_cost_session_04c368df"
+				},
+				"plan": {
+					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
+				},
+				"workspace": {
+					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
+				},
+				"notices": {
+					"$ref": "#/components/schemas/Array_7aa99c38"
 				}
 			},
 			"Shape_3d21f4f2": {
@@ -24950,6 +25009,39 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
 				}
 			},
+			"Shape_8974e1b5": {
+				"used": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"size": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"cost": {
+					"$ref": "#/components/schemas/Object_amount_currency_ca1db74c"
+				},
+				"context": {
+					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_bf3f55ca"
+				},
+				"session": {
+					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_calls_25e3d2e1"
+				}
+			},
 			"Shape_8bfc6f43": {
 				"usd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
@@ -24972,69 +25064,6 @@
 				},
 				"fact": {
 					"$ref": "#/components/schemas/Union_afe90f89"
-				}
-			},
-			"Shape_9634ada1": {
-				"costDisplay": {
-					"type": "string"
-				},
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_11bb1234"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_ad017d75"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_b77c5ef9"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_b473b104"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_97c11ec5": {
@@ -25272,6 +25301,69 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_evidenceId_findingCount_firstPassSuccess_9636d862"
+				}
+			},
+			"Shape_a7c47c31": {
+				"costDisplay": {
+					"type": "string"
+				},
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_11bb1234"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_ad017d75"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_878ab071"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_b473b104"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_abb5a769": {
@@ -26279,35 +26371,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_outcome_trigger_d43aa16b"
-				}
-			},
-			"Shape_f78c6c1c": {
-				"autonomy": {
-					"$ref": "#/components/schemas/Object_level_source_ac199f39"
-				},
-				"eggs": {
-					"$ref": "#/components/schemas/Array_9e16c3c4"
-				},
-				"memory": {
-					"$ref": "#/components/schemas/Object_state_e373222f"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_context_cost_session_60818c3b"
-				},
-				"plan": {
-					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
-				},
-				"workspace": {
-					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
-				},
-				"notices": {
-					"$ref": "#/components/schemas/Array_7aa99c38"
 				}
 			},
 			"Shape_f9eca9e4": {

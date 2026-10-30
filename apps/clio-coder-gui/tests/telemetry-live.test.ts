@@ -4,6 +4,7 @@ import { setTimeout } from "node:timers/promises";
 import { telemetryInvalidations } from "../client/telemetry/live-model.js";
 import type { Event } from "../contracts/events.js";
 import { routes } from "../contracts/routes.js";
+import { sessionUpdateTelemetry } from "../server/acp/telemetry.js";
 import { harness, json } from "./harness/app.js";
 
 test("a telemetry_update names the reads to refresh and folds nothing (#434)", () => {
@@ -11,6 +12,30 @@ test("a telemetry_update names the reads to refresh and folds nothing (#434)", (
 	assert.deepEqual(telemetryInvalidations({ topics: ["cache", "timeline", "runs"] }), ["telemetry"]);
 	assert.deepEqual(telemetryInvalidations({ topics: ["quota", "health"] }), []);
 	assert.deepEqual(telemetryInvalidations({ topics: [] }), []);
+});
+
+test("a usage_update's unknowns reach the browser as null, never as 0 (R1)", () => {
+	const usage = (size: number, session: Record<string, unknown>) =>
+		sessionUpdateTelemetry({ sessionUpdate: "usage_update", used: 900, size, _meta: { "clio-coder/usage": { session } } })
+			?.usage;
+	const counts = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0 };
+	const unknown = usage(0, { ...counts, calls: 2, missingTokenCalls: 2, costUsd: 0, costProvenance: "unknown" });
+	assert.equal(unknown?.size, null, "a window the agent does not know");
+	assert.equal(unknown?.used, 900);
+	assert.equal(unknown?.session?.totalTokens, null, "every counted call reported no usage");
+	assert.equal(unknown?.session?.costUsd, null);
+	const partial = usage(200_000, {
+		...counts,
+		totalTokens: 50,
+		calls: 2,
+		missingTokenCalls: 1,
+		costUsd: 0.1,
+		costProvenance: "known",
+	});
+	assert.equal(partial?.size, 200_000);
+	assert.equal(partial?.session?.totalTokens, 50, "a partial count stays beside its missing-usage count");
+	assert.equal(partial?.session?.costUsd, 0.1);
+	assert.equal(usage(1, { ...counts, calls: 0, costUsd: 0, costProvenance: "known" })?.session?.totalTokens, 0);
 });
 
 test("the agent's telemetry_update reaches the browser as a telemetry.updated event for its session", {

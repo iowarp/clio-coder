@@ -49,7 +49,7 @@ export const TelemetryChips = memo(function TelemetryChips({
 	const telemetry = useSessionTelemetry(client, sessionId);
 	const meter = ledger.data
 		? contextMeter(ledger.data)
-		: telemetry?.usage
+		: telemetry?.usage && telemetry.usage.used !== null && telemetry.usage.size !== null
 			? contextMeter({
 					usedTokens: telemetry.usage.used,
 					contextWindow: telemetry.usage.size,
