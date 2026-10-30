@@ -10783,6 +10783,25 @@
 													"additionalProperties": false
 												}
 											]
+										},
+										"telemetry": {
+											"type": "object",
+											"required": ["session", "cost"],
+											"properties": {
+												"session": {
+													"type": "object",
+													"patternProperties": {
+														"^.*$": {}
+													}
+												},
+												"cost": {
+													"type": "object",
+													"patternProperties": {
+														"^.*$": {}
+													}
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
@@ -11337,7 +11356,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_dae40276"
+									"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_bf3f55ca"
 								}
 							}
 						},
@@ -13789,7 +13808,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_93d57aa7"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
 								}
 							}
 						},
@@ -14692,7 +14711,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_93d57aa7"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
 								}
 							}
 						},
@@ -14787,7 +14806,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_93d57aa7"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
 								}
 							}
 						},
@@ -14837,7 +14856,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_93d57aa7"
+										"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
 									}
 								}
 							}
@@ -15328,7 +15347,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_93d57aa7"
+									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_5420e8c3"
 								}
 							}
 						},
@@ -19121,7 +19140,7 @@
 										"minimum": 1
 									},
 									"telemetry": {
-										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_44f34995"
+										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_b77c5ef9"
 									}
 								},
 								"additionalProperties": false
@@ -21388,10 +21407,10 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_autonomy_budget_eggs_44f34995": {
+			"Object_autonomy_budget_eggs_b77c5ef9": {
 				"type": "object",
 				"properties": {
-					"$ref": "#/components/schemas/Shape_ca9f9658"
+					"$ref": "#/components/schemas/Shape_f78c6c1c"
 				},
 				"additionalProperties": false
 			},
@@ -21546,49 +21565,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_backendVerdict_cacheReadTokens_cacheWriteTokens_0d0cf5b2": {
+			"Object_backend_backendVerdict_cacheReadTokens_bb1d823e": {
 				"type": "object",
 				"required": ["shellReused", "cacheReadTokens", "cacheWriteTokens", "uncachedInputTokens", "backendVerdict"],
 				"properties": {
-					"shellReused": {
-						"type": "boolean"
-					},
-					"cacheReadTokens": {
-						"anyOf": [
-							{
-								"type": "integer",
-								"minimum": 0
-							},
-							{
-								"type": "null"
-							}
-						]
-					},
-					"cacheWriteTokens": {
-						"anyOf": [
-							{
-								"type": "integer",
-								"minimum": 0
-							},
-							{
-								"type": "null"
-							}
-						]
-					},
-					"uncachedInputTokens": {
-						"anyOf": [
-							{
-								"type": "integer",
-								"minimum": 0
-							},
-							{
-								"type": "null"
-							}
-						]
-					},
-					"backendVerdict": {
-						"$ref": "#/components/schemas/Union_8170a8ee"
-					}
+					"$ref": "#/components/schemas/Shape_61296a73"
 				},
 				"additionalProperties": false
 			},
@@ -21754,6 +21735,43 @@
 					},
 					"costProvenance": {
 						"$ref": "#/components/schemas/Union_e4fc00ad"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_cachedTokens_predictedMs_predictedTokens_ce0fb0a3": {
+				"type": "object",
+				"required": ["promptTokens", "cachedTokens", "predictedTokens", "promptMs", "predictedMs", "source"],
+				"properties": {
+					"promptTokens": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"cachedTokens": {
+						"anyOf": [
+							{
+								"type": "integer",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"predictedTokens": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"promptMs": {
+						"type": "number",
+						"minimum": 0
+					},
+					"predictedMs": {
+						"type": "number",
+						"minimum": 0
+					},
+					"source": {
+						"$ref": "#/components/schemas/Union_b39b1081"
 					}
 				},
 				"additionalProperties": false
@@ -22017,7 +22035,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_compactionAuto_compactionThreshold_contextWindow_dae40276": {
+			"Object_compactionAuto_compactionThreshold_contextWindow_bf3f55ca": {
 				"type": "object",
 				"required": [
 					"version",
@@ -22041,11 +22059,11 @@
 					"promptCache"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_0a0508e9"
+					"$ref": "#/components/schemas/Shape_a6ef072d"
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_costDisplay_93d57aa7": {
+			"Object_config_contextWork_costDisplay_5420e8c3": {
 				"type": "object",
 				"required": [
 					"id",
@@ -22062,7 +22080,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_40a39a15"
+					"$ref": "#/components/schemas/Shape_9634ada1"
 				},
 				"additionalProperties": false
 			},
@@ -22169,11 +22187,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_context_cost_session_9f65e927": {
+			"Object_context_cost_session_60818c3b": {
 				"type": "object",
 				"required": ["used", "size"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_0ebc09dd"
+					"$ref": "#/components/schemas/Shape_2fce9459"
 				},
 				"additionalProperties": false
 			},
@@ -23655,118 +23673,6 @@
 					"$ref": "#/components/schemas/Object_canStopTurn_decision_escalateAt_d6c6b544"
 				}
 			},
-			"Shape_0a0508e9": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"provider": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 300
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"model": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 300
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"contextWindow": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"contextWindowSource": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 300
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"contextWindowSlots": {
-					"$ref": "#/components/schemas/Union_466f5fd5"
-				},
-				"usedTokens": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"reserveTokens": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"freeTokens": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"percent": {
-					"anyOf": [
-						{
-							"type": "number",
-							"minimum": 0
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"measured": {
-					"type": "boolean"
-				},
-				"compactionThreshold": {
-					"anyOf": [
-						{
-							"type": "number"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"compactionAuto": {
-					"type": "boolean"
-				},
-				"projectPreload": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 300
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"projectHandbookFiles": {
-					"$ref": "#/components/schemas/Union_a9b97dcf"
-				},
-				"toolCount": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"groups": {
-					"$ref": "#/components/schemas/Array_0608acf6"
-				},
-				"lastCompaction": {
-					"$ref": "#/components/schemas/Union_f45e8ccb"
-				},
-				"promptCache": {
-					"$ref": "#/components/schemas/Union_99af88e2"
-				}
-			},
 			"Shape_0c7d4ebb": {
 				"type": {
 					"type": "string"
@@ -23788,25 +23694,6 @@
 				},
 				"modelSelection": {
 					"$ref": "#/components/schemas/Object_availableModels_code_remedy_eb9b94b8"
-				}
-			},
-			"Shape_0ebc09dd": {
-				"used": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"size": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"cost": {
-					"$ref": "#/components/schemas/Object_amount_currency_ca1db74c"
-				},
-				"context": {
-					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_dae40276"
-				},
-				"session": {
-					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_calls_40803965"
 				}
 			},
 			"Shape_108fba47": {
@@ -23858,6 +23745,25 @@
 					"$ref": "#/components/schemas/Array_de2d36b0"
 				}
 			},
+			"Shape_2fce9459": {
+				"used": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"size": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"cost": {
+					"$ref": "#/components/schemas/Object_amount_currency_ca1db74c"
+				},
+				"context": {
+					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_bf3f55ca"
+				},
+				"session": {
+					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_calls_40803965"
+				}
+			},
 			"Shape_319482bf": {
 				"neverSent": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
@@ -23905,69 +23811,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_agentId_progressCount_runId_b5633ec7"
-				}
-			},
-			"Shape_40a39a15": {
-				"costDisplay": {
-					"type": "string"
-				},
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_11bb1234"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_ad017d75"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_44f34995"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_b473b104"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_41fcd9d1": {
@@ -24365,6 +24208,64 @@
 					"type": "boolean"
 				}
 			},
+			"Shape_61296a73": {
+				"shellReused": {
+					"type": "boolean"
+				},
+				"cacheReadTokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"cacheWriteTokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"uncachedInputTokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"backendVerdict": {
+					"$ref": "#/components/schemas/Union_8170a8ee"
+				},
+				"expectedColdReasons": {
+					"$ref": "#/components/schemas/Array_345add3d"
+				},
+				"backend": {
+					"$ref": "#/components/schemas/Union_4e82e857"
+				},
+				"uncachedPrefillTokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
 			"Shape_6333d1d4": {
 				"measured": {
 					"type": "number",
@@ -24662,6 +24563,69 @@
 					"$ref": "#/components/schemas/Union_afe90f89"
 				}
 			},
+			"Shape_9634ada1": {
+				"costDisplay": {
+					"type": "string"
+				},
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_11bb1234"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_ad017d75"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_b77c5ef9"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_b473b104"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
 			"Shape_97c11ec5": {
 				"version": {
 					"type": "number",
@@ -24720,6 +24684,118 @@
 				},
 				"artifact": {
 					"$ref": "#/components/schemas/Object_overview_verdict_643b5e1a"
+				}
+			},
+			"Shape_a6ef072d": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"provider": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 300
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"model": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 300
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"contextWindow": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"contextWindowSource": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 300
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"contextWindowSlots": {
+					"$ref": "#/components/schemas/Union_466f5fd5"
+				},
+				"usedTokens": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"reserveTokens": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"freeTokens": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"percent": {
+					"anyOf": [
+						{
+							"type": "number",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"measured": {
+					"type": "boolean"
+				},
+				"compactionThreshold": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"compactionAuto": {
+					"type": "boolean"
+				},
+				"projectPreload": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 300
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"projectHandbookFiles": {
+					"$ref": "#/components/schemas/Union_a9b97dcf"
+				},
+				"toolCount": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"groups": {
+					"$ref": "#/components/schemas/Array_0608acf6"
+				},
+				"lastCompaction": {
+					"$ref": "#/components/schemas/Union_f45e8ccb"
+				},
+				"promptCache": {
+					"$ref": "#/components/schemas/Union_3623f686"
 				}
 			},
 			"Shape_a7a7e801": {
@@ -25125,35 +25201,6 @@
 					"$ref": "#/components/schemas/Union_e4fc00ad"
 				}
 			},
-			"Shape_ca9f9658": {
-				"autonomy": {
-					"$ref": "#/components/schemas/Object_level_source_ac199f39"
-				},
-				"eggs": {
-					"$ref": "#/components/schemas/Array_9e16c3c4"
-				},
-				"memory": {
-					"$ref": "#/components/schemas/Object_state_e373222f"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_context_cost_session_9f65e927"
-				},
-				"plan": {
-					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
-				},
-				"workspace": {
-					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
-				},
-				"notices": {
-					"$ref": "#/components/schemas/Array_7aa99c38"
-				}
-			},
 			"Shape_cd30fe87": {
 				"input": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
@@ -25537,6 +25584,35 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_outcome_trigger_d43aa16b"
+				}
+			},
+			"Shape_f78c6c1c": {
+				"autonomy": {
+					"$ref": "#/components/schemas/Object_level_source_ac199f39"
+				},
+				"eggs": {
+					"$ref": "#/components/schemas/Array_9e16c3c4"
+				},
+				"memory": {
+					"$ref": "#/components/schemas/Object_state_e373222f"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_context_cost_session_60818c3b"
+				},
+				"plan": {
+					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
+				},
+				"workspace": {
+					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
+				},
+				"notices": {
+					"$ref": "#/components/schemas/Array_7aa99c38"
 				}
 			},
 			"Shape_f9eca9e4": {
@@ -26227,6 +26303,16 @@
 					}
 				]
 			},
+			"Union_3623f686": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_backend_backendVerdict_cacheReadTokens_bb1d823e"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_38ecd717": {
 				"anyOf": [
 					{
@@ -26413,6 +26499,16 @@
 					{
 						"type": "string",
 						"const": "failed"
+					}
+				]
+			},
+			"Union_4e82e857": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_cachedTokens_predictedMs_predictedTokens_ce0fb0a3"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -26779,16 +26875,6 @@
 					}
 				]
 			},
-			"Union_99af88e2": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_backendVerdict_cacheReadTokens_cacheWriteTokens_0d0cf5b2"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_9d36f13d": {
 				"anyOf": [
 					{
@@ -26972,6 +27058,18 @@
 					{
 						"type": "string",
 						"const": "blocked"
+					}
+				]
+			},
+			"Union_b39b1081": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "llamacpp-timings"
+					},
+					{
+						"type": "string",
+						"const": "lmstudio-timings"
 					}
 				]
 			},
