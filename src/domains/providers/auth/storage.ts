@@ -100,6 +100,8 @@ export interface AuthStatus {
 
 export interface AuthResolution extends AuthStatus {
 	apiKey?: string;
+	/** A stored OAuth key: true only when this process ran the refresh that minted it (#434). */
+	refreshed?: boolean;
 }
 
 interface AuthStorageShapeV1 {
@@ -532,7 +534,7 @@ export class AuthStorage {
 		providerId: string,
 		signal: AbortSignal,
 		rejectedApiKey?: string,
-	): Promise<{ apiKey: string; credential: OAuthCredential } | null> {
+	): Promise<{ apiKey: string; credential: OAuthCredential; refreshed: boolean } | null> {
 		let latestData: AuthStorageData | undefined;
 		const result = await this.backend.withLockAsync(
 			async (current) => {
@@ -551,7 +553,7 @@ export class AuthStorage {
 					Date.now() + OAUTH_EXPIRY_MARGIN_MS < stored.expires &&
 					(rejectedApiKey === undefined || (await getOAuthApiKey(providerId, stored)) !== rejectedApiKey)
 				) {
-					return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored } };
+					return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored, refreshed: false } };
 				}
 				const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
 				const next: OAuthCredential = {
@@ -562,7 +564,7 @@ export class AuthStorage {
 				const merged: AuthStorageData = { ...currentData, [providerId]: next };
 				latestData = merged;
 				return {
-					result: { apiKey: await getOAuthApiKey(providerId, next), credential: next },
+					result: { apiKey: await getOAuthApiKey(providerId, next), credential: next, refreshed: true },
 					next: serializeStorageData(merged),
 				};
 			},
@@ -594,6 +596,7 @@ export class AuthStorage {
 					source: "stored-oauth",
 					detail: providerId,
 					apiKey: refreshed.apiKey,
+					refreshed: refreshed.refreshed,
 				};
 			}
 		} catch (error) {
@@ -664,6 +667,7 @@ export class AuthStorage {
 					source: "stored-oauth",
 					detail: providerId,
 					apiKey: await getOAuthApiKey(providerId, stored),
+					refreshed: false,
 				};
 			}
 			try {
@@ -679,6 +683,7 @@ export class AuthStorage {
 						source: "stored-oauth",
 						detail: providerId,
 						apiKey: refreshed.apiKey,
+						refreshed: refreshed.refreshed,
 					};
 				}
 			} catch (error) {
@@ -695,6 +700,7 @@ export class AuthStorage {
 						source: "stored-oauth",
 						detail: providerId,
 						apiKey: await getOAuthApiKey(providerId, updated),
+						refreshed: false,
 					};
 				}
 			}
