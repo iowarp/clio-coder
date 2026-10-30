@@ -11,8 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { classifyCallFailure } from "../../src/core/call-failure.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../src/core/oauth-retry.js";
 import { isProviderAuthRejection } from "../../src/core/provider-auth-error.js";
+import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { AuthStorage, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
@@ -21,6 +23,7 @@ import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtim
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { registerClioOAuthProviders } from "../../src/engine/oauth.js";
 import { retryStreamOnceOnAuthRejection } from "../../src/engine/oauth-retry-stream.js";
+import { createWorkerCallTelemetry } from "../../src/engine/worker-call-telemetry.js";
 
 // The engine registry is lazy and ALCF joins it only through this call, which
 // the providers extension and the configure and target CLI paths make.
@@ -232,6 +235,42 @@ describe("contracts/auth OAuth refresh", () => {
 			};
 		};
 		const recovered = await run(stream(null, rejected), async () => stream("retried"));
+		const frames: WorkerTelemetryFrame[] = [];
+		const telemetry = createWorkerCallTelemetry(
+			{ sessionId: null, runId: "auth-retry", label: "worker" },
+			{
+				targetId: "fixture",
+				runtimeId: "fixture",
+				api: base.api,
+				requestedModel: base.model,
+				reportedModel: { kind: "unknown", reason: "not-observed" },
+			},
+			"unknown",
+			(frame) => frames.push(frame),
+		);
+		try {
+			const request = { roundKind: "normal", toolChoice: "auto" } as const;
+			telemetry.begin(request);
+			const observe = (source: ReturnType<typeof stream>) => {
+				telemetry.attempt(request);
+				return telemetry.observe(source, () => classifyCallFailure(rejected, { invoked: true, httpStatus: 401 }));
+			};
+			deepStrictEqual(await run(observe(stream(null, rejected)), async () => observe(stream("retried"))), recovered);
+			telemetry.close({ stopReason: "error", callInvoked: false });
+			const attempts = frames.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
+			strictEqual(attempts.length, 2, "the rejected attempt survives the retry wrapper");
+			strictEqual(attempts[0]?.callId, attempts[1]?.callId);
+			deepStrictEqual(
+				attempts.map((attempt) => attempt.attempt),
+				[0, 1],
+			);
+			deepStrictEqual(
+				attempts.map((attempt) => attempt.stop.reason),
+				["error", "stop"],
+			);
+		} finally {
+			telemetry.close({ stopReason: "error", callInvoked: false });
+		}
 		deepStrictEqual(recovered, {
 			recovers: 1,
 			events: ["start", "text_delta", "done"],

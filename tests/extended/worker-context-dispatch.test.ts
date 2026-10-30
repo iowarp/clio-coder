@@ -1,6 +1,7 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { selectWorkerContext } from "../../src/domains/context/worker/select.js";
 import { captureWorkerContext } from "../../src/domains/context/worker/snapshot.js";
@@ -102,6 +103,14 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const result = await startWorkerRun(input, (event) => events.push(event)).promise;
 			equal(result.exitCode, 0);
 			equal(fixture.requests.length, 1);
+			const telemetryContext = spec.telemetryContext;
+			const callFacts = events.flatMap((event) => {
+				const record = readWorkerTelemetryFrame(event, telemetryContext);
+				return record?.kind === "call.settled" ? [record.data] : [];
+			});
+			equal(callFacts.length, 1);
+			equal(callFacts[0]?.disposition, "settled");
+			equal(callFacts[0]?.label, "worker");
 			const request = JSON.stringify(fixture.requests[0]);
 			equal(request.split("PARENT_CONSTRAINT_42").length - 1, mode === "isolated" ? 0 : 1);
 			ok(!request.includes("LATER_PARENT_TURN"));

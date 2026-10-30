@@ -16,7 +16,7 @@ import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
-import { compactionBudget } from "../domains/providers/catalog.js";
+import { compactionBudget, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
@@ -164,6 +164,7 @@ import {
 	supportsNamedToolChoice,
 } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
+import { createWorkerCallTelemetry } from "./worker-call-telemetry.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerExtensionHookRegistrations, type WorkerHookTransport } from "./worker-extension-hooks.js";
 import type { WorkerRefusal } from "./worker-refusals.js";
@@ -1390,6 +1391,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					currentModel,
 					{ ...controlled, context: requestContext },
 					(attempt) => {
+						const roundKind = attempt.toolRounds?.[0]?.kind ?? "normal";
+						const choice = attempt.options?.toolChoice;
+						const toolName = attempt.toolRounds?.[0]?.toolName;
+						workerTelemetry?.attempt({
+							roundKind,
+							toolChoice: choice === "auto" || choice === "none" ? choice : toolName ? { name: toolName } : "auto",
+						});
 						const resolvedAttempt = resolvedRequestContext(attempt.context);
 						const attemptContext =
 							middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
@@ -1404,7 +1412,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						const lockedRound = synthesisToolLock || helperTerminalPhase;
 						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attempt.options ?? {};
 
-						return boundWorkerResponse(
+						const source = boundWorkerResponse(
 							currentModel,
 							attemptContext,
 							lockedRound && !codexToolChanges ? thinkingOffOptions : attempt.options,
@@ -1440,6 +1448,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 										await boundedOptions?.onProviderStreamEvent?.(data, eventModel);
 									},
 								}),
+						);
+						return (
+							workerTelemetry?.observe(source, (message) =>
+								tracking.failure(
+									message,
+									input.signal?.aborted || (message as { stopReason?: unknown } | null)?.stopReason === "aborted",
+									callUsageReported,
+								),
+							) ?? source
 						);
 					},
 					input.target.id,
@@ -1580,6 +1597,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		) {
 			const reminder = middlewareToolChoice.completeRound(event.message);
 			if (reminder !== null) {
+				workerTelemetry?.settle(event.message);
 				// The middleware round must run before this answer can seal a terminal result (#423).
 				const tail: AgentMessage = { role: "user", content: reminder, timestamp: Date.now() };
 				if (event.message.content.some((block) => block.type === "toolCall")) agent.steer(tail);
@@ -1589,6 +1607,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 		}
 		if (event.type === "turn_start") {
+			const choice = middlewareToolChoice.current();
+			const handoff = terminalHandoffActive(model.api);
+			workerTelemetry?.begin({
+				roundKind: handoff
+					? "required"
+					: synthesisToolLock
+						? "tools-removed"
+						: choice.kind === "none"
+							? "text-only"
+							: choice.kind === "required"
+								? "required"
+								: "normal",
+				toolChoice: handoff
+					? { name: INTERNAL_HELPER_RESULT_TOOL }
+					: synthesisToolLock || choice.kind === "none"
+						? "none"
+						: choice.kind === "required"
+							? { name: choice.toolName }
+							: "auto",
+			});
 			callTracking = null;
 			callUsageReported = false;
 			workerModelRound += 1;
@@ -1612,6 +1650,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			usage.callInvoked = failure?.invoked ?? true;
 			usage.usageReported = reported;
 		}
+		if (event.type === "message_end" && isAssistantMessage(event.message)) workerTelemetry?.settle(event.message);
 		// Detect the whole terminal batch before any call is prepared/executed.
 		// beforeToolCall rejects every sibling, regardless of ordering or parallelism.
 		if (helperSchema !== null && event.type === "message_end" && isAssistantMessage(event.message)) {
@@ -2297,6 +2336,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		registry.cancelParkedCalls(reason);
 	});
 
+	const workerTelemetry = input.telemetryContext
+		? createWorkerCallTelemetry(
+				input.telemetryContext,
+				{
+					targetId: input.target.id,
+					runtimeId: input.runtime.id,
+					api: model.api,
+					requestedModel: model.id,
+					reportedModel: { kind: "unknown", reason: "not-observed" },
+				},
+				resolveEffectivePricing(input.target, input.runtime, input.wireModelId).provenance,
+				emit,
+			)
+		: undefined;
 	const promise = (async (): Promise<WorkerRunResult> => {
 		try {
 			await agent.prompt(promptMessagesForWorker(input));
@@ -2365,7 +2418,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			unsubscribePermission();
 			// Every server this run launched closes with it; teardown reports go to
 			// stderr inside the source, never to the NDJSON lane.
-			await workerMcp?.close();
+			try {
+				await workerMcp?.close();
+			} finally {
+				workerTelemetry?.close({
+					stopReason: input.signal?.aborted ? "aborted" : "error",
+					failure:
+						(callTracking as ReturnType<typeof trackCallFetch> | null)?.failure(
+							"worker ended without a terminal response",
+							input.signal?.aborted,
+						) ?? classifyCallFailure("worker ended before request invocation", { invoked: false }),
+				});
+			}
 		}
 	})();
 
