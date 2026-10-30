@@ -90,6 +90,7 @@ export {
 	matchesKey,
 	ProcessTerminal,
 	parseKey,
+	renderFakeCursor,
 	ScrollView,
 	SelectList,
 	setKeybindings,

@@ -3,6 +3,7 @@ import { colorDisabled, nerdFontEnabled } from "../core/terminal-preferences.js"
 import {
 	Editor,
 	getKeybindings,
+	renderFakeCursor,
 	stripTerminalSequences,
 	type TUI,
 	truncateToWidth,
@@ -57,8 +58,11 @@ const KILL_ACTIONS = [
 	"tui.editor.deleteWordForward",
 ] as const;
 
-const REVERSE_VIDEO = `${String.fromCharCode(27)}[7m`;
-const REVERSE_VIDEO_BLANK = `${REVERSE_VIDEO} ${String.fromCharCode(27)}[0m`;
+// Since Pi 1.4 (4f2422c16) the Editor draws its cursor cell between zero-width
+// markers the TUI resolves to reverse video only when it paints, so the composer
+// finds the cursor by those markers rather than by an SGR sequence.
+const FAKE_CURSOR_BLANK = renderFakeCursor(" ");
+const FAKE_CURSOR_START = FAKE_CURSOR_BLANK.slice(0, FAKE_CURSOR_BLANK.indexOf(" "));
 const EMPTY_PROMPT = "Ask Clio…  / for commands";
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
@@ -201,9 +205,9 @@ function emptyPromptFor(mode: ComposerMode): string {
 }
 
 function renderEmptyPrompt(line: string, width: number, theme: ClioTheme, text = EMPTY_PROMPT): string {
-	const cursorAt = line.indexOf(REVERSE_VIDEO_BLANK);
+	const cursorAt = line.indexOf(FAKE_CURSOR_BLANK);
 	if (cursorAt < 0) return line;
-	const afterCursorAt = cursorAt + REVERSE_VIDEO_BLANK.length;
+	const afterCursorAt = cursorAt + FAKE_CURSOR_BLANK.length;
 	const available = Math.max(0, width - 1);
 	const invitation =
 		text === EMPTY_PROMPT
@@ -637,7 +641,7 @@ export class ClioEditor extends Editor {
 		const input = lines.slice(1, border);
 		const cursor = Math.max(
 			0,
-			input.findIndex((line) => line.includes(REVERSE_VIDEO)),
+			input.findIndex((line) => line.includes(FAKE_CURSOR_START)),
 		);
 		const [inputStart, inputEnd] = centeredWindow(input.length, cursor, Math.max(1, ceiling - 2));
 		const rows = [this.renderTopBorder(width, this.renderedTopHidden + inputStart)];
@@ -791,7 +795,7 @@ export class ClioEditor extends Editor {
 			const input = lines.slice(1, border);
 			const cursor = Math.max(
 				0,
-				input.findIndex((line) => line.includes(REVERSE_VIDEO)),
+				input.findIndex((line) => line.includes(FAKE_CURSOR_START)),
 			);
 			const [start, end] = centeredWindow(input.length, cursor, Math.max(1, dockBodyRows(this.dockHost) - 3));
 			// An empty composer has nothing to show under the card; its draft returns with the normal rails.
