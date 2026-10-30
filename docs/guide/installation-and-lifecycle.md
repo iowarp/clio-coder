@@ -731,7 +731,7 @@ five-second delay. Registry requests have a 2.5-second timeout and are cached fo
 the registry named by `npm_config_registry` or `NPM_CONFIG_REGISTRY` when it is an
 `http` or `https` URL, so a mirror announces the version its own `npm install`
 fetches, and to `registry.npmjs.org` otherwise. npm,
-pnpm, Bun and installer installs check the `latest` tag. A release candidate also
+pnpm, Bun, Homebrew, winget and installer installs check the `latest` tag. A release candidate also
 reads `beta`, a `-snapshot.` build also reads `dev`, and an installer install reads
 the channel it recorded instead.
 Source checkouts, local or npx copies, unknown layouts and pinned installer
@@ -783,8 +783,11 @@ quit, and caps the package-manager run itself at 10 minutes. `/upgrade` arms the
 wrapper on request. The next interactive launch reports the outcome once, as
 `Updated to v<version> · installed by <manager> after your last session` or
 `background update to v<version> failed (<detail>); log: <path>; run <command>`.
-Windows, root, `sudo`, a prefix this user cannot write, Homebrew, winget and unknown
-layouts keep the plain notice `v<version> available · <exact upgrade command>`.
+Windows, root, `sudo` and a prefix this user cannot write keep the plain notice
+`v<version> available · <exact upgrade command>`. Homebrew and winget replace their own
+installs, so their notice names `brew upgrade clio-coder` or
+`winget upgrade --id IOWarp.ClioCoder --exact`; a winget install ignores the version pin
+its installer record carries, because winget owns that version.
 
 A launch that starts while a wrapper holds the install waits up to 120 seconds for it
 to finish, printing `Clio Coder is updating (<manager>); waiting…`. When the wrapper

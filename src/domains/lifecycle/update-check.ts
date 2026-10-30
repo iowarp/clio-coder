@@ -314,15 +314,20 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		// `latest` is always an older stable, so neither answer is one the developer should see.
 		const running = parseReleaseVersion(runningVersion);
 		if (
-			!["npm", "pnpm", "bun", "installer"].includes(installation.kind) ||
+			!["npm", "pnpm", "bun", "installer", "homebrew", "winget"].includes(installation.kind) ||
 			running === null ||
 			(isDevVersion(runningVersion) && !installation.installer)
 		)
 			return null;
+		// A winget install also carries an installer record, but its pin is the version winget
+		// installed and winget owns its updates, so only a native record pins or picks a channel.
+		const native =
+			installation.kind === "installer" && installation.installer
+				? readInstallerRecord(installation.installer.root)
+				: null;
+		if (native?.versionPin) return null;
 		// A pre-release install also reads `beta`, so an rc learns about the next rc
 		// as well as the final release. Stable installs never see pre-releases.
-		const native = installation.installer ? readInstallerRecord(installation.installer.root) : null;
-		if (native?.versionPin) return null;
 		const tags: ReleaseTag[] =
 			native && ["latest", "beta", "dev"].includes(native.channel)
 				? (releaseChannelTags(native.channel) as ReleaseTag[])
@@ -375,6 +380,9 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		const available = cache.available;
 		const channel = native?.channel ?? (runningVersion.includes("-snapshot.") ? "dev" : cache.availableTag);
 		const key = `available:${runningVersion}:${available}`;
+		// Homebrew and winget replace their own installs; the notice names their upgrade command (#436).
+		if (installation.kind === "homebrew" || installation.kind === "winget")
+			return { kind: "available", key, text: `v${available} available · ${installationCommand(installation, "upgrade")}` };
 		// Package-manager installs never update while Clio runs: a user-writable
 		// prefix is handed to a wrapper when the session quits; any other gets
 		// the exact command (#436).

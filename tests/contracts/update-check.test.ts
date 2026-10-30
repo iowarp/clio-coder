@@ -99,6 +99,43 @@ test("simultaneous sessions share one registry request and one reminder", async 
 	assert.equal(claims.filter(Boolean).length, 1);
 });
 
+test("Homebrew and winget installs get a notice with their own upgrade command and never install (#436)", async (t) => {
+	for (const kind of ["homebrew", "winget"] as const) {
+		const f = await fixture(kind);
+		t.after(f.home.cleanup);
+		// A winget install carries the installer record winget's run wrote, pin included; winget still owns the update.
+		const installation: Installation =
+			kind === "winget"
+				? {
+						...f.installation,
+						installer: {
+							root: f.home.dir,
+							node: "",
+							nodeVersion: "",
+							nodeBuild: "",
+							current: "",
+							previous: null,
+							launcher: "",
+							channel: "latest",
+							versionPin: "0.5.4",
+							autoUpdate: true,
+						},
+					}
+				: f.installation;
+		const notice = await createUpdateCheck({ ...f, installation, fetchVersion: async () => "0.5.5" }).probe(
+			new AbortController().signal,
+		);
+		assert.deepEqual(notice, {
+			kind: "available",
+			key: "available:0.5.4:0.5.5",
+			text:
+				kind === "homebrew"
+					? "v0.5.5 available · brew upgrade clio-coder"
+					: "v0.5.5 available · winget upgrade --id IOWarp.ClioCoder --exact",
+		});
+	}
+});
+
 test("detects replacement and same-version rebuilds without consulting the registry", async (t) => {
 	const f = await fixture("source");
 	t.after(f.home.cleanup);
