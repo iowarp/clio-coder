@@ -340,17 +340,25 @@ function ProjectGroup({
 						<li className="wb-note">Loading…</li>
 					) : null}
 					{history.isError ? (
-						<li className="wb-note" role="status">
-							{history.error instanceof ApiProblem && history.error.problem.code === "unsupported" ? (
-								"Saved tasks aren't available with this connection."
-							) : (
-								<>
-									Saved tasks could not be refreshed.{" "}
-									<button type="button" className="wb-link" disabled={history.isFetching} onClick={() => void history.refetch()}>
-										{history.isFetching ? "Checking…" : "Try again"}
-									</button>
-								</>
-							)}
+						<li className="wb-note">
+							{/* A list item may not carry the status role; the note inside it can. */}
+							<span role="status">
+								{history.error instanceof ApiProblem && history.error.problem.code === "unsupported" ? (
+									"Saved tasks aren't available with this connection."
+								) : (
+									<>
+										Saved tasks could not be refreshed.{" "}
+										<button
+											type="button"
+											className="wb-link"
+											disabled={history.isFetching}
+											onClick={() => void history.refetch()}
+										>
+											{history.isFetching ? "Checking…" : "Try again"}
+										</button>
+									</>
+								)}
+							</span>
 						</li>
 					) : null}
 					<li>
