@@ -102,7 +102,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 									className="usage-model-row"
 									type="button"
 									aria-pressed={selectedId === row.id}
-									aria-controls="usage-model-accounting"
+									{...(selected ? { "aria-controls": "usage-model-accounting" } : {})}
 									onClick={(event) => {
 										opener.current = event.currentTarget;
 										if (selectedId === row.id) closeInspector();
@@ -222,7 +222,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 									<button
 										type="button"
 										aria-pressed={selectedId === segment.id}
-										aria-controls="usage-model-accounting"
+										{...(selected ? { "aria-controls": "usage-model-accounting" } : {})}
 										onClick={(event) => {
 											opener.current = event.currentTarget;
 											setSelectedId(segment.id);
