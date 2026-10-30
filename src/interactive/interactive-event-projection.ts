@@ -238,6 +238,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		}),
 		deps.chat.onEvent((event) => {
 			if (event.type !== "message_end" && event.type !== "agent_end") return;
+			// #423: the reuse estimate is about the next call. Once a call settles,
+			// its own cache figures answer it, and a warning never expires on its own.
+			if (event.type === "agent_end" || event.message.role === "assistant") {
+				deps.dismissNotification("context.cache.reuse-uncertain");
+			}
 			if (event.type === "agent_end") deps.refreshLiveWorkspaceGit(true);
 			deps.refreshFooter();
 			deps.requestRender();
