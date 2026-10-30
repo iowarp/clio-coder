@@ -140,17 +140,30 @@ export function foldTaskMemorySpend(
 }
 
 interface SpendCacheEntry {
-	references: TaskMemoryCallReference[];
-	journalFingerprint: string;
 	fingerprint: string;
+	/** Journal directories the retained steps reference, with the stamp their facts were folded under (#434). */
+	directories: string[];
+	stamp: string;
 	summary: TaskMemorySpendSummary;
 }
 
+interface JournalCacheEntry {
+	fingerprint: string;
+	/** Only referenced attempts are retained; a journal's other calls never enter this fold (#434). */
+	referenced: Set<string>;
+	attempts: Map<string, FoldedAttempt>;
+	issues: number;
+	/** Settled facts are immutable: once every referenced attempt has settled, the directory needs no more stats (#434). */
+	frozen: boolean;
+}
+
 const spendCache = new Map<string, SpendCacheEntry>();
+const journalCache = new Map<string, JournalCacheEntry>();
 
 /**
- * Reuse the fold while step files and referenced journal segments are unchanged.
- * A late call settlement invalidates the cache even when the step timed out earlier (#434).
+ * Reuse the fold while the step files and the journals still awaiting a settlement are unchanged.
+ * The footer reads this on every refresh, so an idle refresh costs two stats plus one readdir per
+ * directory that still has an unsettled reference; a late settlement is picked up on the next read (#434).
  * Missing generations contribute no rows; missing call facts retain explicit coverage.
  */
 export function readTaskMemorySpendSummary(stateDir: string = clioStateDir()): TaskMemorySpendSummary {
@@ -171,12 +184,10 @@ export function readTaskMemorySpendSummary(stateDir: string = clioStateDir()): T
 		)
 		.join("|");
 	const cached = spendCache.get(path);
-	if (
-		unreadableFiles === 0 &&
-		cached?.fingerprint === fingerprint &&
-		journalFingerprint(stateDir, cached.references) === cached.journalFingerprint
-	)
-		return cached.summary;
+	if (unreadableFiles === 0 && cached?.fingerprint === fingerprint) {
+		if (refreshJournals(cached.directories, new Map()) && journalStamp(cached.directories) === cached.stamp)
+			return cached.summary;
+	}
 	let readableFiles = 0;
 	const lines = files.flatMap((file) => {
 		if (file.info === undefined) return [];
@@ -190,42 +201,103 @@ export function readTaskMemorySpendSummary(stateDir: string = clioStateDir()): T
 			return [];
 		}
 	});
-	const references = lines.flatMap((line) => {
+	const referenced = new Map<string, Set<string>>();
+	for (const line of lines) {
+		let calls: readonly TaskMemoryCallReference[] | undefined;
 		try {
-			return parseTaskMemoryTelemetryRecord(JSON.parse(line))?.calls ?? [];
+			calls = parseTaskMemoryTelemetryRecord(JSON.parse(line))?.calls;
 		} catch {
-			return [];
-		} // Invalid lines are counted by the fold below (#434).
-	});
-	const before = journalFingerprint(stateDir, references);
-	const journals = new Map<string, Map<string, FoldedAttempt>>();
-	let journalIssues = 0;
+			continue; // Invalid lines are counted by the fold below (#434).
+		}
+		for (const reference of calls ?? []) {
+			const directory = join(stateDir, "sessions", reference.repoIdentity, reference.sessionId);
+			const attempts = referenced.get(directory) ?? new Set<string>();
+			attempts.add(reference.attemptId);
+			referenced.set(directory, attempts);
+		}
+	}
+	const directories = [...referenced.keys()].sort();
+	const readable = refreshJournals(directories, referenced);
 	const summary = foldTaskMemorySpend(lines, (reference) => {
 		const directory = join(stateDir, "sessions", reference.repoIdentity, reference.sessionId);
-		let attempts = journals.get(directory);
-		if (!attempts) {
-			attempts = new Map();
-			journals.set(directory, attempts);
-			try {
-				const read = readCallJournalSync(directory);
-				journalIssues += read.skipped + read.damaged;
-				for (const attempt of foldCallJournal(read.records.map(({ record }) => record)).attempts)
-					attempts.set(attempt.started.attemptId, attempt);
-			} catch {
-				unreadableFiles += 1;
-			}
-		}
-		const attempt = attempts.get(reference.attemptId);
+		const attempt = journalCache.get(directory)?.attempts.get(reference.attemptId);
 		return attempt?.started.callId === reference.callId ? attempt : undefined;
 	});
-	summary.invalidRows += journalIssues;
+	for (const directory of directories) {
+		const entry = journalCache.get(directory);
+		if (!entry) {
+			unreadableFiles += 1;
+			continue;
+		}
+		summary.invalidRows += entry.issues;
+		entry.frozen = [...entry.referenced].every((attemptId) => {
+			const attempt = entry.attempts.get(attemptId);
+			return attempt !== undefined && attempt.settled !== null;
+		});
+	}
 	summary.readableFiles = readableFiles;
 	summary.unreadableFiles = unreadableFiles;
-	// A late settlement can arrive during this read; never cache old facts under its newer fingerprint (#434).
-	if (unreadableFiles === 0 && before !== null && before === journalFingerprint(stateDir, references)) {
-		spendCache.set(path, { fingerprint, journalFingerprint: before, references, summary });
-	} else spendCache.delete(path);
+	if (unreadableFiles === 0 && readable)
+		spendCache.set(path, { fingerprint, directories, stamp: journalStamp(directories), summary });
+	else spendCache.delete(path);
 	return summary;
+}
+
+/**
+ * Bring the cached folds of these directories up to date; false when a journal could not be read.
+ * A directory is stat'ed before it is read, so a settlement that lands between the two is re-read
+ * on the next call rather than cached under its newer fingerprint (#434).
+ */
+function refreshJournals(
+	directories: readonly string[],
+	referenced: ReadonlyMap<string, ReadonlySet<string>>,
+): boolean {
+	let readable = true;
+	for (const directory of directories) {
+		const entry = journalCache.get(directory);
+		const wanted = referenced.get(directory) ?? entry?.referenced ?? new Set<string>();
+		const covered = entry !== undefined && [...wanted].every((attemptId) => entry.referenced.has(attemptId));
+		if (entry?.frozen && covered) continue;
+		const current = journalFingerprint(directory);
+		if (current === null) {
+			journalCache.delete(directory);
+			readable = false;
+			continue;
+		}
+		if (entry?.fingerprint === current && covered) continue;
+		try {
+			const read = readCallJournalSync(directory);
+			const attempts = new Map<string, FoldedAttempt>();
+			for (const attempt of foldCallJournal(read.records.map(({ record }) => record)).attempts) {
+				if (wanted.has(attempt.started.attemptId)) attempts.set(attempt.started.attemptId, attempt);
+			}
+			journalCache.set(directory, {
+				fingerprint: current,
+				referenced: new Set(wanted),
+				attempts,
+				issues: read.skipped + read.damaged,
+				frozen: false,
+			});
+		} catch {
+			journalCache.delete(directory);
+			readable = false;
+		}
+	}
+	return readable;
+}
+
+/** The state a summary was folded under: frozen directories need no fingerprint, the others carry theirs (#434). */
+function journalStamp(directories: readonly string[]): string {
+	return directories
+		.map((directory) => {
+			const entry = journalCache.get(directory);
+			return entry === undefined
+				? `${directory}:unread`
+				: entry.frozen
+					? `${directory}:frozen`
+					: `${directory}:${entry.fingerprint}`;
+		})
+		.join("|");
 }
 
 /** Compact operator wording, with incomplete-history warnings before any known totals. */
@@ -251,25 +323,19 @@ export function formatTaskMemorySpend(summary: TaskMemorySpendSummary): string {
 	return `${scope} ${summary.llmSteps} steps · known ${tokens} · ${time} · hit ${summary.injections}/${summary.llmSteps} (${rate})`;
 }
 
-function journalFingerprint(stateDir: string, references: readonly TaskMemoryCallReference[]): string | null {
-	const directories = [
-		...new Set(references.map((ref) => join(stateDir, "sessions", ref.repoIdentity, ref.sessionId))),
-	].sort();
-	const parts: string[] = [];
-	for (const directory of directories) {
-		try {
-			const names = readdirSync(directory)
-				.filter((name) => name === "calls.jsonl" || /^calls\.rec_.*\.jsonl$/.test(name))
-				.sort();
-			parts.push(directory);
-			for (const name of names) {
+/** One directory's journal segment identities; null when it exists but cannot be listed (#434). */
+function journalFingerprint(directory: string): string | null {
+	try {
+		const names = readdirSync(directory)
+			.filter((name) => name === "calls.jsonl" || /^calls\.rec_.*\.jsonl$/.test(name))
+			.sort();
+		return names
+			.map((name) => {
 				const stat = statSync(join(directory, name));
-				parts.push(`${name}:${stat.dev}:${stat.ino}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}`);
-			}
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
-			parts.push(`${directory}:missing`);
-		}
+				return `${name}:${stat.dev}:${stat.ino}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}`;
+			})
+			.join(",");
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : null;
 	}
-	return parts.join("|");
 }
