@@ -5,11 +5,14 @@ import type { SideCallAuth } from "../../../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../../core/oauth-retry.js";
 import { prepareProviderCheckpoint } from "../../../core/provider-checkpoint.js";
 import { ProviderCompactionError } from "../../../core/provider-checkpoint-handle.js";
+import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
 // Direct modules, not the memory barrel: entries and compaction sit in the
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
 import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
 import { traceObservation } from "../../memory/observation-trace.js";
+import type { CallJournalOptions, CallScope } from "../../observability/call-scope.js";
+import { openCallScope } from "../../observability/call-scope.js";
 
 export {
 	COMPACTION_SYSTEM_PROMPT,
@@ -107,8 +110,12 @@ export interface CompactionCallObservation {
 }
 
 export interface CompactInput extends SideCallAuth {
+	telemetry?: CallJournalOptions;
 	/** Main-route native port, supplied only after runtime, setting and flow admission (#423). */
-	providerCompaction?: (observe: CompactInput["onCall"]) => Promise<ProviderCompactionResult>;
+	providerCompaction?: (
+		observe: CompactInput["onCall"],
+		callTelemetry?: CallMessageObserver,
+	) => Promise<ProviderCompactionResult>;
 	providerCheckpointSource?: { sessionId: string; archive: string };
 	providerFallbackReason?: string;
 	/**
@@ -874,7 +881,14 @@ async function runSummaryStream(
 	systemPrompt: string,
 	maxTokens: number | undefined,
 ): Promise<{ text: string; usage: unknown }> {
-	return withOAuthRefresh(input, (auth) => runSummaryAttempt({ ...input, ...auth }, userText, systemPrompt, maxTokens));
+	const scope = await openCallScope(input.telemetry, input.model);
+	try {
+		return await withOAuthRefresh(input, (auth) =>
+			runSummaryAttempt({ ...input, ...auth }, userText, systemPrompt, maxTokens, scope),
+		);
+	} finally {
+		await scope.close();
+	}
 }
 
 async function runSummaryAttempt(
@@ -882,6 +896,24 @@ async function runSummaryAttempt(
 	userText: string,
 	systemPrompt: string,
 	maxTokens: number | undefined,
+	scope: CallScope,
+): Promise<{ text: string; usage: unknown }> {
+	scope.startAttempt();
+	try {
+		return await scope.withContext(() => runSummaryRequest(input, userText, systemPrompt, maxTokens, scope));
+	} catch (error) {
+		// The request settles its own transport failures; this covers admission and fit checks (#434).
+		scope.settle({ stopReason: input.signal?.aborted ? "aborted" : "error", callInvoked: false });
+		throw error;
+	}
+}
+
+async function runSummaryRequest(
+	input: CompactInput,
+	userText: string,
+	systemPrompt: string,
+	maxTokens: number | undefined,
+	scope: CallScope,
 ): Promise<{ text: string; usage: unknown }> {
 	const options: Record<string, unknown> = {};
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
@@ -945,6 +977,7 @@ async function runSummaryAttempt(
 				...(maxTokens !== undefined ? { maxTokens } : {}),
 			});
 			usage = response.usage;
+			scope.settle({ stopReason: "stop", usage });
 			reported = retainReportedUsage(reported, usage);
 			input.signal?.throwIfAborted();
 			outcome = "success";
@@ -965,6 +998,7 @@ async function runSummaryAttempt(
 				reported = retainReportedUsage(reported, usage);
 			}
 			if (event.type === "done") {
+				scope.settle(event.message);
 				usage = event.message.usage ?? usage;
 				reported = retainReportedUsage(reported, usage);
 				input.signal?.throwIfAborted();
@@ -975,6 +1009,7 @@ async function runSummaryAttempt(
 				return { text: textFromAssistant(event.message).trim(), usage };
 			}
 			if (event.type === "error") {
+				scope.settle({ ...event.error, failure: tracking.failure(event.error, event.error.stopReason === "aborted") });
 				usage = event.error.usage ?? usage;
 				reported = retainReportedUsage(reported, usage);
 				outcome = event.error.stopReason === "aborted" ? "aborted" : "error";
@@ -984,6 +1019,7 @@ async function runSummaryAttempt(
 		throw new Error("compaction stream ended without a terminal response");
 	} catch (error) {
 		failure = tracking.failure(error, input.signal?.aborted || outcome === "aborted", Object.keys(reported).length > 0);
+		scope.settle({ stopReason: input.signal?.aborted || outcome === "aborted" ? "aborted" : "error", failure });
 		rememberOAuthCallFailure(error, failure);
 		throw error;
 	} finally {
@@ -1008,21 +1044,21 @@ async function runSummaryAttempt(
 export async function compact(input: CompactInput): Promise<CompactResult> {
 	let nativeUsage: CompactionUsage | undefined;
 	let fallbackReason = input.providerFallbackReason;
-	if (
-		input.providerCompaction &&
-		input.providerCheckpointSource &&
-		input.entries.some((entry) => entry.kind === "message")
-	) {
+	const providerCompaction = input.providerCompaction;
+	if (providerCompaction && input.providerCheckpointSource && input.entries.some((entry) => entry.kind === "message")) {
 		input.signal?.throwIfAborted();
 		const selection =
 			input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
 		const skillContext = captureSkillContext(input.entries, selection);
+		const scope = await openCallScope(input.telemetry, input.model);
+		scope.startAttempt({ roundKind: "normal", toolChoice: "auto" });
 		try {
 			if (!skillContext && input.entries.some((entry) => entry.kind === "skillActivation" && !entry.activation.runId))
 				throw new ProviderCompactionError("native-skills-unverified");
 			await input.beforeSummaryCall?.();
 			input.signal?.throwIfAborted();
-			const native = await input.providerCompaction(input.onCall);
+			const native = await scope.withContext(() => providerCompaction(input.onCall, scope));
+			scope.settle({ stopReason: "stop", usage: native.usage });
 			nativeUsage = addCompactionUsage(undefined, native.usage);
 			input.signal?.throwIfAborted();
 			const cutCursor = [...input.entries].reverse().find((entry) => entry.kind === "message")?.turnId ?? "";
@@ -1071,9 +1107,12 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 				...(userContext ? { userContext } : {}),
 			};
 		} catch (error) {
+			scope.settle({ stopReason: input.signal?.aborted ? "aborted" : "error", callInvoked: false });
 			input.signal?.throwIfAborted();
 			if (!(error instanceof ProviderCompactionError)) throw error;
 			fallbackReason = error.category;
+		} finally {
+			await scope.close();
 		}
 	}
 	// Native checkpoints never replace evidence. A portable route summarizes the original ledger lazily (#423).

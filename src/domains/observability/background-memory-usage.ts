@@ -1,4 +1,5 @@
 import type { CallFailureRecord } from "../../core/call-failure.js";
+import type { ObservabilityContract } from "./contract.js";
 /**
  * Accounting for one proactive-memory step.
  *
@@ -38,6 +39,7 @@ export interface BackgroundMemoryStepUsage {
 
 /** The subset of the observability contract this accounting needs. */
 export interface BackgroundMemoryUsageSink {
+	acquireTelemetrySession?: ObservabilityContract["acquireTelemetrySession"];
 	recordTokens(
 		providerId: string,
 		attributedModelId: string,

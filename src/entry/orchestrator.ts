@@ -1568,7 +1568,7 @@ async function runCompactionFlow(
 		runtimeId: resolved.runtimeId,
 		wireModelId: resolved.wireModelId,
 	});
-	if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
+
 	// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
 	// pre-warm so dispatch admission and background memory see its real usage.
 	const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
@@ -1593,6 +1593,18 @@ async function runCompactionFlow(
 	let result: CompactResult;
 	try {
 		result = await compact({
+			...(observability?.acquireTelemetrySession
+				? {
+						telemetry: {
+							origin: meta,
+							acquire: observability.acquireTelemetrySession,
+							label: "compaction",
+							targetId: resolved.targetId,
+							runtimeId: resolved.runtimeId,
+							costProvenance: resolved.costProvenance,
+						},
+					}
+				: {}),
 			entries,
 			offerMemory: (slice, ordinary, projected) => {
 				const scope = admission?.memory?.observationStatus().scope;
@@ -1617,6 +1629,7 @@ async function runCompactionFlow(
 				: {}),
 			// Native rejection and its portable retry share one transaction admission (#423).
 			beforeSummaryCall: () => {
+				if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
 				if (!nativeEnabled || !providerCompaction) return admitSummary();
 				nativeAdmission ??= admitSummary();
 				return nativeAdmission;

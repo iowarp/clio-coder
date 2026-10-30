@@ -161,7 +161,12 @@ export function setEngineProviderCompactionPolicy(agent: Agent, enabled: () => b
 /** Snapshot public Pi transforms and the live transcript without running the agent loop (#423). */
 export async function compactEngineCodex(
 	agent: Agent,
-	options: { signal?: AbortSignal; sessionId?: string; onUsage?: Parameters<typeof compactOpenAI>[0]["onUsage"] },
+	options: {
+		signal?: AbortSignal;
+		sessionId?: string;
+		onUsage?: Parameters<typeof compactOpenAI>[0]["onUsage"];
+		callTelemetry?: Parameters<typeof compactOpenAI>[0]["callTelemetry"];
+	},
 ) {
 	let messages = structuredClone(agent.state.messages);
 	if (agent.transformContext) messages = await agent.transformContext(messages, options.signal);
@@ -178,6 +183,7 @@ export async function compactEngineCodex(
 	options.signal?.throwIfAborted();
 	const configuration = codexConfigurations.get(agent);
 	return compactOpenAI({
+		...(options.callTelemetry ? { callTelemetry: options.callTelemetry } : {}),
 		stream: engineMainStreamSimple,
 		model: agent.state.model,
 		context: { messages: converted },

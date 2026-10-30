@@ -14,6 +14,7 @@ import { codexAccountScope } from "../../core/codex-account.js";
 import type { ProviderCheckpoint } from "../../core/provider-checkpoint.js";
 import { readProviderCheckpoint } from "../../core/provider-checkpoint.js";
 import { ProviderCompactionError, providerCheckpointFromMessage } from "../../core/provider-checkpoint-handle.js";
+import type { CallMessageObserver } from "../../core/telemetry/producer.js";
 import { normalizeContext } from "../context.js";
 import type { CodexConfiguration, ProviderCheckpointHandle, ProviderCompactionResult } from "../types.js";
 
@@ -140,6 +141,7 @@ export function withProviderCheckpoint<T extends StreamOptions | SimpleStreamOpt
 
 /** Drain a main-route stream without publishing an empty assistant or invoking the print terminal guard (#423). */
 export async function compactOpenAI(input: {
+	callTelemetry?: CallMessageObserver;
 	stream: (model: Model<Api>, context: Context, options: SimpleStreamOptions) => AssistantMessageEventStream;
 	model: Model<Api>;
 	context: Context;
@@ -212,7 +214,10 @@ export async function compactOpenAI(input: {
 		let failureCategory = "native-stream-failed";
 		for await (const event of events) {
 			if ("partial" in event) usage = event.partial.usage ?? usage;
-			if (event.type === "done") usage = event.message.usage ?? usage;
+			if (event.type === "done") {
+				usage = event.message.usage ?? usage;
+				input.callTelemetry?.settle(event.message);
+			}
 			if (event.type === "error") {
 				usage = event.error.usage ?? usage;
 				failed = true;
@@ -228,6 +233,7 @@ export async function compactOpenAI(input: {
 					invoked: sent || (usage?.totalTokens ?? 0) > 0,
 					aborted: options.signal?.aborted ?? false,
 				});
+				input.callTelemetry?.settle({ ...event.error, failure });
 				const detail = event.error.errorMessage ?? "";
 				if (/TypeError|ReferenceError|Cannot read properties|is not a function/u.test(detail))
 					throw new Error("native-compaction-programming-error");
@@ -252,6 +258,11 @@ export async function compactOpenAI(input: {
 			compatibility: { accountScope, provider: model.provider, model: model.id, protocol: "codex-responses-trigger-v1" },
 		};
 	} finally {
+		input.callTelemetry?.settle({
+			stopReason: completed ? "stop" : options.signal?.aborted ? "aborted" : "error",
+			usage,
+			...(failure ? { failure } : { callInvoked: completed || payloadPrepared }),
+		});
 		input.onUsage?.(
 			(usage?.totalTokens ?? 0) > 0 || outcome === "success" ? usage : undefined,
 			options.signal?.aborted ? "aborted" : outcome,

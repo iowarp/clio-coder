@@ -13,6 +13,7 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { summarizeFailedCompactionUsage } from "../../src/domains/observability/compaction-usage.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import {
@@ -20,6 +21,7 @@ import {
 	outOfTurnUsagePath,
 	readOutOfTurnUsageRows,
 } from "../../src/domains/observability/out-of-turn-usage.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { canonicalEndpointKey, foregroundStreamUsage } from "../../src/domains/providers/index.js";
@@ -238,9 +240,14 @@ describe("production compaction controls", () => {
 			registerEngineApiProvider({ api: faux.api, stream, streamSimple: stream });
 		}
 		const liveUsage: unknown[][] = [];
+		const journals = createSessionJournals(clioStateDir(), () => {});
 		return {
 			session,
 			liveUsage,
+			journalCalls: async () =>
+				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
+					.map(({ record }) => record)
+					.filter((record) => record.k === "call.settled"),
 			settings,
 			auth,
 			response,
@@ -260,6 +267,7 @@ describe("production compaction controls", () => {
 			},
 			run: createProductionAutoCompact(session, () => settings, providers, {
 				recordTokens: (...args) => liveUsage.push(args),
+				acquireTelemetrySession: journals.acquire,
 			}),
 		};
 	}
@@ -1165,6 +1173,16 @@ describe("production compaction controls", () => {
 		await rejects(f.run(), /fixture stream error/);
 		strictEqual(f.calls.length, 2);
 		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 0);
+		const journalCalls = await f.journalCalls();
+		strictEqual(journalCalls.length, 2);
+		strictEqual(
+			new Set(journalCalls.map((record) => record.data.callId)).size,
+			2,
+			"chunk summaries are separate calls, not retries",
+		);
+		strictEqual(journalCalls[0]?.data.disposition, "settled");
+		strictEqual(journalCalls[1]?.data.disposition, "sent_unsettled");
+		ok(journalCalls.every((record) => record.data.label === "compaction"));
 		const read = readOutOfTurnUsageRows(clioStateDir());
 		deepStrictEqual(read.errors, []);
 		strictEqual(read.rows.length, 2);
