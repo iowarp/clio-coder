@@ -2,6 +2,8 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
 ## 0.6.5 - 2026-10-29
 
 Clio Coder 0.6.5 keeps itself current and is easier to run on shared machines. Native installs update in the background under a new `interface.autoUpdate` switch, and on Linux and macOS, npm, pnpm, bun and volta installs whose prefix the operator owns update after an interactive session quits and no other process of that install remains (#436). `clio-coder session list` and `clio-coder session terminate` find and stop sessions from any host that shares the state directory (#439). Long Codex sessions can hand compaction to the provider with `context.compaction.provider: native` (#423). Several reported rough edges are fixed: copies that never reached the clipboard (#437), `@`-attached PDFs that blew past the context window (#438), a startup of nearly a minute in large C trees (#441), Codex runs ended by a rejected `tool_choice` or an expired OAuth token (#426, #427), and gpt-oss on vLLM losing its reasoning and tool calls (#435). Durable dispatch settlement and transcript rendering left the main thread's hot path, so the TUI stays within its 50 ms p99 and 250 ms maximum lag bounds with three streaming workers (#428).
