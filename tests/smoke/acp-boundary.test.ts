@@ -558,7 +558,14 @@ describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
 					streamingRequests: fixture.requests.length,
 				}),
 			);
-			strictEqual(fixture.requests.length, 1);
+			// The safety judge may review the call on the same route before the ask;
+			// no request may carry the refused tool's result back to the model.
+			strictEqual(
+				fixture.requests.some((request) =>
+					(request.messages as Array<{ role?: string }>).some((message) => message.role === "tool"),
+				),
+				false,
+			);
 			doesNotMatch(JSON.stringify(client.updates), /unexpected continuation/);
 			await client.close(sessionId);
 		} finally {
