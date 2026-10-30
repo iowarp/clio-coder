@@ -1,10 +1,12 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { telemetryContext, withToolTelemetryContext } from "../../src/core/telemetry/context.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
+import type { ToolCallAuditInput, ToolCallAuditRecord } from "../../src/domains/safety/audit.js";
+import { buildAuditRecord } from "../../src/domains/safety/audit.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import { foldSessionArtifacts } from "../../src/domains/session/session-artifacts.js";
@@ -43,6 +45,7 @@ interface Harness {
 	cwd: string;
 	registry: ToolRegistry;
 	rows: ToolCallAuditInput[];
+	auditRows: ToolCallAuditRecord[];
 	parks: ParkRecord[];
 }
 
@@ -55,13 +58,14 @@ function neutral<T>(value: T, cwd: string): T {
 	return JSON.parse(JSON.stringify(value).split(cwd).join("<cwd>")) as T;
 }
 
-function auditing(base: SafetyContract, rows: ToolCallAuditInput[]): SafetyContract {
+function auditing(base: SafetyContract, rows: ToolCallAuditInput[], auditRows: ToolCallAuditRecord[]): SafetyContract {
 	return {
 		...base,
 		audit: {
 			recordCount: () => rows.length,
 			recordToolCall: (input) => {
 				rows.push(input);
+				auditRows.push(buildAuditRecord(input));
 			},
 		},
 	};
@@ -76,9 +80,10 @@ function harness(
 	readOnly = false,
 ): Harness {
 	const rows: ToolCallAuditInput[] = [];
+	const auditRows: ToolCallAuditRecord[] = [];
 	const parks: ParkRecord[] = [];
 	const registry = createRegistry({
-		safety: auditing(createWorkerSafety({ cwd }), rows),
+		safety: auditing(createWorkerSafety({ cwd }), rows, auditRows),
 		autonomy: () => level,
 		...(readOnly ? { readOnly: true } : {}),
 	});
@@ -101,7 +106,7 @@ function harness(
 			registry.cancelParkedCall(meta.requestId, "denied by the operator");
 		}
 	});
-	return { cwd, registry, rows, parks };
+	return { cwd, registry, rows, auditRows, parks };
 }
 
 const ARTIFACT_ARGS = { kind: "report", content: "# Findings\n\nAll equal.\n", path: "notes/REPORT.md" };
@@ -143,6 +148,82 @@ describe("direct and gateway invocation preserve the same authority", () => {
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 		env.restore();
+	});
+
+	it("keeps concurrent host identities on gateway and capability audits without trusting model arguments", async () => {
+		const gateway = harness(scratch(), "yolo", "gateway", "approve");
+		await Promise.all(
+			["first", "second"].map(async (id) => {
+				const verdict = await gateway.registry.invoke(
+					{
+						tool: ToolNames.Gateway,
+						args: {
+							op: "call",
+							capability: ToolNames.Artifact,
+							args: {
+								...ARTIFACT_ARGS,
+								path: `notes/${id}.md`,
+								sessionId: "forged",
+								callId: "forged",
+							},
+						},
+					},
+					{ runId: id, turnId: `turn-${id}`, toolCallId: `tool-${id}` },
+				);
+				okResult(verdict);
+			}),
+		);
+		for (const id of ["first", "second"]) {
+			const rows = gateway.auditRows.filter((row) => row.runId === id);
+			strictEqual(
+				rows.some((row) => row.tool === ToolNames.Artifact),
+				true,
+			);
+			for (const row of rows) {
+				strictEqual(row.sessionId, null);
+				strictEqual(row.turnId, `turn-${id}`);
+				strictEqual(row.toolCallId, `tool-${id}`);
+				strictEqual(row.callId, undefined);
+				strictEqual(row.attemptId, undefined);
+			}
+		}
+		strictEqual(telemetryContext(), undefined);
+	});
+
+	it("retains the parked caller's identity when another context approves it", async () => {
+		const rows: ToolCallAuditInput[] = [];
+		const auditRows: ToolCallAuditRecord[] = [];
+		const registry = createRegistry({ safety: auditing(createWorkerSafety({ cwd: scratch() }), rows, auditRows) });
+		let requestId = "";
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			requestId = meta.requestId;
+		});
+		ok(registry.requestReadRootApproval);
+		const pending = registry.requestReadRootApproval(scratch(), {
+			sessionId: "parked-session",
+			turnId: "parked-turn",
+			toolCallId: "parked-tool",
+		});
+		strictEqual(requestId.length > 0, true);
+		strictEqual(telemetryContext(), undefined);
+		await withToolTelemetryContext({ sessionId: "approver-session" }, () =>
+			registry.resumeParkedCalls({
+				requestId,
+				actionClass: "read",
+				issuer: "operator",
+				requestedBy: "test",
+			}),
+		);
+		strictEqual((await pending)?.requestId, requestId);
+		strictEqual(
+			auditRows.some((row) => row.decision === "allowed"),
+			true,
+		);
+		for (const row of auditRows) {
+			strictEqual(row.sessionId, "parked-session");
+			strictEqual(row.turnId, "parked-turn");
+			strictEqual(row.toolCallId, "parked-tool");
+		}
 	});
 
 	it("denies a write-class capability in a read-only run identically, with the capability's own audit row", async () => {

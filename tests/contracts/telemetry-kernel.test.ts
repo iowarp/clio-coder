@@ -1,7 +1,12 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
-import { TelemetryContextSchema, telemetryContext, withTelemetryContext } from "../../src/core/telemetry/context.js";
+import {
+	TelemetryContextSchema,
+	telemetryContext,
+	withTelemetryContext,
+	withToolTelemetryContext,
+} from "../../src/core/telemetry/context.js";
 import type { SegmentHeader, TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord, monotonicSpan, readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId, newRecordId, UUID_V7_PATTERN } from "../../src/core/telemetry/ids.js";
@@ -45,6 +50,22 @@ test("telemetry keeps existing ids, mints namespaced UUIDv7 ids, and isolates co
 	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, runId: "run", label: "worker" }), true);
 	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, label: "worker" }), false);
 	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, runId: "", label: "worker" }), false);
+});
+
+test("tool contexts retain provider attribution only within the same owner and turn", () => {
+	const call = { ...context, turnId: "turn", callId: newCallId(), attemptId: newAttemptId() };
+	withTelemetryContext(call, () => {
+		withToolTelemetryContext({ sessionId: context.sessionId, turnId: "turn", toolCallId: "tool" }, () => {
+			strictEqual(telemetryContext()?.callId, call.callId);
+			strictEqual(telemetryContext()?.toolCallId, "tool");
+		});
+		for (const identity of [{ sessionId: "other" }, { turnId: "next" }, { runId: "standalone" }]) {
+			withToolTelemetryContext(identity, () => {
+				strictEqual(telemetryContext()?.callId, undefined);
+				strictEqual(telemetryContext()?.attemptId, undefined);
+			});
+		}
+	});
 });
 
 test("run owners stay separate from session owners, including standalone runs", () => {

@@ -20,6 +20,7 @@ import {
 } from "../core/sandbox/main-session.js";
 import type { SandboxEnvPolicy, UnixSocketMode } from "../core/sandbox/types.js";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
+import { withToolTelemetryContext } from "../core/telemetry/context.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
@@ -2033,21 +2034,23 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	};
 
 	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string, options?: ParkCancelOptions): void => {
-		cleanupParkedEntry(entry);
-		disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
-		// A denied/cancelled park is still a model attempt: observe it so
-		// identical retries trip the loop detector. When the detector fires, its
-		// reason replaces the generic denial so the model gets recovery guidance.
-		const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
-		entry.resolve(
-			guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ??
-				parkDenial(
-					parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason),
-					reason,
-					options?.denied,
-					options?.unattended,
-				),
-		);
+		withToolTelemetryContext(entry.options ?? {}, () => {
+			cleanupParkedEntry(entry);
+			disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
+			// A denied/cancelled park is still a model attempt: observe it so
+			// identical retries trip the loop detector. When the detector fires, its
+			// reason replaces the generic denial so the model gets recovery guidance.
+			const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
+			entry.resolve(
+				guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ??
+					parkDenial(
+						parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason),
+						reason,
+						options?.denied,
+						options?.unattended,
+					),
+			);
+		});
 	};
 
 	const reparkEntry = (entry: ParkedCall, index?: number): void => {
@@ -2358,142 +2361,147 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listVisible: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "direct"),
 		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
 		async invoke(call, options) {
-			if (deps.principal === "worker") return invokeAdmitted(call, options);
-			// A refusal is final for the identical call within the turn: the same
-			// policy, the same operator and the same server would answer it the
-			// same way. Refusing the repeat here, before admission, keeps it from
-			// asking the operator again or reaching the server again, where the
-			// loop guard would otherwise allow two more attempts first. A call with
-			// no turn (/council, an ACP host dispatch) is the operator's own
-			// command, so nothing is remembered for it.
-			const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-			if (level !== deniedCallsLevel) {
-				deniedCalls.clear();
-				deniedCallsLevel = level;
-			}
-			const turnId = options?.turnId;
-			const key =
-				turnId === undefined
-					? null
-					: `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
-			const prior = key === null ? undefined : deniedCalls.get(key);
-			if (prior?.denial !== undefined) {
-				const decision: SafetyDecision = {
-					kind: "block",
-					classification: prior.decision.classification,
-					rejection:
-						prior.decision.kind === "allow"
-							? { short: prior.reason, detail: prior.reason, hints: [] }
-							: prior.decision.rejection,
-					...(prior.decision.policy !== undefined
-						? { policy: { ...prior.decision.policy, reasonCode: DENIED_REPEAT_REASON_CODE } }
-						: {}),
-				};
-				const repeat: Extract<RegistryVerdict, { kind: "blocked" }> = {
-					kind: "blocked",
-					reason: `${repeatedDenialReason(effectiveToolCall(call.tool, call.args).toolName, prior.denial)}\n${prior.reason}`,
-					decision,
-					// A repeat of an ask nobody could approve is still that unanswered
-					// ask, so receipts keep counting it as a permission request.
-					...(prior.deniedPark === true ? { deniedPark: true } : {}),
-					denial: prior.denial,
-				};
-				recordRegistryDisposition(call, decision, "blocked", { reasonCode: DENIED_REPEAT_REASON_CODE });
-				return observeBlockedAttempt(call, repeat, options) ?? repeat;
-			}
-			const verdict = await invokeAdmitted(call, options);
-			// An operator's answer can grant what an earlier call was refused.
-			if (effectiveToolCall(call.tool, call.args).toolName === ToolNames.AskUser && askUserAnswered(verdict)) {
-				deniedCalls.clear();
-			}
-			if (key !== null && rememberedRefusal(verdict) && verdict.denial !== undefined) {
-				// Only a remembered refusal tells the model its repeat is refused
-				// without running; an attended operator's refusal, a worker's and a
-				// turnless call's are asked or run again.
-				const remembered: Extract<RegistryVerdict, { kind: "blocked" }> = {
-					...verdict,
-					denial: { ...verdict.denial, repeatRefused: true },
-				};
-				deniedCalls.delete(key);
-				deniedCalls.set(key, remembered);
-				if (deniedCalls.size > DENIED_CALL_MEMORY_LIMIT) {
-					const oldest = deniedCalls.keys().next().value;
-					if (oldest !== undefined) deniedCalls.delete(oldest);
+			return withToolTelemetryContext(options ?? {}, async () => {
+				if (deps.principal === "worker") return invokeAdmitted(call, options);
+				// A refusal is final for the identical call within the turn: the same
+				// policy, the same operator and the same server would answer it the
+				// same way. Refusing the repeat here, before admission, keeps it from
+				// asking the operator again or reaching the server again, where the
+				// loop guard would otherwise allow two more attempts first. A call with
+				// no turn (/council, an ACP host dispatch) is the operator's own
+				// command, so nothing is remembered for it.
+				const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+				if (level !== deniedCallsLevel) {
+					deniedCalls.clear();
+					deniedCallsLevel = level;
 				}
-				return remembered;
-			}
-			return verdict;
+				const turnId = options?.turnId;
+				const key =
+					turnId === undefined
+						? null
+						: `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
+				const prior = key === null ? undefined : deniedCalls.get(key);
+				if (prior?.denial !== undefined) {
+					const decision: SafetyDecision = {
+						kind: "block",
+						classification: prior.decision.classification,
+						rejection:
+							prior.decision.kind === "allow"
+								? { short: prior.reason, detail: prior.reason, hints: [] }
+								: prior.decision.rejection,
+						...(prior.decision.policy !== undefined
+							? { policy: { ...prior.decision.policy, reasonCode: DENIED_REPEAT_REASON_CODE } }
+							: {}),
+					};
+					const repeat: Extract<RegistryVerdict, { kind: "blocked" }> = {
+						kind: "blocked",
+						reason: `${repeatedDenialReason(effectiveToolCall(call.tool, call.args).toolName, prior.denial)}\n${prior.reason}`,
+						decision,
+						// A repeat of an ask nobody could approve is still that unanswered
+						// ask, so receipts keep counting it as a permission request.
+						...(prior.deniedPark === true ? { deniedPark: true } : {}),
+						denial: prior.denial,
+					};
+					recordRegistryDisposition(call, decision, "blocked", { reasonCode: DENIED_REPEAT_REASON_CODE });
+					return observeBlockedAttempt(call, repeat, options) ?? repeat;
+				}
+				const verdict = await invokeAdmitted(call, options);
+				// An operator's answer can grant what an earlier call was refused.
+				if (effectiveToolCall(call.tool, call.args).toolName === ToolNames.AskUser && askUserAnswered(verdict)) {
+					deniedCalls.clear();
+				}
+				if (key !== null && rememberedRefusal(verdict) && verdict.denial !== undefined) {
+					// Only a remembered refusal tells the model its repeat is refused
+					// without running; an attended operator's refusal, a worker's and a
+					// turnless call's are asked or run again.
+					const remembered: Extract<RegistryVerdict, { kind: "blocked" }> = {
+						...verdict,
+						denial: { ...verdict.denial, repeatRefused: true },
+					};
+					deniedCalls.delete(key);
+					deniedCalls.set(key, remembered);
+					if (deniedCalls.size > DENIED_CALL_MEMORY_LIMIT) {
+						const oldest = deniedCalls.keys().next().value;
+						if (oldest !== undefined) deniedCalls.delete(oldest);
+					}
+					return remembered;
+				}
+				return verdict;
+			});
 		},
 		async requestReadRootApproval(root, options) {
-			if ((deps.principal ?? "main") !== "main" || options?.signal?.aborted || permissionListeners.size === 0) return null;
-			const call: ClassifierCall = Object.freeze({ tool: ToolNames.Read, args: Object.freeze({ path: root }) });
-			const admission = evaluateAdmission({
-				principal: "main",
-				effects: [call],
-				safety: deps.safety,
-				autonomy: "default",
-				confirmationRuleId: "dispatch-external-read",
-				confirmationText: {
-					detail: `Allow one read-only Scout run to inspect external root ${JSON.stringify(root)}? This grants no writes, commands, or access to other external roots.`,
-					hints: ["This approval expires with this Scout run."],
-				},
-			});
-			if (admission.kind !== "ask") return null;
-			const decision: SafetyDecision = {
-				...admission.decision,
-				kind: "ask",
-				confirmationRuleId: "dispatch-external-read",
-				rejection: {
-					short: `Scout external read root needs approval: ${root}`,
-					detail: `Allow one read-only Scout run to inspect external root ${JSON.stringify(root)}? No writes or commands are granted.`,
-					hints: ["One approval covers only this run and root."],
-				},
-			};
-			const meta: PermissionRequiredMeta = {
-				requestId: nextApprovalRequestId(),
-				axis: "net:dispatch-external-read",
-				approvalAuthority: "operator",
-				...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-				...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
-				...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
-			};
-			return await new Promise((resolve) => {
-				const started = performance.now();
-				let reported = false;
-				const closePark = () => {
-					if (!reported) {
-						reported = true;
-						options?.onParked?.(Math.round(performance.now() - started));
-					}
-				};
-				const entry: ParkedCall = {
-					call,
-					decision,
-					meta,
-					readRootApproval: true,
-					closePark,
-					...(options !== undefined ? { options } : {}),
-					resolve(verdict) {
-						closePark();
-						const details = verdict.kind === "ok" ? verdict.result.details : undefined;
-						resolve(
-							details && typeof details.requestId === "string" && typeof details.requestedBy === "string"
-								? { requestId: details.requestId, requestedBy: details.requestedBy }
-								: null,
-						);
+			return withToolTelemetryContext(options ?? {}, async () => {
+				if ((deps.principal ?? "main") !== "main" || options?.signal?.aborted || permissionListeners.size === 0)
+					return null;
+				const call: ClassifierCall = Object.freeze({ tool: ToolNames.Read, args: Object.freeze({ path: root }) });
+				const admission = evaluateAdmission({
+					principal: "main",
+					effects: [call],
+					safety: deps.safety,
+					autonomy: "default",
+					confirmationRuleId: "dispatch-external-read",
+					confirmationText: {
+						detail: `Allow one read-only Scout run to inspect external root ${JSON.stringify(root)}? This grants no writes, commands, or access to other external roots.`,
+						hints: ["This approval expires with this Scout run."],
+					},
+				});
+				if (admission.kind !== "ask") return null;
+				const decision: SafetyDecision = {
+					...admission.decision,
+					kind: "ask",
+					confirmationRuleId: "dispatch-external-read",
+					rejection: {
+						short: `Scout external read root needs approval: ${root}`,
+						detail: `Allow one read-only Scout run to inspect external root ${JSON.stringify(root)}? No writes or commands are granted.`,
+						hints: ["One approval covers only this run and root."],
 					},
 				};
-				if (options?.signal) {
-					const abort = () => cancelParkedCallById(meta.requestId, PARK_ABORT_REASON);
-					options.signal.addEventListener("abort", abort, { once: true });
-					entry.abortCleanup = () => options.signal?.removeEventListener("abort", abort);
-				}
-				parked.push(entry);
-				recordRegistryDisposition(call, decision, "permission_requested", {
-					requestId: meta.requestId,
-					reasonCode: "confirmation:dispatch-external-read",
+				const meta: PermissionRequiredMeta = {
+					requestId: nextApprovalRequestId(),
+					axis: "net:dispatch-external-read",
+					approvalAuthority: "operator",
+					...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+					...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
+					...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
+				};
+				return await new Promise((resolve) => {
+					const started = performance.now();
+					let reported = false;
+					const closePark = () => {
+						if (!reported) {
+							reported = true;
+							options?.onParked?.(Math.round(performance.now() - started));
+						}
+					};
+					const entry: ParkedCall = {
+						call,
+						decision,
+						meta,
+						readRootApproval: true,
+						closePark,
+						...(options !== undefined ? { options } : {}),
+						resolve(verdict) {
+							closePark();
+							const details = verdict.kind === "ok" ? verdict.result.details : undefined;
+							resolve(
+								details && typeof details.requestId === "string" && typeof details.requestedBy === "string"
+									? { requestId: details.requestId, requestedBy: details.requestedBy }
+									: null,
+							);
+						},
+					};
+					if (options?.signal) {
+						const abort = () => cancelParkedCallById(meta.requestId, PARK_ABORT_REASON);
+						options.signal.addEventListener("abort", abort, { once: true });
+						entry.abortCleanup = () => options.signal?.removeEventListener("abort", abort);
+					}
+					parked.push(entry);
+					recordRegistryDisposition(call, decision, "permission_requested", {
+						requestId: meta.requestId,
+						reasonCode: "confirmation:dispatch-external-read",
+					});
+					notifyPermissionRequired(call, decision, meta);
 				});
-				notifyPermissionRequired(call, decision, meta);
 			});
 		},
 		hasParkedCalls: () => parked.length > 0,
@@ -2524,138 +2532,140 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (entry) pending.push({ entry });
 			}
 			for (const { entry, reparkIndex } of pending) {
-				if (entry.readRootApproval === true) {
-					if (grant === undefined || grant.actionClass !== "read" || (grant.issuer ?? "operator") !== "operator") {
+				await withToolTelemetryContext(entry.options ?? {}, async () => {
+					if (entry.readRootApproval === true) {
+						if (grant === undefined || grant.actionClass !== "read" || (grant.issuer ?? "operator") !== "operator") {
+							reparkEntry(entry, reparkIndex);
+							return;
+						}
+						cleanupParkedEntry(entry);
+						const disposition = evaluateAdmission({
+							principal: "main",
+							effects: [entry.call],
+							safety: deps.safety,
+							autonomy: "default",
+							authorization: { actionClass: "read", issuer: "operator" },
+						});
+						entry.closePark();
+						if (disposition.kind !== "allow") {
+							entry.resolve({
+								kind: "blocked",
+								reason: "External read root no longer passes safety admission",
+								decision: disposition.decision,
+							});
+							return;
+						}
+						recordRegistryDisposition(entry.call, disposition.decision, "allowed", {
+							requestId: entry.meta.requestId,
+							reasonCode: "confirmation:dispatch-external-read",
+						});
+						entry.resolve({
+							kind: "ok",
+							decision: disposition.decision,
+							result: {
+								kind: "ok",
+								output: "External Scout read approved for one run.",
+								details: { requestId: entry.meta.requestId, requestedBy: grant.requestedBy },
+							},
+						});
+						return;
+					}
+					// A one-shot grant covers only the parked call it selected. Calls
+					// that parked while the overlay was already open remain queued and
+					// need their own confirmation, so a concurrent privileged call
+					// cannot ride along on a grant approved for another call.
+					const observed = grant?.requestId !== undefined && grant.requestId === entry.meta.requestId;
+					if (grant !== undefined && entry.decision.classification.actionClass !== grant.actionClass) {
+						if (observed) grant?.onExecution?.({ phase: "not_executed", reason: "the grant names another action class" });
 						reparkEntry(entry, reparkIndex);
-						continue;
+						return;
+					}
+					// The operator approved the session's test-runner consent ask; the
+					// consent covers every later test runner this session. It is given
+					// before re-admission, because a dispatch or job that parked on it
+					// re-admits its host checks afresh and must find it given.
+					if (
+						grant !== undefined &&
+						(grant.issuer ?? "operator") === "operator" &&
+						entry.decision.kind === "ask" &&
+						entry.decision.confirmationRuleId === SESSION_CODE_CONSENT_RULE_ID
+					) {
+						deps.sessionCodeConsent?.grant();
+					}
+					// The operator allowed a git-hooks-changed ask: the files the card
+					// named join the baseline before re-admission, so a file changed
+					// after the card was drawn still asks.
+					if (grant !== undefined && (grant.issuer ?? "operator") === "operator" && entry.hookDrift !== undefined) {
+						deps.hookDrift?.accept(entry.hookDrift);
+					}
+					const outcome = admit(entry.call, grant, entry.options);
+					if (outcome.kind === "park") {
+						if (observed) {
+							grant?.onExecution?.({ phase: "not_executed", reason: "admission still requires another approval" });
+						}
+						reparkEntry(entry, reparkIndex);
+						return;
 					}
 					cleanupParkedEntry(entry);
-					const disposition = evaluateAdmission({
-						principal: "main",
-						effects: [entry.call],
-						safety: deps.safety,
-						autonomy: "default",
-						authorization: { actionClass: "read", issuer: "operator" },
-					});
+					if (outcome.kind === "terminal") {
+						disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
+						if (observed) {
+							grant?.onExecution?.({
+								phase: "not_executed",
+								reason: "reason" in outcome.verdict ? outcome.verdict.reason : "admission refused the call",
+							});
+						}
+						entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
+						return;
+					}
+					const approvedOptions: ToolInvokeOptions | undefined =
+						grant === undefined
+							? entry.options
+							: {
+									...(entry.options ?? {}),
+									approval: {
+										requestId: entry.meta.requestId,
+										requestedBy: grant.requestedBy,
+										actionClass: grant.actionClass,
+										...(grant.issuer !== undefined ? { issuer: grant.issuer } : {}),
+									},
+								};
+					// Seal the park before the body runs. Everything after this line is
+					// the tool working, and the caller charges that to the tool.
 					entry.closePark();
-					if (disposition.kind !== "allow") {
-						entry.resolve({
-							kind: "blocked",
-							reason: "External read root no longer passes safety admission",
-							decision: disposition.decision,
-						});
-						continue;
+					// An operator's approval turns the safety judge's review back on after it
+					// handed calls to the operator.
+					if (grant !== undefined && (grant.issuer ?? "operator") === "operator") deps.safetyJudge?.operatorApproved();
+					if (observed) grant?.onExecution?.({ phase: "start" });
+					const verdict = await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions);
+					if (grant !== undefined && (grant.issuer ?? "operator") === "operator") {
+						refreshHooksAfterGitControlWrite(entry.call, entry.decision, verdict);
 					}
-					recordRegistryDisposition(entry.call, disposition.decision, "allowed", {
-						requestId: entry.meta.requestId,
-						reasonCode: "confirmation:dispatch-external-read",
-					});
-					entry.resolve({
-						kind: "ok",
-						decision: disposition.decision,
-						result: {
-							kind: "ok",
-							output: "External Scout read approved for one run.",
-							details: { requestId: entry.meta.requestId, requestedBy: grant.requestedBy },
-						},
-					});
-					continue;
-				}
-				// A one-shot grant covers only the parked call it selected. Calls
-				// that parked while the overlay was already open remain queued and
-				// need their own confirmation, so a concurrent privileged call
-				// cannot ride along on a grant approved for another call.
-				const observed = grant?.requestId !== undefined && grant.requestId === entry.meta.requestId;
-				if (grant !== undefined && entry.decision.classification.actionClass !== grant.actionClass) {
-					if (observed) grant?.onExecution?.({ phase: "not_executed", reason: "the grant names another action class" });
-					reparkEntry(entry, reparkIndex);
-					continue;
-				}
-				// The operator approved the session's test-runner consent ask; the
-				// consent covers every later test runner this session. It is given
-				// before re-admission, because a dispatch or job that parked on it
-				// re-admits its host checks afresh and must find it given.
-				if (
-					grant !== undefined &&
-					(grant.issuer ?? "operator") === "operator" &&
-					entry.decision.kind === "ask" &&
-					entry.decision.confirmationRuleId === SESSION_CODE_CONSENT_RULE_ID
-				) {
-					deps.sessionCodeConsent?.grant();
-				}
-				// The operator allowed a git-hooks-changed ask: the files the card
-				// named join the baseline before re-admission, so a file changed
-				// after the card was drawn still asks.
-				if (grant !== undefined && (grant.issuer ?? "operator") === "operator" && entry.hookDrift !== undefined) {
-					deps.hookDrift?.accept(entry.hookDrift);
-				}
-				const outcome = admit(entry.call, grant, entry.options);
-				if (outcome.kind === "park") {
-					if (observed) {
-						grant?.onExecution?.({ phase: "not_executed", reason: "admission still requires another approval" });
-					}
-					reparkEntry(entry, reparkIndex);
-					continue;
-				}
-				cleanupParkedEntry(entry);
-				if (outcome.kind === "terminal") {
-					disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
 					if (observed) {
 						grant?.onExecution?.({
-							phase: "not_executed",
-							reason: "reason" in outcome.verdict ? outcome.verdict.reason : "admission refused the call",
+							phase: "end",
+							outcome: verdict.kind !== "ok" ? "blocked" : verdict.result.kind === "error" ? "error" : "ok",
 						});
 					}
-					entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
-					continue;
-				}
-				const approvedOptions: ToolInvokeOptions | undefined =
-					grant === undefined
-						? entry.options
-						: {
-								...(entry.options ?? {}),
-								approval: {
-									requestId: entry.meta.requestId,
-									requestedBy: grant.requestedBy,
-									actionClass: grant.actionClass,
-									...(grant.issuer !== undefined ? { issuer: grant.issuer } : {}),
-								},
-							};
-				// Seal the park before the body runs. Everything after this line is
-				// the tool working, and the caller charges that to the tool.
-				entry.closePark();
-				// An operator's approval turns the safety judge's review back on after it
-				// handed calls to the operator.
-				if (grant !== undefined && (grant.issuer ?? "operator") === "operator") deps.safetyJudge?.operatorApproved();
-				if (observed) grant?.onExecution?.({ phase: "start" });
-				const verdict = await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions);
-				if (grant !== undefined && (grant.issuer ?? "operator") === "operator") {
-					refreshHooksAfterGitControlWrite(entry.call, entry.decision, verdict);
-				}
-				if (observed) {
-					grant?.onExecution?.({
-						phase: "end",
-						outcome: verdict.kind !== "ok" ? "blocked" : verdict.result.kind === "error" ? "error" : "ok",
-					});
-				}
-				// A grant is invisible in the result otherwise, and the model reported
-				// a confirmed call as one that never asked. The note names the
-				// surface that released the call, because an ACP client or a
-				// remembered escalation is not this session's operator. Only this path
-				// runs a released call, so no ordinary call is annotated.
-				entry.resolve(
-					grant !== undefined && verdict.kind === "ok"
-						? {
-								...verdict,
-								result: withApprovalNote(verdict.result, {
-									actionClass: grant.actionClass,
-									requestedBy: grant.requestedBy,
-									ruleId: approvalRailOf(entry.decision),
-									gateReason: entry.meta.gateReason,
-								}),
-							}
-						: verdict,
-				);
+					// A grant is invisible in the result otherwise, and the model reported
+					// a confirmed call as one that never asked. The note names the
+					// surface that released the call, because an ACP client or a
+					// remembered escalation is not this session's operator. Only this path
+					// runs a released call, so no ordinary call is annotated.
+					entry.resolve(
+						grant !== undefined && verdict.kind === "ok"
+							? {
+									...verdict,
+									result: withApprovalNote(verdict.result, {
+										actionClass: grant.actionClass,
+										requestedBy: grant.requestedBy,
+										ruleId: approvalRailOf(entry.decision),
+										gateReason: entry.meta.gateReason,
+									}),
+								}
+							: verdict,
+					);
+				});
 			}
 			const next = parked[0];
 			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);

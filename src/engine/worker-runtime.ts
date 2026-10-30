@@ -1055,6 +1055,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		task: input.task,
 		includeInteractiveTools: false,
 		invokeOptions: () => ({
+			...(input.telemetryContext === undefined
+				? {}
+				: {
+						runId: input.telemetryContext.runId,
+						...(input.telemetryContext.sessionId === null ? {} : { sessionId: input.telemetryContext.sessionId }),
+						...(input.telemetryContext.turnId === undefined ? {} : { turnId: input.telemetryContext.turnId }),
+					}),
 			...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 			correlationId: `worker-model-round-${workerModelRound}`,
 			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,

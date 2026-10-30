@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { telemetryContext } from "../../core/telemetry/context.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { QualityFinding } from "../../tools/verify/quality-policy.js";
 import type { FinishContractVerificationScope } from "./finish-contract.js";
@@ -48,6 +49,12 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
  */
 
 export interface ToolCallAuditRecord {
+	sessionId?: string | null;
+	runId?: string;
+	turnId?: string;
+	toolCallId?: string;
+	callId?: string;
+	attemptId?: string;
 	kind: "tool_call";
 	ts: string;
 	correlationId: string;
@@ -292,7 +299,18 @@ function redactArgs(value: unknown, depth = 0): unknown {
 
 export function buildAuditRecord(input: ToolCallAuditInput): ToolCallAuditRecord {
 	const now = input.now ?? new Date();
+	const context = telemetryContext();
 	const record: ToolCallAuditRecord = {
+		...(context === undefined
+			? {}
+			: {
+					sessionId: context.sessionId,
+					...(context.runId === undefined ? {} : { runId: context.runId }),
+					...(context.turnId === undefined ? {} : { turnId: context.turnId }),
+					...(context.toolCallId === undefined ? {} : { toolCallId: context.toolCallId }),
+					...(context.callId === undefined ? {} : { callId: context.callId }),
+					...(context.attemptId === undefined ? {} : { attemptId: context.attemptId }),
+				}),
 		kind: "tool_call",
 		ts: now.toISOString(),
 		correlationId: newCorrelationId(),
