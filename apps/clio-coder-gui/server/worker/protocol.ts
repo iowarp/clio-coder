@@ -57,3 +57,5 @@ export type Reply =
 	| { id: string; ok: true; result: Methods[Method]["result"] }
 	| { id: string; ok: false; problem: Problem }
 	| { id: string; progress: string };
+/** Posted once a domain entry has evaluated and listens for calls; a lane is booting until then. */
+export type Ready = { ready: true };

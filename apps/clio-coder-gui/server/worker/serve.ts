@@ -1,6 +1,6 @@
 import { parentPort } from "node:worker_threads";
 import { AppProblem, problemOf } from "../services/problem.js";
-import type { Call, Methods, Reply } from "./protocol.js";
+import type { Call, Methods, Ready, Reply } from "./protocol.js";
 
 export function serveWorker(
 	handle: (
@@ -26,4 +26,5 @@ export function serveWorker(
 			send({ id: call.id, ok: false, problem: problemOf(error) });
 		}
 	});
+	port.postMessage({ ready: true } satisfies Ready);
 }

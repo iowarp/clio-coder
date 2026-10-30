@@ -3,7 +3,7 @@ import { availableParallelism } from "node:os";
 import type { Worker } from "node:worker_threads";
 import { startDomainWorker } from "../process-policy.js";
 import { AppProblem } from "../services/problem.js";
-import type { Call, Method, Methods, Reply, WorkerKind, WorkerSettings } from "./protocol.js";
+import type { Call, Method, Methods, Ready, Reply, WorkerKind, WorkerSettings } from "./protocol.js";
 
 /**
  * Reads adapters are synchronous and import root `src/**`, so a thread that is
@@ -24,12 +24,15 @@ const READ_LANES = Math.max(2, Math.min(4, availableParallelism() - 1));
  */
 const QUEUE_WAIT_MS = 30_000;
 
-type Lane = { worker: Worker; active: string | undefined };
+/** `ready` once the entry has evaluated and listens; a call held by a booting lane has not started. */
+type Lane = { worker: Worker; active: string | undefined; ready: boolean };
 type Pending = {
 	call: Call;
 	budgetMs: number;
 	timer: NodeJS.Timeout;
 	lane: Lane | undefined;
+	/** Posted to a ready lane, so its budget is running; until then only the queue wait is. */
+	started: boolean;
 	expired: boolean;
 	resolve: (result: Methods[Method]["result"]) => void;
 	reject: (error: unknown) => void;
@@ -75,9 +78,10 @@ export class WorkerHost {
 				call: { id, method, params, deadlineMs: Date.now() + budgetMs } as Call,
 				budgetMs,
 				// Queued calls are armed too, so a wedged lane cannot hold a request open
-				// forever; dispatch re-arms with the full budget once the work starts.
+				// forever; the full budget is re-armed once the work starts.
 				timer: this.arm(id, Math.max(budgetMs, QUEUE_WAIT_MS)),
 				lane: undefined,
+				started: false,
 				expired: false,
 				resolve: (result) => resolve(result as Methods[M]["result"]),
 				reject,
@@ -95,24 +99,35 @@ export class WorkerHost {
 				pending.reject(
 					new AppProblem(
 						"unavailable",
-						pending.lane
+						pending.started
 							? "Domain call exceeded its deadline; synchronous work may still be completing."
-							: "Domain call waited longer than its deadline for a free worker.",
+							: "Domain call waited longer than its deadline for a ready worker.",
 					),
 				);
-				// A call that never reached a lane occupies no thread, so its queue slot
-				// returns immediately; one that did must wait for the thread to come back.
-				if (!pending.lane) this.pending.delete(id);
+				// A call that never started occupies no thread, so its queue slot and any
+				// booting lane held for it return immediately; one that did must wait for
+				// the thread to come back.
+				if (!pending.started) {
+					if (pending.lane) pending.lane.active = undefined;
+					this.pending.delete(id);
+					this.dispatch();
+				}
 			},
 			Math.max(1, ms),
 		);
 	}
 	private spawn(): Lane {
 		const worker = startDomainWorker(this.kind, this.settings, this.env, this.compiledDirectory);
-		const lane: Lane = { worker, active: undefined };
+		const lane: Lane = { worker, active: undefined, ready: false };
 		this.lanes.push(lane);
 		worker.on("online", () => this.dispatch());
-		worker.on("message", (reply: Reply) => {
+		worker.on("message", (reply: Reply | Ready) => {
+			if ("ready" in reply) {
+				lane.ready = true;
+				this.start(lane);
+				this.dispatch();
+				return;
+			}
 			const pending = this.pending.get(reply.id);
 			if (!pending) return;
 			if ("progress" in reply) {
@@ -171,13 +186,24 @@ export class WorkerHost {
 			if (!lane) return;
 			lane.active = pending.call.id;
 			pending.lane = lane;
-			// The deadline an operator is promised is on the work, not on the wait, so
-			// it is re-based here rather than at enqueue.
-			clearTimeout(pending.timer);
-			pending.call.deadlineMs = Date.now() + pending.budgetMs;
-			pending.timer = this.arm(pending.call.id, pending.budgetMs);
-			lane.worker.postMessage(pending.call);
+			this.start(lane);
 		}
+	}
+	/**
+	 * Posts the lane's held call once the lane is ready. The deadline an operator is
+	 * promised is on the work, not on the wait or on a lane's startup, so it is
+	 * re-based here: a cold lane spends seconds evaluating root `src/**` before it
+	 * listens, and charging the first call for that answered 503 on a read that never
+	 * ran (#434).
+	 */
+	private start(lane: Lane) {
+		const pending = lane.ready && lane.active ? this.pending.get(lane.active) : undefined;
+		if (!pending || pending.started) return;
+		pending.started = true;
+		clearTimeout(pending.timer);
+		pending.call.deadlineMs = Date.now() + pending.budgetMs;
+		pending.timer = this.arm(pending.call.id, pending.budgetMs);
+		lane.worker.postMessage(pending.call);
 	}
 	async close() {
 		this.closed = true;
