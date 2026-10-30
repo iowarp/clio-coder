@@ -252,7 +252,7 @@ it("a headless request at the ceiling ends on the budget error without a retry, 
 		const settled = JSON.stringify(f.events);
 		match(
 			settled,
-			/budget_ceiling: session priced spend \$1\.5003 reached the \$1\.5000 ceiling with ~[\d,]+ context tokens per call/u,
+			/budget_ceiling: session priced spend \$1\.50 reached the \$1\.50 ceiling with ~[\d,]+ context tokens per call/u,
 		);
 		doesNotMatch(settled, /stalled|"type":"retry_status"/u);
 	} finally {
