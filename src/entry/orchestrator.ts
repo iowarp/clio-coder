@@ -5691,6 +5691,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// behind its cache, so reopening the view does not spend a provider read.
 				...(observability
 					? {
+							...(observability.telemetry ? { telemetryReadModel: observability.telemetry } : {}),
 							usage: {
 								resetSession: (sessionId: string) => observability.resetSession(sessionId),
 								subscribe: (listener: () => void) => observability.subscribe(listener),

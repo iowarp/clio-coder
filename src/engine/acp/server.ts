@@ -9,6 +9,7 @@ import type { JobRecord } from "../../core/job-types.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../../core/message-accounting.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
+import type { TelemetryReadModel } from "../../domains/observability/contract.js";
 import type { CostAggregate } from "../../domains/observability/cost.js";
 import { accumulateCostAmount, emptyCostAggregate, renderCostAmount } from "../../domains/observability/cost.js";
 import { usageCallsFromAttempts } from "../../domains/session/journal-usage.js";
@@ -188,6 +189,14 @@ import {
 	isSelectableTreeNode,
 	projectSessionTree,
 } from "./session-tree.js";
+import {
+	ACP_TELEMETRY_META_KEY,
+	ACP_TELEMETRY_METHODS,
+	ACP_TELEMETRY_UPDATE_NOTIFICATION,
+	subscribeTelemetryUpdates,
+	telemetryRequestHandlers,
+	telemetryViewFor,
+} from "./telemetry-methods.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
 import { ACP_TRUST_CAPABILITY, ACP_TRUST_META_KEY, trustResultMeta } from "./trust-notice.js";
 import type {
@@ -503,6 +512,11 @@ export interface ClioAcpServerOptions {
 	 * service, for `_clio-coder/usage/read`. Absent means the method refuses.
 	 */
 	usage?: AcpUsageSource;
+	/**
+	 * The telemetry read model, for `_clio-coder/telemetry/*`, `_clio-coder/telemetry/update` and the DTO half of
+	 * `_clio-coder/usage/read` (#434 §11.3). Absent means those methods are not announced and refuse.
+	 */
+	telemetryReadModel?: TelemetryReadModel;
 	/**
 	 * The plugin-resource reload /library reload runs, so a library change made
 	 * elsewhere reaches this open session. Absent means the method refuses.
@@ -3440,6 +3454,8 @@ export interface AcpHandshakeFeatures {
 	aside?: boolean;
 	/** Whether `_clio-coder/usage/read` answers; absent reads as false. */
 	usage?: boolean;
+	/** Whether the `_clio-coder/telemetry/*` methods answer and updates are pushed; absent reads as false. */
+	telemetry?: boolean;
 	/** Whether session responses and `session_info_update` carry the workspace view; absent reads as false. */
 	workspace?: boolean;
 	/** Whether prompts are expanded, which is what admits image blocks; absent reads as false. */
@@ -3771,6 +3787,15 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							: {}),
 						...(features.libraryReload ? { [ACP_LIBRARY_META_KEY]: { version: 1, reload: ACP_LIBRARY_RELOAD_METHOD } } : {}),
 						...(features.usage ? { [ACP_ACCOUNTING_META_KEY]: { version: 1, read: ACP_USAGE_READ_METHOD } } : {}),
+						...(features.telemetry
+							? {
+									[ACP_TELEMETRY_META_KEY]: {
+										version: 1,
+										methods: { ...ACP_TELEMETRY_METHODS },
+										update: ACP_TELEMETRY_UPDATE_NOTIFICATION,
+									},
+								}
+							: {}),
 						...(features.workspace ? { [ACP_WORKSPACE_META_KEY]: { version: 1, update: "session_info_update" } } : {}),
 						...(features.aside
 							? {
@@ -3941,6 +3966,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			libraryReload: options.libraryReload !== undefined,
 			aside: options.aside !== undefined,
 			usage: options.usage !== undefined,
+			telemetry: options.telemetryReadModel !== undefined,
 			workspace: options.workspace !== undefined,
 			images: options.expandPrompt !== undefined,
 			interviews: options.interviews !== undefined,
@@ -5504,7 +5530,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		if (options.usage === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
-		getSession(request);
+		const bound = getSession(request);
 		const session = projectSessionUsage(options.usage.session());
 		let quota: ReturnType<typeof projectQuota> | { status: "failed"; reason: string };
 		try {
@@ -5512,8 +5538,34 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		} catch (err) {
 			quota = { status: "failed", reason: boundString(err instanceof Error ? err.message : String(err), 256) };
 		}
-		return { version: 1, session, quota };
+		// The read model's whole-session DTOs ride beside the v1 counts, which cannot carry an unknown (#434 §11.3).
+		let view: Awaited<ReturnType<typeof telemetryViewFor>> = null;
+		try {
+			view = options.telemetryReadModel ? await telemetryViewFor(options.telemetryReadModel, bound.id) : null;
+		} catch (error) {
+			options.diagnostics?.(`telemetry view failed: ${acpErrorMessage(error)}`);
+		}
+		return {
+			version: 1,
+			session,
+			quota,
+			...(view ? { telemetry: { session: view.session(), cost: view.cost("model") } } : {}),
+		};
 	});
+
+	if (options.telemetryReadModel) {
+		const handlers = telemetryRequestHandlers({
+			model: options.telemetryReadModel,
+			params: assertParamKeys,
+			session: getSession,
+		});
+		for (const [method, handler] of Object.entries(handlers))
+			options.transport.onRequest(method, (params) => {
+				requireInitialized();
+				requireAuthenticated();
+				return handler(params);
+			});
+	}
 
 	// /btw and /draft: one round beside the session at a time, cancellable, and
 	// never a turn. The chat loop answers beside a turn in flight over a snapshot
@@ -7165,6 +7217,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return respond(active.stopReason);
 	});
 
+	// Pushed only after initialize, and only for sessions this server holds; the model coalesces to 10 Hz (#434).
+	const unsubscribeTelemetryUpdates = options.telemetryReadModel
+		? subscribeTelemetryUpdates(
+				options.telemetryReadModel,
+				(sessionId) => handshake.initialized && sessions.has(sessionId),
+				(update) => options.transport.notify(ACP_TELEMETRY_UPDATE_NOTIFICATION, update),
+			)
+		: undefined;
 	const detachInterviews = options.interviews?.attach({
 		transport: options.transport,
 		sessionId: () => activeSessionId ?? boundSessionId,
@@ -7176,6 +7236,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	return await new Promise<number>((resolve) => {
 		options.transport.onClose(() => {
 			telemetry.dispose();
+			unsubscribeTelemetryUpdates?.();
 			detachInterviews?.();
 			// Unbound first: a scheduled turn must be refused, never run where no client can see it.
 			unbindMachineTurns?.();

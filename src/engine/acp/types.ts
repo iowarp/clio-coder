@@ -156,6 +156,23 @@ export const ACP_ASIDE_DRAFT_METHOD = "_clio-coder/aside/draft";
 export const ACP_ASIDE_CANCEL_METHOD = "_clio-coder/aside/cancel";
 export const ACP_ACCOUNTING_META_KEY = "clio-coder/accounting";
 export const ACP_USAGE_READ_METHOD = "_clio-coder/usage/read";
+/** `_clio-coder/telemetry/*`: the telemetry read model's DTOs, every quantity `{fact, display, ref}` (#434 §11.3). */
+export const ACP_TELEMETRY_META_KEY = "clio-coder/telemetry";
+export const ACP_TELEMETRY_METHODS = {
+	session: "_clio-coder/telemetry/session",
+	calls: "_clio-coder/telemetry/calls",
+	cost: "_clio-coder/telemetry/cost",
+	cache: "_clio-coder/telemetry/cache",
+	timeline: "_clio-coder/telemetry/timeline",
+	run: "_clio-coder/telemetry/run",
+	runs: "_clio-coder/telemetry/runs",
+	quota: "_clio-coder/telemetry/quota",
+	health: "_clio-coder/telemetry/health",
+	whyStopped: "_clio-coder/telemetry/why_stopped",
+	explain: "_clio-coder/telemetry/explain",
+} as const;
+/** A coalesced `telemetry_update` notice, at most 10 Hz and never per token; a client re-reads the topics it shows. */
+export const ACP_TELEMETRY_UPDATE_NOTIFICATION = "_clio-coder/telemetry/update";
 
 /** Every thinking level a safe-settings patch or the `thinkingLevel` config option may name, weakest first. */
 export const ACP_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -2310,6 +2327,17 @@ export const AcpSessionUsageSchema = Type.Object(
 			),
 			Type.Object({ status: Type.Literal("failed"), reason: wireUsageText }, closed),
 		]),
+		/**
+		 * The read model's whole-session `SessionTelemetryV1` and `CostReportV1` by model (#434 §11). Unlike the
+		 * counts above, an unknown here stays unknown. Typed structurally: this leaf loads in a browser bundle and the
+		 * DTO schemas do not, so `TELEMETRY_DTO_SCHEMAS` in `src/core/telemetry/dto.ts` is their contract.
+		 */
+		telemetry: Type.Optional(
+			Type.Object(
+				{ session: Type.Record(Type.String(), Type.Unknown()), cost: Type.Record(Type.String(), Type.Unknown()) },
+				closed,
+			),
+		),
 	},
 	closed,
 );
