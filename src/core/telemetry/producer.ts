@@ -83,6 +83,11 @@ export function recordTelemetry<K extends Kind>(kind: K, data: Payload<K>, ctx =
 type Stage = "admission" | "auth" | "transform" | "connect" | "send";
 type StageFacts = { waitedOn?: "budget" | "capacity" | "steering"; refreshed?: boolean; reused?: boolean };
 type Settlement = Omit<CallSettled, keyof CallStarted | "stages">;
+/** A provider HTTP response as the engine seam saw it. Headers never reach the journal except through an allowlist. */
+export interface ObservedResponse {
+	status: number;
+	headers: Readonly<Record<string, string>>;
+}
 export interface TelemetryCall {
 	readonly callId: string;
 	readonly attemptId: string;
@@ -90,6 +95,13 @@ export interface TelemetryCall {
 	withContext<T>(fn: () => T): T;
 	stage(stage: Stage, phase: "start" | "end", facts?: StageFacts): void;
 	mark(mark: "firstByte" | "firstToken"): void;
+	/**
+	 * Feed a provider HTTP response. The first 2xx response opens the stream and marks firstByte; the last one stays
+	 * on the attempt, in memory only, for the quota reading and research capture to read (#434).
+	 */
+	observeResponse?(response: ObservedResponse): void;
+	/** The last 2xx response this attempt observed. */
+	lastResponse?(): ObservedResponse | undefined;
 	/** The first settlement returns the enqueued facts for read-only live projections (#434). */
 	settle(data: Settlement, reportedModel?: CallStarted["target"]["reportedModel"]): CallSettled | undefined;
 	/**
@@ -149,6 +161,7 @@ export function beginCall(
 		const metadata: CallStarted = { ...input, ...request, callId, attemptId, attempt: number };
 		let settled = false;
 		let successor: TelemetryCall | undefined;
+		let response: ObservedResponse | undefined;
 		recordTelemetry("call.started", metadata, scope);
 		const handle: TelemetryCall = {
 			callId,
@@ -172,6 +185,12 @@ export function beginCall(
 			mark(name) {
 				if (!settled) stages[name] ??= performance.now() - start;
 			},
+			observeResponse(observed) {
+				if (settled || observed.status < 200 || observed.status >= 300) return;
+				handle.mark("firstByte");
+				response = { status: observed.status, headers: { ...observed.headers } };
+			},
+			lastResponse: () => response,
 			settle(data, reportedModel) {
 				if (settled) return;
 				settled = true;

@@ -117,6 +117,14 @@ test("an abandoned attempt settles once, as never sent before its send stage and
 		const settled = records.flatMap((record) => (record.kind === "call.settled" ? [record.data] : []));
 		strictEqual(settled.length, 2);
 		ok(settled.every((data) => validPayload("call.settled", data)));
+		// Only a 2xx response opens the stream; the attempt keeps the last one in memory and journals no header.
+		const observed = beginCall(started, ctx);
+		observed.observeResponse?.({ status: 429, headers: { "retry-after": "1" } });
+		strictEqual(observed.lastResponse?.(), undefined);
+		observed.observeResponse?.({ status: 200, headers: { "x-codex-primary-used-percent": "40" } });
+		deepStrictEqual(observed.lastResponse?.(), { status: 200, headers: { "x-codex-primary-used-percent": "40" } });
+		const answered = observed.abandon("internal");
+		ok(answered?.stages.firstByte !== undefined && !JSON.stringify(answered).includes("x-codex"));
 	} finally {
 		release();
 	}

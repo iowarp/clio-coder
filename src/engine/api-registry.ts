@@ -202,8 +202,18 @@ function scopedEngineStreamSimple(
 	// attempts through turn-runtime. Main and worker attempts also mark their own stages; each keeps its first (#434).
 	const call = telemetryCallInContext();
 	call?.stage("send", "start");
+	// The one place a call sees its provider's HTTP response; the caller's own hook still runs after it (#434).
+	const withResponse: SimpleStreamOptions | undefined = call?.observeResponse
+		? {
+				...options,
+				onResponse: async (response, responseModel) => {
+					call.observeResponse?.(response);
+					await options?.onResponse?.(response, responseModel);
+				},
+			}
+		: options;
 	const stream = filterAssistantProseStream(
-		guardToolArgumentStream(model, context, options, (guarded) =>
+		guardToolArgumentStream(model, context, withResponse, (guarded) =>
 			instrumentProviderCall(
 				model,
 				withProviderCheckpoint(
