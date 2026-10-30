@@ -334,11 +334,14 @@ async function runRound(
 				continue;
 			}
 			if (event.type === "done") {
-				scope.settle(event.message);
+				const facts = scope.settle(event.message);
 				const answer = textFromMessage(event.message).trim();
 				const usage = sideQuestionUsage((event.message as { usage?: unknown }).usage);
 				observed = true;
-				input.onUsage?.(usage, { callOutcome: "success" });
+				input.onUsage?.(usage, {
+					callOutcome: "success",
+					...(facts ? { callId: facts.callId, attemptId: facts.attemptId } : {}),
+				});
 				return { text: answer, usage, aborted: false };
 			}
 			if (event.type === "error") {
@@ -346,8 +349,9 @@ async function runRound(
 				const usage = sideQuestionUsage(failed.usage);
 				observed = true;
 				const aborted = event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true;
-				scope.settle({ ...failed, failure: tracking.failure(failed, aborted, usage !== null) });
+				const facts = scope.settle({ ...failed, failure: tracking.failure(failed, aborted, usage !== null) });
 				input.onUsage?.(usage, {
+					...(facts ? { callId: facts.callId, attemptId: facts.attemptId } : {}),
 					callOutcome: aborted ? "aborted" : "error",
 					failure: tracking.failure(failed, aborted, usage !== null),
 				});
@@ -364,11 +368,12 @@ async function runRound(
 		throw error;
 	} finally {
 		if (!observed) {
-			scope.settle({
+			const facts = scope.settle({
 				stopReason: input.signal?.aborted ? "aborted" : "error",
 				failure: tracking.failure(terminalError, input.signal?.aborted),
 			});
 			input.onUsage?.(null, {
+				...(facts ? { callId: facts.callId, attemptId: facts.attemptId } : {}),
 				callOutcome: input.signal?.aborted ? "aborted" : "error",
 				failure: tracking.failure(terminalError, input.signal?.aborted),
 			});

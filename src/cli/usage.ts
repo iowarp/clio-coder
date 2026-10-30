@@ -38,6 +38,7 @@ import {
 	type RecallTelemetry,
 	readAuditRows,
 } from "../domains/session/index.js";
+import { journalUsageWindow } from "../domains/session/journal-usage.js";
 import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
@@ -519,8 +520,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	}
 	const harnessActions = sessions.reduce((total, session) => total + session.harnessActions, 0);
 	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
-	// Side questions and handoff rounds append nothing to the session ledger by
-	// design, so their spend lives in its own store and is folded in here.
+	// Older helpers and callers still awaiting journal migration retain this store (#434).
 	const outOfTurn = readOutOfTurnUsageRows(stateDir);
 	for (const error of outOfTurn.errors) diagnostics.notes.push(error);
 	const outOfTurnRows = outOfTurn.rows.filter(
@@ -645,6 +645,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		for (const call of session.usageCalls) {
 			foldCall(call);
 			callOrigins.rows += 1;
+			if (call.label === "side-question" || call.label === "helper") callOrigins.sideQuestions += 1;
+			else if (call.label === "handoff") callOrigins.handoffs += 1;
 		}
 	}
 	for (const row of outOfTurnRows) {
@@ -1335,15 +1337,13 @@ async function readSessions(
 	const refs = await listSessionLedgerRefs(stateDir, repoHash);
 	const sessions: SessionUsage[] = [];
 	for (const ref of refs) {
-		let mtimeMs: number;
 		try {
-			mtimeMs = (await stat(ref.path)).mtimeMs;
+			await stat(ref.path);
 		} catch {
 			// A session directory without current.jsonl (e.g. archived) is not an error.
 			continue;
 		}
-		// Ledgers untouched since before the window cannot contain in-window entries.
-		if (mtimeMs < windowStart) continue;
+		// Side calls can settle after the last ledger append; the journal has its own UTC window (#434).
 		let raw: string;
 		try {
 			raw = await readFile(ref.path, "utf8");
@@ -1366,6 +1366,11 @@ async function readSessions(
 			diagnostics.notes.push(
 				`session ${ref.sessionId}: call journal has ${journal.skipped} skipped records and ${journal.damaged} damaged segments`,
 			);
+		const usageRecords = journalUsageWindow(
+			journal.records.map(({ record }) => record),
+			windowStart,
+			windowEnd + USAGE_WINDOW_FUTURE_SKEW_MS,
+		);
 		const usage: SessionUsage = {
 			harnessActions: 0,
 			duplicateDispatches: 0,
@@ -1377,15 +1382,8 @@ async function readSessions(
 			// modelChange rows are kept regardless of the window: they carry no
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
-			usageCalls: ledgerUsageCalls(
-				accountingEntries,
-				{},
-				journal.records.map(({ record }) => record),
-			),
-			failureCounts: ledgerCallFailureCounts(
-				accountingEntries,
-				journal.records.map(({ record }) => record),
-			),
+			usageCalls: ledgerUsageCalls(accountingEntries, {}, usageRecords),
+			failureCounts: ledgerCallFailureCounts(accountingEntries, usageRecords),
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
 			recall: foldRecallTelemetry(accountingEntries),
 		};
@@ -1425,7 +1423,8 @@ async function readSessions(
 				if (shape.length > 0) usage.bashShapes.set(shape, (usage.bashShapes.get(shape) ?? 0) + 1);
 			}
 		}
-		if (usage.entriesInWindow > 0) sessions.push(usage);
+		if (usage.entriesInWindow > 0 || usage.usageCalls.length > 0 || usage.failureCounts.neverInvokedCalls > 0)
+			sessions.push(usage);
 	}
 	return sessions;
 }

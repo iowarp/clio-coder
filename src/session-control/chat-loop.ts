@@ -6,6 +6,8 @@ import type { SideCallAuth } from "../core/oauth-retry.js";
 import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
+import { journalOwnsSideUsage, usageCallsFromAttempts } from "../domains/session/journal-usage.js";
+import { recordUsageCall } from "../domains/session/usage-record.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -1927,6 +1929,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						origin,
 						acquire,
 						label,
+						...(journalOwnsSideUsage(label)
+							? {
+									onSettled: (facts) => {
+										if (!deps.observability || deps.session?.current()?.id !== origin.id) return;
+										if (facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
+										for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
+											recordUsageCall(deps.observability, call);
+									},
+								}
+							: {}),
 						targetId: runtime.targetId,
 						runtimeId: runtime.runtimeId,
 						costProvenance:
@@ -1939,17 +1951,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const writeOutOfTurnUsageRow =
 		deps.recordOutOfTurnUsageRow ?? ((row: OutOfTurnUsageRow): void => appendOutOfTurnUsageRow(clioStateDir(), row));
 
-	/**
-	 * Report an out-of-turn round's provider usage. Money was spent, so `/usage`
-	 * says so under its own label; turn persistence, the working-set ledger,
-	 * compaction inputs, and the footer counters never see it.
-	 *
-	 * The same call is also appended to the out-of-turn usage store under the
-	 * state dir. That store exists because `/usage` only knows what this process
-	 * spent: the round appends nothing to the session JSONL by design, so an
-	 * archive reader such as `clio-coder usage report` had no record of the
-	 * spend at all once the process exited. The session ledger stays untouched.
-	 */
+	/** Legacy fallback for rounds without an owned journal; journaled callbacks carry IDs and skip this writer (#434). */
 	const recordOutOfTurnUsage = (
 		runtime: AgentRuntime,
 		usage: SideQuestionResult["usage"],
@@ -1980,6 +1982,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		origin: ReturnType<SessionContract["current"]> = deps.session?.current() ?? null,
 		observation?: CallObservation,
 	): void => {
+		if (observation?.callId) return;
 		const costProvenance = usage ? runtime.costProvenance : "unknown";
 		if (observation?.failure?.invoked !== false && (deps.session?.current()?.id ?? null) === (origin?.id ?? null))
 			deps.observability?.recordTokens(

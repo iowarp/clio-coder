@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import type { CallObservation } from "../../src/core/call-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { journalUsageWindow, usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
+import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import type { AgentMessage } from "../../src/engine/types.js";
@@ -130,7 +134,12 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 	const stateDir = await mkdtemp(join(tmpdir(), "side-journal-"));
 	const journals = createSessionJournals(stateDir, () => {});
 	const provider = registerEngineFauxProvider({ api: "side-journal-contract", models: [{ id: "fixture" }] });
+	const live: CallSettled[] = [];
+	const observations: CallObservation[] = [];
 	const telemetry = {
+		onSettled: (facts: CallSettled) => {
+			live.push(facts);
+		},
 		origin: { id: "side-session", cwdHash: "repo" },
 		acquire: journals.acquire,
 		label: "btw" as const,
@@ -155,6 +164,9 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 			thinkingLevel: "off" as const,
 			runtimeId: "llamacpp",
 			telemetry,
+			onUsage: (_usage: unknown, observation?: CallObservation) => {
+				if (observation) observations.push(observation);
+			},
 			responseSchema: { name: "answer", schema: { type: "object" } },
 		};
 		assert.equal((await runOutOfTurnRound(input)).text, "answer");
@@ -164,6 +176,32 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 		);
 		const calls = records.filter((record) => record.k === "call.settled");
 		assert.equal(calls.length, 3);
+		assert.equal(live.length, 3);
+		assert.deepEqual(
+			observations.map((row) => [row.callId, row.attemptId]),
+			live.map((call) => [call.callId, call.attemptId]),
+		);
+		assert.deepEqual(
+			ledgerUsageCalls([], {}, records),
+			usageCallsFromAttempts(live.map((settled) => ({ started: settled, settled }))),
+		);
+		assert.equal(ledgerCallFailureCounts([], records).neverInvokedCalls, 1);
+		const shifted = records.map((row) => ({
+			...row,
+			t: row.k === "call.settled" ? "2026-01-02T00:00:00.000Z" : "2026-01-01T23:00:00.000Z",
+		}));
+		const inWindow = journalUsageWindow(
+			shifted,
+			Date.parse("2026-01-02T00:00:00.000Z"),
+			Date.parse("2026-01-03T00:00:00.000Z"),
+		);
+		assert.equal(ledgerUsageCalls([], {}, inWindow).length, 2);
+		const outside = journalUsageWindow(
+			shifted,
+			Date.parse("2026-01-03T00:00:00.000Z"),
+			Date.parse("2026-01-04T00:00:00.000Z"),
+		);
+		assert.equal(ledgerUsageCalls([], {}, outside).length, 0);
 		assert.equal(calls[0]?.data.callId, calls[1]?.data.callId);
 		assert.notEqual(calls[0]?.data.attemptId, calls[1]?.data.attemptId);
 		assert.equal(calls[1]?.data.attempt, 1);

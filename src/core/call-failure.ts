@@ -8,6 +8,9 @@ export interface CallFailureRecord {
 }
 
 export interface CallObservation {
+	/** Present when the owned call journal already recorded this attempt (#434). */
+	callId?: string;
+	attemptId?: string;
 	callOutcome: "success" | "error" | "aborted";
 	failure?: CallFailureRecord;
 }

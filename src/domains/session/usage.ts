@@ -19,7 +19,7 @@ import { foldCallJournal, foldCalls } from "../observability/folds.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
-import { usageCallsFromJournal } from "./journal-usage.js";
+import { journalOwnsSideUsage, usageCallsFromJournal } from "./journal-usage.js";
 
 /** One attempt projected from the journal, or a legacy ledger usage row (#434). */
 export interface LedgerUsageCall {
@@ -177,6 +177,14 @@ export function ledgerUsageCalls(
 			...(!observed ? { missingTokenCalls: 1 } : {}),
 		});
 	}
+	const sideIds = new Set(
+		journal.flatMap((row) =>
+			(row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label)
+				? [row.data.callId]
+				: [],
+		),
+	);
+	for (const id of sideIds) if (!projected.has(id)) calls.push(...(journalCalls.get(id) ?? []));
 	return calls;
 }
 
@@ -192,6 +200,10 @@ export function ledgerCallFailureCounts(
 			return typeof callId === "string" ? [callId] : [];
 		}),
 	);
+	for (const row of journal) {
+		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label))
+			linked.add(row.data.callId);
+	}
 	const folded = foldCallJournal(journal, linked);
 	const projected = new Set(folded.attempts.map(({ started }) => started.callId));
 	let invokedUnknownCalls = folded.attempts.filter(

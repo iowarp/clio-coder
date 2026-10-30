@@ -87,3 +87,26 @@ export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): Ledg
 		];
 	});
 }
+
+/** Labels whose usage writer has moved from out-of-turn.jsonl to the call journal (#434). */
+export function journalOwnsSideUsage(label: CallLabel): boolean {
+	return label === "btw" || label === "helper" || label === "handoff";
+}
+
+/** Side calls have no transcript row; choose attempts by settlement UTC while retaining their start facts (#434). */
+export function journalUsageWindow(records: readonly TelemetryRecord[], from: number, to: number): TelemetryRecord[] {
+	const selected = new Map<string, boolean>();
+	for (const row of records) {
+		if ((row.k !== "call.started" && row.k !== "call.settled") || !journalOwnsSideUsage(row.data.label)) continue;
+		if (row.k === "call.settled" || !selected.has(row.data.attemptId)) {
+			const t = Date.parse(row.t);
+			selected.set(row.data.attemptId, t >= from && t <= to);
+		}
+	}
+	return records.filter(
+		(row) =>
+			(row.k !== "call.started" && row.k !== "call.settled") ||
+			!journalOwnsSideUsage(row.data.label) ||
+			selected.get(row.data.attemptId),
+	);
+}
