@@ -13,7 +13,7 @@ import {
 	useTelemetrySession,
 } from "./session-telemetry.js";
 import type { Spend } from "./session-usage-model.js";
-import { sessionSpend } from "./session-usage-model.js";
+import { sessionSpend, tokensText } from "./session-usage-model.js";
 
 const RING = 2 * Math.PI * 6;
 const SOURCE_TITLE: Record<Spend["source"], string> = {
@@ -102,7 +102,7 @@ export const TelemetryChips = memo(function TelemetryChips({
 				>
 					{spend.tokens !== null ? (
 						<span className="wb-chip__tokens">
-							{spend.tokens} tok
+							{tokensText(spend.tokens, "tok")}
 							{spend.missingTokenCalls ? ` (${spend.missingTokenCalls} missing usage)` : ""}
 						</span>
 					) : null}

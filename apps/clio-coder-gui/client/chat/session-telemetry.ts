@@ -7,7 +7,7 @@ import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { sessionReadScope } from "../api/sessions.js";
 
-import type { Spend } from "./session-usage-model.js";
+import { type Spend, tokensText } from "./session-usage-model.js";
 
 type Turns = SessionSnapshot["turns"];
 // A GET may supersede the push it began after, but cannot overwrite a newer push that raced it.
@@ -112,6 +112,6 @@ export function spendLine(spend: Spend): string | null {
 	const missing = spend.missingTokenCalls
 		? ` (${spend.missingTokenCalls} ${spend.missingTokenCalls === 1 ? "call" : "calls"} missing usage)`
 		: "";
-	const parts = [spend.tokens === null ? null : `${spend.tokens} tokens${missing}`, spend.cost].filter(Boolean);
+	const parts = [spend.tokens === null ? null : `${tokensText(spend.tokens)}${missing}`, spend.cost].filter(Boolean);
 	return parts.length > 0 ? parts.join(" · ") : null;
 }

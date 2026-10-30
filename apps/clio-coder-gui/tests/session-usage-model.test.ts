@@ -190,7 +190,7 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 		{
 			key: "claude-sonnet-5",
 			route: "claude-sonnet-5",
-			tokens: "≥5,120 (1 call unknown) tokens",
+			tokens: "Tokens: ≥5,120 (1 call unknown)",
 			cost: "$0.42 +?",
 			calls: "7",
 			beside: null,

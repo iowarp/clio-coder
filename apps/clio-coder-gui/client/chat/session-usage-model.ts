@@ -14,6 +14,17 @@ export function costText(cost: Cost): string {
 	return cost.display ?? "not measured";
 }
 
+const BARE_COUNT = /^~?\d[\d,]*$/;
+
+/**
+ * A token display with its unit. The unit follows a bare count ("5,120 tokens"); a display that carries its own gap
+ * or method clause ("≥5,120 (1 call unknown)") takes the unit as a label instead, because a unit after the clause
+ * misreads. The display is the server's and is never split or reworded (#434).
+ */
+export function tokensText(display: string, unit: "tokens" | "tok" = "tokens"): string {
+	return BARE_COUNT.test(display) ? `${display} ${unit}` : `Tokens: ${display}`;
+}
+
 /**
  * Whether a session DTO holds any call the fold could count. A session the host knows but never journaled answers
  * unknown coverage (R9): no measured or estimated attempt, only the gap. Such a DTO says nothing a surface can show
@@ -116,7 +127,7 @@ export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "s
 		return usage.telemetry.cost.groups.map((group) => ({
 			key: group.key,
 			route: group.key,
-			tokens: `${group.tokens.display} tokens`,
+			tokens: tokensText(group.tokens.display),
 			cost: group.usd.display,
 			calls: group.calls.display,
 			beside: null,
