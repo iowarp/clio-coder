@@ -38,7 +38,7 @@ import {
 } from "../../core/telemetry/render.js";
 import type { CallSettled, CallUsage, Payload } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
-import type { CallJournalFolder, CallTotals, FoldedAttempt, JournalFold } from "./folds.js";
+import type { CallJournalFolder, CallTotals, FoldedAttempt, FoldOptions, JournalFold } from "./folds.js";
 import {
 	addCallTotals,
 	addGroup,
@@ -305,6 +305,8 @@ function attemptsOf(records: readonly TelemetryRecord[], attempts: readonly Fold
 }
 
 const unavailable: JournalSource = { present: false, records: [], modes: [], skipped: 0, damaged: 0 };
+/** Every surface reads an interrupted call's estimate where the provider reported nothing (#430). */
+const READ_MODEL_FOLD: FoldOptions = { interruptedEstimates: true };
 const POLICY_GAPS: ReadonlySet<string> = new Set(["mode-filtered", "research-cap"]);
 
 /** A run journal reads the same until the live model swaps its source, so each source is folded once. */
@@ -312,7 +314,7 @@ const runAnalyses = new WeakMap<JournalSource, Run>();
 function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryRecord): Run {
 	const cached = runAnalyses.get(source);
 	if (cached && cached.runId === runId && cached.reference === (reference ?? null)) return cached;
-	const fold = foldRunJournal(source.records);
+	const fold = foldRunJournal(source.records, READ_MODEL_FOLD);
 	const attempts = attemptsOf(source.records, fold.calls.attempts);
 	let settled: Run["settled"] = null;
 	let firstAt: string | null = null;
@@ -379,7 +381,7 @@ function buildAnalysis(
 	parent: SessionSource | null,
 ): Analysis {
 	const growth: Growth = {
-		folder: callJournalFolder(),
+		folder: callJournalFolder(undefined, READ_MODEL_FOLD),
 		meta: new Map(),
 		tools: new Map(),
 		callAttempts: new Map(),

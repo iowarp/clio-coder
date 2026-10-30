@@ -8,6 +8,7 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import type { TelemetryView } from "../../src/domains/observability/contract.js";
 import type { CostEntry } from "../../src/domains/observability/cost.js";
 import {
@@ -521,7 +522,21 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			if (source === "stream_cancel") f.loop.cancel();
 			else f.loop.cancel({ source, reason: "[Clio Coder] loop guard stopped repeated calls." });
 			await pending;
-			// The read model's fold of the cancelled call: sent, with no usage reported (#434 §11.3).
+			const assistants = f.entries().filter((entry) => entry.kind === "message" && entry.role === "assistant");
+			strictEqual(assistants.length, 1);
+			const assistant = assistants[0];
+			ok(assistant?.kind === "message");
+			const payload = recordValue(assistant.payload);
+			// The read model's fold of the cancelled call as the producer settles the run's live message: sent, with no
+			// usage reported, and the display estimate journaled beside its usage (#430, #434 §11.3).
+			const ended = f.events.filter((event) => event.type === "agent_end").at(-1);
+			ok(ended?.type === "agent_end");
+			const settlement = callSettlementFromMessage(
+				ended.messages.filter((message) => message.role === "assistant").at(-1),
+				"unknown",
+			);
+			strictEqual(settlement.disposition, "sent_unsettled");
+			ok(settlement.interruptedEstimate);
 			const meta = f.session.current();
 			const userTurn = f.entries().find((entry) => entry.kind === "message" && entry.role === "user");
 			ok(meta && userTurn);
@@ -529,9 +544,10 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 				meta.id,
 				telemetryCall(meta.id, {
 					turnId: userTurn.turnId,
-					disposition: "sent_unsettled",
+					disposition: settlement.disposition,
 					usage: { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null },
 					usd: null,
+					interruptedEstimate: settlement.interruptedEstimate,
 				}),
 			);
 			f.setTelemetry(view);
@@ -551,11 +567,6 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 				const row = rows.find((line) => stripTerminalSequences(line).includes("loop guard stopped"));
 				ok(row?.includes(`${theme.fg("warning", GLYPH.warn)} `), row);
 			}
-			const assistants = f.entries().filter((entry) => entry.kind === "message" && entry.role === "assistant");
-			strictEqual(assistants.length, 1);
-			const assistant = assistants[0];
-			ok(assistant?.kind === "message");
-			const payload = recordValue(assistant.payload);
 			strictEqual(payload?.callAccounting, undefined);
 			strictEqual(recordValue(payload?.usage)?.input, 0);
 			strictEqual(recordValue(payload?.failure)?.invoked, true);
@@ -567,21 +578,21 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			const resumedLines = replay.render(120);
 			const resumed = resumedLines.map(stripTerminalSequences).join("\n");
 			// Live and resumed receipts read the turn's spend from the same view: the sent call reported no usage, so its
-			// counts are unknown, never an estimate or a zero (#434 §11.3).
+			// counts are the journaled estimate as a lower bound, never a zero (#430, #434 §11.3).
 			for (const rendered of [live, resumed]) {
 				match(rendered, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
-				match(rendered, /in \? · out \?/u);
+				match(rendered, /in ≥~\S+ \+\? · out ≥~0 \+\?/u);
 				strictEqual(rendered.split("Cancelled").length - 1, 1, rendered);
 				doesNotMatch(rendered, /✦|\[aborted\]/u);
 			}
-			strictEqual(resumed.match(/in \S+ · out \S+/u)?.[0], live.match(/in \S+ · out \S+/u)?.[0]);
+			strictEqual(resumed.match(/in .+? · out \S+ \+\?/u)?.[0], live.match(/in .+? · out \S+ \+\?/u)?.[0]);
 			const html = renderSessionHtml({
 				sessionId: source,
 				exportedAt: "2026-09-07T00:00:00Z",
 				ansiLines: resumedLines,
 			}).replace(/<[^>]*>/gu, "");
 			match(html, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
-			match(html, /in \? · out \?/u);
+			match(html, /in ≥~\S+ \+\? · out ≥~0 \+\?/u);
 			strictEqual(html.split("Cancelled").length - 1, 1, html);
 			if (source === "loop_guard") {
 				for (const rendered of [resumed, html]) {

@@ -61,6 +61,8 @@ export interface TelemetryCallOptions {
 	usd?: number | null;
 	pricedBy?: CallSettled["pricing"]["pricedBy"];
 	disposition?: Disposition;
+	/** An interrupted call's display estimate, as the producer journals it beside the usage. */
+	interruptedEstimate?: CallSettled["interruptedEstimate"];
 }
 
 /** One call's started and settled records, cloned from a golden settled call with fresh ids and the given facts. */
@@ -119,6 +121,7 @@ export function telemetryCall(sessionId: string, options: TelemetryCallOptions =
 					reasoning: count(usage.reasoning),
 				},
 				pricing: { usd, pricedBy },
+				...(options.interruptedEstimate ? { interruptedEstimate: options.interruptedEstimate } : {}),
 			},
 		},
 	];

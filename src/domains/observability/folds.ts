@@ -142,7 +142,37 @@ export interface CallJournalFolder {
 	fold(): JournalFold;
 }
 
-export function callJournalFolder(callIds?: ReadonlySet<string>): CallJournalFolder {
+/**
+ * How a fold reads an interrupted call the provider never reported on. Its settlement carries Clio's estimate of the
+ * call's input and output beside the usage. The read model reads that estimate in place of the unknown counts, so a
+ * transcript, footer or report shows `~` where it would show `?`, and the call's sent_unsettled bound keeps every sum
+ * it enters a lower bound. Accounting folds (ledger rows, receipts, caps) leave it out (#430, #434).
+ */
+export interface FoldOptions {
+	interruptedEstimates?: boolean;
+}
+
+const estimatedSettlements = new WeakMap<CallSettled, CallSettled>();
+function withInterruptedEstimate(settled: CallSettled): CallSettled {
+	const estimate = settled.interruptedEstimate;
+	if (!estimate || settled.disposition !== "sent_unsettled" || !settled.usage) return settled;
+	let shown = estimatedSettlements.get(settled);
+	if (!shown) {
+		const { input, output } = settled.usage;
+		shown = {
+			...settled,
+			usage: {
+				...settled.usage,
+				input: input.kind === "unknown" ? estimate.input : input,
+				output: output.kind === "unknown" ? estimate.output : output,
+			},
+		};
+		estimatedSettlements.set(settled, shown);
+	}
+	return shown;
+}
+
+export function callJournalFolder(callIds?: ReadonlySet<string>, options: FoldOptions = {}): CallJournalFolder {
 	const seen = new Map<string, TelemetryRecord>();
 	const starts = new Map<string, CallStarted>();
 	const settlements = new Map<string, CallSettled>();
@@ -155,10 +185,10 @@ export function callJournalFolder(callIds?: ReadonlySet<string>): CallJournalFol
 		gapRecords: 0,
 		droppedRecords: 0,
 	};
-	const attempt = (started: CallStarted): FoldedAttempt => ({
-		started,
-		settled: conflicts.has(started.attemptId) ? null : (settlements.get(started.attemptId) ?? null),
-	});
+	const attempt = (started: CallStarted): FoldedAttempt => {
+		const settled = conflicts.has(started.attemptId) ? null : (settlements.get(started.attemptId) ?? null);
+		return { started, settled: settled && options.interruptedEstimates ? withInterruptedEstimate(settled) : settled };
+	};
 	const ordered = () => [...starts.values()].sort((a, b) => a.attemptId.localeCompare(b.attemptId)).map(attempt);
 	return {
 		coverage,
@@ -237,8 +267,12 @@ export function callJournalFolder(callIds?: ReadonlySet<string>): CallJournalFol
 }
 
 /** Fold supplied journal and referenced run records once, irrespective of replay order or fork copies (#434). */
-export function foldCallJournal(records: Iterable<TelemetryRecord>, callIds?: ReadonlySet<string>): JournalFold {
-	const folder = callJournalFolder(callIds);
+export function foldCallJournal(
+	records: Iterable<TelemetryRecord>,
+	callIds?: ReadonlySet<string>,
+	options: FoldOptions = {},
+): JournalFold {
+	const folder = callJournalFolder(callIds, options);
 	for (const record of records) folder.add(record);
 	return folder.fold();
 }
@@ -261,9 +295,9 @@ export function foldCallsBy(
 }
 
 /** A run snapshot includes its constituent calls. Pick one accounting source, independent of replay order (#434). */
-function foldRunScope(records: Iterable<TelemetryRecord>) {
+function foldRunScope(records: Iterable<TelemetryRecord>, options: FoldOptions) {
 	const rows = [...records];
-	const calls = foldCallJournal(rows);
+	const calls = foldCallJournal(rows, undefined, options);
 	const aggregates = rows.flatMap((row) => (row.k === "run.usage" ? [row.data] : []));
 	const revision = aggregates.reduce((maximum, row) => Math.max(maximum, row.revision), -1);
 	const latest = aggregates.filter((row) => row.revision === revision);
@@ -347,10 +381,10 @@ export function sumFactSums(sums: readonly FactSum[]): FactSum {
 }
 
 /** Parts are disjoint reported contributions, not inferred calls; a whole-scope snapshot replaces them (#434). */
-export function foldRunJournal(records: Iterable<TelemetryRecord>) {
+export function foldRunJournal(records: Iterable<TelemetryRecord>, options: FoldOptions = {}) {
 	const rows = [...records];
 	const whole = rows.filter((row) => row.k !== "run.usage" || row.data.partId === undefined);
-	const base = foldRunScope(whole);
+	const base = foldRunScope(whole, options);
 	const parts = new Map<string, TelemetryRecord[]>();
 	for (const row of rows) {
 		if (row.k !== "run.usage" || row.data.partId === undefined) continue;
@@ -367,9 +401,11 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 					invoked.every((attempt) => attempt.settled?.pricing.pricedBy === "free");
 	};
 	if (base.source !== "calls" || parts.size === 0) return { ...base, allKnownFree: allKnownFree(base) };
-	const scopes = [...parts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, part]) => foldRunScope(part));
+	const scopes = [...parts.entries()]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([, part]) => foldRunScope(part, options));
 	const sources = new Set(scopes.map((scope) => `${scope.aggregate?.source}/${scope.aggregate?.scope}`));
-	if (sources.size > 1) return { ...foldRunScope(rows), allKnownFree: false };
+	if (sources.size > 1) return { ...foldRunScope(rows, options), allKnownFree: false };
 	const sum = (key: "totalTokens" | "usd" | "apiCalls" | "missingTokenCalls") =>
 		sumFactSums(scopes.map((scope) => scope[key]));
 	const apiCalls = sum("apiCalls");
