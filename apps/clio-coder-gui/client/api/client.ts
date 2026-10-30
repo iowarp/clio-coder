@@ -1,4 +1,5 @@
 import type { Problem } from "../../contracts/common.js";
+import { machinePrefix } from "../../contracts/pages.js";
 import type { Input, Output, Route } from "../../contracts/routes.js";
 import { markTokenRejected, tokenRejected } from "./auth-state.js";
 import { clock } from "./clock.js";
@@ -19,10 +20,17 @@ function unauthorized() {
 		instance: "browser",
 	});
 }
-export function createClient(token: string, fetcher: typeof fetch = fetch) {
+/**
+ * `prefix` is `/m/<id>` while this client drives a registered node's own GUI through the app on this
+ * machine, which proxies every call there; empty for this machine's own app.
+ */
+export function createClient(token: string, fetcher: typeof fetch = fetch, prefix = "") {
 	let epoch: string | undefined;
 	return {
 		token,
+		prefix,
+		/** The registered node this client addresses, or null for this machine. */
+		machine: machinePrefix(prefix)?.id ?? null,
 		currentEpoch: () => epoch ?? null,
 		/** The event stream establishes which server may answer reads in this document (GUI-03). */
 		adoptEpoch(value: string) {
@@ -50,7 +58,7 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 			}
 			let response: Response;
 			try {
-				response = await fetcher(`${path}${query.size ? `?${query}` : ""}`, {
+				response = await fetcher(`${prefix}${path}${query.size ? `?${query}` : ""}`, {
 					method: route.method,
 					headers: {
 						Authorization: `Bearer ${token}`,

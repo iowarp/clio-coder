@@ -66,18 +66,18 @@ function useDocked(): boolean {
 	return docked;
 }
 
-export function App({ client }: { client: Client }) {
+export function App({ client, local }: { client: Client; local: Client }) {
 	return (
 		<div className="app-layout">
 			<SessionControlsProvider client={client}>
-				<Workbench client={client} />
+				<Workbench client={client} local={local} />
 			</SessionControlsProvider>
 			<NoticeToasts />
 		</div>
 	);
 }
 
-function Workbench({ client }: { client: Client }) {
+function Workbench({ client, local }: { client: Client; local: Client }) {
 	useApplyTheme();
 	const queries = useQueryClient();
 	const { controls, requestClose } = useSessionCommands();
@@ -108,9 +108,10 @@ function Workbench({ client }: { client: Client }) {
 	});
 	// The launcher brought one window forward and named a page; only that window goes there.
 	const launched = useRef<(path: string) => void>(() => {});
+	// A launch names a page of this machine's app; a window showing a node stays where it is.
 	launched.current = (path) =>
 		whenFocused(() => {
-			if (path !== window.location.pathname) void navigate(path);
+			if (client.prefix === "" && path !== window.location.pathname) void navigate(path);
 		});
 	useEffect(() => {
 		if (client.token) return subscribe(client, queries, setConnection, (path) => launched.current(path));
@@ -220,8 +221,8 @@ function Workbench({ client }: { client: Client }) {
 	const openWorkspace = useCallback(() => setWorkspaceOpen(true), []);
 	const openHelp = useCallback(() => setHelpOpen(true), []);
 	const openWindow = useCallback(
-		() => openAppWindow(sessionId ? `/sessions/${sessionId}` : "/", client.token),
-		[sessionId, client.token],
+		() => openAppWindow(`${client.prefix}${sessionId ? `/sessions/${sessionId}` : "/"}`, client.token),
+		[sessionId, client.token, client.prefix],
 	);
 	// Launching the installed app again focuses this window (`launch_handler` in the manifest) and
 	// hands the launch here, so a launch that named a page still arrives at it.
@@ -229,10 +230,11 @@ function Workbench({ client }: { client: Client }) {
 		const queue = (window as { launchQueue?: { setConsumer(consumer: (launch: { targetURL?: string }) => void): void } })
 			.launchQueue;
 		queue?.setConsumer((launch) => {
+			if (client.prefix !== "") return;
 			const path = launchedPath(launch.targetURL, window.location.origin, window.location.pathname);
 			if (path !== null) void navigate(path);
 		});
-	}, [navigate]);
+	}, [navigate, client.prefix]);
 
 	useShortcut("palette", () => setPaletteOpen(true));
 	useShortcut("newWindow", openWindow);
@@ -433,6 +435,8 @@ function Workbench({ client }: { client: Client }) {
 				{authed ? (
 					<TaskSidebar
 						client={client}
+						local={local}
+						remoteHost={meta.data?.host}
 						version={meta.data?.clio}
 						platform={meta.data?.platform}
 						actions={actions}

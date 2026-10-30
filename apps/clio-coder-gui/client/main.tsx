@@ -2,6 +2,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider, useRouteError } from "react-router";
+import { machinePrefix } from "../contracts/pages.js";
 import { ApiProblem, createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
@@ -12,7 +13,12 @@ import "./styles.css";
 import "./design/tokens.css";
 import "./render/markdown.css";
 
-const client = createClient(launchToken());
+// Under /m/<id> every call goes to that node's own GUI through the app on this machine. The switcher
+// and Machines keep talking to this machine's app, so the window can always come back or move on.
+const prefix = machinePrefix(location.pathname)?.prefix ?? "";
+const token = launchToken();
+const client = createClient(token, fetch, prefix);
+const local = prefix ? createClient(token, fetch) : client;
 const queries = new QueryClient({
 	// A few seconds of freshness stops two views that mount together from asking for the same thing twice.
 	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
@@ -60,7 +66,7 @@ function RouteError() {
 }
 const router = createBrowserRouter([
 	{
-		element: <App client={client} />,
+		element: <App client={client} local={local} />,
 		errorElement: <RouteError />,
 		hydrateFallbackElement: (
 			<main className="app-opening" role="status">
@@ -229,7 +235,7 @@ const router = createBrowserRouter([
 				path: "/machines",
 				lazy: async () => {
 					const { MachinesPage } = await import("./pages/machines.js");
-					return { element: <MachinesPage client={client} /> };
+					return { element: <MachinesPage client={client} local={local} /> };
 				},
 			},
 			{

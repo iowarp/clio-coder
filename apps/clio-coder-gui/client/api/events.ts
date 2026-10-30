@@ -225,6 +225,7 @@ export function subscribe(
 				for (const key of telemetryInvalidations(event.payload.update)) keys.add(key);
 				refreshReads.set(event.payload.resource, keys);
 			}
+			if (event.type === "machine.attach") invalidate.add("machine-attachments");
 			if (event.type === "app.launch" && clock.now() - Date.parse(event.at) < LAUNCH_FRESH_MS)
 				launched = event.payload.path;
 		}
@@ -301,7 +302,7 @@ export function subscribe(
 		if (disposed || tokenRejected()) return;
 		const query = new URLSearchParams({ token: client.token });
 		if (cursor !== undefined) query.set("after", cursor);
-		const source = new EventSource(`${routes.events.path}?${query}`);
+		const source = new EventSource(`${client.prefix}${routes.events.path}?${query}`);
 		stream = source;
 		const receive = (message: MessageEvent<string>) => {
 			if (disposed || stream !== source) return;
@@ -316,6 +317,7 @@ export function subscribe(
 			"operation.progress",
 			"operation.finished",
 			"toolchain.changed",
+			"machine.attach",
 			"interview.changed",
 			"queue.changed",
 			"app.launch",

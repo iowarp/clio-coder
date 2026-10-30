@@ -15,6 +15,7 @@ import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
 import { ExploreDrawer } from "./ExploreDrawer.js";
 import { InlineRename } from "./InlineRename.js";
+import { MachineSwitcher } from "./MachineSwitcher.js";
 import { Menu, MenuItem } from "./Menu.js";
 import { SettingsSidebar } from "./SettingsSidebar.js";
 import { isSettingsPath, STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
@@ -27,6 +28,8 @@ const TASKS_PER_PROJECT = 6;
 const PROJECTS_SHOWN = 10;
 export function TaskSidebar({
 	client,
+	local,
+	remoteHost,
 	version,
 	platform,
 	actions,
@@ -39,6 +42,9 @@ export function TaskSidebar({
 	onNavigate,
 }: {
 	client: Client;
+	/** The app on this machine, which lists the machines whichever node this window shows. */
+	local: Client;
+	remoteHost: string | undefined;
 	version: string | undefined;
 	platform: string | undefined;
 	actions: TaskActions;
@@ -118,6 +124,8 @@ export function TaskSidebar({
 					<Icon name="sidebar" />
 				</button>
 			</div>
+
+			<MachineSwitcher local={local} current={client.machine} remoteHost={remoteHost} />
 
 			<nav className="wb-side__discover" aria-label="Find and explore">
 				<button type="button" className="wb-action" onClick={onSearch} title="Search tasks and commands">

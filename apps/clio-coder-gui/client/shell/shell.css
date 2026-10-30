@@ -1255,3 +1255,52 @@ button.wb-chip:hover:not(:disabled) {
 		-webkit-app-region: drag;
 	}
 }
+
+/* Machine switcher: which machine's app this window shows. */
+.wb-machine {
+	margin: 0 0 var(--space-2);
+}
+.wb-machine > summary.wb-action {
+	cursor: pointer;
+}
+.wb-machine__label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 600;
+}
+.wb-machine__panel {
+	left: 0;
+	right: auto;
+	min-width: 17rem;
+}
+.wb-machine__item[aria-current="true"] {
+	background: var(--wb-active);
+}
+.wb-machine__choice {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+.wb-machine__choice small {
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+}
+.wb-machine__choice [data-tone="success"] {
+	color: var(--status-success-fg);
+}
+.wb-machine__choice [data-tone="running"] {
+	color: var(--status-running-fg);
+}
+.wb-machine__choice [data-tone="warn"] {
+	color: var(--status-warn-fg);
+}
+.wb-machine__choice [data-tone="fail"] {
+	color: var(--status-fail-fg);
+}
+.wb-machine .wb-note {
+	padding: var(--space-2) 10px;
+	margin: 0;
+}

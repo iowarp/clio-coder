@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RefObject } from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "react-router";
-import type { Machine, MachineAdd, MachineMutation } from "../../contracts/machines.js";
+import type { Machine, MachineAdd, MachineAttachment, MachineMutation } from "../../contracts/machines.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
@@ -10,6 +10,8 @@ import { clock } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
+import { attachInstallCommand, attachmentStatus, openAction } from "../shell/machine-switcher-model.js";
+import { useMachineAttach } from "../shell/use-machine-attach.js";
 import type { MachineDraft, MachineRequest } from "./machines-model.js";
 import {
 	acceptMachineRequest,
@@ -183,15 +185,27 @@ function MachineDetail({
 	projectRoot,
 	busy,
 	onAction,
+	attachment,
+	opening,
+	onOpen,
 }: {
 	machine: Machine;
 	now: number;
 	projectRoot: string;
 	busy: boolean;
 	onAction: (mutation: MachineMutation) => void;
+	/** This app's attachment to the node's own GUI; undefined while the list has not answered. */
+	attachment: MachineAttachment | undefined;
+	opening: boolean;
+	/** Absent while this window already shows a node, whose registry is not this machine's. */
+	onOpen: ((id: string) => void) | undefined;
 }) {
 	const [confirm, setConfirm] = useState<"check" | "remove" | null>(null);
 	const status = machineStatus(machine, now);
+	const attachState = attachment?.state ?? "detached";
+	const open = openAction(attachState, opening);
+	const attachStatus = attachmentStatus(opening ? "connecting" : attachState);
+	const install = attachment ? attachInstallCommand(attachment) : null;
 	return (
 		<article className="machines-detail" aria-label={`Machine ${machine.id}`}>
 			<div className="machines-section-heading">
@@ -272,7 +286,28 @@ function MachineDetail({
 				)}
 				{machine.project?.reason && <p className="machines-caption">{machine.project.reason}</p>}
 			</div>
+			{onOpen ? (
+				<div className="machines-evidence">
+					<span className="machines-kicker">Desktop app on this machine</span>
+					<StatusMark tone={attachStatus.tone} label={attachStatus.label} live={attachStatus.tone === "running"} />
+					<p className="machines-caption">
+						Open starts the node's own Clio Coder app over SSH when it is not running, and this window moves to it: its
+						projects, tasks, settings and traces. The node must run this exact build.
+					</p>
+					{attachment?.detail ? <p className="machines-reason">{attachment.detail}</p> : null}
+					{install ? (
+						<p className="machines-caption">
+							<code>{install}</code>
+						</p>
+					) : null}
+				</div>
+			) : null}
 			<div className="machines-actions">
+				{onOpen ? (
+					<button type="button" className="machines-primary" disabled={open.disabled} onClick={() => onOpen(machine.id)}>
+						<Icon name="external" /> {open.label}
+					</button>
+				) : null}
 				<button type="button" className="machines-primary" disabled={busy} onClick={() => setConfirm("check")}>
 					<Icon name="play" /> Check readiness
 				</button>
@@ -326,8 +361,10 @@ function MachineDetail({
 	);
 }
 
-export function MachinesPage({ client }: { client: Client }) {
+export function MachinesPage({ client, local }: { client: Client; local: Client }) {
 	const queries = useQueryClient();
+	// Open belongs to this machine's app; a window already showing a node lists that node's registry.
+	const attach = useMachineAttach(local, client.machine === null);
 	const selection = useWorkspaceSelection(client);
 	const { id } = selection;
 	const [now, setNow] = useState(() => clock.now());
@@ -790,6 +827,9 @@ export function MachinesPage({ client }: { client: Client }) {
 										projectRoot={inventory.data.projectRoot}
 										busy={busy}
 										onAction={act}
+										attachment={attach.attachments.find((row) => row.id === selected.id)}
+										opening={attach.pending === selected.id}
+										onOpen={client.machine === null ? attach.open : undefined}
 									/>
 								)}
 							</div>
