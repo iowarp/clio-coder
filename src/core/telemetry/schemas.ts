@@ -289,6 +289,39 @@ const RunFeedBodySchema = Type.Union([
 ]);
 export type StructuralRunFeedBody = Static<typeof RunFeedBodySchema>;
 
+/** Upper bounds of the inter-delta gap histogram; one more bucket counts the gaps past the last (#434). */
+export const DELTA_GAP_BOUNDS_MS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192] as const;
+/**
+ * The response headers research capture may keep: rate-limit and quota windows, request ids and server timing.
+ * Anything else, cookies and auth echoes included, never reaches the journal (#434, §12.5).
+ */
+export const PROVIDER_HEADER_PATTERN =
+	"^(?:x-codex-(?:primary|secondary|credits)-[a-z0-9-]{1,48}|x-ratelimit-[a-z0-9-]{1,48}|anthropic-ratelimit-[a-z0-9-]{1,48}|retry-after|retry-after-ms|openai-processing-ms|openai-version|x-request-id|request-id|cf-ray)$";
+const MIDDLEWARE_EFFECTS = vocabulary([
+	"inject_reminder",
+	"annotate_tool_result",
+	"block_tool",
+	"protect_path",
+	"request_continuation",
+	"require_tool",
+	"lock_tools",
+	"notify_operator",
+	"rewrite_tool_input",
+]);
+const SYSTEM_ONE_OUTCOME = vocabulary([
+	"answered",
+	"failed",
+	"timeout",
+	"canceled",
+	"overflow",
+	"breaker-open",
+	"unsupported",
+	"flow-denied",
+]);
+const lagPercentiles = Type.Array(Type.Object({ p: Type.Number({ minimum: 0, maximum: 100 }), ms: duration }, closed), {
+	maxItems: 64,
+});
+
 export const KIND_NAMES = [
 	"call.started",
 	"call.settled",
@@ -316,6 +349,18 @@ export const KIND_NAMES = [
 	"memory.trace",
 	"memory.observation",
 	"health.window",
+	"health.samples",
+	"tool.settled",
+	"prompt.compiled",
+	"context.snapshot",
+	"call.timing.deltas",
+	"prefix.blocks",
+	"auth.event",
+	"middleware.fired",
+	"system_one.decision",
+	"worker.channel",
+	"request.capture",
+	"provider.headers",
 ] as const;
 export type Kind = (typeof KIND_NAMES)[number];
 interface KindDefinition {
@@ -576,6 +621,300 @@ export const KIND_REGISTRY = {
 			closed,
 		),
 	},
+	/** The same window's full lag distribution and heap, which research mode keeps beside health.window (#428, #434). */
+	"health.samples": {
+		version: 1,
+		tier: "research",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				windowMs: duration,
+				/** The lag sampler's percentile curve; empty when no sample landed in the window. */
+				lagPercentiles,
+				/** The share of the window the event loop spent running callbacks, 0 to 1. */
+				eventLoopUtilization: Type.Number({ minimum: 0, maximum: 1 }),
+				heapUsedBytes: count,
+				externalBytes: count,
+			},
+			closed,
+		),
+	},
+	/**
+	 * One tool call as the model's tool wrapper settled it; ctx names the session or run, turn, tool call and the model
+	 * call that asked for it. The safety audit keeps the decision itself (#434).
+	 */
+	"tool.settled": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				tool: ExistingId,
+				outcome: vocabulary(["ok", "error", "blocked"]),
+				/** The tool's own time on the local clock, without any wait for an operator's approval. */
+				durationMs: duration,
+				/** Present only when the call parked for approval. */
+				parkedMs: Type.Optional(duration),
+				/** UTF-8 bytes of the result text the model receives; absent when nothing ran. */
+				resultBytes: Type.Optional(count),
+				images: Type.Optional(Type.Integer({ minimum: 1 })),
+				terminate: Type.Optional(Type.Literal(true)),
+				/** Which refusal blocked it: a policy, an unapproved park, or a withheld duplicate of a succeeded call. */
+				blocked: Type.Optional(vocabulary(["refused", "denied-park", "redundant-repeat"])),
+			},
+			closed,
+		),
+	},
+	/**
+	 * The first request of this writer to cite a compiled prompt structure; ctx names that call. The structure object
+	 * holds the section ids, fragment hashes and token estimates prompt-manifest.jsonl records (#434).
+	 */
+	"prompt.compiled": {
+		version: 1,
+		tier: "operational",
+		cc: "structural",
+		schema: Type.Object(
+			{
+				structure: ObjectRefSchema,
+				/** PROMPT_MANIFEST_VERSION: the prompt's layout version. */
+				layoutVersion: Type.Integer({ minimum: 1 }),
+				tokenEstimate: count,
+				sections: count,
+				thinkingLevel: Type.Optional(ExistingId),
+				contextWindow: Type.Optional(count),
+				contextWindowSource: Type.Optional(ExistingId),
+			},
+			closed,
+		),
+	},
+	/**
+	 * The persisted context snapshot's token split. ctx carries the real session and turn, and the call the snapshot was
+	 * reconciled against when it was (#434).
+	 */
+	"context.snapshot": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				snapshotId: ExistingId,
+				categories: Type.Object(
+					{
+						system: count,
+						tools: count,
+						toolResults: Type.Optional(count),
+						agents: count,
+						skills: count,
+						memory: count,
+						project: count,
+						messages: count,
+						reserve: count,
+						free: count,
+						streaming: count,
+					},
+					closed,
+				),
+				window: Type.Object({ desired: count, effective: count, source: ExistingId }, closed),
+				source: vocabulary(["estimated", "exact", "reconciled", "streaming"]),
+				/** The chars/4 prompt-side total the snapshot was captured with. */
+				estimatedTokens: Type.Optional(count),
+				/** The provider's prompt tokens for the call it was reconciled against. */
+				reconciledTokens: Type.Optional(count),
+			},
+			closed,
+		),
+	},
+	/** One call's inter-delta gaps as a histogram, never a row per delta; ctx names the call (#428, #434). */
+	"call.timing.deltas": {
+		version: 1,
+		tier: "research",
+		cc: "content-free",
+		capture: "deltas",
+		schema: Type.Object(
+			{
+				deltas: Type.Integer({ minimum: 1 }),
+				/** Counts per DELTA_GAP_BOUNDS_MS bucket, then the gaps past the last bound. */
+				gapCounts: Type.Array(count, {
+					minItems: DELTA_GAP_BOUNDS_MS.length + 1,
+					maxItems: DELTA_GAP_BOUNDS_MS.length + 1,
+				}),
+				maxGapMs: duration,
+				/** First delta to last, on the local monotonic clock. */
+				spanMs: duration,
+			},
+			closed,
+		),
+	},
+	/**
+	 * The request's prefix as a list of block hashes, so a cache break can be placed on the block that moved. Each
+	 * hash commits to text the journal does not keep (#423, #434).
+	 */
+	"prefix.blocks": {
+		version: 1,
+		tier: "research",
+		cc: "structural",
+		schema: Type.Object(
+			{
+				label: Type.Literal("commitment"),
+				function: Type.Literal("sha256"),
+				canonicalization: Type.Literal("utf8-text-v1"),
+				blocks: Type.Array(
+					Type.Object(
+						{
+							kind: vocabulary(["system-section", "tools", "message"]),
+							/** The section id or message role; absent for the tool set. */
+							id: Type.Optional(ExistingId),
+							hash: sha256Hex,
+							tokens: count,
+						},
+						closed,
+					),
+					{ minItems: 1, maxItems: 4096 },
+				),
+				/** Blocks past the cap, which the list does not name. */
+				omitted: Type.Optional(Type.Integer({ minimum: 1 })),
+			},
+			closed,
+		),
+	},
+	/** One OAuth credential refresh under the storage lock; no token material is ever recorded (#427). */
+	"auth.event": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				provider: ExistingId,
+				/** expiry: the stored token was inside the skew margin. rejected: the provider refused the key in use. */
+				trigger: vocabulary(["expiry", "rejected"]),
+				/** Whether this process called the provider's refresh endpoint. */
+				attempted: Type.Boolean(),
+				/**
+				 * refreshed: this process minted the new credential. adopted: another writer had already replaced it under
+				 * the lock. failed: no usable credential came back. cancelled: the request ended first.
+				 */
+				outcome: vocabulary(["refreshed", "adopted", "failed", "cancelled"]),
+				/** The process that wrote the credential now in use; null when another process wrote it. */
+				writerPid: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+				/** The stored credential's updatedAt when this process read it, and after the refresh. */
+				updatedAtBefore: Type.Optional(utc),
+				updatedAtAfter: Type.Optional(utc),
+				durationMs: duration,
+			},
+			closed,
+		),
+	},
+	/** One middleware rule that emitted effects at a hook; ctx names the session or run, turn and tool call (#431). */
+	"middleware.fired": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]),
+				phase: vocabulary(["sync", "async", "awaited"]),
+				ruleId: ExistingId,
+				effects: Type.Array(MIDDLEWARE_EFFECTS, { minItems: 1, maxItems: 32 }),
+				/** The strongest severity among its reminders. */
+				severity: Type.Optional(vocabulary(["info", "advisory", "warn", "hard-block"])),
+				/** What the rule matched, as `matcher:subject@scope`, for example `regex:PLAN_REQUEST@operator-request`. */
+				evidence: Type.Optional(
+					Type.String({ pattern: "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$" }),
+				),
+				tool: Type.Optional(ExistingId),
+			},
+			closed,
+		),
+	},
+	/** One System One decision: what each engine answered, against which deadline, and its breaker (#429). */
+	"system_one.decision": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				site: ExistingId,
+				moment: Type.Optional(ExistingId),
+				outcome: SYSTEM_ONE_OUTCOME,
+				latencyMs: duration,
+				deadlineMs: duration,
+				fitted: Type.Optional(Type.Boolean()),
+				routes: Type.Array(
+					Type.Object(
+						{
+							engine: ExistingId,
+							kind: ExistingId,
+							outcome: SYSTEM_ONE_OUTCOME,
+							roundTripMs: Type.Optional(duration),
+							/**
+							 * opened: this timeout opened the cooldown. probe: the half-open probe went out. closed: an answer
+							 * reset a counting breaker. disabled: a derived engine was disabled for the session.
+							 */
+							breaker: Type.Optional(vocabulary(["opened", "probe", "closed", "disabled"])),
+						},
+						closed,
+					),
+					{ minItems: 1, maxItems: 16 },
+				),
+				/** The journal calls the decision's model requests opened. */
+				callIds: Type.Array(CallIdSchema, { uniqueItems: true }),
+			},
+			closed,
+		),
+	},
+	/** A worker channel failure as the host saw it, in the run's journal (#425). */
+	"worker.channel": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				/** stdin carries control frames to the worker; stdout is the worker's NDJSON lane. */
+				lane: vocabulary(["stdin", "stdout"]),
+				/** The control frame whose write failed; null when no frame was being written. */
+				frameType: Type.Union([Type.String({ pattern: "^[a-z][a-z0-9_]{0,63}$" }), Type.Null()]),
+				/** The system error code, such as EPIPE; null when the failure was not a system error. */
+				errno: Type.Union([Type.String({ pattern: "^E[A-Z0-9]{1,31}$" }), Type.Null()]),
+				/** The worker process had already exited when the failure happened. */
+				afterExit: Type.Boolean(),
+				failure: vocabulary(["write-failed", "oversize-frame", "unserializable-frame", "undrained", "invalid-frame"]),
+			},
+			closed,
+		),
+	},
+	/** The redacted request body a call sent, stored as a `request` object under content capture (#434, P4). */
+	"request.capture": {
+		version: 1,
+		tier: "research",
+		cc: "content-bearing",
+		capture: "content",
+		schema: Type.Object(
+			{
+				/** UTF-8 bytes of the serialized body before the cap. */
+				bodyBytes: count,
+				truncated: Type.Boolean(),
+				content: ObjectRefSchema,
+				bytes: count,
+			},
+			closed,
+		),
+	},
+	/** The allowlisted headers of the call's last 2xx response (#434, §12.5). */
+	"provider.headers": {
+		version: 1,
+		tier: "research",
+		cc: "content-free",
+		capture: "providerHeaders",
+		schema: Type.Object(
+			{
+				status: Type.Integer({ minimum: 200, maximum: 299 }),
+				headers: Type.Record(Type.String({ pattern: PROVIDER_HEADER_PATTERN }), Type.String({ maxLength: 256 }), {
+					additionalProperties: false,
+				}),
+			},
+			closed,
+		),
+	},
 } satisfies Record<Kind, KindDefinition>;
 /**
  * Kinds whose content the journal writer stores in `objects/` and cites as `content`, with its size as `bytes`,
@@ -584,6 +923,7 @@ export const KIND_REGISTRY = {
 export const PREIMAGE_SUBJECTS = {
 	"memory.trace": "memory-trace",
 	"memory.observation": "observation-trace",
+	"request.capture": "request",
 } as const satisfies Partial<Record<Kind, ObjectRef["subject"]>>;
 export type PreimageKind = keyof typeof PREIMAGE_SUBJECTS;
 export type PreimageData<K extends PreimageKind> = Omit<Payload<K>, "content" | "bytes">;
@@ -612,6 +952,22 @@ export function validPayload<K extends Kind>(kind: K, data: unknown): data is Pa
 	if (kind === "compaction.closed") {
 		const outcome = data as Payload<"compaction.closed">;
 		return outcome.outcome !== "committed" || outcome.checkpointTurnId !== null;
+	}
+	if (kind === "tool.settled") {
+		const tool = data as Payload<"tool.settled">;
+		return (
+			(tool.outcome === "blocked") === (tool.blocked !== undefined) &&
+			(tool.outcome !== "blocked" || tool.resultBytes === undefined)
+		);
+	}
+	if (kind === "auth.event") {
+		const auth = data as Payload<"auth.event">;
+		if (auth.outcome === "refreshed") return auth.attempted && auth.writerPid !== null;
+		return auth.outcome !== "adopted" || !auth.attempted;
+	}
+	if (kind === "call.timing.deltas") {
+		const timing = data as Payload<"call.timing.deltas">;
+		return timing.gapCounts.reduce((sum, value) => sum + value, 0) === timing.deltas - 1;
 	}
 	if (kind !== "call.settled") return true;
 	const call = data as CallSettled;

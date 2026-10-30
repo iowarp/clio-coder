@@ -16,6 +16,7 @@ type StoredSubject =
 	| "prompt-structure"
 	| "tool-schemas"
 	| "prompt-text"
+	| "request"
 	| "config"
 	| "memory-trace"
 	| "observation-trace";
@@ -99,6 +100,11 @@ const nullableText = Type.Union([Type.String(), Type.Null()]);
 const contentSchemas: Partial<Record<StoredSubject, TSchema>> = {
 	"prompt-structure": promptStructureSchema,
 	"prompt-text": promptTextSchema,
+	// A body past the research capture cap keeps only its head, as text (#434).
+	request: Type.Union([
+		Type.Object({ body: Type.Unknown() }, { additionalProperties: false }),
+		Type.Object({ bodyText: Type.String(), truncated: Type.Literal(true) }, { additionalProperties: false }),
+	]),
 	"memory-trace": Type.Object(
 		{ response: Type.String(), userPrompt: Type.String(), reminder: nullableText, error: nullableText },
 		{ additionalProperties: false },
@@ -112,6 +118,7 @@ const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
 	"prompt-structure",
 	"tool-schemas",
 	"prompt-text",
+	"request",
 	"config",
 	"memory-trace",
 	"observation-trace",
