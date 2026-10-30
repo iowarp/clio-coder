@@ -106,6 +106,13 @@ export function repoOwner(cwdHash: string | null, days: number): string {
 	return `${cwdHash ?? "all"}-${days}d`;
 }
 
+/** The repository bucket (null for every bucket) and window a `repo` scope owner names, or null when it names none. */
+export function parseRepoOwner(owner: string): { cwdHash: string | null; days: number } | null {
+	const match = /^([0-9a-f]{16}|all)-([1-9][0-9]{0,5})d$/.exec(owner);
+	if (!match) return null;
+	return { cwdHash: match[1] === "all" ? null : (match[1] as string), days: Number(match[2]) };
+}
+
 export interface ReadOptions {
 	now?: Date;
 	/** Whether a recorded process still runs; null when it cannot be probed. Defaults to {@link processIdentityAlive}. */
@@ -2371,12 +2378,17 @@ const EXPLAIN_CAP = 500;
 /** Resolve a reference against a session (any scope it can see) or a standalone run. */
 export function explain(
 	ref: FactRef,
-	source: { session: SessionSource } | { runId: string; run: JournalSource },
+	source: { session: SessionSource } | { runId: string; run: JournalSource } | { repo: RepoSource },
 	options: ReadOptions = {},
 ): ExplanationV1 | null {
 	const parsed = parseFactRef(ref);
 	if (!parsed) return null;
-	const view: View = "session" in source ? { session: source.session } : { run: analyzeRun(source.runId, source.run) };
+	const view: View =
+		"session" in source
+			? { session: source.session }
+			: "repo" in source
+				? { repo: source.repo }
+				: { run: analyzeRun(source.runId, source.run) };
 	const measured = measure(view, parsed);
 	if (!measured) return null;
 	const attempts = measured.selection.parts.flatMap((part) => part.attempts ?? part.run?.attempts ?? []);

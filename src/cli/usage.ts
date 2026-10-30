@@ -200,49 +200,30 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const stateDir = clioStateDir();
 	const now = Date.now();
 	const windowStart = now - parsed.days * 24 * 60 * 60 * 1000;
-	const diagnostics: Diagnostics = {
-		malformedReceipts: 0,
-		unreadableSessions: 0,
-		malformedSessionLines: 0,
-		malformedAuditRows: 0,
-		notes: [],
-	};
+	const diagnostics = emptyDiagnostics();
 
 	const presence = await readStorePresence(stateDir);
 	const repoPath = parsed.repo === undefined ? undefined : resolve(parsed.repo);
 	const repoHash = repoPath === undefined ? undefined : cwdHash(repoPath);
-	const repoRunIds = repoPath === undefined ? null : await runIdsForCwd(stateDir, repoPath, diagnostics);
 
 	const sessions = await readSessions(stateDir, windowStart, now, repoHash, diagnostics);
-	const repoSessions =
-		repoHash === undefined
-			? null
-			: new Set((await listSessionLedgerRefs(stateDir, repoHash)).map((ref) => ref.sessionId));
-	const receipts = (await readReceipts(stateDir, windowStart, now, diagnostics)).filter(
-		(receipt) =>
-			repoRunIds === null ||
-			receipt.cwd === repoPath ||
-			repoRunIds.has(receipt.runId) ||
-			(receipt.sessionId !== null && repoSessions?.has(receipt.sessionId)),
-	);
 	// Every token and cost figure is the read model's: one window over the sessions and the runs they reference, plus
 	// standalone runs, folded once and worded by the canonical renderer, so nothing here sums spend (#434 §11.3).
-	const telemetry = loadRepoTelemetrySources(stateDir, {
-		cwdHash: repoHash ?? null,
-		from: windowStart,
-		to: now + USAGE_WINDOW_FUTURE_SKEW_MS,
-		// A receipt from before run journals may have left the run ledger's ring; its own cwd still attributes it.
-		standaloneRuns: repoRunIds === null ? "all" : new Set([...repoRunIds, ...receipts.map((receipt) => receipt.runId)]),
-	});
-	const repo: RepoSource = { owner: repoOwner(repoHash ?? null, parsed.days), ...telemetry };
+	const { receipts, repo } = await usageWindow(
+		stateDir,
+		repoPath === undefined ? null : { hash: cwdHash(repoPath), inRepo: (cwd) => cwd === repoPath },
+		parsed.days,
+		now,
+		diagnostics,
+	);
 	const scope = { repo: repoPath ?? "all", days: parsed.days };
 	const costReports = (["label", "model"] as const).map((groupBy) => repoCostReport(repo, scope, groupBy));
 	const tokens = repoTokenQuantities(repo);
-	const cacheReports = telemetry.sessions
+	const cacheReports = repo.sessions
 		.map((source) => cacheReport(source))
 		.filter((report) => Object.values(report.verdicts).some((count) => count > 0))
 		.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
-	const unreadableJournals = telemetry.sessions.filter(
+	const unreadableJournals = repo.sessions.filter(
 		(source) => source.journal.skipped > 0 || source.journal.damaged > 0,
 	).length;
 	if (unreadableJournals > 0)
@@ -250,7 +231,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			`${unreadableJournals} session call journal(s) have unreadable records; the totals they feed are partial`,
 		);
 	// Spend needs a store to measure: a missing session store with no standalone run has nothing to report.
-	const spendMeasurable = presence.sessionsPresent || telemetry.runs.size > 0;
+	const spendMeasurable = presence.sessionsPresent || repo.runs.size > 0;
 	const harnessActions = sessions.reduce((total, session) => total + session.harnessActions, 0);
 	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
 	const auditRows = await readAuditRows(stateDir);
@@ -675,7 +656,48 @@ function inWindow(iso: string, start: number, end: number): boolean {
 	return Number.isFinite(value) && value >= start && value <= end + USAGE_WINDOW_FUTURE_SKEW_MS;
 }
 
-async function runIdsForCwd(stateDir: string, repoPath: string, diagnostics: Diagnostics): Promise<Set<string>> {
+/**
+ * The window `usage report` folds: the repository's sessions (every bucket's without one), and the runs no session
+ * references that the run ledger or a window receipt attributes to it, by cwd or by one of its sessions. `telemetry
+ * explain` rebuilds a `repo:` reference's window through it, ending at its own now (#434 §11.4).
+ */
+export async function usageWindow(
+	stateDir: string,
+	scope: { hash: string; inRepo: (cwd: string) => boolean } | null,
+	days: number,
+	now: number,
+	diagnostics: Diagnostics = emptyDiagnostics(),
+): Promise<{ receipts: UsageReceipt[]; repo: RepoSource }> {
+	const windowStart = now - days * 24 * 60 * 60 * 1000;
+	const repoRunIds = scope === null ? null : await runIdsForCwd(stateDir, scope.inRepo, diagnostics);
+	const repoSessions =
+		scope === null ? null : new Set((await listSessionLedgerRefs(stateDir, scope.hash)).map((ref) => ref.sessionId));
+	const receipts = (await readReceipts(stateDir, windowStart, now, diagnostics)).filter(
+		(receipt) =>
+			scope === null ||
+			(receipt.cwd !== null && scope.inRepo(receipt.cwd)) ||
+			repoRunIds?.has(receipt.runId) ||
+			(receipt.sessionId !== null && repoSessions?.has(receipt.sessionId)),
+	);
+	const telemetry = loadRepoTelemetrySources(stateDir, {
+		cwdHash: scope?.hash ?? null,
+		from: windowStart,
+		to: now + USAGE_WINDOW_FUTURE_SKEW_MS,
+		// A receipt from before run journals may have left the run ledger's ring; its own cwd still attributes it.
+		standaloneRuns: repoRunIds === null ? "all" : new Set([...repoRunIds, ...receipts.map((receipt) => receipt.runId)]),
+	});
+	return { receipts, repo: { owner: repoOwner(scope?.hash ?? null, days), ...telemetry } };
+}
+
+function emptyDiagnostics(): Diagnostics {
+	return { malformedReceipts: 0, unreadableSessions: 0, malformedSessionLines: 0, malformedAuditRows: 0, notes: [] };
+}
+
+async function runIdsForCwd(
+	stateDir: string,
+	inRepo: (cwd: string) => boolean,
+	diagnostics: Diagnostics,
+): Promise<Set<string>> {
 	try {
 		const raw = await readFile(join(stateDir, "runs.json"), "utf8");
 		const parsed = JSON.parse(raw) as unknown;
@@ -683,7 +705,7 @@ async function runIdsForCwd(stateDir: string, repoPath: string, diagnostics: Dia
 		const ids = new Set<string>();
 		for (const entry of parsed) {
 			if (!isRecord(entry)) continue;
-			if (typeof entry.id === "string" && entry.cwd === repoPath) ids.add(entry.id);
+			if (typeof entry.id === "string" && typeof entry.cwd === "string" && inRepo(entry.cwd)) ids.add(entry.id);
 		}
 		return ids;
 	} catch (error) {

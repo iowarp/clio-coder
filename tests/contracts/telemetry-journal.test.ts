@@ -23,7 +23,7 @@ import {
 	STANDARD_CAPTURE,
 	systemOneDatasetRecording,
 } from "../../src/core/telemetry/capture.js";
-import type { CostReportV1 } from "../../src/core/telemetry/dto.js";
+import type { CostReportV1, ExplanationV1 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
@@ -1671,6 +1671,23 @@ test("usage report discovers a standalone run journal that has no session and no
 			| CostReportV1
 			| undefined;
 		strictEqual(cost?.total.tokens.display, "21");
+		// `telemetry explain` rebuilds the report's repo window from the reference alone (#434 §11.4).
+		const read = new URL("../../src/cli/telemetry-read.ts", import.meta.url).href;
+		const explained = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				"--input-type=module",
+				"-e",
+				`import {runTelemetryReadCommand} from ${JSON.stringify(read)}; process.exitCode = await runTelemetryReadCommand(['explain',${JSON.stringify(cost?.total.tokens.ref)},'--json']);`,
+			],
+			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
+		);
+		strictEqual(explained.status, 0, explained.stderr);
+		const explanation = JSON.parse(explained.stdout) as ExplanationV1;
+		strictEqual(explanation.value.display, "21");
+		deepStrictEqual(explanation.from.runIds, [owner.runId]);
 	} finally {
 		await run.close();
 		await rm(scratch, { recursive: true, force: true });
