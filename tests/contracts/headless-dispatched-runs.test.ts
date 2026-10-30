@@ -38,8 +38,8 @@ describe("headless dispatched runs", () => {
 		const description = describeRuns(settlement.undelivered);
 		match(description, /withheld \(coder, merge_withheld\)/u);
 		match(description, /preserved branch clio-coder\/task\/withheld/u);
-		match(description, /git merge clio-coder\/task\/withheld/u);
-		doesNotMatch(describeRuns([{ ...withheld, outcomeDetail: "the operator discarded the branch" }]), /git merge/u);
+		match(description, /clio-coder fleet land clio-coder\/task\/withheld/u);
+		doesNotMatch(describeRuns([{ ...withheld, outcomeDetail: "the operator discarded the branch" }]), /fleet land/u);
 	});
 	it("reports unretried failures as undelivered and names runs still live at shutdown", async () => {
 		const runs = [

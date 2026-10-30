@@ -105,7 +105,7 @@ export function boundedCheck(check: string): string {
 export interface MergeGateVerdict {
 	/** The failing or unrun check, as a clause: what the operator is being asked to overlook. */
 	reason: string;
-	/** Completes "`git merge <branch>` applies it ...". */
+	/** Completes "`clio-coder fleet land <branch>` applies it ...". */
 	appliesWhen: string;
 }
 
@@ -203,5 +203,5 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 export function mergeWithheldDetail(input: MergeGateInput): string | null {
 	const verdict = mergeGateVerdict(input);
 	if (verdict === null) return null;
-	return `merge withheld: ${verdict.reason}; its work is committed on the preserved branch ${input.branch}, and \`git merge ${input.branch}\` applies it ${verdict.appliesWhen}`;
+	return `merge withheld: ${verdict.reason}; its work is committed on the preserved branch ${input.branch}, and \`clio-coder fleet land ${input.branch}\` applies it ${verdict.appliesWhen}`;
 }

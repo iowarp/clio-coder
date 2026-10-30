@@ -663,11 +663,11 @@ places a clause of the task that asks for tests to be removed exempts the remova
 clause that tells the worker not to validate (for example "do not run the tests") means an
 unrun check does not withhold. A withheld merge ends the run `failed` with outcome code
 `merge_withheld`, which suppresses automatic retry; its work stays committed on the preserved
-branch, and the detail names the `git merge` that applies it.
+branch, and the detail names the `clio-coder fleet land` command that applies it.
 
 A merge-mode run whose host verification rejected the tree fails with
 `host_verification_rejected` and keeps its branch with the work committed. The detail
-names the `git merge` that applies it. That detail, the receipt's evidence line for the
+names the `clio-coder fleet land` command that applies it. That detail, the receipt's evidence line for the
 check, and the merge card all say whether Clio Coder ran the failing check on the task base. Only
 a quick command check is replayed, once, inside a bubblewrap sandbox over a throwaway
 archive of the base: one that took under two seconds, with a timeout capped at five seconds.
@@ -698,7 +698,7 @@ worker is unknown.
   refused: the run fails with `merge_withheld`, the branch is kept, and the detail says it
   changed after the preview and to inspect it before merging.
 - `Keep branch` withholds: the run fails with `merge_withheld`, its work is committed on
-  the preserved branch, and the detail names the `git merge` that applies it.
+  the preserved branch, and the detail names the `clio-coder fleet land` command that applies it.
 - `Discard` asks `Delete branch <b> and its worktree? This cannot be undone.` (opening on
   `Back`) and, on `Delete`, removes the worktree and branch; `Back` or Esc returns to the
   card. If the worktree is removed but the branch cannot be deleted, the receipt says so and
