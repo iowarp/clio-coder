@@ -1,6 +1,9 @@
+import { writeDiagnostic } from "../core/diagnostics.js";
 import { beginCall } from "../core/telemetry/producer.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { CostEntryLabel } from "../domains/observability/cost.js";
+import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
+import { recordUsageCall } from "../domains/session/usage-record.js";
 /**
  * What the composition root keeps between System One calls.
  *
@@ -99,8 +102,21 @@ export function createSystemOneRequestAdmission(deps: {
 		const settle = (message: unknown): void => {
 			if (settled) return;
 			settled = true;
-			call?.settle(callSettlementFromMessage(message, pricing.provenance), reportedModelFromMessage(message));
-			void lease?.release();
+			const facts = call?.settle(
+				callSettlementFromMessage(message, pricing.provenance),
+				reportedModelFromMessage(message),
+			);
+			try {
+				if (facts && deps.observability && deps.currentSession() === session) {
+					if (facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
+					for (const projected of usageCallsFromAttempts([{ started: facts, settled: facts }]))
+						recordUsageCall(deps.observability, projected);
+				}
+			} catch {
+				writeDiagnostic("[clio-coder:telemetry] live decision projection failed; journal retains the call\n");
+			} finally {
+				void lease?.release();
+			}
 		};
 		try {
 			signal.throwIfAborted();
@@ -154,6 +170,7 @@ export function createSystemOneRequestAdmission(deps: {
 								},
 							},
 			});
+			if (call) return;
 			// Admission alone is not evidence of spending when the deadline wins (#429).
 			if (observation?.failure?.invoked === false) return;
 			const outcome = observation ?? {

@@ -648,6 +648,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			if (call.label === "side-question" || call.label === "helper") callOrigins.sideQuestions += 1;
 			else if (call.label === "handoff") callOrigins.handoffs += 1;
 			else if (call.label === "prewarm") callOrigins.prewarms += 1;
+			else if (call.label === "system-one") callOrigins.systemOne += 1;
+			else if (call.label === "safety-judge") callOrigins.safetyJudge += 1;
 		}
 	}
 	for (const row of outOfTurnRows) {
