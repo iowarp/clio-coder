@@ -233,7 +233,7 @@ export async function main(args = process.argv.slice(2)) {
 		settings: settingsService,
 		setup,
 		fleet: new FleetService(reads),
-		machines: new MachinesService(reads, ops, workspaces, operations),
+		machines: new MachinesService(reads, ops, workspaces, operations, attachments),
 		attachments,
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),

@@ -48,6 +48,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 				: id === "mini"
 					? { kind: "pending", state: "connecting" }
 					: null,
+		forget: () => {},
 	};
 	const app = new Hono();
 	app.onError(problemResponse);

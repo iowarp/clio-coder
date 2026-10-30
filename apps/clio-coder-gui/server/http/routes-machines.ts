@@ -18,6 +18,8 @@ export interface MachineAttachmentsApi {
 	attach(id: string): Promise<MachineAttachment>;
 	/** Null for a node this app has not attached; pending while it is not ready. */
 	route(id: string): MachineRoute | null;
+	/** Stop and drop the attachment of a node removed from the registry. */
+	forget(id: string): void;
 }
 
 /** The browser's own credentials and hop-by-hop headers stop here; the proxy sets the remote's own. */

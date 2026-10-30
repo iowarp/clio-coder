@@ -135,19 +135,42 @@ export class MachineAttachments implements MachineAttachmentsApi {
 	constructor(private readonly deps: MachineAttachDeps) {}
 
 	async list(): Promise<MachineAttachment[]> {
-		const endpoints = await this.deps.endpoints();
+		const endpoints = await this.registry();
 		return endpoints.map((endpoint) => this.entries.get(endpoint.id)?.attachment ?? this.detached(endpoint));
 	}
 
 	async attach(id: string): Promise<MachineAttachment> {
 		if (this.stopped) throw new AppProblem("unavailable", "The app is stopping.");
-		const endpoint = (await this.deps.endpoints()).find((candidate) => candidate.id === id);
+		const endpoint = (await this.registry()).find((candidate) => candidate.id === id);
 		if (!endpoint) throw new AppProblem("not_found", `No fleet node is registered as ${id}.`);
 		const current = this.entries.get(id);
 		if (current && (current.attachment.state === "ready" || current.attachment.state === "connecting"))
 			return current.attachment;
 		// An explicit open starts over, whatever the earlier run ended in, and resets the backoff.
 		return this.start(endpoint, 0).attachment;
+	}
+
+	/**
+	 * Stop and drop the attachment of a node that left the registry, so the proxy refuses it from now
+	 * on. The GUI's own remove calls this at once; a removal made elsewhere lands at the next read.
+	 */
+	forget(id: string): void {
+		const entry = this.entries.get(id);
+		if (!entry) return;
+		if (entry.timer) clearTimeout(entry.timer);
+		entry.timer = null;
+		this.teardown(entry);
+		this.entries.delete(id);
+		entry.attachment = {
+			...entry.attachment,
+			state: "detached",
+			since: new Date().toISOString(),
+			detail: null,
+			attempt: 0,
+			retryAt: null,
+			remote: null,
+		};
+		this.publish(entry);
 	}
 
 	route(id: string): MachineRoute | null {
@@ -170,6 +193,14 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		}
 		await Promise.race([Promise.all(children.map(exited)), sleep(2_000)]);
 		for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+	}
+
+	/** The registry as it stands now; an attachment whose node is no longer in it ends here. */
+	private async registry(): Promise<MachineEndpoint[]> {
+		const endpoints = await this.deps.endpoints();
+		const registered = new Set(endpoints.map((endpoint) => endpoint.id));
+		for (const id of [...this.entries.keys()]) if (!registered.has(id)) this.forget(id);
+		return endpoints;
 	}
 
 	private detached(endpoint: MachineEndpoint): MachineAttachment {
@@ -264,12 +295,14 @@ export class MachineAttachments implements MachineAttachmentsApi {
 			this.publish(entry);
 			return;
 		}
+		// A successful open leaves nothing of an earlier failure or idle exit behind.
 		entry.failures = 0;
 		entry.attachment = {
 			...entry.attachment,
 			state: "ready",
 			since: new Date().toISOString(),
 			detail: null,
+			attempt: 0,
 			retryAt: null,
 			remote,
 		};

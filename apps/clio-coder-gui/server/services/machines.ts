@@ -7,12 +7,18 @@ import { fingerprint } from "./operations.js";
 import { AppProblem } from "./problem.js";
 import type { WorkspaceService } from "./workspaces.js";
 
+/** What a registry change tells the attach supervisor. */
+export interface AttachmentRegistryListener {
+	forget(id: string): void;
+}
+
 export class MachinesService {
 	constructor(
 		private readonly reads: WorkerHost,
 		private readonly ops: WorkerHost,
 		private readonly workspaces: WorkspaceService,
 		private readonly operations: OperationRegistry,
+		private readonly attachments?: AttachmentRegistryListener,
 	) {}
 
 	async list(workspaceId: string): Promise<Machines> {
@@ -36,7 +42,10 @@ export class MachinesService {
 						? `Checking and recording SSH readiness for ${workspace.path}.`
 						: "Updating the user fleet-node registry.",
 				);
-				return this.ops.call("machines.mutate", { cwd: workspace.path, mutation }, { progress });
+				const result = await this.ops.call("machines.mutate", { cwd: workspace.path, mutation }, { progress });
+				// A node that left the registry is no longer a place this app may reach.
+				if (mutation.action === "remove") this.attachments?.forget(mutation.id);
+				return result;
 			},
 		});
 	}
