@@ -7,8 +7,8 @@ import { observedToolCallOrigin } from "../core/telemetry/context.js";
 import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
-import { journalOwnsSideUsage, usageCallsFromAttempts } from "../domains/session/journal-usage.js";
-import { recordUsageCall } from "../domains/session/usage-record.js";
+import { journalOwnsSideUsage } from "../domains/session/journal-usage.js";
+import { recordSettledSideCall } from "../domains/session/usage-record.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -1935,9 +1935,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							? {
 									onSettled: (facts) => {
 										if (!deps.observability || deps.session?.current()?.id !== origin.id) return;
-										if (facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
-										for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
-											recordUsageCall(deps.observability, call);
+										recordSettledSideCall(deps.observability, facts);
 									},
 								}
 							: {}),

@@ -3,8 +3,10 @@ import {
 	addResponseModelIdObservationCount,
 	emptyResponseModelIdObservationCounts,
 } from "../../core/response-model-id.js";
+import type { CallSettled } from "../../core/telemetry/schemas.js";
 import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import { usageCallsFromAttempts } from "./journal-usage.js";
 import type { LedgerUsageCall } from "./usage.js";
 
 /** The slice of ObservabilityContract a reseed needs. */
@@ -84,4 +86,13 @@ export function recordUsageCall(
 		call.costSummary,
 		replayed,
 	);
+}
+
+/** Live projection of one journaled side call into the running totals; replay folds the same facts (#434). */
+export function recordSettledSideCall(
+	sink: Pick<SessionUsageSink, "recordTokens" | "recordRunTokens" | "recordNeverSentCalls">,
+	facts: CallSettled,
+): void {
+	if (facts.disposition === "never_sent") sink.recordNeverSentCalls?.(1);
+	for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) recordUsageCall(sink, call);
 }

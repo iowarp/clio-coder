@@ -2,6 +2,7 @@ import { publishClioCompileCache } from "../core/compile-cache.js";
 import type { ClioSettings } from "../core/config.js";
 import { canonicalEndpointUrl } from "../core/endpoint-key.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
+import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 import { observeCacheDeployment } from "../domains/providers/cache-deployment.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
@@ -16,6 +17,8 @@ interface StartupPreparation {
 	signal: AbortSignal;
 	isBusy: () => boolean;
 	recordWarm?: (target: string, model: string, result: PrewarmRoundResult, costProvenance: CostProvenance) => void;
+	/** The session journal that owns each warm's call facts, as a turn prewarm's does (#434). */
+	callJournal?: (target: string, runtime: string, costProvenance: CostProvenance) => CallJournalOptions | undefined;
 	/** Test seams; production always uses the normal engine and deployment checks. */
 	observe?: typeof observeCacheDeployment;
 	warm?: typeof runPrewarmRound;
@@ -57,9 +60,12 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 		input.providers.knowledgeBase?.lookup(modelId, runtime.id) ?? null,
 	);
 	const release = registerForegroundStream(deployment.endpoint);
+	const costProvenance = resolveEffectivePricing(target, runtime, modelId).provenance;
+	const telemetry = input.callJournal?.(target.id, runtime.id, costProvenance);
 	let result: PrewarmRoundResult;
 	try {
 		result = await (input.warm ?? runPrewarmRound)({
+			...(telemetry ? { telemetry } : {}),
 			model,
 			state: { systemPrompt: "", messages: [], tools: [], thinkingLevel: "off" },
 			...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
@@ -71,7 +77,7 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 	} finally {
 		release();
 	}
-	input.recordWarm?.(target.id, modelId, result, resolveEffectivePricing(target, runtime, modelId).provenance);
+	input.recordWarm?.(target.id, modelId, result, costProvenance);
 	recordStartupDiagnostic({
 		kind: "worker-warm",
 		target: target.id,

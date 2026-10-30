@@ -32,6 +32,7 @@ import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
+import { recordSettledSideCall } from "../domains/session/usage-record.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -2075,8 +2076,25 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						providers: deps.providers,
 						signal: startupAbort.signal,
 						isBusy,
+						callJournal: (targetId, runtimeId, costProvenance) => {
+							const acquire = deps.observability.acquireTelemetrySession;
+							if (!startupSession || !acquire) return undefined;
+							return {
+								origin: startupSession,
+								acquire,
+								label: "prewarm",
+								targetId,
+								runtimeId,
+								costProvenance,
+								onSettled: (facts) => {
+									if ((deps.session?.current()?.id ?? null) === startupSession.id)
+										recordSettledSideCall(deps.observability, facts);
+								},
+							};
+						},
 						recordWarm: (target, model, result, costProvenance) => {
-							if (result.invoked === false) return;
+							// A journaled warm is booked by its settlement; only an unowned one uses the legacy store (#434).
+							if (result.invoked === false || result.callId) return;
 							const usage = result.usage;
 							if ((deps.session?.current()?.id ?? null) === (startupSession?.id ?? null))
 								deps.observability.recordTokens(
