@@ -19,6 +19,16 @@ function isRecord(value: unknown): value is Payload {
  * in that prefix they reach the server once per connection. A full resend
  * (continuation rejected, a changed prompt or tool surface, SSE fallback)
  * still carries both items, so the server sees the same prompt either way.
+ *
+ * Measured on gpt-6-luna, 2026-10-30 (#423): the backend reuses its cache at
+ * item granularity. After a recompile that changed the instructions item
+ * 9,258 characters in (about 2,000 of its 6,100 tokens), the next request read
+ * 3,840 of 10,203 prompt tokens, the tools item at its rendered size and
+ * nothing of the instructions item, although both bodies shared that item's
+ * head; the 2,048 tokens every recompile turn reused before Pi 1.4 were the
+ * smaller tools item of that layout. A changed leading item is paid in full
+ * from its first byte, which is why the session prompt stays frozen and
+ * posture, memory and effort changes travel as later items.
  */
 function moveCodexPromptIntoInput(payload: Payload): Payload {
 	const input = payload.input;
