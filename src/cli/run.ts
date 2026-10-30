@@ -239,6 +239,23 @@ export function explicitTargetMissing(targetId: string): boolean {
 /** Exit code for a run interrupted before its first request, by the 128+SIGINT convention. */
 const RUN_INTERRUPTED_EXIT = 130;
 
+/**
+ * A dispatch without declared intent infers its path scope from the task text,
+ * and that inference refuses any absolute path token, so `run --agent ... @file`
+ * failed on the attachment's own `<file name="/abs/...">` opener. An attachment
+ * inside the workspace is named by its workspace-relative path instead; one
+ * outside keeps its absolute name and is refused as before.
+ */
+function workspaceRelativeFileNames(text: string, referencedPaths: ReadonlyArray<string>, cwd: string): string {
+	let named = text;
+	for (const absolute of new Set(referencedPaths)) {
+		const local = path.relative(cwd, absolute);
+		if (local === "" || local === ".." || local.startsWith(`..${path.sep}`) || path.isAbsolute(local)) continue;
+		named = named.replaceAll(`<file name="${absolute}">`, `<file name="${local.split(path.sep).join("/")}">`);
+	}
+	return named;
+}
+
 async function assemblePrompt(parsed: RunCliArgs): Promise<
 	| {
 			prompt: string;
@@ -277,10 +294,14 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		writeRunDiagnostic(`${diagnostic.type}: ${diagnostic.message}\n`);
 	}
 	if (fileRefs.diagnostics.some((diagnostic) => diagnostic.type === "error")) return 2;
+	const fileText =
+		parsed.agentId === undefined
+			? fileRefs.text
+			: workspaceRelativeFileNames(fileRefs.text, fileRefs.referencedPaths, process.cwd());
 	const initial = buildInitialMessage({
 		messages,
 		...(stdinContent !== undefined ? { stdinContent } : {}),
-		...(fileRefs.text.length > 0 ? { fileText: fileRefs.text } : {}),
+		...(fileText.length > 0 ? { fileText } : {}),
 		...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
 	});
 	if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
