@@ -1626,6 +1626,83 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 	};
 }
 
+type BudgetEntry = Extract<TimelineEntry, { kind: "budget" }>;
+type QuotaEntry = Extract<TimelineEntry, { kind: "quota" }>;
+
+/**
+ * The spend admission saw at `t`, marked as the session's priced calls settled by then were: estimated when any was,
+ * with every sent call it could not price beside it, as the cost tracker that fed admission words it (#434 §8).
+ */
+function spendAt(analysis: Analysis, usd: number, t: string): FactSum {
+	let estimated = false;
+	let unpriced = 0;
+	const visit = (attempt: Attempt) => {
+		if (!invoked(attempt) || !attempt.settled || attempt.settledAt === null || attempt.settledAt > t) return;
+		const fact = attempt.settled.pricing.usd;
+		if (fact.kind === "estimated") estimated = true;
+		else if (fact.kind === "unknown") unpriced += 1;
+	};
+	for (const attempt of analysis.attempts) visit(attempt);
+	for (const run of analysis.runs.values()) for (const attempt of run.attempts) visit(attempt);
+	return {
+		measured: estimated ? 0 : usd,
+		estimated: estimated ? usd : 0,
+		unknownCount: unpriced,
+		absentCount: 0,
+		coverage: { measured: estimated ? 0 : 1, estimated: estimated ? 1 : 0, unknown: unpriced },
+	};
+}
+
+function budgetEntry(
+	analysis: Analysis,
+	record: Extract<TelemetryRecord, { k: "budget.crossing" | "budget.wait" }>,
+): BudgetEntry {
+	const data = record.data;
+	const wait = record.k === "budget.wait" ? record.data : null;
+	const waited = wait ? localClock(wait.waitedMs) : null;
+	const spend = spendAt(analysis, data.spendUsd, record.t);
+	// Admission's own estimate of what the held request re-sends; it names no method, so it reads `~`.
+	const context = data.contextTokens === undefined ? null : estimatedSum(data.contextTokens);
+	return {
+		kind: "budget",
+		at: record.t,
+		event: wait ? "wait" : "crossing",
+		level: data.level,
+		callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
+		attemptId: (record.ctx.attemptId ?? null) as CallRowV1["attemptId"] | null,
+		spend: { fact: spend, display: renderUsdSum(spend, false) },
+		ceiling: { usd: data.ceilingUsd, display: renderUsdLimit(data.ceilingUsd) },
+		contextTokens: context ? { fact: context, display: renderCountSum(context) } : null,
+		outcome: wait?.outcome ?? null,
+		waited: waited ? { fact: waited, display: renderFact(waited, "duration") } : null,
+		raisedTo:
+			wait?.raisedToUsd === undefined ? null : { usd: wait.raisedToUsd, display: renderUsdLimit(wait.raisedToUsd) },
+		raisedBy: wait?.raisedBy ?? null,
+	};
+}
+
+function quotaEntry(record: Extract<TelemetryRecord, { k: "quota.reading" }>): QuotaEntry {
+	return {
+		kind: "quota",
+		at: record.t,
+		provider: record.data.provider,
+		targetId: record.data.targetId,
+		source: record.data.source,
+		observedAt: record.data.observedAt,
+		limitReached: record.data.limitReached ?? null,
+		windows: record.data.windows.map((window) => ({
+			key: window.key,
+			usedPct: { fact: window.usedPct, display: renderFact(window.usedPct, "percent") },
+			resetsAt: window.resetsAt ?? null,
+		})),
+	};
+}
+
+/** A reading that says the account cannot send, or a window measured full. */
+const quotaLimited = (entry: QuotaEntry) =>
+	entry.limitReached === true ||
+	entry.windows.some((window) => window.usedPct.fact.kind === "measured" && window.usedPct.fact.value >= 100);
+
 export function timeline(
 	source: SessionSource,
 	range: { from: string; to: string } | null = null,
@@ -1635,29 +1712,6 @@ export function timeline(
 	const analysis = analyze(source);
 	const id = source.sessionId;
 	const entries: TimelineEntry[] = analysis.attempts.map((attempt) => callEntry(view, "own", id, attempt));
-	/**
-	 * The spend admission saw at `t`, marked as the session's priced calls settled by then were: estimated when any was,
-	 * with every sent call it could not price beside it, as the cost tracker that fed admission words it (#434 §8).
-	 */
-	const spendAt = (usd: number, t: string): FactSum => {
-		let estimated = false;
-		let unpriced = 0;
-		const visit = (attempt: Attempt) => {
-			if (!invoked(attempt) || !attempt.settled || attempt.settledAt === null || attempt.settledAt > t) return;
-			const fact = attempt.settled.pricing.usd;
-			if (fact.kind === "estimated") estimated = true;
-			else if (fact.kind === "unknown") unpriced += 1;
-		};
-		for (const attempt of analysis.attempts) visit(attempt);
-		for (const run of analysis.runs.values()) for (const attempt of run.attempts) visit(attempt);
-		return {
-			measured: estimated ? 0 : usd,
-			estimated: estimated ? usd : 0,
-			unknownCount: unpriced,
-			absentCount: 0,
-			coverage: { measured: estimated ? 0 : 1, estimated: estimated ? 1 : 0, unknown: unpriced },
-		};
-	};
 	for (const record of source.journal.records) {
 		const at = record.t;
 		switch (record.k) {
@@ -1727,51 +1781,11 @@ export function timeline(
 				});
 				break;
 			case "budget.crossing":
-			case "budget.wait": {
-				const data = record.data;
-				const wait = record.k === "budget.wait" ? record.data : null;
-				const waited = wait ? localClock(wait.waitedMs) : null;
-				const spend = spendAt(data.spendUsd, at);
-				entries.push({
-					kind: "budget",
-					at,
-					event: wait ? "wait" : "crossing",
-					level: data.level,
-					callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
-					attemptId: (record.ctx.attemptId ?? null) as CallRowV1["attemptId"] | null,
-					spend: { fact: spend, display: renderUsdSum(spend, false) },
-					ceiling: { usd: data.ceilingUsd, display: renderUsdLimit(data.ceilingUsd) },
-					// Admission's own estimate of what the held request re-sends; it names no method, so it reads `~`.
-					contextTokens:
-						data.contextTokens === undefined
-							? null
-							: (() => {
-									const sum = estimatedSum(data.contextTokens);
-									return { fact: sum, display: renderCountSum(sum) };
-								})(),
-					outcome: wait?.outcome ?? null,
-					waited: waited ? { fact: waited, display: renderFact(waited, "duration") } : null,
-					raisedTo:
-						wait?.raisedToUsd === undefined ? null : { usd: wait.raisedToUsd, display: renderUsdLimit(wait.raisedToUsd) },
-					raisedBy: wait?.raisedBy ?? null,
-				});
+			case "budget.wait":
+				entries.push(budgetEntry(analysis, record));
 				break;
-			}
 			case "quota.reading":
-				entries.push({
-					kind: "quota",
-					at,
-					provider: record.data.provider,
-					targetId: record.data.targetId,
-					source: record.data.source,
-					observedAt: record.data.observedAt,
-					limitReached: record.data.limitReached ?? null,
-					windows: record.data.windows.map((window) => ({
-						key: window.key,
-						usedPct: { fact: window.usedPct, display: renderFact(window.usedPct, "percent") },
-						resetsAt: window.resetsAt ?? null,
-					})),
-				});
+				entries.push(quotaEntry(record));
 				break;
 		}
 	}
@@ -1939,10 +1953,23 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	const id = source.sessionId;
 	let last: { at: string; record: Extract<TelemetryRecord, { k: "turn.settled" }> } | null = null;
 	let closedAt: string | null = null;
+	const budget: BudgetEntry[] = [];
+	const latestQuota = new Map<string, QuotaEntry>();
 	for (const record of source.journal.records) {
 		if (record.k === "turn.settled" && (!last || record.t >= last.at)) last = { at: record.t, record };
 		if (record.k === "session.closed" && (!closedAt || record.t > closedAt)) closedAt = record.t;
+		if (record.k === "budget.crossing" || record.k === "budget.wait") budget.push(budgetEntry(analysis, record));
+		if (record.k === "quota.reading") {
+			const account = `${record.data.provider}\u0000${record.data.targetId}`;
+			const entry = quotaEntry(record);
+			const prior = latestQuota.get(account);
+			if (!prior || entry.observedAt >= prior.observedAt) latestQuota.set(account, entry);
+		}
 	}
+	budget.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+	const quota = [...latestQuota.values()].sort(
+		(a, b) => Number(quotaLimited(b)) - Number(quotaLimited(a)) || (a.provider < b.provider ? -1 : 1),
+	);
 	const terminal = last?.record.data;
 	const lastCallIds = new Set(terminal?.terminal.callIds ?? []);
 	const lastCalls = analysis.attempts
@@ -2003,6 +2030,25 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		);
 	}
 	if (state === "closed") findings.push("The session closed after its last turn.");
+	const crossing = budget.filter((entry) => entry.event === "crossing").at(-1);
+	if (crossing)
+		findings.push(
+			`Priced spend ${crossing.level === "over" ? "passed" : "reached"} the ${crossing.ceiling.display} ceiling at ${crossing.at}: ${crossing.spend.display}.`,
+		);
+	const held = budget.filter((entry) => entry.event === "wait");
+	const release = held.at(-1);
+	if (release)
+		findings.push(
+			`${renderCount(held.length)} paid ${held.length === 1 ? "request was" : "requests were"} held at a ceiling; the last ${
+				release.outcome === "raised" || release.outcome === "removed" || release.outcome === "cleared"
+					? `was released (${release.outcome}${release.raisedTo ? ` to ${release.raisedTo.display}` : ""}${release.raisedBy ? ` by ${release.raisedBy}` : ""})`
+					: `ended ${release.outcome ?? "unreleased"}`
+			} after ${release.waited?.display ?? "an unrecorded wait"}.`,
+		);
+	for (const entry of quota.filter(quotaLimited))
+		findings.push(
+			`${entry.provider} reported the account limited at ${entry.observedAt}: ${entry.windows.map((window) => `${window.key} ${window.usedPct.display}`).join(", ")}.`,
+		);
 	for (const row of waitRows)
 		findings.push(`Admission held on ${row.on}: ${row.calls.display} attempt(s), ${row.waited.display} waited.`);
 	for (const row of causeRows)
@@ -2030,6 +2076,8 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		waits: waitRows,
 		cache,
 		spend,
+		budget,
+		quota,
 		findings,
 	};
 }

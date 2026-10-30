@@ -236,7 +236,7 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	strictEqual(tampered.trust.artifactIntegrity.state, "failed");
 });
 
-test("the timeline carries config, budget and quota records, the spend admission saw marked as its calls were priced (#434 §8)", () => {
+test("the timeline and why-stopped carry config, budget and quota records, spend marked as its calls were priced (#434 §8, §12.6)", () => {
 	const ctx = { sessionId: "timeline-records", label: "main" as const };
 	const clock = (t: string) => ({ t, mono: 0 });
 	const object = {
@@ -285,13 +285,14 @@ test("the timeline carries config, budget and quota records, the spend admission
 				source: "stream-event",
 				observedAt: "2026-10-30T00:00:05.000Z",
 				windows: [{ key: "primary", usedPct: { kind: "measured", value: 42, source: "provider" } }],
-				limitReached: false,
+				limitReached: true,
 			},
 			ctx,
 			clock("2026-10-30T00:00:05.000Z"),
 		),
 	];
-	const dto = timeline({ ...source, sessionId: "timeline-records", journal: { ...source.journal, records } }, null, now);
+	const recorded: SessionSource = { ...source, sessionId: "timeline-records", journal: { ...source.journal, records } };
+	const dto = timeline(recorded, null, now);
 	ok(Value.Check(TimelineSchema, dto), [...Value.Errors(TimelineSchema, dto)][0]?.message);
 	deepStrictEqual(
 		dto.entries.filter((entry) => entry.kind !== "call").map((entry) => entry.kind),
@@ -302,4 +303,20 @@ test("the timeline carries config, budget and quota records, the spend admission
 	strictEqual(crossing?.kind === "budget" ? crossing.spend.display : null, "~$5.00 +?");
 	strictEqual(wait?.kind === "budget" ? wait.waited?.display : null, "1.50s");
 	strictEqual(wait?.kind === "budget" ? wait.raisedBy : null, "settings-ui");
+	// why-stopped reads the same records: the crossing, the held request's release and the limited account (#434 §12.6).
+	const why = whyStopped(recorded, now);
+	ok(Value.Check(WhyStoppedSchema, why), [...Value.Errors(WhyStoppedSchema, why)][0]?.message);
+	deepStrictEqual(
+		why.budget.map((entry) => entry.event),
+		["crossing", "wait"],
+	);
+	strictEqual(why.quota[0]?.limitReached, true);
+	deepStrictEqual(
+		why.findings.filter((line) => /ceiling|limited/.test(line)),
+		[
+			"Priced spend reached the $5.00 ceiling at 2026-10-30T00:00:03.000Z: ~$5.00 +?.",
+			"1 paid request was held at a ceiling; the last was released (raised to $10.00 by settings-ui) after 1.50s.",
+			"codex reported the account limited at 2026-10-30T00:00:05.000Z: primary 42.0%.",
+		],
+	);
 });

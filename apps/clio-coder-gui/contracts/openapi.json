@@ -18368,6 +18368,12 @@
 					"$ref": "#/components/schemas/Object_id_kind_locations_1b48846f"
 				}
 			},
+			"Array_177d63bd": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_key_resetsAt_usedPct_9b19714a"
+				}
+			},
 			"Array_215104f3": {
 				"type": "array",
 				"items": {
@@ -21418,6 +21424,28 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_at_attemptId_callId_8ba578df": {
+				"type": "object",
+				"required": [
+					"kind",
+					"at",
+					"event",
+					"level",
+					"callId",
+					"attemptId",
+					"spend",
+					"ceiling",
+					"contextTokens",
+					"outcome",
+					"waited",
+					"raisedTo",
+					"raisedBy"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_35d00657"
+				},
+				"additionalProperties": false
+			},
 			"Object_at_attemptId_continuation_ec9e55ef": {
 				"type": "object",
 				"required": [
@@ -21511,6 +21539,14 @@
 				"required": ["id", "at", "sourceSequence", "fact"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_92bc19ac"
+				},
+				"additionalProperties": false
+			},
+			"Object_at_kind_limitReached_13ddc75a": {
+				"type": "object",
+				"required": ["kind", "at", "provider", "targetId", "source", "observedAt", "limitReached", "windows"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_7ed6617e"
 				},
 				"additionalProperties": false
 			},
@@ -22560,6 +22596,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_display_fact_6fc3c8f8": {
+				"type": "object",
+				"required": ["fact", "display"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_76438384"
+				},
+				"additionalProperties": false
+			},
 			"Object_display_fact_e638ba04": {
 				"type": "object",
 				"required": ["fact", "display"],
@@ -22934,6 +22978,14 @@
 				"required": ["key", "usedPct"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_ba01a4bb"
+				},
+				"additionalProperties": false
+			},
+			"Object_key_resetsAt_usedPct_9b19714a": {
+				"type": "object",
+				"required": ["key", "usedPct", "resetsAt"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_13063184"
 				},
 				"additionalProperties": false
 			},
@@ -24696,6 +24748,19 @@
 					"$ref": "#/components/schemas/Array_7d31aeb6"
 				}
 			},
+			"Shape_13063184": {
+				"key": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"usedPct": {
+					"$ref": "#/components/schemas/Object_display_fact_6fc3c8f8"
+				},
+				"resetsAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				}
+			},
 			"Shape_15d24127": {
 				"usd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_b6182503"
@@ -24800,6 +24865,49 @@
 				},
 				"closed": {
 					"$ref": "#/components/schemas/Union_54e98030"
+				}
+			},
+			"Shape_35d00657": {
+				"kind": {
+					"type": "string",
+					"const": "budget"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"event": {
+					"enum": ["crossing", "wait"]
+				},
+				"level": {
+					"enum": ["at", "over"]
+				},
+				"callId": {
+					"$ref": "#/components/schemas/Union_3c066253"
+				},
+				"attemptId": {
+					"$ref": "#/components/schemas/Union_e7cc1cf6"
+				},
+				"spend": {
+					"$ref": "#/components/schemas/Object_display_fact_3986ea75"
+				},
+				"ceiling": {
+					"$ref": "#/components/schemas/Object_display_usd_e86d2907"
+				},
+				"contextTokens": {
+					"$ref": "#/components/schemas/Union_0c2967b5"
+				},
+				"outcome": {
+					"$ref": "#/components/schemas/Union_ee32f0b1"
+				},
+				"waited": {
+					"$ref": "#/components/schemas/Union_0c2967b5"
+				},
+				"raisedTo": {
+					"$ref": "#/components/schemas/Union_f4020539"
+				},
+				"raisedBy": {
+					"$ref": "#/components/schemas/Union_443a81ed"
 				}
 			},
 			"Shape_39fec1f7": {
@@ -25374,6 +25482,14 @@
 					"$ref": "#/components/schemas/Union_ee961797"
 				}
 			},
+			"Shape_76438384": {
+				"fact": {
+					"$ref": "#/components/schemas/Union_6986f1bb"
+				},
+				"display": {
+					"type": "string"
+				}
+			},
 			"Shape_78a3786e": {
 				"ttft": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_b6182503"
@@ -25438,6 +25554,46 @@
 							"type": "null"
 						}
 					]
+				}
+			},
+			"Shape_7ed6617e": {
+				"kind": {
+					"type": "string",
+					"const": "quota"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"provider": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"targetId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"source": {
+					"enum": ["response-headers", "stream-event", "poll"]
+				},
+				"observedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"limitReached": {
+					"anyOf": [
+						{
+							"type": "boolean"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"windows": {
+					"$ref": "#/components/schemas/Array_177d63bd"
 				}
 			},
 			"Shape_7fc57a3d": {
@@ -27077,169 +27233,10 @@
 									"additionalProperties": false
 								},
 								{
-									"type": "object",
-									"required": [
-										"kind",
-										"at",
-										"event",
-										"level",
-										"callId",
-										"attemptId",
-										"spend",
-										"ceiling",
-										"contextTokens",
-										"outcome",
-										"waited",
-										"raisedTo",
-										"raisedBy"
-									],
-									"properties": {
-										"kind": {
-											"type": "string",
-											"const": "budget"
-										},
-										"at": {
-											"type": "string",
-											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-										},
-										"event": {
-											"enum": ["crossing", "wait"]
-										},
-										"level": {
-											"enum": ["at", "over"]
-										},
-										"callId": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"attemptId": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"spend": {
-											"$ref": "#/components/schemas/Object_display_fact_3986ea75"
-										},
-										"ceiling": {
-											"$ref": "#/components/schemas/Object_display_usd_e86d2907"
-										},
-										"contextTokens": {
-											"$ref": "#/components/schemas/Union_0c2967b5"
-										},
-										"outcome": {
-											"anyOf": [
-												{
-													"enum": ["raised", "removed", "cleared", "refused", "aborted"]
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"waited": {
-											"$ref": "#/components/schemas/Union_0c2967b5"
-										},
-										"raisedTo": {
-											"anyOf": [
-												{
-													"$ref": "#/components/schemas/Object_display_usd_e86d2907"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"raisedBy": {
-											"$ref": "#/components/schemas/Union_443a81ed"
-										}
-									},
-									"additionalProperties": false
+									"$ref": "#/components/schemas/Object_at_attemptId_callId_8ba578df"
 								},
 								{
-									"type": "object",
-									"required": ["kind", "at", "provider", "targetId", "source", "observedAt", "limitReached", "windows"],
-									"properties": {
-										"kind": {
-											"type": "string",
-											"const": "quota"
-										},
-										"at": {
-											"type": "string",
-											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-										},
-										"provider": {
-											"type": "string",
-											"minLength": 1,
-											"maxLength": 512
-										},
-										"targetId": {
-											"type": "string",
-											"minLength": 1,
-											"maxLength": 512
-										},
-										"source": {
-											"enum": ["response-headers", "stream-event", "poll"]
-										},
-										"observedAt": {
-											"type": "string",
-											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-										},
-										"limitReached": {
-											"anyOf": [
-												{
-													"type": "boolean"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"windows": {
-											"type": "array",
-											"items": {
-												"type": "object",
-												"required": ["key", "usedPct", "resetsAt"],
-												"properties": {
-													"key": {
-														"type": "string",
-														"minLength": 1,
-														"maxLength": 512
-													},
-													"usedPct": {
-														"type": "object",
-														"required": ["fact", "display"],
-														"properties": {
-															"fact": {
-																"$ref": "#/components/schemas/Union_6986f1bb"
-															},
-															"display": {
-																"type": "string"
-															}
-														},
-														"additionalProperties": false
-													},
-													"resetsAt": {
-														"$ref": "#/components/schemas/Union_9d36f13d"
-													}
-												},
-												"additionalProperties": false
-											}
-										}
-									},
-									"additionalProperties": false
+									"$ref": "#/components/schemas/Object_at_kind_limitReached_13ddc75a"
 								}
 							]
 						}
@@ -27691,6 +27688,17 @@
 					{
 						"type": "string",
 						"const": "done"
+					}
+				]
+			},
+			"Union_3c066253": {
+				"anyOf": [
+					{
+						"type": "string",
+						"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -28735,6 +28743,17 @@
 					}
 				]
 			},
+			"Union_e7cc1cf6": {
+				"anyOf": [
+					{
+						"type": "string",
+						"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_ec5e9162": {
 				"anyOf": [
 					{
@@ -28752,6 +28771,16 @@
 					{
 						"type": "string",
 						"const": "failed"
+					}
+				]
+			},
+			"Union_ee32f0b1": {
+				"anyOf": [
+					{
+						"enum": ["raised", "removed", "cleared", "refused", "aborted"]
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -28795,6 +28824,16 @@
 					{
 						"type": "string",
 						"const": "ssh"
+					}
+				]
+			},
+			"Union_f4020539": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_display_usd_e86d2907"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -28918,6 +28957,8 @@
 					"waits",
 					"cache",
 					"spend",
+					"budget",
+					"quota",
 					"findings"
 				],
 				"properties": {
@@ -29047,6 +29088,18 @@
 					},
 					"spend": {
 						"$ref": "#/components/schemas/Object_tokens_usd_f9a8771f"
+					},
+					"budget": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Object_at_attemptId_callId_8ba578df"
+						}
+					},
+					"quota": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Object_at_kind_limitReached_13ddc75a"
+						}
 					},
 					"findings": {
 						"type": "array",

@@ -514,6 +514,55 @@ const shown = Type.Object(
 /** A configured amount such as a ceiling: a setting, not spend, so it carries no provenance. */
 const limit = Type.Object({ usd: nonNegative, display: Type.String() }, closed);
 const settingsSource = vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]);
+/**
+ * Priced spend reaching a ceiling (`crossing`), or a paid request held there until the hold ended (`wait`). `spend`
+ * is what admission saw, marked estimated when any call settled before it was, with the unpriced calls beside it.
+ */
+export const BudgetEntrySchema = Type.Object(
+	{
+		kind: Type.Literal("budget"),
+		...at,
+		event: vocabulary(["crossing", "wait"]),
+		level: vocabulary(["at", "over"]),
+		callId: Type.Union([CallIdSchema, Type.Null()]),
+		attemptId: Type.Union([AttemptIdSchema, Type.Null()]),
+		spend: shown,
+		ceiling: limit,
+		contextTokens: Type.Union([shown, Type.Null()]),
+		outcome: Type.Union([vocabulary(["raised", "removed", "cleared", "refused", "aborted"]), Type.Null()]),
+		waited: Type.Union([shown, Type.Null()]),
+		raisedTo: Type.Union([limit, Type.Null()]),
+		raisedBy: Type.Union([settingsSource, Type.Null()]),
+	},
+	closed,
+);
+/** A provider's quota windows as one reading saw them; journaled at a turn's first reading and on change. */
+export const QuotaEntrySchema = Type.Object(
+	{
+		kind: Type.Literal("quota"),
+		...at,
+		provider: ExistingId,
+		targetId: ExistingId,
+		source: vocabulary(["response-headers", "stream-event", "poll"]),
+		observedAt: UtcSchema,
+		/** Null when the reading did not say. */
+		limitReached: Type.Union([Type.Boolean(), Type.Null()]),
+		windows: Type.Array(
+			Type.Object(
+				{
+					key: ExistingId,
+					usedPct: Type.Object(
+						{ fact: factSchema(Type.Number({ minimum: 0, maximum: 100 })), display: Type.String() },
+						closed,
+					),
+					resetsAt: Type.Union([UtcSchema, Type.Null()]),
+				},
+				closed,
+			),
+		),
+	},
+	closed,
+);
 export const TimelineEntrySchema = Type.Union([
 	callEntry,
 	Type.Object(
@@ -566,55 +615,8 @@ export const TimelineEntrySchema = Type.Union([
 		},
 		closed,
 	),
-	/**
-	 * Priced spend reaching a ceiling (`crossing`), or a paid request held there until the hold ended (`wait`). `spend`
-	 * is what admission saw, marked estimated when any call settled before it was, with the unpriced calls beside it.
-	 */
-	Type.Object(
-		{
-			kind: Type.Literal("budget"),
-			...at,
-			event: vocabulary(["crossing", "wait"]),
-			level: vocabulary(["at", "over"]),
-			callId: Type.Union([CallIdSchema, Type.Null()]),
-			attemptId: Type.Union([AttemptIdSchema, Type.Null()]),
-			spend: shown,
-			ceiling: limit,
-			contextTokens: Type.Union([shown, Type.Null()]),
-			outcome: Type.Union([vocabulary(["raised", "removed", "cleared", "refused", "aborted"]), Type.Null()]),
-			waited: Type.Union([shown, Type.Null()]),
-			raisedTo: Type.Union([limit, Type.Null()]),
-			raisedBy: Type.Union([settingsSource, Type.Null()]),
-		},
-		closed,
-	),
-	/** A provider's quota windows as one reading saw them; journaled at a turn's first reading and on change. */
-	Type.Object(
-		{
-			kind: Type.Literal("quota"),
-			...at,
-			provider: ExistingId,
-			targetId: ExistingId,
-			source: vocabulary(["response-headers", "stream-event", "poll"]),
-			observedAt: UtcSchema,
-			/** Null when the reading did not say. */
-			limitReached: Type.Union([Type.Boolean(), Type.Null()]),
-			windows: Type.Array(
-				Type.Object(
-					{
-						key: ExistingId,
-						usedPct: Type.Object(
-							{ fact: factSchema(Type.Number({ minimum: 0, maximum: 100 })), display: Type.String() },
-							closed,
-						),
-						resetsAt: Type.Union([UtcSchema, Type.Null()]),
-					},
-					closed,
-				),
-			),
-		},
-		closed,
-	),
+	BudgetEntrySchema,
+	QuotaEntrySchema,
 ]);
 export type TimelineEntry = Static<typeof TimelineEntrySchema>;
 export const TimelineSchema = Type.Object(
@@ -902,6 +904,10 @@ export const WhyStoppedSchema = Type.Object(
 		),
 		cache: Type.Object({ rePrefilled: QuantitySchema, breakUsd: QuantitySchema }, closed),
 		spend: totals,
+		/** Every ceiling crossing and held request the journal recorded, oldest first (#434 §12.6). */
+		budget: Type.Array(BudgetEntrySchema),
+		/** Each account's latest journaled quota reading, the ones that reported a limit first. */
+		quota: Type.Array(QuotaEntrySchema),
 		/** Rendered findings, most decisive first; every number in them also appears above. */
 		findings: Type.Array(Type.String()),
 	},
