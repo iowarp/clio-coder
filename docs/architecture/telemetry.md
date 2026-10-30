@@ -132,7 +132,7 @@ The environment variables `CLIO_CODER_MEMORY_TRACE`, `CLIO_CODER_OBSERVATION_TRA
 
 ## Export, import and retention
 
-`clio-coder telemetry export <session-id> --out <dir>` writes a `clio-telemetry-bundle/1` directory: `bundle.json` with the capture ceiling and a sha256 and record count per file, the session journal verbatim, each referenced run journal, and only the objects those records cite ([bundle.ts](../../src/domains/observability/bundle.ts)). A bundle is content-free unless `--content`, which needs research content capture and consent for the session's workspace. `import-bundle` verifies every hash, count, checksum, schema and the ceiling, and writes the verified copy, which is also the golden fixture layout.
+`clio-coder telemetry export <session-id> --out <dir>` writes a `clio-telemetry-bundle/1` directory: `bundle.json` with the capture ceiling and a sha256 and record count per file, the session journal verbatim, each referenced run journal, and only the objects those records cite ([bundle.ts](../../src/domains/observability/bundle.ts)). A bundle is content-free unless `--content`, which needs research content capture and consent for the session's workspace. `import-bundle` verifies every hash, count, checksum, schema and the ceiling, and writes the verified copy. The golden fixture is not a bundle: it is a legacy ledger, `tests/fixtures/telemetry/golden/p0/current.jsonl`.
 
 `clio-coder telemetry prune` is a dry run unless `--apply`. It removes, oldest first, session journals and their objects past 90 days or over 1 GiB, unreferenced run journals by the same rule, objects no record cites, and research content past 30 days or over 4 GiB, together with the research files under `<stateDir>/telemetry/research/`. It never touches a live or locked session or run, a fork parent a kept child reads, or a run that a kept journal or a receipt references. Research content expires before the records that cite it, which then read as missing. Ledgers, receipts and `trace.sqlite` are not telemetry journals and are never pruned by it.
 
@@ -158,10 +158,12 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 These parts of the design are not in this build and are planned for 0.6.7:
 
-- The records `auth.event`, `middleware.fired`, `system_one.decision` and `worker.channel`, and `tool.settled` unless a lane builds it sooner.
+- The records `auth.event`, `middleware.fired`, `system_one.decision` and `worker.channel`.
 - Research capture of request bodies and allow-listed provider response headers.
 - Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
 - `clio-coder telemetry rebuild`, which rebuilds projections from journals and reports rule drift.
 - The GUI explain popover and timeline view.
+
+The `tool.settled` record is not built, and no release is set for it.
 
 Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.
