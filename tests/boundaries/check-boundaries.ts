@@ -207,6 +207,175 @@ export function checkCostRendering(file: string, source: string): string[] {
 	return [...new Set(violations)];
 }
 
+/** The surfaces whose token and cost figures must be the read model's folds (#434 §11.3). */
+const SURFACE_TOTAL_ROOTS = ["src/interactive/", "src/engine/acp/", "src/cli/"];
+/**
+ * Functions on those surfaces that still fold token or cost fields, each with the reason it may. An exemption that
+ * no longer matches a fold fails, so the list only shrinks.
+ */
+const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonly string[]; reason: string }> = [
+	{
+		file: "src/engine/acp/usage.ts",
+		functions: ["projectSessionUsage"],
+		reason: "the ACP v1 usage read projects the cost tracker's rows; it retires with CostTracker (P5)",
+	},
+	{
+		file: "src/engine/acp/live-telemetry.ts",
+		functions: ["sessionUsageTotals"],
+		reason: "ACP usage_update totals fold the same v1 cost tracker rows and retire with CostTracker (P5)",
+	},
+	{
+		file: "src/engine/acp/server.ts",
+		functions: ["mergeUsage", "mergeMessageUsage"],
+		reason: "the v1 usage on an ACP prompt response folds that prompt's own messages; it retires with CostTracker (P5)",
+	},
+	{
+		file: "src/engine/acp/server.ts",
+		functions: ["handleChatEvent"],
+		reason: "an ACP prompt's output tokens over its generation time make its tok/s rate, a division over measured facts",
+	},
+	{
+		file: "src/engine/acp/adapter.ts",
+		functions: ["mergeUsage"],
+		reason: "the producer side of a delegated run: it folds the peer's reported deltas into the run's run.usage snapshot",
+	},
+	{
+		file: "src/interactive/status/summary.ts",
+		functions: ["foldMessageIntoRunTally"],
+		reason: "the live last-turn TurnSummary tally behind the reasoning chip and transcript summary, folded per message",
+	},
+	{
+		file: "src/interactive/session-last-turn.ts",
+		functions: ["lastTurnSummaryFromLedger"],
+		reason: "rebuilds that same last-turn TurnSummary from the ledger on resume, so the two tallies agree",
+	},
+	{
+		file: "src/interactive/chat-panel.ts",
+		functions: ["aggregateAssistantUsage"],
+		reason: "the transcript's per-turn usage line folds the turn's own assistant messages; no live turn fold exists yet",
+	},
+	{
+		file: "src/cli/fleet.ts",
+		functions: ["statusSnapshot"],
+		reason: "fleet status totals the run ledger's sealed rows, a store the read model has no scope over",
+	},
+	{
+		file: "src/cli/fleet-board-model.ts",
+		functions: ["applyEvent"],
+		reason: "the fleet board's live per-run token count follows the run feed's message_end lines as they stream",
+	},
+	{
+		file: "src/cli/modes/print.ts",
+		functions: ["addRunUsage"],
+		reason:
+			"a headless run folds its own calls into the main-agent receipt it seals and the --max-cost-usd cap it enforces",
+	},
+	{
+		file: "src/cli/wiki-generate.ts",
+		functions: ["attemptsBreakdown", "invocationUsage"],
+		reason: "the wiki generator's footer totals its own workers' sealed receipts for the run it just made",
+	},
+];
+
+const USAGE_FIELD = /^(?:input|output|cacheRead|cacheWrite|cacheWrite1h|reasoning)$/;
+const TOTAL_NAME = /^(?:tokens|tokenCount|usd)$|(?:Tokens|TokenCount|Usd)$/;
+
+/**
+ * A surface sums no token or cost field: no `+=`, self-adding assignment, `field: prev.field + x` fold or `.reduce`
+ * over one (#434 §11.3). A bare `input`/`output` identifier is not a field, so string building does not trip it.
+ */
+export function checkSurfaceTotals(file: string, source: string, used?: Set<string>): string[] {
+	if (!SURFACE_TOTAL_ROOTS.some((root) => file.startsWith(root))) return [];
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const violations: string[] = [];
+	const unwrap = (node: ts.Expression): ts.Expression => {
+		while (
+			ts.isAsExpression(node) ||
+			ts.isParenthesizedExpression(node) ||
+			ts.isNonNullExpression(node) ||
+			(ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+		)
+			node = ts.isBinaryExpression(node) ? node.left : node.expression;
+		return node;
+	};
+	const field = (node: ts.Node): string | undefined =>
+		ts.isPropertyAccessExpression(node)
+			? node.name.text
+			: ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)
+				? node.argumentExpression.text
+				: undefined;
+	const total = (input: ts.Expression): boolean => {
+		const node = unwrap(input);
+		const name = field(node);
+		if (name !== undefined) return TOTAL_NAME.test(name) || USAGE_FIELD.test(name);
+		return ts.isIdentifier(node) && TOTAL_NAME.test(node.text);
+	};
+	const readsTotal = (node: ts.Node): boolean => {
+		const name = field(node);
+		if (name !== undefined && (TOTAL_NAME.test(name) || USAGE_FIELD.test(name))) return true;
+		return ts.forEachChild(node, (child) => readsTotal(child) || undefined) === true;
+	};
+	const owner = (node: ts.Node): string => {
+		for (let at: ts.Node | undefined = node.parent; at; at = at.parent) {
+			if ((ts.isFunctionDeclaration(at) || ts.isMethodDeclaration(at)) && at.name) return at.name.getText(tree);
+			if ((ts.isArrowFunction(at) || ts.isFunctionExpression(at)) && ts.isVariableDeclaration(at.parent))
+				return at.parent.name.getText(tree);
+		}
+		return "<module>";
+	};
+	const report = (node: ts.Node) => {
+		const fn = owner(node);
+		const exemption = SURFACE_TOTAL_EXEMPTIONS.find((entry) => entry.file === file && entry.functions.includes(fn));
+		if (exemption) {
+			used?.add(`${file}#${fn}`);
+			return;
+		}
+		const line = tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+		violations.push(
+			`rule14: ${file}:${line} sums a token or cost field in ${fn}; show the read model's quantity display instead, or exempt the function with its reason in SURFACE_TOTAL_EXEMPTIONS`,
+		);
+	};
+	const adds = (node: ts.Expression, target: (operand: ts.Expression) => boolean): boolean => {
+		const sum = unwrap(node);
+		return (
+			ts.isBinaryExpression(sum) &&
+			sum.operatorToken.kind === ts.SyntaxKind.PlusToken &&
+			(target(sum.left) || target(sum.right) || adds(sum.left, target))
+		);
+	};
+	const visit = (node: ts.Node): void => {
+		if (ts.isBinaryExpression(node)) {
+			const kind = node.operatorToken.kind;
+			if (kind === ts.SyntaxKind.PlusEqualsToken && (total(node.left) || readsTotal(node.right))) report(node);
+			const target = node.left.getText(tree);
+			if (
+				kind === ts.SyntaxKind.EqualsToken &&
+				total(node.left) &&
+				adds(node.right, (operand) => unwrap(operand).getText(tree) === target)
+			)
+				report(node);
+		}
+		if (ts.isPropertyAssignment(node)) {
+			const name = node.name.getText(tree).replace(/["']/g, "");
+			if (
+				(TOTAL_NAME.test(name) || USAGE_FIELD.test(name)) &&
+				adds(node.initializer, (operand) => field(unwrap(operand)) === name)
+			)
+				report(node);
+		}
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			node.expression.name.text === "reduce" &&
+			node.arguments.some((argument) => readsTotal(argument))
+		)
+			report(node);
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return [...new Set(violations)];
+}
+
 const jsSuffixRegex = /\.m?jsx?$/;
 const piPackagePrefix = "@earendil-works/pi-";
 // Since the 0.83.0 engine-boundary rework, no file outside src/engine/** may
@@ -634,6 +803,9 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *      terminal a dependency of every surface.
  *  10. Root and GUI monetary display uses core/telemetry/render.ts;
  *      browser code consumes display strings rendered by the server.
+ *  14. src/interactive/**, src/engine/acp/** and src/cli/** sum no token or
+ *      cost field: their figures are the read model's quantity displays,
+ *      except the functions SURFACE_TOTAL_EXEMPTIONS names with a reason.
  *   9. src/engine/** never imports src/interactive/**, type-only included.
  *      The ACP server reaches session behavior through src/session-control.
  *   6. Any value importer outside the computed Stage 0 closure and its
@@ -662,11 +834,15 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	const violations: string[] = [];
 	/** Runtime importers by declared seam, so rule 6b can disposition each reacher. */
 	const valueReachedSeams = new Map<string, Set<string>>();
+	const usedSurfaceExemptions = new Set<string>();
 
 	for (const filePath of walk(srcRoot)) {
 		const source = readFileSync(filePath, "utf8");
 		violations.push(...checkCostRendering(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkLedgerUsageMutation(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
+		violations.push(
+			...checkSurfaceTotals(path.relative(projectRoot, filePath).split(path.sep).join("/"), source, usedSurfaceExemptions),
+		);
 		const specifiers = extractSpecifiers(source);
 		const references = extractReferenceDirectives(source);
 
@@ -823,6 +999,13 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 			`rule6: seam ${seamPath}, reached by ${importers.join(", ")}, value-imports its way into the Stage 0 closure (${reached.join(", ")}); an external seam must stay off the modules ${STAGE_0_OWNER} already reaches, or its importer becomes a second reacher and esbuild splits their merged chunk. That closure is held to 32 chunks, 1,400,000 total bytes and 350,000 Clio source bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the value the seam needs into a leaf module instead of importing the render module that happens to hold it.`,
 		);
 	}
+
+	for (const exemption of SURFACE_TOTAL_EXEMPTIONS)
+		for (const fn of exemption.functions)
+			if (!usedSurfaceExemptions.has(`${exemption.file}#${fn}`))
+				violations.push(
+					`rule14: SURFACE_TOTAL_EXEMPTIONS exempts ${exemption.file}#${fn}, which no longer sums a token or cost field; remove the exemption`,
+				);
 
 	for (const directory of ["client", "server"]) {
 		for (const file of walk(path.join(projectRoot, "apps/clio-coder-gui", directory))) {
