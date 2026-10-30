@@ -1,3 +1,4 @@
+import { formatFooterTokens } from "../display-units.js";
 import type { Fact, FactSum } from "./fact.js";
 
 /**
@@ -116,6 +117,29 @@ export function renderCountSum(sum: FactSum, unit = "call"): string {
 	const gap = `${plural(sum.unknownCount, unit)} unknown`;
 	if (sum.coverage.measured + sum.coverage.estimated === 0) return `unknown (${gap})`;
 	return `≥${approx}${renderCount(known)} (${gap})`;
+}
+
+/**
+ * A count or count sum in the footer's narrow form (`12.3k`). The width changes, the honesty does not: an estimate
+ * keeps `~`, a partial sum keeps `≥` and `+?`, an unknown is `?` and never `0`, and an absent count is `n/a` (R1, R10).
+ */
+export function renderCompactCount(fact: Fact<number> | FactSum): string {
+	if ("kind" in fact) {
+		switch (fact.kind) {
+			case "measured":
+				return formatFooterTokens(fact.value);
+			case "estimated":
+				return `~${formatFooterTokens(fact.value)}`;
+			case "unknown":
+				return "?";
+			case "absent":
+				return "n/a";
+		}
+	}
+	if (allAbsent(fact)) return "n/a";
+	const known = `${fact.coverage.estimated > 0 ? "~" : ""}${formatFooterTokens(fact.measured + fact.estimated)}`;
+	if (fact.unknownCount === 0) return known;
+	return fact.coverage.measured + fact.coverage.estimated === 0 ? "?" : `≥${known} +?`;
 }
 
 /** A folded USD sum, as the same claim {@link renderCostClaim} words; `free` is true when every priced call was free. */

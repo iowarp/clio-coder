@@ -8,6 +8,7 @@ import type {
 	ExplanationV1,
 	FactRef,
 	HealthV1,
+	Quantity,
 	QuotaStateV1,
 	RunRowV1,
 	RunTelemetryV1,
@@ -176,6 +177,8 @@ export interface TelemetryView {
 	run(runId: string): RunTelemetryV1 | null;
 	whyStopped(): WhyStoppedV1;
 	explain(ref: FactRef): ExplanationV1 | null;
+	/** Any one number by reference, e.g. a turn's input tokens, without building a whole report for it. */
+	quantity(ref: FactRef): Quantity | null;
 }
 
 /**

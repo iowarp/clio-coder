@@ -1,0 +1,81 @@
+import type { FactMetric, Quantity } from "../../core/telemetry/dto.js";
+import { factRef } from "../../core/telemetry/dto.js";
+import { renderCompactCount, renderCount } from "../../core/telemetry/render.js";
+import type { TelemetryView } from "../../domains/observability/contract.js";
+
+/**
+ * What the footer shows of the session's spend, read from the telemetry read model's live view (#434 §11.3): the
+ * whole session's tokens and cost across every branch, the newest turn's tokens, and the newest main call's prompt
+ * cache. Every string is the canonical renderer's, so an unknown cache read reads `?`, never `0`.
+ */
+export interface FooterSpend {
+	/** Whole-session tokens, compact; null before the session made any call. */
+	tokens: string | null;
+	/** Whole-session cost; null before anything could be charged. */
+	cost: string | null;
+	/** Calls that never reached a provider, or null when there are none. */
+	neverSent: string | null;
+	/** The newest turn's tokens across every call it made, workers included. */
+	turn: { input: string; output: string; cacheRead: string; cacheWrite: string } | null;
+	/** The newest main call's prompt-cache split and verdict. */
+	promptCache: { read: string; write: string; uncached: string; verdict: string } | null;
+}
+/** `unavailable` means no read model; `reading` means the live view is still merging its cold read. */
+export type FooterTelemetry = { kind: "unavailable" } | { kind: "reading" } | ({ kind: "ready" } & FooterSpend);
+
+const contributed = (quantity: Quantity): boolean =>
+	"kind" in quantity.fact
+		? quantity.fact.kind !== "absent"
+		: quantity.fact.coverage.measured + quantity.fact.coverage.estimated + quantity.fact.unknownCount > 0;
+const zero = (quantity: Quantity): boolean =>
+	"kind" in quantity.fact
+		? quantity.fact.kind === "measured" && quantity.fact.value === 0
+		: quantity.fact.unknownCount === 0 && quantity.fact.measured + quantity.fact.estimated === 0;
+
+const spends = new WeakMap<TelemetryView, FooterTelemetry>();
+
+export function footerTelemetry(view: TelemetryView | null | undefined): FooterTelemetry {
+	if (!view) return { kind: "unavailable" };
+	if (view.seeding) return { kind: "reading" };
+	const cached = spends.get(view);
+	if (cached) return cached;
+	const session = view.session();
+	const neverSent = session.own.counts.dispositions.neverSent;
+	const main = view.calls({ labels: ["main"], limit: 1 }).calls[0];
+	const turnId = main?.owner.turnId;
+	const turnCount = (metric: FactMetric): string => {
+		const quantity =
+			turnId === undefined
+				? null
+				: view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
+		return quantity ? renderCompactCount(quantity.fact) : "?";
+	};
+	const spend: FooterTelemetry = {
+		kind: "ready",
+		tokens: contributed(session.totals.tokens) ? renderCompactCount(session.totals.tokens.fact) : null,
+		cost: contributed(session.totals.usd) ? session.totals.usd.display : null,
+		neverSent:
+			contributed(neverSent) && !zero(neverSent) && !("kind" in neverSent.fact)
+				? `${renderCount(neverSent.fact.measured)} never sent`
+				: null,
+		turn:
+			turnId === undefined
+				? null
+				: {
+						input: turnCount("input"),
+						output: turnCount("output"),
+						cacheRead: turnCount("cacheRead"),
+						cacheWrite: turnCount("cacheWrite"),
+					},
+		promptCache: main?.usage
+			? {
+					read: renderCompactCount(main.usage.cacheRead.fact),
+					write: renderCompactCount(main.usage.cacheWrite.fact),
+					uncached: renderCompactCount(main.usage.input.fact),
+					verdict: main.cache.verdict,
+				}
+			: null,
+	};
+	spends.set(view, spend);
+	return spend;
+}

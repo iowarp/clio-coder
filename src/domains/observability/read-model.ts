@@ -1301,6 +1301,12 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	};
 }
 
+/** One quantity by reference, measured exactly as every DTO measures it; null when the source cannot see the ref. */
+export function quantityOf(ref: FactRef, source: SessionSource): Quantity | null {
+	const parsed = parseFactRef(ref);
+	return parsed ? (measure({ session: source }, parsed)?.quantity ?? null) : null;
+}
+
 const EXPLAIN_CAP = 500;
 
 /** Resolve a reference against a session (any scope it can see) or a standalone run. */

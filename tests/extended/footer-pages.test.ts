@@ -14,6 +14,7 @@ import {
 	renderCompactDashboard,
 	renderDashboardPage,
 } from "../../src/interactive/footer/pages.js";
+import { footerTelemetry } from "../../src/interactive/footer/spend.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import {
 	renderToolExecution,
@@ -22,6 +23,7 @@ import {
 } from "../../src/interactive/renderers/tool-execution.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
+import { telemetryViewOf } from "../harness/telemetry-view.js";
 
 function state(): FooterDashboardRenderState {
 	const ledger = buildContextLedger({
@@ -90,8 +92,7 @@ function state(): FooterDashboardRenderState {
 		toolCounts: { tools: {}, errors: 0 },
 		dispatchRows: [row],
 		throughput: null,
-		sessionTokens: null,
-		sessionCost: null,
+		telemetry: footerTelemetry(telemetryViewOf("fixture-session", [])),
 		tick: 0,
 		now: 12000,
 	};
@@ -449,7 +450,7 @@ test("worker cards and Status distinguish shared account limits from recorded se
 	}));
 	match(plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u")), /Account.*Shared Claude Code.*9% left/);
 	const status = plain(renderDashboardPage(snapshot, "Status", 160, 120, "alt+u"));
-	match(status, /SESSION.*recorded tokens/);
+	match(status, /SESSION · 0 tokens · nothing charged yet/);
 	match(status, /Claude Code.*Weekly 91%/);
 	match(plain(renderDashboardPage(snapshot, "Context", 160, 120, "alt+u")), /subscription limits are account-wide/);
 });

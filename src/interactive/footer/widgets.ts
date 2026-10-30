@@ -1,7 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
-import type { CostAggregate, TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
-import { formatCostAggregate } from "../../domains/observability/index.js";
+import type { TokenThroughputSnapshot } from "../../domains/observability/index.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
@@ -32,6 +31,7 @@ import {
 	contextOccupancyBar,
 	contextUsagePercent,
 } from "./context-rail.js";
+import type { FooterTelemetry } from "./spend.js";
 
 export interface ToolTallySnapshot {
 	tools: Readonly<Record<string, number>>;
@@ -455,8 +455,7 @@ interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
 	status?: AgentStatus;
 	toolCounts?: ToolTallySnapshot;
 	throughput?: TokenThroughputSnapshot | null;
-	sessionTokens?: UsageBreakdown | null;
-	sessionCost?: CostAggregate | null;
+	telemetry?: FooterTelemetry;
 	contextUsed?: number | null;
 	tick?: number;
 	now?: number;
@@ -490,15 +489,13 @@ function liveTokenValue(
 	status: AgentStatus,
 	throughput: TokenThroughputSnapshot | null | undefined,
 	lastTurn: TurnSummary | null,
-	sessionTokens: UsageBreakdown | null | undefined,
 	contextUsed: number | null | undefined,
 ): string | null {
 	const output = finiteNonNegative(throughput?.outputTokens);
 	const input =
 		finiteNonNegative(contextUsed) ||
 		finiteNonNegative(status.summary?.inputTokens) ||
-		finiteNonNegative(lastTurn?.inputTokens) ||
-		finiteNonNegative(sessionTokens?.input);
+		finiteNonNegative(lastTurn?.inputTokens);
 	const parts = [
 		output > 0
 			? theme.fg("counter", `${GLYPH.down} ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`)
@@ -525,19 +522,14 @@ function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatCompactMs(lastTurn.elapsedMs))}`;
 }
 
-function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
-	const estimate = lastTurn.estimated ? "≈" : "";
+/** Tokens are the journal's for the whole turn, workers included; timing and tools are the turn's own status. */
+function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary, telemetry: FooterTelemetry | undefined): string {
+	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
 	const parts: Array<string | null> = [
-		theme.fg(
-			"counter",
-			`${GLYPH.up} ${estimate}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down} ${estimate}${formatFooterTokens(lastTurn.outputTokens)}`,
-		),
+		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
 		reasoningChip(theme, lastTurn),
-		lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
-			? theme.fg(
-					"annotation",
-					`cache ${formatFooterTokens(lastTurn.cacheReadTokens)}/${formatFooterTokens(lastTurn.cacheWriteTokens)}`,
-				)
+		turn && !(turn.cacheRead === "0" && turn.cacheWrite === "0")
+			? theme.fg("annotation", `cache ${turn.cacheRead}/${turn.cacheWrite}`)
 			: null,
 	];
 	if (lastTurn.toolCount > 0) {
@@ -550,9 +542,12 @@ function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
 	return joinChips(theme, parts);
 }
 
-function cumulativeTokens(sessionTokens: UsageBreakdown | null | undefined): number {
-	const fallback = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
-	return finiteNonNegative(sessionTokens?.totalTokens) || fallback;
+/** The Σ row: the whole session across every branch, as the read model folds it (#434 §11.3). */
+function totalsValue(telemetry: FooterTelemetry | undefined): string | null {
+	if (!telemetry || telemetry.kind === "unavailable") return "not available";
+	if (telemetry.kind === "reading") return "reading the call journal";
+	if (telemetry.tokens === null && telemetry.neverSent === null) return null;
+	return [`Σ${telemetry.tokens ?? "0"}`, telemetry.neverSent].filter(Boolean).join(" · ");
 }
 
 function meaningfulToolTally(value: string): string | null {
@@ -600,34 +595,16 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	if (isStreaming && facts.statusText) rows.push(kv("state", facts.statusText, "activity"));
 	if (isStreaming) {
 		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput)));
-		rows.push(
-			styledKv(
-				"live",
-				liveTokenValue(theme, status, options.throughput, facts.lastTurn, options.sessionTokens, options.contextUsed),
-			),
-		);
+		rows.push(styledKv("live", liveTokenValue(theme, status, options.throughput, facts.lastTurn, options.contextUsed)));
 	} else if (facts.lastTurn) {
 		rows.push(styledKv("last", lastTurnOutcome(theme, facts.lastTurn)));
-		rows.push(styledKv("turn", lastTurnDetails(theme, facts.lastTurn)));
+		rows.push(styledKv("turn", lastTurnDetails(theme, facts.lastTurn, options.telemetry)));
 		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput)));
 	}
-	const total = cumulativeTokens(options.sessionTokens);
-	const missing = options.sessionTokens?.missingTokenCalls ?? 0;
-	const neverSent = options.sessionTokens?.neverSentCalls ?? 0;
-	rows.push(
-		total > 0 || missing > 0 || neverSent > 0
-			? styledKv(
-					"totals",
-					theme.fg(
-						"counter",
-						`Σ${formatFooterTokens(total)}${missing > 0 ? ` +? (${missing} call${missing === 1 ? "" : "s"} with unknown usage)` : ""}${neverSent > 0 ? ` · ${neverSent} call${neverSent === 1 ? "" : "s"} never sent` : ""}`,
-					),
-				)
-			: statusRow(null),
-	);
-	// Null until something has actually been priced, and an absent row is the
-	// only honest rendering of that. See formatCostAggregate.
-	const cost = formatCostAggregate(options.sessionCost);
+	const totals = totalsValue(options.telemetry);
+	rows.push(totals === null ? statusRow(null) : styledKv("totals", theme.fg("counter", totals)));
+	// Absent until the session made a call that could be charged; an absent row is the honest rendering of that.
+	const cost = options.telemetry?.kind === "ready" ? options.telemetry.cost : null;
 	rows.push(cost === null ? statusRow(null) : styledKv("cost", theme.fg("counter", cost)));
 	rows.push(
 		kv("fleet", facts.dispatchSummary?.replace(/^dispatch\s+/, ""), fleetSummaryIsAction ? "activity" : "annotation"),

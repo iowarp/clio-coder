@@ -27,6 +27,7 @@ import {
 	costReport,
 	explain,
 	journalSourceFromRead,
+	quantityOf,
 	runsReport,
 	runTelemetry,
 	sessionTelemetry,
@@ -68,7 +69,7 @@ const EMPTY_LEGACY: SessionSource["legacy"] = { records: [], aggregates: 0 };
 const sessionOwner = (sessionId: string) => `session:${sessionId}`;
 const runOwner = (runId: string) => `run:${runId}`;
 
-function telemetryView(source: SessionSource): TelemetryView {
+export function telemetryView(source: SessionSource): TelemetryView {
 	let session: SessionTelemetryV1 | undefined;
 	return {
 		sessionId: source.sessionId,
@@ -85,6 +86,7 @@ function telemetryView(source: SessionSource): TelemetryView {
 		},
 		whyStopped: () => whyStopped(source),
 		explain: (ref) => explain(ref, { session: source }),
+		quantity: (ref) => quantityOf(ref, source),
 	};
 }
 

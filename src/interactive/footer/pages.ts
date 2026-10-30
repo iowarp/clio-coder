@@ -17,6 +17,7 @@ import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
+import type { FooterTelemetry } from "./spend.js";
 import { activityQuadrant, compactContextUsage, contextQuadrant, contextUsageText, zipColumns } from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
@@ -93,8 +94,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 		status: state.status,
 		toolCounts: state.toolCounts,
 		throughput: state.throughput,
-		sessionTokens: state.sessionTokens,
-		sessionCost: state.sessionCost,
+		telemetry: state.telemetry,
 		contextUsed: state.context.used,
 		tick: state.tick,
 		now: state.now,
@@ -264,22 +264,22 @@ function contextPage(state: FooterDashboardRenderState, width: number, budget: n
 				width,
 			),
 		);
-	if (ledger.promptCache) {
-		const cache = ledger.promptCache;
-		const count = (value: number | null) => (value === null ? "unreported" : formatFooterTokens(value));
+	// The split comes from the newest main call's journal record, so an unreported cache read reads `?` (#434).
+	const journaled = state.telemetry.kind === "ready" ? state.telemetry.promptCache : null;
+	if (journaled)
 		out.push(
 			...wrapTextWithAnsi(
-				`Prompt cache · read ${count(cache.cacheReadTokens)} · write ${count(cache.cacheWriteTokens)} · uncached ${count(cache.uncachedInputTokens)}`,
+				`Prompt cache · read ${journaled.read} · write ${journaled.write} · uncached ${journaled.uncached}`,
 				width,
 			),
 		);
+	if (ledger.promptCache || journaled)
 		out.push(
 			...wrapTextWithAnsi(
-				`Session shell ${cache.shellReused ? "reused" : "rebuilt"} · backend ${cache.backendVerdict ?? "unreported"}`,
+				`Session shell ${ledger.promptCache ? (ledger.promptCache.shellReused ? "reused" : "rebuilt") : "unreported"} · backend ${journaled?.verdict ?? "unreported"}`,
 				width,
 			),
 		);
-	}
 	if (ledger.prewarm)
 		out.push(
 			...wrapTextWithAnsi(
@@ -438,17 +438,26 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	return [firstRow, fit(`${fit(line, room)}   ${fit(tail, tailWidth)}`)];
 }
 
+/** Whole-session spend across every branch (#434 §11.3, decision A). */
+function sessionSpendLine(telemetry: FooterTelemetry): string {
+	if (telemetry.kind === "unavailable") return "spend not available";
+	if (telemetry.kind === "reading") return "reading the call journal";
+	return `${telemetry.tokens ?? "0"} tokens · ${telemetry.cost ?? "nothing charged yet"}`;
+}
+
+function trackedCost(telemetry: FooterTelemetry): string {
+	if (telemetry.kind === "unavailable") return "not available";
+	if (telemetry.kind === "reading") return "reading";
+	return telemetry.cost ?? "nothing charged yet";
+}
+
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	type MeterCell = { kind: "meter"; percent: number | null; suffix: string };
 	type SectionEntry = readonly [label: string, value: string | MeterCell];
 
 	const quotaRows = [
-		theme.style(
-			"metricValue",
-			`SESSION · ${formatFooterTokens(state.sessionTokens?.totalTokens ?? 0)} recorded tokens · ${formatCostAggregate(state.sessionCost) ?? "cost not yet priced"}`,
-			{ bold: true },
-		),
+		theme.style("metricValue", `SESSION · ${sessionSpendLine(state.telemetry)}`, { bold: true }),
 		...renderQuotaAccounts(state.quota ?? [], width, { compact: true, now: state.now }),
 	];
 
@@ -491,7 +500,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
 	const left: [string, string][] = [
 		["Target", state.session.target ?? "No model selected"],
-		["Tracked cost", formatCostAggregate(state.sessionCost) ?? "not yet priced"],
+		["Tracked cost", trackedCost(state.telemetry)],
 		[
 			"Clio ceiling",
 			state.costCeilingUsd === undefined

@@ -3,7 +3,8 @@ import { readHarnessProfile } from "../../core/harness-profile.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
-import type { CostAggregate, TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
+import type { TelemetryView } from "../../domains/observability/contract.js";
+import type { TokenThroughputSnapshot } from "../../domains/observability/index.js";
 import type { CapabilityFlags, ProvidersContract } from "../../domains/providers/index.js";
 import { acceptsImageInput } from "../../domains/providers/index.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
@@ -27,6 +28,8 @@ import type { Notification, NotificationCenter } from "./notifications.js";
 import { formatNotificationPanel } from "./notifications.js";
 import type { DashboardPage } from "./pages.js";
 import { DASHBOARD_PAGES, dashboardPageViewport, renderCompactDashboard } from "./pages.js";
+import type { FooterTelemetry } from "./spend.js";
+import { footerTelemetry } from "./spend.js";
 import type { LocalMachineMetrics } from "./system-metrics.js";
 import { createLocalMachineSampler } from "./system-metrics.js";
 
@@ -67,9 +70,9 @@ export interface FooterDashboardDeps {
 	getTerminalColumns?: () => number;
 	getTerminalRows?: () => number;
 	onHeightChange?: (rows: number) => void;
-	getSessionTokens?: () => UsageBreakdown;
+	/** The telemetry read model's live view; absent when there is no read model, which renders "not available". */
+	getTelemetry?: () => TelemetryView | null;
 	getTokenThroughput?: () => TokenThroughputSnapshot | null;
-	getSessionCost?: () => CostAggregate;
 	getContextUsage?: () => ContextUsageSnapshot &
 		Partial<Pick<LiveBudgetView, "revision" | "historical" | "inputSource">>;
 	getContextLedger?: () => ContextLedger;
@@ -124,8 +127,7 @@ export interface FooterDashboardRenderState {
 	toolCounts: ToolTallySnapshot;
 	dispatchRows: ReadonlyArray<DispatchBoardRow>;
 	throughput: TokenThroughputSnapshot | null;
-	sessionTokens: UsageBreakdown | null;
-	sessionCost: CostAggregate | null;
+	telemetry: FooterTelemetry;
 	tick: number;
 	now: number;
 }
@@ -239,7 +241,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const tools = deps.getToolCounts?.() ?? { tools: {}, errors: 0 };
 		const status = deps.getAgentStatus?.();
 		const compactionActive = status?.phase === "compacting" || (status?.activePhases?.has("compacting") ?? false);
-		const usage = deps.getSessionTokens?.();
+		const telemetry = footerTelemetry(deps.getTelemetry?.());
 		const throughputMetric = deps.getTokenThroughput?.();
 		const contextUsage = deps.getContextUsage?.();
 		const contextLedger = deps.getContextLedger?.() ?? null;
@@ -355,8 +357,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			toolCounts: tools,
 			dispatchRows: dispatch,
 			throughput: throughputMetric ?? null,
-			sessionTokens: usage ?? null,
-			sessionCost: deps.getSessionCost?.() ?? null,
+			telemetry,
 			tick: frame,
 			now,
 		};

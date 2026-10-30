@@ -471,9 +471,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		onHeightChange: (rows) => {
 			if (setDockFooterRows(deps.tui, rows)) requestRender();
 		},
-		getSessionTokens: () => observabilitySnapshot.session.tokens,
+		...(deps.observability.telemetry ? { getTelemetry: () => deps.observability.telemetry?.live() ?? null } : {}),
 		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : observabilitySnapshot.session.latestThroughput),
-		getSessionCost: () => observabilitySnapshot.session.cost,
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
@@ -525,6 +524,15 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		footer.refresh();
 		requestRender();
 	});
+	// Spend repaints on persisted batches only, coalesced to 10 Hz by the read model; never per token (#434 §11.3).
+	// One listener for every topic, so an update naming several repaints once.
+	const repaintSpend = () => {
+		footer.refresh();
+		requestRender();
+	};
+	const unsubscribeTelemetry = (["session", "calls", "cost", "runs"] as const).map(
+		(topic) => deps.observability.telemetry?.subscribe(topic, repaintSpend) ?? (() => {}),
+	);
 
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
@@ -820,6 +828,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		banner.dispose();
 		footer.dispose();
 		unsubscribeObservability();
+		for (const off of unsubscribeTelemetry) off();
 		contextActivityStore.unsubscribe();
 		unsubscribeLoops?.();
 		dispatchBoardStore.unsubscribe();

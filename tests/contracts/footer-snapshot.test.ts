@@ -1,9 +1,11 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import type { TelemetryView } from "../../src/domains/observability/contract.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";
 import { footerState } from "../harness/footer-fixture.js";
+import { goldenTelemetryRecords, telemetryViewOf } from "../harness/telemetry-view.js";
 
 test("footer hydration reads time and notices once per snapshot", () => {
 	let clocks = 0;
@@ -71,36 +73,35 @@ test("compact footer names an unknown serving window without a percentage", () =
 	strictEqual(/\?%/u.test(rows), false);
 });
 
-test("footer totals distinguish unknown usage from never-sent calls, including when no tokens were spent", () => {
-	let total = 0;
-	let missing = 0;
-	let neverSent = 1;
+test("footer totals come from the read model: unknown usage stays partial, never-sent is counted, nothing reads as 0 (#434)", () => {
+	const records = goldenTelemetryRecords();
+	const golden = telemetryViewOf("golden-p0", records);
+	const neverSentId = golden.calls({ dispositions: ["never_sent"] }).calls[0]?.callId;
+	let view: TelemetryView | null = telemetryViewOf(
+		"golden-p0",
+		records.filter((record) => "callId" in record.data && record.data.callId === neverSentId),
+	);
 	const panel = buildFooterDashboard({
 		providers: { list: () => [] } as never,
 		resolveCurrentBranch: async () => null,
 		getTerminalRows: () => 120,
-		getSessionTokens: () => ({
-			input: total,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			reasoningTokens: 0,
-			totalTokens: total,
-			missingTokenCalls: missing,
-			neverSentCalls: neverSent,
-		}),
+		getTelemetry: () => view,
 	});
 	try {
 		panel.setExpanded(true);
-		for (const mixed of [false, true]) {
-			total = mixed ? 150 : 0;
-			missing = mixed ? 2 : 0;
-			neverSent = mixed ? 3 : 1;
+		for (const scenario of ["never-sent", "golden", "unbound"] as const) {
+			view = scenario === "never-sent" ? view : scenario === "golden" ? golden : null;
+			panel.refresh();
 			for (const width of [40, 80, 120]) {
 				const rows = panel.view.render(width);
 				const text = rows.map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
-				match(text, mixed ? /Σ150 \+\? \(2 calls with unknown usage\) · 3 calls never sent/u : /Σ0 · 1 call never sent/u);
-				if (!mixed) doesNotMatch(text, /unknown usage|\+\?/u);
+				if (scenario === "never-sent") match(text, /Σ0 · 1 never sent/u);
+				if (scenario === "golden") {
+					// Two calls have unknown usage, so the total is a lower bound and the cache read is unknown, not 0.
+					match(text, /Σ≥5\.3k \+\? · 1 never sent/u);
+					match(text, /\$0\.01 \+\?/u);
+				}
+				if (scenario === "unbound") match(text, /not available/u);
 				for (const row of rows) ok(visibleWidth(row) <= width);
 			}
 		}
