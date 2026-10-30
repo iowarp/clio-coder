@@ -1,10 +1,11 @@
-import { constants, readdirSync, readFileSync } from "node:fs";
+import { constants, existsSync, readdirSync, readFileSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { mkdir, open, readdir, readFile, rename } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
+import { resolvePackageRoot } from "../../core/package-root.js";
 import { processBirthToken } from "../../core/process-identity.js";
-import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
+import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import { captureAdmits, STANDARD_CAPTURE, sameTelemetryCapture } from "../../core/telemetry/capture.js";
@@ -15,7 +16,7 @@ import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/e
 import { newRecordId } from "../../core/telemetry/ids.js";
 import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/producer.js";
 import { registerRunTelemetrySink, registerTelemetrySink } from "../../core/telemetry/producer.js";
-import type { Kind, PreimageKind } from "../../core/telemetry/schemas.js";
+import type { Kind, Payload, PreimageKind } from "../../core/telemetry/schemas.js";
 import { PREIMAGE_SUBJECTS } from "../../core/telemetry/schemas.js";
 import type { SegmentScan } from "../../core/telemetry/segment.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../core/telemetry/segment.js";
@@ -175,6 +176,34 @@ export function callJournalHeader(
 		},
 		writer: writer,
 	};
+}
+
+/** Only the newly created child's cold fork path calls this, before any writer can acquire it (#434). */
+export function seedForkCallJournal(
+	directory: string,
+	sessionId: string,
+	lineage: Payload<"session.forked_from">,
+): void {
+	const path = join(directory, "calls.jsonl");
+	if (existsSync(path)) throw new Error("fork journal already exists");
+	const pkg = JSON.parse(readFileSync(join(resolvePackageRoot(), "package.json"), "utf8")) as {
+		version: string;
+		dependencies: Record<string, string>;
+	};
+	const header = callJournalHeader({
+		clioCoderVersion: pkg.version,
+		piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown",
+	});
+	const row = makeTelemetryRecord(
+		"session.forked_from",
+		lineage,
+		{ sessionId, label: "main" },
+		{
+			t: new Date().toISOString(),
+			mono: performance.now(),
+		},
+	);
+	safeResourceWrite(path, Buffer.concat([encodeTelemetryLine(header), encodeTelemetryLine(row)]), { mode: 0o600 });
 }
 
 /** One lease for the writer's lifetime, adjudicated by host, pid and birth token (#434). */

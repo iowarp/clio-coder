@@ -157,6 +157,91 @@ export function checkTelemetryProducer(file: string, source: string): string[] {
 	return violations;
 }
 
+/** A journal segment, a session's objects/, the trace index or <stateDir>/telemetry/, as a path expression spells it. */
+const TELEMETRY_PATH =
+	/[/"'`](calls\.(?:[^"'`/\s]*\.)?jsonl|events\.(?:[^"'`/\s]*\.)?ndjson|trace\.sqlite[^"'`/\s]*|objects|telemetry)(?=[/"'`])/;
+/** The write call and which of its arguments name a path it writes, creates, moves or removes. */
+const PATH_WRITES = new Map<string, number[]>([
+	...["writeFile", "appendFile", "createWriteStream", "rm", "rmdir", "unlink", "truncate", "mkdir"].flatMap(
+		(name): [string, number[]][] => [
+			[name, [0]],
+			[`${name}Sync`, [0]],
+		],
+	),
+	...["rename", "copyFile", "cp", "symlink", "link"].flatMap((name): [string, number[]][] => [
+		[name, [0, 1]],
+		[`${name}Sync`, [0, 1]],
+	]),
+	["safeResourceWrite", [0]],
+	["safeResourceWriteAsync", [0]],
+]);
+
+/** Only the observability domain writes under the telemetry paths; every other module goes through its writers (#434 §5.1). */
+export function checkTelemetryWrites(file: string, source: string): string[] {
+	if (file.startsWith("src/domains/observability/")) return [];
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	// A path is usually built a step or two before the write, so a name expands to what this file assigns it.
+	const definitions = new Map<string, ts.Node[]>();
+	const define = (name: string, node: ts.Node) => definitions.set(name, [...(definitions.get(name) ?? []), node]);
+	const collect = (node: ts.Node): void => {
+		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer)
+			define(node.name.text, node.initializer);
+		if (ts.isFunctionDeclaration(node) && node.name && node.body) define(node.name.text, node.body);
+		ts.forEachChild(node, collect);
+	};
+	collect(tree);
+	const expand = (node: ts.Node, seen: Set<string>): string => {
+		let text = node.getText(tree);
+		const visit = (child: ts.Node): void => {
+			if (ts.isIdentifier(child) && !seen.has(child.text) && seen.size < 8) {
+				seen.add(child.text);
+				for (const definition of definitions.get(child.text) ?? []) text += ` ${expand(definition, seen)}`;
+			}
+			ts.forEachChild(child, visit);
+		};
+		visit(node);
+		return text;
+	};
+	const violations: string[] = [];
+	const visit = (node: ts.Node): void => {
+		let paths: ts.Expression[] = [];
+		if (ts.isCallExpression(node)) {
+			const callee = node.expression;
+			const name = ts.isPropertyAccessExpression(callee) ? callee.name.text : callee.getText(tree);
+			const positions = PATH_WRITES.get(name);
+			if (positions) paths = positions.flatMap((index) => node.arguments[index] ?? []);
+			// open() writes only with a flag that is not read-only.
+			const flags = node.arguments[1];
+			if (
+				(name === "open" || name === "openSync") &&
+				flags &&
+				!(ts.isStringLiteral(flags) && /^rs?$/.test(flags.text)) &&
+				!/RDONLY/.test(flags.getText(tree))
+			)
+				paths = [node.arguments[0] as ts.Expression];
+		}
+		if (
+			ts.isNewExpression(node) &&
+			node.expression.getText(tree) === "DatabaseSync" &&
+			node.arguments?.[0] &&
+			!/readOnly:\s*true/.test(node.arguments[1]?.getText(tree) ?? "")
+		)
+			paths = [node.arguments[0]];
+		for (const target of paths) {
+			const match = TELEMETRY_PATH.exec(expand(target, new Set()));
+			if (!match) continue;
+			const line = tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+			violations.push(
+				`rule11: ${file}:${line} writes under a telemetry path (${match[1]}) outside the observability domain; go through the observability writers`,
+			);
+			break;
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return violations;
+}
+
 /** Guard monetary presentation without confusing token/duration precision or shell dollars (#434). */
 export function checkCostRendering(file: string, source: string): string[] {
 	if (file === "src/core/telemetry/render.ts") return [];
@@ -837,6 +922,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		const source = readFileSync(filePath, "utf8");
 		violations.push(...checkCostRendering(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkLedgerUsageMutation(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
+		violations.push(...checkTelemetryWrites(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(
 			...checkSurfaceTotals(path.relative(projectRoot, filePath).split(path.sep).join("/"), source, usedSurfaceExemptions),
 		);
@@ -1006,9 +1092,10 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 
 	for (const directory of ["client", "server"]) {
 		for (const file of walk(path.join(projectRoot, "apps/clio-coder-gui", directory))) {
-			violations.push(
-				...checkCostRendering(path.relative(projectRoot, file).split(path.sep).join("/"), readFileSync(file, "utf8")),
-			);
+			const relative = path.relative(projectRoot, file).split(path.sep).join("/");
+			const source = readFileSync(file, "utf8");
+			violations.push(...checkCostRendering(relative, source));
+			if (directory === "server") violations.push(...checkTelemetryWrites(relative, source));
 		}
 	}
 	for (const file of valueImportClosure(path.join(projectRoot, "src/core/telemetry/producer.ts"))) {

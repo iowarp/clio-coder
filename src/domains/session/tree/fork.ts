@@ -1,10 +1,10 @@
 import { dirname } from "node:path";
 import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
+import { seedForkCallJournal } from "../../observability/call-journal.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
 import type { SessionMeta } from "../contract.js";
 import { isSessionHeader, type SessionEntry } from "../entries.js";
-import { seedForkCallJournal } from "../fork-journal.js";
 import { enrichForkMeta } from "../history.js";
 import { type SessionManagerState, startSession } from "../manager.js";
 import { entryBelongsToPath } from "./active-path.js";

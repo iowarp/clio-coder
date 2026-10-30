@@ -1,46 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { resolvePackageRoot } from "../../core/package-root.js";
 import { assertSafeId } from "../../core/safe-id.js";
-import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
-import { encodeTelemetryLine } from "../../core/telemetry/segment.js";
 import type { CallJournalRead } from "../observability/call-journal.js";
-import { callJournalHeader, readCallJournalSync } from "../observability/call-journal.js";
+import { readCallJournalSync } from "../observability/call-journal.js";
 import type { SessionEntry } from "./entries.js";
 import { journalOwnsSideUsage } from "./journal-usage.js";
 
 export interface SessionCallJournalRead extends CallJournalRead {
 	runs: Map<string, CallJournalRead & { throughMs: number }>;
-}
-
-/** Only the newly created child's cold fork path calls this, before any writer can acquire it (#434). */
-export function seedForkCallJournal(
-	directory: string,
-	sessionId: string,
-	lineage: Payload<"session.forked_from">,
-): void {
-	const path = join(directory, "calls.jsonl");
-	if (existsSync(path)) throw new Error("fork journal already exists");
-	const pkg = JSON.parse(readFileSync(join(resolvePackageRoot(), "package.json"), "utf8")) as {
-		version: string;
-		dependencies: Record<string, string>;
-	};
-	const header = callJournalHeader({
-		clioCoderVersion: pkg.version,
-		piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown",
-	});
-	const row = makeTelemetryRecord(
-		"session.forked_from",
-		lineage,
-		{ sessionId, label: "main" },
-		{
-			t: new Date().toISOString(),
-			mono: performance.now(),
-		},
-	);
-	safeResourceWrite(path, Buffer.concat([encodeTelemetryLine(header), encodeTelemetryLine(row)]), { mode: 0o600 });
 }
 
 /** Resolve immutable ancestor facts; a copied ledger never owns a second copy of its calls (#434). */

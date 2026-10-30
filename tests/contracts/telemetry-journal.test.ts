@@ -51,6 +51,7 @@ import {
 	openCallJournal,
 	readCallJournal,
 	readCallJournalSync,
+	seedForkCallJournal,
 } from "../../src/domains/observability/call-journal.js";
 import {
 	createConsentView,
@@ -85,7 +86,7 @@ import { createSessionJournals } from "../../src/domains/observability/session-j
 import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
 import { readAuditRows } from "../../src/domains/session/archive-readers.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { readSessionCallJournalSync, seedForkCallJournal } from "../../src/domains/session/fork-journal.js";
+import { readSessionCallJournalSync } from "../../src/domains/session/fork-journal.js";
 import {
 	uniqueUsageCalls,
 	usageCallsFromAttempts,
@@ -99,7 +100,7 @@ import type { SessionUsageSink } from "../../src/domains/session/usage-record.js
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
-import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
+import { checkTelemetryProducer, checkTelemetryWrites } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 import { telemetryCall } from "../harness/telemetry-view.js";
 
@@ -125,6 +126,27 @@ test("producer boundaries reject filesystem helpers and serialization without bl
 	strictEqual(checkTelemetryProducer("helper.ts", 'import { open as write } from "node:fs/promises";').length, 1);
 	strictEqual(checkTelemetryProducer("helper.ts", 'JSON.stringify(event); new DatabaseSync("file");').length, 2);
 	deepStrictEqual(checkTelemetryProducer("producer.ts", "sink.enqueue(event);"), []);
+});
+
+test("rule11 keeps writes under telemetry paths inside the observability domain", () => {
+	for (const source of [
+		'writeFileSync(join(directory, "calls.jsonl"), bytes);',
+		'const path = join(stateDir, "telemetry", "consent.json"); await writeFile(path, "{}");',
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: The source under check builds a segment name in a template.
+		"appendFileSync(`${directory}/events.${id}.ndjson`, line);",
+		'openSync(join(directory, "objects", name), "wx");',
+		'new DatabaseSync(join(stateDir, "trace.sqlite"));',
+	]) {
+		ok(checkTelemetryWrites("src/domains/session/example.ts", source)[0]?.startsWith("rule11:"), source);
+		deepStrictEqual(checkTelemetryWrites("src/domains/observability/example.ts", source), []);
+	}
+	for (const source of [
+		'readFileSync(join(directory, "calls.jsonl"));',
+		'openSync(join(directory, "calls.jsonl"), "r");',
+		'new DatabaseSync(join(stateDir, "trace.sqlite"), { readOnly: true });',
+		"rmSync(sessionDirectory, { recursive: true });",
+	])
+		deepStrictEqual(checkTelemetryWrites("src/domains/session/example.ts", source), [], source);
 });
 
 test("worker forwarding preserves identity and source clocks with bounded deferred delivery", async () => {
