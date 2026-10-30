@@ -1,11 +1,11 @@
 import type { ChildProcessByStdio } from "node:child_process";
 import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
 import { codexSubprocessPermissionConfig } from "../../domains/providers/runtimes/external-cli-policy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
+import { bindExternalUsage } from "../external-call-telemetry.js";
 import {
 	createProcessTreeTerminator,
 	EXTERNAL_PROCESS_KILL_GRACE_MS,
@@ -198,7 +198,26 @@ function assistantMessage(
 	} as AgentMessage & { role: "assistant" };
 	if (state.threadId) message.responseId = state.threadId;
 	if (diagnostic) message.errorMessage = boundedExternalDiagnostic(diagnostic);
-	return message;
+	const count = (value: unknown): value is number =>
+		typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+	const prompt = rawUsage?.input_tokens;
+	const cached = rawUsage?.cached_input_tokens;
+	const written = rawUsage?.cache_write_input_tokens;
+	const output = rawUsage?.output_tokens;
+	return bindExternalUsage(message, {
+		usage: {
+			input:
+				count(prompt) && count(cached) && count(written) && prompt >= cached + written
+					? prompt - cached - written
+					: undefined,
+			output,
+			cacheRead: cached,
+			cacheWrite: written,
+			reasoning: rawUsage?.reasoning_output_tokens,
+			totalTokens: count(prompt) && count(output) ? prompt + output : undefined,
+		},
+		coverage: state.terminal !== null ? "complete" : "partial",
+	});
 }
 
 export function startCodexCliWorkerRun(

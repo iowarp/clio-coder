@@ -1,7 +1,9 @@
 /** Clio's supported managed CLI connectors. Each peer owns its wire parser and permissions. */
+
 import { startAntigravityWorkerRun } from "../antigravity/subprocess-runtime.js";
 import { startClaudeCodeWorkerRun } from "../claude/subprocess-runtime.js";
 import { startCodexCliWorkerRun } from "../codex/subprocess-runtime.js";
+import { observeExternalWorkerRun } from "../external-call-telemetry.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput } from "../worker-runtime.js";
 import { startJsonlCliRun } from "./jsonl-runner.js";
 import { OPENCODE_CLI_CONNECTOR } from "./opencode.js";
@@ -29,5 +31,7 @@ export function externalCliConnector(runtimeId: string): ExternalCliConnector | 
 export function startExternalCliWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const connector = externalCliConnector(input.runtime.id);
 	if (!connector) throw new Error(`no managed CLI connector for runtime '${input.runtime.id}'`);
-	return connector.start(input, emit);
+	return ["codex-cli", "claude-code", "antigravity-code"].includes(input.runtime.id)
+		? observeExternalWorkerRun(input, emit, (observedEmit) => connector.start(input, observedEmit))
+		: connector.start(input, emit);
 }

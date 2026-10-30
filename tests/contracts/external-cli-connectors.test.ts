@@ -6,6 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, it } from "node:test";
+import { readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { peerModeCapabilities } from "../../src/domains/interop/peer-modes.js";
 import { interopAgentKind } from "../../src/domains/interop/registry.js";
 import type { InteropAgentRecord } from "../../src/domains/interop/types.js";
@@ -18,6 +21,7 @@ import {
 	buildCodexExecPrompt,
 	startCodexCliWorkerRun,
 } from "../../src/engine/codex/subprocess-runtime.js";
+import { observeExternalWorkerRun } from "../../src/engine/external-call-telemetry.js";
 import { externalCliConnector } from "../../src/engine/external-cli/connectors.js";
 import { startJsonlCliRun } from "../../src/engine/external-cli/jsonl-runner.js";
 import { buildOpenCodeCliArgs, OPENCODE_CLI_CONNECTOR } from "../../src/engine/external-cli/opencode.js";
@@ -205,12 +209,31 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 			},
 		]);
 		const run = input(root, codexCliRuntime);
+		run.telemetryContext = { sessionId: null, runId: "codex-test", label: "worker" };
+		run.target = { ...run.target, pricing: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } };
+		const frames: WorkerTelemetryFrame[] = [];
 		const events: string[] = [];
-		const result = await startCodexCliWorkerRun(run, (event) => events.push(event.type), {
-			binary,
-			workspaceRoot: root,
-			environment: { PATH: process.env.PATH, HOME: root, CODEX_HOME: join(root, "codex-home"), FAKE_SECRET: "hidden" },
-		}).promise;
+		const result = await observeExternalWorkerRun(
+			run,
+			(event) => {
+				events.push(event.type);
+				if (event.type === "clio_coder_telemetry") frames.push(event);
+			},
+			(emit) =>
+				startCodexCliWorkerRun(run, emit, {
+					binary,
+					workspaceRoot: root,
+					environment: { PATH: process.env.PATH, HOME: root, CODEX_HOME: join(root, "codex-home"), FAKE_SECRET: "hidden" },
+				}),
+		).promise;
+		ok(frames.every(({ record }) => readTelemetryRecord(record).kind === "record"));
+		const projected = runUsageFromCallRecords(frames.map(({ record }) => record));
+		equal(projected.totalTokens, 13);
+		equal(projected.apiCalls, 0, "a CLI turn can contain multiple provider calls");
+		equal(projected.costSummary.unknownCallCoverageRuns, 1);
+		equal(projected.costProvenance, "estimated");
+		ok(Math.abs(projected.costUsd - 27 / 1_000_000) < 1e-12);
+		equal(projected.usageFacts.reasoning.unknownCount, 1);
 		equal(result.exitCode, 0);
 		const message = assistant(result.messages);
 		equal(message.stopReason, "stop");

@@ -6,6 +6,7 @@ import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
+import { bindExternalUsage } from "../external-call-telemetry.js";
 import {
 	createProcessTreeTerminator,
 	EXTERNAL_PROCESS_KILL_GRACE_MS,
@@ -191,7 +192,23 @@ function buildAssistantMessage(input: {
 	if (typeof input.result?.request_id === "string") message.responseId = input.result.request_id;
 	if (typeof input.result?.model === "string") message.responseModel = input.result.model;
 	if (errorMessage.length > 0) message.errorMessage = boundedExternalDiagnostic(errorMessage);
-	return message;
+	const usage = input.result ? nestedRecord(input.result, "usage") : null;
+	return bindExternalUsage(message, {
+		usage: {
+			input: usage?.input_tokens ?? usage?.inputTokens ?? usage?.input ?? usage?.prompt_tokens ?? usage?.promptTokens,
+			output:
+				usage?.output_tokens ?? usage?.outputTokens ?? usage?.output ?? usage?.completion_tokens ?? usage?.completionTokens,
+			cacheRead:
+				usage?.cache_read_input_tokens ?? usage?.cacheReadInputTokens ?? usage?.cacheRead ?? usage?.cacheReadTokens,
+			cacheWrite:
+				usage?.cache_creation_input_tokens ??
+				usage?.cacheCreationInputTokens ??
+				usage?.cacheWrite ??
+				usage?.cacheWriteTokens,
+			costUsd: input.result?.total_cost_usd ?? usage?.costUSD ?? usage?.cost_usd,
+		},
+		coverage: input.result ? "complete" : "partial",
+	});
 }
 
 function emitTextDelta(

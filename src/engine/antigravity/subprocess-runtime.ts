@@ -1,10 +1,10 @@
 import type { ChildProcessByStdio } from "node:child_process";
 import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
+import { bindExternalUsage } from "../external-call-telemetry.js";
 import {
 	createProcessTreeTerminator,
 	EXTERNAL_PROCESS_KILL_GRACE_MS,
@@ -384,7 +384,29 @@ function buildAssistantMessage(input: {
 	// Opaque provider observation only; callers must explicitly request resume.
 	if (input.conversationId) message.responseId = input.conversationId;
 	if (input.diagnostic) message.errorMessage = boundedExternalDiagnostic(input.diagnostic);
-	return message;
+	const raw = record(input.result?.usage);
+	const count = (value: unknown): value is number =>
+		typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+	const prompt = raw?.input_tokens;
+	const cached = raw?.cache_read_tokens;
+	const output = raw?.output_tokens;
+	const thinking = raw?.thinking_tokens;
+	const total = raw?.total_tokens;
+	return bindExternalUsage(message, {
+		usage: {
+			input: count(prompt) && count(cached) && prompt >= cached ? prompt - cached : undefined,
+			output:
+				count(prompt) && count(output) && count(thinking) && count(total)
+					? total >= prompt + output + thinking
+						? output + thinking
+						: output
+					: undefined,
+			cacheRead: cached,
+			reasoning: thinking,
+			totalTokens: total,
+		},
+		coverage: input.result ? "complete" : "partial",
+	});
 }
 
 export function startAntigravityWorkerRun(

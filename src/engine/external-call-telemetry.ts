@@ -6,6 +6,7 @@ import { newAttemptId, newCallId } from "../core/telemetry/ids.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallUsage, RunUsage } from "../core/telemetry/schemas.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
+import { calculatePricingCostUsd } from "../domains/providers/catalog.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput } from "./worker-runtime.js";
 
 const unknown = { kind: "unknown", reason: "provider-omitted" } as const;
@@ -96,6 +97,40 @@ export function observeExternalWorkerRun(
 		requestedModel: input.wireModelId,
 		reportedModel: { kind: "unknown", reason: "not-observed" } as const,
 	};
+	const price = (facts: ReturnType<typeof externalUsageFacts>) => {
+		if (facts.pricing.usd.kind !== "unknown" || !input.target.pricing) return facts;
+		const rates = input.target.pricing;
+		if (
+			rates === "free" ||
+			[rates.input, rates.output, rates.cacheRead ?? 0, rates.cacheWrite ?? 0].every((rate) => rate === 0)
+		)
+			return {
+				...facts,
+				pricing: {
+					usd: { kind: "measured" as const, value: 0, source: "local-count" as const },
+					pricedBy: "free" as const,
+				},
+			};
+		const keys = ["input", "output", "cacheRead", "cacheWrite"] as const;
+		if (keys.some((key) => (rates[key] ?? 0) !== 0 && facts.usage[key].kind !== "measured")) return facts;
+		const counts = Object.fromEntries(
+			keys.map((key) => [key, facts.usage[key].kind === "measured" ? facts.usage[key].value : 0]),
+		) as Record<(typeof keys)[number], number>;
+		return {
+			...facts,
+			pricing: {
+				usd: {
+					kind: "estimated" as const,
+					value: calculatePricingCostUsd(
+						{ input: rates.input, output: rates.output, cacheRead: rates.cacheRead ?? 0, cacheWrite: rates.cacheWrite ?? 0 },
+						counts,
+					),
+					method: "target-rates" as const,
+				},
+				pricedBy: "target-rates" as const,
+			},
+		};
+	};
 	let revision = 0;
 	const calls = new Set<string>();
 	recordTelemetry("process.started", {}, context);
@@ -108,7 +143,7 @@ export function observeExternalWorkerRun(
 				const identity = payload.responseId ?? String(payload.callIndex);
 				if (observed && !calls.has(identity)) {
 					calls.add(identity);
-					const facts = externalUsageFacts(observed);
+					const facts = price(externalUsageFacts(observed));
 					const callId = newCallId();
 					const attemptId = newAttemptId();
 					const settlement = callSettlementFromMessage(
@@ -146,7 +181,9 @@ export function observeExternalWorkerRun(
 			} else if (event.type === "message_end" && event.message.role === "assistant") {
 				const message = event.message;
 				const bound = observations.get(message);
-				const facts = externalUsageFacts(bound ?? { usage: record(message.usage), coverage: "unknown", normalized: true });
+				const facts = price(
+					externalUsageFacts(bound ?? { usage: record(message.usage), coverage: "unknown", normalized: true }),
+				);
 				recordTelemetry(
 					"run.usage",
 					{
