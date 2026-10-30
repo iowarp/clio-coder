@@ -232,12 +232,12 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 	if (deps.scheduling) {
 		const budget = deps.scheduling.preflight();
 		if (budget.verdict === "over" || budget.verdict === "at") {
-			return `budget ceiling crossed: $${budget.currentUsd.toFixed(4)} / $${budget.ceilingUsd.toFixed(4)}`;
+			return `budget ceiling crossed: ${renderCostAmount(budget.currentUsd, "known")} / ${renderCostAmount(budget.ceilingUsd, "known")}`;
 		}
 		if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (playbook.budgetUsd > remaining) {
-				return `fleet budget $${playbook.budgetUsd.toFixed(2)} exceeds remaining session budget $${remaining.toFixed(2)}`;
+				return `fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${renderCostAmount(remaining, "known")}`;
 			}
 		}
 	}

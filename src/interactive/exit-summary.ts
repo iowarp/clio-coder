@@ -1,21 +1,11 @@
 import type { ExitSummaryStyle, OutputStyle } from "../core/defaults.js";
 import { resolveExitSummaryStyle } from "../core/defaults.js";
 import type { CostRow } from "../domains/observability/cost-rows.js";
-import type { CostAggregate } from "../domains/observability/index.js";
-import { formatCostAggregate } from "../domains/observability/index.js";
+import { renderCostAggregate } from "../domains/observability/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ExitSummarySnapshot } from "./exit-summary-collector.js";
 import { brandMark, clioTheme, formatCompactMs, frame, innerDivider } from "./theme/index.js";
-
-function costLabel(cost: CostAggregate): string {
-	if (cost.allKnownFree) return "$0.00 (free)";
-	const amount = formatCostAggregate(cost);
-	if (cost.hasUnknown)
-		return amount ? `${amount} (${cost.hasEstimated ? "estimated; " : ""}partly unknown)` : "unknown pricing";
-	if (amount === null) return "unknown (not measured)";
-	return cost.hasEstimated ? amount : `${amount} (known)`;
-}
 
 const count = (value: number): string => value.toLocaleString("en-US");
 
@@ -155,7 +145,7 @@ export function renderExitSummary(
 			),
 		);
 		add("Tokens", count(snapshot.usage.reduce((sum, usage) => sum + usage.tokens, 0)));
-		add("Cost", `${costLabel(snapshot.cost)} · ${formatCompactMs(snapshot.wallMs)} wall`);
+		add("Cost", `${renderCostAggregate(snapshot.cost)} · ${formatCompactMs(snapshot.wallMs)} wall`);
 		// What Clio decided while the operator was away is never folded away.
 		if (unattended !== null) add("Unattended", unattended);
 		// Nor is a hook that runs outside the sandbox on the next git command.
@@ -171,7 +161,7 @@ export function renderExitSummary(
 			`${formatCompactMs(snapshot.wallMs)} wall · ${formatCompactMs(snapshot.modelMs)} model${snapshot.modelTimeIncomplete ? " (partly measured)" : ""}`,
 		);
 		add("Tokens", tokens(snapshot.usage));
-		add("Cost", costLabel(snapshot.cost));
+		add("Cost", renderCostAggregate(snapshot.cost));
 		if (snapshot.compactions > 0) add("Compactions", count(snapshot.compactions));
 		if (unattended !== null) add("Unattended", unattended);
 		if (gitHooks !== null) add("Git hooks", gitHooks);
@@ -201,7 +191,7 @@ export function renderExitSummary(
 			section(
 				`Models (${models.length})`,
 				models.flatMap(({ target, model, usage }) => {
-					if (!usage) return [`${target} / ${model} · usage not reported; cost unknown`];
+					if (!usage) return [`${target} / ${model} · usage not reported; cost ${renderCostAggregate(null)}`];
 					const requested = usage.requestedModelIds.filter((id) => id !== model);
 					const extra = [
 						["side questions", usage.sideQuestions],
@@ -214,7 +204,7 @@ export function renderExitSummary(
 						.filter(([, n]) => Number(n) > 0)
 						.map(([label, n]) => `${n} ${label}`);
 					return [
-						`${target} / ${model} · ${count(usage.apiCalls)} calls · ${costLabel(usage.cost)}`,
+						`${target} / ${model} · ${count(usage.apiCalls)} calls · ${renderCostAggregate(usage.cost)}`,
 						tokens([usage]),
 						...(requested.length ? [`Requested: ${requested.join(", ")}`] : []),
 						...(extra.length ? [extra.join(" · ")] : []),

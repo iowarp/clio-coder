@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../observability/cost.js";
 /**
  * Pure presentation helpers for quota snapshots.
  *
@@ -157,7 +158,7 @@ export function localQuotaSnapshot(options: { runtimeLabel?: string; fetchedAt?:
 		displayName: options.runtimeLabel ?? "Local AI",
 		status: "ok",
 		windows: [],
-		credits: { display: "$0.00", usedPct: null },
+		credits: { display: renderCostAmount(0, "known_free"), usedPct: null },
 		plan: "Local",
 		message: "no subscription window consumed",
 		fetchedAt: options.fetchedAt ?? null,

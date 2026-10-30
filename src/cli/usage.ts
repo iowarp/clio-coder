@@ -13,6 +13,7 @@ import { summarizeFailedCompactionUsage } from "../domains/observability/compact
 import type { CostAggregate } from "../domains/observability/cost.js";
 import {
 	accumulateCostAmount,
+	aggregateCostAmounts,
 	callCoverageForRun,
 	emptyCostAggregate,
 	renderCostAggregate,
@@ -957,13 +958,18 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			if (callOrigins.systemOne > 0) out(`  System One calls in window: ${callOrigins.systemOne}`);
 		}
 		if (failedCompaction.calls > 0) {
+			const erroredCompactionCost = aggregateCostAmounts(
+				outOfTurnRows
+					.filter(
+						(row) => row.label === "failed-compaction" && row.callOutcome === "error" && row.failure?.invoked !== false,
+					)
+					.map((row) => ({ usd: row.usage.costUsd ?? 0, provenance: row.usage.costProvenance ?? "unknown" })),
+			);
 			out(
 				`  failed-compaction streams: ${failedCompaction.calls} (${failedCompaction.erroredCalls} errored, ${failedCompaction.abortedCalls} aborted, ${failedCompaction.successfulCalls} completed before the attempt failed)`,
 			);
 			out("  usage figures are known subtotals; missing compaction usage is not zero or a complete spending bound");
-			out(
-				`  errored compaction known cost: ${failedCompaction.erroredKnownUsage.costUsd === null ? "unknown" : `$${failedCompaction.erroredKnownUsage.costUsd.toFixed(4)}`}`,
-			);
+			out(`  errored compaction known cost: ${renderCostAggregate(erroredCompactionCost)}`);
 		}
 		out(
 			`  ${missingTokenCalls > 0 ? "known cost subtotal" : "reported/estimated cost"} in window: ${renderCostAggregate(usageTotals.cost)}`,

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { clioStatePath } from "../core/xdg.js";
 import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
 import { codeStepDir, readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
-import { renderCostAggregate } from "../domains/observability/cost.js";
+import { renderTraceCost } from "../domains/observability/cost.js";
 import type {
 	TraceEventRow,
 	TracePhaseRow,
@@ -441,15 +441,7 @@ function formatNumber(value: number | null, missingTokenCalls?: number | null): 
 }
 
 function formatCost(value: number | null, row: TraceRunRow | TracePhaseRow): string {
-	if (value === null) return "—";
-	if (row.cost_estimated == null && row.cost_unknown == null) return `$${value.toFixed(4)} (pricing unknown)`;
-	return renderCostAggregate({
-		knownUsd: value,
-		hasEstimated: row.cost_estimated === 1,
-		hasUnknown: row.cost_unknown === 1,
-		allKnownFree: false,
-		calls: row.api_calls ?? 1,
-	});
+	return renderTraceCost({ ...row, total_cost_usd: value });
 }
 
 function jsonBigInt(_key: string, value: unknown): unknown {

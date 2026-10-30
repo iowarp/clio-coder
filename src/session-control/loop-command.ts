@@ -1,4 +1,5 @@
 import type { JobPredicate, JobRecord } from "../core/job-types.js";
+import { renderCostAmount } from "../domains/observability/cost.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolResult } from "../tools/registry.js";
@@ -538,7 +539,7 @@ export function loopJobDetail(job: JobRecord, now: number): string[] {
 			`${job.delivery.kind === "main_turn" ? "follow-up turn" : "notice"} ${job.delivery.state}${job.delivery.reason ? `: ${preview(job.delivery.reason, SUMMARY_CHARS)}` : ""}`,
 		);
 	}
-	if (job.costUsd !== null) lines.push(`cost $${job.costUsd.toFixed(4)}`);
+	if (job.costUsd !== null) lines.push(`cost ${renderCostAmount(job.costUsd, undefined)}`);
 	for (const warning of jobWarnings(job, now)) lines.push(`warning: ${warning}`);
 	return lines;
 }

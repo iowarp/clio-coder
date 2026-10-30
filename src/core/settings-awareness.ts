@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../domains/observability/cost.js";
 import type { ClioSettings } from "./config.js";
 import { type RouteName, type RouteProvenance, routeFields } from "./route-provenance.js";
 import { getAtPath } from "./session-routing.js";
@@ -26,7 +27,7 @@ function describeSettingsPosture(settings: Readonly<ClioSettings>): string {
 	const budget =
 		settings.safety.limits.sessionCostUsd === 0
 			? "Tracked spending has no session ceiling."
-			: `Tracked session spending is capped at $${settings.safety.limits.sessionCostUsd}; unknown provider prices are not a guaranteed dollar limit.`;
+			: `Tracked session spending is capped at ${renderCostAmount(settings.safety.limits.sessionCostUsd, "known")}; unknown provider prices are not a guaranteed dollar limit.`;
 	return `${AUTONOMY_HELP[settings.safety.autonomy]} ${worker} ${budget}`;
 }
 

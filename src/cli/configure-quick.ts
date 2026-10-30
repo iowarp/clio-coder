@@ -1,5 +1,6 @@
 import { readSettings, SettingsValidationError, updateSettings, validateSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
+import { renderCostAmount } from "../domains/observability/cost.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import { isOrchestratorEligibleRuntime, resolveAuthTarget } from "../domains/providers/index.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
@@ -250,7 +251,7 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 						"Tracked spending",
 						settings.safety.limits.sessionCostUsd === 0
 							? "no session ceiling"
-							: `$${settings.safety.limits.sessionCostUsd} per session; unpriced usage is not covered`,
+							: `${renderCostAmount(settings.safety.limits.sessionCostUsd, "known")} per session; unpriced usage is not covered`,
 					],
 				]);
 				presenter.note("Safety rules still apply. You can adjust these in /settings → Permissions & Limits.");

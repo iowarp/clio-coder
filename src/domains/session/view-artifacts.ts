@@ -1,7 +1,7 @@
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { formatFooterTokens, formatUsd } from "../../core/display-units.js";
+import { formatFooterTokens } from "../../core/display-units.js";
 import { clockLocal } from "../../core/format-time.js";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
@@ -22,6 +22,7 @@ import {
 	TRUST_STATUS_AXES,
 } from "../evidence/trust-status.js";
 import type { EvidenceFinding, EvidenceInspectable, EvidenceOverview, EvidenceSource } from "../evidence/types.js";
+import { renderCostAggregate, renderCostAmount } from "../observability/cost.js";
 import type { AccountabilitySummary } from "../observability/index.js";
 import { readEvidenceIndex, summarizeEvidenceIndex } from "../observability/index.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
@@ -714,7 +715,7 @@ function renderEvidenceMarkdown(
 		`- tool errors: ${overview.totals.toolErrors}`,
 		`- blocked tool calls: ${overview.totals.blockedToolCalls}`,
 		`- tokens: ${formatFooterTokens(overview.totals.tokens)}`,
-		`- cost: ${formatUsd(overview.totals.costUsd)}`,
+		`- cost: ${renderCostAggregate(overview.totals.costSummary)}`,
 		`- protected artifacts: ${overview.totals.protectedArtifacts}`,
 		`- wall time: ${formatDurationMs(overview.totals.wallTimeMs)}`,
 		"",
@@ -809,7 +810,7 @@ function renderEvidenceSummary(
 		"",
 		"## What happened",
 		`${overview.totals.runs} runs · ${overview.totals.toolCalls} tool calls · ${overview.totals.toolErrors} errors · ${overview.totals.blockedToolCalls} blocked`,
-		`${formatDurationMs(overview.totals.wallTimeMs)} · ${formatFooterTokens(overview.totals.tokens)} tokens · ${formatUsd(overview.totals.costUsd)}`,
+		`${formatDurationMs(overview.totals.wallTimeMs)} · ${formatFooterTokens(overview.totals.tokens)} tokens · ${renderCostAggregate(overview.totals.costSummary)}`,
 		"",
 		"Press i for all bundle details and backing files.",
 	];
@@ -896,7 +897,7 @@ function renderReceiptSummary(receipt: RunReceipt, report: ReceiptVerificationRe
 		"## Checks",
 		...renderReceiptChecks(receipt),
 		"",
-		`${formatDurationMs(parseTime(receipt.endedAt) - parseTime(receipt.startedAt))} · ${formatFooterTokens(receipt.tokenCount)} tokens · ${formatUsd(receipt.costUsd)}`,
+		`${formatDurationMs(parseTime(receipt.endedAt) - parseTime(receipt.startedAt))} · ${formatFooterTokens(receipt.tokenCount)} tokens · ${renderCostAmount(receipt.costUsd, receipt.costProvenance, receipt.costSummary)}`,
 		"",
 		...(receipt.output
 			? [
@@ -1191,7 +1192,7 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`started: ${formatLocalTime(env.startedAt)}`,
 						`ended: ${env.endedAt ? formatLocalTime(env.endedAt) : "running"}`,
 						`tokens: ${formatFooterTokens(env.tokenCount)}`,
-						`cost: ${formatUsd(env.costUsd)}`,
+						`cost: ${renderCostAmount(env.costUsd, env.costProvenance, env.costSummary)}`,
 						`receipt: ${env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id)}`,
 						"",
 						"## What changed",

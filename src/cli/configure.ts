@@ -22,6 +22,7 @@ import {
 import { resolveClioDirs } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
+import { renderCostAmount } from "../domains/observability/cost.js";
 import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import {
 	buildProviderSupportEntry,
@@ -1493,7 +1494,9 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				["Worker permissions", settings.fleet.permissions.mode],
 				[
 					"Session cost limit",
-					settings.safety.limits.sessionCostUsd === 0 ? "none" : `$${settings.safety.limits.sessionCostUsd} USD`,
+					settings.safety.limits.sessionCostUsd === 0
+						? "none"
+						: renderCostAmount(settings.safety.limits.sessionCostUsd, "known"),
 				],
 				["Turn tool budget", String(settings.safety.limits.chatToolCallsPerTurn)],
 				["Review watchdog", onOff(settings.safety.review.enabled)],
@@ -1544,13 +1547,15 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 					if (answer === null) return;
 					const parsed = Number(answer);
 					if (!Number.isFinite(parsed) || parsed < 0) {
-						io.warn(`Session cost limit must be 0 or greater; left at $${current}\n`);
+						io.warn(`Session cost limit must be 0 or greater; left at ${renderCostAmount(current, "known")}\n`);
 						return;
 					}
 					updateSettings((draft) => {
 						draft.safety.limits.sessionCostUsd = parsed;
 					});
-					io.ok(parsed === 0 ? "Session cost limit removed" : `Session cost limit set to $${parsed} USD`);
+					io.ok(
+						parsed === 0 ? "Session cost limit removed" : `Session cost limit set to ${renderCostAmount(parsed, "known")}`,
+					);
 				},
 			},
 			{

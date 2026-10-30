@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../observability/cost.js";
 /**
  * Session budget state. Admission checks priced spend before the next paid
  * request; unpriced requests never enter this gate.
@@ -91,8 +92,8 @@ export class SessionCostCeilingError extends Error {
 		const perCall = budgetStopContextClause(contextTokens);
 		super(
 			runCap !== undefined && ceilingUsd >= runCap.ceilingUsd
-				? `${SESSION_COST_CEILING_REASON}: this run's priced spend $${(currentUsd - runCap.startUsd).toFixed(4)} reached its --max-cost-usd $${runCap.maxUsd.toFixed(4)} cap${perCall}`
-				: `${SESSION_COST_CEILING_REASON}: session priced spend $${currentUsd.toFixed(4)} reached the $${ceilingUsd.toFixed(4)} ceiling${perCall}; raise safety.limits.sessionCostUsd`,
+				? `${SESSION_COST_CEILING_REASON}: this run's priced spend ${renderCostAmount(currentUsd - runCap.startUsd, "known")} reached its --max-cost-usd ${renderCostAmount(runCap.maxUsd, "known")} cap${perCall}`
+				: `${SESSION_COST_CEILING_REASON}: session priced spend ${renderCostAmount(currentUsd, "known")} reached the ${renderCostAmount(ceilingUsd, "known")} ceiling${perCall}; raise safety.limits.sessionCostUsd`,
 		);
 	}
 }

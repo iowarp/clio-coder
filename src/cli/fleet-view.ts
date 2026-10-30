@@ -1,4 +1,5 @@
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
+import { renderCostAmount } from "../domains/observability/cost.js";
 /**
  * `clio-coder fleet view <runId|fleetRootId> [--follow]`.
  *
@@ -216,7 +217,7 @@ function modelObservationText(receipt: RunReceipt): string {
 
 function costText(receipt: RunReceipt): string {
 	const cost = typeof receipt.costUsd === "number" && Number.isFinite(receipt.costUsd) ? receipt.costUsd : null;
-	return `${cost === null ? "not recorded" : `$${cost.toFixed(4)}`} · ${receipt.costProvenance ?? "provenance not recorded"}`;
+	return renderCostAmount(cost ?? 0, receipt.costProvenance, receipt.costSummary);
 }
 
 /**

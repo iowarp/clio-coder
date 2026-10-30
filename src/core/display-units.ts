@@ -23,9 +23,3 @@ export function formatFooterTokens(n: number): string {
 	const fixed = scaled.toFixed(1);
 	return fixed.endsWith(".0") ? `${fixed.slice(0, -2)}M` : `${fixed}M`;
 }
-
-export function formatUsd(value: number): string {
-	if (!Number.isFinite(value) || value <= 0) return "$0.00";
-	if (value < 0.01) return `$${value.toFixed(4)}`;
-	return `$${value.toFixed(2)}`;
-}

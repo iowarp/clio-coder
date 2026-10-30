@@ -12,7 +12,7 @@ import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
-import { aggregateCostAmounts, type CostAmount } from "../observability/cost.js";
+import { aggregateCostAmounts, type CostAmount, renderCostAmount } from "../observability/cost.js";
 import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
@@ -4018,8 +4018,9 @@ export function createDispatchBundle(
 		agentId: string,
 		routeEstimateUsd = 0,
 	): never {
-		const estimateSuffix = routeEstimateUsd > 0 ? ` (includes $${routeEstimateUsd.toFixed(4)} route estimate)` : "";
-		const reason = `budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}${estimateSuffix}`;
+		const estimateSuffix =
+			routeEstimateUsd > 0 ? ` (includes ${renderCostAmount(routeEstimateUsd, "estimated")} route estimate)` : "";
+		const reason = `budget ceiling crossed: ${renderCostAmount(preflight.currentUsd, "known")} / ${renderCostAmount(preflight.ceilingUsd, "known")}${estimateSuffix}`;
 		safety.audit.recordToolCall?.({
 			tool: "dispatch",
 			classification: { actionClass: "dispatch", reasons: ["budget admission preflight"] },

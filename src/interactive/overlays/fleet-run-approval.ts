@@ -12,9 +12,9 @@
  */
 
 import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
+import { renderCostAmount } from "../../domains/observability/cost.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
-import { formatUsd } from "../footer/widgets.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, formatTargetLabel, rule } from "../theme/index.js";
 
@@ -85,10 +85,12 @@ export function formatBudgetLine(preview: FleetRunPreview): string {
 	const playbook =
 		preview.budget.playbookUsd === null
 			? "playbook declares no ceiling"
-			: `playbook ceiling $${preview.budget.playbookUsd.toFixed(2)}`;
+			: `playbook ceiling ${renderCostAmount(preview.budget.playbookUsd, "known")}`;
 	const ceiling =
-		preview.budget.ceilingUsd === 0 ? "no session ceiling" : `$${preview.budget.ceilingUsd.toFixed(2)} session ceiling`;
-	return `budget: admitted under ${ceiling}, ${formatUsd(preview.budget.currentUsd)} spent, ${playbook}`;
+		preview.budget.ceilingUsd === 0
+			? "no session ceiling"
+			: `${renderCostAmount(preview.budget.ceilingUsd, "known")} session ceiling`;
+	return `budget: admitted under ${ceiling}, ${renderCostAmount(preview.budget.currentUsd, "known")} spent, ${playbook}`;
 }
 
 /**

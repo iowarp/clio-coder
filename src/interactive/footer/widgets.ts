@@ -1,4 +1,3 @@
-import { formatUsd } from "../../core/display-units.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { CostAggregate, TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
@@ -176,8 +175,6 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, 
 			: "";
 	return `${prefix}${active}${truncated} · ${formatFooterTokens(snapshot.errors)}${GLYPH.error}`;
 }
-
-export { formatUsd };
 
 function contextComposition(context: ContextEngineFacts): {
 	system: number;

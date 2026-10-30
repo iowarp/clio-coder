@@ -90,7 +90,7 @@ describe("--max-cost-usd and parallel dispatches", () => {
 			ok(spentUsd <= capUsd + 2 * callUsd + 1e-9, `spent ${spentUsd}`);
 			for (const receipt of receipts) {
 				strictEqual(receipt.outcome, "canceled");
-				match(receipt.outcomeDetail ?? "", /--max-cost-usd \$1\.0000 cap/u);
+				match(receipt.outcomeDetail ?? "", /--max-cost-usd \$1\.00 cap/u);
 			}
 		} finally {
 			await bundle.extension.stop?.();

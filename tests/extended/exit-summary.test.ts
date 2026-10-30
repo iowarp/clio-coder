@@ -1,7 +1,8 @@
-import { deepStrictEqual, match } from "node:assert/strict";
+import { deepStrictEqual, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { aggregateCostAmounts, renderCostAggregate } from "../../src/domains/observability/cost.js";
 import type { ObservabilityContract } from "../../src/domains/observability/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { renderExitSummary } from "../../src/interactive/exit-summary.js";
@@ -52,6 +53,26 @@ test("the session summary counts what Clio answered while the operator was away 
 			/Unattended: 2 questions auto-resolved · 1 permission ask timed out and denied/u,
 			style,
 		);
+	}
+	ok(snapshot);
+	for (const amounts of [
+		[],
+		[{ usd: 0, provenance: "unknown" as const }],
+		[{ usd: 0, provenance: "known_free" as const }],
+		[{ usd: 0.000001, provenance: "known" as const }],
+		[
+			{ usd: 0.25, provenance: "estimated" as const },
+			{ usd: 0, provenance: "unknown" as const },
+		],
+	]) {
+		const cost = aggregateCostAmounts(amounts);
+		for (const style of ["brief", "standard", "report"] as const) {
+			ok(
+				renderExitSummary({ ...snapshot, cost }, style, 120, false)
+					.join("\n")
+					.includes(renderCostAggregate(cost)),
+			);
+		}
 	}
 	collector.dispose();
 });

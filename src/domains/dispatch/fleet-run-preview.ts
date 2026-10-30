@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../observability/cost.js";
 /**
  * What `/fleet run <playbook>` will do, projected before anything dispatches.
  *
@@ -149,13 +150,6 @@ function defaultLoad(
 	// loadPlaybook already refused any unregistered command id; this read
 	// is the binding the runner executes.
 	return { playbook, commands: loadPlaybookCommands(workspaceRoot) };
-}
-
-/** The footer's dollar format, restated so a diagnostic reads the same wherever it is shown. */
-function formatUsd(value: number): string {
-	if (!Number.isFinite(value) || value <= 0) return "$0.00";
-	if (value < 0.01) return `$${value.toFixed(4)}`;
-	return `$${value.toFixed(2)}`;
 }
 
 function describeError(error: unknown): string {
@@ -329,12 +323,14 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	};
 	if (input.budget) {
 		if (input.budget.verdict === "over" || input.budget.verdict === "at") {
-			diagnostics.push(`budget ceiling crossed: ${formatUsd(budget.currentUsd)} / ${formatUsd(budget.ceilingUsd)}`);
+			diagnostics.push(
+				`budget ceiling crossed: ${renderCostAmount(budget.currentUsd, "known")} / ${renderCostAmount(budget.ceilingUsd, "known")}`,
+			);
 		} else if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (playbook.budgetUsd > remaining) {
 				diagnostics.push(
-					`fleet budget $${playbook.budgetUsd.toFixed(2)} exceeds remaining session budget $${remaining.toFixed(2)}`,
+					`fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${renderCostAmount(remaining, "known")}`,
 				);
 			}
 		}

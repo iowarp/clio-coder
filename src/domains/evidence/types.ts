@@ -1,4 +1,5 @@
 import type { GateDecisionArtifact, RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
+import type { CostAggregate } from "../observability/cost.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { DecisionRecord } from "../session/entries.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
@@ -61,6 +62,7 @@ export const FAILURE_CAUSE_TAGS: ReadonlySet<EvidenceTag> = new Set(FAILURE_CAUS
 export type EvidenceSource = { kind: "run"; runId: string } | { kind: "session"; sessionId: string };
 
 export interface EvidenceTotals {
+	costSummary?: CostAggregate;
 	runs: number;
 	receipts: number;
 	toolCalls: number;

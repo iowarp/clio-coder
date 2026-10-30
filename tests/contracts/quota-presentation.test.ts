@@ -112,7 +112,7 @@ it("marks local inference as free rather than omitting it", () => {
 	assert.equal(local.providerId, "local");
 	assert.equal(local.status, "ok");
 	assert.deepEqual(local.windows, []);
-	assert.equal(local.credits?.display, "$0.00");
+	assert.equal(local.credits?.display, "$0.00 local");
 	assert.equal(local.plan, "Local");
 	assert.equal(local.message, "no subscription window consumed");
 	assert.equal(localQuotaSnapshot({ runtimeLabel: "Ollama" }).displayName, "Ollama");

@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../../domains/observability/cost.js";
 import { costAggregateForAmount, formatCostAggregate } from "../../domains/observability/index.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
 /** Expanded footer pages: dense inspection, separate from transcript output style. */
@@ -497,7 +498,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				? "unknown"
 				: state.costCeilingUsd === 0
 					? "none"
-					: `$${state.costCeilingUsd} · tracked pricing only`,
+					: `${renderCostAmount(state.costCeilingUsd, "known")} · tracked pricing only`,
 		],
 		["MCP connected", names(state.connections?.mcp)],
 		["Plugins active", names(state.connections?.plugins)],

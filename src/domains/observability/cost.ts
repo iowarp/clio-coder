@@ -93,7 +93,9 @@ export function aggregateCostAmounts(amounts: ReadonlyArray<CostAmount>): CostAg
 
 function formatUsdAmount(value: number): string {
 	if (!Number.isFinite(value) || value <= 0) return "$0.00";
-	return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+	if (value < 0.00000001) return `$${value.toExponential(2)}`;
+	const digits = value < 0.01 ? Math.min(8, Math.max(4, Math.ceil(-Math.log10(value)))) : 2;
+	return `$${value.toFixed(digits)}`;
 }
 
 /**
@@ -157,6 +159,31 @@ export function renderCostAmount(
 	costSummary?: CostAggregate,
 ): string {
 	return renderCostAggregate(costAggregateForAmount(usd, provenance, costSummary));
+}
+
+/** Trace rows predating pricing flags cannot establish a priced amount (#434). */
+export function renderTraceCost(row: {
+	total_cost_usd: number | null;
+	cost_estimated?: number | null;
+	cost_unknown?: number | null;
+	api_calls?: number | null;
+}): string {
+	if (row.total_cost_usd === null || (row.cost_estimated == null && row.cost_unknown == null))
+		return renderCostAggregate(null);
+	return renderCostAggregate({
+		knownUsd: row.total_cost_usd,
+		hasEstimated: row.cost_estimated === 1,
+		hasUnknown: row.cost_unknown === 1,
+		allKnownFree: false,
+		calls: row.api_calls ?? 0,
+		...(row.api_calls == null ? { unknownCallCoverageRuns: 1 } : {}),
+	});
+}
+
+/** Provider credit limits are measured balances; they can be denominated outside USD. */
+export function renderCreditAmount(value: number, currency: string): string {
+	if (currency.toUpperCase() === "USD") return renderCostAmount(value, "known");
+	return `${value.toFixed(2)} ${currency}`;
 }
 
 export interface UsageBreakdown {
