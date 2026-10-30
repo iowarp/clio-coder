@@ -69,6 +69,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 		headers: { Authorization: `Bearer ${LOCAL_TOKEN}`, Cookie: "session=browser", Origin: ORIGIN, "X-Keep": "1" },
 	});
 	assert.equal(meta.status, 200);
+	assert.equal(meta.headers.get("content-type"), "application/json");
 	assert.equal(meta.headers.get("x-remote"), "yes");
 	assert.equal(meta.headers.get("x-frame-options"), "DENY");
 	assert.deepEqual(await meta.json(), { echo: "", path: "/api/meta" });
@@ -84,7 +85,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 	// A stream authenticates locally by query token and reaches the node with the bearer instead.
 	const events = await request(`/m/blade/api/events?token=${LOCAL_TOKEN}`);
 	assert.equal(events.status, 200);
-	assert.match(events.headers.get("content-type") ?? "", /text\/event-stream/);
+	assert.equal(events.headers.get("content-type"), "text/event-stream");
 	assert.equal(await events.text(), "event: hello\ndata: {}\n\n");
 	const stream = seen.at(-1);
 	assert.ok(stream);

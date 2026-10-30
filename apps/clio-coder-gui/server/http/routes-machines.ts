@@ -91,9 +91,11 @@ export function machinesRoutes(
 			await upstream.body.cancel().catch(() => {});
 			throw new AppProblem("unavailable", `Machine ${id}'s GUI refused this app's credentials. Open it again.`, 502);
 		}
-		const response = new Response(upstream.body, { status: upstream.status });
+		// Headers go in at construction: a response built without a content type takes the adaptor's
+		// text/plain default, and one appended afterwards would only join it.
+		const answered = new Headers();
 		for (const [name, value] of upstream.headers)
-			if (!UNFORWARDED_RESPONSE_HEADERS.has(name.toLowerCase())) response.headers.append(name, value);
-		return response;
+			if (!UNFORWARDED_RESPONSE_HEADERS.has(name.toLowerCase())) answered.append(name, value);
+		return new Response(upstream.body, { status: upstream.status, headers: answered });
 	});
 }
