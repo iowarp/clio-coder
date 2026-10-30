@@ -1,9 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PendingTelemetry } from "../../../../src/core/telemetry/producer.js";
-import type { Kind } from "../../../../src/core/telemetry/schemas.js";
 import { openCallJournal } from "../../../../src/domains/observability/call-journal.js";
+
+type PendingTelemetry = Parameters<Awaited<ReturnType<typeof openCallJournal>>["enqueue"]>[0];
+type Kind = PendingTelemetry["kind"];
 
 export { quantitiesOf, telemetryLies } from "../../../../tests/harness/telemetry-lies.js";
 
