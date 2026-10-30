@@ -10,6 +10,7 @@ import { beginCall, recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallStarted } from "../core/telemetry/schemas.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
+import { hasAssistantGenerationDelta } from "./generation-delta.js";
 
 type Request = Pick<CallStarted, "roundKind" | "toolChoice">;
 
@@ -41,9 +42,19 @@ export function createWorkerCallTelemetry(
 	return {
 		begin(request: Request): void {
 			call = beginCall({ ...request, label: "worker", target }, context);
+			// Pi converts the conversation before it resolves the key; getApiKey closes this stage (#434).
+			call.stage("transform", "start");
 		},
 		attempt(request: Request): void {
 			call = call ? (call.nextAttempt(request) ?? call) : beginCall({ ...request, label: "worker", target }, context);
+			call.stage("send", "start");
+		},
+		/** Stage facts for the live attempt; a settled attempt ignores them (#434). */
+		stage(...args: Parameters<TelemetryCall["stage"]>): void {
+			call?.stage(...args);
+		},
+		mark(name: Parameters<TelemetryCall["mark"]>[0]): void {
+			call?.mark(name);
 		},
 		settle(message: unknown): void {
 			settle(call, message);
@@ -55,14 +66,15 @@ export function createWorkerCallTelemetry(
 			failure: (message: unknown) => CallFailureRecord,
 		): AssistantMessageEventStream {
 			const attempt = call;
+			// The stream is handed back once Pi's provider owns the request; TTFT is firstToken minus this mark (#434).
+			attempt?.stage("send", "end");
 			return new Proxy(source, {
 				get(target, key) {
 					if (key === Symbol.asyncIterator)
 						return async function* () {
 							try {
 								for await (const event of target) {
-									if ((event.type === "text_delta" || event.type === "thinking_delta") && event.delta.length > 0)
-										attempt?.mark("firstToken");
+									if (hasAssistantGenerationDelta(event)) attempt?.mark("firstToken");
 									if (event.type === "done") settle(attempt, event.message);
 									else if (event.type === "error") settle(attempt, { ...event.error, failure: failure(event.error) });
 									yield event;

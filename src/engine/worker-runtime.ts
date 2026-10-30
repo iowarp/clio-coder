@@ -1137,6 +1137,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
 		beforeStreamRequest: () => {
+			workerTelemetry?.stage("admission", "start");
 			const reason = flowTransferRefusal(
 				safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
 				runFlow,
@@ -1147,6 +1148,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					model: input.wireModelId,
 				}),
 			);
+			workerTelemetry?.stage("admission", "end");
 			if (reason === null) return { block: false };
 			// A retry or failover on this target carries the same labels and meets
 			// the same refusal, so the parent must not spend another attempt on it.
@@ -1442,6 +1444,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 										const response = await tracking.fetch(url, init);
 										lastProviderHttpStatus = response.status;
 										roundProviderHttpStatus = response.status;
+										// Pi retries a retryable status inside one attempt; the response that opens the stream is
+										// the first byte (#434).
+										if (response.ok) workerTelemetry?.mark("firstByte");
 										return response;
 									},
 									onProviderStreamEvent: async (data, eventModel) => {
@@ -1502,17 +1507,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			messages: inheritedMessages,
 		},
 		getApiKey: async () => {
+			workerTelemetry?.stage("transform", "end");
+			// A key the parent handed over needs no resolution, so the call has no auth stage (#434).
 			if (!input.authProfile) return input.apiKey;
-			registerClioOAuthProviders();
-			const resolved = await openAuthStorage().resolveApiKey(input.authProfile, {
-				includeFallback: false,
-				...(input.signal ? { signal: input.signal } : {}),
-			});
-			if (!resolved.available || !resolved.apiKey) {
-				throw new Error(resolved.detail ?? `Credential '${input.authProfile}' is unavailable. Log in again.`);
+			workerTelemetry?.stage("auth", "start");
+			let refreshed: boolean | undefined;
+			try {
+				registerClioOAuthProviders();
+				const resolved = await openAuthStorage().resolveApiKey(input.authProfile, {
+					includeFallback: false,
+					...(input.signal ? { signal: input.signal } : {}),
+				});
+				refreshed = resolved.refreshed;
+				if (!resolved.available || !resolved.apiKey) {
+					throw new Error(resolved.detail ?? `Credential '${input.authProfile}' is unavailable. Log in again.`);
+				}
+				lastAuthResolution = resolved;
+				return resolved.apiKey;
+			} finally {
+				workerTelemetry?.stage("auth", "end", refreshed === undefined ? {} : { refreshed });
 			}
-			lastAuthResolution = resolved;
-			return resolved.apiKey;
 		},
 	};
 	// Providers derive prompt-cache affinity (openai-codex prompt_cache_key,

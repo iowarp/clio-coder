@@ -111,6 +111,15 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			equal(callFacts.length, 1);
 			equal(callFacts[0]?.disposition, "settled");
 			equal(callFacts[0]?.label, "worker");
+			// A parent-supplied key leaves no auth stage; every other stage the worker passed is journaled (#434).
+			deepStrictEqual(Object.keys(callFacts[0]?.stages ?? {}).sort(), [
+				"admission",
+				"firstByte",
+				"firstToken",
+				"send",
+				"settle",
+				"transform",
+			]);
 			const request = JSON.stringify(fixture.requests[0]);
 			equal(request.split("PARENT_CONSTRAINT_42").length - 1, mode === "isolated" ? 0 : 1);
 			ok(!request.includes("LATER_PARENT_TURN"));

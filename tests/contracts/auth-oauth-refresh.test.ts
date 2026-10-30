@@ -269,6 +269,12 @@ describe("contracts/auth OAuth refresh", () => {
 				attempts.map((attempt) => attempt.stop.reason),
 				["error", "stop"],
 			);
+			// Each wire attempt hands its own request to Pi; only the retry generated a token (#434).
+			ok(attempts.every((attempt) => attempt.stages.send !== undefined));
+			deepStrictEqual(
+				attempts.map((attempt) => attempt.stages.firstToken !== undefined),
+				[false, true],
+			);
 		} finally {
 			telemetry.close({ stopReason: "error", callInvoked: false });
 		}
