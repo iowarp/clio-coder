@@ -6,6 +6,7 @@ import { sessionUsageTotals } from "../../src/engine/acp/live-telemetry.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import type { AcpUsageSource } from "../../src/engine/acp/usage.js";
+import { sessionUsageV1 } from "../../src/engine/acp/usage.js";
 import { readModelOf, telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 /**
@@ -197,4 +198,19 @@ test("live accounting distinguishes no calls from measured free calls", () => {
 	);
 	assert.equal(free.costProvenance, "known_free");
 	assert.equal(free.costDisplay, "$0.00 local");
+});
+
+test("a worker run that recorded no call telemetry is named beside the v1 call count, never folded into it as 0", () => {
+	const view = telemetryViewOf(
+		"lost-run",
+		telemetryCall("lost-run", { usage: { input: 10, output: 2 }, usd: 0.01 }),
+		new Map([["lost", []]]),
+	);
+	const read = sessionUsageV1(view);
+	assert.equal(read.cost.calls, 1, "the known part");
+	assert.equal(read.cost.unknownCallCoverageRuns, 1);
+	assert.equal(read.cost.unknown, true);
+	const live = sessionUsageTotals(view);
+	assert.equal(live.calls, 1);
+	assert.equal(live.unknownCallCoverageRuns, 1);
 });
