@@ -62,8 +62,15 @@ export function externalUsageFacts(
 		(observation.normalized && cost === 0)
 			? unknown
 			: read(cost, false);
+	// Declared target rates read as known (#434); a peer's own total or a catalog rate stays an estimate.
+	const declaredRates =
+		usd.kind === "measured" &&
+		raw.costProvenance === "known" &&
+		external.cost !== "provider-reported" &&
+		observation.costEstimateMethod === undefined;
 	const estimatedUsd =
 		usd.kind === "measured" &&
+		!declaredRates &&
 		(raw.costProvenance === "estimated" || raw.costProvenance === "known") &&
 		external.cost !== "provider-reported"
 			? {
@@ -73,7 +80,9 @@ export function externalUsageFacts(
 						observation.costEstimateMethod ??
 						(raw.costProvenance === "known" ? ("target-rates" as const) : ("catalog" as const)),
 				}
-			: usd;
+			: usd.kind === "measured" && declaredRates
+				? { kind: "measured" as const, value: usd.value, source: "local-count" as const }
+				: usd;
 	return {
 		usage,
 		totalTokens: token("totalTokens"),
@@ -89,7 +98,9 @@ export function externalUsageFacts(
 							? "target-rates"
 							: "catalog"
 					: estimatedUsd.kind === "measured"
-						? "provider"
+						? declaredRates
+							? "target-rates"
+							: "provider"
 						: "none",
 		},
 		coverage: observation.coverage,
@@ -134,12 +145,12 @@ function priceExternalUsage(input: WorkerRunInput, facts: ReturnType<typeof exte
 		pricingCoverage: "complete" as const,
 		pricing: {
 			usd: {
-				kind: "estimated" as const,
+				kind: "measured" as const,
 				value: calculatePricingCostUsd(
 					{ input: rates.input, output: rates.output, cacheRead: rates.cacheRead ?? 0, cacheWrite: rates.cacheWrite ?? 0 },
 					counts,
 				),
-				method: "target-rates" as const,
+				source: "local-count" as const,
 			},
 			pricedBy: "target-rates" as const,
 		},

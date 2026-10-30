@@ -128,7 +128,8 @@ function assertCharged(charge: Charge | undefined): void {
 		Math.abs((charge.costUsd ?? Number.NaN) - EXPECTED_COST_USD) <= COST_TOLERANCE_USD,
 		`cost ${charge.costUsd} is not ${EXPECTED_COST_USD} within ${COST_TOLERANCE_USD}`,
 	);
-	strictEqual(charge.provenance, "estimated");
+	// Declared target rates read as known, as in 0.6.5 (#434).
+	strictEqual(charge.provenance, "known");
 	strictEqual(charge.label, "system-one");
 }
 

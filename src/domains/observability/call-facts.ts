@@ -108,10 +108,12 @@ export function callSettlementFromMessage(
 	else if (usd !== null && observed && terminal) {
 		if (external.cost === "provider-reported")
 			pricing = { usd: { kind: "measured", value: usd, source: "provider" }, pricedBy: "provider" };
-		else if (costProvenance === "known" || costProvenance === "estimated") {
-			const method = costProvenance === "known" ? "target-rates" : "catalog";
-			pricing = { usd: { kind: "estimated", value: usd, method }, pricedBy: method };
-		}
+		// Declared target rates price measured tokens exactly as 0.6.5 did: known, ranked only below a provider's own
+		// cost. The Pi catalog rate is a guess at someone else's price list and stays estimated (#434).
+		else if (costProvenance === "known")
+			pricing = { usd: { kind: "measured", value: usd, source: "local-count" }, pricedBy: "target-rates" };
+		else if (costProvenance === "estimated")
+			pricing = { usd: { kind: "estimated", value: usd, method: "catalog" }, pricedBy: "catalog" };
 	}
 	return {
 		disposition: neverSent ? "never_sent" : !terminal ? "sent_unsettled" : observed ? "settled" : "settled_no_usage",

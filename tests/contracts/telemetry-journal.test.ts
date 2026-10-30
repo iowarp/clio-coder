@@ -474,7 +474,7 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		strictEqual(projected.length, 1);
 		strictEqual(projected[0]?.attributedModelId, "served-model");
 		strictEqual(projected[0]?.totalTokens, 9);
-		strictEqual(projected[0]?.costProvenance, "estimated");
+		strictEqual(projected[0]?.costProvenance, "known", "declared target rates read as known");
 		const ledger: SessionEntry[] = [
 			{
 				kind: "message",
@@ -665,8 +665,8 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	strictEqual(fold.totals.incomplete, 1);
 	strictEqual(fold.totals.promptTokens.measured, 18);
 	strictEqual(fold.totals.totalTokens.measured, 22);
-	strictEqual(fold.totals.usd.measured, 0);
-	strictEqual(fold.totals.usd.estimated, 0.125);
+	strictEqual(fold.totals.usd.measured, 0.125);
+	strictEqual(fold.totals.usd.estimated, 0);
 	strictEqual(fold.totals.usd.unknownCount, 2);
 	strictEqual(fold.totals.usd.absentCount, 1);
 	strictEqual(fold.totals.totalTokens.unknownCount, 1);

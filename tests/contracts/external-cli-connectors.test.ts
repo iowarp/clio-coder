@@ -231,7 +231,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		equal(projected.totalTokens, 13);
 		equal(projected.apiCalls, 0, "a CLI turn can contain multiple provider calls");
 		equal(projected.costSummary.unknownCallCoverageRuns, 1);
-		equal(projected.costProvenance, "estimated");
+		equal(projected.costProvenance, "known", "declared target rates read as known");
 		ok(Math.abs(projected.costUsd - 27 / 1_000_000) < 1e-12);
 		equal(projected.usageFacts.reasoning.unknownCount, 1);
 		equal(result.exitCode, 0);
