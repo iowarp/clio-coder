@@ -55,6 +55,7 @@ function projectCost(cost: AcpCostAggregate) {
 	return {
 		knownUsd: usd(cost.knownUsd),
 		calls: count(cost.calls),
+		...(cost.unknownCallCoverageRuns ? { unknownCallCoverageRuns: count(cost.unknownCallCoverageRuns) } : {}),
 		estimated: cost.hasEstimated,
 		unknown: cost.hasUnknown,
 		free: cost.allKnownFree,

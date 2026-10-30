@@ -1443,6 +1443,7 @@ export interface AcpIgnoredProjectSurface {
 }
 
 export interface AcpCostAggregate {
+	unknownCallCoverageRuns?: number;
 	knownUsd: number;
 	hasEstimated: boolean;
 	hasUnknown: boolean;
@@ -1551,6 +1552,7 @@ const usageMetaFields = {
 				hasUnknown: Type.Boolean(),
 				allKnownFree: Type.Boolean(),
 				calls: Type.Integer({ minimum: 0 }),
+				unknownCallCoverageRuns: Type.Optional(Type.Integer({ minimum: 0 })),
 			},
 			closed,
 		),
@@ -2163,6 +2165,7 @@ const wireUsageCost = Type.Object(
 	{
 		knownUsd: Type.Number({ minimum: 0 }),
 		calls: wireUsageCount,
+		unknownCallCoverageRuns: Type.Optional(wireUsageCount),
 		estimated: Type.Boolean(),
 		unknown: Type.Boolean(),
 		free: Type.Boolean(),

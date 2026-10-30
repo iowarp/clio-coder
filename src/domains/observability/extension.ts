@@ -16,7 +16,7 @@ import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
-import { createCostTracker } from "./cost.js";
+import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
@@ -70,8 +70,7 @@ function recordDispatchCost(
 			...(payload.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1h: payload.cacheWrite1hTokenCount }),
 			reasoningTokens: payload.reasoningTokenCount ?? 0,
 			totalTokens: payload.tokenCount,
-			apiCalls: payload.apiCalls ?? (payload.tokenCount > 0 ? 1 : 0),
-			missingTokenCalls: payload.missingTokenCalls ?? 0,
+			...callCoverageForRun(payload),
 		},
 		payload.costProvenance,
 		undefined,

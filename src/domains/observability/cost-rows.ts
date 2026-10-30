@@ -120,6 +120,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 				provenance: entry.provenance,
 				apiCalls: entry.apiCalls ?? 1,
 				missingTokenCalls: entry.missingTokenCalls ?? 0,
+				unknownCallCoverageRuns: entry.unknownCallCoverageRuns ?? entry.costSummary?.unknownCallCoverageRuns ?? 0,
 			})),
 		),
 	}));

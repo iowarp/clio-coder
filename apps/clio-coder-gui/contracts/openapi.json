@@ -15185,6 +15185,10 @@
 															"type": "integer",
 															"minimum": 0
 														},
+														"unknownCallCoverageRuns": {
+															"type": "integer",
+															"minimum": 0
+														},
 														"estimated": {
 															"type": "boolean"
 														},
@@ -15310,6 +15314,10 @@
 																		"minimum": 0
 																	},
 																	"calls": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"unknownCallCoverageRuns": {
 																		"type": "integer",
 																		"minimum": 0
 																	},
@@ -21240,6 +21248,10 @@
 																			"calls": {
 																				"type": "integer",
 																				"minimum": 0
+																			},
+																			"unknownCallCoverageRuns": {
+																				"type": "integer",
+																				"minimum": 0
 																			}
 																		},
 																		"additionalProperties": false
@@ -26291,6 +26303,10 @@
 																			"calls": {
 																				"type": "integer",
 																				"minimum": 0
+																			},
+																			"unknownCallCoverageRuns": {
+																				"type": "integer",
+																				"minimum": 0
 																			}
 																		},
 																		"additionalProperties": false
@@ -29927,6 +29943,10 @@
 																			"calls": {
 																				"type": "integer",
 																				"minimum": 0
+																			},
+																			"unknownCallCoverageRuns": {
+																				"type": "integer",
+																				"minimum": 0
 																			}
 																		},
 																		"additionalProperties": false
@@ -33525,6 +33545,10 @@
 																					"type": "boolean"
 																				},
 																				"calls": {
+																					"type": "integer",
+																					"minimum": 0
+																				},
+																				"unknownCallCoverageRuns": {
 																					"type": "integer",
 																					"minimum": 0
 																				}
@@ -37372,6 +37396,10 @@
 																				"type": "boolean"
 																			},
 																			"calls": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"unknownCallCoverageRuns": {
 																				"type": "integer",
 																				"minimum": 0
 																			}
@@ -48478,6 +48506,10 @@
 																	"calls": {
 																		"type": "integer",
 																		"minimum": 0
+																	},
+																	"unknownCallCoverageRuns": {
+																		"type": "integer",
+																		"minimum": 0
 																	}
 																},
 																"additionalProperties": false
@@ -49292,6 +49324,10 @@
 																"type": "boolean"
 															},
 															"calls": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"unknownCallCoverageRuns": {
 																"type": "integer",
 																"minimum": 0
 															}

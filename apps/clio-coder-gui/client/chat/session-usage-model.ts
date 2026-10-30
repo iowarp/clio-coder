@@ -18,7 +18,7 @@ function dollars(value: number): string {
 }
 
 export function costText(cost: Cost): string {
-	if (cost.calls === 0) return "Nothing recorded yet";
+	if (cost.calls === 0 && !cost.unknownCallCoverageRuns) return "Nothing recorded yet";
 	if (cost.free) return "$0.00, every call free";
 	if (cost.unknown && cost.knownUsd === 0) return "Cost not measured";
 	if (cost.unknown) return `${cost.estimated ? "about " : ""}${dollars(cost.knownUsd)} subtotal, some calls unpriced`;
@@ -33,7 +33,12 @@ export function usageTotals(usage: SessionUsage): Array<{ label: string; value: 
 			label: "Tokens",
 			value: `${tokens(usage.session.tokens)}${usage.session.missingTokenCalls ? ` +? (${tokens(usage.session.missingTokenCalls)} call${usage.session.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
 		},
-		{ label: "Model calls", value: tokens(usage.session.cost.calls) },
+		{
+			label: "Model calls",
+			value: usage.session.cost.unknownCallCoverageRuns
+				? `${tokens(usage.session.cost.calls)} known; ${usage.session.cost.unknownCallCoverageRuns} runs with unknown call coverage`
+				: tokens(usage.session.cost.calls),
+		},
 	];
 }
 
@@ -52,6 +57,11 @@ export function usageRows(usage: SessionUsage) {
 			...counted(row.beside.compactions ?? 0, "compaction call", "compaction calls"),
 			...counted(row.beside.workers ?? 0, "worker call", "worker calls"),
 			...counted(row.missingTokenCalls ?? 0, "call missing token usage", "calls missing token usage"),
+			...counted(
+				row.cost.unknownCallCoverageRuns ?? 0,
+				"run with unknown call coverage",
+				"runs with unknown call coverage",
+			),
 		];
 		const cache = row.tokens.cacheRead + row.tokens.cacheWrite;
 		return {

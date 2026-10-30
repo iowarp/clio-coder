@@ -17,6 +17,7 @@ import type { ResponseModelIdObservationCounts } from "../../core/response-model
 import { type CostProvenance, normalizeCostProvenance } from "../providers/index.js";
 
 export interface CostAmount {
+	unknownCallCoverageRuns?: number;
 	costSummary?: CostAggregate;
 	usd: number;
 	provenance: CostProvenance;
@@ -25,6 +26,8 @@ export interface CostAmount {
 }
 
 export interface CostAggregate {
+	/** Runs whose receipts omitted API-call or missing-usage counts (#434). */
+	unknownCallCoverageRuns?: number;
 	knownUsd: number;
 	hasEstimated: boolean;
 	hasUnknown: boolean;
@@ -48,12 +51,29 @@ export function emptyCostAggregate(): CostAggregate {
 
 /** False when nothing has been priced yet, so no cost claim of any kind is available. */
 export function costWasMeasured(cost: CostAggregate | null | undefined): cost is CostAggregate {
-	return cost !== null && cost !== undefined && cost.calls > 0;
+	return cost !== null && cost !== undefined && (cost.calls > 0 || (cost.unknownCallCoverageRuns ?? 0) > 0);
+}
+
+/** Receipt totals never reveal how many calls ran or went unmetered (#434). */
+export function callCoverageForRun(run: { apiCalls?: unknown; missingTokenCalls?: unknown }) {
+	const count = (value: unknown): number | null =>
+		typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+	const apiCalls = count(run.apiCalls);
+	const missingTokenCalls = count(run.missingTokenCalls);
+	return {
+		apiCalls: apiCalls ?? 0,
+		missingTokenCalls: missingTokenCalls ?? 0,
+		unknownCallCoverageRuns: apiCalls === null || missingTokenCalls === null ? 1 : 0,
+	};
 }
 
 export function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount): CostAggregate {
-	const first = aggregate.calls === 0;
+	const first = !costWasMeasured(aggregate);
+	const unknownCallCoverageRuns =
+		(aggregate.unknownCallCoverageRuns ?? 0) +
+		(amount.unknownCallCoverageRuns ?? amount.costSummary?.unknownCallCoverageRuns ?? 0);
 	return {
+		...(unknownCallCoverageRuns > 0 ? { unknownCallCoverageRuns } : {}),
 		knownUsd: aggregate.knownUsd + (amount.costSummary?.knownUsd ?? (amount.provenance === "unknown" ? 0 : amount.usd)),
 		hasEstimated: aggregate.hasEstimated || (amount.costSummary?.hasEstimated ?? amount.provenance === "estimated"),
 		hasUnknown:
@@ -140,6 +160,7 @@ export function renderCostAmount(
 }
 
 export interface UsageBreakdown {
+	unknownCallCoverageRuns?: number;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -170,6 +191,7 @@ export type CostEntryLabel =
 	| "compaction";
 
 export interface CostEntry {
+	unknownCallCoverageRuns?: number;
 	replayed?: boolean;
 	costSummary?: CostAggregate;
 	providerId: string;
@@ -244,7 +266,9 @@ export function createCostTracker(): CostTracker {
 			const reasoningTokens = breakdown?.reasoningTokens ?? 0;
 			const apiCalls = breakdown?.apiCalls;
 			const missingTokenCalls = breakdown?.missingTokenCalls ?? 0;
+			const unknownCallCoverageRuns = breakdown?.unknownCallCoverageRuns ?? costSummary?.unknownCallCoverageRuns ?? 0;
 			log.push({
+				...(unknownCallCoverageRuns > 0 ? { unknownCallCoverageRuns } : {}),
 				...(replayed ? { replayed } : {}),
 				providerId,
 				attributedModelId,
@@ -275,6 +299,7 @@ export function createCostTracker(): CostTracker {
 				provenance,
 				apiCalls: apiCalls ?? 1,
 				missingTokenCalls,
+				unknownCallCoverageRuns,
 				...(costSummary ? { costSummary } : {}),
 			});
 			totals.input += input;
@@ -285,6 +310,8 @@ export function createCostTracker(): CostTracker {
 			totals.reasoningTokens += reasoningTokens;
 			totals.totalTokens += tokens;
 			totals.apiCalls = (totals.apiCalls ?? 0) + (apiCalls ?? 1);
+			if (unknownCallCoverageRuns > 0)
+				totals.unknownCallCoverageRuns = (totals.unknownCallCoverageRuns ?? 0) + unknownCallCoverageRuns;
 			if (missingTokenCalls > 0) totals.missingTokenCalls = (totals.missingTokenCalls ?? 0) + missingTokenCalls;
 			return resolvedUsd;
 		},
@@ -316,6 +343,7 @@ export function createCostTracker(): CostTracker {
 			delete totals.apiCalls;
 			delete totals.missingTokenCalls;
 			delete totals.neverSentCalls;
+			delete totals.unknownCallCoverageRuns;
 		},
 	};
 }

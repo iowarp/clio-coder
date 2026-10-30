@@ -177,6 +177,9 @@ function summaryBlock(
 			),
 		],
 		["model calls", formatTokens(totals.apiCalls)],
+		...((totalCost.unknownCallCoverageRuns ?? 0) > 0
+			? [["call coverage", `${totalCost.unknownCallCoverageRuns} runs unknown; call counts are known subtotals`] as const]
+			: []),
 		...((totals.workers ?? 0) > 0 ? [["worker calls", formatTokens(totals.workers ?? 0)] as const] : []),
 		...((totals.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(totals.compactions ?? 0)] as const] : []),
 		...((totals.missingTokenCalls ?? 0) > 0 || neverSentCalls > 0
@@ -228,6 +231,9 @@ function modelBlock(row: CostRow): string[] {
 			),
 		],
 		["model calls", formatTokens(row.apiCalls)],
+		...((row.cost.unknownCallCoverageRuns ?? 0) > 0
+			? [["call coverage", `${row.cost.unknownCallCoverageRuns} runs unknown; call counts are known subtotals`] as const]
+			: []),
 		...((row.workers ?? 0) > 0 ? [["worker calls", formatTokens(row.workers ?? 0)] as const] : []),
 		...((row.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(row.compactions ?? 0)] as const] : []),
 		...((row.missingTokenCalls ?? 0) > 0

@@ -11,7 +11,12 @@ import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/inde
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
 import { summarizeFailedCompactionUsage } from "../domains/observability/compaction-usage.js";
 import type { CostAggregate } from "../domains/observability/cost.js";
-import { accumulateCostAmount, emptyCostAggregate, renderCostAggregate } from "../domains/observability/cost.js";
+import {
+	accumulateCostAmount,
+	callCoverageForRun,
+	emptyCostAggregate,
+	renderCostAggregate,
+} from "../domains/observability/cost.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
 import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
 import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
@@ -65,6 +70,7 @@ const NON_FAILURE_TAGS = new Set([
 ]);
 
 interface UsageReceipt {
+	unknownCallCoverageRuns: number;
 	costSummary?: CostAggregate;
 	cwd: string | null;
 	usageSessionId: string | null;
@@ -93,6 +99,7 @@ interface UsageReceipt {
 }
 
 interface WorkerUsageTotals {
+	unknownCallCoverageRuns: number;
 	apiCalls: number;
 	missingTokenCalls: number;
 	cost: CostAggregate;
@@ -111,6 +118,7 @@ interface WorkerUsageTotals {
 
 function emptyWorkerUsageTotals(): WorkerUsageTotals {
 	return {
+		unknownCallCoverageRuns: 0,
 		runs: 0,
 		apiCalls: 0,
 		missingTokenCalls: 0,
@@ -132,12 +140,14 @@ function addWorkerReceipt(totals: WorkerUsageTotals, receipt: UsageReceipt): voi
 	totals.runs += 1;
 	totals.apiCalls += receipt.apiCalls;
 	totals.missingTokenCalls += receipt.missingTokenCalls;
+	totals.unknownCallCoverageRuns += receipt.unknownCallCoverageRuns;
 	totals.cost = accumulateCostAmount(totals.cost, {
 		usd: receipt.costUsd ?? 0,
 		...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
 		provenance: receipt.costProvenance,
 		apiCalls: receipt.apiCalls,
 		missingTokenCalls: receipt.missingTokenCalls,
+		unknownCallCoverageRuns: receipt.unknownCallCoverageRuns,
 	});
 	if (receipt.missingTokenUsage) totals.missingTokenRuns += 1;
 	if (
@@ -666,13 +676,14 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		{ invokedUnknownCalls: 0, neverInvokedCalls: 0 },
 	);
 	const allCost: CostAggregate = {
+		...(workerUsage.unknownCallCoverageRuns > 0 ? { unknownCallCoverageRuns: workerUsage.unknownCallCoverageRuns } : {}),
 		knownUsd: usageTotals.cost.knownUsd + workerUsage.cost.knownUsd,
 		calls: usageTotals.cost.calls + workerUsage.cost.calls,
 		hasEstimated: usageTotals.cost.hasEstimated || workerUsage.cost.hasEstimated,
 		hasUnknown: usageTotals.cost.hasUnknown || workerUsage.cost.hasUnknown,
 		allKnownFree:
 			(usageTotals.cost.calls === 0 || usageTotals.cost.allKnownFree) &&
-			(workerUsage.cost.calls === 0 || workerUsage.cost.allKnownFree) &&
+			((workerUsage.cost.calls === 0 && workerUsage.unknownCallCoverageRuns === 0) || workerUsage.cost.allKnownFree) &&
 			usageTotals.cost.calls + workerUsage.cost.calls > 0,
 	};
 	const usageRows = [...usageByModel.values()].sort(
@@ -844,6 +855,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 				sessionAndSideCallTokens: usageTotals.totalTokens,
 				workerRunTokens: workerUsage.totalTokens,
 				missingTokenCalls,
+				unknownCallCoverageRuns: workerUsage.unknownCallCoverageRuns,
 			});
 		}
 		if (presence.receiptsPresent) {
@@ -910,6 +922,10 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
 	if (usageMeasurable || presence.receiptsPresent) {
 		out(`  all recorded cost in window: ${renderCostAggregate(allCost)} (${allCost.calls} recorded model calls)`);
+		if (workerUsage.unknownCallCoverageRuns > 0)
+			out(
+				`  call coverage unknown for ${workerUsage.unknownCallCoverageRuns} worker receipts; call counts are known subtotals`,
+			);
 		out(
 			`  all recorded tokens in window: ${allRecordedTokens} known subtotal (session and side calls ${usageTotals.totalTokens}, worker runs ${workerUsage.totalTokens}; ${missingTokenCalls} calls missing token usage)`,
 		);
@@ -1244,6 +1260,7 @@ async function readReceipts(
 			: [];
 		const unverifiedTokens =
 			isRecord(parsed.externalTelemetry) && parsed.externalTelemetry.tokenUsage !== "provider-reported";
+		const coverage = callCoverageForRun(parsed);
 		receipts.push({
 			runId: parsed.runId,
 			...(isRecord(parsed.costSummary) &&
@@ -1261,14 +1278,7 @@ async function readReceipts(
 					: isRecord(parsed.delegation) && typeof parsed.delegation.acpSessionId === "string"
 						? parsed.delegation.acpSessionId
 						: null,
-			apiCalls: nonnegativeNumberOrNull(parsed.apiCalls) ?? 1,
-			missingTokenCalls:
-				nonnegativeNumberOrNull(parsed.missingTokenCalls) ??
-				(nonnegativeNumberOrNull(parsed.tokenCount) === null ||
-				parsed.tokenCount === 0 ||
-				(isRecord(parsed.externalTelemetry) && parsed.externalTelemetry.tokenUsage !== "provider-reported")
-					? 1
-					: 0),
+			...coverage,
 			costProvenance: resolveCostProvenance(parsed.costProvenance, "unknown"),
 			agentId: typeof parsed.agentId === "string" ? parsed.agentId : "unknown",
 			task: typeof parsed.task === "string" ? parsed.task : "",
@@ -1298,8 +1308,9 @@ async function readReceipts(
 					: null,
 			missingTokenUsage:
 				nonnegativeNumberOrNull(parsed.tokenCount) === null ||
-				(isRecord(parsed.externalTelemetry) && parsed.externalTelemetry.tokenUsage !== "provider-reported") ||
-				(parsed.tokenCount === 0 && Array.isArray(parsed.upstreamResponses) && parsed.upstreamResponses.length > 0),
+				unverifiedTokens ||
+				nonnegativeNumberOrNull(parsed.missingTokenCalls) === null ||
+				coverage.missingTokenCalls > 0,
 		});
 	}
 	return receipts;
