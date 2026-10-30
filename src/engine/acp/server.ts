@@ -3865,8 +3865,11 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							: {}),
 					}),
 				},
+				// Older clients and the ACP registry's validator announce terminal auth as
+				// `_meta["terminal-auth"]` rather than `auth.terminal` (#418).
 				authMethods:
-					isRecord(clientCapabilities?.auth) && clientCapabilities.auth.terminal === true
+					(isRecord(clientCapabilities?.auth) && clientCapabilities.auth.terminal === true) ||
+					clientMeta?.["terminal-auth"] === true
 						? [
 								{
 									id: "clio-login",

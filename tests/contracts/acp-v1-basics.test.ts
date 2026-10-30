@@ -62,12 +62,17 @@ function server() {
 }
 
 test("ACP v1 negotiates the supported version and terminal auth only with client support", async () => {
-	for (const terminal of [false, true]) {
+	// The ACP registry's validator and older clients announce it as `_meta["terminal-auth"]` (#418).
+	for (const [terminal, clientCapabilities] of [
+		[false, { auth: { terminal: false } }],
+		[true, { auth: { terminal: true } }],
+		[true, { _meta: { "terminal-auth": true } }],
+	] as const) {
 		const peer = server();
 		try {
 			const response = (await peer.call("initialize", {
 				protocolVersion: 42,
-				clientCapabilities: { auth: { terminal } },
+				clientCapabilities,
 				_meta: { fixture: true },
 			})) as {
 				protocolVersion: number;
