@@ -39,7 +39,7 @@ export interface PruneAction {
 
 export interface PruneHold {
 	path: string;
-	reason: "live" | "unknown-owner" | "fork-parent" | "referenced-run" | "receipt" | "unreadable";
+	reason: "live" | "unknown-owner" | "fork-parent" | "referenced-run" | "receipt" | "unreadable" | "symlink";
 }
 
 export interface PrunePlan {
@@ -96,6 +96,16 @@ async function names(directory: string): Promise<string[]> {
 	}
 }
 
+/** Every path prune removes stays under the state root: a directory reached through a symlink is never entered. */
+async function realDirectory(path: string): Promise<boolean> {
+	try {
+		const stat = await lstat(path);
+		return stat.isDirectory() && !stat.isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+
 /** A writer holds `<journal>.lock` for its whole life; a lock, live or stale, keeps every file of that journal. */
 function locked(directory: string, fileName: JournalFileName): boolean {
 	return existsSync(join(directory, `${fileName}.lock`));
@@ -104,7 +114,10 @@ function locked(directory: string, fileName: JournalFileName): boolean {
 async function readSessionTelemetry(directory: string, sessionId: string): Promise<SessionTelemetry | null> {
 	const entries = await names(directory);
 	const segmentNames = journalFiles(entries, "calls.jsonl");
-	const objectNames = (await names(join(directory, "objects"))).filter((name) => OBJECT_FILE.test(name));
+	const objectsDirectory = join(directory, "objects");
+	const objectNames = (await realDirectory(objectsDirectory))
+		? (await names(objectsDirectory)).filter((name) => OBJECT_FILE.test(name))
+		: [];
 	if (segmentNames.length === 0 && objectNames.length === 0) return null;
 	const session: SessionTelemetry = {
 		directory,
@@ -201,16 +214,25 @@ export async function planTelemetryPrune(
 	const sessions: SessionTelemetry[] = [];
 	const sessionsRoot = join(stateDir, "sessions");
 	for (const cwdHash of await names(sessionsRoot)) {
-		if (!SAFE_ID.test(cwdHash)) continue;
+		if (!SAFE_ID.test(cwdHash) || !(await realDirectory(join(sessionsRoot, cwdHash)))) continue;
 		for (const sessionId of await names(join(sessionsRoot, cwdHash))) {
 			if (!SAFE_ID.test(sessionId)) continue;
-			const session = await readSessionTelemetry(join(sessionsRoot, cwdHash, sessionId), sessionId);
+			const directory = join(sessionsRoot, cwdHash, sessionId);
+			if (!(await realDirectory(directory))) {
+				plan.held.push({ path: directory, reason: "symlink" });
+				continue;
+			}
+			const session = await readSessionTelemetry(directory, sessionId);
 			if (session) sessions.push(session);
 		}
 	}
 	const runs: RunTelemetry[] = [];
 	for (const runId of await names(join(stateDir, "runs"))) {
 		if (!SAFE_ID.test(runId)) continue;
+		if (!(await realDirectory(join(stateDir, "runs", runId)))) {
+			plan.held.push({ path: join(stateDir, "runs", runId), reason: "symlink" });
+			continue;
+		}
 		const run = await readRunTelemetry(stateDir, runId);
 		if (run) runs.push(run);
 	}
@@ -286,7 +308,7 @@ export async function planTelemetryPrune(
 		}
 	}
 	const traceDirectory = join(stateDir, "telemetry", "research");
-	for (const name of await names(traceDirectory)) {
+	for (const name of (await realDirectory(traceDirectory)) ? await names(traceDirectory) : []) {
 		const file = await info(join(traceDirectory, name));
 		if (file) research.push({ file, owner: { kind: "research" } });
 	}
@@ -309,43 +331,57 @@ export interface PruneResult {
 	skipped: Array<{ path: string; reason: string }>;
 }
 
-/** Ownership is re-checked per session or run just before its files go; a session that came alive is skipped whole. */
+/**
+ * Ownership is re-checked per session or run immediately before its files go, and the journal's lock file again
+ * before every unlink, so a session that starts between the plan and its turn is skipped whole. Prune never takes
+ * the journal lock itself: a writer that found it held would fail its open and lose the session's journal (#434).
+ */
 export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult> {
 	const result: PruneResult = { removed: [], skipped: [] };
-	const liveNow = new Map<string, boolean>();
-	const stillIdle = async (owner: PruneAction["owner"]): Promise<boolean> => {
-		if (owner.kind === "research") return true;
-		const cached = liveNow.get(owner.directory);
-		if (cached !== undefined) return !cached;
-		let live = locked(owner.directory, owner.kind === "session" ? "calls.jsonl" : "events.ndjson");
-		if (!live && owner.kind === "session") {
-			try {
-				const meta = JSON.parse(await readFile(join(owner.directory, "meta.json"), "utf8")) as Parameters<
-					typeof liveSessionOwner
-				>[0];
-				live = liveSessionOwner(meta) !== null;
-			} catch {
-				live = true;
-			}
-		}
-		liveNow.set(owner.directory, live);
-		return !live;
-	};
-	for (const action of plan.remove) {
-		if (!(await stillIdle(action.owner))) {
-			result.skipped.push({ path: action.path, reason: "became live" });
-			continue;
-		}
-		const current = await info(action.path);
-		if (!current || current.bytes !== action.bytes || current.mtimeMs !== action.mtimeMs) {
-			result.skipped.push({ path: action.path, reason: current ? "changed since planning" : "already gone" });
-			continue;
-		}
+	const journalOf = (owner: PruneAction["owner"]): JournalFileName =>
+		owner.kind === "run" ? "events.ndjson" : "calls.jsonl";
+	const live = async (owner: PruneAction["owner"]): Promise<boolean> => {
+		if (owner.kind === "research") return false;
+		if (locked(owner.directory, journalOf(owner))) return true;
+		if (owner.kind !== "session") return false;
 		try {
-			await rm(action.path);
-			result.removed.push(action);
-		} catch (error) {
-			result.skipped.push({ path: action.path, reason: error instanceof Error ? error.message : String(error) });
+			const meta = JSON.parse(await readFile(join(owner.directory, "meta.json"), "utf8")) as Parameters<
+				typeof liveSessionOwner
+			>[0];
+			return liveSessionOwner(meta) !== null;
+		} catch {
+			return true;
+		}
+	};
+	// One owner's files go together, so the liveness check stays fresh for every file it covers.
+	const batches = new Map<string, PruneAction[]>();
+	for (const action of plan.remove) {
+		const key = action.owner.kind === "research" ? "research" : `${action.owner.kind}:${action.owner.directory}`;
+		batches.set(key, [...(batches.get(key) ?? []), action]);
+	}
+	for (const batch of batches.values()) {
+		const owner = (batch[0] as PruneAction).owner;
+		if (await live(owner)) {
+			for (const action of batch) result.skipped.push({ path: action.path, reason: "became live" });
+			continue;
+		}
+		for (const action of batch) {
+			const current = await info(action.path);
+			if (!current || current.bytes !== action.bytes || current.mtimeMs !== action.mtimeMs) {
+				result.skipped.push({ path: action.path, reason: current ? "changed since planning" : "already gone" });
+				continue;
+			}
+			// A writer creates its lock before it opens the journal, so a lock seen here means a session just started.
+			if (owner.kind !== "research" && locked(owner.directory, journalOf(owner))) {
+				result.skipped.push({ path: action.path, reason: "became live" });
+				continue;
+			}
+			try {
+				await rm(action.path);
+				result.removed.push(action);
+			} catch (error) {
+				result.skipped.push({ path: action.path, reason: error instanceof Error ? error.message : String(error) });
+			}
 		}
 	}
 	for (const directory of new Set(
