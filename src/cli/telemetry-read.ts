@@ -37,8 +37,6 @@ import { formatColumns, printError } from "./shared.js";
  * strings. Nothing here computes a total.
  */
 
-export const READ_COMMANDS = new Set(["inspect", "calls", "cost", "cache", "timeline", "why-stopped", "explain"]);
-
 export const READ_HELP = `clio-coder telemetry inspect <session> [--json]
 clio-coder telemetry inspect --run <run-id> [--json]
 clio-coder telemetry calls <session> [--run <run-id>] [--label <l,..>] [--disposition <d,..>]

@@ -319,13 +319,16 @@ function readLedger(directory: string): SessionEntry[] {
 	return entries;
 }
 
+/** The read model's commands; its module, the folds and the session loader load only for them. */
+const READ_COMMANDS = new Set(["inspect", "calls", "cost", "cache", "timeline", "why-stopped", "explain"]);
+
 export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<number> {
-	const read = await import("./telemetry-read.js");
 	if (argv[0] === "--help" || argv[0] === "-h") {
-		process.stdout.write(`${read.READ_HELP}${HELP}`);
+		process.stdout.write(`${(await import("./telemetry-read.js")).READ_HELP}${HELP}`);
 		return 0;
 	}
-	if (argv[0] !== undefined && read.READ_COMMANDS.has(argv[0])) return read.runTelemetryReadCommand(argv);
+	if (argv[0] !== undefined && READ_COMMANDS.has(argv[0]))
+		return (await import("./telemetry-read.js")).runTelemetryReadCommand(argv);
 	if (argv[0] === "consent") return runConsent(argv.slice(1));
 	if (argv[0] === "export") return runExport(argv.slice(1));
 	if (argv[0] === "import-bundle") return runImportBundle(argv.slice(1));
