@@ -8,6 +8,7 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { TelemetryView } from "../../src/domains/observability/contract.js";
 import type { CostEntry } from "../../src/domains/observability/cost.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -39,6 +40,7 @@ import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 const PARTIAL = "[Clio Coder] CANCEL_PARTIAL_ONCE";
 const THOUGHT = "CANCEL_THINKING_ONCE";
@@ -270,7 +272,9 @@ function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: V
 	context.bus.on(BusChannels.RunAborted, (event) => {
 		audit.push(event);
 	});
-	const panel = createChatPanel({ getOutputStyle: () => "detailed" });
+	// The fixture runs without observability; a test that reads the receipt's spend supplies the read model's view.
+	let telemetry: TelemetryView | null = null;
+	const panel = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => telemetry });
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		...(visionSidecar ? { visionSidecar } : {}),
@@ -307,6 +311,9 @@ function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: V
 		audit,
 		toolRunning,
 		wire: () => wire,
+		setTelemetry(view: TelemetryView) {
+			telemetry = view;
+		},
 		next() {
 			wire = transport("success");
 		},
@@ -507,6 +514,20 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			if (source === "stream_cancel") f.loop.cancel();
 			else f.loop.cancel({ source, reason: "[Clio Coder] loop guard stopped repeated calls." });
 			await pending;
+			// The read model's fold of the cancelled call: sent, with no usage reported (#434 §11.3).
+			const meta = f.session.current();
+			const userTurn = f.entries().find((entry) => entry.kind === "message" && entry.role === "user");
+			ok(meta && userTurn);
+			const view = telemetryViewOf(
+				meta.id,
+				telemetryCall(meta.id, {
+					turnId: userTurn.turnId,
+					disposition: "sent_unsettled",
+					usage: { input: null, output: null, cacheRead: null, cacheWrite: null, reasoning: null },
+					usd: null,
+				}),
+			);
+			f.setTelemetry(view);
 			const rows = f.panel.render(120);
 			const live = rows.map(stripTerminalSequences).join("\n");
 			const theme = clioTheme();
@@ -534,23 +555,26 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			strictEqual(recordValue(payload?.interruptClosure)?.operatorCancel, source === "stream_cancel");
 			strictEqual(recordValue(payload?.estimatedUsage)?.output, 0);
 			ok(typeof payload?.apiMs === "number");
-			const replay = createChatPanel({ getOutputStyle: () => "detailed" });
+			const replay = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => view });
 			rehydrateChatPanelFromTurns(replay, f.entries());
 			const resumedLines = replay.render(120);
 			const resumed = resumedLines.map(stripTerminalSequences).join("\n");
-			// This fixture runs without a telemetry read model, so the receipt states only what the run knows; its spend
-			// is the read model's (#434 §11.3).
+			// Live and resumed receipts read the turn's spend from the same view: the sent call reported no usage, so its
+			// counts are unknown, never an estimate or a zero (#434 §11.3).
 			for (const rendered of [live, resumed]) {
-				match(rendered, /⊘ Cancelled · \S+$/mu);
+				match(rendered, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
+				match(rendered, /in \? · out \?/u);
 				strictEqual(rendered.split("Cancelled").length - 1, 1, rendered);
 				doesNotMatch(rendered, /✦|\[aborted\]/u);
 			}
+			strictEqual(resumed.match(/in \S+ · out \S+/u)?.[0], live.match(/in \S+ · out \S+/u)?.[0]);
 			const html = renderSessionHtml({
 				sessionId: source,
 				exportedAt: "2026-09-07T00:00:00Z",
 				ansiLines: resumedLines,
 			}).replace(/<[^>]*>/gu, "");
-			match(html, /⊘ Cancelled · \S+/u);
+			match(html, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
+			match(html, /in \? · out \?/u);
 			strictEqual(html.split("Cancelled").length - 1, 1, html);
 			if (source === "loop_guard") {
 				for (const rendered of [resumed, html]) {
