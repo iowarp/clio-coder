@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
 import { getCatalogModelForRuntime } from "../../src/domains/providers/catalog.js";
 import type { CodexCredentials } from "../../src/domains/quota/codex-provider.js";
@@ -13,6 +14,8 @@ import {
 	noteCodexStreamQuota,
 	observedCodexQuota,
 	observedQuota,
+	quotaReadingFingerprint,
+	quotaReadingFromMessage,
 } from "../../src/domains/quota/index.js";
 import type { QuotaProvider } from "../../src/domains/quota/types.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "../../src/engine/apis/codex-quota.js";
@@ -344,4 +347,33 @@ it("captures stream quota without a request and keeps target/account evidence di
 	assert.deepEqual(background(null), { admit: false, kind: "quota", reason: "quota_unknown" });
 	assert.equal(observedQuota("codex", NOW.getTime()), null, "a Clio stream must not overwrite a sibling CLI reading");
 	assert.ok(codexStreamSnapshots(NOW.getTime()).some((s) => s.providerId === "codex:weekly-test"));
+});
+
+it("journals a codex.rate_limits event as one quota reading whose identity ignores reset drift (#434)", () => {
+	const event = {
+		type: "codex.rate_limits",
+		rate_limits: {
+			limit_reached: true,
+			primary: { used_percent: 100, window_minutes: 300, reset_after_seconds: 3600 },
+			secondary: { used_percent: 16, window_minutes: 10_080, reset_after_seconds: 7200 },
+		},
+	};
+	const first = parseCodexQuotaEvent(event, "account", NOW.getTime());
+	const later = parseCodexQuotaEvent(event, "account", NOW.getTime() + 5_000);
+	assert.ok(first && later);
+	const reading = quotaReadingFromMessage({ codexQuota: first }, "openai-codex", "codex-target");
+	assert.ok(reading && validPayload("quota.reading", reading));
+	assert.equal(reading.source, "stream-event");
+	assert.equal(reading.limitReached, true);
+	assert.deepEqual(
+		reading.windows.map((window) => [window.key, window.usedPct]),
+		[
+			["session", { kind: "measured", value: 100, source: "provider" }],
+			["weekly", { kind: "measured", value: 16, source: "provider" }],
+		],
+	);
+	const drifted = quotaReadingFromMessage({ codexQuota: later }, "openai-codex", "codex-target");
+	assert.ok(drifted);
+	assert.equal(quotaReadingFingerprint(drifted), quotaReadingFingerprint(reading));
+	assert.equal(quotaReadingFromMessage({ codexQuota: first }, "openai", "codex-target"), null);
 });

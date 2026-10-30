@@ -2,7 +2,7 @@ import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
-import { beginCall } from "../core/telemetry/producer.js";
+import { beginCall, recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -12,6 +12,8 @@ import { cachePhysics } from "../domains/observability/cache-physics.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/observability/session-journals.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
+import type { QuotaReading } from "../domains/quota/index.js";
+import { quotaReadingFingerprint, quotaReadingFromMessage } from "../domains/quota/index.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import { recordUsageCall } from "../domains/session/usage-record.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
@@ -332,6 +334,22 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	let cacheBaselineGeneration: number | undefined;
 	// Disturbances taken for a request that never left still precede the next one that does (#434).
 	let unsentColdReasons: ExpectedColdReason[] = [];
+	// The last quota reading journaled per provider and target. A reading is journaled at its turn's first sight of it
+	// and whenever it changes, never once per call (#434).
+	const journaledQuota = new Map<string, { fingerprint: string; turnId: string | undefined }>();
+	const recordQuotaReading = (
+		reading: QuotaReading,
+		owner: TelemetrySessionLease["context"] | undefined,
+		facts: CallSettled,
+	): void => {
+		if (!owner) return;
+		const key = JSON.stringify([reading.provider, reading.targetId]);
+		const fingerprint = quotaReadingFingerprint(reading);
+		const previous = journaledQuota.get(key);
+		if (previous?.fingerprint === fingerprint && previous.turnId === owner.turnId) return;
+		if (recordTelemetry("quota.reading", reading, { ...owner, callId: facts.callId, attemptId: facts.attemptId }))
+			journaledQuota.set(key, { fingerprint, turnId: owner.turnId });
+	};
 
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
@@ -736,20 +754,25 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			journalLease = undefined;
 			if (call) {
 				Object.assign(message, { callId: call.callId, attemptId: call.attemptId });
+				const quota = quotaReadingFromMessage(message, localRuntime.runtimeId, localRuntime.targetId);
 				const facts = call.settle(
-					withCachePhysics(
-						callSettlementFromMessage(
+					{
+						...withCachePhysics(
+							callSettlementFromMessage(
+								message,
+								localRuntime.runtimeResolution.costProvenance,
+								message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
+									? "operator_cancel"
+									: undefined,
+							),
 							message,
-							localRuntime.runtimeResolution.costProvenance,
-							message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
-								? "operator_cancel"
-								: undefined,
 						),
-						message,
-					),
+						...(quota ? { quota: { provider: quota.provider, windows: quota.windows, source: quota.source } } : {}),
+					},
 					reportedModelFromMessage(message),
 				);
 				recordSettledCall(facts, lease?.context);
+				if (quota && facts) recordQuotaReading(quota, lease?.context, facts);
 				rememberMessageCalls(message, settledAttempts);
 			}
 			await lease?.release();

@@ -169,10 +169,9 @@ function codexKey(targetId: string, accountScope: string): string {
 	return JSON.stringify(["codex-stream", targetId, accountScope]);
 }
 
-/** OAI-1 / #423: keep sibling CLI reads and other target/account observations separate. */
-export function noteCodexStreamQuota(targetId: string, observation: CodexQuotaObservation): void {
-	const key = codexKey(targetId, observation.accountScope);
-	const snapshot: UsageSnapshot = {
+/** One codex.rate_limits event as the quota views read it; the journal's quota reading shares its window keys. */
+export function codexStreamSnapshot(observation: CodexQuotaObservation): UsageSnapshot {
+	return {
 		providerId: "codex",
 		displayName: "Codex",
 		status: "ok",
@@ -195,6 +194,12 @@ export function noteCodexStreamQuota(targetId: string, observation: CodexQuotaOb
 				? { display: observation.credits.balance, usedPct: null }
 				: null,
 	};
+}
+
+/** OAI-1 / #423: keep sibling CLI reads and other target/account observations separate. */
+export function noteCodexStreamQuota(targetId: string, observation: CodexQuotaObservation): void {
+	const key = codexKey(targetId, observation.accountScope);
+	const snapshot = codexStreamSnapshot(observation);
 	observed.set(key, {
 		snapshot,
 		storedAtMs: Date.parse(observation.observedAt),

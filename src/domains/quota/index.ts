@@ -8,3 +8,5 @@ export {
 	observedQuota,
 	onAnthropicQuotaChange,
 } from "./observed.js";
+export type { QuotaReading } from "./reading.js";
+export { quotaReadingFingerprint, quotaReadingFromMessage } from "./reading.js";

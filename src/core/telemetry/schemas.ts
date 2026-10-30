@@ -89,6 +89,15 @@ const call = {
 	]),
 };
 const span = { start: duration, end: duration };
+const QuotaWindowSchema = Type.Object(
+	{
+		key: ExistingId,
+		usedPct: factSchema(Type.Number({ minimum: 0, maximum: 100 })),
+		resetsAt: Type.Optional(utc),
+	},
+	closed,
+);
+const quotaSource = vocabulary(["response-headers", "stream-event", "poll"]);
 const stop = Type.Object(
 	{ reason: StopReason, failure: Type.Optional(FailureCause), detail: Type.Optional(text) },
 	closed,
@@ -178,23 +187,7 @@ export const CallSettledSchema = Type.Object(
 			closed,
 		),
 		quota: Type.Optional(
-			Type.Object(
-				{
-					provider: ExistingId,
-					windows: Type.Array(
-						Type.Object(
-							{
-								key: ExistingId,
-								usedPct: factSchema(Type.Number({ minimum: 0, maximum: 100 })),
-								resetsAt: Type.Optional(utc),
-							},
-							closed,
-						),
-					),
-					source: vocabulary(["response-headers", "stream-event", "poll"]),
-				},
-				closed,
-			),
+			Type.Object({ provider: ExistingId, windows: Type.Array(QuotaWindowSchema), source: quotaSource }, closed),
 		),
 		responseId: Type.Optional(text),
 	},
@@ -304,6 +297,7 @@ export const KIND_NAMES = [
 	"process.started",
 	"process.exited",
 	"prompt.text",
+	"quota.reading",
 ] as const;
 export type Kind = (typeof KIND_NAMES)[number];
 interface KindDefinition {
@@ -424,6 +418,25 @@ export const KIND_REGISTRY = {
 		cc: "content-bearing",
 		capture: "content",
 		schema: Type.Object({ structure: Type.Optional(ObjectRefSchema), text: ObjectRefSchema, bytes: count }, closed),
+	},
+	// One provider's quota windows, journaled at a turn's first reading and whenever they change (#434).
+	"quota.reading": {
+		version: 1,
+		tier: "operational",
+		cc: "content-free",
+		schema: Type.Object(
+			{
+				provider: ExistingId,
+				targetId: ExistingId,
+				source: quotaSource,
+				/** When the provider took the reading, which can precede the record by a stream's length. */
+				observedAt: utc,
+				windows: Type.Array(QuotaWindowSchema, { minItems: 1 }),
+				/** The provider reported that this account cannot send now. */
+				limitReached: Type.Optional(Type.Boolean()),
+			},
+			closed,
+		),
 	},
 } satisfies Record<Kind, KindDefinition>;
 export type Payload<K extends Kind> = Static<(typeof KIND_REGISTRY)[K]["schema"]>;
