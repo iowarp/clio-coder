@@ -6,8 +6,11 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
+import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/observability/cost.js";
+import { aggregateCostEntries } from "../../src/domains/observability/cost-rows.js";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
 import { ledgerCallFailureCounts } from "../../src/domains/session/usage.js";
+import { projectSessionUsage } from "../../src/engine/acp/usage.js";
 import {
 	remainingContextMaxTokens,
 	resolveReservedOutputTokens,
@@ -51,6 +54,37 @@ function assistant(
 
 describe("contracts/metering integrity", () => {
 	afterEach(() => setGlobalDefaultMaxOutputTokens(0));
+
+	it("preserves declared call counts and unknown run coverage through usage projections", () => {
+		const tracker = createCostTracker();
+		for (const [counts, expected] of [
+			[{}, { apiCalls: 0, missingTokenCalls: 0, unknownCallCoverageRuns: 1 }],
+			[
+				{ apiCalls: 0, missingTokenCalls: 0 },
+				{ apiCalls: 0, missingTokenCalls: 0, unknownCallCoverageRuns: 0 },
+			],
+			[
+				{ apiCalls: 3, missingTokenCalls: 1 },
+				{ apiCalls: 3, missingTokenCalls: 1, unknownCallCoverageRuns: 0 },
+			],
+			[{ apiCalls: 2 }, { apiCalls: 2, missingTokenCalls: 0, unknownCallCoverageRuns: 1 }],
+		] as const) {
+			const coverage = callCoverageForRun(counts);
+			deepStrictEqual(coverage, expected);
+			tracker.accumulate("target", "model", 0, 0, coverage, "known_free", undefined, "worker");
+		}
+		const rows = aggregateCostEntries(tracker.entries());
+		const usage = projectSessionUsage({ cost: tracker.sessionCost(), rows });
+		strictEqual(usage.cost.calls, 5);
+		strictEqual(usage.cost.unknownCallCoverageRuns, 2);
+		strictEqual(usage.missingTokenCalls, 1);
+		strictEqual(usage.rows[0]?.calls, 5);
+		deepStrictEqual(usage.rows[0]?.cost, usage.cost);
+		strictEqual(renderCostAggregate(tracker.sessionCost()), "$0.00 local");
+		tracker.reset();
+		strictEqual(tracker.sessionTokens().unknownCallCoverageRuns, undefined);
+		strictEqual(renderCostAggregate(tracker.sessionCost()), "not measured");
+	});
 
 	it("attributes provider usage to the target and the model that answered", () => {
 		const [call] = ledgerUsageCalls(

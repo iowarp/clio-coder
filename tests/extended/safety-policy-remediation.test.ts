@@ -184,6 +184,7 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 			},
 		],
 		["missing", { tokenCount: 0, costUsd: 0, costProvenance: "unknown", externalTelemetry: { tokenUsage: "missing" } }],
+		["measured-zero", { tokenCount: 0, apiCalls: 1, missingTokenCalls: 0, costUsd: 0, costProvenance: "known_free" }],
 	] as const) {
 		writeFileSync(
 			join(receipts, `${name}.json`),
@@ -230,7 +231,10 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
 	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.knownSubtotal, 280);
-	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.missingTokenCalls, 1);
-	assert.equal(rows.find((row) => row.fact === "worker-model-usage" && row.targetId === "worker-target")?.runs, 2);
+	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.missingTokenCalls, 0);
+	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.unknownCallCoverageRuns, 2);
+	assert.equal(rows.find((row) => row.fact === "worker-tokens")?.apiCalls, 1);
+	assert.equal(rows.find((row) => row.fact === "worker-tokens")?.missingTokenRuns, 2);
+	assert.equal(rows.find((row) => row.fact === "worker-model-usage" && row.targetId === "worker-target")?.runs, 3);
 	assert.equal(rows.find((row) => row.fact === "worker-audience-usage" && row.audience === "shadow")?.totalTokens, 130);
 });
