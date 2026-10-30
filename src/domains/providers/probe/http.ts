@@ -37,6 +37,19 @@ export interface JsonProbeResult<T = unknown> extends HttpProbeResult {
 /** Enough for a provider's error JSON, small enough that a failing server cannot make a probe buffer a page. */
 export const ERROR_BODY_LIMIT = 2048;
 
+/**
+ * A successful probe body is a model catalog or one embedding. The largest
+ * catalogs (OpenRouter, LiteLLM) run to a few MiB; a body past this is not a
+ * probe answer, and parsing it whole would let one server exhaust memory.
+ */
+export const JSON_BODY_LIMIT = 16 * 1024 * 1024;
+
+class ProbeBodyTooLarge extends Error {
+	constructor() {
+		super(`response body exceeds the ${JSON_BODY_LIMIT / (1024 * 1024)} MiB probe limit`);
+	}
+}
+
 export async function probeHttp(opts: HttpProbeOptions): Promise<HttpProbeResult> {
 	return runProbe(opts, false);
 }
@@ -88,19 +101,48 @@ async function runProbe<T>(opts: HttpProbeOptions, readJson: boolean): Promise<J
 					};
 		}
 		parsingJson = true;
-		const data = (await response.json()) as T;
+		const data = (await readJsonBody(response)) as T;
 		controller.signal.throwIfAborted();
 		return { ok: true, latencyMs, status: response.status, data };
 	} catch (err) {
 		return {
 			ok: false,
 			latencyMs: latencyMs ?? Math.round(performance.now() - started),
-			error: abortError ?? `${parsingJson ? "JSON parse: " : ""}${describeError(err)}`,
+			error:
+				abortError ??
+				(err instanceof ProbeBodyTooLarge ? err.message : `${parsingJson ? "JSON parse: " : ""}${describeError(err)}`),
 		};
 	} finally {
 		clearTimeout(timer);
 		opts.signal?.removeEventListener("abort", onExternalAbort);
 	}
+}
+
+/** Parse a successful body read up to {@link JSON_BODY_LIMIT} bytes; a declared or streamed excess cancels the read. */
+async function readJsonBody(response: Response): Promise<unknown> {
+	const declared = Number(response.headers.get("content-length") ?? Number.NaN);
+	if (declared > JSON_BODY_LIMIT) {
+		await response.body?.cancel();
+		throw new ProbeBodyTooLarge();
+	}
+	const reader = response.body?.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		for (;;) {
+			const next = await reader?.read();
+			if (!next || next.done) break;
+			total += next.value.byteLength;
+			if (total > JSON_BODY_LIMIT) throw new ProbeBodyTooLarge();
+			chunks.push(next.value);
+		}
+	} catch (error) {
+		await reader?.cancel().catch(() => {
+			// The read already failed or overflowed; the stream has nothing left worth releasing.
+		});
+		throw error;
+	}
+	return JSON.parse(new TextDecoder("utf-8").decode(Buffer.concat(chunks)));
 }
 
 /**
