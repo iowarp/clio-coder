@@ -349,6 +349,8 @@ export interface CallJournalRead {
 	records: Array<{ record: TelemetryRecord; origin: ClockOrigin }>;
 	skipped: number;
 	damaged: number;
+	/** Each readable segment's capture mode, in read order (#434 §9). */
+	modes?: Array<SegmentHeader["mode"]>;
 }
 
 /** Read-only readers preserve future records and never repair a writer's file (#434). */
@@ -397,8 +399,10 @@ function appendReadSegment(result: CallJournalRead, bytes: Buffer): void {
 	if (scan.corruptOffset !== null || scan.tornTailBytes > 0) result.damaged += 1;
 	let origin: ClockOrigin | undefined;
 	for (const row of scan.rows) {
-		if (row.kind === "header") origin = row.header.clockOrigin;
-		else if (row.kind === "record" && origin)
+		if (row.kind === "header") {
+			origin = row.header.clockOrigin;
+			result.modes = [...(result.modes ?? []), row.header.mode];
+		} else if (row.kind === "record" && origin)
 			result.records.push({ record: row.record, origin: row.record.origin ?? origin });
 		else {
 			if (row.kind === "skipped" && row.segment) origin = undefined;

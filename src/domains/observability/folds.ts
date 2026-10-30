@@ -3,6 +3,9 @@ import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
 
+/** Stamped on every read-model DTO; bump when a fold rule changes what a sum means (#434, R4). */
+export const TELEMETRY_FOLD_VERSION = 1;
+
 const fields = ["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning"] as const;
 const unknown: Fact<number> = { kind: "unknown", reason: "not-observed" };
 const absent: Fact<number> = { kind: "absent", reason: "not-applicable" };
@@ -279,7 +282,7 @@ function foldRunScope(records: Iterable<TelemetryRecord>) {
 	};
 }
 
-function sumFactSums(sums: readonly FactSum[]): FactSum {
+export function sumFactSums(sums: readonly FactSum[]): FactSum {
 	const result = emptyFactSum();
 	for (const sum of sums) {
 		result.measured += sum.measured;
