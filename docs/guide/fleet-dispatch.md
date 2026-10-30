@@ -1583,7 +1583,7 @@ include:
   `worker_mutation_blocked`, `merge_withheld` (a task worktree was preserved instead
   of merged because of one of the four gate cases above), `worker_removed_tests` (a
   run in the current checkout removed existing test cases that the task did not ask to
-  remove) and `information_flow_blocked`. Every code except `result_contract_invalid` suppresses automatic retry; that one is retried on another agent or model.
+  remove) and `information_flow_blocked`. Every code except `result_contract_invalid` and `worker_final_output_missing` suppresses automatic retry. `result_contract_invalid` is retried on another agent or model. `worker_final_output_missing` has no retry class of its own, so the run's other evidence classifies it, usually as a worker runtime failure that is retried on another runtime.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
   complete current-policy decision, exact execution role, route estimate and
   readiness evidence, and digest-covered quality sources.
