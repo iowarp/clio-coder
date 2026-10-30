@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
@@ -175,6 +175,12 @@ function readHistory(path: string): HistoryRead {
 	if (raw.length === 0) return empty;
 	const parsed: unknown = JSON.parse(raw);
 	if (!isRecord(parsed) || !Array.isArray(parsed.records)) throw new Error("route history has unsupported format");
+	// An older format was retired by 0.6.5 too: set it aside and keep learning. A newer file belongs to another
+	// installation, so it is preserved and this version writes nothing over it (R12, #434).
+	if (typeof parsed.version === "number" && parsed.version < 3) {
+		retireHistory(path, parsed.version);
+		return empty;
+	}
 	if (parsed.version !== 3 && parsed.version !== ROUTE_HISTORY_VERSION)
 		return { records: [], writable: false, skipped: Math.max(1, parsed.records.length) };
 	const records: RouteHistoryRecord[] = [];
@@ -187,6 +193,24 @@ function readHistory(path: string): HistoryRead {
 		} // Preserve records this reader cannot interpret on the next write, too (#434).
 	}
 	return { records: records.sort(compareRecords), writable: skipped === 0, skipped };
+}
+
+function retireHistory(path: string, version: number): void {
+	const stamp = new Date()
+		.toISOString()
+		.replace(/[-:]/gu, "")
+		.replace(/\.\d+Z$/u, "Z");
+	const retired = `${path}.v${version}.${stamp}.retired`;
+	try {
+		renameSync(path, retired);
+	} catch (error) {
+		// A sibling process set the same file aside first.
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
+	}
+	writeDiagnostic(
+		`[clio-coder:dispatch] route history v${version} is retired; starting empty at v${ROUTE_HISTORY_VERSION}. Prior observations: ${retired}\n`,
+	);
 }
 
 /** Inode, size and mtime; every write is tmp-and-rename, so a rewrite always moves it. */

@@ -144,11 +144,11 @@ describe("contracts/route identity keying", () => {
 		strictEqual(JSON.parse(readFileSync(path, "utf8")).version, 4);
 	});
 
-	it("unsupported files and records are counted and never retired or overwritten", () => {
+	it("future files and unreadable records are counted and never retired or overwritten", () => {
 		for (const version of [2, 5]) {
 			const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-preserve-"));
 			const path = join(stateDir, "route-history.json");
-			for (const outer of [version, 4]) {
+			for (const outer of version === 5 ? [5, 4] : [4]) {
 				const bytes = JSON.stringify({ version: outer, records: [{ version, receiptDigest: hash("future") }] });
 				writeFileSync(path, bytes);
 				const history = createRouteHistoryStore({ stateDir });
@@ -159,5 +159,21 @@ describe("contracts/route identity keying", () => {
 				deepStrictEqual(readdirSync(stateDir), ["route-history.json"]);
 			}
 		}
+	});
+
+	it("a retired v2 file is set aside, as 0.6.5 did, and learning continues (#434)", () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-retire-"));
+		const path = join(stateDir, "route-history.json");
+		const bytes = JSON.stringify({ version: 2, records: [{ version: 2, receiptDigest: hash("old") }] });
+		writeFileSync(path, bytes);
+		const history = createRouteHistoryStore({ stateDir });
+		deepStrictEqual(history.health(), { skipped: 0, writable: true });
+		const retired = readdirSync(stateDir).filter((name) =>
+			/^route-history\.json\.v2\.\d{8}T\d{6}Z\.retired$/u.test(name),
+		);
+		strictEqual(retired.length, 1);
+		strictEqual(readFileSync(join(stateDir, retired[0] ?? ""), "utf8"), bytes);
+		history.upsert(record(route(), "fresh"));
+		strictEqual(JSON.parse(readFileSync(path, "utf8")).version, 4);
 	});
 });
