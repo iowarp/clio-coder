@@ -19,6 +19,7 @@ import { SettingsService } from "../../server/services/settings.js";
 import { SetupService } from "../../server/services/setup.js";
 import { SystemService } from "../../server/services/system.js";
 import { TargetsService } from "../../server/services/targets-cli.js";
+import { TelemetryService } from "../../server/services/telemetry.js";
 import { ToolchainService } from "../../server/services/toolchain.js";
 import { TraceService } from "../../server/services/traces.js";
 import { WorkspaceService } from "../../server/services/workspaces.js";
@@ -72,6 +73,7 @@ export async function harness(
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
+		telemetry: new TelemetryService(reads),
 		settings: settingsService,
 		setup,
 		fleet: new FleetService(reads),

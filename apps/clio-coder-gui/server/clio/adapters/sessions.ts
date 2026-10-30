@@ -5,7 +5,7 @@ import { endAbandonedSession, listSessionWorkspaces } from "../../../../../src/d
 import { AppProblem } from "../../services/problem.js";
 
 /** Fails closed when session storage links outside the state directory; false when there is no ledger yet. */
-function preflightLedger() {
+export function preflightLedger() {
 	const state = clioStateDir(),
 		directory = join(state, "sessions");
 	if (!existsSync(directory)) return false;

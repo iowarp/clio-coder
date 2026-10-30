@@ -5,6 +5,7 @@ import type { FleetRequest } from "../../contracts/fleet.js";
 import type { LibraryPlanRequest } from "../../contracts/library.js";
 import type { Machine, MachineMutation } from "../../contracts/machines.js";
 import type { SettingWrite } from "../../contracts/settings-controls.js";
+import type { TelemetryRequest } from "../../contracts/telemetry.js";
 import type { Tool } from "../../contracts/toolchain.js";
 import type { TraceRequest } from "../../contracts/traces.js";
 
@@ -40,6 +41,7 @@ export interface Methods {
 	"workspace.files": { params: { cwd: string; input: string }; result: unknown };
 	"sessions.recover": { params: { cwd: string; sessionId: string }; result: boolean };
 	"traces.read": { params: TraceRequest; result: unknown };
+	"telemetry.read": { params: TelemetryRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };
 	"tools.install": { params: { id: string; force: boolean }; result: { id: string; message: string } };
 	"library.plan": { params: { cwd: string; request: Static<typeof LibraryPlanRequest> }; result: unknown };

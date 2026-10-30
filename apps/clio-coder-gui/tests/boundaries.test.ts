@@ -81,6 +81,9 @@ const adapters = new Set([
 	"src/domains/observability/trace-store.ts",
 	"src/domains/observability/evidence-index.ts",
 	"src/domains/session/history.ts",
+	// The telemetry read model and its cold loader; the adapter serves their DTOs unchanged (#434).
+	"src/domains/observability/read-model.ts",
+	"src/domains/session/telemetry-source.ts",
 ]);
 // Test-only root seams are intentionally enumerated independently of production.
 const testModules = new Set([
@@ -102,6 +105,7 @@ const testModules = new Set([
 	"src/domains/toolchain/index.ts",
 	"src/domains/observability/trace-store.ts",
 	"tests/harness/openai-compat-fixture.ts",
+	"tests/harness/telemetry-lies.ts",
 ]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>

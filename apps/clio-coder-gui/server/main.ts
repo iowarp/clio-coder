@@ -30,6 +30,7 @@ import { SettingsService } from "./services/settings.js";
 import { SetupService } from "./services/setup.js";
 import { SystemService } from "./services/system.js";
 import { TargetsService } from "./services/targets-cli.js";
+import { TelemetryService } from "./services/telemetry.js";
 import { ToolchainService } from "./services/toolchain.js";
 import { TraceService } from "./services/traces.js";
 import { WorkspaceService } from "./services/workspaces.js";
@@ -210,6 +211,7 @@ export async function main(args = process.argv.slice(2)) {
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
+		telemetry: new TelemetryService(reads),
 		settings: settingsService,
 		setup,
 		fleet: new FleetService(reads),

@@ -63,6 +63,10 @@ serveWorker(async (call) => {
 		return completeWorkspaceFiles(call.params.cwd, call.params.input);
 	}
 	if (call.method === "traces.read") return traces.read(call.params);
+	if (call.method === "telemetry.read") {
+		const { readTelemetry } = await import("../clio/adapters/telemetry.js");
+		return readTelemetry(call.params);
+	}
 	if (call.method !== "tools.list") throw new AppProblem("unsupported", "Method is not available in the reads worker.");
 	if (settings.fixture && settings.readDelayMs)
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, settings.readDelayMs);
