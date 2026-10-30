@@ -163,9 +163,24 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 	try {
 		const display = defaultRunEventJournal();
 		display.open(run.runId, "scout");
-		journal.feed({ kind: "event", type: "text", detail: "bounded display" }, 1);
+		journal.feed({ kind: "event", type: "text", detail: "PRIVATE_WORKER_PROSE" }, 1);
+		journal.feed(
+			{
+				kind: "event",
+				type: "clio_coder_tool_finish",
+				tool: "read",
+				callId: "tool-1",
+				outcome: "ok",
+				durationMs: 12,
+				detail: "PRIVATE_TOOL_DETAIL",
+				reason: "PRIVATE_TOOL_REASON",
+				audit: { target: "PRIVATE_TARGET" },
+			},
+			10000,
+		);
+		journal.feed({ kind: "event", type: "message_end", detail: "PRIVATE_MESSAGE" }, 1);
 		display.receipt(run.runId, { outcome: "succeeded", exitCode: 0 });
-		display.terminal(run.runId, "succeeded");
+		display.terminal(run.runId, "succeeded", "PRIVATE_TERMINAL_DETAIL");
 		display.append(run.runId, { at: new Date().toISOString(), type: "late-display" });
 		const call = beginCall(
 			{
@@ -190,11 +205,24 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 		const feed = readRunEventJournal(run.runId, { root: directory });
 		deepStrictEqual(
 			feed.lines.map((line) => line.kind),
-			["open", "journal_truncated", "receipt", "terminal"],
+			["open", "event", "journal_truncated", "receipt", "terminal"],
 		);
 		strictEqual(feed.terminal?.outcome, "succeeded");
 		strictEqual(feed.truncated, true);
 		strictEqual(feed.agentId, "scout");
+		deepStrictEqual(feed.lines[1] && { ...feed.lines[1], seq: undefined, at: undefined }, {
+			kind: "event",
+			type: "clio_coder_tool_finish",
+			tool: "read",
+			callId: "tool-1",
+			outcome: "ok",
+			durationMs: 12,
+			seq: undefined,
+			at: undefined,
+		});
+		const raw = await readFile(join(directory, run.runId, "events.ndjson"), "utf8");
+		strictEqual(raw.includes("PRIVATE_"), false, "standard run feed excludes prose, details, reasons and tool arguments");
+		ok(saved.records.every(({ record }) => record.cc !== "content-bearing"));
 		strictEqual((await readdir(directory)).length, 1, "standalone ownership never materializes a session");
 		const before = await readFile(join(directory, run.runId, "events.ndjson"));
 		display.open(run.runId, "late");

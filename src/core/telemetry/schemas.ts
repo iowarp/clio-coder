@@ -159,6 +159,67 @@ export const CallSettledSchema = Type.Object(
 );
 export type CallSettled = Static<typeof CallSettledSchema>;
 
+export const RUN_FEED_EVENTS = [
+	"agent_start",
+	"agent_end",
+	"attempt_start",
+	"message_end",
+	"thinking",
+	"route_warning",
+	"clio_coder_tool_start",
+	"clio_coder_tool_finish",
+	"clio_coder_tool_observation",
+	"clio_coder_permission_escalated",
+	"clio_coder_permission_resolved",
+	"clio_coder_run_outcome",
+	"clio_coder_steer_received",
+	"unknown",
+] as const;
+export const RUN_FEED_OUTCOMES = [
+	"succeeded",
+	"failed",
+	"timed_out",
+	"stalled",
+	"canceled",
+	"denied_by_policy",
+	"spawn_failed",
+	"unknown",
+] as const;
+const runFeedOutcome = vocabulary(RUN_FEED_OUTCOMES);
+const RunFeedBodySchema = Type.Union([
+	Type.Object({ kind: Type.Literal("open"), runId: ExistingId, agentId: ExistingId }, closed),
+	Type.Object(
+		{
+			kind: Type.Literal("event"),
+			type: vocabulary(RUN_FEED_EVENTS),
+			tool: Type.Optional(ExistingId),
+			callId: Type.Optional(ExistingId),
+			outcome: Type.Optional(vocabulary(["ok", "error", "blocked"])),
+			durationMs: Type.Optional(duration),
+		},
+		closed,
+	),
+	Type.Object(
+		{
+			kind: Type.Literal("journal_truncated"),
+			reason: Type.Literal("per-run size cap"),
+			droppedFromSeq: Type.Integer({ minimum: 1 }),
+		},
+		closed,
+	),
+	Type.Object(
+		{
+			kind: Type.Literal("receipt"),
+			outcome: runFeedOutcome,
+			exitCode: Type.Union([Type.Integer(), Type.Null()]),
+			attemptRunId: Type.Optional(ExistingId),
+		},
+		closed,
+	),
+	Type.Object({ kind: Type.Literal("terminal"), outcome: runFeedOutcome }, closed),
+]);
+export type StructuralRunFeedBody = Static<typeof RunFeedBodySchema>;
+
 export const KIND_NAMES = [
 	"call.started",
 	"call.settled",
@@ -260,8 +321,8 @@ export const KIND_REGISTRY = {
 	"run.feed": {
 		version: 1,
 		tier: "operational",
-		cc: "content-bearing",
-		schema: Type.Object({ seq: Type.Integer({ minimum: 1 }), body: Type.Record(Type.String(), Type.Unknown()) }, closed),
+		cc: "structural",
+		schema: Type.Object({ seq: Type.Integer({ minimum: 1 }), body: RunFeedBodySchema }, closed),
 	},
 	"process.started": accountability(empty),
 	"process.exited": accountability(Type.Object({ exitCode: Type.Integer() }, closed)),

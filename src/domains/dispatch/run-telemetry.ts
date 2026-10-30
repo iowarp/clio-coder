@@ -4,6 +4,8 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
+import type { StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
+import { RUN_FEED_EVENTS, RUN_FEED_OUTCOMES } from "../../core/telemetry/schemas.js";
 import type { CallJournal } from "../observability/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
 
@@ -16,6 +18,36 @@ export interface RunTelemetryJournal {
 	feed(body: RunEventJournalBody, capBytes: number): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
+}
+
+/** Select structural fields; prose and free-text details stay in existing output artifacts (#434). */
+function structuralFeed(body: RunEventJournalBody): StructuralRunFeedBody | null {
+	const outcome = (value: string) => RUN_FEED_OUTCOMES.find((known) => known === value) ?? "unknown";
+	switch (body.kind) {
+		case "open":
+			return { kind: body.kind, runId: body.runId, agentId: body.agentId };
+		case "terminal":
+			return { kind: body.kind, outcome: outcome(body.outcome) };
+		case "receipt":
+			return {
+				kind: body.kind,
+				outcome: outcome(body.outcome),
+				exitCode: body.exitCode,
+				...(body.attemptRunId !== undefined ? { attemptRunId: body.attemptRunId } : {}),
+			};
+		case "journal_truncated":
+			return { kind: body.kind, reason: "per-run size cap", droppedFromSeq: body.droppedFromSeq };
+		case "event":
+			if (body.type === "text" || body.type === "text_delta" || body.type === "thinking_delta") return null;
+			return {
+				kind: body.kind,
+				type: RUN_FEED_EVENTS.find((known) => known === body.type) ?? "unknown",
+				...(body.tool !== undefined ? { tool: body.tool } : {}),
+				...(body.callId !== undefined ? { callId: body.callId } : {}),
+				...(body.outcome !== undefined ? { outcome: body.outcome } : {}),
+				...(body.durationMs !== undefined ? { durationMs: body.durationMs } : {}),
+			};
+	}
 }
 
 const journals = new Map<string, RunTelemetryJournal>();
@@ -117,6 +149,8 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 		},
 		feed(body, capBytes) {
 			if (journal.closed || feedClosed) return;
+			const structural = structuralFeed(body);
+			if (structural === null) return;
 			if (body.kind === "event" && (dropping || feedBytes >= capBytes)) {
 				if (!dropping) {
 					dropping = true;
@@ -124,10 +158,16 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 				}
 				return;
 			}
-			feedBytes += Buffer.byteLength(JSON.stringify(body));
+			// A conservative bound keeps serialization off the producer stack (#434).
+			feedBytes +=
+				256 +
+				Object.values(structural).reduce<number>(
+					(sum, value) => sum + (typeof value === "string" ? Buffer.byteLength(value) * 6 : 16),
+					0,
+				);
 			writer.enqueue({
 				kind: "run.feed",
-				data: { seq: ++seq, body: { ...body } },
+				data: { seq: ++seq, body: structural },
 				ctx: context,
 				wallMs: Date.now(),
 				mono: performance.now(),
