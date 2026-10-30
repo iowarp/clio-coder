@@ -850,3 +850,26 @@
 		display: none;
 	}
 }
+
+.wizard-selection {
+	padding: var(--space-3) var(--space-4);
+	background: var(--well);
+	border-left: 2px solid var(--accent);
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.wizard-step__actions {
+	position: sticky;
+	bottom: 0;
+	background: var(--paper);
+	padding-block: var(--space-4);
+	border-top: 1px solid var(--line);
+	z-index: 2;
+}
+.wizard-recap {
+	max-height: 10rem;
+	overflow: auto;
+	border-left: 2px solid var(--accent-line);
+	padding-left: var(--space-4);
+}

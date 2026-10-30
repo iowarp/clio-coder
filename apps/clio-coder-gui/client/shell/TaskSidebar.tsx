@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router";
 import { routes } from "../../contracts/routes.js";
-import type { SessionSnapshot, Workspace } from "../../contracts/sessions.js";
-import { type Client, emptyInput } from "../api/client.js";
+import type { SessionOverviewItem } from "../../contracts/session-overview.js";
+import type { Workspace } from "../../contracts/sessions.js";
+import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { Icon } from "../design/icons.js";
@@ -12,12 +13,15 @@ import { platformLabel, systemStatus } from "../pages/system-model.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
 import { chordHint } from "./chords.js";
+import { ExploreDrawer } from "./ExploreDrawer.js";
 import { InlineRename } from "./InlineRename.js";
 import { Menu, MenuItem } from "./Menu.js";
 import { SettingsSidebar } from "./SettingsSidebar.js";
 import { isSettingsPath, STATE_LABELS, sessionIdFromPath, shortAge, type TaskRow, taskRows } from "./shell-model.js";
-import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask } from "./tasks.js";
+import { type TaskActions, useDeleteTask, useMinuteClock, useRenameTask, useSessionOverview } from "./tasks.js";
 import { setThemeChoice, themeSwitchLabel, useTheme } from "./theme.js";
+import { useSessionIntent } from "./use-session-intent.js";
+import "./task-sidebar-actions.css";
 
 const TASKS_PER_PROJECT = 6;
 const PROJECTS_SHOWN = 10;
@@ -44,12 +48,13 @@ export function TaskSidebar({
 	onSearch: () => void;
 	onToggle: () => void;
 	onHelp: () => void;
-	/** Called after any navigation so a mobile drawer can close itself. */
+	/** Called after navigation to finish any open navigation interaction. */
 	onNavigate: () => void;
 }) {
 	const theme = useTheme();
 	countRender("task-sidebar");
 	const location = useLocation();
+	const [exploring, setExploring] = useState(false);
 	// The settings rail lists Library, Fleet and the other inspection pages, so it stays up on them.
 	// Library and System are also linked from the work rail; reached from there, they keep that rail.
 	const inSettings = useRef(false);
@@ -65,7 +70,7 @@ export function TaskSidebar({
 	const now = useMinuteClock();
 	const [shown, setShown] = useState(PROJECTS_SHOWN);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
+	const overview = useSessionOverview(client);
 	const system = useQuery({
 		queryKey: ["system"],
 		queryFn: () => client.call(routes.system, emptyInput),
@@ -114,6 +119,33 @@ export function TaskSidebar({
 				</button>
 			</div>
 
+			<nav className="wb-side__discover" aria-label="Find and explore">
+				<button type="button" className="wb-action" onClick={onSearch} title="Search tasks and commands">
+					<Icon name="search" />
+					<span>Search</span>
+				</button>
+				<button
+					type="button"
+					className="wb-action"
+					aria-haspopup="dialog"
+					aria-expanded={exploring}
+					onClick={() => setExploring(true)}
+				>
+					<Icon name="overview" />
+					<span>Explore</span>
+				</button>
+			</nav>
+			{exploring ? (
+				<ExploreDrawer
+					activeWorkspaceId={activeWorkspaceId}
+					onClose={() => setExploring(false)}
+					onNavigate={() => {
+						setExploring(false);
+						onNavigate();
+					}}
+				/>
+			) : null}
+
 			{settings ? (
 				<div className="wb-side__panel">
 					<Link className="wb-back" to={backTo.current} onClick={onNavigate}>
@@ -127,38 +159,27 @@ export function TaskSidebar({
 						<button
 							type="button"
 							className="wb-action wb-action--primary"
-							disabled={!activeWorkspaceId || actions.launch.busy}
-							onClick={() => activeWorkspaceId && actions.newTask(activeWorkspaceId)}
-							title={activeWorkspaceId ? "Start a new task in the current workspace" : "Open a workspace first"}
+							disabled={actions.launch.busy}
+							onClick={() => actions.newTask(activeWorkspaceId ?? undefined)}
+							title="Open your task composer"
 						>
 							{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
 							<span>{actions.launch.busy ? "Starting…" : "New task"}</span>
-							<kbd>{chordHint("newTask")}</kbd>
 						</button>
+						<NavLink to="/sessions" className="wb-action" onClick={onNavigate}>
+							<Icon name="sessions" />
+							<span>Sessions</span>
+						</NavLink>
 						<button type="button" className="wb-action" onClick={onOpenWorkspace}>
 							<Icon name="folderOpen" />
 							<span>Open workspace</span>
-							<kbd>{chordHint("openWorkspace")}</kbd>
 						</button>
-						<NavLink to="/library" className="wb-action" onClick={onNavigate}>
-							<Icon name="library" />
-							<span>Library</span>
-						</NavLink>
 					</nav>
 
 					{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the task list independently. */}
 					<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by workspace">
 						<div className="wb-side__heading">
 							<h2>Workspaces</h2>
-							<button
-								type="button"
-								className="wb-icon wb-icon--small"
-								aria-label="Search tasks and commands"
-								title={`Search tasks and commands (${chordHint("palette")})`}
-								onClick={onSearch}
-							>
-								<Icon name="search" />
-							</button>
 						</div>
 
 						{workspaces.isPending ? <p className="wb-note">Loading workspaces…</p> : null}
@@ -178,7 +199,7 @@ export function TaskSidebar({
 								key={workspace.id}
 								client={client}
 								workspace={workspace}
-								sessions={sessions.data ?? []}
+								sessions={overview.data?.sessions ?? []}
 								current={workspace.id === activeWorkspaceId}
 								activeTask={activeTask}
 								actions={actions}
@@ -215,6 +236,9 @@ export function TaskSidebar({
 						</span>
 					</span>
 				</Link>
+				<button type="button" className="wb-icon" aria-label="Open help" title="Help and shortcuts" onClick={onHelp}>
+					<Icon name="docs" />
+				</button>
 				<button
 					type="button"
 					className="wb-icon"
@@ -244,7 +268,7 @@ function ProjectGroup({
 }: {
 	client: Client;
 	workspace: Workspace;
-	sessions: readonly SessionSnapshot[];
+	sessions: readonly SessionOverviewItem[];
 	current: boolean;
 	activeTask: string | null;
 	actions: TaskActions;
@@ -315,7 +339,27 @@ function ProjectGroup({
 					{history.isPending && history.fetchStatus !== "idle" && rows.length === 0 ? (
 						<li className="wb-note">Loading…</li>
 					) : null}
-					{!history.isPending && rows.length === 0 ? <li className="wb-note">No tasks yet.</li> : null}
+					{history.isError ? (
+						<li className="wb-note" role="status">
+							{history.error instanceof ApiProblem && history.error.problem.code === "unsupported" ? (
+								"Saved tasks aren't available with this connection."
+							) : (
+								<>
+									Saved tasks could not be refreshed.{" "}
+									<button type="button" className="wb-link" disabled={history.isFetching} onClick={() => void history.refetch()}>
+										{history.isFetching ? "Checking…" : "Try again"}
+									</button>
+								</>
+							)}
+						</li>
+					) : null}
+					<li>
+						<Link to={`/workspaces/${workspace.id}/sessions`} className="wb-more wb-project__history" onClick={onNavigate}>
+							View project work
+							<Icon name="chevronRight" />
+						</Link>
+					</li>
+					{!history.isPending && !history.isError && rows.length === 0 ? <li className="wb-note">No tasks yet.</li> : null}
 					{rows.length > visible ? (
 						<li>
 							<button type="button" className="wb-more" onClick={() => setLimit(visible + TASKS_PER_PROJECT)}>
@@ -346,15 +390,16 @@ function TaskItem({
 }) {
 	const rename = useRenameTask(client);
 	const remove = useDeleteTask(client);
+	const intent = useSessionIntent(client, row.id, row.open && !selected);
 	const [editing, setEditing] = useState(false);
 	const [confirming, setConfirming] = useState(false);
 	const age = shortAge(row.at, now);
 	const label = STATE_LABELS[row.state];
-	const busy = actions.resuming === row.id || actions.closing === row.id;
+	const busy = actions.resuming === row.id || actions.controlling(row.id);
 	const glyph =
 		row.state === "working" || row.state === "starting" || actions.resuming === row.id ? (
 			<ClioPulse size={PULSE_SIZE.row} />
-		) : row.state === "approval" ? (
+		) : row.state === "approval" || row.state === "question" || row.state === "unknown" ? (
 			<span className="wb-dot wb-dot--approval" aria-hidden="true" />
 		) : row.state === "failed" ? (
 			<span className="wb-dot wb-dot--failed" aria-hidden="true" />
@@ -419,7 +464,7 @@ function TaskItem({
 					/>
 				</div>
 			) : row.open ? (
-				<NavLink to={`/sessions/${row.id}`} className="wb-task__main" title={title} onClick={onNavigate}>
+				<NavLink to={`/sessions/${row.id}`} className="wb-task__main" title={title} onClick={onNavigate} {...intent}>
 					{body}
 				</NavLink>
 			) : (
@@ -443,7 +488,13 @@ function TaskItem({
 							Open in new window
 						</MenuItem>
 						{row.open ? (
-							<MenuItem icon="close" disabled={busy || working} onClick={() => actions.close(row.id)}>
+							<MenuItem
+								icon="close"
+								disabled={busy || working}
+								onClick={() =>
+									actions.close({ id: row.id, workspaceId: row.workspaceId, title: row.title, currentTurnId: null })
+								}
+							>
 								Close task
 							</MenuItem>
 						) : (

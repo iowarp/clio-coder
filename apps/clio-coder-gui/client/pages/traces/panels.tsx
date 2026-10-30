@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { Link } from "react-router";
 import type { Static } from "typebox";
 import type { TraceEvent, TraceGate, TracePhase, TraceReceipt, TraceRun } from "../../../contracts/traces.js";
@@ -49,6 +49,19 @@ export function Waterfall({
 	selected: string | null;
 	select: (id: string) => void;
 }) {
+	const toolSpans = useMemo(() => {
+		const grouped = new Map<string, TraceEvent[]>();
+		let count = 0;
+		for (const event of events) {
+			if (event.type !== "tool_call" || !Number.isFinite(Date.parse(event.started_at))) continue;
+			const group = grouped.get(event.phase_id) ?? [];
+			if (group.length >= 64 || count >= 256) continue;
+			group.push(event);
+			grouped.set(event.phase_id, group);
+			count += 1;
+		}
+		return grouped;
+	}, [events]);
 	const start = Date.parse(run.started_at),
 		end = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? clock.now() : Number.NaN,
 		knownDuration = Number.isFinite(end - start) && end >= start,
@@ -61,7 +74,7 @@ export function Waterfall({
 			</div>
 			<p className="panel-note">
 				Select a phase to inspect its events, checks and accounting. Bars use recorded timestamps; they do not imply
-				causality.
+				causality. Up to 64 tool spans per phase and 256 in total are drawn; every recorded event is available in replay.
 			</p>
 			<div className="trace-waterfall">
 				{phases.map((phase) => {
@@ -88,25 +101,17 @@ export function Waterfall({
 								) : (
 									<span className="trace-timing-missing">No recorded timing</span>
 								)}
-								{events
-									.filter(
-										(event) =>
-											knownDuration &&
-											event.phase_id === phase.phase_id &&
-											event.type === "tool_call" &&
-											Number.isFinite(Date.parse(event.started_at)),
-									)
-									.map((event) => (
-										<i
-											key={event.event_id}
-											className="trace-tool-span"
-											title={`${event.name} · ${event.ended_at ? formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at)) : "end not recorded"}`}
-											style={{
-												left: `${Math.max(0, Math.min(99, ((Date.parse(event.started_at) - start) / duration) * 100))}%`,
-												width: `${Math.max(0.4, Math.min(100, ((event.ended_at ? Math.max(0, Date.parse(event.ended_at) - Date.parse(event.started_at)) : 0) / duration) * 100))}%`,
-											}}
-										/>
-									))}
+								{(knownDuration ? (toolSpans.get(phase.phase_id) ?? []) : []).map((event) => (
+									<i
+										key={event.event_id}
+										className="trace-tool-span"
+										title={`${event.name} · ${event.ended_at ? formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at)) : "end not recorded"}`}
+										style={{
+											left: `${Math.max(0, Math.min(99, ((Date.parse(event.started_at) - start) / duration) * 100))}%`,
+											width: `${Math.max(0.4, Math.min(100, ((event.ended_at ? Math.max(0, Date.parse(event.ended_at) - Date.parse(event.started_at)) : 0) / duration) * 100))}%`,
+										}}
+									/>
+								))}
 							</div>
 						</div>
 					);
@@ -157,9 +162,11 @@ export function CostPanel({ phase }: { phase: TracePhase }) {
 		</section>
 	);
 }
-export function EventRow({ event, start }: { event: TraceEvent; start: string }) {
-	const payload = parseJson(event.payload_json),
-		record = object(payload);
+export function EventRow({ event, start, payload = true }: { event: TraceEvent; start: string; payload?: boolean }) {
+	const parsed = parseJson(event.payload_json),
+		record = object(parsed),
+		elapsed = Date.parse(event.started_at) - Date.parse(start),
+		duration = event.ended_at ? Date.parse(event.ended_at) - Date.parse(event.started_at) : Number.NaN;
 	return (
 		<article className="trace-event">
 			<div className="trace-event-head">
@@ -169,10 +176,12 @@ export function EventRow({ event, start }: { event: TraceEvent; start: string })
 				/>
 				<strong>{event.name}</strong>
 				<small>
-					+{formatDuration(Date.parse(event.started_at) - Date.parse(start))}
-					{event.ended_at
-						? ` · ${formatDuration(Date.parse(event.ended_at) - Date.parse(event.started_at))}`
-						: " · end not recorded"}
+					{Number.isFinite(elapsed) && elapsed >= 0 ? `+${formatDuration(elapsed)}` : "Elapsed time unavailable"}
+					{Number.isFinite(duration) && duration >= 0
+						? ` · ${formatDuration(duration)}`
+						: event.ended_at
+							? " · duration unavailable"
+							: " · end not recorded"}
 					{event.tokens == null ? "" : ` · ${formatTokens(event.tokens)} tokens`}
 				</small>
 			</div>
@@ -184,10 +193,12 @@ export function EventRow({ event, start }: { event: TraceEvent; start: string })
 				</p>
 			)}
 
-			<details>
-				<summary>Event payload</summary>
-				<Json value={payload} />
-			</details>
+			{payload ? (
+				<details>
+					<summary>Event payload</summary>
+					<Json value={parsed} />
+				</details>
+			) : null}
 		</article>
 	);
 }
@@ -217,10 +228,12 @@ export function ReceiptPanel({
 	data,
 	loadFull,
 	full,
+	loading = false,
 }: {
 	data: Static<typeof TraceReceipt>;
 	loadFull: () => void;
 	full: boolean;
+	loading?: boolean;
 }) {
 	const r = data.receipt;
 	return (
@@ -228,8 +241,8 @@ export function ReceiptPanel({
 			<div className="page-heading">
 				<h2>Receipt</h2>
 				{r && !full ? (
-					<button type="button" onClick={loadFull}>
-						Load full receipt
+					<button type="button" disabled={loading} onClick={loadFull}>
+						{loading ? "Reading receipt…" : "Load full receipt"}
 					</button>
 				) : null}
 			</div>
@@ -303,11 +316,17 @@ export function ReceiptPanel({
 					</div>
 					<div>
 						<h3>Safety</h3>
-						<Facts entries={Object.entries(object(r.safety))} />
+						{Object.keys(object(r.safety)).length ? (
+							<Facts entries={Object.entries(object(r.safety))} />
+						) : (
+							<p>No safety facts were recorded in this receipt.</p>
+						)}
 					</div>
 					<div>
-						<h3>Provenance</h3>
-						<Facts entries={provenanceFacts(r)} />
+						<details>
+							<summary>Execution provenance & runtime facts</summary>
+							<Facts entries={provenanceFacts(r)} />
+						</details>
 					</div>
 				</div>
 			) : null}

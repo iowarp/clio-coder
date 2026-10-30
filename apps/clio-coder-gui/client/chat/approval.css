@@ -512,3 +512,27 @@
 		transform: translateY(calc(var(--motion-distance) * -1));
 	}
 }
+
+.approval-decision-progress {
+	flex-basis: 100%;
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.approval-decision-error {
+	padding: var(--space-3);
+	border-left: 2px solid var(--status-fail-line);
+	background: var(--status-fail-tint);
+	font-size: var(--text-exact);
+}
+.approval-decision-error p {
+	margin: 0;
+}
+.approval-decision-error p + p {
+	margin-top: var(--space-2);
+}
+.approval-banner--strip:has(.approval-decision-error) {
+	flex-wrap: wrap;
+}
+.approval-banner--strip > .approval-decision-error {
+	flex-basis: 100%;
+}

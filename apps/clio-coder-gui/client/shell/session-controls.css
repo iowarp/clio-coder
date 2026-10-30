@@ -1,0 +1,95 @@
+.session-control-notice {
+	display: flex;
+	flex: none;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-4);
+	padding: var(--space-2) var(--space-4);
+	border-bottom: 1px solid var(--accent-line);
+	background: var(--well);
+	font-size: var(--text-meta);
+}
+.session-control-notice[data-state="unresolved"] {
+	border-color: var(--status-warn-line);
+	background: var(--status-warn-tint);
+}
+.session-control-notice__message,
+.session-control-notice__actions,
+.session-control-result header,
+.session-control-result__actions,
+.session-control-confirm__actions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+}
+.session-control-notice__message {
+	min-width: 0;
+}
+.session-control-notice__message > span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.session-control-notice__actions {
+	flex: none;
+	gap: var(--space-1);
+}
+.session-control-notice button,
+.session-control-result__actions a {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.session-control-notice button {
+	min-height: 30px;
+	padding: var(--space-1) var(--space-2);
+}
+.session-control-notice button .icon {
+	width: 14px;
+	height: 14px;
+}
+.session-control-results {
+	display: grid;
+	gap: var(--space-4);
+}
+.session-control-result {
+	padding: var(--space-4);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--well);
+}
+.session-control-result[data-state="unresolved"] {
+	border-color: var(--status-warn-line);
+}
+.session-control-result header {
+	align-items: baseline;
+	flex-wrap: wrap;
+}
+.session-control-result h3 {
+	margin: 0;
+	font-size: var(--text-body);
+	overflow-wrap: anywhere;
+}
+.session-control-result p {
+	margin-block: var(--space-3);
+}
+.session-control-result__actions {
+	flex-wrap: wrap;
+}
+.session-control-result details {
+	margin-top: var(--space-4);
+	color: var(--muted);
+	font-size: var(--text-meta);
+}
+.session-control-result code {
+	overflow-wrap: anywhere;
+}
+.session-control-confirm__title {
+	font-family: var(--font-editorial);
+	font-size: var(--text-h3);
+	overflow-wrap: anywhere;
+}
+.session-control-confirm__actions {
+	justify-content: flex-end;
+	margin-top: var(--space-5);
+}

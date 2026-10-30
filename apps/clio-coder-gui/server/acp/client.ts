@@ -23,7 +23,7 @@ import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
 import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability } from "../../contracts/interviews.js";
 import { PERMISSION_WITHDRAW_METHOD } from "../../contracts/permissions.js";
-import type { SessionConfig } from "../../contracts/session-config.js";
+import type { SessionConfig, SetConfigOption } from "../../contracts/session-config.js";
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { UsageCapability } from "../../contracts/usage.js";
@@ -65,6 +65,7 @@ import {
 } from "../../contracts/wire.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
+import { modelSelectionRefusal, promptAdmissionDetail } from "./error-model.js";
 import { projectConfigOptions } from "./session-config.js";
 import { sessionResultTelemetry } from "./telemetry.js";
 
@@ -142,11 +143,22 @@ export function acpProblem(error: unknown) {
 	if (error instanceof AcpProtocolError) {
 		const detail = record(record(record(error.data).data)._meta)[ACP_ERROR_META_KEY];
 		const code = record(detail).code;
+		const modelSelection = code === "invalid_params" ? modelSelectionRefusal(record(detail).modelSelection) : undefined;
+		if (modelSelection)
+			return new AppProblem(
+				"validation",
+				"Clio did not change the conversation route because the requested model is not declared for this target. Choose an available model or update targets[].wireModels in settings.yaml, then restart the ACP session.",
+				undefined,
+				undefined,
+				{ modelSelection },
+			);
 		if (code === "prompt_not_admitted" && record(detail).reason === "authentication-required")
 			return new AppProblem(
 				"upstream_acp",
 				"Clio cannot access credentials for the selected target. Connect it with clio-coder auth login <target> in a terminal, then close and reopen this session. Background apps use Clio's saved credentials; terminal-only API keys are unavailable after login or restart.",
 			);
+		if (code === "prompt_not_admitted")
+			return new AppProblem("upstream_acp", promptAdmissionDetail(record(detail).reason));
 		if (code === "turn_failed")
 			return new AppProblem(
 				"upstream_acp",
@@ -157,7 +169,7 @@ export function acpProblem(error: unknown) {
 				"conflict",
 				code === "shell_active"
 					? "A shell line is running in this task. Wait for it or stop it."
-					: "A shell line runs between turns. Wait for this turn or stop it.",
+					: "A turn is already running in this task. Wait for it or stop it before changing the conversation.",
 			);
 		if (code === "shell_failed")
 			return new AppProblem("upstream_acp", "Clio could not run or record that shell line. (shell_failed)");
@@ -231,6 +243,8 @@ export class AcpClient {
 	telemetry: SessionTelemetry = {};
 	async open(cwd: string, sessionId?: string, replay = true) {
 		const load = replay || !this.resumable ? "session/load" : "session/resume";
+		const previousMode = sessionId ? this.modes.get(sessionId) : undefined;
+		const previousConfig = this.config;
 		const result = await this.request<unknown>(sessionId ? load : "session/new", {
 			cwd,
 			mcpServers: [],
@@ -240,13 +254,16 @@ export class AcpClient {
 		const mode = record(record(result).modes).currentModeId;
 		const options = projectConfigOptions(record(result).configOptions);
 		const target = record(record(record(result)._meta)[ACP_SESSION_META_KEY]).target;
-		if (options !== undefined)
+		if (options !== undefined && this.config === previousConfig)
 			this.config = {
 				options,
 				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
 			};
 		if (sessionId) {
-			if (mode === "default" || mode === "yolo") this.rememberMode(sessionId, mode);
+			if ((mode === "default" || mode === "yolo") && this.modes.get(sessionId) === previousMode)
+				this.rememberMode(sessionId, mode);
+			const current = this.modes.get(sessionId);
+			if (current) this.telemetry.autonomy = current;
 			return sessionId;
 		}
 		if (!Value.Check(NewSession, result))
@@ -264,12 +281,15 @@ export class AcpClient {
 		this.modes.delete(previousId);
 		this.telemetry = sessionResultTelemetry(result);
 		const mode = record(record(result).modes).currentModeId;
-		if (mode === "default" || mode === "yolo")
-			this.modes.set(nextId, { level: mode, source: previous?.source ?? "settings" });
-		else if (previous) this.modes.set(nextId, previous);
+		const notified = this.modes.get(nextId);
+		if (notified) this.telemetry.autonomy = notified;
+		else if (mode === "default" || mode === "yolo") this.rememberMode(nextId, mode, previous?.source ?? "settings");
+		else if (previous) this.rememberMode(nextId, previous.level, previous.source);
 	}
-	private rememberMode(sessionId: string, level: "default" | "yolo") {
-		this.modes.set(sessionId, { level, source: "settings" });
+	private rememberMode(sessionId: string, level: "default" | "yolo", source: "settings" | "session" = "settings") {
+		const current = { level, source };
+		this.modes.set(sessionId, current);
+		this.telemetry.autonomy = current;
 		this.capabilities.session = {
 			close: false,
 			list: false,
@@ -278,15 +298,40 @@ export class AcpClient {
 			...this.capabilities.session,
 			autonomy: true,
 		};
+		return current;
+	}
+	/** A mode notification reports a session override, including changes made through runtime commands (GUI-03). */
+	modeUpdate(sessionId: string, mode: unknown) {
+		if (mode !== "default" && mode !== "yolo")
+			throw new AppProblem("upstream_acp", "Clio reported a session mode this app cannot display.");
+		return this.rememberMode(sessionId, mode, "session");
 	}
 	async autonomy(sessionId: string, level?: "default" | "yolo") {
 		if (level !== undefined) {
+			const previous = this.modes.get(sessionId);
 			await this.request("session/set_mode", { sessionId, modeId: level });
-			this.modes.set(sessionId, { level, source: "session" });
+			// A notification received during the request is newer than its acknowledgement (GUI-03).
+			if (this.modes.get(sessionId) === previous) this.rememberMode(sessionId, level, "session");
 		}
 		const current = this.modes.get(sessionId);
 		if (!current) throw new AppProblem("upstream_acp", "Clio did not provide a session mode.");
 		return current;
+	}
+	async setConfig(sessionId: string, body: SetConfigOption) {
+		const previous = this.config;
+		const result = record(await this.request("session/set_config_option", { sessionId, ...body }));
+		const options = projectConfigOptions(result.configOptions);
+		if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
+		if (this.config === previous) {
+			const target = record(record(result._meta)[ACP_SESSION_META_KEY]).target;
+			this.config = {
+				...previous,
+				options,
+				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
+			};
+		}
+		if (!this.config) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
+		return this.config;
 	}
 	async prompt(
 		sessionId: string,

@@ -1,16 +1,23 @@
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
-import { useOperation } from "../api/queries.js";
+import { RequestRecovery, useOperationRequest } from "../api/operation-request.js";
 import { Facts } from "../design/facts.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
+import { InspectionError, InspectionSummary } from "../design/run-inspection.js";
 import { StatusMark } from "../design/status.js";
 import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
-import { listDestination, matchesText } from "./run-inspection-model.js";
+import {
+	evidenceVerdictTone,
+	inspectionSort,
+	listDestination,
+	matchesText,
+	sortInspectionRecords,
+} from "./run-inspection-model.js";
 import "./run-inspection.css";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
@@ -58,11 +65,22 @@ export function CollectedEvidence({ id }: { id: string }) {
 		</p>
 	);
 }
-function EvidenceActions({ client, initialRun = "" }: { client: Client; initialRun?: string }) {
+function EvidenceActions({
+	client,
+	initialRun = "",
+	initiallyOpen = !!initialRun,
+}: {
+	client: Client;
+	initialRun?: string;
+	initiallyOpen?: boolean;
+}) {
 	const selection = useWorkspaceSelection(client);
+	const queryClient = useQueryClient();
+	const navigate = useNavigate();
 	const [runId, setRunId] = useState(initialRun);
 	const [choosing, setChoosing] = useState(false);
 	const dispatches = useInfiniteQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["fleet-dispatches"],
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) =>
@@ -74,24 +92,20 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 		maxPages: ARTIFACT_MAX_PAGES,
 		enabled: choosing,
 	});
-	const [operationId, setOperationId] = useState<string | null>(null);
-	const operation = useOperation(client, operationId);
-	const action = useMutation({
-		mutationFn: (kind: "build" | "verify") =>
-			client.call(kind === "build" ? routes.evidenceBuild : routes.receiptVerify, {
-				...emptyInput,
-				params: { id: selection.id, runId: runId.trim() },
-			}),
-		onMutate: () => setOperationId(null),
-		onSuccess: (value) => setOperationId(value.operationId),
-	});
-	const busy =
-		action.isPending ||
-		(!!operationId && operation.isPending) ||
-		operation.data?.status === "queued" ||
-		operation.data?.status === "running";
+	const tracking = useOperationRequest(client, "evidence", (request) =>
+		client.call(
+			request.action === "build" ? routes.evidenceBuild : routes.receiptVerify,
+			{ ...emptyInput, params: { id: request.workspaceId, runId: request.resourceId } },
+			request.key,
+			undefined,
+			request.epoch ?? undefined,
+		),
+	);
+	const { operation, busy } = tracking;
+	const submit = (kind: "build" | "verify") =>
+		tracking.start({ workspaceId: selection.id, resourceId: runId.trim(), action: kind });
 	return (
-		<details className="trace-panel evidence-actions" open={initialRun ? true : undefined}>
+		<details className="trace-panel evidence-actions" open={initiallyOpen || !!tracking.request}>
 			<summary>Collect evidence or recheck a receipt</summary>
 			<p>
 				Choose a workspace and a dispatch run. Collecting evidence saves a report of the records Clio can find. Rechecking
@@ -106,7 +120,16 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 				{choosing && (
 					<div className="inspection-picker">
 						{dispatches.isPending && <p role="status">Reading recent dispatches…</p>}
-						{dispatches.error && <p role="alert">{dispatches.error.message}</p>}
+						{dispatches.error && (
+							<InspectionError
+								title="Recent dispatches unavailable"
+								error={dispatches.error}
+								busy={dispatches.isFetching}
+								retry={() => {
+									void dispatches.refetch();
+								}}
+							/>
+						)}
 						<label>
 							Recorded dispatch
 							<select
@@ -152,22 +175,16 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 					/>
 				</label>
 				<div className="actions">
-					<button type="button" disabled={busy || !selection.id || !runId.trim()} onClick={() => action.mutate("build")}>
+					<button type="button" disabled={busy || !selection.id || !runId.trim()} onClick={() => submit("build")}>
 						Collect evidence
 					</button>
-					<button type="button" disabled={busy || !selection.id || !runId.trim()} onClick={() => action.mutate("verify")}>
+					<button type="button" disabled={busy || !selection.id || !runId.trim()} onClick={() => submit("verify")}>
 						Recheck receipt
 					</button>
 				</div>
 			</fieldset>
-			{action.error && (
-				<div role="alert">
-					<p>{action.error.message}</p>
-					<p>Choose the dispatch from recent history again if its reference expired, then retry.</p>
-				</div>
-			)}
-			{operation.error && <p role="alert">{operation.error.message}</p>}
-			{operation.data && (
+			<RequestRecovery tracking={tracking} />
+			{operation.data && !tracking.epochChanged && (
 				<div role="status">
 					<p>
 						<StatusMark
@@ -186,7 +203,17 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 						<>
 							<p>{operation.data.result.message}</p>
 							{"kind" in operation.data.result && operation.data.result.kind === "evidence" && (
-								<CollectedEvidence id={operation.data.result.id} />
+								<>
+									<CollectedEvidence id={operation.data.result.id} />
+									<button
+										type="button"
+										onClick={() => {
+											void queryClient.resetQueries({ queryKey: ["evidence"] }).then(() => navigate("/evidence"));
+										}}
+									>
+										Open refreshed evidence inventory
+									</button>
+								</>
 							)}
 							{"kind" in operation.data.result && operation.data.result.kind === "receipt-verification" && (
 								<>
@@ -197,11 +224,14 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 									{operation.data.result.verification.reason && <p>Reason: {operation.data.result.verification.reason}</p>}
 									<p>An intact receipt authenticates the record; it does not establish that the work is correct.</p>
 									<dl className="settings-list">
-										{Object.entries(operation.data.result.verification.axes).map(([name, value]) => (
-											<div key={name}>
-												<dt>{name}</dt>
-												<dd>{value}</dd>
-												<dd />
+										{trustChecks.map((check) => (
+											<div key={check.key}>
+												<dt>{check.label}</dt>
+												<dd>
+													{operation.data.status === "succeeded" && "verification" in operation.data.result
+														? operation.data.result.verification.axes[check.key]
+														: "Not recorded"}
+												</dd>
 											</div>
 										))}
 									</dl>
@@ -216,12 +246,15 @@ function EvidenceActions({ client, initialRun = "" }: { client: Client; initialR
 	);
 }
 export function EvidencePage({ client }: { client: Client }) {
+	const queryClient = useQueryClient();
 	const [search, setSearch] = useSearchParams();
 	const q = search.get("q") ?? "";
 	const verdict = search.get("verdict") ?? "";
+	const sort = inspectionSort(search.get("sort"));
 	const initialRun = search.get("run") ?? "";
 
 	const inventory = useInfiniteQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["evidence"],
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) =>
@@ -234,16 +267,24 @@ export function EvidencePage({ client }: { client: Client }) {
 	});
 	const live = retainedLinksLive(inventory);
 	const loaded = admittedPages(inventory).flatMap((page) => page.items);
-	const bundles = loaded.filter(
-		(item) =>
-			(!verdict || item.verdict === verdict) &&
-			matchesText(q, [
-				item.overview.evidenceId,
-				...(item.overview.tasks ?? []),
-				...(item.overview.runIds ?? []),
-				...(item.overview.agentIds ?? []),
-				...(item.overview.modelIds ?? []),
-			]),
+	const bundles = sortInspectionRecords(
+		loaded.filter(
+			(item) =>
+				(!verdict || item.verdict === verdict) &&
+				matchesText(q, [
+					item.overview.evidenceId,
+					...(item.overview.tasks ?? []),
+					...(item.overview.runIds ?? []),
+					...(item.overview.agentIds ?? []),
+					...(item.overview.modelIds ?? []),
+				]),
+		),
+		sort,
+		(item) => ({
+			name: item.overview.tasks[0] || item.overview.evidenceId,
+			date: item.overview.generatedAt,
+			id: item.overview.evidenceId,
+		}),
 	);
 	return (
 		<section className="run-inspection">
@@ -256,12 +297,12 @@ export function EvidencePage({ client }: { client: Client }) {
 			<EvidenceActions key={initialRun} client={client} initialRun={initialRun} />
 			<form
 				className="trace-filters"
-				key={`${q}:${verdict}`}
+				key={`${q}:${verdict}:${sort}`}
 				onSubmit={(event) => {
 					event.preventDefault();
 					const data = new FormData(event.currentTarget);
 					const next = new URLSearchParams(search);
-					for (const key of ["q", "verdict"]) {
+					for (const key of ["q", "verdict", "sort"]) {
 						const value = String(data.get(key) ?? "").trim();
 						if (value) next.set(key, value);
 						else next.delete(key);
@@ -282,18 +323,43 @@ export function EvidencePage({ client }: { client: Client }) {
 						))}
 					</select>
 				</label>
-				<button type="submit">Filter</button>
+				<label>
+					Sort loaded bundles
+					<select name="sort" defaultValue={sort}>
+						<option value="newest">Newest collected</option>
+						<option value="oldest">Oldest collected</option>
+						<option value="name">Task name</option>
+					</select>
+				</label>
+				<button type="submit">Apply</button>
 			</form>
-			<p className="panel-note">Collected reports · installation history · filters apply to loaded pages</p>
+			<p className="panel-note">
+				Filters apply to retained bundles. Loading older bundles can replace earlier pages; refresh to return to the newest.
+			</p>
 			{!live && <p role="status">Updating inventory. Bundle links return when the refresh finishes.</p>}
-			{(q || verdict) && <Link to={listDestination("/evidence", search, ["run"])}>Clear filters</Link>}
+			{(q || verdict || sort !== "newest") && <Link to={listDestination("/evidence", search, ["run"])}>Reset view</Link>}
 			<div className="actions inspection-refresh">
-				<button type="button" disabled={inventory.isFetching} onClick={() => void inventory.refetch()}>
+				<button
+					type="button"
+					disabled={inventory.isFetching}
+					onClick={() => {
+						void queryClient.resetQueries({ queryKey: ["evidence"] });
+					}}
+				>
 					Refresh evidence
 				</button>
 			</div>
 			{inventory.isPending && <p>Reading evidence…</p>}
-			{inventory.error && <p role="alert">{inventory.error.message}</p>}
+			{inventory.error && (
+				<InspectionError
+					title="Evidence inventory unavailable"
+					error={inventory.error}
+					busy={inventory.isFetching}
+					retry={() => {
+						void inventory.refetch();
+					}}
+				/>
+			)}
 			{inventory.data?.pages[0]?.items.length === 0 && (
 				<PanelEmpty>
 					{inventory.data.pages[0].present
@@ -305,12 +371,24 @@ export function EvidencePage({ client }: { client: Client }) {
 			{loaded.length > 0 && bundles.length === 0 && (
 				<PanelEmpty>No loaded bundle matches these filters. Change the filter or continue to older bundles.</PanelEmpty>
 			)}
-			<div className="config-entries">
+			<InspectionSummary
+				figures={[
+					{ label: "Bundles matching / loaded", value: `${bundles.length} / ${loaded.length}` },
+					{
+						label: "Reviewed or grounded · loaded",
+						value: loaded.filter((item) => item.verdict === "reviewed" || item.verdict === "grounded").length,
+					},
+					{ label: "Compromised · loaded", value: loaded.filter((item) => item.verdict === "compromised").length },
+				]}
+			/>
+			<div className="inspection-inventory">
 				{bundles.map(({ overview, verdict }) => (
 					<article key={overview.evidenceId} className="trace-panel">
-						<h2>
+						<h2 className="inspection-card-title">
 							{live ? (
-								<Link to={listDestination(`/evidence/${encodeURIComponent(overview.evidenceId)}`, search, ["q", "verdict"])}>
+								<Link
+									to={listDestination(`/evidence/${encodeURIComponent(overview.evidenceId)}`, search, ["q", "verdict", "sort"])}
+								>
 									{overview.tasks[0] || overview.evidenceId}
 								</Link>
 							) : (
@@ -318,7 +396,7 @@ export function EvidencePage({ client }: { client: Client }) {
 							)}
 						</h2>
 						<p>
-							<strong>{verdict}</strong> · {formatTime(overview.generatedAt)}
+							<StatusMark tone={evidenceVerdictTone(verdict)} label={verdict} /> · {formatTime(overview.generatedAt)}
 						</p>
 						<p>{verdictText[verdict]}</p>
 						<p className="inspection-id">{overview.evidenceId}</p>
@@ -333,7 +411,7 @@ export function EvidencePage({ client }: { client: Client }) {
 				<>
 					<PanelEmpty>{emptyState.bounded("evidence bundles")}</PanelEmpty>
 					<button type="button" disabled={inventory.isFetching} onClick={() => void inventory.fetchNextPage()}>
-						Load more evidence
+						{inventory.isFetchingNextPage ? "Loading evidence…" : "Load older evidence"}
 					</button>
 				</>
 			)}
@@ -344,25 +422,34 @@ export function EvidenceDetail({ client }: { client: Client }) {
 	const { id = "" } = useParams();
 	const [search] = useSearchParams();
 	const detail = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["evidence-detail", id],
 		queryFn: () => client.call(routes.evidenceDetail, { ...emptyInput, params: { id } }),
 	});
 	const data = detail.data;
 	return (
 		<section className="run-inspection">
-			<Link to={listDestination("/evidence", search, ["q", "verdict"])}>← Evidence inventory</Link>
-			<PanelHeading panel={PANELS.evidenceBundle} level={1} title={`Evidence · ${id}`} />
+			<Link to={listDestination("/evidence", search, ["q", "verdict", "sort"])}>← Evidence inventory</Link>
+			<PanelHeading panel={PANELS.evidenceBundle} level={1} title={data?.overview.tasks[0] || "Evidence bundle"} />
 			{detail.isPending && <p>Reading report…</p>}
 			{detail.error && (
-				<div role="alert">
-					<p>{detail.error.message}</p>
+				<>
+					<InspectionError
+						title="Evidence bundle unavailable"
+						error={detail.error}
+						busy={detail.isFetching}
+						retry={() => {
+							void detail.refetch();
+						}}
+					/>
 					<p>Return to the evidence inventory and refresh it to reopen a retained bundle. Its admission may have expired.</p>
-				</div>
+				</>
 			)}
 			{data && (
 				<>
 					<p>
-						<strong>{data.verdict}</strong> · Collected {formatTime(data.overview.generatedAt)}
+						<StatusMark tone={evidenceVerdictTone(data.verdict)} label={data.verdict} /> · Collected{" "}
+						{formatTime(data.overview.generatedAt)}
 					</p>
 					<p>{verdictText[data.verdict]}</p>
 					<nav className="inspection-jumps" aria-label="Evidence sections">
@@ -371,32 +458,51 @@ export function EvidenceDetail({ client }: { client: Client }) {
 						<a href="#evidence-provenance">Provenance</a>
 						<a href="#evidence-gates">Gate decisions</a>
 					</nav>
-					<h2>Bundle summary</h2>
-					<p>{data.overview.tasks.join(" · ") || "No task text recorded"}</p>
-					<p className="panel-note">
-						{data.overview.totals.runs} runs · {data.overview.totals.receipts} receipts · {data.overview.totals.toolCalls}{" "}
-						tool calls · {data.overview.totals.toolErrors} tool errors
-					</p>
-					<h3>Tool-event attribution</h3>
-					<p>Counts describe event rows in this collected bundle. Time-window links can overlap during concurrent runs.</p>
-					<div className="actions">
-						<span className="count" title="The source record carried an exact run link.">
-							Exact links {data.attribution.exact}
-						</span>
-						<span className="count" title="Clio linked these rows by time window; concurrent runs may overlap.">
-							Best effort links {data.attribution.bestEffort}
-						</span>
-						<span className="count" title="These tool-event rows contain no usable link confidence.">
-							Unclassified {data.attribution.unclassified}
-						</span>
-					</div>
+					<InspectionSummary
+						figures={[
+							{ label: "Runs in bundle", value: data.overview.totals.runs },
+							{ label: "Saved receipts", value: data.overview.totals.receipts },
+							{
+								label: "Tool calls / errors",
+								value: `${data.overview.totals.toolCalls} / ${data.overview.totals.toolErrors}`,
+							},
+						]}
+					/>
+					<details className="trace-panel">
+						<summary>Bundle identity & source records</summary>
+						<p className="inspection-id">{id}</p>
+						<Facts
+							value={{
+								source: data.overview.source,
+								models: data.overview.modelIds,
+								agents: data.overview.agentIds,
+								files: data.overview.files,
+							}}
+						/>
+					</details>
+
+					<details className="trace-panel">
+						<summary>Tool-event attribution</summary>
+						<p>Counts describe event rows in this collected bundle. Time-window links can overlap during concurrent runs.</p>
+						<div className="actions">
+							<span className="count" title="The source record carried an exact run link.">
+								Exact links {data.attribution.exact}
+							</span>
+							<span className="count" title="Clio linked these rows by time window; concurrent runs may overlap.">
+								Best effort links {data.attribution.bestEffort}
+							</span>
+							<span className="count" title="These tool-event rows contain no usable link confidence.">
+								Unclassified {data.attribution.unclassified}
+							</span>
+						</div>
+					</details>
 					{data.projection === "historical_format" && (
 						<PanelEmpty>
 							{emptyState.predatesSchema("bundle", "trust projection", "axes")} Recheck its original receipt to learn its
 							current integrity.
 						</PanelEmpty>
 					)}
-					<EvidenceActions key={id} client={client} initialRun={data.overview.runIds[0] ?? ""} />
+					<EvidenceActions key={id} client={client} initialRun={data.overview.runIds[0] ?? ""} initiallyOpen={false} />
 					<h2 id="evidence-findings">What was found</h2>
 					{!data.findings.length && <PanelEmpty>{emptyState.emptyStore("finding", "in this bundle")}</PanelEmpty>}
 					{data.findings.map((finding) => (
@@ -406,7 +512,7 @@ export function EvidenceDetail({ client }: { client: Client }) {
 							</h3>
 							{finding.tag === "best-effort-link" && <span className="count">Best effort attribution</span>}
 							<p>{finding.message}</p>
-							{finding.runId && <Link to={`/fleet/dispatches/${finding.runId}`}>{finding.runId}</Link>}
+							{finding.runId && <Link to={`/fleet/dispatches/${encodeURIComponent(finding.runId)}`}>{finding.runId}</Link>}
 						</article>
 					))}
 					<div id="evidence-trust" />
@@ -415,10 +521,10 @@ export function EvidenceDetail({ client }: { client: Client }) {
 					{data.runs.map((run) => (
 						<article className="trace-panel" key={run.runId}>
 							<h3>
-								<Link to={`/fleet/dispatches/${run.runId}`}>{run.runId}</Link> · {run.summary.verdict}
+								<Link to={`/fleet/dispatches/${encodeURIComponent(run.runId)}`}>{run.runId}</Link> · {run.summary.verdict}
 							</h3>
 							<p>{run.summary.text}</p>
-							<dl className="settings-list evidence-trust-axes">
+							<dl className="inspection-trust-grid">
 								{trustChecks.map((check) => (
 									<div key={check.key}>
 										<dt>{check.label}</dt>

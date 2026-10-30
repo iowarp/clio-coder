@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiProblem } from "../api/client.js";
 import { useLiveState } from "../interaction/announcer.js";
 import type { Notice, NoticeTone } from "./notification-model.js";
-import { DEFAULT_TTL, noticeAfterDismissal, problemTone } from "./notification-model.js";
+import { DEFAULT_TTL, matchingProblem, noticeAfterDismissal, problemTone } from "./notification-model.js";
 import "../interaction/interaction.css";
 
 export type { Notice, NoticeTone } from "./notification-model.js";
@@ -88,18 +88,21 @@ export function useNotices(): readonly Notice[] {
 }
 
 /** Every thrown value becomes a notice. An unrecognised error is still shown, never swallowed. */
-export function reportProblem(error: unknown): void {
+export function reportProblem(error: unknown, scope?: string): void {
 	// A refused token fails every request the same way. The shell replaces the page with one
 	// reconnect panel, so a toast per query would only bury it.
 	if (error instanceof ApiProblem && error.problem.status === 401) return;
 	if (error instanceof ApiProblem) {
+		const previous = matchingProblem(notices, scope, error.problem);
 		notify({
-			id: error.problem.instance,
+			// Client-side failures all use "browser" as their reference, not as a notification identity.
+			id: previous?.id ?? (scope || error.problem.instance === "browser" ? crypto.randomUUID() : error.problem.instance),
 			tone: problemTone(error.problem.code),
 			title: error.problem.title,
 			detail: error.problem.detail,
 			code: error.problem.code,
 			reference: error.problem.instance,
+			...(scope ? { problemScope: scope, occurrences: (previous?.occurrences ?? 0) + 1 } : {}),
 		});
 		return;
 	}
@@ -225,6 +228,9 @@ export function NoticeToasts() {
 										{GLYPHS[notice.tone]}
 									</span>
 									<strong>{notice.title}</strong>
+									{notice.occurrences && notice.occurrences > 1 ? (
+										<span className="notice__repeat">Repeated {notice.occurrences} times</span>
+									) : null}
 									<button
 										type="button"
 										onMouseDown={keepFocus}
@@ -244,8 +250,15 @@ export function NoticeToasts() {
 									</button>
 								</div>
 								{notice.detail ? <p>{notice.detail}</p> : null}
-								{notice.code ? <code>{notice.code}</code> : null}
-								{notice.reference ? <small>Reference: {notice.reference}</small> : null}
+								{notice.code || notice.reference ? (
+									<details className="notice__meta">
+										<summary>Technical details</summary>
+										<div>
+											{notice.code ? <code>{notice.code}</code> : null}
+											{notice.reference ? <small>Reference: {notice.reference}</small> : null}
+										</div>
+									</details>
+								) : null}
 							</article>
 						))}
 					</div>

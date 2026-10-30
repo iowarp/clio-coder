@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useId, useRef } from "react";
+import { memo, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
@@ -8,6 +8,8 @@ import { formatTime } from "../api/clock.js";
 import { notify } from "../design/notifications.js";
 import { type BranchRow, branchView, FORKED_NOTE, SWITCHED_NOTE } from "./branch-model.js";
 import "./session-board.css";
+import "./pane-inspection.css";
+import { paneBranchRows } from "./pane-inspection-model.js";
 
 const excerpt = (text: string) => (text.length > 80 ? `${text.slice(0, 79)}…` : text);
 
@@ -33,6 +35,8 @@ export const BranchPanel = memo(function BranchPanel({
 	running: boolean;
 	/** Render without the disclosure frame, for a host that supplies its own heading. */
 }) {
+	const [query, setQuery] = useState("");
+	const [kind, setKind] = useState("");
 	const panel = useRef<HTMLDivElement>(null);
 	const headingId = useId();
 	const navigate = useNavigate();
@@ -40,12 +44,14 @@ export const BranchPanel = memo(function BranchPanel({
 	const params = { params: { id: sessionId }, query: {} };
 	const supported = !!capabilities?.branches;
 	const tree = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["session-tree", sessionId, settledTurns],
 		queryFn: () => client.call(routes.sessionTree, { ...params, body: {} }),
 		enabled: sessionOpen && supported,
 		retry: false,
 	});
 	const change = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: async ({ action, row }: { action: "continue" | "fork"; row: BranchRow }) =>
 			action === "continue"
 				? {
@@ -86,22 +92,58 @@ export const BranchPanel = memo(function BranchPanel({
 	});
 	const view = tree.data ? branchView(tree.data) : null;
 	const busy = change.isPending || running;
+	const rows = paneBranchRows(view?.rows ?? [], query, kind);
+	const tip = view?.rows.find((row) => row.tip && row.active);
 	const body = (
 		<>
 			{!sessionOpen ? <p>This task is not open. Open it to read its branches.</p> : null}
 			{sessionOpen && !supported ? <p>Clio does not report branches for this task.</p> : null}
 			{tree.isPending && sessionOpen && supported ? <p>Reading the branches…</p> : null}
-			{tree.error ? <p role="alert">{tree.error.message}</p> : null}
+			{tree.error ? (
+				<div className="pane-inspection-error" role="alert">
+					<p>{tree.error.message}</p>
+					<button
+						type="button"
+						disabled={tree.isFetching}
+						onClick={() => {
+							void tree.refetch();
+						}}
+					>
+						Retry branch history
+					</button>
+				</div>
+			) : null}
 			{view ? (
 				<section aria-labelledby={headingId}>
+					<div className="pane-inspection-toolbar">
+						<p>{view.rows.length} recorded turns</p>
+						<button
+							type="button"
+							disabled={tree.isFetching || !sessionOpen || !supported}
+							onClick={() => {
+								void tree.refetch();
+							}}
+						>
+							{tree.isFetching ? "Refreshing…" : "Refresh history"}
+						</button>
+					</div>
 					<h3 id={headingId} tabIndex={-1}>
 						{view.branchPoints === 0 ? "One line of turns" : `${view.branchPoints + 1} branches`}
 					</h3>
-					<p className="session-board__note">
-						Continue moves where the next request lands and keeps the other branches. Fork starts a new conversation from a
-						turn. Files in the project are never rewound.
-						{running ? " Both wait for the current turn to finish." : ""}
-					</p>
+					{tip && (
+						<p className="pane-inspection-lead">
+							<small>The next request continues after</small>
+							{tip.text}
+						</p>
+					)}
+					<details className="pane-inspection-disclosure">
+						<summary>How continuing and forking work</summary>
+						<p className="session-board__note">
+							Continue moves where the next request lands and keeps the other branches. Fork starts a new conversation from a
+							turn. Files in the project are never rewound.
+							{running ? " Both wait for the current turn to finish." : ""}
+						</p>
+					</details>
 					{view.forkedFrom ? (
 						<p className="session-board__note">
 							Forked from an earlier conversation at turn <span className="session-board__hash">{view.forkedFrom.turnId}</span>
@@ -111,8 +153,45 @@ export const BranchPanel = memo(function BranchPanel({
 					{view.rows.length === 0 ? (
 						<p className="session-board__empty">No request has been recorded in this conversation yet.</p>
 					) : null}
+					<div className="pane-inspection-filters">
+						<label>
+							Find a turn
+							<input
+								type="search"
+								value={query}
+								onChange={(event) => setQuery(event.target.value)}
+								maxLength={256}
+								placeholder="Request, reply or label"
+							/>
+						</label>
+						<label>
+							Turn kind
+							<select value={kind} onChange={(event) => setKind(event.target.value)}>
+								<option value="">All turns</option>
+								<option value="request">Requests</option>
+								<option value="reply">Replies</option>
+							</select>
+						</label>
+						{(query || kind) && (
+							<button
+								type="button"
+								onClick={() => {
+									setQuery("");
+									setKind("");
+								}}
+							>
+								Reset filters
+							</button>
+						)}
+					</div>
+					<p className="pane-inspection-count" role="status">
+						{rows.length} of {view.rows.length} turns shown
+					</p>
+					{view.rows.length > 0 && !rows.length && (
+						<p className="session-board__empty">No recorded turn matches these filters.</p>
+					)}
 					<ol className="session-board__rows branch-panel__rows">
-						{view.rows.map((row) => (
+						{rows.map((row) => (
 							<li
 								key={row.id}
 								className={row.active ? "branch-panel__row branch-panel__row--active" : "branch-panel__row"}
@@ -162,7 +241,21 @@ export const BranchPanel = memo(function BranchPanel({
 							Only the current branch and the newest 400 turns are shown; the terminal's /tree shows the rest.
 						</p>
 					) : null}
-					{change.error ? <p role="alert">{change.error.message}</p> : null}
+					{change.error ? (
+						<div role="alert" className="pane-inspection-error">
+							<p>{change.error.message}</p>
+							<p>Your requested continuation was not confirmed. Refresh the history before choosing where to continue.</p>
+							<button
+								type="button"
+								disabled={tree.isFetching}
+								onClick={() => {
+									void tree.refetch();
+								}}
+							>
+								Refresh branch state
+							</button>
+						</div>
+					) : null}
 				</section>
 			) : null}
 		</>

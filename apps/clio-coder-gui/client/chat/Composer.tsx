@@ -20,13 +20,17 @@ import type { CommandRequest, QueueEditRequest, QueueSnapshot } from "../../cont
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
+import { Dialog } from "../interaction/Dialog.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { useSessionCommands } from "../shell/SessionControls.js";
+import { taskTitle } from "../shell/shell-model.js";
 import { AutonomyPill } from "./AutonomyPill.js";
 import { persistAttachments, savedAttachments } from "./attachment-drafts.js";
 import { readAttachment } from "./attachment-image.js";
+import { attachmentBadge, attachmentCapabilityIssue, attachmentReview } from "./attachment-review-model.js";
 import {
 	type Attachment,
 	admitAttachment,
@@ -36,11 +40,13 @@ import {
 	type FileAttachment,
 	type ImageAttachment,
 } from "./attachments-model.js";
+import type { CommandFields } from "./command-model.js";
 import { fitComposerField, initialEnterSends, rememberEnterSends } from "./composer-field.js";
 import { type HistoryBrowse, readHistory, rememberPrompt, stepHistory } from "./composer-history.js";
 import {
 	type ComposerNotice,
 	capabilityRefusal,
+	composerDelivery,
 	composerKeyAction,
 	draftStore,
 	noticeForError,
@@ -87,16 +93,12 @@ import {
 	slashEntries,
 	slashQuery,
 } from "./slash-model.js";
+import { VisualActions } from "./VisualActions.js";
 import "./composer-box.css";
 import "./composer.css";
 
 /** Focus handlers keyed by session, so a retry elsewhere in the turn can fill and focus this field. */
 const focusHandlers = new Map<string, () => void>();
-/** Up to four letters of a file's extension, for the tile beside its name. */
-function fileBadge(name: string): string {
-	const extension = /\.([A-Za-z0-9]{1,4})$/u.exec(name)?.[1];
-	return extension ? extension.toUpperCase() : "TXT";
-}
 
 function saveAttachment(item: Attachment): void {
 	const url =
@@ -154,14 +156,20 @@ export const Composer = memo(function Composer({
 	const draft = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
 	const field = useRef<HTMLTextAreaElement | null>(null);
 	const sending = useRef(false);
+	const commandSending = useRef(false);
 	const fieldId = useId();
 	const hintId = useId();
 	const [enterSends, setEnterSends] = useState(initialEnterSends);
 	const options = useRef<HTMLDetailsElement | null>(null);
 	const [optionsOpen, setOptionsOpen] = useState(false);
+	const [actionsOpen, setActionsOpen] = useState(false);
+	const [actionDrafts, setActionDrafts] = useState<Record<string, CommandFields>>({});
 	useDetailsDismiss(options, optionsOpen);
 	const [attachments, setAttachments] = useState<Attachment[]>(() => savedAttachments(sessionId));
 	const [attachmentsStored, setAttachmentsStored] = useState(true);
+	const [reviewingAttachment, setReviewingAttachment] = useState<string | null>(null);
+	const [readingAttachments, setReadingAttachments] = useState(false);
+	const attachmentReads = useRef(0);
 	const [attachProblem, setAttachProblem] = useState<string | null>(null);
 	const [pasteReview, setPasteReview] = useState<{ text: string; reason: string; bytes: number } | null>(null);
 	const [pasteNotice, setPasteNotice] = useState<{ id: string; text: string } | null>(null);
@@ -208,13 +216,13 @@ export const Composer = memo(function Composer({
 	const steering = steeringAffordances(capabilities.data);
 	const modes = steerModeOffers(steering);
 
-	// Read only once a draft starts with a slash. The template list changes on a
+	// Read only when Actions opens or a draft starts with a slash. The template list changes on a
 	// library reload, so this observer lets it go stale where the palette does not.
 	const slashDraft = draft.text.trimStart().startsWith("/");
 	const commandCatalog = useQuery({
 		queryKey: ["session-commands", sessionId],
 		queryFn: () => client.call(routes.sessionCommands, params),
-		enabled: slashDraft && sessionState === "open" && !!capabilities.data?.commands,
+		enabled: (actionsOpen || slashDraft) && sessionState === "open" && !!capabilities.data?.commands,
 		staleTime: 30_000,
 		retry: false,
 	});
@@ -237,7 +245,7 @@ export const Composer = memo(function Composer({
 	);
 	const query = sessionState === "open" ? slashQuery(draft.text) : null;
 	const matches = useMemo(() => (query === null ? [] : filterSlashEntries(entries, query)), [entries, query]);
-	const paletteOpen = matches.length > 0 && dismissed !== draft.text && dialog === null;
+	const paletteOpen = matches.length > 0 && dismissed !== draft.text && dialog === null && !actionsOpen;
 	const active = Math.min(activeIndex, Math.max(0, matches.length - 1));
 	const line = slashDraft ? parseSlashLine(draft.text, commandCatalog.data) : null;
 
@@ -290,7 +298,7 @@ export const Composer = memo(function Composer({
 				]
 			: argMatches.map((row) => ({ id: `arg:${row.value}`, label: row.value, summary: row.summary }));
 	const suggestionKey = mention !== null ? mentionKey : argMatches.length > 0 ? draft.text : null;
-	const mentionOpen = suggestions.length > 0 && mentionDismissed !== suggestionKey && dialog === null;
+	const mentionOpen = suggestions.length > 0 && mentionDismissed !== suggestionKey && dialog === null && !actionsOpen;
 	const mentionActive = Math.min(mentionIndex, Math.max(0, suggestions.length - 1));
 	const [steerNote, setSteerNote] = useState<{ tone: "success" | "warn" | "fail"; message: string } | null>(null);
 	// A second Esc within this window stops the turn; the first only says so.
@@ -316,6 +324,7 @@ export const Composer = memo(function Composer({
 	const queueOps = capabilities.data?.queue?.ops;
 
 	const send = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: async ({
 			intent,
 			attachments: sent,
@@ -387,15 +396,30 @@ export const Composer = memo(function Composer({
 	});
 
 	const interrupt = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: () => client.call(routes.interruptSession, { ...params, body: {} }),
 		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
 	});
-	const stop = useMutation({
-		mutationFn: () =>
-			client.call(routes.cancelTurn, { params: { id: sessionId, turnId: runningTurnId ?? "" }, query: {}, body: {} }),
-		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
-	});
+	const { controls } = useSessionCommands();
+	const control = controls.records.find((row) => row.sessionId === sessionId && row.stage !== "complete");
+	const stopTurn = () => {
+		if (!runningTurnId) return;
+		const snapshot = queries.getQueryData<SessionSnapshot>(["session", sessionId]);
+		controls.start(
+			{
+				id: sessionId,
+				workspaceId,
+				title: snapshot ? taskTitle(snapshot) : "Conversation",
+				currentTurnId: runningTurnId,
+			},
+			"stop",
+		);
+	};
 	const command = useMutation({
+		meta: { errorSurface: "inline" },
+		onSettled: () => {
+			commandSending.current = false;
+		},
 		mutationFn: ({
 			request,
 			key,
@@ -417,7 +441,8 @@ export const Composer = memo(function Composer({
 		},
 	});
 	const runCommand = (plan: { request: CommandRequest; description: string }, sent: string | null) => {
-		if (command.isPending || contextRunning) return;
+		if (commandSending.current || command.isPending || contextRunning || control) return;
+		commandSending.current = true;
 		setSlashError(null);
 		command.mutate({
 			request: plan.request,
@@ -507,6 +532,7 @@ export const Composer = memo(function Composer({
 	};
 
 	const drain = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: () => client.call(routes.clearSessionQueue, { ...params, body: {} }),
 		onSuccess: (result) => {
 			store.write(restoredDraft(store.snapshot().text, result.restored));
@@ -537,12 +563,10 @@ export const Composer = memo(function Composer({
 	// What the engine said about one turn's interrupt, stop or queue is not a fact about the next
 	// turn: without this an interrupt refusal stayed under the composer for the rest of the session.
 	const resetInterrupt = interrupt.reset;
-	const resetStop = stop.reset;
 	const resetDrain = drain.reset;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the turn id is the trigger; the resets are stable.
 	useEffect(() => {
 		resetInterrupt();
-		resetStop();
 		resetDrain();
 		setQueueNote(null);
 	}, [runningTurnId]);
@@ -558,11 +582,14 @@ export const Composer = memo(function Composer({
 		sessionState,
 		turnRunning: running,
 		sending: send.isPending,
+		...(control && control.stage !== "complete" ? { sessionControl: control.stage } : {}),
 		steering,
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
 		shell: capabilities.data?.shell !== undefined,
 	} as const;
 	const intent = submitIntent(draft, situation);
+	const delivery = composerDelivery(situation, draft.mode, contextRunning, readingAttachments);
+	const reviewedAttachment = attachments.find((item) => item.id === reviewingAttachment) ?? null;
 	const canAttachImages = capabilities.data?.images === true && sessionState === "open";
 	const canAttachFiles = capabilities.data?.embeddedContext === true && sessionState === "open";
 	const canAttach = canAttachImages || canAttachFiles;
@@ -570,14 +597,13 @@ export const Composer = memo(function Composer({
 		kind === "shell" && count > 0 ? "A shell line takes no attachments. Remove them, or send a message instead." : null;
 	const attachBlock =
 		(contextRunning && !running ? "Context work is running. Your draft is kept until it finishes." : null) ??
+		attachmentCapabilityIssue(attachments, capabilities.data) ??
 		shellBlock(intent.kind, attachments.length) ??
 		attachmentRefusal(attachments, running);
 	const shellHint = shellNotice(draft.text, situation.shell);
 	// The delivery switch takes the route's place in the row, and only once there is a message to
 	// deliver: an empty field mid-turn offers Stop alone.
 	const steerChoice = running && modes.length > 1 && draft.text.trim() !== "";
-	// The palette reads the whole draft as its query, so it cannot open over a message in progress.
-	const commandsReachable = sessionState === "open" && (draft.text.trim() === "" || slashDraft);
 	// An image goes as an image when the agent takes them; anything else is offered as text.
 	const readPicked = async (file: File): Promise<Attachment> => {
 		if (file.type.startsWith("image/") && canAttachImages) return readAttachment(file, crypto.randomUUID());
@@ -589,24 +615,35 @@ export const Composer = memo(function Composer({
 	};
 	// One at a time, so each admission sees the attachments the previous one added.
 	const attach = async (files: readonly File[]) => {
+		if (sending.current) return;
+		attachmentReads.current++;
+		setReadingAttachments(true);
 		setAttachProblem(null);
-		for (const file of files) {
-			try {
-				const item = await readPicked(file);
-				const admitted = admitAttachment(attached.current, item);
-				if (!admitted.ok) {
-					setAttachProblem(admitted.reason);
-					break;
+		try {
+			for (const file of files) {
+				try {
+					const item = await readPicked(file);
+					const admitted = admitAttachment(attached.current, item);
+					if (!admitted.ok) {
+						setAttachProblem(admitted.reason);
+						break;
+					}
+					store.attachmentsChanged();
+					attached.current = [...attached.current, item];
+					setAttachments(attached.current);
+				} catch (error) {
+					setAttachProblem(error instanceof Error ? error.message : String(error));
 				}
-				attached.current = [...attached.current, item];
-				setAttachments(attached.current);
-			} catch (error) {
-				setAttachProblem(error instanceof Error ? error.message : String(error));
 			}
+		} finally {
+			attachmentReads.current--;
+			setReadingAttachments(attachmentReads.current > 0);
 		}
 	};
 	const attachLabel = canAttachFiles ? (canAttachImages ? "Attach files" : "Attach text files") : "Attach images";
 	const detach = (id: string) => {
+		if (sending.current) return;
+		store.attachmentsChanged();
 		attached.current = attached.current.filter((image) => image.id !== id);
 		setAttachments(attached.current);
 		setAttachProblem(null);
@@ -614,7 +651,7 @@ export const Composer = memo(function Composer({
 	// Recomputed from the store rather than closed over, so a keystroke that
 	// lands between render and keydown still sends the text the operator sees.
 	const submit = () => {
-		if (sending.current || (contextRunning && !running)) return;
+		if (sending.current || attachmentReads.current > 0 || (contextRunning && !running) || control) return;
 		const current = store.snapshot();
 		// `@agent text` guides a running worker instead of the main turn. With no worker running the
 		// line is an ordinary message, and its `@word` an ordinary file reference.
@@ -660,6 +697,7 @@ export const Composer = memo(function Composer({
 		if (
 			next.kind !== "blocked" &&
 			shellBlock(next.kind, attached.current.length) === null &&
+			attachmentCapabilityIssue(attached.current, capabilities.data) === null &&
 			attachmentRefusal(attached.current, running) === null
 		) {
 			sending.current = true;
@@ -677,7 +715,7 @@ export const Composer = memo(function Composer({
 	};
 
 	const notice =
-		noticeForError(send.error ?? interrupt.error ?? stop.error ?? drain.error) ??
+		noticeForError(send.error ?? interrupt.error ?? drain.error) ??
 		queueNote ??
 		noticeForRefusal(send.data) ??
 		noticeForRefusal(interrupt.data);
@@ -685,21 +723,25 @@ export const Composer = memo(function Composer({
 	return (
 		<>
 			<form
-				className="composer"
+				className="composer composer--conversation"
 				data-steering={steerChoice ? "" : undefined}
 				onSubmit={(event) => {
 					event.preventDefault();
 					submit();
 				}}
 				onDragOver={(event) => {
-					if (canAttach && event.dataTransfer.types.includes("Files")) event.preventDefault();
+					if (canAttach && !send.isPending && event.dataTransfer.types.includes("Files")) event.preventDefault();
 				}}
 				onDrop={(event) => {
-					if (!canAttach || event.dataTransfer.files.length === 0) return;
+					if (!canAttach || send.isPending || event.dataTransfer.files.length === 0) return;
 					event.preventDefault();
 					void attach([...event.dataTransfer.files]);
 				}}
 			>
+				<div className="composer__delivery-note" data-tone={delivery.tone}>
+					<strong>{delivery.label}</strong>
+					<span>{delivery.detail}</span>
+				</div>
 				<label className="composer__label sr-only" htmlFor={fieldId}>
 					Message Clio Coder
 				</label>
@@ -809,13 +851,19 @@ export const Composer = memo(function Composer({
 									<img src={`data:${item.mimeType};base64,${item.data}`} alt="" width={28} height={28} />
 								) : (
 									<span className="composer__attachment-file" aria-hidden="true">
-										{fileBadge(item.name)}
+										{attachmentBadge(item.name)}
 									</span>
 								)}
 								<span className="composer__attachment-name">
-									<span className="composer__attachment-title" title={item.name}>
+									<button
+										type="button"
+										className="composer__attachment-title"
+										onClick={() => setReviewingAttachment(item.id)}
+										title={`Review ${item.name}`}
+										aria-haspopup="dialog"
+									>
 										{item.name}
-									</span>
+									</button>
 									<small>
 										{item.kind === "image"
 											? `${item.width}×${item.height}`
@@ -828,7 +876,11 @@ export const Composer = memo(function Composer({
 								<button
 									type="button"
 									className="composer__attachment-action composer__attachment-remove"
-									onClick={() => detach(item.id)}
+									disabled={send.isPending}
+									onClick={() => {
+										detach(item.id);
+										field.current?.focus();
+									}}
 								>
 									<Icon name="close" />
 									<span className="sr-only">Remove {item.name}</span>
@@ -921,10 +973,15 @@ export const Composer = memo(function Composer({
 						setActiveIndex(0);
 						setSlashError(null);
 						if (!event.target.value.startsWith("/")) setDismissed(null);
-						if (!send.isPending) send.reset();
+						if (!send.isPending && !send.isIdle) send.reset();
 					}}
 					onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
 					onPaste={(event) => {
+						if (sending.current && event.clipboardData.files.length > 0) {
+							event.preventDefault();
+							setAttachProblem("Wait for this send to finish before adding attachments.");
+							return;
+						}
 						const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
 						if (canAttachImages && images.length > 0) {
 							event.preventDefault();
@@ -942,7 +999,7 @@ export const Composer = memo(function Composer({
 							store.snapshot().text,
 							field.selectionStart,
 							field.selectionEnd,
-							canAttachFiles,
+							canAttachFiles && !sending.current,
 							`pasted-text-${index}.txt`,
 						);
 						setPasteNotice(null);
@@ -957,6 +1014,7 @@ export const Composer = memo(function Composer({
 								setPasteReview({ text: paste, reason: admission.reason, bytes: file.bytes });
 								return;
 							}
+							store.attachmentsChanged();
 							attached.current = [...attached.current, file];
 							setAttachments(attached.current);
 							setPasteNotice({
@@ -966,7 +1024,7 @@ export const Composer = memo(function Composer({
 						}
 						setPasteReview(null);
 						store.write(plan.text);
-						if (!send.isPending) send.reset();
+						if (!send.isPending && !send.isIdle) send.reset();
 						requestAnimationFrame(() => field.setSelectionRange(plan.caret, plan.caret));
 					}}
 					onKeyDown={(event) => {
@@ -1017,7 +1075,7 @@ export const Composer = memo(function Composer({
 						// Esc with nothing open stops the turn, as it does in the terminal, on the second press.
 						if (event.key === "Escape" && plain && running && !layerOwned && !optionsOpen) {
 							event.preventDefault();
-							if (stopArmed && !stop.isPending) stop.mutate();
+							if (stopArmed && !control) stopTurn();
 							setStopArmed(!stopArmed);
 							return;
 						}
@@ -1084,7 +1142,7 @@ export const Composer = memo(function Composer({
 						{attachProblem}
 					</p>
 				) : null}
-				<p className="composer__hint sr-only" id={hintId}>
+				<p className="composer__hint composer__keyboard-hint" id={hintId}>
 					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @ adds a file or folder · ↑
 					recalls earlier messages
 					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
@@ -1106,8 +1164,33 @@ export const Composer = memo(function Composer({
 								}}
 							/>
 						) : null}
-						{/* One menu for everything that adds to a message or changes how it is typed. The file
-						    input stays outside it, so a closed menu never unmounts a picker that is open. */}
+						<button
+							type="button"
+							className="composer__labeled-button"
+							disabled={!canAttach || send.isPending || readingAttachments}
+							title={
+								send.isPending
+									? "This request is being sent. You can attach files when it settles."
+									: canAttach
+										? attachLabel
+										: "Attachments are unavailable for this session"
+							}
+							onClick={() => picker.current?.click()}
+						>
+							<Icon name="paperclip" />
+							{readingAttachments ? "Reading…" : "Attach"}
+						</button>
+						<button
+							type="button"
+							className="composer__labeled-button composer__actions-button"
+							aria-haspopup="dialog"
+							aria-expanded={actionsOpen}
+							disabled={sessionState !== "open"}
+							onClick={() => setActionsOpen(true)}
+						>
+							<Icon name="overview" />
+							Actions
+						</button>
 						<details
 							className="composer__options"
 							ref={options}
@@ -1118,45 +1201,10 @@ export const Composer = memo(function Composer({
 								closeOptions();
 							}}
 						>
-							<summary aria-label="Add to message" title="Attach files, run a command, keyboard options">
-								<Icon name="plus" />
+							<summary aria-label="Message options" title="Message and keyboard options">
+								<Icon name="more" />
 							</summary>
 							<div className="composer__options-panel">
-								{canAttach ? (
-									<button
-										type="button"
-										className="composer__menu-item"
-										title={`You can also ${canAttachImages ? "paste or " : ""}drop them on the message box.`}
-										onClick={() => {
-											closeOptions();
-											picker.current?.click();
-										}}
-									>
-										<Icon name="paperclip" />
-										{attachLabel}
-									</button>
-								) : null}
-								<button
-									type="button"
-									className="composer__menu-item"
-									disabled={!commandsReachable}
-									title={
-										commandsReachable
-											? "Clio Coder commands and this task's actions"
-											: "A command is a line of its own. Send or clear the draft first."
-									}
-									onClick={() => {
-										if (options.current) options.current.open = false;
-										setDismissed(null);
-										setActiveIndex(0);
-										store.write("/");
-										placeCaretAtEnd();
-									}}
-								>
-									<Icon name="system" />
-									Commands
-									<kbd>/</kbd>
-								</button>
 								{running && steering.interrupt ? (
 									<button
 										type="button"
@@ -1205,7 +1253,7 @@ export const Composer = memo(function Composer({
 										disabled={send.isPending}
 										onClick={() => {
 											store.chooseMode(offer.mode);
-											if (!send.isPending) send.reset();
+											if (!send.isPending && !send.isIdle) send.reset();
 										}}
 									>
 										<span className="composer__delivery-full">{offer.label}</span>
@@ -1218,24 +1266,27 @@ export const Composer = memo(function Composer({
 							<button
 								className="composer__icon-button composer__stop composer__stop--live"
 								type="button"
-								disabled={stop.isPending}
-								onClick={() => stop.mutate()}
-								aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
+								disabled={!!control}
+								onClick={() => stopTurn()}
+								aria-label={control ? (control.stage === "unresolved" ? "Review stop request" : "Stopping…") : "Stop turn"}
 								title="End this turn now. Nothing further is run."
 							>
 								<Icon name="stop" />
-								<span aria-hidden="true">{stop.isPending ? "Stopping" : "Stop"}</span>
+								<span aria-hidden="true">
+									{control ? (control.stage === "unresolved" ? "Check request" : "Stopping") : "Stop"}
+								</span>
 							</button>
 						) : null}
 						{!running || draft.text.trim() !== "" ? (
 							<button
 								className="composer__submit primary"
 								type="submit"
-								disabled={intent.kind === "blocked" || attachBlock !== null}
+								disabled={intent.kind === "blocked" || attachBlock !== null || readingAttachments}
 								aria-label={send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
 								title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? submitLabel(intent, situation, draft.mode))}
 							>
 								{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
+								<span aria-hidden="true">{send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}</span>
 							</button>
 						) : null}
 					</div>
@@ -1243,9 +1294,19 @@ export const Composer = memo(function Composer({
 				{attachBlock !== null && intent.kind !== "blocked" ? (
 					<p className="composer__blocked" role="status">
 						{attachBlock}
+						{capabilities.error && (
+							<button
+								type="button"
+								className="composer__secondary"
+								disabled={capabilities.isFetching}
+								onClick={() => void capabilities.refetch()}
+							>
+								Retry attachment support
+							</button>
+						)}
 					</p>
 				) : null}
-				{intent.kind === "blocked" && draft.text.trim() !== "" ? (
+				{intent.kind === "blocked" && draft.text.trim() !== "" && intent.reason !== delivery.detail ? (
 					<p className="composer__blocked" role="status">
 						{intent.reason}
 						{running && steeringUnavailable === "failed" ? (
@@ -1325,18 +1386,110 @@ export const Composer = memo(function Composer({
 			</form>
 			{/* Outside the form: React bubbles a portaled panel's submit through its owner, and the
 		    composer's own submit must never hear it. */}
+			{reviewedAttachment ? (
+				<AttachmentReview
+					item={reviewedAttachment}
+					pending={send.isPending}
+					onClose={() => setReviewingAttachment(null)}
+					onRemove={() => {
+						detach(reviewedAttachment.id);
+						setReviewingAttachment(null);
+						field.current?.focus();
+					}}
+				/>
+			) : null}
+			{actionsOpen ? (
+				<VisualActions
+					entries={entries}
+					paneAvailable={pane !== null}
+					loading={capabilities.isPending || (!!capabilities.data?.commands && commandCatalog.isFetching)}
+					error={capabilities.error?.message ?? commandCatalog.error?.message ?? null}
+					onRetry={() => {
+						void capabilities.refetch();
+						if (capabilities.data?.commands) void commandCatalog.refetch();
+					}}
+					busy={command.isPending || contextRunning || sessionState !== "open" || !!control}
+					running={running}
+					formDrafts={actionDrafts}
+					onFormDraft={(id, fields) => setActionDrafts((drafts) => ({ ...drafts, [id]: fields }))}
+					onClose={() => setActionsOpen(false)}
+					onPick={(entry) => {
+						setActionsOpen(false);
+						if (entry.kind === "pane") pane?.show(entry.view);
+						else if (entry.kind === "action") setDialog(entry.action);
+					}}
+					onShowChanges={() => {
+						setActionsOpen(false);
+						pane?.show("changes");
+					}}
+					onRun={(plan) => {
+						if (command.isPending || contextRunning || sessionState !== "open" || control) return;
+						runCommand(plan, null);
+						setActionsOpen(false);
+					}}
+				/>
+			) : null}
 			{dialog !== null ? (
 				<SlashActionDialog
 					action={dialog}
 					client={client}
 					sessionId={sessionId}
-					sessionOpen={sessionState === "open"}
+					sessionOpen={sessionState === "open" && !control}
 					capabilities={capabilities.data}
 					running={running}
 					settledTurns={settledTurns}
-					onClose={() => setDialog(null)}
+					onClose={() => {
+						setDialog(null);
+						placeCaretAtEnd();
+					}}
 				/>
 			) : null}
 		</>
 	);
 });
+
+function AttachmentReview({
+	item,
+	pending,
+	onClose,
+	onRemove,
+}: {
+	item: Attachment;
+	pending: boolean;
+	onClose: () => void;
+	onRemove: () => void;
+}) {
+	const review = attachmentReview(item);
+	return (
+		<Dialog title={item.name} eyebrow="Attachment review" size="wide" className="attachment-review" onClose={onClose}>
+			<p className="attachment-review__meta">{review.detail}</p>
+			{item.kind === "image" ? (
+				<img className="attachment-review__image" src={`data:${item.mimeType};base64,${item.data}`} alt={item.name} />
+			) : (
+				<textarea
+					className="attachment-review__text"
+					aria-label="Attachment text preview"
+					readOnly
+					rows={16}
+					value={review.text ?? ""}
+				/>
+			)}
+			{review.truncated && (
+				<p className="attachment-review__note">
+					Preview shortened to 12,000 characters. The full text is kept for sending and download.
+				</p>
+			)}
+			<div className="attachment-review__actions">
+				<button type="button" onClick={() => saveAttachment(item)}>
+					<Icon name="artifacts" /> Save original
+				</button>
+				<button type="button" disabled={pending} onClick={onRemove}>
+					Remove attachment
+				</button>
+				<button type="button" className="primary" onClick={onClose}>
+					Keep attachment
+				</button>
+			</div>
+		</Dialog>
+	);
+}

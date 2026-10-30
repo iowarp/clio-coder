@@ -994,3 +994,169 @@
 	color: var(--status-warn-fg);
 	font-size: var(--text-exact);
 }
+
+.composer__labeled-button {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2);
+	min-height: 34px;
+	padding: 4px var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+	white-space: nowrap;
+}
+.composer__labeled-button:hover:not(:disabled) {
+	background: var(--wb-active);
+	color: var(--ink);
+}
+.composer__labeled-button .icon {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+}
+.composer__actions-button {
+	border-color: var(--line);
+	color: var(--accent);
+}
+@container composer (max-width: 650px) {
+	.composer__actions {
+		flex-wrap: wrap;
+	}
+	.composer__tools {
+		flex-wrap: wrap;
+	}
+}
+
+/* Conversation-only controls keep the home composer independent. */
+.composer--conversation {
+	gap: var(--space-2);
+	padding: var(--space-4);
+}
+.composer__delivery-note {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-3);
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+	line-height: var(--leading-body);
+}
+.composer__delivery-note strong {
+	color: var(--ink);
+	font-weight: 600;
+	flex: none;
+}
+.composer__delivery-note[data-tone="running"] strong {
+	color: var(--accent);
+}
+.composer__delivery-note[data-tone="warn"] strong {
+	color: var(--status-warn-fg);
+}
+.composer--conversation .composer__keyboard-hint {
+	margin: 0;
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+}
+.composer--conversation .composer__submit.primary {
+	width: auto;
+	min-width: 88px;
+	padding: 0 var(--space-4);
+	gap: var(--space-2);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
+	font-weight: 600;
+}
+.composer--conversation .composer__submit .icon {
+	width: var(--icon-md);
+	height: var(--icon-md);
+}
+.composer--conversation .composer__attachments {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+	max-height: 11rem;
+	overflow-y: auto;
+	gap: var(--space-2);
+}
+.composer--conversation .composer__attachments > li {
+	height: auto;
+	min-height: 58px;
+	padding: var(--space-2);
+	gap: var(--space-2);
+	background: var(--surface);
+}
+.composer--conversation .composer__attachments img,
+.composer--conversation .composer__attachment-file {
+	width: 38px;
+	height: 38px;
+}
+.composer--conversation .composer__attachment-name {
+	display: grid;
+	flex: 1;
+	gap: 2px;
+}
+.composer--conversation .composer__attachment-title {
+	display: block;
+	max-width: 100%;
+	min-width: 0;
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	text-align: left;
+	color: var(--accent);
+	font-size: var(--text-exact);
+	line-height: var(--leading-body);
+	text-decoration: underline;
+	text-decoration-color: var(--accent-line);
+	text-underline-offset: 3px;
+}
+.composer--conversation .composer__attachment-name small {
+	font-size: var(--text-instrument);
+}
+.composer--conversation .composer__attachments .composer__attachment-action {
+	min-height: 32px;
+	height: 32px;
+	font-size: var(--text-instrument);
+}
+.composer--conversation .composer__attachments .composer__attachment-remove {
+	width: 32px;
+}
+.attachment-review__meta,
+.attachment-review__note {
+	margin-top: 0;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.attachment-review__image {
+	display: block;
+	max-width: 100%;
+	max-height: 55dvh;
+	object-fit: contain;
+	margin-inline: auto;
+	background: var(--well);
+	border: 1px solid var(--line);
+}
+.attachment-review__text {
+	width: 100%;
+	min-height: 20rem;
+	resize: vertical;
+	max-height: 50dvh;
+	overflow: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	padding: var(--space-4);
+	border: 1px solid var(--line);
+	background: var(--code-paper);
+	color: var(--code-ink);
+	font: var(--text-exact) / var(--leading-body) var(--font-mono);
+}
+.attachment-review__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	justify-content: flex-end;
+	padding-top: var(--space-4);
+}

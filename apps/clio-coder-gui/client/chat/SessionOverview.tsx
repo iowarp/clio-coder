@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
@@ -135,6 +135,7 @@ function Section({
  * a value the session reported, and each section opens the view that says the rest.
  */
 export function SessionOverview({
+	active = true,
 	client,
 	session,
 	title,
@@ -144,6 +145,7 @@ export function SessionOverview({
 	onChangeModel,
 	route,
 }: {
+	active?: boolean;
 	client: Client;
 	session: PaneSession;
 	title: string;
@@ -156,10 +158,19 @@ export function SessionOverview({
 	route?: RouteFacts;
 }) {
 	countRender("session-overview");
+	const [more, setMore] = useState(false);
 	const params = { params: { id: session.id }, query: {}, body: {} };
 	const open = session.state === "open";
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
-	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
+	const sessions = useQuery({
+		queryKey: ["sessions"],
+		queryFn: () => client.call(routes.sessions, emptyInput),
+		enabled: active && more,
+	});
+	const workspaces = useQuery({
+		queryKey: ["workspaces"],
+		queryFn: () => client.call(routes.workspaces, emptyInput),
+		enabled: active && more,
+	});
 	const workspaceNames = new Map((workspaces.data ?? []).map((item) => [item.id, item.name]));
 	const activity = (sessions.data ?? [])
 		.filter(isHeld)
@@ -169,13 +180,13 @@ export function SessionOverview({
 	const workingCount = activity.filter((item) => item.state === "working" || item.state === "starting").length;
 	const queuedCount = activity.filter((item) => item.state === "waiting").length;
 	const approvalCount = activity.filter((item) => item.state === "approval").length;
-	const capabilities = useSessionCapabilities(client, session.id, open);
+	const capabilities = useSessionCapabilities(client, session.id, active && open);
 	const settled = settledTurns(session.turns);
 	// The keys the drill-ins use, so opening one after the column costs no second request.
 	const board = useQuery({
 		queryKey: ["session-board", session.id, settled],
 		queryFn: () => client.call(routes.sessionBoard, params),
-		enabled: open && capabilities.data?.board !== undefined,
+		enabled: active && open && !!capabilities.data?.board,
 		retry: false,
 		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
 		// so rows (and the focus a row holds) do not vanish between the two reads.
@@ -185,14 +196,14 @@ export function SessionOverview({
 	const tree = useQuery({
 		queryKey: ["session-tree", session.id, settled],
 		queryFn: () => client.call(routes.sessionTree, params),
-		enabled: open && !!capabilities.data?.branches,
+		enabled: active && more && open && !!capabilities.data?.branches,
 		retry: false,
 		placeholderData: (previous) => previous,
 	});
 	const branches = tree.data ? branchView(tree.data) : null;
 	const tip = branches?.rows.filter((row) => row.tip && row.active).at(-1) ?? null;
-	const ledger = useContextLedger(client, session.id, settled, open && !!capabilities.data?.context);
-	const usage = useSessionUsage(client, session.id, settled, open && !!capabilities.data?.usage);
+	const ledger = useContextLedger(client, session.id, settled, active && more && open && !!capabilities.data?.context);
+	const usage = useSessionUsage(client, session.id, settled, active && more && open && !!capabilities.data?.usage);
 	const view = board.data ? boardView(board.data) : null;
 	const plan = session.telemetry?.plan ? livePlanView(session.telemetry.plan) : (view?.plan ?? null);
 	const workspace = session.telemetry?.workspace;
@@ -287,187 +298,38 @@ export function SessionOverview({
 			{health.attention ? healthSection : null}
 
 			<Section
-				id="pane-activity"
-				title="App activity"
-				icon="running"
-				summary={
-					sessions.data
-						? `${workingCount} working · ${queuedCount} queued${approvalCount > 0 ? ` · ${approvalCount} need approval` : ""}`
-						: sessions.error
-							? "Unavailable"
-							: "Loading…"
+				id="pane-changes"
+				title="Review changes"
+				icon="fileDiff"
+				open={() => onOpen("changes")}
+				aside={
+					changes.applied > 0 ? (
+						<span className="diffstat">
+							<span className="diffstat__add">+{changes.adds}</span> <span className="diffstat__del">−{changes.dels}</span>
+						</span>
+					) : null
 				}
-				expanded={activity.length > 0 || !!sessions.error}
 			>
-				{sessions.data ? (
-					<>
-						<p className="pane-card__facts">
-							{workingCount} working · {queuedCount} queued{approvalCount > 0 ? ` · ${approvalCount} need approval` : ""}
-						</p>
-						{otherActivity.length > 0 ? (
-							<ul className="pane-agents">
-								{otherActivity.map((item) => (
-									<li key={item.session.id}>
-										<Icon name={item.state === "approval" ? "shield" : "sessions"} />
-										<Link to={`/sessions/${item.session.id}`}>{taskTitle(item.session)}</Link>
-										<span>
-											{[workspaceNames.get(item.session.workspaceId), STATE_LABELS[item.state]].filter(Boolean).join(" · ")}
-										</span>
-									</li>
-								))}
-							</ul>
-						) : (
-							<p className="pane-empty">
-								{activity.length > 0 ? "This is the only active session." : "No work is running or queued."}
-							</p>
-						)}
-						<p className="pane-card__facts">Across all workspaces in this app.</p>
-					</>
+				{changes.files.length > 0 ? (
+					<p className="pane-changes-line">
+						{changes.applied > 0 ? `${changes.applied} ${changes.applied === 1 ? "file" : "files"} changed` : null}
+						<span className="sr-only">{changeCounts(changes)}</span>
+						{changes.pending > 0 ? `${changes.applied > 0 ? " · " : ""}${changes.pending} waiting for approval` : null}
+					</p>
 				) : (
-					<p className="pane-empty">{sessions.error ? "App activity could not be read." : "Reading app activity…"}</p>
+					<p className="pane-empty">No edits reported here yet.</p>
 				)}
 			</Section>
 
-			{workspace ? (
-				<Section id="pane-workspace" title="Workspace" icon="folder">
-					<p className="pane-path" title={workspace.cwd}>
-						<bdi dir="ltr">{workspace.cwd}</bdi>
-					</p>
-					<p className="pane-card__facts">
-						{workspace.isGit
-							? [
-									workspace.branch ?? "Detached HEAD",
-									workspace.dirty === null
-										? "Working tree not reported"
-										: workspace.dirty
-											? "Uncommitted changes"
-											: "Clean working tree",
-									workspace.ahead ? `${workspace.ahead} ahead` : null,
-									workspace.behind ? `${workspace.behind} behind` : null,
-								]
-									.filter(Boolean)
-									.join(" · ")
-							: "No Git repository"}
-					</p>
+			{capabilities.data?.artifacts ? (
+				<Section id="pane-artifacts" title="Task files" icon="artifacts" open={() => onOpen("artifacts")}>
+					<p className="pane-empty">Browse files, outputs and task records.</p>
 				</Section>
 			) : null}
-
-			{route ? (
-				<Section
-					id="pane-model"
-					title="Model"
-					icon="models"
-					{...(onChangeModel ? { open: onChangeModel } : {})}
-					aside={<StatusMark tone={route.tone} label={ROUTE_HEALTH_WORDS[route.tone]} />}
-				>
-					<p className="pane-changes-line" title={route.title}>
-						<span className="pane-mono">{route.text}</span>
-					</p>
-					{route.thinking ? <p className="pane-card__facts">Thinking {route.thinking}</p> : null}
-					{modelSessionFacts(route.config, facts.model).map((text) => (
-						<p key={text} className="pane-card__facts">
-							{text}
-						</p>
-					))}
-				</Section>
-			) : null}
-
-			{meter || capabilities.data?.context || facts.context.length > 0 ? (
-				<Section
-					id="pane-context"
-					title="Context"
-					icon="layers"
-					open={() => onOpen("context")}
-					aside={meter ? <span className="pane-card__state">{Math.round(meter.percent)}%</span> : null}
-				>
-					{meter ? (
-						<div className="pane-meter" data-tone={meter.tone}>
-							{/* biome-ignore lint/a11y/useSemanticElements: a native meter draws one fill; this one stacks the window's parts. */}
-							<div
-								className="pane-stack"
-								role="meter"
-								aria-label="Context window"
-								aria-valuemin={0}
-								aria-valuemax={100}
-								aria-valuenow={Math.round(meter.percent)}
-								aria-valuetext={meter.text}
-							>
-								{segments.map((segment, index) => (
-									<span
-										key={segment.key}
-										className="pane-stack__part"
-										data-index={index}
-										style={{ width: `${segment.percent}%` }}
-										title={`${segment.label} ${segment.percent.toFixed(1)}%`}
-									/>
-								))}
-							</div>
-							<p className="pane-card__facts">{meter.label}</p>
-							{segments.length > 0 ? (
-								<ul className="pane-legend" aria-label="What fills the window">
-									{segments.map((segment, index) => (
-										<li key={segment.key} data-index={index}>
-											{segment.label} <span>{segment.percent < 1 ? "<1" : Math.round(segment.percent)}%</span>
-										</li>
-									))}
-								</ul>
-							) : null}
-						</div>
-					) : (
-						<p className="pane-empty">{ledger.isPending ? "Reading the context window…" : "Not reported yet."}</p>
-					)}
-					{facts.context.map((text) => (
-						<p key={text} className="pane-card__facts">
-							{text}
-						</p>
-					))}
-				</Section>
-			) : null}
-
-			{!health.attention ? healthSection : null}
-			{facts.other.length > 0 ? (
-				<Section id="pane-notes" title="Session notes" icon="sessions">
-					{facts.other.map((text) => (
-						<p key={text} className="pane-card__facts">
-							{text}
-						</p>
-					))}
-				</Section>
-			) : null}
-
-			<Section
-				id="pane-usage"
-				title="Usage"
-				icon="usage"
-				summary={used || "No usage reported"}
-				{...(capabilities.data?.usage ? { open: () => onOpen("usage") } : {})}
-			>
-				{used ? (
-					<dl className="pane-usage-stats">
-						<div>
-							<dt>Tokens</dt>
-							<dd title={`${spend.tokens.toLocaleString("en-US")} tokens`}>
-								{compactCount(spend.tokens)}
-								{spend.missingTokenCalls
-									? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"})`
-									: ""}
-							</dd>
-						</div>
-						<div>
-							<dt>Cost</dt>
-							<dd>{spend.cost ?? "Unpriced"}</dd>
-						</div>
-					</dl>
-				) : (
-					<p className="pane-empty">No usage reported yet.</p>
-				)}
-			</Section>
-
 			<Section
 				id="pane-plan"
-				title="Plan"
+				title="Tasks and decisions"
 				icon="listChecks"
-				{...(!plan?.rows.length && !openTasks && !decisions ? { summary: "No published plan" } : {})}
 				{...(capabilities.data?.board ? { open: () => onOpen("board") } : {})}
 				aside={
 					plan && plan.rows.length > 0 ? (
@@ -479,7 +341,7 @@ export function SessionOverview({
 			>
 				{plan && plan.rows.length > 0 ? (
 					<ol className="pane-steps">
-						{plan.rows.map((row) => (
+						{(capabilities.data?.board ? plan.rows.slice(0, 5) : plan.rows).map((row) => (
 							<li key={row.id} data-tone={row.tone}>
 								<PlanGlyph tone={row.tone} />
 								<span className="sr-only">{row.word}: </span>
@@ -497,6 +359,9 @@ export function SessionOverview({
 							: "No plan published yet."}
 					</p>
 				)}
+				{capabilities.data?.board && plan && plan.rows.length > 5 ? (
+					<p className="pane-card__facts">{plan.rows.length - 5} more steps in the full plan.</p>
+				) : null}
 				{openTasks > 0 || decisions > 0 ? (
 					<p className="pane-card__facts">
 						{[
@@ -510,61 +375,6 @@ export function SessionOverview({
 			</Section>
 
 			{session.telemetry?.plan?.truncated ? <p className="pane-hint">The plan shows its first 100 steps.</p> : null}
-			{capabilities.data?.artifacts ? (
-				<Section id="pane-artifacts" title="Artifacts" icon="artifacts" summary="Browse" open={() => onOpen("artifacts")}>
-					<p className="pane-empty">Receipts, outputs and session records.</p>
-				</Section>
-			) : null}
-			<Section
-				id="pane-changes"
-				title="Changes"
-				icon="fileDiff"
-				{...(changes.files.length === 0 ? { summary: "No files changed" } : {})}
-				{...(changes.files.length > 0 ? { open: () => onOpen("changes") } : {})}
-				aside={
-					changes.applied > 0 ? (
-						<span className="diffstat">
-							<span className="diffstat__add">+{changes.adds}</span> <span className="diffstat__del">−{changes.dels}</span>
-						</span>
-					) : null
-				}
-			>
-				{changes.files.length > 0 ? (
-					<p className="pane-changes-line">
-						{changes.applied > 0 ? `${changes.applied} ${changes.applied === 1 ? "file" : "files"} changed` : null}
-						<span className="sr-only">{changeCounts(changes)}</span>
-						{changes.pending > 0 ? `${changes.applied > 0 ? " · " : ""}${changes.pending} waiting for approval` : null}
-					</p>
-				) : (
-					<p className="pane-empty">No files changed yet.</p>
-				)}
-			</Section>
-
-			{/* A session that can run fleets keeps the section with no runs, because its drill holds the
-			    form that starts one. */}
-			{branches ? (
-				<Section
-					id="pane-branches"
-					title="Branches"
-					icon="branch"
-					{...(branches.branchPoints === 0 && !branches.forkedFrom ? { summary: "Current branch" } : {})}
-					open={() => onOpen("branches")}
-					aside={
-						branches.branchPoints > 0 ? (
-							<span className="pane-card__state">
-								{branches.branchPoints} {branches.branchPoints === 1 ? "fork point" : "fork points"}
-							</span>
-						) : null
-					}
-				>
-					<p className="pane-changes-line">
-						{branches.branchPoints === 0 ? "One line of conversation." : "Continuing on the current branch."}
-						{branches.forkedFrom ? " Forked from an earlier task." : ""}
-					</p>
-					{tip ? <p className="pane-card__facts pane-card__preview">Latest: {tip.label ?? tip.text}</p> : null}
-				</Section>
-			) : null}
-
 			{runs.length > 0 || capabilities.data?.fleet ? (
 				<Section
 					id="pane-agents"
@@ -647,14 +457,223 @@ export function SessionOverview({
 				</Section>
 			) : null}
 
-			{open ? (
-				<p className="pane-hint pane-hint--commands">
-					<Icon name="bolt" />
+			<details className="pane-more" open={more} onToggle={(event) => setMore(event.currentTarget.open)}>
+				<summary>
+					<Icon name="layers" />
 					<span>
-						Commands and side questions <kbd>/</kbd>
+						<strong>More details</strong>
+						<small>Model, context, usage and branches</small>
 					</span>
-				</p>
-			) : null}
+					<Icon name="chevronRight" />
+				</summary>
+				{more ? (
+					<div className="pane-more__body">
+						{route ? (
+							<Section
+								id="pane-model"
+								title="Model"
+								icon="models"
+								{...(onChangeModel ? { open: onChangeModel } : {})}
+								aside={<StatusMark tone={route.tone} label={ROUTE_HEALTH_WORDS[route.tone]} />}
+							>
+								<p className="pane-changes-line" title={route.title}>
+									<span className="pane-mono">{route.text}</span>
+								</p>
+								{route.thinking ? <p className="pane-card__facts">Thinking {route.thinking}</p> : null}
+								{modelSessionFacts(route.config, facts.model).map((text) => (
+									<p key={text} className="pane-card__facts">
+										{text}
+									</p>
+								))}
+							</Section>
+						) : null}
+
+						{meter || capabilities.data?.context || facts.context.length > 0 ? (
+							<Section
+								id="pane-context"
+								title="Context"
+								icon="layers"
+								open={() => onOpen("context")}
+								aside={meter ? <span className="pane-card__state">{Math.round(meter.percent)}%</span> : null}
+							>
+								{meter ? (
+									<div className="pane-meter" data-tone={meter.tone}>
+										{/* biome-ignore lint/a11y/useSemanticElements: a native meter draws one fill; this one stacks the window's parts. */}
+										<div
+											className="pane-stack"
+											role="meter"
+											aria-label="Context window"
+											aria-valuemin={0}
+											aria-valuemax={100}
+											aria-valuenow={Math.round(meter.percent)}
+											aria-valuetext={meter.text}
+										>
+											{segments.map((segment, index) => (
+												<span
+													key={segment.key}
+													className="pane-stack__part"
+													data-index={index}
+													style={{ width: `${segment.percent}%` }}
+													title={`${segment.label} ${segment.percent.toFixed(1)}%`}
+												/>
+											))}
+										</div>
+										<p className="pane-card__facts">{meter.label}</p>
+										{segments.length > 0 ? (
+											<ul className="pane-legend" aria-label="What fills the window">
+												{segments.map((segment, index) => (
+													<li key={segment.key} data-index={index}>
+														{segment.label} <span>{segment.percent < 1 ? "<1" : Math.round(segment.percent)}%</span>
+													</li>
+												))}
+											</ul>
+										) : null}
+									</div>
+								) : (
+									<p className="pane-empty">{ledger.isPending ? "Reading the context window…" : "Not reported yet."}</p>
+								)}
+								{facts.context.map((text) => (
+									<p key={text} className="pane-card__facts">
+										{text}
+									</p>
+								))}
+							</Section>
+						) : null}
+
+						{!health.attention ? healthSection : null}
+						{facts.other.length > 0 ? (
+							<Section id="pane-notes" title="Session notes" icon="sessions">
+								{facts.other.map((text) => (
+									<p key={text} className="pane-card__facts">
+										{text}
+									</p>
+								))}
+							</Section>
+						) : null}
+
+						<Section
+							id="pane-usage"
+							title="Usage"
+							icon="usage"
+							summary={used || "No usage reported"}
+							{...(capabilities.data?.usage ? { open: () => onOpen("usage") } : {})}
+						>
+							{used ? (
+								<dl className="pane-usage-stats">
+									<div>
+										<dt>Tokens</dt>
+										<dd title={`${spend.tokens.toLocaleString("en-US")} tokens`}>
+											{compactCount(spend.tokens)}
+											{spend.missingTokenCalls
+												? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"})`
+												: ""}
+										</dd>
+									</div>
+									<div>
+										<dt>Cost</dt>
+										<dd>{spend.cost ?? "Unpriced"}</dd>
+									</div>
+								</dl>
+							) : (
+								<p className="pane-empty">No usage reported yet.</p>
+							)}
+						</Section>
+
+						{branches || capabilities.data?.branches ? (
+							<Section
+								id="pane-branches"
+								title="Branches"
+								icon="branch"
+								{...(branches?.branchPoints === 0 && !branches?.forkedFrom ? { summary: "Current branch" } : {})}
+								open={() => onOpen("branches")}
+								aside={
+									(branches?.branchPoints ?? 0) > 0 ? (
+										<span className="pane-card__state">
+											{branches?.branchPoints} {branches?.branchPoints === 1 ? "fork point" : "fork points"}
+										</span>
+									) : null
+								}
+							>
+								<p className="pane-changes-line">
+									{!branches
+										? "Read the conversation branches."
+										: branches.branchPoints === 0
+											? "One line of conversation."
+											: "Continuing on the current branch."}
+									{branches?.forkedFrom ? " Forked from an earlier task." : ""}
+								</p>
+								{tip ? <p className="pane-card__facts pane-card__preview">Latest: {tip.label ?? tip.text}</p> : null}
+							</Section>
+						) : null}
+
+						<Section
+							id="pane-activity"
+							title="App activity"
+							icon="running"
+							summary={
+								sessions.data
+									? `${workingCount} working · ${queuedCount} queued${approvalCount > 0 ? ` · ${approvalCount} need approval` : ""}`
+									: sessions.error
+										? "Unavailable"
+										: "Loading…"
+							}
+							expanded={activity.length > 0 || !!sessions.error}
+						>
+							{sessions.data ? (
+								<>
+									<p className="pane-card__facts">
+										{workingCount} working · {queuedCount} queued{approvalCount > 0 ? ` · ${approvalCount} need approval` : ""}
+									</p>
+									{otherActivity.length > 0 ? (
+										<ul className="pane-agents">
+											{otherActivity.map((item) => (
+												<li key={item.session.id}>
+													<Icon name={item.state === "approval" ? "shield" : "sessions"} />
+													<Link to={`/sessions/${item.session.id}`}>{taskTitle(item.session)}</Link>
+													<span>
+														{[workspaceNames.get(item.session.workspaceId), STATE_LABELS[item.state]].filter(Boolean).join(" · ")}
+													</span>
+												</li>
+											))}
+										</ul>
+									) : (
+										<p className="pane-empty">
+											{activity.length > 0 ? "This is the only active session." : "No work is running or queued."}
+										</p>
+									)}
+									<p className="pane-card__facts">Across all workspaces in this app.</p>
+								</>
+							) : (
+								<p className="pane-empty">{sessions.error ? "App activity could not be read." : "Reading app activity…"}</p>
+							)}
+						</Section>
+
+						{workspace ? (
+							<Section id="pane-workspace" title="Workspace" icon="folder">
+								<p className="pane-path" title={workspace.cwd}>
+									<bdi dir="ltr">{workspace.cwd}</bdi>
+								</p>
+								<p className="pane-card__facts">
+									{workspace.isGit
+										? [
+												workspace.branch ?? "Detached HEAD",
+												workspace.dirty === null
+													? "Working tree not reported"
+													: workspace.dirty
+														? "Uncommitted changes"
+														: "Clean working tree",
+												workspace.ahead ? `${workspace.ahead} ahead` : null,
+												workspace.behind ? `${workspace.behind} behind` : null,
+											]
+												.filter(Boolean)
+												.join(" · ")
+										: "No Git repository"}
+								</p>
+							</Section>
+						) : null}
+					</div>
+				) : null}
+			</details>
 		</div>
 	);
 }

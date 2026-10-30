@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import type { ArtifactRead } from "../../contracts/artifacts.js";
@@ -130,6 +131,7 @@ import { Interviews } from "./interviews.js";
 import { JOB_QUIET_MS, jobChangeIsStructural, scheduledTurnPrompt } from "./jobs.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
+import { projectSessionOverview, SessionWorkers } from "./session-overview.js";
 import { projectTelemetryValue, sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
 
 /**
@@ -187,6 +189,7 @@ type Entry = {
 	jobPending?: Map<string, AcpJob>;
 	jobPublished?: Map<string, number>;
 	jobTimer?: ReturnType<typeof setTimeout>;
+	workers?: SessionWorkers;
 };
 /** A branch change reads and replays a whole session, which a long one makes slow. */
 const BRANCH_TIMEOUT_MS = 60_000;
@@ -262,6 +265,7 @@ export class Supervisor {
 			!entry.drafting &&
 			entry.client.pending === 0 &&
 			!this.liveJobs(entry.id) &&
+			!entry.workers?.hasWork &&
 			entry.client.capabilities.loadSession &&
 			!this.configuring.has(entry.id) &&
 			this.snapshots.get(entry.id)?.state === "open"
@@ -285,6 +289,22 @@ export class Supervisor {
 	}
 	list() {
 		return [...this.snapshots.values()].map((value) => snapshotCostDisplay(structuredClone(value)));
+	}
+	/** Lists control facts without cloning transcripts, tool output, or permission request bodies. */
+	overview() {
+		return {
+			host: hostname(),
+			sessions: [...this.snapshots.values()].map((snapshot) => {
+				const entry = this.entries.get(snapshot.id);
+				const interview = entry?.interviews?.current();
+				return projectSessionOverview(
+					snapshot,
+					interview?.questions.length ?? 0,
+					interview?.requestedAt,
+					entry?.workers?.summary(),
+				);
+			}),
+		};
 	}
 	get hasOpenSessions() {
 		return this.entries.size > 0;
@@ -390,38 +410,23 @@ export class Supervisor {
 		}
 	}
 	/**
-	 * A resumed child reads autonomy, thinking and its other session controls from settings. The task
-	 * was parked with the operator's own choices, kept in its snapshot, so they are set again before
-	 * any window is told the task is open. A choice the new child no longer offers is left at its
-	 * setting, and a refusal leaves the task open on the settings' values rather than failing the resume.
+	 * Autonomy is a GUI-held override; routing controls come from the restored ACP session.
+	 * Reapplying a cached route would overwrite newer ledger choices made through another client (AUD-3).
 	 */
 	private async restoreChoices(entry: Entry, id: string) {
 		const level = this.parkedAutonomy.get(id);
 		this.parkedAutonomy.delete(id);
-		try {
-			if (level !== undefined && (await entry.client.autonomy(id)).level !== level) await entry.client.autonomy(id, level);
-			for (const kept of this.snapshots.get(id)?.config?.options ?? []) {
-				const offered = entry.client.config?.options.find((option) => option.id === kept.id);
-				if (
-					!offered ||
-					offered.currentValue === kept.currentValue ||
-					!offered.options.some((row) => row.value === kept.currentValue)
-				)
-					continue;
-				const result = record(
-					await entry.client.request("session/set_config_option", {
-						sessionId: id,
-						configId: kept.id,
-						value: kept.currentValue,
-					}),
-				);
-				const options = projectConfigOptions(result.configOptions);
-				if (options !== undefined) entry.client.config = { ...entry.client.config, options };
-			}
-		} catch (error) {
+		const refused = (error: unknown) => {
 			console.error(
-				`[clio-coder:gui] session ${id} resumed on its settings: ${error instanceof Error ? error.message : String(error)}`,
+				`[clio-coder:gui] session ${id} could not restore a choice: ${error instanceof Error ? error.message : String(error)}`,
 			);
+		};
+		if (level !== undefined) {
+			try {
+				await entry.client.autonomy(id, level);
+			} catch (error) {
+				refused(error);
+			}
 		}
 	}
 	/** Start a parked session's child again. Its transcript is the kept snapshot, so clients see only the state change. */
@@ -575,6 +580,8 @@ export class Supervisor {
 						console.error(`[clio-coder:gui] dropped an unrecognized _clio-coder/event kind on session ${owned.id}`);
 						return;
 					}
+					owned.workers ??= new SessionWorkers();
+					owned.workers.observe(projected.item.fact);
 					// The type and the schema the item was checked against both come
 					// from the same `ACP_TO_WEB_EVENT` row, so the pairing cannot
 					// disagree; TypeScript just cannot see that across the call.
@@ -607,10 +614,11 @@ export class Supervisor {
 				type: "session.telemetry",
 				payload: { resource: boundId, revision: this.revision(boundId), telemetry: entry.client.telemetry },
 			});
-			if (entry.client.config)
+			const config = entry.client.config ?? (resume && this.snapshot(boundId).config ? { options: [] } : undefined);
+			if (config)
 				this.publish({
 					type: "session.configured",
-					payload: { resource: boundId, revision: this.revision(boundId), config: entry.client.config },
+					payload: { resource: boundId, revision: this.revision(boundId), config },
 				});
 			if (this.stopping) {
 				await this.retire(entry);
@@ -853,6 +861,13 @@ export class Supervisor {
 		if (params.sessionId !== entry.id)
 			throw new AppProblem("upstream_acp", "ACP update has a different session identity.");
 		if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
+		if (update.sessionUpdate === "current_mode_update") {
+			const autonomy = entry.client.modeUpdate(entry.id, update.currentModeId);
+			this.publish({
+				type: "session.telemetry",
+				payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { autonomy } },
+			});
+		}
 		const telemetry = sessionUpdateTelemetry(update);
 		if (telemetry)
 			this.publish({
@@ -864,10 +879,11 @@ export class Supervisor {
 			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
 			const target = record(meta[ACP_SESSION_META_KEY]).target;
 			const config = {
-				...this.snapshot(entry.id).config,
+				...entry.client.config,
 				options,
 				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
 			};
+			entry.client.config = config;
 			this.publish({
 				type: "session.configured",
 				payload: { resource: entry.id, revision: this.revision(entry.id), config },
@@ -1074,15 +1090,7 @@ export class Supervisor {
 			throw new AppProblem("validation", "Choose a value Clio Coder reports for this conversation.");
 		this.configuring.add(id);
 		try {
-			const result = record(await entry.client.request("session/set_config_option", { sessionId: id, ...body }));
-			const options = projectConfigOptions(result.configOptions);
-			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
-			const target = record(record(result._meta)[ACP_SESSION_META_KEY]).target;
-			const next = {
-				...this.snapshot(id).config,
-				options,
-				...(target === null || typeof target === "string" ? { target } : {}),
-			};
+			const next = await entry.client.setConfig(id, body);
 			this.publish({ type: "session.configured", payload: { resource: id, revision: this.revision(id), config: next } });
 			return next;
 		} finally {
@@ -1108,8 +1116,14 @@ export class Supervisor {
 			throw new AppProblem("unsupported", "This Clio build does not expose target probes.");
 		return this.projected(id, ACP_TARGETS_PROBE_METHOD, { targetId }, TargetProbe);
 	}
-	autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
-		return this.active(id).client.autonomy(id, level);
+	async autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
+		const autonomy = await this.active(id).client.autonomy(id, level);
+		if (level !== undefined && this.snapshot(id).telemetry?.autonomy !== autonomy)
+			this.publish({
+				type: "session.telemetry",
+				payload: { resource: id, revision: this.revision(id), telemetry: { autonomy } },
+			});
+		return autonomy;
 	}
 	capabilities(id: string) {
 		return this.active(id).client.capabilities;

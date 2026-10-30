@@ -66,8 +66,11 @@ export function Menu({
 				className="wb-menu__panel"
 				role="menu"
 				onClick={(event) => {
-					if (event.target instanceof Element && event.target.closest('[role="menuitem"]') && ref.current)
+					if (event.target instanceof Element && event.target.closest('[role="menuitem"]') && ref.current) {
 						ref.current.open = false;
+						// A dialog opened by a hidden menu item must return to the visible menu button.
+						ref.current.querySelector("summary")?.focus();
+					}
 				}}
 			>
 				{children}

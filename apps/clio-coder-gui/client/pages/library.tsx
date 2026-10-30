@@ -8,7 +8,16 @@ import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { LibraryCatalog } from "./library-catalog.js";
-import { type Agent, agentCard, matchesQuery, type Resource, skillCard, tabAfterKey } from "./library-model.js";
+import {
+	type Agent,
+	agentCard,
+	extensionState,
+	matchesQuery,
+	type Resource,
+	resourceDetails,
+	skillCard,
+	tabAfterKey,
+} from "./library-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 const collections = ["Catalog", "Agents", "Skills", "Prompts", "Playbooks", "Extensions", "Verifiers"] as const;
@@ -22,6 +31,31 @@ type Entry = {
 	agent?: Agent;
 	skill?: Resource;
 };
+
+function ResourceBody({ collection, value }: { collection: string; value: unknown }) {
+	const detail = resourceDetails(collection, value);
+	return (
+		<>
+			<p>{detail.explanation}</p>
+			<CardFacts facts={detail.facts} />
+			{!!detail.notes.length && (
+				<ul>
+					{detail.notes.map((note) => (
+						<li key={note}>{note}</li>
+					))}
+				</ul>
+			)}
+			<details>
+				<summary>Source and configuration</summary>
+				<Facts
+					value={value}
+					order={["availability", "reason", "source", "owner", "origin", "path"]}
+					hide={["key", "name", "description"]}
+				/>
+			</details>
+		</>
+	);
+}
 
 function CardFacts({ facts }: { facts: { label: string; value: string; absent?: true }[] }) {
 	return (
@@ -196,17 +230,7 @@ export function LibraryPage({
 			id: `${row.id}:${row.scope}`,
 			name: row.name,
 			description: row.description,
-			state: row.loadable
-				? "Ready to load"
-				: !row.enabled
-					? "Disabled"
-					: !row.valid
-						? "Invalid"
-						: !row.compatible
-							? "Incompatible"
-							: !row.effective
-								? "Overridden"
-								: "Unavailable",
+			state: extensionState(row),
 			detail: row,
 		})),
 		Verifiers: (verifiers.data?.checks ?? []).map((row) => ({
@@ -233,10 +257,14 @@ export function LibraryPage({
 		activate(next);
 		tabs.current.get(next)?.focus();
 	};
-	const count = (name: Collection) =>
-		name === "Catalog" ? (inventory.data?.packages.length ?? 0) : entries[name].length;
+	const count = (name: Collection) => {
+		const query =
+			name === "Agents" ? agents : name === "Extensions" ? extensions : name === "Verifiers" ? verifiers : inventory;
+		if (!query.data) return query.isError ? "Unavailable" : "…";
+		return name === "Catalog" ? inventory.data?.packages.length : entries[name].length;
+	};
 	return (
-		<section>
+		<section className="library-page">
 			{!compact && <PanelHeading panel={PANELS.library} level={1} />}
 			{!workspaceId && <WorkspacePicker selection={selection} />}
 			{!compact && <p>Explore the capabilities available to Clio in this workspace, and see where they come from.</p>}
@@ -268,6 +296,7 @@ export function LibraryPage({
 				<label className="settings-filter">
 					Search {active.toLowerCase()}
 					<input
+						type="search"
 						value={filter}
 						onChange={(event) => {
 							discover(active, event.target.value, true);
@@ -275,7 +304,12 @@ export function LibraryPage({
 						}}
 					/>
 				</label>
-				{source.isPending && id && <p>Reading {active.toLowerCase()}…</p>}
+				{filter && (
+					<button type="button" onClick={() => discover(active, "")}>
+						Clear search
+					</button>
+				)}
+				{source.isPending && id && <p role="status">Reading {active.toLowerCase()}…</p>}
 				{source.error && (
 					<p role="alert">
 						{source.error.message}{" "}
@@ -285,7 +319,9 @@ export function LibraryPage({
 					</p>
 				)}
 				{inventory.data && Object.values(inventory.data.truncated).some(Boolean) && (
-					<PanelEmpty>{emptyState.bounded("library records", "Later")}</PanelEmpty>
+					<PanelEmpty>
+						This inventory is incomplete. Search and filters cover only the records returned by the server.
+					</PanelEmpty>
 				)}
 				{active === "Verifiers" && verifiers.data && (
 					<>
@@ -336,17 +372,7 @@ export function LibraryPage({
 								) : row.skill ? (
 									<SkillBody skill={row.skill} />
 								) : (
-									<>
-										<p>{row.state}</p>
-										<details>
-											<summary>Source and configuration</summary>
-											<Facts
-												value={row.detail}
-												order={["availability", "reason", "source", "owner", "origin", "path"]}
-												hide={["key", "name", "description"]}
-											/>
-										</details>
-									</>
+									<ResourceBody collection={active} value={row.detail} />
 								)}
 							</details>
 						</article>

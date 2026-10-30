@@ -271,3 +271,30 @@
 .library-terminal code {
 	overflow-wrap: anywhere;
 }
+
+.library-page > [role="tabpanel"] > h2 {
+	font-family: var(--font-editorial);
+	margin-bottom: var(--space-2);
+}
+.library-page > [role="tabpanel"] > h2 + p {
+	max-width: 72ch;
+	color: var(--ink-muted);
+}
+.library-resource:has(> .library-resource__details[open]) {
+	background: var(--surface);
+}
+.library-resource__details[open] {
+	border-left: 2px solid var(--accent-line);
+	padding-left: var(--space-4);
+}
+.library-packages > li[data-selected="true"] {
+	border-top: 2px solid var(--accent);
+}
+.library-terminal > summary {
+	color: var(--accent);
+	cursor: pointer;
+}
+.library-package__detail > p {
+	max-width: 72ch;
+	margin-top: 0;
+}

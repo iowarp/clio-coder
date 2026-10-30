@@ -1,0 +1,289 @@
+.mission {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: var(--space-8) var(--space-6);
+}
+.mission__inner {
+	width: min(100%, 1280px);
+	margin: 0 auto;
+}
+.mission__heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-6);
+	margin-bottom: var(--space-8);
+}
+.mission__heading h2 {
+	margin: var(--space-2) 0;
+	font: 500 clamp(30px, 3vw, 44px) / 1.15 var(--font-editorial);
+	letter-spacing: -0.6px;
+}
+.mission__heading h2 em {
+	color: var(--accent);
+}
+.mission__heading p:not(.eyebrow) {
+	margin: var(--space-3) 0 0;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.mission__connection {
+	display: grid;
+	gap: var(--space-2);
+	justify-items: end;
+	font-size: var(--text-meta);
+}
+.mission__connection > span:last-child {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	color: var(--ink-muted);
+}
+.mission__figures {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	border-block: 1px solid var(--line);
+	margin-bottom: var(--space-6);
+}
+.mission__figures > :is(button, div) {
+	display: grid;
+	justify-items: start;
+	align-content: start;
+	gap: var(--space-2);
+	padding: var(--space-5);
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	text-align: left;
+}
+.mission__figures > :not(:last-child) {
+	border-right: 1px solid var(--line);
+}
+.mission__figures button:hover,
+.mission__figures button[aria-pressed="true"] {
+	background: var(--accent-soft);
+}
+.mission__figures strong {
+	color: var(--ink);
+	font: 500 38px / 1 var(--font-editorial);
+}
+.mission__figures span {
+	font-size: var(--text-meta);
+	color: var(--ink);
+}
+.mission__figures small {
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+}
+.mission__toolbar {
+	display: flex;
+	gap: var(--space-3);
+}
+.mission__search {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: var(--space-2);
+	padding-inline: var(--space-3);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--raised);
+}
+.mission__search input {
+	min-width: 0;
+	width: 100%;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+}
+.mission__search .icon {
+	color: var(--ink-muted);
+	flex: none;
+}
+.mission__toolbar select {
+	max-width: 240px;
+}
+.mission__filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	margin: var(--space-5) 0;
+}
+.mission__filters button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-3);
+	border: 1px solid transparent;
+	background: transparent;
+	font-size: var(--text-meta);
+}
+.mission__filters button[aria-pressed="true"] {
+	border-color: var(--line);
+	background: var(--raised);
+	color: var(--accent);
+}
+.mission__filters button > span {
+	font-family: var(--font-mono);
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.mission__grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
+	gap: var(--space-4);
+}
+.mission-card {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	padding: var(--space-5);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--raised);
+}
+.mission-card[data-activity="approval"],
+.mission-card[data-activity="question"] {
+	border-top: 2px solid var(--status-warn-line);
+}
+.mission-card > header,
+.mission-card > footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	font-size: var(--text-instrument);
+}
+.mission-card__project {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+.mission-card h3 {
+	margin: var(--space-4) 0 var(--space-3);
+	font-size: var(--text-body);
+	font-weight: 500;
+	line-height: 1.4;
+}
+.mission-card h3 a {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	color: var(--ink);
+	text-decoration: none;
+	overflow-wrap: anywhere;
+}
+.mission-card h3 a:hover {
+	color: var(--accent);
+}
+.mission-card__facts {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.mission-card__facts > span {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	overflow-wrap: anywhere;
+}
+.mission-card .icon {
+	flex: none;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+}
+.mission-card__workers {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.mission-card__workers > span {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-mono);
+	font-size: var(--text-instrument);
+}
+.mission-card__attention {
+	color: var(--status-warn-fg);
+	font-size: var(--text-meta);
+}
+.mission-card > footer {
+	margin-top: auto;
+	padding-top: var(--space-5);
+}
+.mission-card time {
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+}
+.mission-card > footer > div {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.mission-card > footer button,
+.mission-card__open {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2);
+	border: 0;
+	background: transparent;
+	font-size: var(--text-meta);
+	white-space: nowrap;
+}
+.mission-card__open {
+	color: var(--accent);
+	text-decoration: none;
+}
+.mission-card__open .icon {
+	transform: rotate(45deg);
+}
+.mission-card__stop {
+	color: var(--status-fail-fg);
+}
+.mission-card__close {
+	color: var(--ink-muted);
+}
+.mission__empty {
+	display: grid;
+	justify-items: center;
+	padding: var(--space-12) var(--space-6);
+	text-align: center;
+}
+.mission__empty > .icon {
+	width: 32px;
+	height: 32px;
+	color: var(--accent);
+}
+.mission__empty h3 {
+	margin-bottom: 0;
+	font: 500 var(--text-h2) / var(--leading-tight) var(--font-editorial);
+}
+.mission__empty p,
+.mission__scope {
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
+}
+.mission__scope {
+	margin-top: var(--space-6);
+	border-top: 1px solid var(--line);
+	padding-top: var(--space-4);
+}
+.mission__notice,
+.mission-card__error {
+	color: var(--status-warn-fg);
+	font-size: var(--text-meta);
+}

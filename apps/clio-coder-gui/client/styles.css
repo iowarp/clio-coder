@@ -68,6 +68,14 @@ body {
 	margin: min(12dvh, 8rem) auto;
 	max-width: 42rem;
 }
+.app-opening {
+	display: grid;
+	place-content: center;
+	justify-items: center;
+	gap: var(--space-3);
+	min-height: 100dvh;
+	color: var(--ink-muted);
+}
 .route-error p:not(.eyebrow) {
 	color: var(--ink-muted);
 	line-height: var(--leading-reading);
@@ -1355,12 +1363,9 @@ nav a:hover {
 	font-size: var(--text-meta);
 }
 
-/* Dense inspection pages share a compact title; expressive type remains on the overview. */
-/* One page voice. Every settings and inspection page opens the same way: a title in the interface
-   face at one size, whatever wrapper the page puts it in. The editorial serif is kept for the two
-   places that greet the operator: the home question and an empty conversation. */
-main :is(.panel-heading, .page-heading) h1,
-.wb-main[data-mode="settings"] h1 {
+/* Calm defaults leave page-specific type and layout in control without a specificity contest. */
+:where(main :is(.panel-heading, .page-heading)) h1,
+:where(.wb-main[data-mode="settings"]) h1 {
 	font-family: var(--font-ui);
 	font-size: var(--text-h1);
 	font-weight: 650;

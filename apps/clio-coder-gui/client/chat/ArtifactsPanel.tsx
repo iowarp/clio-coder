@@ -5,6 +5,8 @@ import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import "./artifacts.css";
+import "./pane-inspection.css";
+import { paneArtifactRows } from "./pane-inspection-model.js";
 
 export function ArtifactsPanel({
 	client,
@@ -23,9 +25,11 @@ export function ArtifactsPanel({
 	const [offsets, setOffsets] = useState([0]);
 	const [details, setDetails] = useState(false);
 	const [filter, setFilter] = useState("");
+	const [query, setQuery] = useState("");
 	const title = useRef<HTMLHeadingElement>(null);
 	const supported = !!capabilities?.artifacts;
 	const list = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["session-artifacts", sessionId, settled],
 		queryFn: () => client.call(routes.sessionArtifacts, { params: { id: sessionId }, query: {}, body: {} }),
 		enabled: open && supported,
@@ -33,6 +37,7 @@ export function ArtifactsPanel({
 	});
 	const offset = offsets.at(-1) ?? 0;
 	const page = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["session-artifact", sessionId, selected, offset, details, settled],
 		queryFn: () =>
 			client.call(routes.sessionArtifact, {
@@ -47,7 +52,7 @@ export function ArtifactsPanel({
 	useEffect(() => {
 		if (pageId && selected && offset >= 0) title.current?.focus();
 	}, [pageId, selected, offset]);
-	const rows = list.data?.artifacts.filter((row) => !filter || row.category === filter) ?? [];
+	const rows = paneArtifactRows(list.data?.artifacts ?? [], query, filter);
 	const error = selected ? page.error : list.error;
 	return (
 		<div className="pane-drill artifacts">
@@ -74,6 +79,13 @@ export function ArtifactsPanel({
 							<h3 className="artifacts__title" tabIndex={-1} ref={title}>
 								{page.data.title}
 							</h3>
+							<p className="pane-inspection-count">
+								{page.data.format} · {page.data.totalLines} recorded lines
+							</p>
+							<details className="pane-inspection-disclosure">
+								<summary>Artifact identity</summary>
+								<code>{page.data.id}</code>
+							</details>
 							{page.data.refused ? (
 								<p className="artifacts__refusal" role="status">
 									{page.data.refused.reason}
@@ -83,6 +95,7 @@ export function ArtifactsPanel({
 								<button
 									type="button"
 									className="artifacts__back"
+									disabled={page.isFetching}
 									onClick={() => {
 										setDetails(!details);
 										setOffsets([0]);
@@ -101,7 +114,11 @@ export function ArtifactsPanel({
 								<p className="pane-hint">{page.data.clippedLines} oversized lines were shortened by Clio.</p>
 							) : null}
 							<div className="artifacts__paging">
-								<button type="button" disabled={offsets.length === 1} onClick={() => setOffsets(offsets.slice(0, -1))}>
+								<button
+									type="button"
+									disabled={page.isFetching || offsets.length === 1}
+									onClick={() => setOffsets(offsets.slice(0, -1))}
+								>
 									Previous
 								</button>
 								<span>
@@ -111,7 +128,7 @@ export function ArtifactsPanel({
 								</span>
 								<button
 									type="button"
-									disabled={page.data.nextOffset === null}
+									disabled={page.isFetching || page.data.nextOffset === null}
 									onClick={() => {
 										if (page.data.nextOffset !== null) setOffsets([...offsets, page.data.nextOffset]);
 									}}
@@ -124,6 +141,18 @@ export function ArtifactsPanel({
 				</>
 			) : (
 				<>
+					<div className="pane-inspection-filters">
+						<label>
+							Find an artifact
+							<input
+								type="search"
+								value={query}
+								onChange={(event) => setQuery(event.target.value)}
+								maxLength={256}
+								placeholder="Title, path or artifact ID"
+							/>
+						</label>
+					</div>
 					<div className="artifacts__controls">
 						<label>
 							Kind
@@ -147,7 +176,29 @@ export function ArtifactsPanel({
 						</button>
 					</div>
 					{list.isPending ? <p className="pane-empty">Reading artifacts…</p> : null}
-					{list.data && rows.length === 0 ? <p className="pane-empty">No artifacts in this view yet.</p> : null}
+					{list.data && (
+						<p className="pane-inspection-count" role="status">
+							{rows.length} of {list.data.artifacts.length} loaded artifacts
+						</p>
+					)}
+					{(query || filter) && (
+						<button
+							type="button"
+							onClick={() => {
+								setQuery("");
+								setFilter("");
+							}}
+						>
+							Reset artifact filters
+						</button>
+					)}
+					{list.data && rows.length === 0 ? (
+						<p className="pane-empty">
+							{query || filter
+								? "No saved artifact matches these filters."
+								: "No saved artifacts have been reported for this task."}
+						</p>
+					) : null}
 					<ul className="artifacts__list">
 						{rows.map((row) => (
 							<li key={row.id}>
@@ -181,7 +232,11 @@ export function ArtifactsPanel({
 			{error ? (
 				<p role="alert" className="pane-empty">
 					{error.message}{" "}
-					<button type="button" onClick={() => void (selected ? page.refetch() : list.refetch())}>
+					<button
+						type="button"
+						disabled={selected ? page.isFetching : list.isFetching}
+						onClick={() => void (selected ? page.refetch() : list.refetch())}
+					>
 						Retry
 					</button>
 				</p>

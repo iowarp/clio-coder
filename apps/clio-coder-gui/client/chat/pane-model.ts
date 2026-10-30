@@ -1,3 +1,4 @@
+import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 
 /**
@@ -14,6 +15,8 @@ export const PANE_VIEWS = [
 	{ id: "changes", label: "Changes", icon: "fileDiff" },
 	{ id: "branches", label: "Branches", icon: "branch" },
 	{ id: "agents", label: "Agents", icon: "fleet" },
+	{ id: "handoff", label: "Continue in a new task", icon: "branch" },
+	{ id: "extensions", label: "Tools and add-ons", icon: "toolchain" },
 ] as const;
 
 export type PaneView = (typeof PANE_VIEWS)[number]["id"];
@@ -76,4 +79,44 @@ export function selectPaneSession(session: SessionSnapshot): PaneSession {
 		tools: session.timeline.filter(readsPane),
 		notices: session.timeline.filter((item) => item.kind === "notice"),
 	};
+}
+
+export const PANE_GROUPS: readonly { label: string; views: readonly PaneView[] }[] = [
+	{ label: "Overview", views: ["session"] },
+	{ label: "Work", views: ["changes", "board", "agents"] },
+	{ label: "Resources", views: ["artifacts", "context", "usage", "extensions"] },
+	{ label: "Continue", views: ["branches", "handoff"] },
+];
+
+export const PANE_DESCRIPTIONS: Record<PaneView, string> = {
+	session: "Status, progress and the facts behind this task.",
+	changes: "Edits and file paths reported by this conversation's tools.",
+	board: "Your checklist, Clio's plan and recorded decisions.",
+	agents: "Worker activity and results linked to this task.",
+	artifacts: "Saved artifacts exposed by this task's connection.",
+	context: "Recorded window use, instructions and context management.",
+	usage: "This task's accounting and reported provider limits.",
+	branches: "Choose where the next request continues, or fork a conversation.",
+	handoff: "Review a handoff before starting a new conversation.",
+	extensions: "Tools and hooks loaded by this task's running session.",
+};
+
+export function paneGate(
+	view: PaneView,
+	sessionOpen: boolean,
+	capabilities: AgentCapabilities | undefined,
+): "ready" | "checking" | "closed" | "unsupported" {
+	const required = {
+		context: "context",
+		usage: "usage",
+		board: "board",
+		artifacts: "artifacts",
+		branches: "branches",
+		handoff: "handoff",
+		extensions: "extensions",
+	} as const;
+	if (!(view in required)) return "ready";
+	if (!sessionOpen) return "closed";
+	if (!capabilities) return "checking";
+	return capabilities[required[view as keyof typeof required]] ? "ready" : "unsupported";
 }

@@ -1,5 +1,6 @@
 import { workerData } from "node:worker_threads";
 import { libraryLifecycleAdapter } from "../clio/adapters/library-lifecycle.js";
+import { closeMachines, mutateMachine } from "../clio/adapters/machines.js";
 import { runtimeInfo } from "../clio/adapters/runtime.js";
 import { recoverSession } from "../clio/adapters/sessions.js";
 import { toolchainAdapter, toolDownloader } from "../clio/adapters/toolchain.js";
@@ -18,6 +19,7 @@ const fixture =
 const adapter = toolchainAdapter(fixture?.fixtureOptions(settings) ?? { fetcher: toolDownloader(download) });
 const library = libraryLifecycleAdapter();
 serveWorker(async (call, progress) => {
+	if (call.method === "machines.mutate") return mutateMachine(call.params.cwd, call.params.mutation);
 	if (call.method === "runtime.info" && process.env.NODE_ENV === "test") return runtimeInfo(import.meta.url);
 	if (call.method === "sessions.recover") return recoverSession(call.params.cwd, call.params.sessionId);
 	if (call.method === "tools.install") return adapter.install(call.params.id, call.params.force, progress);
@@ -34,4 +36,4 @@ serveWorker(async (call, progress) => {
 		return writeSettingControl(call.params.cwd, call.params.write);
 	}
 	throw new AppProblem("unsupported", "Method is not available in the ops worker.");
-});
+}, closeMachines);

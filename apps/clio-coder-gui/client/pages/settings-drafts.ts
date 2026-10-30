@@ -26,6 +26,13 @@ function createDraftStore() {
 		},
 		update,
 		original: (path: string) => originals.get(path),
+		keepReviewed: (path: string, reviewedDraft: string, reviewedCurrent: string) => {
+			update((current) => {
+				if (current[path] !== reviewedDraft) return current;
+				originals.set(path, reviewedCurrent);
+				return { ...current };
+			});
+		},
 		set: (path: string, value: string | null, submittedValue?: string, original?: string) => {
 			update((current) => {
 				// A completed save must not erase a newer edit made by a reopened editor.
@@ -64,5 +71,6 @@ export function useSettingsDrafts(client: Client, workspaceId: string) {
 		store.update,
 		store.set,
 		store.original,
+		store.keepReviewed,
 	] as const;
 }

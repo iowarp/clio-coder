@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { Static } from "typebox";
 import type { Councils, FleetGates } from "../../contracts/fleet.js";
@@ -8,10 +8,17 @@ import { formatTime, formatTokens } from "../api/clock.js";
 import { Facts } from "../design/facts.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { DISPATCH_SCOPE, emptyState, PANELS } from "../design/panel-model.js";
+import { InspectionError, InspectionSummary } from "../design/run-inspection.js";
 import { StatusMark, toneForOutcome } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
-import { evidenceDestination, listDestination, matchesText } from "./run-inspection-model.js";
+import {
+	evidenceDestination,
+	inspectionSort,
+	listDestination,
+	matchesText,
+	sortInspectionRecords,
+} from "./run-inspection-model.js";
 import "./run-inspection.css";
 import { ReceiptChecks } from "./traces/receipt-checks.js";
 
@@ -101,12 +108,15 @@ function Topologies({
 }
 
 export function FleetPage({ client }: { client: Client }) {
+	const queryClient = useQueryClient();
 	const [search, setSearch] = useSearchParams();
 	const q = search.get("q") ?? "";
 	const status = search.get("status") ?? "";
-	const destination = (path: string) => listDestination(path, search, ["q", "status"]);
+	const sort = inspectionSort(search.get("sort"));
+	const destination = (path: string) => listDestination(path, search, ["q", "status", "sort"]);
 
 	const roots = useInfiniteQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["fleet-roots"],
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) =>
@@ -118,6 +128,7 @@ export function FleetPage({ client }: { client: Client }) {
 		maxPages: ARTIFACT_MAX_PAGES,
 	});
 	const runs = useInfiniteQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["fleet-dispatches"],
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) =>
@@ -129,21 +140,34 @@ export function FleetPage({ client }: { client: Client }) {
 		maxPages: ARTIFACT_MAX_PAGES,
 	});
 	const councils = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["fleet-councils"],
 		queryFn: () => client.call(routes.fleetCouncils, emptyInput),
 	});
-	const gates = useQuery({ queryKey: ["fleet-gates"], queryFn: () => client.call(routes.fleetGates, emptyInput) });
+	const gates = useQuery({
+		meta: { errorSurface: "inline" },
+		queryKey: ["fleet-gates"],
+		queryFn: () => client.call(routes.fleetGates, emptyInput),
+	});
 	const rootsLive = retainedLinksLive(roots),
 		runsLive = retainedLinksLive(runs);
 	const loadedRoots = admittedPages(roots).flatMap((page) => page.items);
 	const loadedRuns = admittedPages(runs).flatMap((page) => page.items);
-	const matchingRoots = loadedRoots.filter(
-		(run) => matchesText(q, [run.id, run.fleet]) && (!status || (status === "active" ? !run.endedAt : !!run.endedAt)),
+	const matchingRoots = sortInspectionRecords(
+		loadedRoots.filter(
+			(run) => matchesText(q, [run.id, run.fleet]) && (!status || (status === "active" ? !run.endedAt : !!run.endedAt)),
+		),
+		sort,
+		(run) => ({ name: run.fleet, date: run.startedAt, id: run.id }),
 	);
-	const matchingRuns = loadedRuns.filter(
-		(run) =>
-			matchesText(q, [run.id, run.agentId, run.task, run.targetId, run.wireModelId]) &&
-			(!status || (status === "active" ? !run.endedAt : !!run.endedAt)),
+	const matchingRuns = sortInspectionRecords(
+		loadedRuns.filter(
+			(run) =>
+				matchesText(q, [run.id, run.agentId, run.task, run.targetId, run.wireModelId]) &&
+				(!status || (status === "active" ? !run.endedAt : !!run.endedAt)),
+		),
+		sort,
+		(run) => ({ name: run.task || run.agentId, date: run.startedAt, id: run.id }),
 	);
 	return (
 		<section className="run-inspection">
@@ -155,7 +179,12 @@ export function FleetPage({ client }: { client: Client }) {
 					type="button"
 					disabled={roots.isFetching || runs.isFetching || councils.isFetching || gates.isFetching}
 					onClick={() => {
-						void Promise.all([roots.refetch(), runs.refetch(), councils.refetch(), gates.refetch()]);
+						void Promise.all([
+							queryClient.resetQueries({ queryKey: ["fleet-roots"] }),
+							queryClient.resetQueries({ queryKey: ["fleet-dispatches"] }),
+							councils.refetch(),
+							gates.refetch(),
+						]);
 					}}
 				>
 					Refresh history
@@ -165,7 +194,16 @@ export function FleetPage({ client }: { client: Client }) {
 			<nav className="inspection-jumps" aria-label="Fleet history sections">
 				<a href="#fleet-roots">Fleet executions</a>
 				<a href="#fleet-workers">Dispatched workers</a>
-				<a href="#fleet-decisions">Councils & decisions</a>
+				{/* biome-ignore lint/a11y/useValidAnchor: This jump navigates to the decisions section and opens its disclosure so the destination is visible. */}
+				<a
+					href="#fleet-decisions"
+					onClick={() => {
+						const section = document.getElementById("fleet-decisions");
+						if (section instanceof HTMLDetailsElement) section.open = true;
+					}}
+				>
+					Councils & decisions
+				</a>
 			</nav>
 			<form
 				className="trace-filters"
@@ -174,7 +212,7 @@ export function FleetPage({ client }: { client: Client }) {
 					event.preventDefault();
 					const data = new FormData(event.currentTarget);
 					const next = new URLSearchParams();
-					for (const key of ["q", "status"]) {
+					for (const key of ["q", "status", "sort"]) {
 						const value = String(data.get(key) ?? "").trim();
 						if (value) next.set(key, value);
 					}
@@ -193,21 +231,53 @@ export function FleetPage({ client }: { client: Client }) {
 						<option value="finished">End recorded</option>
 					</select>
 				</label>
-				<button type="submit">Filter</button>
-				{(q || status) && <Link to="/fleet">Clear filters</Link>}
+				<label>
+					Sort loaded history
+					<select name="sort" defaultValue={sort}>
+						<option value="newest">Newest first</option>
+						<option value="oldest">Oldest first</option>
+						<option value="name">Task / fleet name</option>
+					</select>
+				</label>
+				<button type="submit">Apply</button>
+				{(q || status || sort !== "newest") && <Link to="/fleet">Reset view</Link>}
 			</form>
 			<p className="panel-note">
-				Filters apply to the loaded fleet and worker pages. Continue to older pages to extend the search. Start, steer or
-				cancel work from its conversation.
+				Filters apply to retained fleet and worker pages. Loading older records can replace earlier pages; refresh to return
+				to the newest. Start, steer or cancel work from its conversation.
 			</p>
-			{Object.entries({ roots, runs, councils, gates }).map(([name, query]) =>
+			<InspectionSummary
+				figures={[
+					{ label: "Fleet executions loaded", value: loadedRoots.length },
+					{ label: "Worker dispatches loaded", value: loadedRuns.length },
+					{ label: "Council groups recorded", value: councils.data?.councils.length ?? "—" },
+					{ label: "Authenticated decisions", value: gates.data?.decisions.length ?? "—" },
+				]}
+			/>
+			{Object.entries({
+				"Fleet executions": roots,
+				"Worker dispatches": runs,
+				"Council groups": councils,
+				"Gate decisions": gates,
+			}).map(([name, query]) =>
 				query.error ? (
-					<p key={name} role="alert">
-						{query.error.message}
-					</p>
+					<InspectionError
+						key={name}
+						title={`${name} unavailable`}
+						error={query.error}
+						busy={query.isFetching}
+						retry={() => {
+							void query.refetch();
+						}}
+					/>
 				) : null,
 			)}
-			<h2 id="fleet-roots">Fleet executions</h2>
+			<div className="inspection-section-heading">
+				<h2 id="fleet-roots">Fleet executions</h2>
+				<span className="inspection-result-count">
+					{matchingRoots.length} of {loadedRoots.length} loaded
+				</span>
+			</div>
 			<p className="panel-note">
 				A fleet execution records the plan and completed steps. Each step can point to its terminal worker dispatch.
 			</p>
@@ -220,7 +290,7 @@ export function FleetPage({ client }: { client: Client }) {
 			{loadedRoots.length > 0 && matchingRoots.length === 0 && (
 				<PanelEmpty>No loaded fleet execution matches these filters.</PanelEmpty>
 			)}
-			<div className="config-entries">
+			<div className="inspection-inventory">
 				{matchingRoots.map((run) => (
 					<article className="trace-panel" key={run.id}>
 						<h3>
@@ -240,10 +310,15 @@ export function FleetPage({ client }: { client: Client }) {
 			</div>
 			{roots.hasNextPage && !roots.isRefetchError && (
 				<button type="button" disabled={roots.isFetching} onClick={() => void roots.fetchNextPage()}>
-					Load more fleet runs
+					{roots.isFetchingNextPage ? "Loading fleet runs…" : "Load older fleet runs"}
 				</button>
 			)}
-			<h2 id="fleet-workers">Dispatched workers</h2>
+			<div className="inspection-section-heading">
+				<h2 id="fleet-workers">Dispatched workers</h2>
+				<span className="inspection-result-count">
+					{matchingRuns.length} of {loadedRuns.length} loaded
+				</span>
+			</div>
 			{runs.isPending && <p>Reading dispatch history…</p>}
 			{runs.data?.pages[0]?.items.length === 0 && (
 				<PanelEmpty>
@@ -253,33 +328,40 @@ export function FleetPage({ client }: { client: Client }) {
 			{loadedRuns.length > 0 && matchingRuns.length === 0 && (
 				<PanelEmpty>No loaded worker dispatch matches these filters.</PanelEmpty>
 			)}
-			<dl className="settings-list inspection-workers">
+			<div className="inspection-inventory">
 				{matchingRuns.map((run) => (
-					<div key={run.id}>
-						<dt>
-							{runsLive ? <Link to={destination(`/fleet/dispatches/${encodeURIComponent(run.id)}`)}>{run.id}</Link> : run.id}
-							<br />
-							<small>{run.agentId}</small>
-							{run.task && (
-								<small className="inspection-lineage">{run.task.length > 130 ? `${run.task.slice(0, 130)}…` : run.task}</small>
-							)}
-						</dt>
-						<dd>
+					<article className="trace-panel" key={run.id}>
+						<p className="panel-marks">
 							<StatusMark tone={toneForOutcome(run.outcome ?? run.status)} label={run.outcome ?? run.status} />
-							<br />
+							<span className="panel-note">{run.agentId}</span>
+						</p>
+						<h3 className="inspection-card-title">
+							{runsLive ? (
+								<Link to={destination(`/fleet/dispatches/${encodeURIComponent(run.id)}`)}>
+									{run.task || `Dispatch by ${run.agentId}`}
+								</Link>
+							) : (
+								run.task || `Dispatch by ${run.agentId}`
+							)}
+						</h3>
+						<p className="panel-note">
 							{run.targetId} / {run.wireModelId}
-						</dd>
-						<dd>
-							{formatTokens(run.tokenCount)} tokens
-							{run.rootRunId && <small className="inspection-lineage">Root dispatch: {run.rootRunId}</small>}
-							{run.parentRunId && <small className="inspection-lineage">Parent: {run.parentRunId}</small>}
-						</dd>
-					</div>
+						</p>
+						<p className="panel-note">
+							{formatTime(run.startedAt)} · {formatTokens(run.tokenCount)} recorded tokens
+						</p>
+						<details>
+							<summary>Run identity & lineage</summary>
+							<p className="inspection-id">{run.id}</p>
+							{run.rootRunId && <p className="inspection-lineage">Root: {run.rootRunId}</p>}
+							{run.parentRunId && <p className="inspection-lineage">Parent: {run.parentRunId}</p>}
+						</details>
+					</article>
 				))}
-			</dl>
+			</div>
 			{runs.hasNextPage && !runs.isRefetchError && (
 				<button type="button" disabled={runs.isFetching} onClick={() => void runs.fetchNextPage()}>
-					Load more dispatch runs
+					{runs.isFetchingNextPage ? "Loading dispatches…" : "Load older dispatches"}
 				</button>
 			)}
 			<details className="trace-panel" id="fleet-decisions">
@@ -297,18 +379,21 @@ export function FleetPage({ client }: { client: Client }) {
 export function FleetDetail({ client, dispatch = false }: { client: Client; dispatch?: boolean }) {
 	const { id = "" } = useParams();
 	const [search] = useSearchParams();
-	const back = listDestination("/fleet", search, ["q", "status"]);
+	const back = listDestination("/fleet", search, ["q", "status", "sort"]);
 	const root = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["fleet-root", id],
 		queryFn: () => client.call(routes.fleetRoot, { ...emptyInput, params: { id } }),
 		enabled: !dispatch,
 	});
 	const run = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["fleet-dispatch", id],
 		queryFn: () => client.call(routes.dispatchRun, { ...emptyInput, params: { id } }),
 		enabled: dispatch,
 	});
 	const receipt = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["fleet-receipt", id],
 		queryFn: () => client.call(routes.fleetReceipt, { ...emptyInput, params: { id } }),
 		enabled: dispatch,
@@ -318,12 +403,28 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 		<section className="run-inspection">
 			<Link to={back}>← Fleet history</Link>
 			<p className="panel-note">Installation history · saved execution records</p>
-			<PanelHeading panel={PANELS.fleetRun} level={1} title={`${dispatch ? "Dispatch run" : "Fleet run"} · ${id}`} />
+			<PanelHeading
+				panel={PANELS.fleetRun}
+				level={1}
+				title={
+					dispatch
+						? run.data?.agentId
+							? `${run.data.agentId} dispatch`
+							: "Dispatch run"
+						: (root.data?.run.fleet ?? "Fleet execution")
+				}
+			/>
 			{Object.entries({ root, run, receipt }).map(([name, query]) =>
 				query.error ? (
-					<p role="alert" key={name}>
-						{query.error.message}
-					</p>
+					<InspectionError
+						key={name}
+						title={`${name === "root" ? "Fleet execution" : name === "run" ? "Dispatch" : "Receipt"} unavailable`}
+						error={query.error}
+						busy={query.isFetching}
+						retry={() => {
+							void query.refetch();
+						}}
+					/>
 				) : null,
 			)}
 			{(dispatch ? run.isPending : root.isPending) && <p>Reading run…</p>}
@@ -340,39 +441,55 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 						<Link to={`/traces?${new URLSearchParams({ q: run.data.id, source: "dispatch" })}`}>Find its trace</Link>
 						{run.data.sessionId && <Link to={`/sessions/${encodeURIComponent(run.data.sessionId)}`}>Open conversation</Link>}
 					</div>
-					<dl className="trace-facts">
-						<dt>Workspace</dt>
-						<dd>{run.data.cwd}</dd>
-						<dt>Runtime</dt>
-						<dd>{run.data.runtimeId}</dd>
-						<dt>Started</dt>
-						<dd>{formatTime(run.data.startedAt)}</dd>
-						<dt>Ended</dt>
-						<dd>{run.data.endedAt ? formatTime(run.data.endedAt) : "Not recorded"}</dd>
-						{run.data.parentRunId && (
-							<>
-								<dt>Parent dispatch</dt>
-								<dd>
-									<Link to={`/fleet/dispatches/${encodeURIComponent(run.data.parentRunId)}`}>{run.data.parentRunId}</Link>
-								</dd>
-							</>
-						)}
-						{run.data.rootRunId && (
-							<>
-								<dt>Root dispatch</dt>
-								<dd>
-									<Link to={`/fleet/dispatches/${encodeURIComponent(run.data.rootRunId)}`}>{run.data.rootRunId}</Link>
-								</dd>
-							</>
-						)}
-					</dl>
+					<details className="trace-panel inspection-record-meta">
+						<summary>Run identity, timing & runtime</summary>
+						<p className="inspection-id">{id}</p>
+						<dl className="trace-facts">
+							<dt>Workspace</dt>
+							<dd>{run.data.cwd}</dd>
+							<dt>Runtime</dt>
+							<dd>{run.data.runtimeId}</dd>
+							<dt>Started</dt>
+							<dd>{formatTime(run.data.startedAt)}</dd>
+							<dt>Ended</dt>
+							<dd>{run.data.endedAt ? formatTime(run.data.endedAt) : "Not recorded"}</dd>
+							{run.data.parentRunId && (
+								<>
+									<dt>Parent dispatch</dt>
+									<dd>
+										<Link to={`/fleet/dispatches/${encodeURIComponent(run.data.parentRunId)}`}>{run.data.parentRunId}</Link>
+									</dd>
+								</>
+							)}
+							{run.data.rootRunId && (
+								<>
+									<dt>Root dispatch</dt>
+									<dd>
+										<Link to={`/fleet/dispatches/${encodeURIComponent(run.data.rootRunId)}`}>{run.data.rootRunId}</Link>
+									</dd>
+								</>
+							)}
+						</dl>
+					</details>
+					{run.data.outcomeDetail && <p className="inspection-error">{run.data.outcomeDetail}</p>}
 					<h3>Worker task</h3>
 					<MarkdownContent source={run.data.task} complete />
 				</>
 			)}
 			{root.data && (
 				<>
-					<h2>{root.data.run.fleet}</h2>
+					<InspectionSummary
+						figures={[
+							{ label: "Steps recorded", value: `${root.data.run.completedCount} / ${root.data.run.stepCount}` },
+							{ label: "End time", value: root.data.run.endedAt ? formatTime(root.data.run.endedAt) : "Not recorded" },
+						]}
+					/>
+					<details className="trace-panel">
+						<summary>Execution identity & plan</summary>
+						<Facts value={root.data.run} />
+					</details>
+					<h2>Recorded steps</h2>
+					{!root.data.steps.length && <PanelEmpty>No completed step output was retained for this execution.</PanelEmpty>}
 					<p>
 						{root.data.run.completedCount} of {root.data.run.stepCount} {root.data.run.stepCount === 1 ? "step" : "steps"}{" "}
 						recorded

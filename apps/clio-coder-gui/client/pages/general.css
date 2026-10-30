@@ -161,3 +161,57 @@
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
+
+.settings-page {
+	max-width: 1040px;
+}
+.settings-page__links {
+	grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+	gap: var(--space-4);
+	margin-block: var(--space-4) var(--space-6);
+}
+.settings-page__links li {
+	padding: var(--space-4);
+	border: 1px solid var(--line);
+	background: var(--surface);
+	gap: var(--space-2);
+	align-content: start;
+}
+.settings-page__links a {
+	font-size: var(--text-body);
+}
+.theme-choice {
+	grid-template-columns: repeat(3, minmax(0, 9rem));
+}
+.theme-choice__swatch {
+	position: relative;
+	height: 66px;
+	overflow: hidden;
+}
+.theme-choice__preview {
+	position: absolute;
+	inset: 12px 10px 0 28px;
+	border: 1px solid var(--line-strong);
+	background: var(--surface);
+	padding: 10px 8px;
+	display: grid;
+	gap: 5px;
+	align-content: start;
+}
+.theme-choice__preview i {
+	display: block;
+	height: 3px;
+	background: currentColor;
+	width: 80%;
+}
+.theme-choice__preview i:first-child {
+	width: 55%;
+	background: var(--accent);
+}
+.theme-choice__preview i:last-child {
+	width: 65%;
+}
+.general__control .general__applied {
+	color: var(--accent);
+	font-size: var(--text-instrument);
+}

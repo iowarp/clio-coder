@@ -7,6 +7,7 @@ import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
 import { Home } from "./pages/home.js";
+import { ClioPulse, PULSE_SIZE } from "./shell/ClioMark.js";
 import "./styles.css";
 import "./design/tokens.css";
 import "./render/markdown.css";
@@ -17,6 +18,12 @@ const queries = new QueryClient({
 	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },
 	queryCache: new QueryCache({
 		onError: (error, query) => {
+			// Speculative reads have no visible owner. Opening the view surfaces any failure there.
+			if (query.getObserversCount() === 0) return;
+			if (query.meta?.errorSurface === "inline") return;
+			// The project list explains unavailable saved history beside the affected tasks.
+			if (query.queryKey[0] === "session-history" && error instanceof ApiProblem && error.problem.code === "unsupported")
+				return;
 			// A link to a saved task this server has not opened answers not_found on the first read, and
 			// the task page shows that state with its own way to resume. Only that first read is quiet:
 			// a snapshot that was loaded and then goes missing is still reported, as is everything else.
@@ -27,10 +34,14 @@ const queries = new QueryClient({
 				error.problem.code === "not_found"
 			)
 				return;
-			reportProblem(error);
+			reportProblem(error, query.queryHash);
 		},
 	}),
-	mutationCache: new MutationCache({ onError: reportProblem }),
+	mutationCache: new MutationCache({
+		onError: (error, _variables, _context, mutation) => {
+			if (mutation.meta?.errorSurface !== "inline") reportProblem(error);
+		},
+	}),
 });
 function RouteError() {
 	const error = useRouteError();
@@ -51,6 +62,12 @@ const router = createBrowserRouter([
 	{
 		element: <App client={client} />,
 		errorElement: <RouteError />,
+		hydrateFallbackElement: (
+			<main className="app-opening" role="status">
+				<ClioPulse size={PULSE_SIZE.stage} />
+				<p>Opening Clio Coder…</p>
+			</main>
+		),
 		children: [
 			{
 				path: "/evidence",
@@ -204,8 +221,15 @@ const router = createBrowserRouter([
 			{
 				path: "/sessions",
 				lazy: async () => {
-					const { Workspaces } = await import("./pages/sessions.js");
-					return { element: <Workspaces /> };
+					const { MissionControl } = await import("./pages/mission-control.js");
+					return { element: <MissionControl client={client} /> };
+				},
+			},
+			{
+				path: "/machines",
+				lazy: async () => {
+					const { MachinesPage } = await import("./pages/machines.js");
+					return { element: <MachinesPage client={client} /> };
 				},
 			},
 			{

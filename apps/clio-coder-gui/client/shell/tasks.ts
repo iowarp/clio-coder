@@ -8,9 +8,12 @@ import { useLocation, useNavigate } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
-import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
+import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
+import { homeDraft, updateHomeDraft } from "../pages/home-draft.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
+import type { SessionControlTarget } from "../pages/session-control-model.js";
 import { ownDrafts } from "./own-drafts.js";
+import { useSessionCommands } from "./SessionControls.js";
 import { reusableDraft, sessionIdFromPath } from "./shell-model.js";
 import { openAppWindow } from "./windows.js";
 
@@ -34,52 +37,65 @@ export function rememberWorkspace(id: string): void {
 
 export interface TaskActions {
 	readonly launch: ProjectLaunch;
-	/** Start a task in a project, or return to the untouched draft this window made there instead of spawning a second child. */
-	newTask(workspaceId: string): void;
+	/** Open the Home composer, or return to this window's untouched task when Home has no unfinished request. */
+	newTask(workspaceId?: string): void;
 	resume(sessionId: string, workspaceId: string): void;
 	/** Show a task in a second window. A saved one is loaded here first, so the new window finds it open. */
 	openWindow(sessionId: string, workspaceId: string, held: boolean): void;
 	readonly resuming: string | null;
-	close(sessionId: string): void;
-	readonly closing: string | null;
+	close(target: SessionControlTarget): void;
+	controlling(sessionId: string): boolean;
 	readonly error: Error | null;
+}
+
+export function useSessionOverview(client: Client, enabled = true) {
+	return useQuery({
+		queryKey: ["session-overview"],
+		queryFn: ({ signal }) => client.call(routes.sessionOverview, emptyInput, undefined, signal),
+		refetchInterval: 30_000,
+		enabled,
+	});
 }
 
 export function useTaskActions(client: Client, afterNavigate?: () => void): TaskActions {
 	const navigate = useNavigate();
 	const queries = useQueryClient();
 	const launch = useProjectLaunch(client);
-	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
+	const { controls, requestClose } = useSessionCommands();
+	const overview = useSessionOverview(client);
 	const resume = useMutation({
-		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string; window?: boolean }) =>
-			client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } }),
+		mutationFn: ({ sessionId, workspaceId }: { sessionId: string; workspaceId: string; window?: boolean }) => {
+			if (controls.records.some((row) => row.sessionId === sessionId && row.stage !== "complete"))
+				throw new Error("Review this session's control request before resuming it. Your draft is kept.");
+			return client.call(routes.loadSession, { params: { id: sessionId }, query: {}, body: { workspaceId } });
+		},
 		onSuccess: (session, request) => {
+			advanceSessionReadScope(session.id);
 			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, session.id] });
 			queries.setQueryData(["session", session.id], sessionBuffer(session.id).snapshot(session) ?? session);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-overview"] });
 			if (request.window) return openAppWindow(`/sessions/${session.id}`, client.token);
 			afterNavigate?.();
 			void navigate(`/sessions/${session.id}`);
 		},
 	});
-	const close = useMutation({
-		mutationFn: (sessionId: string) =>
-			client.call(routes.closeSession, { params: { id: sessionId }, query: {}, body: {} }),
-		onSuccess: (snapshot) => {
-			queries.setQueryData(["session", snapshot.id], sessionBuffer(snapshot.id).snapshot(snapshot) ?? snapshot);
-			void queries.invalidateQueries({ queryKey: ["sessions"] });
-			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
-		},
-	});
 	const newTask = useCallback(
-		(workspaceId: string) => {
-			rememberWorkspace(workspaceId);
-			const draft = reusableDraft(sessions.data ?? [], workspaceId, ownDrafts());
+		(workspaceId?: string) => {
+			const home = homeDraft();
+			if (workspaceId && !home.pending && !home.text && !home.textIssue) {
+				rememberWorkspace(workspaceId);
+				updateHomeDraft({ workspaceId });
+			}
+			const draft =
+				workspaceId && !home.pending && !home.text && !home.textIssue
+					? reusableDraft(overview.data?.sessions ?? [], workspaceId, ownDrafts())
+					: undefined;
 			afterNavigate?.();
 			if (draft) void navigate(`/sessions/${draft.id}`);
-			else launch.start(workspaceId);
+			else void navigate("/");
 		},
-		[sessions.data, navigate, launch, afterNavigate],
+		[overview.data?.sessions, navigate, afterNavigate],
 	);
 	return {
 		launch,
@@ -90,9 +106,9 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 			else resume.mutate({ sessionId, workspaceId, window: true });
 		},
 		resuming: resume.isPending ? (resume.variables?.sessionId ?? null) : null,
-		close: (sessionId) => close.mutate(sessionId),
-		closing: close.isPending ? (close.variables ?? null) : null,
-		error: resume.error ?? close.error ?? launch.error,
+		close: requestClose,
+		controlling: (sessionId) => controls.records.some((row) => row.sessionId === sessionId && row.stage !== "complete"),
+		error: resume.error ?? launch.error,
 	};
 }
 
@@ -117,6 +133,7 @@ export function useRenameTask(client: Client) {
 		onSuccess: (_result, { sessionId, workspaceId }) => {
 			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-overview"] });
 			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
 		},
 	});
@@ -136,6 +153,7 @@ export function useDeleteTask(client: Client) {
 			queries.removeQueries({ queryKey: ["session", sessionId] });
 			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
+			void queries.invalidateQueries({ queryKey: ["session-overview"] });
 			if (sessionIdFromPath(location.pathname) === sessionId) void navigate("/");
 		},
 	});

@@ -154,3 +154,148 @@
 		gap: 0;
 	}
 }
+
+.inspection-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	border-block: 1px solid var(--line-strong);
+	margin: var(--space-6) 0;
+	background: var(--surface);
+}
+.inspection-summary > div {
+	padding: var(--space-4) var(--space-5);
+	border-right: 1px solid var(--line);
+}
+.inspection-summary > div:first-child {
+	border-top: 2px solid var(--accent);
+	padding-top: calc(var(--space-4) - 2px);
+}
+.inspection-summary > div:last-child {
+	border-right: 0;
+}
+.inspection-summary dt {
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+}
+.inspection-summary dd {
+	margin: var(--space-2) 0 0;
+	font: 400 var(--text-h2) var(--font-editorial);
+	font-variant-numeric: tabular-nums;
+}
+.inspection-error {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: var(--space-4);
+	padding: var(--space-4);
+	margin-block: var(--space-4);
+	background: var(--status-fail-tint);
+	border-left: 2px solid var(--status-fail-line);
+}
+.inspection-error p {
+	margin: var(--space-1) 0 0;
+	font-size: var(--text-meta);
+}
+.run-inspection .inspection-error button {
+	flex-shrink: 0;
+}
+.inspection-tabs {
+	display: flex;
+	gap: var(--space-1);
+	border-bottom: 1px solid var(--line-strong);
+	margin-block: var(--space-6);
+}
+.run-inspection .inspection-tabs button {
+	background: transparent;
+	color: var(--ink-muted);
+	border: 0;
+	border-bottom: 3px solid transparent;
+	border-radius: 0;
+	padding: var(--space-3) var(--space-5);
+}
+.inspection-tabs button[aria-selected="true"] {
+	color: var(--ink);
+	border-bottom-color: var(--accent);
+	background: var(--accent-soft);
+}
+.inspection-tabs + [role="tabpanel"] {
+	min-width: 0;
+}
+.run-inspection :is(button, a, summary, [role="tabpanel"]):focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 3px;
+}
+.inspection-inventory {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-4);
+}
+.inspection-inventory > .trace-panel {
+	margin-top: 0;
+	padding: var(--space-4) var(--space-5);
+	background: var(--surface);
+	border-top: 2px solid var(--line-strong);
+}
+.inspection-inventory > .trace-panel:has(a:hover) {
+	border-top-color: var(--accent);
+}
+.inspection-inventory h2,
+.inspection-inventory h3 {
+	font-family: var(--font-editorial);
+	font-size: var(--text-h3);
+	font-weight: 500;
+	margin-bottom: var(--space-3);
+}
+.inspection-inventory .inspection-card-title {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.inspection-inventory .inspection-id {
+	font-size: var(--text-instrument);
+	margin-block: var(--space-2);
+}
+.inspection-inventory .panel-marks {
+	display: flex;
+	gap: var(--space-3);
+	align-items: center;
+	flex-wrap: wrap;
+}
+.inspection-result-count {
+	color: var(--ink-muted);
+	font: var(--text-instrument) var(--font-mono);
+	margin-block: var(--space-4);
+}
+.inspection-section-heading {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-4);
+	margin-top: var(--space-8);
+	border-bottom: 1px solid var(--line);
+}
+.inspection-section-heading h2 {
+	font-family: var(--font-editorial);
+	font-weight: 400;
+}
+.inspection-record-meta {
+	margin-block: var(--space-4);
+}
+.inspection-trust-grid {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	border-block: 1px solid var(--line);
+}
+.inspection-trust-grid > div {
+	padding: var(--space-3);
+	border-right: 1px solid var(--line);
+}
+.inspection-trust-grid dt {
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.inspection-trust-grid dd {
+	margin: var(--space-2) 0 0;
+	font-size: var(--text-exact);
+}

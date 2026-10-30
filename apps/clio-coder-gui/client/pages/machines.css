@@ -1,0 +1,470 @@
+.machines-page {
+	max-width: 1440px;
+	margin: 0 auto;
+	padding: 0 0 40px;
+	color: var(--ink);
+}
+
+.machines-heading,
+.machines-section-heading,
+.machines-scope,
+.machines-row-title,
+.machines-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+}
+
+.machines-heading {
+	padding: 0 0 24px;
+	border-bottom: 2px solid var(--ink);
+}
+
+.machines-heading h1 {
+	font-family: var(--font-editorial);
+	font-size: clamp(34px, 3vw, 44px);
+	font-weight: 400;
+	line-height: 1.05;
+	margin: 12px 0;
+	letter-spacing: -0.035em;
+}
+
+.machines-heading p {
+	font-family: var(--font-editorial);
+	font-size: 20px;
+	margin: 0;
+	color: var(--ink-muted);
+}
+
+.machines-kicker {
+	font: 11px var(--font-mono);
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--secondary);
+}
+
+.machines-page button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 38px;
+}
+
+.machines-page button:focus-visible,
+.machines-page input:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 3px;
+}
+
+.machines-primary {
+	background: var(--ink);
+	color: var(--paper);
+	border: 1px solid var(--ink);
+	padding: 10px 16px;
+}
+
+.machines-page button:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.machines-scope {
+	padding: 18px 0;
+	align-items: flex-start;
+}
+
+.machines-scope p,
+.machines-caption {
+	font-size: 13px;
+	color: var(--ink-muted);
+	line-height: 1.65;
+}
+
+.machines-scope p {
+	max-width: 34ch;
+	margin: 0;
+}
+
+.machines-summary {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(100px, 1fr)) minmax(180px, 1.4fr);
+	padding: 22px 0;
+	border-top: 1px solid var(--line);
+	border-bottom: 1px solid var(--line);
+}
+
+.machines-summary > div {
+	border-right: 1px solid var(--line);
+	padding: 0 20px;
+	display: grid;
+	gap: 6px;
+}
+
+.machines-summary > div:first-child {
+	padding-left: 0;
+}
+
+.machines-summary strong {
+	font: 36px var(--font-editorial);
+	font-variant-numeric: tabular-nums;
+}
+
+.machines-summary span {
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+
+.machines-summary [data-tone="ready"] strong {
+	color: var(--accent-strong);
+}
+
+.machines-summary [data-tone="attention"] strong {
+	color: var(--secondary);
+}
+
+.machines-summary > p {
+	padding-left: 24px;
+	font: 13px / 1.8 var(--font-mono);
+}
+
+.machines-registry-heading {
+	margin: 24px 0 16px;
+}
+
+.machines-section-heading h2 {
+	font: 28px var(--font-editorial);
+	margin: 6px 0;
+	overflow-wrap: anywhere;
+}
+
+.machines-workbench {
+	display: grid;
+	grid-template-columns: minmax(260px, 0.85fr) minmax(380px, 1.65fr);
+	border: 1px solid var(--line);
+	background: var(--surface);
+}
+
+.machines-list {
+	align-content: start;
+	gap: 0;
+	max-block-size: min(70dvh, 900px);
+	overflow-y: auto;
+	border-right: 1px solid var(--line);
+	background: var(--paper);
+}
+.machines-toolbar {
+	display: flex;
+	gap: var(--space-3);
+	margin-bottom: var(--space-4);
+}
+.machines-search {
+	display: flex;
+	align-items: center;
+	flex: 1;
+	gap: var(--space-2);
+	padding-inline: var(--space-3);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--raised);
+}
+.machines-search .icon {
+	flex: none;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	color: var(--ink-muted);
+}
+.machines-search input {
+	width: 100%;
+	min-width: 0;
+	border: 0;
+	background: transparent;
+}
+.machines-search:focus-within {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+.machines-search input:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+.machines-advanced {
+	margin-block: var(--space-3);
+	border-block: 1px solid var(--line);
+	padding-block: var(--space-3);
+}
+.machines-advanced > summary,
+.machines-diagnostics > summary {
+	cursor: pointer;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.machines-diagnostics {
+	margin-block: var(--space-4);
+}
+
+.machines-page .machines-row {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 10px;
+	width: 100%;
+	text-align: left;
+	padding: 22px 20px;
+	border: 0;
+	border-bottom: 1px solid var(--line);
+	border-left: 3px solid transparent;
+	border-radius: 0;
+	color: var(--ink);
+	background: transparent;
+}
+
+.machines-page .machines-row[aria-current="true"] {
+	border-left-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+.machines-row-title {
+	gap: 10px;
+	justify-content: flex-start;
+}
+
+.machines-row-title strong {
+	overflow-wrap: anywhere;
+	min-width: 0;
+}
+
+.machines-row-title > span {
+	margin-left: auto;
+	font: 10px var(--font-mono);
+	color: var(--ink-muted);
+	white-space: nowrap;
+}
+
+.machines-row-host,
+.machines-row-age {
+	font: 12px var(--font-mono);
+	color: var(--ink-muted);
+	overflow-wrap: anywhere;
+}
+
+.machines-row .status-mark {
+	align-self: flex-start;
+}
+
+.machines-detail {
+	padding: 28px;
+	min-width: 0;
+}
+
+.machines-address,
+.machines-path {
+	font: 13px / 1.65 var(--font-mono);
+	overflow-wrap: anywhere;
+}
+
+.machines-address {
+	margin: 8px 0 20px;
+}
+
+.machines-facts {
+	margin: 24px 0;
+}
+
+.machines-facts > div {
+	display: grid;
+	grid-template-columns: 132px 1fr;
+	gap: 14px;
+	padding: 9px 0;
+	border-bottom: 1px solid var(--line);
+	font-size: 13px;
+}
+
+.machines-facts dt {
+	color: var(--ink-muted);
+}
+
+.machines-facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.machines-facts time,
+.machines-facts code {
+	display: block;
+	font: 11px / 1.7 var(--font-mono);
+	color: var(--ink-muted);
+	margin-top: 4px;
+}
+
+.machines-evidence {
+	border-top: 2px solid var(--line-strong);
+	padding-top: 20px;
+	margin: 24px 0;
+}
+
+.machines-checks {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 16px 12px;
+	margin: 22px 0;
+}
+
+.machines-checks > div {
+	display: flex;
+	gap: 8px;
+	font-size: 12px;
+	color: var(--ink-muted);
+}
+
+.machines-checks > div[data-confirmed="true"] {
+	color: var(--accent-strong);
+}
+
+.machines-checks svg {
+	flex-shrink: 0;
+}
+
+.machines-checks small {
+	display: block;
+	color: var(--ink-muted);
+	font-size: 10px;
+	margin-top: 4px;
+}
+
+.machines-reason,
+.machines-confirm {
+	background: var(--surface-sunken);
+	border-left: 2px solid var(--secondary);
+	padding: 16px;
+	font-size: 13px;
+	line-height: 1.65;
+	overflow-wrap: anywhere;
+}
+
+.machines-confirm h3 {
+	font: 24px var(--font-editorial);
+	margin: 0 0 12px;
+}
+
+.machines-actions {
+	justify-content: flex-start;
+	flex-wrap: wrap;
+}
+
+.machines-add {
+	padding: 24px;
+	margin: 12px 0 28px;
+	border: 1px solid var(--accent-line);
+	border-top: 3px solid var(--accent);
+	background: var(--surface);
+}
+
+.machines-add > p {
+	max-width: 90ch;
+}
+
+.machines-fields {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 20px;
+	padding: 16px 0;
+	margin: 0;
+	border: 0;
+}
+
+.machines-fields label {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	font-size: 13px;
+}
+
+.machines-fields label span {
+	color: var(--ink-muted);
+	font-size: 11px;
+}
+
+.machines-fields input {
+	margin-top: auto;
+	min-width: 0;
+	width: 100%;
+	box-sizing: border-box;
+	font-family: var(--font-mono);
+	font-size: 13px;
+	padding: 10px 12px;
+}
+
+.machines-empty {
+	padding: 60px 32px;
+	text-align: center;
+	border: 1px dashed var(--line-strong);
+}
+
+.machines-empty h2 {
+	font: 32px var(--font-editorial);
+}
+
+.machines-empty p {
+	color: var(--ink-muted);
+	max-width: 60ch;
+	margin: 16px auto 24px;
+}
+
+.machines-operation {
+	margin: 12px 0 20px;
+	padding: 16px 20px;
+	border-left: 3px solid var(--accent);
+	background: var(--accent-soft);
+	font-size: 13px;
+}
+.machines-operation__dismiss {
+	float: inline-end;
+	border: 0;
+	background: transparent;
+	min-width: 32px;
+	padding: var(--space-1);
+}
+
+.machines-operation p:last-child {
+	margin-bottom: 0;
+}
+
+@media (max-width: 1050px) {
+	.machines-page {
+		padding: 20px 16px 40px;
+	}
+
+	.machines-summary {
+		grid-template-columns: repeat(4, 1fr);
+	}
+
+	.machines-summary > p {
+		grid-column: 1 / -1;
+		padding-left: 0;
+	}
+
+	.machines-workbench {
+		grid-template-columns: minmax(230px, 0.8fr) minmax(330px, 1.2fr);
+	}
+
+	.machines-detail {
+		padding: 20px;
+	}
+
+	.machines-checks,
+	.machines-fields {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+
+.machines-add-dialog .machines-add {
+	margin: 0;
+	border: 0;
+	padding: 0;
+	background: transparent;
+}
+.machines-add-dialog .machines-fields {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}

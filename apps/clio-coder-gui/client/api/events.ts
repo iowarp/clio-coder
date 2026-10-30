@@ -8,7 +8,7 @@ import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import { type Client, emptyInput } from "./client.js";
 import { clock } from "./clock.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
-import { resetSessionBuffers, SESSION_CACHES, sessionBuffer } from "./sessions.js";
+import { advanceSessionReadScope, resetSessionBuffers, SESSION_CACHES, sessionBuffer } from "./sessions.js";
 
 type OperationEntry = { resource: string; revision: number; operation?: Operation };
 export type ConnectionState = "Connecting…" | "Connected" | "Reconnecting…" | "Not connected";
@@ -29,23 +29,76 @@ export function subscribe(
 	let disposed = false;
 	let epoch: string | undefined;
 	let disconnected = false;
+	const contextSnapshots = new WeakMap<ReturnType<typeof sessionBuffer>, { context: unknown }>();
+	const projectContext = (snapshot: SessionSnapshot) => {
+		const held = sessionBuffer(snapshot.id);
+		const accepted = held.snapshot(snapshot);
+		if (!accepted) return;
+		const context = accepted.telemetry?.usage?.context;
+		const previous = contextSnapshots.get(held);
+		contextSnapshots.set(held, { context });
+		if ((!previous && context === undefined) || previous?.context === context) return;
+		// A newer REST snapshot is just as authoritative as pushed context. Retire reads
+		// that began before it, while unrelated timeline updates leave accounting alone.
+		queries.setQueryData<number>(["session-context-push", snapshot.id], (revision = 0) => revision + 1);
+	};
+	const refreshAutonomy = (id?: string) => {
+		const queryKey = id === undefined ? ["session-autonomy"] : ["session-autonomy", id];
+		// Cancellation also retires query functions that do not forward an AbortSignal (GUI-03).
+		void queries.cancelQueries({ queryKey });
+		void queries.invalidateQueries({ queryKey });
+	};
+	const projectAutonomy = (snapshot: SessionSnapshot) => {
+		const accepted = sessionBuffer(snapshot.id).snapshot(snapshot);
+		const autonomy = accepted?.telemetry?.autonomy;
+		if (!autonomy) return;
+		const queryKey = ["session-autonomy", snapshot.id];
+		void queries.cancelQueries({ queryKey, exact: true });
+		const current = queries.getQueryData<typeof autonomy>(queryKey);
+		if (current?.level === autonomy.level && current.source === autonomy.source) return;
+		queries.setQueryData(queryKey, autonomy);
+	};
+	// REST snapshots and SSE deltas both pass through the session revision buffer before seeding mode (GUI-03).
+	const stopSnapshots = queries.getQueryCache().subscribe((event) => {
+		if (event.type !== "updated" || event.action.type !== "success" || event.query.queryKey[0] !== "session") return;
+		const snapshot = event.query.state.data as SessionSnapshot | undefined;
+		if (snapshot) projectContext(snapshot);
+		if (snapshot && (!event.action.manual || queries.getQueryData(["session-autonomy", snapshot.id]) === undefined))
+			projectAutonomy(snapshot);
+	});
+	for (const [, snapshot] of queries.getQueriesData<SessionSnapshot>({ queryKey: ["session"] }))
+		if (snapshot) {
+			projectContext(snapshot);
+			projectAutonomy(snapshot);
+		}
 
 	// One commit per session per display frame, however many chunks landed in it.
 	const buffer = new FrameEventBuffer((events) => {
 		const snapshots = new Map<string, SessionSnapshot>(),
 			gaps = new Set<string>(),
 			resumed = new Set<string>(),
+			reset = new Set<string>(),
+			configured = new Set<string>(),
+			refreshReads = new Map<string, Set<string>>(),
+			contextPushes = new Map<string, number>(),
+			autonomyChanged = new Set<string>(),
 			invalidate = new Set<string>(),
 			operations: OperationEntry[] = [];
 		let resynced = false;
 		let launched: string | null = null;
 		for (const event of events) {
+			client.adoptEpoch(event.epoch);
 			if ((epoch && epoch !== event.epoch) || event.type === "resync") {
 				// Everything collected so far is stale, and so is the rest of the batch.
 				resynced = true;
 				snapshots.clear();
 				gaps.clear();
 				resumed.clear();
+				reset.clear();
+				configured.clear();
+				refreshReads.clear();
+				contextPushes.clear();
+				autonomyChanged.clear();
 				invalidate.clear();
 				operations.length = 0;
 				launched = null;
@@ -56,12 +109,32 @@ export function subscribe(
 			if (Object.hasOwn(SessionDeltas, event.type)) {
 				const delta = event as SessionDelta,
 					held = sessionBuffer(delta.payload.resource),
+					hadGap = held.hasGap,
+					previousRevision = held.value?.revision ?? -1,
+					previousAutonomy = held.value?.telemetry?.autonomy,
 					parked = held.value?.state === "parked",
 					state = held.event(delta);
 				if (state) snapshots.set(state.id, state);
+				if (
+					delta.type === "session.telemetry" &&
+					delta.payload.telemetry.usage !== undefined &&
+					delta.payload.revision > previousRevision &&
+					state &&
+					state.revision >= delta.payload.revision
+				)
+					contextPushes.set(delta.payload.resource, delta.payload.revision);
+				if (state?.telemetry?.autonomy && state.telemetry.autonomy !== previousAutonomy) autonomyChanged.add(state.id);
 				// A resumed task answers from a new agent process, so what the old one reported is stale.
 				if (parked && state?.state === "open") resumed.add(state.id);
+				if (delta.type === "session.reset") reset.add(delta.payload.resource);
 				if (held.hasGap) gaps.add(delta.payload.resource);
+				if (delta.type === "session.configured" || (!hadGap && held.hasGap)) configured.add(delta.payload.resource);
+				if (
+					delta.type === "session.telemetry" &&
+					delta.payload.telemetry.autonomy &&
+					delta.payload.revision > previousRevision
+				)
+					void queries.cancelQueries({ queryKey: ["session-autonomy", delta.payload.resource], exact: true });
 				if (
 					delta.type === "context.activity" ||
 					delta.type === "context.status" ||
@@ -95,8 +168,11 @@ export function subscribe(
 						"session-artifacts",
 						"session-tree",
 						"session-board",
-					])
-						invalidate.add(key);
+					]) {
+						const keys = refreshReads.get(delta.payload.resource) ?? new Set<string>();
+						keys.add(key);
+						refreshReads.set(delta.payload.resource, keys);
+					}
 				}
 				// A sealed evidence bundle changes what the evidence and receipt reads return.
 				if (delta.type === "evidence.ready")
@@ -110,6 +186,7 @@ export function subscribe(
 						void queries.invalidateQueries({ queryKey: ["session"] });
 						void queries.invalidateQueries({ queryKey: ["sessions"] });
 						void queries.invalidateQueries({ queryKey: ["session-interview"] });
+						refreshAutonomy();
 					}
 					disconnected = false;
 				}
@@ -126,10 +203,12 @@ export function subscribe(
 			}
 			if (event.type === "operation.progress") operations.push({ ...event.payload });
 			if (event.type === "interview.changed") {
+				invalidate.add("session-overview");
 				void queries.cancelQueries({ queryKey: ["session-interview", event.payload.resource], exact: true });
 				queries.setQueryData(["session-interview", event.payload.resource], event.payload.round);
 			}
 			if (event.type === "queue.changed") {
+				invalidate.add("session-overview");
 				const { resource, entries } = event.payload;
 				void queries.cancelQueries({ queryKey: ["session-queue", resource], exact: true });
 				queries.setQueryData<QueueSnapshot>(["session-queue", resource], {
@@ -143,15 +222,44 @@ export function subscribe(
 				launched = event.payload.path;
 		}
 		if (resynced) {
+			void queries.cancelQueries();
+			queries.removeQueries({ queryKey: ["session-autonomy"] });
 			queries.removeQueries({ queryKey: ["operation"] });
 			resetSessionBuffers();
 			void queries.resetQueries({ queryKey: ["session"] });
+			for (const key of SESSION_CACHES) void queries.resetQueries({ queryKey: [key] });
 			void queries.invalidateQueries();
 			return;
 		}
+		for (const id of new Set([...resumed, ...reset])) advanceSessionReadScope(id);
 		for (const [id, state] of snapshots) queries.setQueryData<SessionSnapshot>(["session", id], state);
+		// Equal-valued telemetry still supersedes an older in-flight read.
+		for (const id of contextPushes.keys())
+			queries.setQueryData<number>(["session-context-push", id], (revision = 0) => revision + 1);
+		for (const id of autonomyChanged) {
+			const state = snapshots.get(id);
+			if (state) projectAutonomy(state);
+		}
 		for (const id of gaps) void queries.invalidateQueries({ queryKey: ["session", id] });
-		for (const id of resumed) for (const key of SESSION_CACHES) void queries.invalidateQueries({ queryKey: [key, id] });
+		for (const id of new Set([...resumed, ...reset]))
+			for (const key of SESSION_CACHES) {
+				void queries.cancelQueries({ queryKey: [key, id] });
+				// A replacement runtime or branch cannot inherit the previous read's successful data.
+				void queries.resetQueries({ queryKey: [key, id] });
+			}
+		for (const [id, keys] of refreshReads)
+			for (const key of keys) {
+				void queries.cancelQueries({ queryKey: [key, id] });
+				void queries.invalidateQueries({ queryKey: [key, id] });
+			}
+		for (const id of configured) {
+			const held = sessionBuffer(id);
+			if (!resumed.has(id) && (held.hasGap || !held.value?.telemetry?.autonomy)) refreshAutonomy(id);
+			for (const key of ["session-settings", "session-targets", "session-context"]) {
+				void queries.cancelQueries({ queryKey: [key, id] });
+				void queries.invalidateQueries({ queryKey: [key, id] });
+			}
+		}
 		for (const entry of operations) {
 			if (entry.operation)
 				queries.setQueryData<Operation>(["operation", entry.resource], (current) =>
@@ -159,6 +267,22 @@ export function subscribe(
 				);
 			else void queries.invalidateQueries({ queryKey: ["operation", entry.resource] });
 		}
+		if (
+			invalidate.has("sessions") ||
+			events.some(
+				(event) =>
+					event.type === "fleet.enqueued" ||
+					event.type === "fleet.started" ||
+					event.type === "fleet.completed" ||
+					event.type === "fleet.failed" ||
+					event.type === "job.changed" ||
+					event.type === "job.listed" ||
+					event.type === "hello",
+			)
+		)
+			invalidate.add("session-overview");
+		// Invalidation alone reuses a pending first read, which may have captured an older attention state.
+		if (invalidate.has("session-overview")) void queries.cancelQueries({ queryKey: ["session-overview"] });
 		for (const key of invalidate) void queries.invalidateQueries({ queryKey: [key] });
 		if (launched !== null) launch(launched);
 	});
@@ -229,6 +353,7 @@ export function subscribe(
 	document.addEventListener("visibilitychange", onVisibility);
 	return () => {
 		disposed = true;
+		stopSnapshots();
 		document.removeEventListener("visibilitychange", onVisibility);
 		stopWatching();
 		if (retryTimer !== null) clearTimeout(retryTimer);

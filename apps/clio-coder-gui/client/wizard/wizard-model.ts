@@ -571,7 +571,8 @@ export function viewFor(state: SetupState | null, previous: WizardView | null): 
 				// The CLI says nothing after it saves, so the summary is the choices made on the way.
 				summary: [...savedSummary(read.recap), ...read.saved],
 				warnings: read.warnings,
-				verified: read.probe?.state !== "unreachable" && read.probe?.state !== "auth-failed",
+				verified:
+					read.probe?.state === "reachable" && read.recap.some((row) => row.label === "Model" && row.value.trim() !== ""),
 			};
 		case "cancelled":
 			return { kind: "cancelled" };
@@ -603,4 +604,14 @@ export function matches(text: readonly string[], query: string): boolean {
 /** The model to start on: the CLI's own default, else the first listed. */
 export function startingModel(models: readonly ModelOption[], initial: number): ModelOption | undefined {
 	return models.find((model) => model.recommended) ?? models.find((model) => model.choice.id === initial) ?? models[0];
+}
+
+/** A required blank answer cannot advance; whitespace is preserved only for masked credentials. */
+export function canSubmitText(value: string, initial: string, masked = false): boolean {
+	return (masked ? value : value.trim()) !== "" || initial !== "";
+}
+
+/** Searching must not submit a model choice that the current list hides. */
+export function modelChoiceVisible(models: readonly ModelOption[], picked: number | undefined): boolean {
+	return models.some((model) => model.choice.id === picked);
 }

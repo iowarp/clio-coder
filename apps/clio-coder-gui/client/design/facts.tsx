@@ -62,8 +62,9 @@ function FactList({ facts, omitted }: { facts: Fact[]; omitted: number }) {
 	return (
 		<>
 			<dl className="facts">
-				{facts.map((fact) => (
-					<FactRow key={fact.label} fact={fact} />
+				{facts.map((fact, index) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: read-only facts have no local state; different wire keys can share a humanized label.
+					<FactRow key={`${index}:${fact.label}`} fact={fact} />
 				))}
 			</dl>
 			{omitted > 0 && <small>{omittedSentence(omitted, "field")}</small>}

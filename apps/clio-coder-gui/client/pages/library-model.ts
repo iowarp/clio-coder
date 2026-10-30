@@ -145,3 +145,120 @@ export function tabAfterKey<T>(tabs: readonly T[], current: T, key: string): T |
 	if (key === "End") return at(tabs.length - 1);
 	return null;
 }
+
+export const SKILL_ORIGINS: Readonly<Record<string, string>> = {
+	core: "Built in",
+	package: "Installed package",
+	user: "Yours",
+	project: "This project",
+	compat: "Another agent's folder",
+};
+export const SKILL_ACCESS = ["all", "available", "operator", "unavailable", "shadowed"] as const;
+export type SkillAccess = (typeof SKILL_ACCESS)[number];
+export const SKILL_ACCESS_LABELS: Record<SkillAccess, string> = {
+	all: "All skills",
+	available: "Model available",
+	operator: "Operator only",
+	unavailable: "Unavailable",
+	shadowed: "Overridden copies",
+};
+export function skillAccess(skill: Resource): Exclude<SkillAccess, "all"> {
+	if (skill.availability === "shadowed") return "shadowed";
+	if (skillCard(skill).reachable) return "available";
+	if (skill.availability === "available" && skill.trusted && skill.modelInvocable === false) return "operator";
+	return "unavailable";
+}
+export function discoverSkills(resources: readonly Resource[], query: string, access: SkillAccess, origin: string) {
+	const skills = resources.filter((row) => row.kind === "skill").sort((a, b) => a.name.localeCompare(b.name));
+	return {
+		skills,
+		origins: [...new Set(skills.map((skill) => skill.source.class))].sort(),
+		shown: skills.filter(
+			(skill) =>
+				(access === "all" || skillAccess(skill) === access) &&
+				(!origin || skill.source.class === origin) &&
+				matchesQuery(skill, query),
+		),
+		counts: Object.fromEntries(
+			SKILL_ACCESS.map((key) => [key, skills.filter((skill) => key === "all" || skillAccess(skill) === key).length]),
+		) as Record<SkillAccess, number>,
+	};
+}
+
+export function extensionState(value: unknown): string {
+	const row = record(value);
+	return row.loadable
+		? "Ready to load"
+		: !row.enabled
+			? "Disabled"
+			: !row.valid
+				? "Invalid"
+				: !row.compatible
+					? "Incompatible"
+					: !row.effective
+						? "Overridden"
+						: "Unavailable";
+}
+
+export function resourceDetails(
+	collection: string,
+	value: unknown,
+): { explanation: string; facts: CardFact[]; notes: string[] } {
+	const row = record(value);
+	if (collection === "Extensions") {
+		const capabilities = record(row.capabilities);
+		return {
+			explanation: row.loadable
+				? "This extension passed admission and can be loaded. Its declared capabilities describe what it may add; they do not prove it is running."
+				: `This extension is ${extensionState(value).toLowerCase()}. Review its admission diagnostics before changing it in the terminal.`,
+			facts: [
+				fact("Scope", word(row.scope)),
+				fact("Version", word(row.version)),
+				fact(
+					"Declared capabilities",
+					Object.keys(capabilities).length
+						? Object.entries(capabilities)
+								.filter(([, value]) => value !== false && value !== null)
+								.map(([key]) => humanizeKey(key))
+								.join(", ") || "None enabled"
+						: null,
+				),
+			],
+			notes: Array.isArray(row.diagnostics)
+				? row.diagnostics.map((note) => word(record(note).message)).filter((note): note is string => note !== null)
+				: [],
+		};
+	}
+	if (collection === "Verifiers")
+		return {
+			explanation:
+				"A discovered check describes how Clio can verify work. Discovery does not mean this check has run or passed.",
+			facts: [
+				fact("Runner", word(row.runner)),
+				fact("Evidence signal", word(row.signal)),
+				fact("Authority", word(row.authority)),
+				fact("Working directory", row.runsAtRepositoryRoot ? "Repository root" : "Defined by the check"),
+				fact("Arguments", row.argvFixed ? "Fixed by the check" : "May be supplied at runtime"),
+				fact("Time limit", number(row.timeoutMs) === null ? null : `${Number(row.timeoutMs) / 1000} seconds`),
+			],
+			notes: [],
+		};
+	const source = record(row.source);
+	return {
+		explanation:
+			row.availability === "available"
+				? collection === "Prompts"
+					? "A saved starting point you can invoke for a conversation or task."
+					: "A saved workflow that coordinates steps and specialists. Inspect its source before running it."
+				: `This copy is ${String(row.availability ?? "unavailable")}. ${word(row.reason) ?? "Review the source and discovery notes for the cause."}`,
+		facts: [
+			fact("Availability", word(row.availability)),
+			fact("Invocation", word(row.invocation)),
+			fact("Source", SOURCE_CLASS[String(source.class)] ?? word(source.class)),
+			fact("Root trust", row.trusted === true ? "Trusted" : "Not trusted"),
+		],
+		notes: Array.isArray(row.diagnostics)
+			? row.diagnostics.filter((note): note is string => typeof note === "string")
+			: [],
+	};
+}

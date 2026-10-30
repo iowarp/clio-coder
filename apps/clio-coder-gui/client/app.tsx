@@ -3,14 +3,14 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
-import type { SessionSnapshot, SessionSummary } from "../contracts/sessions.js";
+import type { SessionSummary } from "../contracts/sessions.js";
 import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { type ConnectionState, subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
 import { Icon } from "./design/icons.js";
 import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation.js";
-import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
+import { dismissAll, LiveRegions, NoticeToasts, useNotices } from "./design/notifications.js";
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { LEFT_SIDEBAR, RIGHT_SIDEBAR, Splitter } from "./design/Splitter.js";
@@ -19,10 +19,11 @@ import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
 import { ASIDE_DOCK_QUERY, toggleAside, useAsideExpanded } from "./shell/aside-state.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
+import { SessionControlNotice, SessionControlsProvider, useSessionCommands } from "./shell/SessionControls.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
-import { isHeld, isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model.js";
+import { isHeld, isSettingsPath, sessionIdFromPath, taskRows, taskTitle } from "./shell/shell-model.js";
 import { TaskSidebar } from "./shell/TaskSidebar.js";
-import { rememberedWorkspace, rememberWorkspace, useTaskActions } from "./shell/tasks.js";
+import { rememberedWorkspace, rememberWorkspace, useSessionOverview, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
 import { WindowTitlebar } from "./shell/WindowTitlebar.js";
 import { launchedPath, openAppWindow, whenFocused } from "./shell/windows.js";
@@ -66,7 +67,9 @@ function useDocked(): boolean {
 export function App({ client }: { client: Client }) {
 	return (
 		<div className="app-layout">
-			<Workbench client={client} />
+			<SessionControlsProvider client={client}>
+				<Workbench client={client} />
+			</SessionControlsProvider>
 			<NoticeToasts />
 		</div>
 	);
@@ -75,6 +78,7 @@ export function App({ client }: { client: Client }) {
 function Workbench({ client }: { client: Client }) {
 	useApplyTheme();
 	const queries = useQueryClient();
+	const { controls, requestClose } = useSessionCommands();
 	const navigate = useNavigate();
 	const location = useLocation();
 	const phone = usePhone();
@@ -110,6 +114,7 @@ function Workbench({ client }: { client: Client }) {
 		if (client.token) return subscribe(client, queries, setConnection, (path) => launched.current(path));
 	}, [client, queries]);
 	const setup = useSetupStatus(client, !!client.token && !refused);
+	const overview = useSessionOverview(client, !!client.token && !refused);
 	// A machine with no connection at all opens the wizard, full window. It stays until the wizard
 	// itself finishes, because saving the connection makes the status "ready" before the last step.
 	useEffect(() => {
@@ -128,6 +133,7 @@ function Workbench({ client }: { client: Client }) {
 
 	const sessionId = sessionIdFromPath(location.pathname);
 	const mode = isSettingsPath(location.pathname) ? "settings" : "work";
+	const pageAside = mode === "work" && location.pathname !== "/sessions";
 	// `enabled: false` reads the cache the conversation already filled and re-renders when it
 	// changes, without this component ever fetching a session of its own.
 	const session = useQuery({
@@ -135,6 +141,7 @@ function Workbench({ client }: { client: Client }) {
 		queryFn: () => client.call(routes.session, { params: { id: sessionId ?? "" }, query: {}, body: {} }),
 		select: (value) => ({
 			workspaceId: value.workspaceId,
+			title: taskTitle(value),
 			state: value.state,
 			runningTurnId: value.turns.at(-1)?.status === "running" ? (value.turns.at(-1)?.id ?? null) : null,
 		}),
@@ -238,7 +245,7 @@ function Workbench({ client }: { client: Client }) {
 	useEffect(() => {
 		if (!paletteOpen) return;
 		const collect = () => {
-			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
+			const sessions = overview.data?.sessions ?? [];
 			return (workspaces.data ?? []).flatMap((workspace) =>
 				taskRows(
 					workspace.id,
@@ -263,10 +270,10 @@ function Workbench({ client }: { client: Client }) {
 		return () => {
 			current = false;
 		};
-	}, [paletteOpen, workspaces.data, queries, client]);
+	}, [paletteOpen, workspaces.data, overview.data, queries, client]);
 	const openTask = useCallback(
 		(id: string) => {
-			const sessions = queries.getQueryData<SessionSnapshot[]>(["sessions"]) ?? [];
+			const sessions = overview.data?.sessions ?? [];
 			if (sessions.some((session) => session.id === id && isHeld(session))) void navigate(`/sessions/${id}`);
 			else {
 				const workspace = (workspaces.data ?? []).find((candidate) =>
@@ -275,7 +282,7 @@ function Workbench({ client }: { client: Client }) {
 				if (workspace) actions.resume(id, workspace.id);
 			}
 		},
-		[queries, navigate, workspaces.data, actions.resume],
+		[queries, navigate, workspaces.data, overview.data, actions.resume],
 	);
 	const commands = useMemo(
 		() =>
@@ -297,32 +304,23 @@ function Workbench({ client }: { client: Client }) {
 					openTask,
 					openWindow,
 					cancelTurn: (turnId) => {
-						if (sessionId === null) return;
-						void client
-							.call(routes.cancelTurn, { params: { id: sessionId, turnId }, query: {}, body: {} })
-							.then(() => queries.invalidateQueries({ queryKey: ["session", sessionId] }))
-							.catch(reportProblem);
+						if (sessionId === null || !snapshot) return;
+						controls.start({ id: sessionId, ...snapshot, currentTurnId: turnId }, "stop");
 					},
 					closeSession: () => {
-						if (sessionId === null) return;
-						void client
-							.call(routes.closeSession, { params: { id: sessionId }, query: {}, body: {} })
-							.then(() => {
-								void queries.invalidateQueries({ queryKey: ["session", sessionId] });
-								void queries.invalidateQueries({ queryKey: ["sessions"] });
-							})
-							.catch(reportProblem);
+						if (sessionId === null || !snapshot) return;
+						requestClose({ id: sessionId, ...snapshot, currentTurnId: runningTurnId });
 					},
 				},
 			),
 		[
-			client,
 			navigate,
 			notices.length,
-			queries,
 			runningTurnId,
 			sessionId,
-			snapshot?.state,
+			snapshot,
+			controls,
+			requestClose,
 			revealSidebar,
 			startTask,
 			openWorkspace,
@@ -341,7 +339,7 @@ function Workbench({ client }: { client: Client }) {
 			openHelp,
 			activeWorkspaceId,
 			starting: actions.launch.busy,
-			asideSlot: docked && mode === "work" ? asideSlot : null,
+			asideSlot: docked && pageAside ? asideSlot : null,
 		}),
 		[
 			sidebarCollapsed,
@@ -352,7 +350,7 @@ function Workbench({ client }: { client: Client }) {
 			activeWorkspaceId,
 			actions.launch.busy,
 			docked,
-			mode,
+			pageAside,
 			asideSlot,
 		],
 	);
@@ -399,7 +397,7 @@ function Workbench({ client }: { client: Client }) {
 			className="wb"
 			data-sidebar={collapsed ? "collapsed" : "expanded"}
 			data-drawer={drawer ? "open" : "closed"}
-			data-aside={docked && mode === "work" && authed && asideExpanded ? "expanded" : "collapsed"}
+			data-aside={docked && pageAside && authed && asideExpanded ? "expanded" : "collapsed"}
 			data-mode={mode}
 		>
 			<WindowTitlebar />
@@ -451,6 +449,7 @@ function Workbench({ client }: { client: Client }) {
 				</div>
 				<main id="main" className="wb-main" data-mode={mode} tabIndex={-1}>
 					{pendingNotice}
+					{authed ? <SessionControlNotice connected={connection === "Connected"} /> : null}
 					{!client.token || refused ? (
 						<Reconnect refused={refused} />
 					) : meta.error ? (
@@ -483,7 +482,7 @@ function Workbench({ client }: { client: Client }) {
 				) : null}
 			</Suspense>
 			{/* The right sidebar, the left rail's mirror in the same chrome. Pages portal into its body. */}
-			{docked && mode === "work" && authed ? (
+			{docked && pageAside && authed ? (
 				<aside className="wb-aside" aria-label="This task and project" inert={layered} hidden={!asideExpanded}>
 					<Splitter spec={RIGHT_SIDEBAR} edge="start" label="Resize right sidebar" host=".wb" onCollapse={toggleAside} />
 					<div className="wb-aside__slot" ref={setAsideSlot} />

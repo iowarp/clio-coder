@@ -22,6 +22,7 @@ import { FleetService } from "./services/fleet.js";
 import { IdleExit } from "./services/idle-exit.js";
 import { LibraryService } from "./services/library.js";
 import { lifecycleLog } from "./services/log.js";
+import { MachinesService } from "./services/machines.js";
 import { OperationRegistry } from "./services/operations.js";
 import { ReportsService } from "./services/reports.js";
 import { SessionService } from "./services/sessions.js";
@@ -212,6 +213,7 @@ export async function main(args = process.argv.slice(2)) {
 		settings: settingsService,
 		setup,
 		fleet: new FleetService(reads),
+		machines: new MachinesService(reads, ops, workspaces, operations),
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),

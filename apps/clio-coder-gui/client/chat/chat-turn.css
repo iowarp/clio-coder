@@ -23,6 +23,37 @@
 	gap: var(--space-6);
 	min-width: 0;
 }
+.chat-turn + .chat-turn {
+	border-top: 1px solid var(--line);
+	padding-top: var(--space-8);
+}
+.chat-turn:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: var(--space-3);
+	border-radius: var(--radius-sm);
+}
+
+.transcript-history {
+	display: grid;
+	gap: var(--space-3);
+	padding-block: var(--space-3) var(--space-6);
+	border-bottom: 1px solid var(--line);
+	color: var(--muted);
+	font-size: var(--text-meta);
+}
+.transcript-history > p {
+	margin: 0;
+}
+.transcript-history > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+}
+.transcript-history button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+}
 
 /* A grid item's automatic minimum size is its min-content width, so a card holding a long command
    or a wide diff refuses to shrink and pushes the whole page sideways on a phone. Every level of
@@ -156,6 +187,55 @@
 .chat-request__prompt.is-missing {
 	color: var(--ink-subtle);
 	font-style: italic;
+}
+.chat-request__long {
+	width: 100%;
+	box-sizing: border-box;
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--well);
+}
+.chat-request__long > summary {
+	display: grid;
+	gap: var(--space-3);
+	cursor: pointer;
+	list-style: none;
+}
+.chat-request__long > summary::-webkit-details-marker {
+	display: none;
+}
+.chat-request__preview,
+.chat-request__full {
+	margin: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: var(--text-reading);
+	line-height: var(--leading-body);
+	color: var(--ink-strong);
+}
+.chat-request__expand {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2) var(--space-3);
+	font-size: var(--text-exact);
+	color: var(--accent);
+}
+.chat-request__expand small {
+	font-size: inherit;
+	color: var(--ink-muted);
+}
+.chat-request__hide,
+.chat-request__long[open] .chat-request__show,
+.chat-request__long[open] .chat-request__preview {
+	display: none;
+}
+.chat-request__long[open] .chat-request__hide {
+	display: inline;
+}
+.chat-request__full {
+	margin-top: var(--space-3);
 }
 
 .chat-response {
