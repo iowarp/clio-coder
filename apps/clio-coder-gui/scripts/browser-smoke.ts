@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { AxeBuilder } from "@axe-core/playwright";
 import { serve } from "@hono/node-server";
 import { type BrowserContext, chromium, type Locator } from "playwright-core";
+import { SETTINGS_SECTIONS } from "../client/shell/shell-model.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
@@ -342,6 +343,8 @@ try {
 		await page.locator('main a[href^="/traces/run-0000"]').click();
 		await page.locator("main").getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
 		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
+		// A run opens on its replay; the sealed receipt's checks have their own view.
+		await page.getByRole("tab", { name: /^Checks & receipt/ }).click();
 		// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.
 		const checkRow = (label: string) => page.locator(".receipt-check", { has: page.getByText(label, { exact: true }) });
 		const mark = (label: string, word: string) =>
@@ -403,13 +406,11 @@ try {
 		await page.keyboard.press("Escape");
 		assert.equal(await page.getByRole("link", { name: "Docs", exact: true }).count(), 0);
 		await page.goto(`${origin}/docs/architecture/trace-store.md`);
-		await page
-			.locator("main")
-			.getByRole("heading", { name: "Documentation is on the public site.", exact: true })
-			.waitFor();
+		// A retired docs path lands on Help, whose documentation link leaves the app.
+		await page.locator("main").getByRole("heading", { name: "Make yourself at home.", exact: true }).waitFor();
 		assert.equal(await page.locator(".docs-page, iframe").count(), 0);
 		assert.equal(
-			await page.getByRole("link", { name: "Open documentation ↗", exact: true }).getAttribute("href"),
+			await page.getByRole("link", { name: "Browse documentation", exact: true }).getAttribute("href"),
 			"https://coder.iowarp.ai/docs.html",
 		);
 		await check("legacy-help");
@@ -425,12 +426,12 @@ try {
 			await page.locator(".wb-sidebar").getByRole("button", { name: "Collapse sidebar", exact: true }).waitFor();
 			assert.equal(
 				await page.getByRole("navigation", { name: "Settings", exact: true }).getByRole("link").count(),
-				12,
+				SETTINGS_SECTIONS.length,
 				"every settings place stays listed once the rail returns",
 			);
 		}
-		// A project opens from the rail's Open workspace dialog, which starts a task in it; the project's
-		// own page lists its tasks and offers New task.
+		// A project opens from the rail's Open workspace dialog onto its own page, which lists its
+		// tasks and offers New task.
 		await leaveSettings();
 		await revealSidebar();
 		await page
@@ -440,6 +441,8 @@ try {
 		const openDialog = page.getByRole("dialog", { name: "Open workspace", exact: true });
 		await openDialog.getByLabel("Project folder", { exact: true }).fill(h.home.path);
 		await openDialog.getByRole("button", { name: "Open", exact: true }).click();
+		await page.waitForURL(/\/workspaces\/[^/]+\/sessions$/);
+		await page.locator("main button.primary", { hasText: "New task" }).click();
 		await page.waitForURL(/\/sessions\/[^/]+$/);
 		await page.getByLabel("Message Clio Coder", { exact: true }).waitFor();
 		const noticeSessionUrl = page.url();
