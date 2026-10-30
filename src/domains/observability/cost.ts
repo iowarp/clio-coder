@@ -79,7 +79,7 @@ export function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmoun
 		hasUnknown:
 			aggregate.hasUnknown ||
 			(amount.costSummary?.hasUnknown ?? amount.provenance === "unknown") ||
-			((amount.missingTokenCalls ?? 0) > 0 && amount.provenance !== "known_free"),
+			(amount.costSummary === undefined && (amount.missingTokenCalls ?? 0) > 0 && amount.provenance !== "known_free"),
 		allKnownFree:
 			(amount.costSummary?.allKnownFree ?? amount.provenance === "known_free") && (first || aggregate.allKnownFree),
 		// Carried summaries retain their call coverage along with their USD and flags (#434).
@@ -207,6 +207,7 @@ export interface UsageBreakdown {
  * spent beside the session rather than inside it.
  */
 export type CostEntryLabel =
+	| "helper"
 	| "side-question"
 	| "handoff"
 	| "prewarm"

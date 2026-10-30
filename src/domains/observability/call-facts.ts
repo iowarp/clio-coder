@@ -1,3 +1,4 @@
+import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
@@ -9,6 +10,14 @@ const record = (value: unknown): Record<string, unknown> =>
 	value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 const amount = (value: unknown): number | null =>
 	typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+
+/** A requested model is not evidence that the provider served that model (#434). */
+export function reportedModelFromMessage(message: unknown): Fact<string> {
+	const observation = responseModelIdObservationFromRecord(record(message), "not-observed");
+	return observation.state === "reported"
+		? { kind: "measured", value: observation.reportedModelId, source: "provider" }
+		: { kind: "unknown", reason: observation.state === "not-reported" ? "provider-omitted" : "not-observed" };
+}
 
 /** Map existing structured causes; prose is never a telemetry classifier (#434). */
 function failureCause(failure: Record<string, unknown>): FailureCause | undefined {

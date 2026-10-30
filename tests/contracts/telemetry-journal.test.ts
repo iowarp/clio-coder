@@ -9,8 +9,8 @@ import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
-import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
-import { openCallJournal, readCallJournal } from "../../src/domains/observability/call-journal.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
+import { openCallJournal, readCallJournal, readCallJournalSync } from "../../src/domains/observability/call-journal.js";
 import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
 import {
 	readTelemetryObject,
@@ -21,6 +21,10 @@ import {
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
 import { readAuditRows } from "../../src/domains/session/archive-readers.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
+import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
+import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -107,7 +111,19 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		strictEqual(retry, call.nextAttempt());
 		strictEqual(retry.callId, call.callId);
 		strictEqual(retry.attempt, 1);
-		retry.settle(unsent);
+		const message = {
+			stopReason: "stop",
+			responseModelIdObservation: { state: "reported", reportedModelId: "served-model" },
+			usage: {
+				input: 7,
+				output: 2,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: { total: 0.125 },
+				clioExternal: { tokenUsage: "provider-reported" },
+			},
+		};
+		retry.settle(callSettlementFromMessage(message, "known"), reportedModelFromMessage(message));
 		strictEqual(journal.health().queueDepth, 4);
 		await journal.flush();
 		const rows = (await readCallJournal(sessionDirectory)).records.map(({ record }) => record);
@@ -122,6 +138,45 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		ok(settled?.k === "call.settled");
 		strictEqual(settled.data.usage, null);
 		strictEqual(settled.data.stages.admission?.waitedOn, "budget");
+		deepStrictEqual(
+			readCallJournalSync(sessionDirectory).records.map(({ record }) => record),
+			rows,
+		);
+		const projected = usageCallsFromJournal(rows);
+		strictEqual(projected.length, 1);
+		strictEqual(projected[0]?.attributedModelId, "served-model");
+		strictEqual(projected[0]?.totalTokens, 9);
+		strictEqual(projected[0]?.costProvenance, "estimated");
+		const ledger: SessionEntry[] = [
+			{
+				kind: "message",
+				role: "assistant",
+				turnId: "assistant",
+				parentTurnId: null,
+				timestamp: new Date().toISOString(),
+				payload: { callId: call.callId, usage: { input: 999, output: 999, totalTokens: 1998 } },
+			},
+		];
+		deepStrictEqual(ledgerUsageCalls([...ledger, ...ledger], {}, rows), projected);
+		deepStrictEqual(ledgerCallFailureCounts([...ledger, ...ledger], rows), {
+			invokedUnknownCalls: 0,
+			neverInvokedCalls: 1,
+		});
+		const replayed: unknown[][] = [];
+		reseedSessionUsageFromLedger(
+			{
+				resetSession() {},
+				recordTokens(...args) {
+					replayed.push(args);
+				},
+			},
+			ledger,
+			{ journalDirectory: sessionDirectory },
+		);
+		strictEqual(replayed.length, 1);
+		strictEqual(replayed[0]?.[1], "served-model");
+		strictEqual(replayed[0]?.[2], 9);
+		deepStrictEqual(replayed[0]?.[8], projected[0]?.costSummary);
 		await journal.close();
 		const before = telemetryProducerHealth().unownedRecords;
 		strictEqual(recordTelemetry("session.closed", { reason: "completed" }, context), false);

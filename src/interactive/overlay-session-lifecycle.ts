@@ -1,5 +1,7 @@
 import { hostname } from "node:os";
+import { join } from "node:path";
 import { editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
+import { clioStateDir } from "../core/xdg.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import {
@@ -101,9 +103,15 @@ function sessionUsageDefaults(session: SessionContract): {
 	target?: string | null;
 	model?: string | null;
 	sessionId?: string | null;
+	journalDirectory?: string;
 } {
 	const meta = session.current();
-	return { target: meta?.target ?? null, model: meta?.model ?? null, sessionId: meta?.id ?? null };
+	return {
+		target: meta?.target ?? null,
+		model: meta?.model ?? null,
+		sessionId: meta?.id ?? null,
+		...(meta ? { journalDirectory: join(clioStateDir(), "sessions", meta.cwdHash, meta.id) } : {}),
+	};
 }
 
 function restorePriorSessionOrReopen(

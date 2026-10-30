@@ -1,5 +1,5 @@
 import { beginCall } from "../core/telemetry/producer.js";
-import { callSettlementFromMessage } from "../domains/observability/call-facts.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { CostEntryLabel } from "../domains/observability/cost.js";
 /**
  * What the composition root keeps between System One calls.
@@ -99,7 +99,7 @@ export function createSystemOneRequestAdmission(deps: {
 		const settle = (message: unknown): void => {
 			if (settled) return;
 			settled = true;
-			call?.settle(callSettlementFromMessage(message, pricing.provenance));
+			call?.settle(callSettlementFromMessage(message, pricing.provenance), reportedModelFromMessage(message));
 			void lease?.release();
 		};
 		try {

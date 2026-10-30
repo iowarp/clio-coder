@@ -6,7 +6,7 @@ import { beginCall } from "../core/telemetry/producer.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { traceObservation } from "../domains/memory/observation-trace.js";
-import { callSettlementFromMessage } from "../domains/observability/call-facts.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/observability/session-journals.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
@@ -647,6 +647,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? "operator_cancel"
 							: undefined,
 					),
+					reportedModelFromMessage(message),
 				);
 			}
 			await lease?.release();
@@ -740,6 +741,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								{ ...message, ...(failure ? { failure } : {}) },
 								localRuntime.runtimeResolution.costProvenance,
 							),
+							reportedModelFromMessage(message),
 						);
 					},
 				);

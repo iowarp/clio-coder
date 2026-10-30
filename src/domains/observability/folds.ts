@@ -152,7 +152,8 @@ export function foldCallJournal(records: Iterable<TelemetryRecord>, callIds?: Re
 			attemptId: data.attemptId,
 			attempt: data.attempt,
 			label: data.label,
-			target: data.target,
+			// A response model is learned at settlement; it is not part of the request identity (#434).
+			target: { ...data.target, reportedModel: { kind: "unknown", reason: "not-observed" } },
 			roundKind: data.roundKind,
 			toolChoice: data.toolChoice,
 		};

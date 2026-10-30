@@ -4384,7 +4384,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		reseedSessionUsageFromLedger(
 			observability,
 			readCurrentSessionEntries(),
-			{ target: meta.target, model: meta.model, sessionId: meta.id },
+			{
+				target: meta.target,
+				model: meta.model,
+				sessionId: meta.id,
+				journalDirectory: join(clioStateDir(), "sessions", meta.cwdHash, meta.id),
+			},
 			session.tree(meta.id).leafId,
 		);
 	};
@@ -4898,7 +4903,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					reseedSessionUsageFromLedger(
 						observability,
 						resumedEntries,
-						{ target: resumedMeta.target, model: resumedMeta.model, sessionId: resumedMeta.id },
+						{
+							target: resumedMeta.target,
+							model: resumedMeta.model,
+							sessionId: resumedMeta.id,
+							journalDirectory: join(clioStateDir(), "sessions", resumedMeta.cwdHash, resumedMeta.id),
+						},
 						leafTurnId,
 					);
 				}

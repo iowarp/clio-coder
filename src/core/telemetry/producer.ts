@@ -67,7 +67,7 @@ export interface TelemetryCall {
 	withContext<T>(fn: () => T): T;
 	stage(stage: Stage, phase: "start" | "end", facts?: StageFacts): void;
 	mark(mark: "firstByte" | "firstToken"): void;
-	settle(data: Settlement): void;
+	settle(data: Settlement, reportedModel?: CallStarted["target"]["reportedModel"]): void;
 	/** One successor per settled attempt. A live attempt cannot silently disappear (#434). */
 	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall | null;
 }
@@ -109,11 +109,20 @@ export function beginCall(
 			mark(name) {
 				if (!settled) stages[name] ??= performance.now() - start;
 			},
-			settle(data) {
+			settle(data, reportedModel) {
 				if (settled) return;
 				settled = true;
 				stages.settle = performance.now() - start;
-				recordTelemetry("call.settled", { ...metadata, ...data, stages }, scope);
+				recordTelemetry(
+					"call.settled",
+					{
+						...metadata,
+						...data,
+						target: { ...metadata.target, reportedModel: reportedModel ?? metadata.target.reportedModel },
+						stages,
+					},
+					scope,
+				);
 			},
 			nextAttempt(request) {
 				if (!settled) return null;

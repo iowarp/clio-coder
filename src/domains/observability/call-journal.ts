@@ -1,4 +1,4 @@
-import { constants } from "node:fs";
+import { constants, readdirSync, readFileSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { mkdir, open, readdir, readFile, rename } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -293,17 +293,7 @@ async function readCallJournalSnapshot(sessionDirectory: string, retries: number
 				return readCallJournalSnapshot(sessionDirectory, retries - 1);
 			throw error;
 		}
-		const scan = scanTelemetrySegment(bytes);
-		if (scan.corruptOffset !== null || scan.tornTailBytes > 0) result.damaged += 1;
-		let origin: ClockOrigin | undefined;
-		for (const row of scan.rows) {
-			if (row.kind === "header") origin = row.header.clockOrigin;
-			else if (row.kind === "record" && origin) result.records.push({ record: row.record, origin });
-			else {
-				if (row.kind === "skipped" && row.segment) origin = undefined;
-				result.skipped += 1;
-			}
-		}
+		appendReadSegment(result, bytes);
 	}
 	const after = (await readdir(sessionDirectory))
 		.filter((name) => name === "calls.jsonl" || /^calls\.rec_[0-9a-f-]+\.jsonl$/.test(name))
@@ -313,4 +303,43 @@ async function readCallJournalSnapshot(sessionDirectory: string, retries: number
 		throw new Error("call journal rotated repeatedly during read");
 	}
 	return result;
+}
+
+function appendReadSegment(result: CallJournalRead, bytes: Buffer): void {
+	const scan = scanTelemetrySegment(bytes);
+	if (scan.corruptOffset !== null || scan.tornTailBytes > 0) result.damaged += 1;
+	let origin: ClockOrigin | undefined;
+	for (const row of scan.rows) {
+		if (row.kind === "header") origin = row.header.clockOrigin;
+		else if (row.kind === "record" && origin) result.records.push({ record: row.record, origin });
+		else {
+			if (row.kind === "skipped" && row.segment) origin = undefined;
+			result.skipped += 1;
+		}
+	}
+}
+
+/** Session switches already read their ledger synchronously; take the journal snapshot in that same cold path (#434). */
+export function readCallJournalSync(sessionDirectory: string): CallJournalRead {
+	const names = () =>
+		readdirSync(sessionDirectory)
+			.filter((name) => name === "calls.jsonl" || /^calls\.rec_[0-9a-f-]+\.jsonl$/.test(name))
+			.sort((left, right) => (left === "calls.jsonl" ? 1 : right === "calls.jsonl" ? -1 : left.localeCompare(right)));
+	for (let retry = 0; retry < 3; retry += 1) {
+		const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
+		let files: string[];
+		try {
+			files = names();
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
+			throw error;
+		}
+		try {
+			for (const file of files) appendReadSegment(result, readFileSync(join(sessionDirectory, file)));
+			if (files.join("\n") === names().join("\n")) return result;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+	}
+	throw new Error("call journal rotated repeatedly during read");
 }

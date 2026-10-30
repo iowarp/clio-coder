@@ -2,7 +2,7 @@ import type { TelemetryCall } from "../../core/telemetry/producer.js";
 import { beginCall } from "../../core/telemetry/producer.js";
 import type { CallStarted } from "../../core/telemetry/schemas.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
-import { callSettlementFromMessage } from "./call-facts.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "./call-facts.js";
 import type { ObservabilityContract } from "./contract.js";
 import type { TelemetrySessionOrigin } from "./session-journals.js";
 
@@ -42,7 +42,8 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 					);
 		},
 		settle(message: unknown): void {
-			if (call && options) call.settle(callSettlementFromMessage(message, options.costProvenance));
+			if (call && options)
+				call.settle(callSettlementFromMessage(message, options.costProvenance), reportedModelFromMessage(message));
 		},
 		withContext<T>(work: () => T): T {
 			return call ? call.withContext(work) : work();

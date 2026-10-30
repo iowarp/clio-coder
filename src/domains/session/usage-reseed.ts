@@ -14,11 +14,14 @@
  * only the sink wiring between that fold and the observability projection.
  */
 
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import {
 	addResponseModelIdObservationCount,
 	emptyResponseModelIdObservationCounts,
 	type ResponseModelIdObservationCounts,
 } from "../../core/response-model-id.js";
+import type { CallJournalRead } from "../observability/call-journal.js";
+import { readCallJournalSync } from "../observability/call-journal.js";
 import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
@@ -76,10 +79,22 @@ export function reseedSessionUsageFromLedger(
 	defaults: SessionUsageDefaults = {},
 	activeLeafTurnId?: string | null,
 ): void {
+	let journal: CallJournalRead | undefined;
+	if (defaults.journalDirectory) {
+		try {
+			journal = readCallJournalSync(defaults.journalDirectory);
+			if (journal.skipped || journal.damaged)
+				writeDiagnostic("[clio-coder:telemetry] session usage journal has skipped or damaged records\n");
+		} catch {
+			// Reset onto this session's ledger even when its optional journal cannot be read (#434).
+			writeDiagnostic("[clio-coder:telemetry] session usage journal unavailable; using legacy ledger coverage\n");
+		}
+	}
 	sink.resetSession(defaults.sessionId);
 	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
-	sink.recordNeverSentCalls?.(ledgerCallFailureCounts(scoped).neverInvokedCalls);
-	for (const call of ledgerUsageCalls(scoped, defaults)) {
+	const records = journal?.records.map(({ record }) => record);
+	sink.recordNeverSentCalls?.(ledgerCallFailureCounts(scoped, records).neverInvokedCalls);
+	for (const call of ledgerUsageCalls(scoped, defaults, records)) {
 		const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
 		addResponseModelIdObservationCount(
 			responseModelIdObservationCounts,
@@ -108,7 +123,7 @@ export function reseedSessionUsageFromLedger(
 				responseModelIdObservationCounts,
 			},
 			call.label,
-			undefined,
+			call.costSummary,
 			true,
 		);
 	}

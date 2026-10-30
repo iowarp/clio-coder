@@ -1,20 +1,7 @@
 /**
- * Fold a session ledger's assistant turns into the per-call usage the rest of
- * Clio reports: tokens in and out, cache reads and writes, reasoning tokens,
- * and provider-reported cost, attributed to the target and observed model id
- * for each call.
- *
- * This lives in the session domain because the ledger is the only durable
- * record of what a session spent, and three surfaces read it: the `/usage`
- * overlay and footer reseed from it on every session change, and `clio-coder usage
- * report` folds it across sessions. It was written for the overlay first and
- * sat under src/interactive; a headless report reaching into the TUI surface's
- * directory for it would have made one surface's presentation a dependency of
- * every surface's accounting, which is the same thing the tools/interactive
- * boundary rule exists to prevent.
- *
- * Failed and aborted calls still consumed resources. Missing provider counts
- * contribute to coverage, without adding estimates to the token subtotal.
+ * Session accounting prefers linked call-journal facts, including retries. Old
+ * ledger rows remain a compatibility input until explicitly imported (#434).
+ * Model-change entries retain their attribution for that legacy path.
  */
 
 import { messageUsageForAccounting } from "../../core/message-accounting.js";
@@ -24,14 +11,22 @@ import {
 	type ResponseModelIdObservation,
 	responseModelIdObservationFromRecord,
 } from "../../core/response-model-id.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
-import type { CostEntryLabel } from "../observability/cost.js";
+import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
+import type { CallTotals } from "../observability/folds.js";
+import { foldCallJournal, foldCalls } from "../observability/folds.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
+import { usageCallsFromJournal } from "./journal-usage.js";
 
-/** One completed assistant API call, as the ledger recorded it. */
+/** One attempt projected from the journal, or a legacy ledger usage row (#434). */
 export interface LedgerUsageCall {
+	callId?: string;
+	attemptId?: string;
+	facts?: CallTotals;
+	costSummary?: CostAggregate;
 	providerId: string;
 	/** Model id the accounting row uses, or `unknown` when an observed response omitted it. */
 	attributedModelId: string;
@@ -56,6 +51,7 @@ export interface LedgerUsageCall {
 
 /** The target and model a session ran under before any modelChange row. */
 export interface SessionUsageDefaults {
+	journalDirectory?: string;
 	target?: string | null;
 	model?: string | null;
 	sessionId?: string | null;
@@ -88,8 +84,17 @@ function stringAt(source: Record<string, unknown>, ...keys: string[]): string | 
 export function ledgerUsageCalls(
 	entries: ReadonlyArray<SessionEntry>,
 	defaults: SessionUsageDefaults = {},
+	journal: ReadonlyArray<TelemetryRecord> = [],
 ): LedgerUsageCall[] {
 	const calls: LedgerUsageCall[] = [];
+	const journalCalls = new Map<string, LedgerUsageCall[]>();
+	for (const call of usageCallsFromJournal(journal)) {
+		if (!call.callId) continue;
+		const group = journalCalls.get(call.callId) ?? [];
+		group.push(call);
+		journalCalls.set(call.callId, group);
+	}
+	const projected = new Set<string>();
 	let currentTarget = defaults.target ?? null;
 	let currentModel = defaults.model ?? null;
 	for (const entry of entries) {
@@ -134,6 +139,11 @@ export function ledgerUsageCalls(
 		const payload = entry.payload;
 		if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
 		const record = payload as Record<string, unknown>;
+		if (typeof record.callId === "string" && journalCalls.has(record.callId)) {
+			if (!projected.has(record.callId)) calls.push(...(journalCalls.get(record.callId) ?? []));
+			projected.add(record.callId);
+			continue;
+		}
 		const rawUsage = messageUsageForAccounting(record);
 		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) continue;
 		const usage = rawUsage as Record<string, unknown>;
@@ -171,16 +181,35 @@ export function ledgerUsageCalls(
 }
 
 /** Never-sent rows stay outside spending, but remain visible in coverage (#430). */
-export function ledgerCallFailureCounts(entries: ReadonlyArray<SessionEntry>) {
-	let invokedUnknownCalls = 0;
-	let neverInvokedCalls = 0;
+export function ledgerCallFailureCounts(
+	entries: ReadonlyArray<SessionEntry>,
+	journal: ReadonlyArray<TelemetryRecord> = [],
+) {
+	const linked = new Set(
+		entries.flatMap((entry) => {
+			if (entry.kind !== "message" || entry.role !== "assistant") return [];
+			const callId = (entry.payload as { callId?: unknown } | null)?.callId;
+			return typeof callId === "string" ? [callId] : [];
+		}),
+	);
+	const folded = foldCallJournal(journal, linked);
+	const projected = new Set(folded.attempts.map(({ started }) => started.callId));
+	let invokedUnknownCalls = folded.attempts.filter(
+		(attempt) =>
+			attempt.settled !== null &&
+			attempt.settled.disposition !== "never_sent" &&
+			foldCalls([attempt]).totalTokens.unknownCount > 0,
+	).length;
+	let neverInvokedCalls = folded.totals.neverSent;
 	for (const entry of entries) {
 		if (entry.kind !== "message" || entry.role !== "assistant") continue;
 		const payload = entry.payload as {
+			callId?: string;
 			usage?: Record<string, unknown> | null;
 			callInvoked?: boolean;
 			failure?: { invoked?: boolean };
 		} | null;
+		if (payload?.callId && projected.has(payload.callId)) continue;
 		const usage = payload?.usage;
 		if (payload?.callInvoked === false || usage?.callInvoked === false || payload?.failure?.invoked === false)
 			neverInvokedCalls += 1;

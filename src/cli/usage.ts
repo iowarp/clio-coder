@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
 	addResponseModelIdObservationCount,
 	emptyResponseModelIdObservationCounts,
@@ -9,6 +9,8 @@ import {
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
+import type { CallJournalRead } from "../domains/observability/call-journal.js";
+import { readCallJournal } from "../domains/observability/call-journal.js";
 import { summarizeFailedCompactionUsage } from "../domains/observability/compaction-usage.js";
 import type { CostAggregate } from "../domains/observability/cost.js";
 import {
@@ -341,6 +343,7 @@ function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
 		usd: call.costUsd,
 		provenance: call.costProvenance ?? (call.costUsd > 0 ? "estimated" : "unknown"),
 		apiCalls: call.apiCalls ?? 1,
+		...(call.costSummary ? { costSummary: call.costSummary } : {}),
 		missingTokenCalls: call.missingTokenCalls ?? 0,
 	});
 	totals.costUsd = totals.cost.knownUsd;
@@ -1353,6 +1356,16 @@ async function readSessions(
 		const accountingEntries = parsedEntries.entries.filter(
 			(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
 		);
+		let journal: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
+		try {
+			journal = await readCallJournal(dirname(ref.path));
+		} catch {
+			diagnostics.notes.push(`session ${ref.sessionId}: call journal unavailable; using legacy ledger coverage`);
+		}
+		if (journal.skipped || journal.damaged)
+			diagnostics.notes.push(
+				`session ${ref.sessionId}: call journal has ${journal.skipped} skipped records and ${journal.damaged} damaged segments`,
+			);
 		const usage: SessionUsage = {
 			harnessActions: 0,
 			duplicateDispatches: 0,
@@ -1364,8 +1377,15 @@ async function readSessions(
 			// modelChange rows are kept regardless of the window: they carry no
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
-			usageCalls: ledgerUsageCalls(accountingEntries),
-			failureCounts: ledgerCallFailureCounts(accountingEntries),
+			usageCalls: ledgerUsageCalls(
+				accountingEntries,
+				{},
+				journal.records.map(({ record }) => record),
+			),
+			failureCounts: ledgerCallFailureCounts(
+				accountingEntries,
+				journal.records.map(({ record }) => record),
+			),
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
 			recall: foldRecallTelemetry(accountingEntries),
 		};
