@@ -252,7 +252,8 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 	{
 		file: "src/interactive/chat-panel.ts",
 		functions: ["aggregateAssistantUsage"],
-		reason: "the transcript's per-turn usage line folds the turn's own assistant messages; no live turn fold exists yet",
+		reason:
+			"the transcript's per-turn receipt line folds the turn's own assistant messages, an unknown field as zero, while the footer already reads that turn from the live read model; it moves onto that fold in 0.6.6",
 	},
 	{
 		file: "src/cli/fleet.ts",
@@ -343,6 +344,22 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 			(target(sum.left) || target(sum.right) || adds(sum.left, target))
 		);
 	};
+	// `a[k] = (a[k] ?? 0) + (b[k] ?? 0)` folds one record into another field by field under a key no name test can
+	// read, as a loop over a list of usage fields does (#434).
+	const mergesComputedKey = (target: ts.Expression, sum: ts.Expression): boolean => {
+		const left = unwrap(target);
+		if (!ts.isElementAccessExpression(left) || ts.isStringLiteral(left.argumentExpression)) return false;
+		const key = left.argumentExpression.getText(tree);
+		const receiver = left.expression.getText(tree);
+		return adds(sum, (operand) => {
+			const read = unwrap(operand);
+			return (
+				ts.isElementAccessExpression(read) &&
+				read.argumentExpression.getText(tree) === key &&
+				read.expression.getText(tree) !== receiver
+			);
+		});
+	};
 	const visit = (node: ts.Node): void => {
 		if (ts.isBinaryExpression(node)) {
 			const kind = node.operatorToken.kind;
@@ -350,7 +367,7 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 			const target = node.left.getText(tree);
 			if (
 				kind === ts.SyntaxKind.EqualsToken &&
-				total(node.left) &&
+				(total(node.left) || mergesComputedKey(node.left, node.right)) &&
 				adds(node.right, (operand) => unwrap(operand).getText(tree) === target)
 			)
 				report(node);

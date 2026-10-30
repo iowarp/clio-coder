@@ -30,7 +30,12 @@ import {
 } from "../../src/session-control/chat-loop-messages.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import { createTurnState } from "../../src/session-control/turn-state.js";
-import { checkCostRendering, checkLedgerUsageMutation, runBoundaryCheck } from "../boundaries/check-boundaries.js";
+import {
+	checkCostRendering,
+	checkLedgerUsageMutation,
+	checkSurfaceTotals,
+	runBoundaryCheck,
+} from "../boundaries/check-boundaries.js";
 
 const zeroUsage = {
 	input: 0,
@@ -565,5 +570,22 @@ describe("canonical monetary presentation (#434)", () => {
 			[],
 		);
 		deepStrictEqual(runBoundaryCheck(process.cwd()).violations, []);
+	});
+
+	it("rejects a surface that sums a token or cost field, including a field-by-field merge under a computed key", () => {
+		for (const source of [
+			"function show(rows) { let tokens = 0; for (const row of rows) tokens += row.tokens; return tokens; }",
+			"const total = rows.reduce((sum, row) => sum + row.usage.input, 0);",
+			"for (const [key] of FIELDS) totals[key] = (totals[key] ?? 0) + (receipt[key] ?? 0);",
+		])
+			ok(checkSurfaceTotals("src/interactive/example.ts", source).some((line) => line.startsWith("rule14:")));
+		deepStrictEqual(
+			checkSurfaceTotals(
+				"src/interactive/example.ts",
+				'let input = ""; for (const chunk of chunks) input += chunk; counts[name] = (counts[name] ?? 0) + 1;',
+			),
+			[],
+		);
+		deepStrictEqual(checkSurfaceTotals("src/domains/example.ts", "tokens += row.tokens;"), []);
 	});
 });
