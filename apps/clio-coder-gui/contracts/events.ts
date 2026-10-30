@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import { Id } from "./common.js";
 import { InterviewRound } from "./interviews.js";
+import { MachineAttachment } from "./machines.js";
 import { Operation, Progress } from "./operations.js";
 import { SessionDeltas } from "./sessions.js";
 import { QUEUE_MAX_ENTRIES, QueueEntry } from "./steering.js";
@@ -83,6 +84,8 @@ export const Event = Type.Union([
 		type: Type.Literal("telemetry.updated"),
 		payload: Type.Object({ resource: Id, update: TelemetryUpdate }, { additionalProperties: false }),
 	}),
+	/** This app's attachment to a node's own GUI changed state. */
+	Type.Object({ ...base, type: Type.Literal("machine.attach"), payload: MachineAttachment }),
 	/** A launch found the app window open and asks it to show a page. The window the launcher focused takes it. */
 	Type.Object({
 		...base,

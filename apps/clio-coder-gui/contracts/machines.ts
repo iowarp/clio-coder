@@ -79,3 +79,37 @@ export const Machines = Type.Object(
 	closed,
 );
 export type Machines = Static<typeof Machines>;
+
+/** How far this app has come in reaching a node's own GUI over SSH. */
+export const MachineAttachmentState = Type.Union([
+	Type.Literal("detached"),
+	Type.Literal("connecting"),
+	Type.Literal("ready"),
+	Type.Literal("failed"),
+	Type.Literal("version-mismatch"),
+]);
+export type MachineAttachmentState = Static<typeof MachineAttachmentState>;
+export const MachineAttachment = Type.Object(
+	{
+		id: MachineId,
+		host: Type.String(),
+		state: MachineAttachmentState,
+		/** When the state was entered. */
+		since: Type.String(),
+		/** Why the attachment failed or was refused; null in every other state. */
+		detail: nullableText,
+		/** Reconnects made since the last explicit open. */
+		attempt: Type.Integer({ minimum: 0 }),
+		/** When the next reconnect is due, while one is scheduled. */
+		retryAt: nullableText,
+		/** What the node's own GUI reported about itself once it answered. */
+		remote: Type.Union([
+			Type.Null(),
+			Type.Object({ clio: Type.String(), build: nullableText, host: Type.String() }, closed),
+		]),
+	},
+	closed,
+);
+export type MachineAttachment = Static<typeof MachineAttachment>;
+export const MachineAttachments = Type.Object({ attachments: Type.Array(MachineAttachment) }, closed);
+export type MachineAttachments = Static<typeof MachineAttachments>;

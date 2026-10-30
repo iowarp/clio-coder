@@ -13,6 +13,8 @@ const httpModules = new Map([
 	// server; browser contracts carry only rendered strings (#434).
 	["src/core/telemetry/render.ts", new Set(["renderCompactCount", "renderCount", "renderFact", "renderUsdLimit"])],
 	["src/core/running-build.ts", new Set(["registerRunningBuild", "pendingInstalledVersion"])],
+	// The exact loaded build, so a remote node's GUI is driven by this client only when both builds agree.
+	["src/core/build-info.ts", new Set(["runningBuildId"])],
 	["src/engine/acp/transport.ts", new Set(["createStdioTransport", "AcpJsonRpcTransport"])],
 	["src/engine/acp/errors.ts", new Set(["AcpProcessError", "AcpTimeoutError", "AcpRequestError", "AcpProtocolError"])],
 	["src/engine/acp/types.ts", new Set(["*"])],

@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -5,7 +6,7 @@ import { API_VERSION, APP_VERSION } from "../contracts/meta.js";
 import { openapi } from "../contracts/openapi.js";
 import { isPagePath } from "../contracts/pages.js";
 import { routes } from "../contracts/routes.js";
-import { getVersionInfo, pendingInstalledVersion, resolvePackageRoot } from "./clio/http-shims.js";
+import { getVersionInfo, pendingInstalledVersion, resolvePackageRoot, runningBuildId } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
@@ -102,6 +103,8 @@ export function createApp(options: {
 		desktopManaged: options.desktopManaged?.() ?? false,
 		idle: options.idle(),
 		bundledDocsPath: join(resolvePackageRoot(), "docs"),
+		host: hostname(),
+		build: runningBuildId,
 	}));
 	register(app, hub, routes.openapi, () => openapi());
 	register(app, hub, routes.events, ({ query }, context) => events(context, hub, query.after));

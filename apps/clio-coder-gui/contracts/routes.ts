@@ -49,7 +49,7 @@ import {
 	LibraryPlanRequest,
 	LibraryVerifiers,
 } from "./library.js";
-import { MachineMutation, Machines } from "./machines.js";
+import { MachineAttachment, MachineAttachments, MachineId, MachineMutation, Machines } from "./machines.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
@@ -158,6 +158,20 @@ export const routes = {
 		body: MachineMutation,
 		response: Accepted,
 		summary: "Register, remove, or explicitly check an SSH node through a serial operation.",
+	}),
+	machineAttachments: defineRoute({
+		...get,
+		path: "/api/machines/attachments",
+		response: MachineAttachments,
+		summary: "Registered SSH nodes with the state of this app's attachment to each node's own GUI.",
+	}),
+	machineAttach: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/machines/:id/attach",
+		params: Type.Object({ id: MachineId }, { additionalProperties: false }),
+		response: MachineAttachment,
+		summary: "Start or resume this app's attachment to the node's own GUI over SSH, answering the current state.",
 	}),
 	setupStatus: defineRoute({
 		...get,

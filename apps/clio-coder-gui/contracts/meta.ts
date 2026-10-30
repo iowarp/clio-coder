@@ -20,6 +20,10 @@ export const Meta = Type.Object(
 		idle: Type.Boolean(),
 		/** Fixed installed reference root; no arbitrary file reads are exposed. */
 		bundledDocsPath: Type.String(),
+		/** The name of the machine the server runs on. A view of a remote node is labelled with it. */
+		host: Type.String(),
+		/** The exact build the server loaded, or null when it runs from source. One client drives two servers only when their builds agree. */
+		build: Type.Union([Type.String(), Type.Null()]),
 	},
 	{ additionalProperties: false },
 );

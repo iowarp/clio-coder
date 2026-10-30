@@ -483,6 +483,153 @@
 				}
 			}
 		},
+		"/api/machines/attachments": {
+			"get": {
+				"operationId": "machineAttachments",
+				"summary": "Registered SSH nodes with the state of this app's attachment to each node's own GUI.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["attachments"],
+									"properties": {
+										"attachments": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/Object_attempt_detail_host_2b3ea260"
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/machines/{id}/attach": {
+			"post": {
+				"operationId": "machineAttach",
+				"summary": "Start or resume this app's attachment to the node's own GUI over SSH, answering the current state.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^(?!local$)[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Object_attempt_detail_host_2b3ea260"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/setup": {
 			"get": {
 				"operationId": "setupStatus",
@@ -16994,7 +17141,9 @@
 										"epoch",
 										"pwa",
 										"idle",
-										"bundledDocsPath"
+										"bundledDocsPath",
+										"host",
+										"build"
 									],
 									"properties": {
 										"clio": {
@@ -17067,6 +17216,19 @@
 										},
 										"bundledDocsPath": {
 											"type": "string"
+										},
+										"host": {
+											"type": "string"
+										},
+										"build": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
 										}
 									},
 									"additionalProperties": false
@@ -20270,6 +20432,34 @@
 							},
 							"type": {
 								"type": "string",
+								"const": "machine.attach"
+							},
+							"payload": {
+								"$ref": "#/components/schemas/Object_attempt_detail_host_2b3ea260"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
 								"const": "app.launch"
 							},
 							"payload": {
@@ -21381,6 +21571,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_attempt_detail_host_2b3ea260": {
+				"type": "object",
+				"required": ["id", "host", "state", "since", "detail", "attempt", "retryAt", "remote"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_5788f5fd"
+				},
+				"additionalProperties": false
+			},
 			"Object_attempts_calls_dispositions_af4b7186": {
 				"type": "object",
 				"required": ["calls", "attempts", "dispositions"],
@@ -21957,6 +22155,29 @@
 				"required": ["briefingBytes", "worker", "project"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_705d2e6b"
+				},
+				"additionalProperties": false
+			},
+			"Object_build_clio_host_f1810918": {
+				"type": "object",
+				"required": ["clio", "build", "host"],
+				"properties": {
+					"clio": {
+						"type": "string"
+					},
+					"build": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"host": {
+						"type": "string"
+					}
 				},
 				"additionalProperties": false
 			},
@@ -26837,6 +27058,48 @@
 					"$ref": "#/components/schemas/Union_aa0baad3"
 				}
 			},
+			"Shape_5788f5fd": {
+				"id": {
+					"type": "string",
+					"pattern": "^(?!local$)[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+				},
+				"host": {
+					"type": "string"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_9440a4a5"
+				},
+				"since": {
+					"type": "string"
+				},
+				"detail": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"retryAt": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"remote": {
+					"$ref": "#/components/schemas/Union_1025c694"
+				}
+			},
 			"Shape_58cf6ac5": {
 				"runId": {
 					"type": "string",
@@ -29868,6 +30131,16 @@
 					}
 				]
 			},
+			"Union_1025c694": {
+				"anyOf": [
+					{
+						"type": "null"
+					},
+					{
+						"$ref": "#/components/schemas/Object_build_clio_host_f1810918"
+					}
+				]
+			},
 			"Union_13e141e9": {
 				"anyOf": [
 					{
@@ -30909,6 +31182,30 @@
 					},
 					{
 						"type": "null"
+					}
+				]
+			},
+			"Union_9440a4a5": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "detached"
+					},
+					{
+						"type": "string",
+						"const": "connecting"
+					},
+					{
+						"type": "string",
+						"const": "ready"
+					},
+					{
+						"type": "string",
+						"const": "failed"
+					},
+					{
+						"type": "string",
+						"const": "version-mismatch"
 					}
 				]
 			},
