@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,6 +12,12 @@ import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
 import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import { openCallJournal, readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
+import {
+	readTelemetryObject,
+	storeTelemetryObject,
+	telemetryCommitment,
+	telemetryPromptStructure,
+} from "../../src/domains/observability/objects.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 
@@ -284,4 +290,48 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	]);
 	deepStrictEqual(facts.coverage, { measured: 1, estimated: 0, unknown: 1 });
 	strictEqual(facts.absentCount, 1);
+});
+
+test("session objects retain canonical redacted preimages, distinguish commitments, and reject damaged objects", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "telemetry-objects-"));
+	try {
+		const secret = "fake-password-value-for-test";
+		const schemas = [{ name: "fixture", parameters: { password: secret, type: "object" } }];
+		const ref = await storeTelemetryObject(directory, "tool-schemas", schemas);
+		deepStrictEqual(
+			await storeTelemetryObject(directory, "tool-schemas", [
+				{ parameters: { type: "object", password: secret }, name: "fixture" },
+			]),
+			ref,
+		);
+		strictEqual(ref.label, "resolvable");
+		const path = join(directory, "objects", `${ref.id}.json`);
+		const bytes = await readFile(path, "utf8");
+		ok(!bytes.includes(secret));
+		strictEqual((await stat(path)).mode & 0o777, 0o600);
+		deepStrictEqual(await readTelemetryObject(directory, ref), { kind: "resolved", value: JSON.parse(bytes) });
+		const commitment = telemetryCommitment("briefing", { text: "private task" });
+		deepStrictEqual(await readTelemetryObject(directory, commitment), { kind: "commitment" });
+		strictEqual((await readdir(join(directory, "objects"))).length, 1);
+		await writeFile(path, "{}");
+		await rejects(readTelemetryObject(directory, ref), /digest mismatch/);
+		await rejects(storeTelemetryObject(directory, "tool-schemas", schemas), /corrupt preimage/);
+		await rm(path);
+		deepStrictEqual(await readTelemetryObject(directory, ref), { kind: "missing" });
+		await symlink(join(directory, "nonexistent"), path);
+		await rejects(readTelemetryObject(directory, ref));
+		await rm(path);
+		const compiled = {
+			systemPrompt: "private prompt",
+			sections: [{ id: "identity", tokenEstimate: 5, contentHash: "a".repeat(64) }],
+			fragmentManifest: [{ id: "identity.base", contentHash: "b".repeat(64), dynamic: false, body: "private prompt" }],
+		};
+		const structure = telemetryPromptStructure(compiled);
+		const prompt = await storeTelemetryObject(directory, "prompt-structure", structure);
+		deepStrictEqual(await readTelemetryObject(directory, prompt), { kind: "resolved", value: structure });
+		await rejects(storeTelemetryObject(directory, "prompt-structure", compiled), /unsupported fields/);
+		await rejects(storeTelemetryObject(directory, "tool-schemas", { invalid: Number.NaN }), /non-finite/);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
 });

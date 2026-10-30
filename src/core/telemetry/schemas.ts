@@ -30,6 +30,7 @@ export const ObjectRefSchema = Type.Object(
 	},
 	closed,
 );
+export type ObjectRef = Static<typeof ObjectRefSchema>;
 
 export const UsageSchema = Type.Object(
 	{
