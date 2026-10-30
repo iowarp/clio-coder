@@ -59,7 +59,10 @@ export function importLegacySession(
 	} = {},
 ): LegacyImport {
 	const result: LegacyImport = { records: [], aggregates: 0, invalid: 0 };
-	const fallback = options.costProvenance ?? "unknown";
+	// A ledger from before cost provenance (pre-0.2.9) stored only the cost Clio derived from catalog rates: a nonzero one
+	// reads as estimated, as 0.6.5 read it, and a placeholder zero stays unknown (#434).
+	const fallback = (usd: unknown): CostProvenance =>
+		options.costProvenance ?? (typeof usd === "number" && Number.isFinite(usd) && usd > 0 ? "estimated" : "unknown");
 	let target = "unknown";
 	let model = "unknown";
 	let userTurn: string | undefined;
@@ -93,7 +96,10 @@ export function importLegacySession(
 		const usage = message.usage as Record<string, unknown> | null | undefined;
 		const settled = {
 			...started,
-			...callSettlementFromMessage(message, provenance(usage?.costProvenance, fallback)),
+			...callSettlementFromMessage(
+				message,
+				provenance(usage?.costProvenance, fallback((usage?.cost as { total?: unknown } | undefined)?.total)),
+			),
 			target: { ...started.target, reportedModel: reportedModelFromMessage(message) },
 			stages: { settle: null },
 		};
