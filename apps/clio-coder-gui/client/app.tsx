@@ -10,7 +10,7 @@ import { type ConnectionState, subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
 import { Icon } from "./design/icons.js";
 import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation.js";
-import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
+import { dismissAll, LiveRegions, NoticeToasts, useNotices } from "./design/notifications.js";
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { LEFT_SIDEBAR, RIGHT_SIDEBAR, Splitter } from "./design/Splitter.js";
@@ -19,8 +19,9 @@ import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
 import { ASIDE_DOCK_QUERY, toggleAside, useAsideExpanded } from "./shell/aside-state.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
+import { SessionControlNotice, SessionControlsProvider, useSessionCommands } from "./shell/SessionControls.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
-import { isHeld, isSettingsPath, sessionIdFromPath, taskRows } from "./shell/shell-model.js";
+import { isHeld, isSettingsPath, sessionIdFromPath, taskRows, taskTitle } from "./shell/shell-model.js";
 import { TaskSidebar } from "./shell/TaskSidebar.js";
 import { rememberedWorkspace, rememberWorkspace, useSessionOverview, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
@@ -66,7 +67,9 @@ function useDocked(): boolean {
 export function App({ client }: { client: Client }) {
 	return (
 		<div className="app-layout">
-			<Workbench client={client} />
+			<SessionControlsProvider client={client}>
+				<Workbench client={client} />
+			</SessionControlsProvider>
 			<NoticeToasts />
 		</div>
 	);
@@ -75,6 +78,7 @@ export function App({ client }: { client: Client }) {
 function Workbench({ client }: { client: Client }) {
 	useApplyTheme();
 	const queries = useQueryClient();
+	const { controls, requestClose } = useSessionCommands();
 	const navigate = useNavigate();
 	const location = useLocation();
 	const phone = usePhone();
@@ -137,6 +141,7 @@ function Workbench({ client }: { client: Client }) {
 		queryFn: () => client.call(routes.session, { params: { id: sessionId ?? "" }, query: {}, body: {} }),
 		select: (value) => ({
 			workspaceId: value.workspaceId,
+			title: taskTitle(value),
 			state: value.state,
 			runningTurnId: value.turns.at(-1)?.status === "running" ? (value.turns.at(-1)?.id ?? null) : null,
 		}),
@@ -299,32 +304,23 @@ function Workbench({ client }: { client: Client }) {
 					openTask,
 					openWindow,
 					cancelTurn: (turnId) => {
-						if (sessionId === null) return;
-						void client
-							.call(routes.cancelTurn, { params: { id: sessionId, turnId }, query: {}, body: {} })
-							.then(() => queries.invalidateQueries({ queryKey: ["session", sessionId] }))
-							.catch(reportProblem);
+						if (sessionId === null || !snapshot) return;
+						controls.start({ id: sessionId, ...snapshot, currentTurnId: turnId }, "stop");
 					},
 					closeSession: () => {
-						if (sessionId === null) return;
-						void client
-							.call(routes.closeSession, { params: { id: sessionId }, query: {}, body: {} })
-							.then(() => {
-								void queries.invalidateQueries({ queryKey: ["session", sessionId] });
-								void queries.invalidateQueries({ queryKey: ["sessions"] });
-							})
-							.catch(reportProblem);
+						if (sessionId === null || !snapshot) return;
+						requestClose({ id: sessionId, ...snapshot, currentTurnId: runningTurnId });
 					},
 				},
 			),
 		[
-			client,
 			navigate,
 			notices.length,
-			queries,
 			runningTurnId,
 			sessionId,
-			snapshot?.state,
+			snapshot,
+			controls,
+			requestClose,
 			revealSidebar,
 			startTask,
 			openWorkspace,
@@ -453,6 +449,7 @@ function Workbench({ client }: { client: Client }) {
 				</div>
 				<main id="main" className="wb-main" data-mode={mode} tabIndex={-1}>
 					{pendingNotice}
+					{authed ? <SessionControlNotice connected={connection === "Connected"} /> : null}
 					{!client.token || refused ? (
 						<Reconnect refused={refused} />
 					) : meta.error ? (

@@ -25,6 +25,8 @@ import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
+import { useSessionCommands } from "../shell/SessionControls.js";
+import { taskTitle } from "../shell/shell-model.js";
 import { AutonomyPill } from "./AutonomyPill.js";
 import { persistAttachments, savedAttachments } from "./attachment-drafts.js";
 import { readAttachment } from "./attachment-image.js";
@@ -398,12 +400,21 @@ export const Composer = memo(function Composer({
 		mutationFn: () => client.call(routes.interruptSession, { ...params, body: {} }),
 		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
 	});
-	const stop = useMutation({
-		meta: { errorSurface: "inline" },
-		mutationFn: () =>
-			client.call(routes.cancelTurn, { params: { id: sessionId, turnId: runningTurnId ?? "" }, query: {}, body: {} }),
-		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
-	});
+	const { controls } = useSessionCommands();
+	const control = controls.records.find((row) => row.sessionId === sessionId && row.stage !== "complete");
+	const stopTurn = () => {
+		if (!runningTurnId) return;
+		const snapshot = queries.getQueryData<SessionSnapshot>(["session", sessionId]);
+		controls.start(
+			{
+				id: sessionId,
+				workspaceId,
+				title: snapshot ? taskTitle(snapshot) : "Conversation",
+				currentTurnId: runningTurnId,
+			},
+			"stop",
+		);
+	};
 	const command = useMutation({
 		meta: { errorSurface: "inline" },
 		onSettled: () => {
@@ -430,7 +441,7 @@ export const Composer = memo(function Composer({
 		},
 	});
 	const runCommand = (plan: { request: CommandRequest; description: string }, sent: string | null) => {
-		if (commandSending.current || command.isPending || contextRunning) return;
+		if (commandSending.current || command.isPending || contextRunning || control) return;
 		commandSending.current = true;
 		setSlashError(null);
 		command.mutate({
@@ -552,12 +563,10 @@ export const Composer = memo(function Composer({
 	// What the engine said about one turn's interrupt, stop or queue is not a fact about the next
 	// turn: without this an interrupt refusal stayed under the composer for the rest of the session.
 	const resetInterrupt = interrupt.reset;
-	const resetStop = stop.reset;
 	const resetDrain = drain.reset;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the turn id is the trigger; the resets are stable.
 	useEffect(() => {
 		resetInterrupt();
-		resetStop();
 		resetDrain();
 		setQueueNote(null);
 	}, [runningTurnId]);
@@ -573,6 +582,7 @@ export const Composer = memo(function Composer({
 		sessionState,
 		turnRunning: running,
 		sending: send.isPending,
+		...(control && control.stage !== "complete" ? { sessionControl: control.stage } : {}),
 		steering,
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
 		shell: capabilities.data?.shell !== undefined,
@@ -641,7 +651,7 @@ export const Composer = memo(function Composer({
 	// Recomputed from the store rather than closed over, so a keystroke that
 	// lands between render and keydown still sends the text the operator sees.
 	const submit = () => {
-		if (sending.current || attachmentReads.current > 0 || (contextRunning && !running)) return;
+		if (sending.current || attachmentReads.current > 0 || (contextRunning && !running) || control) return;
 		const current = store.snapshot();
 		// `@agent text` guides a running worker instead of the main turn. With no worker running the
 		// line is an ordinary message, and its `@word` an ordinary file reference.
@@ -705,7 +715,7 @@ export const Composer = memo(function Composer({
 	};
 
 	const notice =
-		noticeForError(send.error ?? interrupt.error ?? stop.error ?? drain.error) ??
+		noticeForError(send.error ?? interrupt.error ?? drain.error) ??
 		queueNote ??
 		noticeForRefusal(send.data) ??
 		noticeForRefusal(interrupt.data);
@@ -1065,7 +1075,7 @@ export const Composer = memo(function Composer({
 						// Esc with nothing open stops the turn, as it does in the terminal, on the second press.
 						if (event.key === "Escape" && plain && running && !layerOwned && !optionsOpen) {
 							event.preventDefault();
-							if (stopArmed && !stop.isPending) stop.mutate();
+							if (stopArmed && !control) stopTurn();
 							setStopArmed(!stopArmed);
 							return;
 						}
@@ -1256,13 +1266,15 @@ export const Composer = memo(function Composer({
 							<button
 								className="composer__icon-button composer__stop composer__stop--live"
 								type="button"
-								disabled={stop.isPending}
-								onClick={() => stop.mutate()}
-								aria-label={stop.isPending ? "Stopping…" : "Stop turn"}
+								disabled={!!control}
+								onClick={() => stopTurn()}
+								aria-label={control ? (control.stage === "unresolved" ? "Review stop request" : "Stopping…") : "Stop turn"}
 								title="End this turn now. Nothing further is run."
 							>
 								<Icon name="stop" />
-								<span aria-hidden="true">{stop.isPending ? "Stopping" : "Stop"}</span>
+								<span aria-hidden="true">
+									{control ? (control.stage === "unresolved" ? "Check request" : "Stopping") : "Stop"}
+								</span>
 							</button>
 						) : null}
 						{!running || draft.text.trim() !== "" ? (
@@ -1294,7 +1306,7 @@ export const Composer = memo(function Composer({
 						)}
 					</p>
 				) : null}
-				{intent.kind === "blocked" && draft.text.trim() !== "" ? (
+				{intent.kind === "blocked" && draft.text.trim() !== "" && intent.reason !== delivery.detail ? (
 					<p className="composer__blocked" role="status">
 						{intent.reason}
 						{running && steeringUnavailable === "failed" ? (
@@ -1396,7 +1408,7 @@ export const Composer = memo(function Composer({
 						void capabilities.refetch();
 						if (capabilities.data?.commands) void commandCatalog.refetch();
 					}}
-					busy={command.isPending || contextRunning || sessionState !== "open"}
+					busy={command.isPending || contextRunning || sessionState !== "open" || !!control}
 					running={running}
 					formDrafts={actionDrafts}
 					onFormDraft={(id, fields) => setActionDrafts((drafts) => ({ ...drafts, [id]: fields }))}
@@ -1411,7 +1423,7 @@ export const Composer = memo(function Composer({
 						pane?.show("changes");
 					}}
 					onRun={(plan) => {
-						if (command.isPending || contextRunning || sessionState !== "open") return;
+						if (command.isPending || contextRunning || sessionState !== "open" || control) return;
 						runCommand(plan, null);
 						setActionsOpen(false);
 					}}
@@ -1422,7 +1434,7 @@ export const Composer = memo(function Composer({
 					action={dialog}
 					client={client}
 					sessionId={sessionId}
-					sessionOpen={sessionState === "open"}
+					sessionOpen={sessionState === "open" && !control}
 					capabilities={capabilities.data}
 					running={running}
 					settledTurns={settledTurns}

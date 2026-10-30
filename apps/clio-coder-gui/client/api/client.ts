@@ -23,6 +23,7 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 	let epoch: string | undefined;
 	return {
 		token,
+		currentEpoch: () => epoch ?? null,
 		/** The event stream establishes which server may answer reads in this document (GUI-03). */
 		adoptEpoch(value: string) {
 			epoch = value;

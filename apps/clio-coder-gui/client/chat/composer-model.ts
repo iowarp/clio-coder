@@ -347,6 +347,8 @@ export interface ComposerSituation {
 	readonly turnRunning: boolean;
 	/** A send this composer already put on the wire and has not settled. */
 	readonly sending: boolean;
+	/** A retained stop or close must settle before the session accepts another command. */
+	readonly sessionControl?: "sending" | "unresolved";
 	readonly steering: SteeringAffordances;
 	/** Absent when the agent's capability answer is available. */
 	readonly steeringUnavailable?: "checking" | "failed";
@@ -410,6 +412,7 @@ function tooLong(text: string, characters: number, bytes: number): string | null
  */
 export function submitIntent(draft: Draft, situation: ComposerSituation): SubmitIntent {
 	if (situation.sending) return blocked("The previous send is still on the wire.");
+	if (situation.sessionControl) return blocked(controlMessage(situation.sessionControl));
 	if (situation.sessionState !== "open")
 		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.");
 	const text = draft.text.trim();
@@ -940,6 +943,12 @@ export function composerDelivery(
 	contextRunning: boolean,
 	readingAttachments: boolean,
 ): { label: string; detail: string; tone: "neutral" | "running" | "warn" } {
+	if (situation.sessionControl)
+		return {
+			label: situation.sessionControl === "unresolved" ? "Review session request" : "Session request",
+			detail: controlMessage(situation.sessionControl),
+			tone: situation.sessionControl === "unresolved" ? "warn" : "running",
+		};
 	if (situation.sessionState !== "open")
 		return {
 			label: situation.sessionState === "parked" ? "Paused" : "Unavailable",
@@ -981,4 +990,10 @@ export function composerDelivery(
 				detail: "Send adds direction between tool calls. Stop ends the current turn.",
 				tone: "running",
 			};
+}
+
+function controlMessage(stage: "sending" | "unresolved"): string {
+	return stage === "sending"
+		? "A session control is being sent. Your draft is kept until it settles."
+		: "Check the session request above before sending more work. Your draft is kept.";
 }

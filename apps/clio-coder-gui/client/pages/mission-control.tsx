@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useMemo, useRef } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionOverviewItem } from "../../contracts/session-overview.js";
@@ -9,16 +9,16 @@ import { formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
-import { Dialog } from "../interaction/Dialog.js";
 import { InventoryMore } from "../interaction/InventoryMore.js";
 import { useInventoryWindow } from "../interaction/use-inventory-window.js";
+import { useSessionCommands } from "../shell/SessionControls.js";
 import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useSessionOverview, useTaskActions } from "../shell/tasks.js";
 import { useSessionIntent } from "../shell/use-session-intent.js";
 import type { SessionFilter } from "./mission-control-model.js";
 import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
-import { type SessionControls, useSessionControls } from "./session-control-actions.js";
+import type { SessionControls } from "./session-control-actions.js";
 import "./mission-control.css";
 
 const FILTER_NAMES: Readonly<Record<SessionFilter, string>> = {
@@ -53,7 +53,7 @@ export function MissionControl({ client }: { client: Client }) {
 			{ replace: true },
 		);
 	const overview = useSessionOverview(client);
-	const controls = useSessionControls(client);
+	const { controls } = useSessionCommands();
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const items = overview.data?.sessions;
 	const projects = workspaces.data;
@@ -150,7 +150,6 @@ export function MissionControl({ client }: { client: Client }) {
 							</small>
 						</div>
 					</div>
-					<ControlFeedback controls={controls} connected={connected} />
 					<div className="mission__toolbar">
 						<label className="mission__search">
 							<Icon name="search" />
@@ -247,87 +246,6 @@ export function MissionControl({ client }: { client: Client }) {
 	);
 }
 
-function ControlFeedback({ controls, connected }: { controls: SessionControls; connected: boolean }) {
-	const recovery = useRef<HTMLElement>(null);
-	const unresolvedKey = controls.records
-		.filter((row) => row.stage === "unresolved")
-		.map((row) => row.key)
-		.join(":");
-	useEffect(() => {
-		if (!unresolvedKey) return;
-		let landing = 0;
-		const frame = requestAnimationFrame(() => {
-			landing = requestAnimationFrame(() => recovery.current?.focus());
-		});
-		return () => {
-			cancelAnimationFrame(frame);
-			cancelAnimationFrame(landing);
-		};
-	}, [unresolvedKey]);
-	if (!controls.records.length && !controls.notice) return null;
-	return (
-		<section className="mission-controls" aria-label="Session control results" ref={recovery} tabIndex={-1}>
-			{controls.notice ? <p role="alert">{controls.notice}</p> : null}
-			{controls.records.map((record) => (
-				<div key={record.key} className="mission-controls__record" data-state={record.stage}>
-					<div>
-						<h3>
-							{record.action === "stop" ? "Stop turn" : "Close session"} · {record.title}
-						</h3>
-						<p role={record.stage === "unresolved" ? "alert" : "status"}>{record.message}</p>
-						{record.stage === "unresolved" ? (
-							<p className="mission-controls__hint">
-								The outcome is unconfirmed. Recovery stays with this session, even when you change filters or leave this page.
-							</p>
-						) : null}
-					</div>
-					<div className="mission-controls__actions">
-						<Link to={`/sessions/${record.sessionId}`}>Open session</Link>
-						{record.stage !== "sending" ? (
-							<button type="button" disabled={!connected} onClick={() => void controls.inspect(record.key)}>
-								Refresh session state
-							</button>
-						) : null}
-						{record.stage === "complete" ? (
-							<button type="button" onClick={() => controls.dismiss(record.key)}>
-								Dismiss
-							</button>
-						) : null}
-						{record.stage === "unresolved" ? (
-							<button type="button" disabled={!connected || record.restarted} onClick={() => controls.retry(record.key)}>
-								Retry original {record.action}
-							</button>
-						) : null}
-					</div>
-					{record.stage === "unresolved" ? (
-						<details>
-							<summary>Review control tracking</summary>
-							<p>
-								Session <code>{record.sessionId}</code>
-								{record.turnId ? (
-									<>
-										{" "}
-										· Original turn <code>{record.turnId}</code>
-									</>
-								) : null}
-								.
-							</p>
-							<p>
-								Retries retain the original request key. After a server restart, replay is refused. Forgetting tracking does not
-								cancel work; review this session's records before starting another control.
-							</p>
-							<Link to={`/workspaces/${record.workspaceId}/sessions`}>Review project history</Link>{" "}
-							<button type="button" onClick={() => controls.forget(record.key)}>
-								I reviewed the records; forget tracking
-							</button>
-						</details>
-					) : null}
-				</div>
-			))}
-		</section>
-	);
-}
-
 const SessionCard = memo(function SessionCard({
 	client,
 	controls,
@@ -341,7 +259,7 @@ const SessionCard = memo(function SessionCard({
 	projectName: string;
 	connected: boolean;
 }) {
-	const [confirm, setConfirm] = useState(false);
+	const { requestClose } = useSessionCommands();
 	const intent = useSessionIntent(client, item.id, connected);
 	const control = controls.records.find((record) => record.sessionId === item.id);
 	const state = ACTIVITY[item.activity];
@@ -421,7 +339,7 @@ const SessionCard = memo(function SessionCard({
 							disabled={!connected || busy}
 							aria-label={`Close session ${item.title}`}
 							title="Close this session"
-							onClick={() => setConfirm(true)}
+							onClick={() => requestClose(item)}
 						>
 							<Icon name="close" />
 						</button>
@@ -432,29 +350,6 @@ const SessionCard = memo(function SessionCard({
 					</Link>
 				</div>
 			</footer>
-			{confirm ? (
-				<Dialog title="Close this session?" eyebrow="Session control" onClose={() => setConfirm(false)}>
-					<p>
-						<strong>{item.title}</strong>
-					</p>
-					<p>This releases its runtime and cancels any running request.</p>
-					<div className="mission__confirm">
-						<button type="button" onClick={() => setConfirm(false)}>
-							Keep open
-						</button>
-						<button
-							type="button"
-							disabled={!connected || busy}
-							onClick={() => {
-								controls.start(item, "close");
-								setConfirm(false);
-							}}
-						>
-							Close session
-						</button>
-					</div>
-				</Dialog>
-			) : null}
 		</article>
 	);
 });

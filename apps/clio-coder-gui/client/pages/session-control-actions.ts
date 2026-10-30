@@ -1,11 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { routes } from "../../contracts/routes.js";
-import type { SessionOverviewItem } from "../../contracts/session-overview.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
-import type { SessionControlRequest } from "./session-control-model.js";
+import type { SessionControlRequest, SessionControlTarget } from "./session-control-model.js";
 import { createSessionControlStore, observedControlOutcome } from "./session-control-model.js";
 
 const clients = new WeakMap<Client, ReturnType<typeof createSessionControlStore>>();
@@ -21,6 +20,7 @@ export function useSessionControls(client: Client) {
 		return value;
 	}, [client]);
 	const records = useSyncExternalStore(store.subscribe, store.read, store.read);
+	const currentEpoch = () => client.currentEpoch() ?? queries.getQueryData<{ epoch: string }>(["meta"])?.epoch ?? null;
 	const refreshLists = () => {
 		for (const key of ["session-overview", "sessions", "session-history"])
 			void queries.invalidateQueries({ queryKey: [key] });
@@ -77,7 +77,8 @@ export function useSessionControls(client: Client) {
 	return {
 		records,
 		notice,
-		start: (item: SessionOverviewItem, action: "stop" | "close") => {
+		currentEpoch,
+		start: (item: SessionControlTarget, action: "stop" | "close", expectedEpoch: string | null = currentEpoch()) => {
 			if (action === "stop" && !item.currentTurnId) return;
 			const request: SessionControlRequest = {
 				sessionId: item.id,
@@ -86,7 +87,7 @@ export function useSessionControls(client: Client) {
 				action,
 				turnId: action === "stop" ? item.currentTurnId : null,
 				key: crypto.randomUUID(),
-				epoch: null,
+				epoch: expectedEpoch,
 				stage: "sending",
 				message: "Checking Clio before submitting…",
 				restarted: false,
@@ -128,6 +129,7 @@ export function useSessionControls(client: Client) {
 		forget: (key: string) => {
 			if (store.read().find((row) => row.key === key)?.stage === "unresolved") store.remove(key);
 		},
+		clearNotice: () => setNotice(null),
 	};
 }
 export type SessionControls = ReturnType<typeof useSessionControls>;

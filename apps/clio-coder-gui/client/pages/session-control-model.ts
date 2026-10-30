@@ -1,5 +1,12 @@
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 
+export type SessionControlTarget = Readonly<{
+	id: string;
+	workspaceId: string;
+	title: string;
+	currentTurnId: string | null;
+}>;
+
 export type SessionControlRequest = Readonly<{
 	sessionId: string;
 	workspaceId: string;

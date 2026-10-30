@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
@@ -42,6 +42,7 @@ import { useFollowLatest } from "../render/follow-latest.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
+import { useSessionCommands } from "../shell/SessionControls.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberedWorkspace, useRenameTask } from "../shell/tasks.js";
@@ -156,6 +157,8 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	useShortcut("agents", () => pane.show("agents", ids.pane));
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
+	const { controls, requestClose } = useSessionCommands();
+	const controlling = controls.records.some((row) => row.sessionId === id && row.stage !== "complete");
 	const input = { params: { id }, query: {}, body: {} };
 	const session = useQuery(sessionQuery(client, id));
 	// A saved task this server has not opened answers not_found. Only that answer starts the search for
@@ -187,14 +190,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		queryFn: () => client.call(routes.sessionSettings, input),
 		enabled: session.data?.state === "open" && capabilities.data?.settings?.get_safe === true,
 	});
-	const close = useMutation({
-		mutationFn: () => client.call(routes.closeSession, input),
-		onSuccess: (snapshot) => {
-			queries.setQueryData(["session", id], sessionBuffer(id).snapshot(snapshot));
-			void queries.invalidateQueries({ queryKey: ["sessions"] });
-			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
-		},
-	});
 	const resume = useMutation({
 		mutationFn: (workspaceId: string) =>
 			client.call(routes.loadSession, { params: { id }, query: {}, body: { workspaceId } }),
@@ -206,7 +201,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
 		},
 	});
-	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
 	const renameTask = useRenameTask(client);
 	const [renaming, setRenaming] = useState(false);
 	const [outline, setOutline] = useState(false);
@@ -313,7 +307,12 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					{resume.error ? <p>Could not resume this task. {resume.error.message}</p> : null}
 					<div className="task-state__actions">
 						{found ? (
-							<button type="button" className="primary" disabled={resume.isPending} onClick={() => resume.mutate(found.id)}>
+							<button
+								type="button"
+								className="primary"
+								disabled={resume.isPending || controlling}
+								onClick={() => resume.mutate(found.id)}
+							>
 								{resume.isPending ? "Resuming…" : "Resume task"}
 							</button>
 						) : located.data ? (
@@ -437,7 +436,12 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
 								All tasks in {workspaceName}
 							</MenuItem>
-							<MenuItem icon="close" tone="danger" disabled={!canClose || close.isPending} onClick={closeSession}>
+							<MenuItem
+								icon="close"
+								tone="danger"
+								disabled={!canClose || controlling}
+								onClick={() => requestClose({ id, workspaceId: snapshot.workspaceId, title, currentTurnId: null })}
+							>
 								Close task
 							</MenuItem>
 						</Menu>
@@ -521,7 +525,11 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								tone="quiet"
 								title="Paused. You can read the conversation below."
 								action={
-									<button type="button" disabled={resume.isPending} onClick={() => resume.mutate(snapshot.workspaceId)}>
+									<button
+										type="button"
+										disabled={resume.isPending || controlling}
+										onClick={() => resume.mutate(snapshot.workspaceId)}
+									>
 										{resume.isPending ? "Resuming…" : "Resume task"}
 									</button>
 								}
@@ -598,7 +606,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						<JumpToLatest follow={follow} />
 					</div>
 					<div className="conversation__dock">
-						{close.error ? <p role="alert">{close.error.message}</p> : null}
 						{contextView && (contextView.live || contextView.id !== dismissedContext) ? (
 							<ContextWorkCard
 								key={contextView.id}

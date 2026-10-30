@@ -48,7 +48,7 @@ export function TaskSidebar({
 	onSearch: () => void;
 	onToggle: () => void;
 	onHelp: () => void;
-	/** Called after any navigation so a mobile drawer can close itself. */
+	/** Called after navigation to finish any open navigation interaction. */
 	onNavigate: () => void;
 }) {
 	const theme = useTheme();
@@ -395,7 +395,7 @@ function TaskItem({
 	const [confirming, setConfirming] = useState(false);
 	const age = shortAge(row.at, now);
 	const label = STATE_LABELS[row.state];
-	const busy = actions.resuming === row.id || actions.closing === row.id;
+	const busy = actions.resuming === row.id || actions.controlling(row.id);
 	const glyph =
 		row.state === "working" || row.state === "starting" || actions.resuming === row.id ? (
 			<ClioPulse size={PULSE_SIZE.row} />
@@ -488,7 +488,13 @@ function TaskItem({
 							Open in new window
 						</MenuItem>
 						{row.open ? (
-							<MenuItem icon="close" disabled={busy || working} onClick={() => actions.close(row.id)}>
+							<MenuItem
+								icon="close"
+								disabled={busy || working}
+								onClick={() =>
+									actions.close({ id: row.id, workspaceId: row.workspaceId, title: row.title, currentTurnId: null })
+								}
+							>
 								Close task
 							</MenuItem>
 						) : (
