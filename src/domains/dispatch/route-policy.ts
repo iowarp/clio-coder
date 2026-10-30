@@ -5,7 +5,7 @@
  */
 
 import type { AgentLatencyClass } from "../agents/spec.js";
-import type { RouteHistoryRecord } from "./route-history.js";
+import type { LegacyRouteHistoryRecord, RouteHistoryRecord } from "./route-history.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 
 export const ROUTE_POLICY_VERSION = "route-policy/4";
@@ -107,7 +107,7 @@ export interface RouteObservation {
 	queueWaitMs: number | null;
 }
 
-export function routeObservationFromHistory(record: RouteHistoryRecord): RouteObservation {
+export function routeObservationFromHistory(record: RouteHistoryRecord | LegacyRouteHistoryRecord): RouteObservation {
 	return {
 		qualityLabel: record.qualityLabel,
 		reliability: record.reliability,
@@ -115,7 +115,7 @@ export function routeObservationFromHistory(record: RouteHistoryRecord): RouteOb
 		completedCostUsd: record.completedCostUsd,
 		completedEndToEndMs: record.completedPhaseTiming?.totalEndToEndMs ?? null,
 		// v3 conflates missing cache measurements with misses; v4 separates them (#434).
-		cacheRead: record.cacheRead ? true : null,
+		cacheRead: record.version === 3 ? (record.cacheRead ? true : null) : record.cacheRead,
 		queueWaitMs: record.completedPhaseTiming?.queueWaitMs ?? null,
 	};
 }

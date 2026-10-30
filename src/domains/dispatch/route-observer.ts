@@ -48,6 +48,11 @@ function receiptHasUnknownCost(receipt: RunReceipt): boolean {
 	);
 }
 
+function receiptPricedCoverage(receipt: RunReceipt): "complete" | "partial" | "unknown" {
+	if (!receiptHasUnknownCost(receipt)) return "complete";
+	return (receipt.costSummary?.knownUsd ?? 0) > 0 ? "partial" : "unknown";
+}
+
 // ---------------------------------------------------------------------------
 // Route-history projection
 // ---------------------------------------------------------------------------
@@ -341,7 +346,8 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				// Records settled before the label existed take it from their receipt.
 				settled: record.settled ?? routeSettledLabel(subject.receipt),
 				qualityLabel: quality.label,
-				completedCostUsd: completed && !receiptHasUnknownCost(subject.receipt) ? record.completedCostUsd : null,
+				completedCostUsd: completed && !receiptHasUnknownCost(subject.receipt) ? subject.receipt.costUsd : null,
+				pricedCoverage: receiptPricedCoverage(subject.receipt),
 				completedPhaseTiming: completed ? record.completedPhaseTiming : null,
 				sourceDigests: quality.sourceDigests,
 			};
@@ -474,7 +480,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				};
 				samples?.record(realized.route, sample);
 				history.upsert({
-					version: 3,
+					version: 4,
 					receiptDigest: outcome.receipt.integrity.digest,
 					assignmentId: outcome.assignmentId ?? outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
 					route: realized.route,
@@ -498,8 +504,8 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 									totalEndToEndMs: outcome.phaseTiming.totalEndToEndMs,
 								}
 							: null,
-					// Keep v3 writable until nullable cache history ships in P1.12 (#434).
-					cacheRead: sample.cacheRead ?? false,
+					cacheRead: sample.cacheRead,
+					pricedCoverage: receiptPricedCoverage(outcome.receipt),
 					sourceDigests: outcome.quality.sourceDigests,
 					settledAt: outcome.receipt.endedAt,
 				});

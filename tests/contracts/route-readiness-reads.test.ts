@@ -138,6 +138,7 @@ describe("contracts/route readiness reads", () => {
 			completedCostUsd: 0.01,
 			completedPhaseTiming: null,
 			cacheRead: false,
+			pricedCoverage: "complete",
 			sourceDigests: [run.receipt.integrity.digest],
 			settledAt: "2026-06-25T12:00:05.000Z",
 		});
@@ -179,6 +180,7 @@ describe("contracts/route readiness reads", () => {
 				completedCostUsd: null,
 				completedPhaseTiming: null,
 				cacheRead: false,
+				pricedCoverage: "complete",
 				sourceDigests: [run.receipt.integrity.digest],
 				settledAt: "2026-06-25T12:00:05.000Z",
 			});
@@ -215,6 +217,7 @@ describe("contracts/route readiness reads", () => {
 			completedCostUsd: 0.01,
 			completedPhaseTiming: null,
 			cacheRead: false,
+			pricedCoverage: "complete",
 			sourceDigests: [run.receipt.integrity.digest],
 			settledAt: "2026-06-25T12:00:05.000Z",
 		});

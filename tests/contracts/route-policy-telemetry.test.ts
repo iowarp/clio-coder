@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { RouteHistoryRecord } from "../../src/domains/dispatch/route-history.js";
+import type { LegacyRouteHistoryRecord } from "../../src/domains/dispatch/route-history.js";
 import type { RouteObservation } from "../../src/domains/dispatch/route-policy.js";
 import {
 	DEFAULT_ROUTE_PRIOR,
@@ -50,7 +50,7 @@ describe("contracts/route telemetry", () => {
 	});
 
 	it("v3 cache false is ambiguous and contributes no miss to replayed affinity", () => {
-		const record: RouteHistoryRecord = {
+		const record: LegacyRouteHistoryRecord = {
 			version: 3,
 			receiptDigest: "receipt",
 			assignmentId: "assignment",

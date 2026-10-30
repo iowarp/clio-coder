@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { atomicWrite } from "../../engine/session.js";
 import { type ExecutionRole, isExecutionRole } from "./execution-role.js";
 import { type RouteCandidate, routeCapabilityKey, routeDriftGuard, routeDriftInvalidates } from "./route-decision.js";
 import type { RouteQualityLabel } from "./route-quality.js";
@@ -43,7 +43,7 @@ export interface RouteHistoryPhaseTiming {
 }
 
 export interface RouteHistoryRecord {
-	version: 3;
+	version: 4;
 	receiptDigest: string;
 	assignmentId: string;
 	route: RouteCandidate;
@@ -58,14 +58,22 @@ export interface RouteHistoryRecord {
 	completedCostUsd: number | null;
 	completedPhaseTiming: RouteHistoryPhaseTiming | null;
 	/** Whether the completed route consumed cache tokens for this exact identity. */
-	cacheRead: boolean;
+	cacheRead: boolean | null;
+	/** Whether pricing covers the whole run, only a known subtotal, or cannot be established (#434). */
+	pricedCoverage: "complete" | "partial" | "unknown";
 	sourceDigests: string[];
 	settledAt: string;
 }
 
+export type LegacyRouteHistoryRecord = Omit<RouteHistoryRecord, "version" | "cacheRead" | "pricedCoverage"> & {
+	version: 3;
+	cacheRead: boolean;
+};
+
 export interface RouteHistoryStore {
 	recordsFor(route: RouteCandidate): ReadonlyArray<RouteHistoryRecord>;
 	all(): ReadonlyArray<RouteHistoryRecord>;
+	health(): { skipped: number; writable: boolean };
 	upsert(record: RouteHistoryRecord): "inserted" | "updated" | "duplicate";
 }
 
@@ -74,8 +82,8 @@ export interface CreateRouteHistoryStoreOptions {
 	maxRecords?: number;
 }
 
-/** The one supported durable format. Earlier files are retired, never read. */
-export const ROUTE_HISTORY_VERSION = 3;
+/** New writes use v4; v3 is read conservatively and unsupported stores stay untouched (#434). */
+export const ROUTE_HISTORY_VERSION = 4;
 
 const DEFAULT_MAX_RECORDS = 4096;
 
@@ -91,8 +99,8 @@ function compareRecords(left: RouteHistoryRecord, right: RouteHistoryRecord): nu
 	return left.settledAt.localeCompare(right.settledAt) || left.receiptDigest.localeCompare(right.receiptDigest);
 }
 
-function validateRecord(value: unknown): RouteHistoryRecord {
-	if (!isRecord(value) || value.version !== ROUTE_HISTORY_VERSION)
+function validateRecord(value: unknown, allowLegacy = false): RouteHistoryRecord {
+	if (!isRecord(value) || (value.version !== ROUTE_HISTORY_VERSION && !(allowLegacy && value.version === 3)))
 		throw new Error("route history record has unsupported version");
 	if (!isDigest(value.receiptDigest)) throw new Error("route history receipt digest invalid");
 	if (typeof value.assignmentId !== "string" || value.assignmentId.length === 0)
@@ -111,14 +119,22 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 	if (typeof value.firstPass !== "boolean") throw new Error("route history first-pass state invalid");
 	if (
 		value.completedCostUsd !== null &&
-		(typeof value.completedCostUsd !== "number" || !Number.isFinite(value.completedCostUsd))
+		(typeof value.completedCostUsd !== "number" || !Number.isFinite(value.completedCostUsd) || value.completedCostUsd < 0)
 	) {
 		throw new Error("route history completed cost invalid");
 	}
 	if (value.completedPhaseTiming !== null && !isPhaseTiming(value.completedPhaseTiming)) {
 		throw new Error("route history phase timing invalid");
 	}
-	if (typeof value.cacheRead !== "boolean") throw new Error("route history cache affinity invalid");
+	if (typeof value.cacheRead !== "boolean" && !(value.version === 4 && value.cacheRead === null))
+		throw new Error("route history cache affinity invalid");
+	if (
+		value.version === 4 &&
+		value.pricedCoverage !== "complete" &&
+		value.pricedCoverage !== "partial" &&
+		value.pricedCoverage !== "unknown"
+	)
+		throw new Error("route history pricing coverage invalid");
 	if (!Array.isArray(value.sourceDigests) || !value.sourceDigests.every(isDigest)) {
 		throw new Error("route history source digests invalid");
 	}
@@ -126,7 +142,7 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 		throw new Error("route history settlement timestamp invalid");
 	}
 	return {
-		version: 3,
+		version: 4,
 		receiptDigest: value.receiptDigest,
 		assignmentId: value.assignmentId,
 		route: { ...value.route },
@@ -135,47 +151,41 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 		reliability: value.reliability,
 		...(typeof value.settled === "string" ? { settled: value.settled } : {}),
 		firstPass: value.firstPass,
-		completedCostUsd: value.completedCostUsd,
+		// Old zero costs could be adapter placeholders. An authenticated receipt can restore measured zero (#434).
+		completedCostUsd: value.version === 3 && value.completedCostUsd === 0 ? null : value.completedCostUsd,
 		completedPhaseTiming: value.completedPhaseTiming === null ? null : { ...value.completedPhaseTiming },
-		cacheRead: value.cacheRead,
+		cacheRead: value.version === 3 ? (value.cacheRead === true ? true : null) : value.cacheRead,
+		pricedCoverage: value.version === 3 ? "unknown" : (value.pricedCoverage as RouteHistoryRecord["pricedCoverage"]),
 		sourceDigests: [...value.sourceDigests].sort(),
 		settledAt: value.settledAt,
 	};
 }
 
-function readHistory(path: string): RouteHistoryRecord[] {
-	if (!existsSync(path)) return [];
-	const raw = readFileSync(path, "utf8").trim();
-	if (raw.length === 0) return [];
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw) as unknown;
-	} catch (error) {
-		throw new Error(`route history unreadable: ${error instanceof Error ? error.message : String(error)}`);
-	}
-	if (!isRecord(parsed) || !Array.isArray(parsed.records)) throw new Error("route history has unsupported format");
-	if (parsed.version !== ROUTE_HISTORY_VERSION) {
-		// Reject rather than migrate, per the plan's durable-format rule. A
-		// retired file is renamed aside instead of crashing every dispatch until
-		// an operator clears it by hand: nothing is read from it, and the
-		// evidence it holds was gathered under semantics this version does not
-		// share, so carrying it forward would be the actual data loss.
-		retireHistory(path, parsed.version);
-		return [];
-	}
-	return parsed.records.map(validateRecord).sort(compareRecords);
+interface HistoryRead {
+	records: RouteHistoryRecord[];
+	writable: boolean;
+	skipped: number;
 }
 
-function retireHistory(path: string, version: unknown): void {
-	const stamp = new Date()
-		.toISOString()
-		.replace(/[-:]/gu, "")
-		.replace(/\.\d+Z$/u, "Z");
-	const retired = `${path}.v${String(version)}.${stamp}.retired`;
-	renameSync(path, retired);
-	process.stderr.write(
-		`[clio-coder:dispatch] route history v${String(version)} is retired; starting empty at v${ROUTE_HISTORY_VERSION}. Prior observations: ${retired}\n`,
-	);
+function readHistory(path: string): HistoryRead {
+	const empty = { records: [], writable: true, skipped: 0 };
+	if (!existsSync(path)) return empty;
+	const raw = readFileSync(path, "utf8").trim();
+	if (raw.length === 0) return empty;
+	const parsed: unknown = JSON.parse(raw);
+	if (!isRecord(parsed) || !Array.isArray(parsed.records)) throw new Error("route history has unsupported format");
+	if (parsed.version !== 3 && parsed.version !== ROUTE_HISTORY_VERSION)
+		return { records: [], writable: false, skipped: Math.max(1, parsed.records.length) };
+	const records: RouteHistoryRecord[] = [];
+	let skipped = 0;
+	for (const value of parsed.records) {
+		try {
+			records.push(validateRecord(value, true));
+		} catch {
+			skipped += 1;
+		} // Preserve records this reader cannot interpret on the next write, too (#434).
+	}
+	return { records: records.sort(compareRecords), writable: skipped === 0, skipped };
 }
 
 /** Inode, size and mtime; every write is tmp-and-rename, so a rewrite always moves it. */
@@ -189,7 +199,7 @@ function fileIdentity(path: string): string {
 }
 
 function writeHistory(path: string, records: ReadonlyArray<RouteHistoryRecord>): void {
-	atomicWrite(
+	safeResourceWrite(
 		path,
 		JSON.stringify({ version: ROUTE_HISTORY_VERSION, records: [...records].sort(compareRecords) }, null, 2),
 	);
@@ -203,11 +213,13 @@ function writeHistory(path: string, records: ReadonlyArray<RouteHistoryRecord>):
 export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions = {}): RouteHistoryStore {
 	const path = historyPath(options.stateDir ?? clioStateDir());
 	const maxRecords = Math.max(1, Math.floor(options.maxRecords ?? DEFAULT_MAX_RECORDS));
-	let records = readHistory(path);
+	let snapshot = readHistory(path);
+	let records = snapshot.records;
 	let loaded = fileIdentity(path);
 
 	const reload = (): void => {
-		records = readHistory(path);
+		snapshot = readHistory(path);
+		records = snapshot.records;
 		loaded = fileIdentity(path);
 	};
 	// Other Clio processes append to the same file. Reads pick up their writes
@@ -223,6 +235,10 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 	};
 
 	return {
+		health() {
+			refresh();
+			return { skipped: snapshot.skipped, writable: snapshot.writable };
+		},
 		recordsFor(route) {
 			refresh();
 			const key = routeCapabilityKey(route);
@@ -242,6 +258,7 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 			const record = validateRecord(input);
 			return withStateFileLockSync(path, () => {
 				reload();
+				if (!snapshot.writable) throw new Error("route history contains unsupported records; preserving existing file");
 				const index = records.findIndex((entry) => entry.receiptDigest === record.receiptDigest);
 				if (index >= 0) {
 					const existing = records[index];

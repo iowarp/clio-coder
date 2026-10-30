@@ -1,6 +1,6 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -52,6 +52,7 @@ function record(candidate: RouteCandidate, digest: string): RouteHistoryRecord {
 		completedCostUsd: 0.01,
 		completedPhaseTiming: null,
 		cacheRead: false,
+		pricedCoverage: "complete",
 		sourceDigests: [hash(digest)],
 		settledAt: `2026-07-2${digest.length % 9}T00:00:00.000Z`,
 	};
@@ -119,23 +120,44 @@ describe("contracts/route identity keying", () => {
 		strictEqual(routeDriftGuard(replayed.route).settingsFingerprint, hash("settings"));
 	});
 
-	it("a retired history version is rejected rather than read", () => {
-		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-identity-retire-"));
+	it("reads v3 without changing it, preserves unknown coverage and writes nullable cache facts in v4", () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-versions-"));
 		const path = join(stateDir, "route-history.json");
-		writeFileSync(path, JSON.stringify({ version: 2, records: [{ version: 2, receiptDigest: hash("old") }] }));
-
+		const legacy = { ...record(route(), "legacy"), version: 3, completedCostUsd: 0 };
+		const bytes = JSON.stringify({ version: 3, records: [legacy] });
+		writeFileSync(path, bytes);
+		const history = createRouteHistoryStore({ stateDir });
+		strictEqual(history.all()[0]?.cacheRead, null);
+		strictEqual(history.all()[0]?.completedCostUsd, null);
+		strictEqual(history.all()[0]?.pricedCoverage, "unknown");
+		strictEqual(readFileSync(path, "utf8"), bytes);
+		history.upsert({ ...record(route(), "known"), cacheRead: false });
+		history.upsert({
+			...record(route(), "unpriced"),
+			cacheRead: null,
+			completedCostUsd: null,
+			pricedCoverage: "unknown",
+		});
 		const reopened = createRouteHistoryStore({ stateDir });
-		strictEqual(reopened.all().length, 0);
-		const retired = readdirSync(stateDir).filter((name) => name.endsWith(".retired"));
-		strictEqual(retired.length, 1);
-		const retiredName = retired[0];
-		ok(retiredName !== undefined);
-		// Retirement moves the file aside intact; nothing is migrated forward.
-		strictEqual(JSON.parse(readFileSync(join(stateDir, retiredName), "utf8")).version, 2);
-		// The live path is gone rather than rewritten, so the next write starts
-		// the current format from empty with no trace of the retired semantics.
-		strictEqual(existsSync(path), false);
-		reopened.upsert(record(route(), "fresh"));
-		strictEqual(JSON.parse(readFileSync(path, "utf8")).version, ROUTE_HISTORY_VERSION);
+		strictEqual(reopened.all().find((row) => row.receiptDigest === hash("known"))?.cacheRead, false);
+		strictEqual(reopened.all().find((row) => row.receiptDigest === hash("unpriced"))?.cacheRead, null);
+		strictEqual(JSON.parse(readFileSync(path, "utf8")).version, 4);
+	});
+
+	it("unsupported files and records are counted and never retired or overwritten", () => {
+		for (const version of [2, 5]) {
+			const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-preserve-"));
+			const path = join(stateDir, "route-history.json");
+			for (const outer of [version, 4]) {
+				const bytes = JSON.stringify({ version: outer, records: [{ version, receiptDigest: hash("future") }] });
+				writeFileSync(path, bytes);
+				const history = createRouteHistoryStore({ stateDir });
+				strictEqual(history.all().length, 0);
+				deepStrictEqual(history.health(), { skipped: 1, writable: false });
+				throws(() => history.upsert(record(route(), "fresh")), /preserving existing file/);
+				strictEqual(readFileSync(path, "utf8"), bytes);
+				deepStrictEqual(readdirSync(stateDir), ["route-history.json"]);
+			}
+		}
 	});
 });
