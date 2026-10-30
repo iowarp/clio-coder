@@ -1,3 +1,4 @@
+import type { CallMessageObserver } from "../core/telemetry/producer.js";
 /**
  * Thin wrapper over @earendil-works/pi-ai. Domains consume this module, not
  * pi-ai directly. The model-lookup side-registry that used to live here is
@@ -66,6 +67,7 @@ export const stream = engineStream;
 export const streamSimple = engineStreamSimple;
 
 export interface EngineTextCompletionInput extends SideCallAuth {
+	callTelemetry?: CallMessageObserver;
 	model: EngineModel;
 	systemPrompt: string;
 	userPrompt: string;
@@ -117,6 +119,7 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 }
 
 async function completeEngineTextAttempt(input: EngineTextCompletionInput): Promise<EngineTextCompletionResult> {
+	input.callTelemetry?.startAttempt();
 	const tracking = trackCallFetch(input.fetch);
 	const observe = (observation: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">): void => {
 		try {
@@ -150,6 +153,7 @@ async function completeEngineTextAttempt(input: EngineTextCompletionInput): Prom
 		);
 	})().catch((error: unknown) => {
 		const failure = tracking.failure(error, input.signal.aborted);
+		input.callTelemetry?.settle({ stopReason: input.signal.aborted ? "aborted" : "error", failure });
 		observe({
 			failure,
 			usage: {
@@ -176,6 +180,7 @@ async function completeEngineTextAttempt(input: EngineTextCompletionInput): Prom
 				normalizeTokenUsage(usage as unknown as Record<string, unknown>).observed,
 			)
 		: undefined;
+	input.callTelemetry?.settle({ ...response, ...(failure ? { failure } : {}) });
 	const observation: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure"> = {
 		...(failure === undefined ? {} : { failure }),
 		usage: {

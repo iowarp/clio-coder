@@ -13,6 +13,13 @@ export type PendingTelemetry<K extends Kind = Kind> = K extends Kind
 		}
 	: never;
 
+/** Erased engine callback; raw provider messages cross only into the host's fact adapter (#434). */
+export interface CallMessageObserver {
+	startAttempt(): void;
+	settle(message: unknown): void;
+	withContext<T>(work: () => T): T;
+}
+
 export interface TelemetrySink {
 	/** Enqueue only. Ownership of data transfers to the sink; callers must not mutate it (#434). */
 	enqueue(record: PendingTelemetry): boolean;

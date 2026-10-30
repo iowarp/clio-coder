@@ -77,10 +77,7 @@ export function callSettlementFromMessage(
 	const stop = raw.stopReason;
 	const reason = stop === "stop" || stop === "toolUse" || stop === "length" || stop === "aborted" ? stop : "error";
 	const failureCode = cause ?? failureCause(failure);
-	const terminal =
-		(reason !== "error" && reason !== "aborted") ||
-		failure.stage === "provider" ||
-		typeof failure.httpStatus === "number";
+	const terminal = (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
 	const usd = amount(record(usage.cost).total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };

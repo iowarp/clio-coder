@@ -21,7 +21,9 @@ import { readTaskMemorySpendSummary } from "../../src/domains/memory/task-memory
 import { createTaskMemoryTelemetrySink } from "../../src/domains/memory/task-memory-telemetry.js";
 import { createMemoryGuardian } from "../../src/domains/middleware/memory-guardian.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { readOutOfTurnUsageRows } from "../../src/domains/observability/out-of-turn-usage.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { EMPTY_CAPABILITIES, type ProvidersContract } from "../../src/domains/providers/index.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
@@ -155,6 +157,24 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 			const bus = createSafeEventBus();
 			const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 			const origin = session.create({ cwd: env.dir });
+			const journals = createSessionJournals(join(env.dir, "state"), () => {});
+			const routing = createBackgroundMemoryRouting(
+				providers,
+				() => settings,
+				null,
+				undefined,
+				true,
+				undefined,
+				(targetId) => ({
+					origin: session.current() ?? origin,
+					acquire: journals.acquire,
+					label: "memory",
+					targetId,
+					runtimeId: "openai-compat",
+					costProvenance: "unknown",
+				}),
+			);
+
 			const bank = new TaskMemoryBank();
 			const live: number[] = [];
 			const reminders: string[] = [];
@@ -162,7 +182,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 			const registration = createMemoryInterventionRegistration({
 				bank,
 				telemetry: createTaskMemoryTelemetrySink({ logDir: join(env.dir, "state", "memory") }),
-				getModelClient: () => route.client,
+				getModelClient: routing.getModelClient,
 				captureStepUsage: () =>
 					captureTaskMemoryUsage({
 						stateDir: join(env.dir, "state"),
@@ -188,6 +208,14 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				release();
 				await idle;
 				await new Promise<void>((resolve) => setImmediate(resolve));
+				await journals.flush();
+				const calls = (await readCallJournal(join(env.dir, "state", "sessions", origin.cwdHash, origin.id))).records
+					.map(({ record }) => record)
+					.filter((record) => record.k === "call.settled");
+				assert.equal(calls.length, 1);
+				assert.equal(calls[0]?.ctx.sessionId, origin.id);
+				assert.equal(calls[0]?.data.label, "memory");
+				assert.equal(calls[0]?.data.disposition, ending === "stop" && !switched ? "settled" : "sent_unsettled");
 				const rows = readOutOfTurnUsageRows(join(env.dir, "state")).rows;
 				assert.equal(rows.length, 1);
 				assert.equal(rows[0]?.sessionId, origin.id);

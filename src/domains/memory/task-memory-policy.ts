@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { BackendCompletionTimings } from "../../core/cache-telemetry.js";
 import type { CallFailureRecord } from "../../core/call-failure.js";
+import type { CallMessageObserver } from "../../core/telemetry/producer.js";
 import type { ToolResultDigestProvenance } from "../../tools/result-disposition.js";
 import {
 	buildMemoryInterventionUserPrompt,
@@ -68,6 +69,7 @@ export class TaskMemoryBudgetSkipError extends Error {
 }
 
 export interface TaskMemoryModelRequest {
+	callTelemetry?: CallMessageObserver;
 	purpose?: "observation" | "reflection" | "lesson";
 	systemPrompt: string;
 	userPrompt: string;

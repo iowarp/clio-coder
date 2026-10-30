@@ -171,6 +171,8 @@ import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { BackgroundMemoryUsageSink } from "../domains/observability/background-memory-usage.js";
+import type { CallJournalOptions } from "../domains/observability/call-scope.js";
+import { openCallScope } from "../domains/observability/call-scope.js";
 import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
 import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
@@ -1008,6 +1010,7 @@ function prepareBackgroundMemoryRoute(
 								backend: completion.backend,
 							});
 							const completion = await completeEngineText({
+								...(request.callTelemetry ? { callTelemetry: request.callTelemetry } : {}),
 								model,
 								systemPrompt: request.systemPrompt,
 								userPrompt: request.userPrompt,
@@ -1097,11 +1100,39 @@ export function createBackgroundMemoryRouting(
 	announceFallback = true,
 	/** Priced session spend the metered budget adds a step's projected cost to. */
 	sessionSpendUsd?: () => number,
+	callJournal?: (targetId: string, modelId: string) => CallJournalOptions | undefined,
 ) {
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
 	let lastNotice: string | null = null;
 	let clientFailure: string | null = null;
+	const observeClient = (client: TaskMemoryModelClient | null): TaskMemoryModelClient | null => {
+		if (!client) return null;
+		return {
+			...client,
+			async complete(request) {
+				const destination = client.route;
+				const options = destination ? callJournal?.(destination.targetId, destination.modelId) : undefined;
+				const scope = await openCallScope(options, {
+					api: options ? (providers.getRuntime(options.runtimeId)?.apiFamily ?? "unknown") : "unknown",
+					id: destination?.modelId ?? "unknown",
+				});
+				scope.startAttempt();
+				try {
+					return await scope.withContext(() => client.complete({ ...request, callTelemetry: scope }));
+				} catch (error) {
+					// Engine attempts settle first; only failures in preparation reach this fallback (#434).
+					scope.settle({
+						stopReason: request.signal.aborted ? "aborted" : "error",
+						failure: classifyCallFailure(error, { invoked: false, aborted: request.signal.aborted }),
+					});
+					throw error;
+				} finally {
+					await scope.close();
+				}
+			},
+		};
+	};
 	const noteFallback = (): void => {
 		if (route?.selection !== "chat-fallback") {
 			lastNotice = null;
@@ -1141,7 +1172,7 @@ export function createBackgroundMemoryRouting(
 						);
 			noteFallback();
 			clientFailure = null;
-			const client = route?.client;
+			const client = observeClient(route?.client ?? null);
 			return client
 				? {
 						...client,
@@ -1169,7 +1200,7 @@ export function createBackgroundMemoryRouting(
 			);
 			if (route && clientFailure) route.fallbackReason = `configured route client error: ${clientFailure}`;
 			noteFallback();
-			return route?.client ?? null;
+			return observeClient(route?.client ?? null);
 		},
 		getModelMaxTokens: (configured: number): number => route?.modelMaxTokens(configured) ?? configured,
 		backgroundEndpointBusy: (): boolean => {
@@ -2580,6 +2611,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// step's projected cost meets the same ceiling chat and dispatch do.
 	const backgroundSessionSpendUsd = (): number =>
 		result.getContract<SchedulingContract>("scheduling")?.preflight().currentUsd ?? observability?.sessionCost() ?? 0;
+	const backgroundCallJournal = (targetId: string, modelId: string): CallJournalOptions | undefined => {
+		const origin = session?.current();
+		const acquire = observability?.acquireTelemetrySession;
+		const target = providers.getTarget(targetId);
+		const runtime = target ? providers.getRuntime(target.runtime) : null;
+		if (!origin || !acquire || !target || !runtime) return undefined;
+		return {
+			origin,
+			acquire,
+			label: "memory",
+			targetId,
+			runtimeId: runtime.id,
+			costProvenance: resolveEffectivePricing(target, runtime, modelId).provenance,
+		};
+	};
 	const captureBackgroundMemoryUsage = () => {
 		const meta = session?.current() ?? null;
 		return captureTaskMemoryUsage({
@@ -2675,6 +2721,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			admitMemoryFlow,
 			true,
 			backgroundSessionSpendUsd,
+			backgroundCallJournal,
 		),
 		captureStepUsage: captureBackgroundMemoryUsage,
 	});
@@ -2703,6 +2750,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			admitMemoryFlow,
 			false,
 			backgroundSessionSpendUsd,
+			backgroundCallJournal,
 		),
 		settings: () => {
 			const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
@@ -2836,6 +2884,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			admitMemoryFlow,
 			false,
 			backgroundSessionSpendUsd,
+			backgroundCallJournal,
 		),
 		captureStepUsage: captureBackgroundMemoryUsage,
 	});

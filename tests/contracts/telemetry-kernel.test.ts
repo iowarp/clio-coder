@@ -171,4 +171,12 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 	strictEqual(dropped.usage?.input.kind, "unknown");
 	strictEqual(dropped.pricing.usd.kind, "unknown");
 	strictEqual(dropped.stop.failure, undefined);
+	strictEqual(
+		callSettlementFromMessage(
+			{ stopReason: "error", failure: { stage: "provider", errorClass: "provider_error" } },
+			"unknown",
+		).disposition,
+		"sent_unsettled",
+		"a legacy prose classifier is not proof of a terminal provider response",
+	);
 });
