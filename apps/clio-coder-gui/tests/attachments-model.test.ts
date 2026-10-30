@@ -76,6 +76,11 @@ test("a text file is read as UTF-8 text or refused with the reason, before anyth
 	assert.match(control.ok ? "" : control.reason, /term\.log is not a text file/);
 	const huge = decodeTextFile("dump.csv", new Uint8Array(TURN_FILE_MAX_BYTES + 1).fill(0x61));
 	assert.match(huge.ok ? "" : huge.reason, /dump\.csv is larger than/);
+	// Checked before the size cap: a PDF of any size attaches through an @path reference (#438).
+	const paper = new Uint8Array(TURN_FILE_MAX_BYTES + 1);
+	paper.set(encode("%PDF-1.7\n"));
+	const pdf = decodeTextFile("paper.pdf", paper);
+	assert.match(pdf.ok ? "" : pdf.reason, /paper\.pdf is a PDF\. Type @ and its path/);
 });
 
 test("files and images share one request budget, counted as the bytes the agent line will carry", () => {

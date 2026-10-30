@@ -50,6 +50,9 @@ export function decodeTextFile(
 	name: string,
 	bytes: Uint8Array,
 ): { ok: true; text: string; bytes: number } | { ok: false; reason: string } {
+	// The agent extracts a PDF's text only for an `@path` reference, which works for any size (#438).
+	if (String.fromCharCode(...bytes.subarray(0, 5)) === "%PDF-")
+		return { ok: false, reason: `${name} is a PDF. Type @ and its path in your message, and Clio Coder reads its text.` };
 	if (bytes.length > TURN_FILE_MAX_BYTES)
 		return { ok: false, reason: `${name} is larger than ${TURN_FILE_MAX_BYTES / 1024} KiB. Attach a smaller file.` };
 	let text: string;
