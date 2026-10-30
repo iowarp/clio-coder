@@ -12,7 +12,14 @@ import { recordTelemetry } from "../../core/telemetry/producer.js";
 import type { Payload } from "../../core/telemetry/schemas.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
-import { createBudgetState, type RunCostCap, SessionCostCeilingError, sessionCeilingReached } from "./budget.js";
+import {
+	type BudgetSpendPricing,
+	combineBudgetPricing,
+	createBudgetState,
+	type RunCostCap,
+	SessionCostCeilingError,
+	sessionCeilingReached,
+} from "./budget.js";
 import { createFleetRegistry, LOCAL_NODE_ID } from "./cluster.js";
 import type { SchedulingContract } from "./contract.js";
 import {
@@ -70,6 +77,13 @@ export function createSchedulingBundle(
 		return { verdict: budget.checkCeiling(currentUsd), currentUsd };
 	}
 
+	/** How the session's spend was priced, read where a stop names it; enforcement reads sessionCost() alone. */
+	function sessionPricing(): BudgetSpendPricing | undefined {
+		// A minimal observability stub may lack the summary; the stop then names its spend as before.
+		const summary = observability?.sessionCostSummary?.();
+		return summary ? { estimated: summary.hasEstimated, unpriced: summary.hasUnknown } : undefined;
+	}
+
 	const extension: DomainExtension = {
 		async start() {
 			unsubscribes.push(
@@ -86,10 +100,12 @@ export function createSchedulingBundle(
 				context.bus.on(BusChannels.DispatchEnqueued, () => {
 					const { verdict, currentUsd } = evaluate();
 					if (verdict !== "under") {
+						const pricing = sessionPricing();
 						context.bus.emit(BusChannels.BudgetAlert, {
 							level: verdict,
 							currentUsd,
 							ceilingUsd: budget.ceilingUsd,
+							...(pricing ? { pricing } : {}),
 						} satisfies BudgetAlertPayload);
 					}
 				}),
@@ -108,11 +124,13 @@ export function createSchedulingBundle(
 		},
 		preflight: () => {
 			const { verdict, currentUsd } = evaluate();
-			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
+			const pricing = sessionPricing();
+			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd, ...(pricing ? { pricing } : {}) };
 		},
 		admitPaidRequest: async ({
 			waitForRaise,
 			additionalUsd = 0,
+			additionalPricing,
 			getCeilingUsd,
 			contextTokens,
 			onBlocked,
@@ -154,24 +172,26 @@ export function createSchedulingBundle(
 					throw signal.reason ?? new Error("budget wait aborted");
 				}
 				if (!held) {
+					const pricing = combineBudgetPricing(sessionPricing(), additionalUsd > 0 ? additionalPricing : undefined);
 					const block: BudgetAlertPayload = {
 						level: spend > ceilingUsd ? "over" : "at",
 						currentUsd: spend,
 						ceilingUsd,
 						...(contextTokens !== undefined ? { contextTokens } : {}),
+						...(pricing ? { pricing } : {}),
 					};
 					held = { block, since: performance.now() };
 					onBlocked?.(block);
 					context.bus.emit(BusChannels.BudgetAlert, block);
 					const crossing = JSON.stringify([telemetry?.sessionId, ceilingUsd]);
 					if (telemetry && !crossings.has(crossing)) {
-						const { currentUsd: spendUsd, ...rest } = block;
+						const { currentUsd: spendUsd, pricing: _pricing, ...rest } = block;
 						if (recordTelemetry("budget.crossing", { ...rest, spendUsd }, telemetry)) crossings.add(crossing);
 					}
 				}
 				if (!waitForRaise) {
 					recordHold("refused");
-					throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined, contextTokens);
+					throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined, contextTokens, held.block.pricing);
 				}
 				try {
 					await new Promise<void>((resolve, reject) => {

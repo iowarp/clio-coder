@@ -1083,15 +1083,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								lastActivityAt = performance.now();
 							}
 						} else {
-							const { currentUsd, ceilingUsd } = deps.scheduling.preflight();
+							const { currentUsd, ceilingUsd, pricing } = deps.scheduling.preflight();
 							if (sessionCeilingReached(currentUsd + unsettledSpendUsd, ceilingUsd)) {
 								recordBlock({
 									level: currentUsd + unsettledSpendUsd > ceilingUsd ? "over" : "at",
 									currentUsd: currentUsd + unsettledSpendUsd,
 									ceilingUsd,
 									contextTokens: input,
+									...(pricing ? { pricing } : {}),
 								});
-								throw new SessionCostCeilingError(currentUsd + unsettledSpendUsd, ceilingUsd, undefined, input);
+								throw new SessionCostCeilingError(currentUsd + unsettledSpendUsd, ceilingUsd, undefined, input, pricing);
 							}
 						}
 					} catch (error) {

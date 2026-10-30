@@ -214,7 +214,13 @@ import {
 	type WorkerPermit,
 	workerPermissionModeForPermit,
 } from "../safety/worker-permit.js";
-import { SESSION_COST_CEILING_REASON, SessionCostCeilingError, sessionCeilingReached } from "../scheduling/budget.js";
+import {
+	type BudgetSpendPricing,
+	combineBudgetPricing,
+	SESSION_COST_CEILING_REASON,
+	SessionCostCeilingError,
+	sessionCeilingReached,
+} from "../scheduling/budget.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import { ceilChars } from "../session/context-accounting.js";
@@ -4101,6 +4107,17 @@ export function createDispatchBundle(
 		return usd;
 	}
 
+	/** How the running workers' meters priced their spend, so a stop that counts it marks it (#434 §6.3). */
+	function inFlightPricing(): BudgetSpendPricing {
+		const pricing = { estimated: false, unpriced: false };
+		for (const run of active.values()) {
+			const provenance = meterCostProvenance(run.meter, run.costProvenance, run.meter.costUsd ?? 0);
+			if (provenance === "estimated") pricing.estimated = true;
+			else if (provenance === "unknown") pricing.unpriced = true;
+		}
+		return pricing;
+	}
+
 	/**
 	 * Under a `clio-coder run --max-cost-usd` cap, admission alone let running
 	 * workers spend past it. Every metered worker call re-checks settled plus
@@ -4111,9 +4128,11 @@ export function createDispatchBundle(
 		const cap = scheduling.runCostCap?.() ?? null;
 		if (cap === null) return;
 		const ceilingUsd = getEffectiveSettings()?.safety.limits.sessionCostUsd ?? scheduling.ceilingUsd();
-		const currentUsd = scheduling.preflight().currentUsd + inFlightSpendUsd();
+		const preflight = scheduling.preflight();
+		const currentUsd = preflight.currentUsd + inFlightSpendUsd();
 		if (!sessionCeilingReached(currentUsd, ceilingUsd)) return;
-		const detail = new SessionCostCeilingError(currentUsd, ceilingUsd, cap).message;
+		const pricing = combineBudgetPricing(preflight.pricing, inFlightPricing());
+		const detail = new SessionCostCeilingError(currentUsd, ceilingUsd, cap, undefined, pricing).message;
 		for (const run of active.values()) {
 			if (!run.aborted) contract.abort(run.runId, { cause: "budget", detail });
 		}
@@ -4136,6 +4155,7 @@ export function createDispatchBundle(
 				await scheduling.admitPaidRequest({
 					waitForRaise: options?.budgetWaitForRaise === true,
 					additionalUsd: inFlightSpendUsd(),
+					additionalPricing: inFlightPricing(),
 					getCeilingUsd: () => getEffectiveSettings()?.safety.limits.sessionCostUsd ?? scheduling.ceilingUsd(),
 					...(signal ? { signal } : {}),
 				});
@@ -4143,7 +4163,13 @@ export function createDispatchBundle(
 				const preflight = scheduling.preflight();
 				const currentUsd = preflight.currentUsd + inFlightSpendUsd();
 				if (sessionCeilingReached(currentUsd, preflight.ceilingUsd))
-					throw new SessionCostCeilingError(currentUsd, preflight.ceilingUsd);
+					throw new SessionCostCeilingError(
+						currentUsd,
+						preflight.ceilingUsd,
+						undefined,
+						undefined,
+						combineBudgetPricing(preflight.pricing, inFlightPricing()),
+					);
 			}
 		} catch (error) {
 			if (error instanceof SessionCostCeilingError) {

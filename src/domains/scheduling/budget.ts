@@ -30,6 +30,46 @@ export interface BudgetBlockView {
 	ceilingUsd: number;
 	contextTokens?: number;
 	raiseToUsd: number;
+	/** How the spend was priced; absent on a stop recorded before 0.6.6, which named its spend as known. */
+	pricing?: BudgetSpendPricing;
+}
+
+/**
+ * How the spend a stop compares was priced, as the cost tracker that admission reads words it: any estimated part
+ * marks the amount `~`, and any sent call it could not price adds `+?`, so a stop never names estimated or partial
+ * spend as known (#434 §6.3).
+ */
+export interface BudgetSpendPricing {
+	estimated: boolean;
+	unpriced: boolean;
+}
+
+/** Either part estimated or unpriced marks the sum; a part with no pricing facts adds none. */
+export function combineBudgetPricing(
+	a: BudgetSpendPricing | undefined,
+	b: BudgetSpendPricing | undefined,
+): BudgetSpendPricing | undefined {
+	return a && b ? { estimated: a.estimated || b.estimated, unpriced: a.unpriced || b.unpriced } : (a ?? b);
+}
+
+function readPricing(value: unknown): BudgetSpendPricing | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const p = value as Record<string, unknown>;
+	return typeof p.estimated === "boolean" && typeof p.unpriced === "boolean"
+		? { estimated: p.estimated, unpriced: p.unpriced }
+		: undefined;
+}
+
+/** A stop's spend through the canonical renderer, marked as it was priced. */
+export function budgetSpendText(usd: number, pricing: BudgetSpendPricing | undefined): string {
+	if (!pricing) return renderCostAmount(usd, "known");
+	return renderCostAmount(usd, undefined, {
+		knownUsd: usd,
+		hasEstimated: pricing.estimated,
+		hasUnknown: pricing.unpriced,
+		allKnownFree: false,
+		calls: 1,
+	});
 }
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -44,18 +84,20 @@ export function readBudgetBlock(value: unknown): BudgetBlockView | null {
 		finite(p.raiseToUsd) && p.raiseToUsd > p.currentUsd
 			? p.raiseToUsd
 			: suggestedSessionCostCeilingUsd(p.currentUsd, p.ceilingUsd);
+	const pricing = readPricing(p.pricing);
 	return {
 		level: p.level,
 		currentUsd: p.currentUsd,
 		ceilingUsd: p.ceilingUsd,
 		...(finite(p.contextTokens) && p.contextTokens > 0 ? { contextTokens: p.contextTokens } : {}),
 		raiseToUsd,
+		...(pricing ? { pricing } : {}),
 	};
 }
 
-/** `$5.00 of $5.00 ceiling`, with more digits for a sub-cent ceiling. */
-export function budgetBlockSpendText(block: Pick<BudgetBlockView, "currentUsd" | "ceilingUsd">): string {
-	return `${renderCostAmount(block.currentUsd, "known")} of ${renderCostAmount(block.ceilingUsd, "known")} ceiling`;
+/** `$5.00 of $5.00 ceiling`, `~$5.00 est of …` or `$5.00 +? of …`, with more digits for a sub-cent ceiling. */
+export function budgetBlockSpendText(block: Pick<BudgetBlockView, "currentUsd" | "ceilingUsd" | "pricing">): string {
+	return `${budgetSpendText(block.currentUsd, block.pricing)} of ${renderCostAmount(block.ceilingUsd, "known")} ceiling`;
 }
 
 /** The one-line operator notice for a ceiling stop; `error` once spend has passed the ceiling. */
@@ -86,14 +128,15 @@ export class SessionCostCeilingError extends Error {
 		readonly ceilingUsd: number,
 		runCap?: RunCostCap,
 		contextTokens?: number,
+		pricing?: BudgetSpendPricing,
 	) {
 		// The context each call re-sends is the per-call cost a headless stop
 		// cannot raise past, so the error names it when the caller knows it (#423).
 		const perCall = budgetStopContextClause(contextTokens);
 		super(
 			runCap !== undefined && ceilingUsd >= runCap.ceilingUsd
-				? `${SESSION_COST_CEILING_REASON}: this run's priced spend ${renderCostAmount(currentUsd - runCap.startUsd, "known")} reached its --max-cost-usd ${renderCostAmount(runCap.maxUsd, "known")} cap${perCall}`
-				: `${SESSION_COST_CEILING_REASON}: session priced spend ${renderCostAmount(currentUsd, "known")} reached the ${renderCostAmount(ceilingUsd, "known")} ceiling${perCall}; raise safety.limits.sessionCostUsd`,
+				? `${SESSION_COST_CEILING_REASON}: this run's priced spend ${budgetSpendText(currentUsd - runCap.startUsd, pricing)} reached its --max-cost-usd ${renderCostAmount(runCap.maxUsd, "known")} cap${perCall}`
+				: `${SESSION_COST_CEILING_REASON}: session priced spend ${budgetSpendText(currentUsd, pricing)} reached the ${renderCostAmount(ceilingUsd, "known")} ceiling${perCall}; raise safety.limits.sessionCostUsd`,
 		);
 	}
 }

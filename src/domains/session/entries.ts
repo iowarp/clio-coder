@@ -95,6 +95,8 @@ export interface BudgetBlockData {
 	contextTokens?: number;
 	raiseToUsd: number;
 	setting: "safety.limits.sessionCostUsd";
+	/** Absent on a stop recorded before 0.6.6. */
+	pricing?: { estimated: boolean; unpriced: boolean };
 }
 
 export interface ModelChangeEntry extends BaseSessionEntry {

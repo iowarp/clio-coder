@@ -338,6 +338,8 @@ export interface BudgetAlertPayload {
 	 * so the stop names it beside the dollars (#423).
 	 */
 	contextTokens?: number;
+	/** How `currentUsd` was priced, so the stop marks estimated or partly unpriced spend (#434 §6.3). */
+	pricing?: { estimated: boolean; unpriced: boolean };
 }
 
 /**

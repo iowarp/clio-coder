@@ -1,6 +1,6 @@
 import type { BudgetAlertPayload } from "../../core/bus-events.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
-import type { BudgetVerdict, RunCostCap } from "./budget.js";
+import type { BudgetSpendPricing, BudgetVerdict, RunCostCap } from "./budget.js";
 import type { FleetRegistry } from "./cluster.js";
 import type { LocalCapacity } from "./local-capacity.js";
 
@@ -8,6 +8,8 @@ export interface BudgetPreflight {
 	verdict: BudgetVerdict;
 	currentUsd: number;
 	ceilingUsd: number;
+	/** How `currentUsd` was priced; absent when no cost tracker feeds it. */
+	pricing?: BudgetSpendPricing;
 }
 
 export interface SchedulingContract {
@@ -25,6 +27,8 @@ export interface SchedulingContract {
 	admitPaidRequest?(options: {
 		waitForRaise: boolean;
 		additionalUsd?: number;
+		/** How `additionalUsd` was priced, so a stop that counts it marks it (#434 §6.3). */
+		additionalPricing?: BudgetSpendPricing;
 		getCeilingUsd?: () => number;
 		/** Estimated input tokens the parked request sends, so a ceiling stop shows what each call costs (#423). */
 		contextTokens?: number;

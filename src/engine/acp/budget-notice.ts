@@ -7,7 +7,12 @@ import { ACP_BUDGET_META_KEY, ACP_NOTICE_META_KEY } from "./types.js";
 
 export { ACP_BUDGET_META_KEY } from "./types.js";
 
-import { describeBudgetBlock, readBudgetBlock, SESSION_COST_CEILING_SETTING } from "../../domains/scheduling/index.js";
+import {
+	budgetSpendText,
+	describeBudgetBlock,
+	readBudgetBlock,
+	SESSION_COST_CEILING_SETTING,
+} from "../../domains/scheduling/index.js";
 /**
  * A session cost ceiling stop on the ACP wire. The TUI shows the stop as a
  * transcript notice and replays the durable `budgetBlock` entry after a
@@ -45,7 +50,7 @@ export function budgetBlockFrame(payload: unknown): AcpBudgetFrame | null {
 			[ACP_NOTICE_META_KEY]: { level: notice.level === "error" ? "error" : "warning" },
 			[ACP_BUDGET_META_KEY]: {
 				version: 1,
-				currentDisplay: renderCostAmount(block.currentUsd, "known"),
+				currentDisplay: budgetSpendText(block.currentUsd, block.pricing),
 				ceilingDisplay: renderCostAmount(block.ceilingUsd, "known"),
 				raiseDisplay: renderCostAmount(block.raiseToUsd, "known"),
 				level: block.level,
