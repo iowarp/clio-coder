@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join, sep } from "node:path";
+import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { rawDurationMs } from "../../core/timers.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
@@ -649,18 +650,19 @@ async function writeEvidenceFiles(
 	transcript?: string,
 ): Promise<void> {
 	await mkdir(directory, { recursive: true });
-	await writeJson(join(directory, "overview.json"), overview);
-	await writeFile(
+	// Each file is replaced whole, and the overview that readers open first lands last, so an interrupted
+	// build never leaves a torn file or an overview pointing at files that were not written (#434).
+	await safeResourceWriteAsync(
 		join(directory, "transcript.md"),
 		transcript ?? renderTranscript(overview, runSources, sessionLinks, trustStatus, findings),
-		"utf8",
 	);
 	await writeJsonl(join(directory, "tool-events.jsonl"), toolEventRows);
 	await writeJson(join(directory, "receipt.json"), receiptsFile(runSources));
 	await writeJson(join(directory, "gate-decisions.json"), gateDecisions);
 	await writeJson(join(directory, "trust-status.json"), trustStatus);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
-	await writeFile(join(directory, "findings.md"), renderEvidenceFindingsMarkdown(findings, trustStatus), "utf8");
+	await safeResourceWriteAsync(join(directory, "findings.md"), renderEvidenceFindingsMarkdown(findings, trustStatus));
+	await writeJson(join(directory, "overview.json"), overview);
 }
 
 function toolEvents(
@@ -1907,11 +1909,14 @@ function collapseWhitespace(text: string): string {
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
-	await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+	await safeResourceWriteAsync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 async function writeJsonl(path: string, rows: ReadonlyArray<unknown>): Promise<void> {
-	await writeFile(path, rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length === 0 ? "" : "\n"), "utf8");
+	await safeResourceWriteAsync(
+		path,
+		rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length === 0 ? "" : "\n"),
+	);
 }
 
 function durationMs(startedAt: string, endedAt: string | null): number {

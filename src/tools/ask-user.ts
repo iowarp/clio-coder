@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
+import { safeResourceWriteAsync } from "../core/safe-resource-write.js";
 import { stripSkillInstallOfferTag } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -651,7 +652,8 @@ async function persistAskUserTranscript(
 			decisions: policy.decisions,
 			rounds: policy.rounds,
 		};
-		await writeFile(policy.transcriptPath, `${JSON.stringify(transcript, null, 2)}\n`, "utf8");
+		// A transcript is rewritten each round; replace it whole so a reader never sees a torn round (#434).
+		await safeResourceWriteAsync(policy.transcriptPath, `${JSON.stringify(transcript, null, 2)}\n`);
 		return policy.transcriptPath;
 	} catch {
 		return policy.transcriptPath;
