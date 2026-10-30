@@ -547,7 +547,8 @@ export function verifyReceiptFileReport(stateDir: string, runId: string): Receip
 				checks.push({
 					name: "run ledger",
 					ok: true,
-					evidence: `run ${runId} evicted from the ledger ring; sealed ledger commitment not compared`,
+					// A missing runs.json is not an eviction; say which absence it was (#434).
+					evidence: `${!ledger.ok && ledger.reason === "run ledger not found" ? "no run ledger on this state dir" : `run ${runId} evicted from the ledger ring`}; sealed ledger commitment not compared`,
 				});
 				checks.push({
 					name: "sealed digest",
