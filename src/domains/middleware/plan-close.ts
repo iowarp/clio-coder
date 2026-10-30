@@ -50,12 +50,14 @@ export function createPlanCloseRegistration(deps: {
 	let changed = false;
 	let asked = false;
 	let closed = false;
+	// What armed this turn's close, reported with the effects it causes (#431).
+	let armedBy = "regex:PLAN_REQUEST@operator-request";
 	let pending: { at: number; sessionId: string | undefined; message: string } | null = null;
 	return {
 		id: "nudge.plan-close",
 		description: "close an unapproved plan through ask_user once",
 		hooks: ["turn_start", "after_tool", "turn_end"],
-		evaluate(input) {
+		evaluate(input, context) {
 			if (input.hook === "turn_start") {
 				armed = false;
 				changed = false;
@@ -69,14 +71,30 @@ export function createPlanCloseRegistration(deps: {
 					reminder.sessionId === input.sessionId &&
 					performance.now() - reminder.at < PLAN_CLOSE_REMINDER_IDLE_MS &&
 					(input.metadata?.requestContinuation === true || PLAN_CLOSE_FOLLOW_UP.test(input.text?.trim() ?? ""))
-				)
+				) {
+					context?.evidence?.(
+						input.metadata?.requestContinuation === true
+							? "continuation:plan-close@turn"
+							: "regex:PLAN_CLOSE_FOLLOW_UP@operator-request",
+					);
 					return [{ kind: "inject_reminder", audience: "model", message: reminder.message }];
+				}
 				if (input.metadata?.requestContinuation !== true) {
 					const request = operatorRequest(input.text ?? "", input.metadata?.promptChars);
 					const wantsPlan = PLAN_REQUEST.test(request) && !DISCUSSION_REQUEST.test(request);
 					planOnly = wantsPlan && isPlanOnlyRequest(request);
-					armed = planOnly || input.metadata?.turnMode === "proposal" || (deps.isPlan() ?? wantsPlan);
+					const proposal = input.metadata?.turnMode === "proposal";
+					const verdict = deps.isPlan();
+					armed = planOnly || proposal || (verdict ?? wantsPlan);
+					armedBy = planOnly
+						? "regex:PLAN_ONLY@operator-request"
+						: proposal
+							? "mode:proposal@turn"
+							: verdict !== undefined
+								? "verdict:system-one.turn@turn"
+								: "regex:PLAN_REQUEST@operator-request";
 				}
+				if (armed) context?.evidence?.(armedBy);
 				return armed
 					? [
 							{
@@ -128,6 +146,7 @@ export function createPlanCloseRegistration(deps: {
 				pending = { at: performance.now(), sessionId: input.sessionId, message };
 				return [];
 			}
+			context?.evidence?.(armedBy);
 			return [{ kind: "request_continuation", note: "", message }];
 		},
 	};

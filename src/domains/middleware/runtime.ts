@@ -4,6 +4,7 @@ import type { MiddlewareRegistrationConflictTier, MiddlewareRegistrationOwner } 
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareEffect,
+	type MiddlewareFiredRule,
 	type MiddlewareHook,
 	type MiddlewareHookInput,
 	type MiddlewareHookResult,
@@ -87,6 +88,11 @@ export interface MiddlewareHookRegistration {
  */
 export interface MiddlewareHookEvaluationContext {
 	priorEffects: ReadonlyArray<MiddlewareEffect>;
+	/**
+	 * Name what the effects this evaluation returns were triggered by, as `matcher:subject@scope` (for example
+	 * `regex:PLAN_REQUEST@operator-request`), so middleware.fired can say why a rule fired. The last call wins (#431).
+	 */
+	evidence?(evidenceClass: string): void;
 }
 
 export type MiddlewareDiagnostic =
@@ -230,15 +236,22 @@ export function runMiddlewareRegistrations(
 	const budgetTracker = options.budgetTracker ?? createHookBudgetTracker();
 	const effects: MiddlewareEffect[] = [];
 	const ruleIds: string[] = [];
+	const fired: MiddlewareFiredRule[] = [];
 	for (const registration of registrations) {
 		if (!registration.hooks.includes(input.hook)) continue;
 		if (!registrationMatchesTool(registration, input.toolName)) continue;
 		let emitted: ReadonlyArray<MiddlewareEffect>;
+		let evidence: string | undefined;
 		const startedAt = now();
 		try {
 			// Each evaluate gets its own clone so a misbehaving registration
 			// cannot mutate the input seen by later registrations.
-			emitted = registration.evaluate(cloneHookInput(input), { priorEffects: [...effects] });
+			emitted = registration.evaluate(cloneHookInput(input), {
+				priorEffects: [...effects],
+				evidence: (value) => {
+					evidence = value;
+				},
+			});
 		} catch (err) {
 			emitDiagnostic(onDiagnostic, {
 				kind: "hook_failed",
@@ -270,12 +283,14 @@ export function runMiddlewareRegistrations(
 			effects.push(cloneMiddlewareEffect(effect));
 		}
 		if (!ruleIds.includes(registration.id)) ruleIds.push(registration.id);
+		fired.push(firedRule(registration.id, emitted, evidence));
 	}
 	return {
 		hook: input.hook,
 		input: cloneHookInput(input),
 		effects,
 		ruleIds,
+		fired,
 	};
 }
 
@@ -295,6 +310,7 @@ export async function runMiddlewareAsyncRegistrations(
 	const onDiagnostic = options.onDiagnostic ?? writeMiddlewareDiagnosticToStderr;
 	const effects: MiddlewareEffect[] = [];
 	const ruleIds: string[] = [];
+	const fired: MiddlewareFiredRule[] = [];
 	for (const registration of registrations) {
 		if (registration.evaluateAsync === undefined || !registration.hooks.includes(input.hook)) continue;
 		if (options.include && !options.include(registration)) continue;
@@ -304,9 +320,13 @@ export async function runMiddlewareAsyncRegistrations(
 		if (registration.awaited === true && isToolHook(input.hook) && input.toolName === undefined) continue;
 		if (!registrationMatchesTool(registration, input.toolName)) continue;
 		let emitted: ReadonlyArray<MiddlewareEffect>;
+		let evidence: string | undefined;
 		try {
 			emitted = await registration.evaluateAsync(cloneHookInput(input), {
 				priorEffects: [...priorEffects, ...effects],
+				evidence: (value) => {
+					evidence = value;
+				},
 			});
 		} catch (err) {
 			emitDiagnostic(onDiagnostic, {
@@ -318,9 +338,24 @@ export async function runMiddlewareAsyncRegistrations(
 			continue;
 		}
 		for (const effect of emitted) effects.push(cloneMiddlewareEffect(effect));
-		if (emitted.length > 0) ruleIds.push(registration.id);
+		if (emitted.length > 0) {
+			ruleIds.push(registration.id);
+			fired.push(firedRule(registration.id, emitted, evidence));
+		}
 	}
-	return { hook: input.hook, input: cloneHookInput(input), effects, ruleIds };
+	return { hook: input.hook, input: cloneHookInput(input), effects, ruleIds, fired };
+}
+
+function firedRule(
+	ruleId: string,
+	emitted: ReadonlyArray<MiddlewareEffect>,
+	evidence: string | undefined,
+): MiddlewareFiredRule {
+	return {
+		ruleId,
+		effects: emitted.map((effect) => effect.kind),
+		...(evidence !== undefined ? { evidence } : {}),
+	};
 }
 
 function isToolHook(hook: MiddlewareHook): boolean {

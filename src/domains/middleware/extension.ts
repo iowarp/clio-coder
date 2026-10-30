@@ -1,4 +1,6 @@
 import type { DomainBundle } from "../../core/domain-loader.js";
+import { telemetryContext, withToolTelemetryContext } from "../../core/telemetry/context.js";
+import { recordTelemetry } from "../../core/telemetry/producer.js";
 import {
 	createHookBudgetTracker,
 	type HookBudgetTracker,
@@ -19,6 +21,61 @@ import {
 	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
 import { createMiddlewareSnapshot } from "./snapshot.js";
+import type { MiddlewareHookResult, MiddlewareReminderSeverity } from "./types.js";
+
+const SEVERITY_ORDER: ReadonlyArray<MiddlewareReminderSeverity> = ["info", "advisory", "warn", "hard-block"];
+
+/**
+ * One middleware.fired per rule that emitted, under the hook's own session, run, turn and tool call. Telemetry never
+ * changes what the hook returns (#431, #434).
+ */
+function recordFiredRules(result: MiddlewareHookResult, phase: "sync" | "async" | "awaited"): MiddlewareHookResult {
+	if (!result.fired?.length) return result;
+	try {
+		const { input } = result;
+		const ctx = withToolTelemetryContext(
+			{
+				...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				...(input.runId !== undefined ? { runId: input.runId } : {}),
+				...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+				...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+			},
+			telemetryContext,
+		);
+		if (!ctx) return result;
+		let offset = 0;
+		for (const rule of result.fired) {
+			const own = result.effects.slice(offset, offset + rule.effects.length);
+			offset += rule.effects.length;
+			let severity = -1;
+			for (const effect of own) {
+				const level =
+					effect.kind === "inject_reminder"
+						? SEVERITY_ORDER.indexOf(effect.severity ?? "info")
+						: effect.kind === "block_tool"
+							? SEVERITY_ORDER.indexOf("hard-block")
+							: -1;
+				if (level > severity) severity = level;
+			}
+			recordTelemetry(
+				"middleware.fired",
+				{
+					hook: result.hook,
+					phase,
+					ruleId: rule.ruleId,
+					effects: rule.effects.slice(0, 32),
+					...(severity >= 0 ? { severity: SEVERITY_ORDER[severity] as MiddlewareReminderSeverity } : {}),
+					...(rule.evidence !== undefined ? { evidence: rule.evidence } : {}),
+					...(input.toolName !== undefined ? { tool: input.toolName } : {}),
+				},
+				ctx,
+			);
+		}
+	} catch {
+		// A rule's record is evidence about the hook, never part of its verdict (#434).
+	}
+	return result;
+}
 
 /**
  * One session-scoped budget tracker per contract, seeded from the environment so
@@ -72,16 +129,22 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 			// Capture the list once; a replacement published mid-evaluation
 			// takes effect for the next evaluation, never this one.
 			const registrations = table.list();
-			return runMiddlewareRegistrations(input, registrations, {
-				budgetTracker,
-				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
-			});
+			return recordFiredRules(
+				runMiddlewareRegistrations(input, registrations, {
+					budgetTracker,
+					...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+				}),
+				"sync",
+			);
 		},
-		runAsyncHook(input, priorEffects = []) {
+		async runAsyncHook(input, priorEffects = []) {
 			const registrations = table.list();
-			return runMiddlewareAsyncRegistrations(input, registrations, priorEffects, {
-				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
-			});
+			return recordFiredRules(
+				await runMiddlewareAsyncRegistrations(input, registrations, priorEffects, {
+					...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+				}),
+				"async",
+			);
 		},
 		hasAwaitedHook(hook, toolName) {
 			return table
@@ -93,11 +156,14 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 						registrationMatchesTool(registration, toolName),
 				);
 		},
-		runAwaitedHook(input, priorEffects = []) {
-			return runMiddlewareAsyncRegistrations(input, table.list(), priorEffects, {
-				include: (registration) => registration.awaited === true,
-				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
-			});
+		async runAwaitedHook(input, priorEffects = []) {
+			return recordFiredRules(
+				await runMiddlewareAsyncRegistrations(input, table.list(), priorEffects, {
+					include: (registration) => registration.awaited === true,
+					...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+				}),
+				"awaited",
+			);
 		},
 		snapshot() {
 			return createMiddlewareSnapshot(ruleDefinitions.map((definition) => definition.rule));

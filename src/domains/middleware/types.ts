@@ -191,11 +191,21 @@ export interface MiddlewareHookInput {
 	text?: string;
 }
 
+/** One rule that emitted effects at a hook, as middleware.fired records it (#431). */
+export interface MiddlewareFiredRule {
+	ruleId: string;
+	effects: ReadonlyArray<MiddlewareEffect["kind"]>;
+	/** What the rule says triggered it, as `matcher:subject@scope`. */
+	evidence?: string;
+}
+
 export interface MiddlewareHookResult {
 	hook: MiddlewareHook;
 	input: MiddlewareHookInput;
 	effects: ReadonlyArray<MiddlewareEffect>;
 	ruleIds: ReadonlyArray<string>;
+	/** The rules that emitted, in order, with their own effects; the runtime's runners always fill it. */
+	fired?: ReadonlyArray<MiddlewareFiredRule>;
 }
 
 /**

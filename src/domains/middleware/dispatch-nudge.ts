@@ -7,7 +7,7 @@ import type { DispatchContract } from "../dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../dispatch/ownership.js";
 import { isTerminalRunEnvelope, type RunOutcome } from "../dispatch/types.js";
 import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
-import type { MiddlewareHookRegistration } from "./runtime.js";
+import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
 
 /**
@@ -153,7 +153,7 @@ export function createReadOnlyExplorationNudgeRegistration(deps: { workspaceRoot
 			id: READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
 			description: "advise Scout delegation after prolonged read-only repository exploration",
 			hooks: ["turn_start", "before_tool", "after_tool", "turn_end"],
-			evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
+			evaluate(input: MiddlewareHookInput, context?: MiddlewareHookEvaluationContext): ReadonlyArray<MiddlewareEffect> {
 				if (input.hook === "turn_start") {
 					const advice = pending;
 					pending = null;
@@ -164,6 +164,8 @@ export function createReadOnlyExplorationNudgeRegistration(deps: { workspaceRoot
 						(input.metadata?.requestContinuation !== true && !EXPLORATION_FOLLOW_UP.test(input.text?.trim() ?? ""))
 					)
 						return [];
+					// The count belongs to the turn that ended; this turn only follows it up (#431).
+					context?.evidence?.("count:read-only-calls@prior-turn");
 					return [
 						{ kind: "inject_reminder", message: buildReadOnlyExplorationMessage(), severity: "info", audience: "model" },
 					];
