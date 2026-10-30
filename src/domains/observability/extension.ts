@@ -20,6 +20,7 @@ import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
+import { createSessionJournals } from "./session-journals.js";
 import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
 /**
@@ -158,6 +159,9 @@ export function createObservabilityBundle(
 	options: ObservabilityBundleOptions = {},
 ): DomainBundle<ObservabilityContract> {
 	const cost = createCostTracker();
+	const journals = createSessionJournals(clioStateDir(), () =>
+		writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
+	);
 	let sessionId: string | null | undefined;
 	const recordedRuns = new Set<string>();
 	const recordRun = (payload: DispatchTerminalLike, replayed = false): void => {
@@ -241,6 +245,7 @@ export function createObservabilityBundle(
 			);
 		},
 		async stop() {
+			await journals.flush();
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
 			projection.stop();
@@ -258,6 +263,7 @@ export function createObservabilityBundle(
 	};
 
 	const contract: ObservabilityContract = {
+		acquireTelemetrySession: journals.acquire,
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
 		costEntries: () => cost.entries(),

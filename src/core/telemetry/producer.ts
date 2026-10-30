@@ -62,7 +62,7 @@ export interface TelemetryCall {
 	mark(mark: "firstByte" | "firstToken"): void;
 	settle(data: Settlement): void;
 	/** One successor per settled attempt. A live attempt cannot silently disappear (#434). */
-	nextAttempt(): TelemetryCall | null;
+	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall | null;
 }
 
 export function beginCall(
@@ -70,13 +70,13 @@ export function beginCall(
 	ctx = telemetryContext(),
 ): TelemetryCall {
 	const callId = newCallId();
-	const attempt = (number: number): TelemetryCall => {
+	const attempt = (number: number, request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall => {
 		const attemptId = newAttemptId();
 		const scope = ctx ? { ...ctx, callId, attemptId, label: input.label } : undefined;
 		const start = performance.now();
 		const starts: Partial<Record<Stage, number>> = {};
 		const stages: CallSettled["stages"] = { settle: 0 };
-		const metadata: CallStarted = { ...input, callId, attemptId, attempt: number };
+		const metadata: CallStarted = { ...input, ...request, callId, attemptId, attempt: number };
 		let settled = false;
 		let successor: TelemetryCall | undefined;
 		recordTelemetry("call.started", metadata, scope);
@@ -108,9 +108,9 @@ export function beginCall(
 				stages.settle = performance.now() - start;
 				recordTelemetry("call.settled", { ...metadata, ...data, stages }, scope);
 			},
-			nextAttempt() {
+			nextAttempt(request) {
 				if (!settled) return null;
-				successor ??= attempt(number + 1);
+				successor ??= attempt(number + 1, request);
 				return successor;
 			},
 		};

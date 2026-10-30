@@ -1,8 +1,12 @@
 import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
+import type { TelemetryCall } from "../core/telemetry/producer.js";
+import { beginCall } from "../core/telemetry/producer.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { traceObservation } from "../domains/memory/observation-trace.js";
+import { callSettlementFromMessage } from "../domains/observability/call-facts.js";
+import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/observability/session-journals.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
@@ -216,6 +220,7 @@ export interface TurnRuntimeDeps {
 	retrySettings: () => RetrySettings;
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
 	sessionId?: () => string | undefined;
+	sessionOrigin?: () => TelemetrySessionOrigin | null;
 	/**
 	 * Information-flow admission of one model request: the block reason when
 	 * the session's restricted context may not reach this target, or null.
@@ -624,6 +629,27 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// monotonic anchor before that wait, including custom stream delegates.
 		let apiCallStartedAt: number | null = null;
 		let callTracking: ReturnType<typeof trackCallFetch> | null = null;
+		let modelCall: TelemetryCall | undefined;
+		let journalLease: TelemetrySessionLease | undefined;
+		const settleModelCall = async (message: AgentMessage): Promise<void> => {
+			const call = modelCall;
+			const lease = journalLease;
+			modelCall = undefined;
+			journalLease = undefined;
+			if (call) {
+				Object.assign(message, { callId: call.callId, attemptId: call.attemptId });
+				call.settle(
+					callSettlementFromMessage(
+						message,
+						localRuntime.runtimeResolution.costProvenance,
+						message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
+							? "operator_cancel"
+							: undefined,
+					),
+				);
+			}
+			await lease?.release();
+		};
 		let apiCallFirstDeltaAt: number | null = null;
 		// Where a request is before `onStreamInvocation`. A watchdog abort while
 		// `apiCallStartedAt` is null names this step, because no request has
@@ -656,11 +682,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const tracking = trackCallFetch(controlled.options?.fetch);
 				callTracking = tracking;
 				tracking.start(currentModel.api, controlled.options?.transport);
+				let invokedAttempt = false;
 				const pinnedPrefix = enginePinnedPrefix(localRuntime.agent);
 				return streamToolRound(
 					currentModel,
 					controlled,
 					(request) => {
+						if (invokedAttempt && modelCall) modelCall = modelCall.nextAttempt({ toolChoice: "auto" }) ?? modelCall;
+						invokedAttempt = true;
 						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
 						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"));
 						delete localRuntime.lastProviderStatus;
@@ -698,6 +727,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						return stream;
 					},
 					target.target.id,
+					(message) => {
+						if (!modelCall) return;
+						const terminal = terminalFailureFromAssistantMessage(message);
+						const reported = normalizeTokenUsage((message.usage ?? {}) as unknown as Record<string, unknown>).observed;
+						const failure = terminal
+							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
+							: undefined;
+						modelCall.settle(
+							callSettlementFromMessage(
+								{ ...message, ...(failure ? { failure } : {}) },
+								localRuntime.runtimeResolution.costProvenance,
+							),
+						);
+					},
 				);
 			},
 			initialState: {
@@ -1092,9 +1135,42 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 		const onAgentEvent = async (event: AgentEvent): Promise<void> => {
 			if (event.type === "agent_start") runIdentity = deps.turnIdentity?.();
+			if (event.type === "agent_end" && journalLease) {
+				await journalLease.release();
+				journalLease = undefined;
+				modelCall = undefined;
+			}
 			if (!currentRun()) {
+				if (event.type === "message_end" && event.message.role === "assistant") await settleModelCall(event.message);
 				clearStallTimer();
 				return;
+			}
+			if (event.type === "turn_start") {
+				const origin = deps.sessionOrigin?.();
+				if (origin && deps.observability?.acquireTelemetrySession) {
+					journalLease = await deps.observability.acquireTelemetrySession(
+						origin,
+						"main",
+						state.activeUserTurnId ?? undefined,
+					);
+					const choice = middlewareToolChoice.current();
+					const textOnly = state.synthesisToolLock || choice.kind === "none";
+					modelCall = beginCall(
+						{
+							label: "main",
+							target: {
+								targetId: localRuntime.targetId,
+								runtimeId: localRuntime.runtimeId,
+								api: model.api,
+								requestedModel: localRuntime.wireModelId,
+								reportedModel: { kind: "unknown", reason: "not-observed" },
+							},
+							roundKind: textOnly ? "text-only" : choice.kind === "required" ? "required" : "normal",
+							toolChoice: textOnly ? "none" : choice.kind === "required" ? { name: choice.toolName } : "auto",
+						},
+						journalLease.context,
+					);
+				}
 			}
 			// Every span below is measured on the monotonic frame, so an NTP
 			// correction mid-turn cannot corrupt a tool duration or a TTFT.
@@ -1227,6 +1303,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					// Preserve the display estimate without replacing provider usage (#423, #430).
 					Object.assign(enrichedEvent.message, { estimatedUsage: interruptedUsage });
 				}
+				await settleModelCall(enrichedEvent.message);
 			}
 
 			if (publicEvent?.type === "message_end" && publicEvent.message.role === "assistant" && apiCallStartedAt !== null) {

@@ -577,6 +577,8 @@ export function assistantSessionPayload(
 	payload.responseModelIdObservation = responseModelIdObservationFromRecord(raw, "not-observed");
 	for (const key of [
 		"usage",
+		"callId",
+		"attemptId",
 		"callInvoked",
 		"estimatedUsage",
 		"failure",

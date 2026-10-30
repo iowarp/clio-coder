@@ -3,9 +3,12 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
@@ -77,6 +80,9 @@ for (const continuation of [false, true])
 			}).contract;
 			const tracePath = join(scratch.dir, "trace.sqlite");
 			const store = new TraceStore(tracePath);
+			const journals = createSessionJournals(clioStateDir(), () => {
+				throw new Error("fixture journal unavailable");
+			});
 			const loop = createChatLoop({
 				getSettings: () => settings,
 				providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
@@ -111,12 +117,15 @@ for (const continuation of [false, true])
 						}
 					: {}),
 				observability: {
+					acquireTelemetrySession: journals.acquire,
 					recordSessionTurn: (trace: Parameters<ObservabilityContract["recordSessionTurn"]>[0]) =>
 						store.recordSessionTurn(trace),
 					recordTokens() {},
 					recordTokenThroughput() {},
 				} as unknown as ObservabilityContract,
 				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
+					// The generic dispatch stub omits the API; a journal target needs the scripted protocol (#434).
+					Object.assign(options?.initialState?.model ?? {}, { api: "openai-responses" });
 					let listener: (event: AgentEvent) => unknown = () => {};
 					const state = { ...options?.initialState, messages: [] as AgentMessage[] };
 					return {
@@ -130,6 +139,7 @@ for (const continuation of [false, true])
 							abort() {},
 							async prompt() {
 								await listener({ type: "agent_start" });
+								await listener({ type: "turn_start" });
 								const message = {
 									role: "assistant",
 									content: [{ type: "text", text: "Which approach?" }],
@@ -154,6 +164,16 @@ for (const continuation of [false, true])
 			});
 			try {
 				await loop.submit("Summarize the fixture", { requestContinuation: continuation });
+				const journal = await readCallJournal(join(clioStateDir(), "sessions", "outcome-repo", "outcome-session"));
+				const calls = journal.records.filter(({ record }) => record.k === "call.settled");
+				strictEqual(calls.length, 1, JSON.stringify(journal));
+				const call = calls[0]?.record;
+				ok(call?.k === "call.settled");
+				strictEqual(call.data.disposition, "settled");
+				deepStrictEqual(call.data.usage?.input, { kind: "measured", value: 7, source: "provider" });
+				const assistant = entries.find((entry) => entry.kind === "message" && entry.role === "assistant");
+				ok(assistant?.kind === "message");
+				strictEqual((assistant.payload as { callId: string }).callId, call.data.callId);
 				if (continuation) {
 					const user = entries.find((entry) => entry.kind === "message" && entry.role === "user");
 					ok(user?.kind === "message");

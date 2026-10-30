@@ -8,6 +8,7 @@ import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
 import { openCallJournal, readCallJournal } from "../../src/domains/observability/call-journal.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 
 const context = { sessionId: "journal-session", label: "main" as const };
@@ -32,6 +33,41 @@ test("producer boundaries reject filesystem helpers and serialization without bl
 	strictEqual(checkTelemetryProducer("helper.ts", 'import { open as write } from "node:fs/promises";').length, 1);
 	strictEqual(checkTelemetryProducer("helper.ts", 'JSON.stringify(event); new DatabaseSync("file");').length, 2);
 	deepStrictEqual(checkTelemetryProducer("producer.ts", "sink.enqueue(event);"), []);
+});
+
+test("overlapping work retains its original session and releases ownership only after the last settlement", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-sessions-"));
+	let failures = 0;
+	const journals = createSessionJournals(stateDir, () => {
+		failures += 1;
+	});
+	try {
+		const origin = { id: "original", cwdHash: "repo" };
+		const main = await journals.acquire(origin, "main", "turn-a");
+		const side = await journals.acquire(origin, "memory", "turn-a");
+		await main.release();
+		const next = await journals.acquire({ ...origin, id: "next" }, "main", "turn-b");
+		recordTelemetry("session.opened", {}, next.context);
+		recordTelemetry("session.resumed", {}, side.context);
+		await next.release();
+		await side.release();
+		const original = await readCallJournal(join(stateDir, "sessions", "repo", "original"));
+		const switched = await readCallJournal(join(stateDir, "sessions", "repo", "next"));
+		deepStrictEqual(
+			original.records.map(({ record }) => record.ctx),
+			[side.context],
+		);
+		deepStrictEqual(
+			switched.records.map(({ record }) => record.ctx),
+			[next.context],
+		);
+		const reopened = await journals.acquire(origin, "main");
+		await reopened.release();
+		strictEqual(failures, 0);
+	} finally {
+		await journals.flush();
+		await rm(stateDir, { recursive: true, force: true });
+	}
 });
 
 test("journal owns a session, flushes call attempts once, and keeps retries linked without shared mutable scope", async () => {

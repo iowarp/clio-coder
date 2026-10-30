@@ -1,5 +1,6 @@
 import type {
 	AnthropicOptions,
+	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	AzureOpenAIResponsesOptions,
@@ -380,6 +381,7 @@ export function streamToolRound(
 	controlled: ControlledRequest,
 	invoke: (request: ControlledRequest) => AssistantMessageEventStream,
 	targetId = model.provider,
+	observeRetry?: (message: AssistantMessage) => void,
 ): AssistantMessageEventStream {
 	const initial = controlled.toolRounds?.[0];
 	if (!initial) return invoke(controlled);
@@ -414,6 +416,11 @@ export function streamToolRound(
 								message,
 							)));
 				if (held !== null && rejected && choice !== undefined && choice !== "auto") {
+					try {
+						if (event.type === "error") observeRetry?.(event.error);
+					} catch {
+						/* Telemetry cannot change provider retry behavior (#434). */
+					}
 					const reason = (message.split("\n\n")[0] ?? message).slice(0, 512);
 					rejectedChoices.set(choiceKey(model, targetId, choice === "none" ? "none" : "forced"), reason);
 					records.push({ ...initial, choice: "auto", attempt: 1, downgradeReason: reason });

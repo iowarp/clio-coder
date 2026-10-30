@@ -1717,6 +1717,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		middleware,
 		retrySettings,
 		sessionId: () => deps.session?.current()?.id,
+		sessionOrigin: () => deps.session?.current() ?? null,
 		...(deps.admitFlow !== undefined ? { admitFlow: deps.admitFlow } : {}),
 		emit: emitRuntimeEvent,
 		emitNotice,

@@ -8,6 +8,7 @@ import { newAttemptId, newCallId, newRecordId, UUID_V7_PATTERN } from "../../src
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { KIND_NAMES, KIND_REGISTRY, validPayload } from "../../src/core/telemetry/schemas.js";
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
+import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 
 const context = { sessionId: "existing-session-id", label: "main" as const };
 const header: SegmentHeader = {
@@ -133,4 +134,41 @@ test("monotonic spans never cross a process or segment origin", () => {
 	for (const changed of [{ pid: 2 }, { host: "other" }, { birthToken: "another" }, { monoEpochWallMs: 2000 }]) {
 		strictEqual(monotonicSpan(start, { origin: { ...start.origin, ...changed }, mono: 10 }), null);
 	}
+});
+
+test("message facts preserve unknown placeholders, explicit zero, terminal errors and unsent calls", () => {
+	const usage = { input: 0, output: 0, cacheRead: 0, cost: { total: 0 } };
+	const omitted = callSettlementFromMessage({ stopReason: "stop", usage }, "unknown");
+	strictEqual(omitted.disposition, "settled_no_usage");
+	strictEqual(omitted.usage?.input.kind, "unknown");
+	const zero = callSettlementFromMessage(
+		{
+			stopReason: "stop",
+			usage: { ...usage, clioExternal: { tokenUsage: "provider-reported", cost: "provider-reported" } },
+		},
+		"known",
+	);
+	strictEqual(zero.disposition, "settled");
+	deepStrictEqual(zero.usage?.input, { kind: "measured", value: 0, source: "provider" });
+	deepStrictEqual(zero.pricing.usd, { kind: "measured", value: 0, source: "provider" });
+	for (const marker of [{ callInvoked: false }, { failure: { invoked: false } }, { usage: { callInvoked: false } }]) {
+		const unsent = callSettlementFromMessage({ stopReason: "aborted", usage, ...marker }, "known_free");
+		strictEqual(unsent.disposition, "never_sent");
+		strictEqual(unsent.usage, null);
+		strictEqual(unsent.pricing.usd.kind, "absent");
+	}
+	const error = callSettlementFromMessage(
+		{ stopReason: "error", failure: { httpStatus: 429 }, usage: { input: 5 } },
+		"unknown",
+	);
+	strictEqual(error.disposition, "settled");
+	strictEqual(error.stop.failure, "rate_limited");
+	const dropped = callSettlementFromMessage(
+		{ stopReason: "aborted", responseId: "response", usage: { input: 5 } },
+		"known",
+	);
+	strictEqual(dropped.disposition, "sent_unsettled");
+	strictEqual(dropped.usage?.input.kind, "unknown");
+	strictEqual(dropped.pricing.usd.kind, "unknown");
+	strictEqual(dropped.stop.failure, undefined);
 });

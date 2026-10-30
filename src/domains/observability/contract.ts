@@ -1,4 +1,5 @@
 import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
+import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
 import type { DispatchSnapshot } from "../dispatch/contract.js";
@@ -7,6 +8,7 @@ import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { CostAggregate, CostEntry, CostEntryLabel, UsageBreakdown } from "./cost.js";
+import type { TelemetrySessionLease, TelemetrySessionOrigin } from "./session-journals.js";
 import type { SessionTurnTrace } from "./trace-store.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
 
@@ -148,6 +150,12 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	costEntries(): ReadonlyArray<CostEntry>;
 	/** Reset the running session token and cost totals. */
 	resetSession(sessionId?: string | null): void;
+	/** Hold the journal for this work's original session, including work surviving a UI switch (#434). */
+	acquireTelemetrySession?(
+		origin: TelemetrySessionOrigin,
+		label: CallLabel,
+		turnId?: string,
+	): Promise<TelemetrySessionLease>;
 	/** Count persisted never-sent assistant calls without adding spend or API calls (#430). */
 	recordNeverSentCalls(count: number): void;
 	/**

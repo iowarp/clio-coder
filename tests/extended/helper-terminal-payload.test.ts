@@ -199,6 +199,7 @@ test("Codex sends only accepted tool_choice shapes and retries one rejected choi
 	});
 	const attempt = async (fault: string, targetId: string, afterOutput = false) => {
 		const sent: unknown[] = [];
+		const suppressed: string[] = [];
 		const controlled = applyToolRounds(codex, { messages: [], tools: [tool("write")] }, undefined, [
 			{ kind: "text-only" },
 		]);
@@ -222,7 +223,12 @@ test("Codex sends only accepted tool_choice shapes and retries one rejected choi
 				return events;
 			},
 			targetId,
+			(message) => {
+				suppressed.push(message.stopReason);
+				throw new Error("observer failure cannot change retry");
+			},
 		).result();
+		strictEqual(suppressed.length, sent.length - 1);
 		return { sent, result };
 	};
 	const rejection = "400 Unsupported parameter: 'tool_choice' is not supported by rustponsesapi";
