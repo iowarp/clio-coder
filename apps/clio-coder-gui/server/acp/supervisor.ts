@@ -20,7 +20,7 @@ import {
 } from "../../contracts/board.js";
 import { SessionTree } from "../../contracts/branches.js";
 import { Id } from "../../contracts/common.js";
-import { ContextLedger } from "../../contracts/context-ledger.js";
+import { WireContextLedger } from "../../contracts/context-ledger.js";
 import { ContextOperationStatus } from "../../contracts/context-work.js";
 import { ExtensionReload, LibraryReload, SessionExtensions } from "../../contracts/extensions.js";
 import {
@@ -121,6 +121,7 @@ import {
 } from "../../contracts/wire.js";
 import { ACP_CONTEXT_STATUS_METHOD } from "../clio/http-shims.js";
 import { childRunning, startAcpChild } from "../process-policy.js";
+import { withLedgerDisplay } from "../services/context-display.js";
 import { turnCostDisplays, withCostDisplay } from "../services/cost-display.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
@@ -1484,11 +1485,11 @@ export class Supervisor {
 			changed: reloaded.some((outcome) => outcome.ok && outcome.changed),
 		};
 	}
-	contextLedger(id: string) {
+	async contextLedger(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.context)
 			throw new AppProblem("conflict", "This Clio Coder build does not report its context window.");
-		return this.projected(id, ACP_CONTEXT_LEDGER_METHOD, { sessionId: id }, ContextLedger);
+		return withLedgerDisplay(await this.projected(id, ACP_CONTEXT_LEDGER_METHOD, { sessionId: id }, WireContextLedger));
 	}
 	async contextStatus(id: string) {
 		const entry = this.active(id);

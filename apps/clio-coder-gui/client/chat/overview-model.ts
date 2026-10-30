@@ -67,16 +67,22 @@ export interface ContextMeter {
  * The window meter on the Progress view, from Clio's own accounting. Null when the window size is not
  * reported, because a share of an unknown size would be invented.
  */
+/** The meter's fill is geometry from the ledger's counts; its words are the server's displays (#434). */
 export function contextMeter(
-	ledger: Pick<ContextLedger, "usedTokens" | "contextWindow" | "percent"> & { measured: boolean | null },
+	ledger: Pick<ContextLedger, "usedTokens" | "contextWindow" | "percent" | "measured" | "display">,
 ): ContextMeter | null {
-	if (ledger.contextWindow <= 0) return null;
+	const meter = ledger.display.meter;
+	if (ledger.contextWindow <= 0 || meter === null) return null;
 	const raw = ledger.percent ?? (ledger.usedTokens / ledger.contextWindow) * 100;
 	const percent = Math.min(100, Math.max(0, raw));
 	const tone = percent >= 85 ? "full" : percent >= 65 ? "warn" : "ok";
-	const basis = ledger.measured === null ? ", measurement not reported" : ledger.measured ? "" : ", estimated";
-	const label = `${compactCount(ledger.usedTokens)} of ${compactCount(ledger.contextWindow)} tokens${basis}`;
-	return { percent, tone, label, text: `Context window ${Math.round(percent)}% used, ${label}` };
+	const label = `${meter.used} of ${meter.window} tokens${ledger.measured ? "" : ", estimated"}`;
+	return {
+		percent,
+		tone,
+		label,
+		text: `Context window ${ledger.display.percent ?? "share not reported"} used, ${label}`,
+	};
 }
 
 export interface ContextSegment {

@@ -45,16 +45,9 @@ export const TelemetryChips = memo(function TelemetryChips({
 	const ledger = useContextLedger(client, sessionId, settled, open && !!capabilities.data?.context);
 	const usage = useSessionUsage(client, sessionId, settled, open && !!capabilities.data?.usage);
 	const telemetry = useSessionTelemetry(client, sessionId);
-	const meter = ledger.data
-		? contextMeter(ledger.data)
-		: telemetry?.usage && telemetry.usage.used !== null && telemetry.usage.size !== null
-			? contextMeter({
-					usedTokens: telemetry.usage.used,
-					contextWindow: telemetry.usage.size,
-					percent: null,
-					measured: null,
-				})
-			: null;
+	// The live hint's ledger carries the same server displays as the ledger read (#434).
+	const live = telemetry?.usage?.context;
+	const meter = ledger.data ? contextMeter(ledger.data) : live ? contextMeter(live) : null;
 	const cold = useTelemetrySession(client, sessionId, !open);
 	const spend = sessionSpend({
 		usage: usage.data,

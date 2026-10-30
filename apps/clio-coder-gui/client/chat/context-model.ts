@@ -23,8 +23,9 @@ const VERDICT_WORDS: Readonly<Record<string, string>> = {
 	unknown: "the backend did not report its cache",
 };
 
-const tokens = (value: number) => `${Math.round(value).toLocaleString("en-US")} tokens`;
-const share = (value: number | null) => (value === null ? "" : ` (${value.toFixed(value < 10 ? 1 : 0)}%)`);
+// Every count is the server's display (#434 §11.3); this model only places it in words.
+const tokens = (display: string) => `${display} tokens`;
+const share = (display: string | null) => (display === null ? "" : ` (${display})`);
 
 export interface ContextView {
 	route: string;
@@ -53,8 +54,6 @@ export interface ContextFact {
 	note: string | null;
 }
 
-const count = (value: number) => Math.round(value).toLocaleString("en-US");
-
 export function contextWorkspaceFacts(workspace: SessionWorkspace): ContextFact[] {
 	return [
 		{ label: "Workspace", value: null, note: workspace.cwd },
@@ -76,7 +75,8 @@ export function contextWorkspaceFacts(workspace: SessionWorkspace): ContextFact[
 }
 
 function contextFacts(ledger: ContextLedger): ContextFact[] {
-	const known = ledger.contextWindow > 0;
+	const display = ledger.display;
+	const known = display.window !== null;
 	const slots = ledger.contextWindowSlots;
 	const route = [ledger.provider, ledger.model].filter(Boolean).join(" · ");
 	const facts: ContextFact[] = [
@@ -84,19 +84,17 @@ function contextFacts(ledger: ContextLedger): ContextFact[] {
 		known
 			? {
 					label: "Window",
-					value: count(ledger.contextWindow),
+					value: display.window,
 					note: [
 						SOURCE_WORDS[ledger.contextWindowSource ?? "unknown"] ?? ledger.contextWindowSource,
-						slots ? `one of ${slots.slots} slots sharing ${count(slots.totalTokens)}` : null,
+						slots ? `one of ${slots.slots} slots sharing ${display.slotsTotal}` : null,
 					]
 						.filter(Boolean)
 						.join(", "),
 				}
 			: { label: "Window", value: null, note: "Size not reported" },
-		known
-			? { label: "Free", value: count(ledger.freeTokens), note: null }
-			: { label: "Free", value: null, note: "Not reported" },
-		{ label: "Reserve", value: count(ledger.reserveTokens), note: "held for compaction" },
+		known ? { label: "Free", value: display.free, note: null } : { label: "Free", value: null, note: "Not reported" },
+		{ label: "Reserve", value: display.reserve, note: "held for compaction" },
 		{
 			label: "Compaction",
 			value:
@@ -106,17 +104,20 @@ function contextFacts(ledger: ContextLedger): ContextFact[] {
 			note: ledger.compactionAuto ? "automatic" : "Automatic compaction is off",
 		},
 	];
-	if (ledger.lastCompaction !== null)
+	if (ledger.lastCompaction !== null && display.lastCompaction !== null)
 		facts.push({
 			label: "Last compacted",
-			value: `${count(ledger.lastCompaction.tokensBefore)} → ${count(ledger.lastCompaction.tokensAfter)}`,
+			value: `${display.lastCompaction.before} → ${display.lastCompaction.after}`,
 			note: `runtime estimates; ${ledger.lastCompaction.trigger}`,
 		});
 	return facts;
 }
 
-function promptCacheFacts(cache: ContextLedger["promptCache"]): ContextFact[] {
-	if (cache === null) return [{ label: "Prompt cache", value: null, note: "Not reported" }];
+function promptCacheFacts(
+	cache: ContextLedger["promptCache"],
+	display: ContextLedger["display"]["cache"],
+): ContextFact[] {
+	if (cache === null || display === null) return [{ label: "Prompt cache", value: null, note: "Not reported" }];
 	return [
 		{
 			label: "Session shell",
@@ -130,20 +131,21 @@ function promptCacheFacts(cache: ContextLedger["promptCache"]): ContextFact[] {
 		},
 		...(
 			[
-				["Cache read", cache.cacheReadTokens],
-				["Cache write", cache.cacheWriteTokens],
-				["Uncached input", cache.uncachedInputTokens],
+				["Cache read", display.cacheRead],
+				["Cache write", display.cacheWrite],
+				["Uncached input", display.uncachedInput],
 			] as const
 		).map(([label, value]) => ({
 			label,
-			value: value === null ? null : count(value),
+			value,
 			note: value === null ? "Not reported" : "tokens · last run",
 		})),
 	];
 }
 
 export function contextView(ledger: ContextLedger): ContextView {
-	const known = ledger.contextWindow > 0;
+	const display = ledger.display;
+	const known = display.window !== null;
 	const slots = ledger.contextWindowSlots;
 	return {
 		project: [
@@ -160,47 +162,47 @@ export function contextView(ledger: ContextLedger): ContextView {
 			},
 		],
 		figure: {
-			percent: known && ledger.percent !== null ? `${ledger.percent.toFixed(ledger.percent < 10 ? 1 : 0)}%` : null,
-			used: count(ledger.usedTokens),
-			window: known ? count(ledger.contextWindow) : null,
+			percent: display.percent,
+			used: display.used,
+			window: display.window,
 			basis: ledger.measured ? "Total anchored to provider-reported usage" : "Estimated until the provider reports usage",
 		},
 		facts: contextFacts(ledger),
-		cacheFacts: promptCacheFacts(ledger.promptCache),
+		cacheFacts: promptCacheFacts(ledger.promptCache, display.cache),
 		route: [ledger.provider, ledger.model].filter(Boolean).join(" · ") || "Route not reported",
 		window: known
-			? `${tokens(ledger.contextWindow)}${slots ? `, one of ${slots.slots} slots sharing ${tokens(slots.totalTokens)}` : ""}, ${
+			? `${tokens(display.window ?? "")}${slots && display.slotsTotal ? `, one of ${slots.slots} slots sharing ${tokens(display.slotsTotal)}` : ""}, ${
 					SOURCE_WORDS[ledger.contextWindowSource ?? "unknown"] ?? ledger.contextWindowSource
 				}.`
 			: "Window size not reported, so no share of it can be shown.",
-		accounting: `${tokens(ledger.usedTokens)} in use${share(ledger.percent)}, ${
+		accounting: `${tokens(display.used)} in use${share(display.percent)}, ${
 			ledger.measured ? "anchored to provider-reported usage" : "estimated until the provider reports usage"
 		}.`,
-		rows: ledger.groups.map((group) => ({
+		rows: ledger.groups.map((group, index) => ({
 			key: group.category,
 			label: group.label,
-			tokens: Math.round(group.tokens).toLocaleString("en-US"),
-			share: group.percent === null ? "" : `${group.percent.toFixed(group.percent < 10 ? 1 : 0)}%`,
+			tokens: display.groups[index]?.tokens ?? "not reported",
+			share: display.groups[index]?.share ?? "",
 		})),
-		reserve: `${tokens(ledger.reserveTokens)} held in reserve for compaction.`,
-		free: known ? `${tokens(ledger.freeTokens)} free.` : "Free space not reported.",
+		reserve: `${tokens(display.reserve)} held in reserve for compaction.`,
+		free: display.free !== null ? `${tokens(display.free)} free.` : "Free space not reported.",
 		compaction: ledger.compactionAuto
 			? ledger.compactionThreshold === null
 				? "Compacts automatically."
 				: `Compacts automatically at ${Math.round(ledger.compactionThreshold * 100)}% of the window.`
 			: "Automatic compaction is off.",
 		lastCompaction:
-			ledger.lastCompaction === null
+			ledger.lastCompaction === null || display.lastCompaction === null
 				? null
-				: `Last compaction (${ledger.lastCompaction.trigger}): estimated ${tokens(ledger.lastCompaction.tokensBefore)} to ${tokens(ledger.lastCompaction.tokensAfter)}.`,
+				: `Last compaction (${ledger.lastCompaction.trigger}): estimated ${tokens(display.lastCompaction.before)} to ${tokens(display.lastCompaction.after)}.`,
 		cache:
 			ledger.promptCache === null
 				? null
 				: [
 						ledger.promptCache.shellReused ? "Session shell reused" : "Session shell rebuilt",
-						ledger.promptCache.cacheReadTokens === null
+						display.cache?.cacheRead == null
 							? "cache reads not reported"
-							: `${tokens(ledger.promptCache.cacheReadTokens)} read from the provider cache`,
+							: `${tokens(display.cache.cacheRead)} read from the provider cache`,
 						ledger.promptCache.backendVerdict === null ? null : VERDICT_WORDS[ledger.promptCache.backendVerdict],
 					]
 						.filter(Boolean)

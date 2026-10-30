@@ -14,6 +14,8 @@ const httpModules = new Map([
 		new Set(["aggregateCostAmounts", "renderCostAggregate", "renderUsdLimit", "CostAggregate"]),
 	],
 	// The server records its loaded build and reads activation so live status can report a pending upgrade.
+	// The context ledger's and fleet frames' counts are worded by the canonical renderer on the server (#434).
+	["src/core/telemetry/render.ts", new Set(["renderCompactCount", "renderCount", "renderFact"])],
 	["src/core/running-build.ts", new Set(["registerRunningBuild", "pendingInstalledVersion"])],
 	["src/engine/acp/transport.ts", new Set(["createStdioTransport", "AcpJsonRpcTransport"])],
 	["src/engine/acp/errors.ts", new Set(["AcpProcessError", "AcpTimeoutError", "AcpRequestError", "AcpProtocolError"])],

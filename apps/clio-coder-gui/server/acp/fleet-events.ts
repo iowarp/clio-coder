@@ -12,6 +12,7 @@ import {
 } from "../../contracts/fleet-events.js";
 import { ReceiptFacts } from "../../contracts/receipt-facts.js";
 import { ACP_RECEIPT_META_KEY, AcpJob } from "../../contracts/wire.js";
+import { renderCount } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
 import { record } from "./client.js";
 import { projectTelemetryValue } from "./telemetry.js";
@@ -65,7 +66,21 @@ export function fleetEvent(value: unknown, sessionId: string, previousSequence: 
 	if (!Object.hasOwn(ACP_TO_WEB_EVENT, kind)) return { type: null, item: null, sequence };
 	const type = ACP_TO_WEB_EVENT[kind as keyof typeof ACP_TO_WEB_EVENT];
 	const schema = HEALTH.has(type) ? HealthFact : FleetFact;
-	const fact = Value.Clean(schema, { type, payload: event.payload });
+	const payload = record(event.payload);
+	// The completed frame's token count is worded here, by the canonical renderer, never in the browser (#434).
+	const fact = Value.Clean(schema, {
+		type,
+		payload:
+			type === "fleet.completed"
+				? {
+						...payload,
+						tokenDisplay:
+							typeof payload.tokenCount === "number" && Number.isFinite(payload.tokenCount)
+								? renderCount(payload.tokenCount)
+								: null,
+					}
+				: event.payload,
+	});
 	if (!Value.Check(schema, fact) || Buffer.byteLength(JSON.stringify(fact)) > 8192)
 		throw new AppProblem("upstream_acp", "ACP event exceeds its public projection contract.");
 	const rawReceipt = record(event._meta)[ACP_RECEIPT_META_KEY];

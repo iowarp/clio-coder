@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { contextView } from "../client/chat/context-model.js";
-import type { ContextLedger } from "../contracts/context-ledger.js";
+import type { WireContextLedger } from "../contracts/context-ledger.js";
+import { withLedgerDisplay } from "../server/services/context-display.js";
 
-const LEDGER: ContextLedger = {
+const WIRE: WireContextLedger = {
 	version: 1,
 	provider: "mini",
 	model: "gemma",
@@ -30,13 +31,14 @@ const LEDGER: ContextLedger = {
 		backendVerdict: "cold",
 	},
 };
+const LEDGER = withLedgerDisplay(WIRE);
 
 test("the context view words the agent's accounting and says whether it was measured", () => {
 	const view = contextView(LEDGER);
 	assert.equal(view.route, "mini · gemma");
 	assert.equal(view.window, "131,072 tokens, one of 4 slots sharing 524,288 tokens, read from the loaded model.");
-	assert.equal(view.accounting, "20,480 tokens in use (16%), anchored to provider-reported usage.");
-	assert.deepEqual(view.rows, [{ key: "messages", label: "Conversation", tokens: "16,384", share: "13%" }]);
+	assert.equal(view.accounting, "20,480 tokens in use (15.6%), anchored to provider-reported usage.");
+	assert.deepEqual(view.rows, [{ key: "messages", label: "Conversation", tokens: "16,384", share: "12.5%" }]);
 	assert.equal(view.compaction, "Compacts automatically at 80% of the window.");
 	assert.equal(view.lastCompaction, "Last compaction (auto): estimated 90,000 tokens to 12,000 tokens.");
 	assert.equal(
@@ -46,14 +48,16 @@ test("the context view words the agent's accounting and says whether it was meas
 });
 
 test("an unknown window is said, not shown as zero, and estimates say so", () => {
-	const view = contextView({
-		...LEDGER,
-		contextWindow: 0,
-		percent: null,
-		measured: false,
-		promptCache: null,
-		lastCompaction: null,
-	});
+	const view = contextView(
+		withLedgerDisplay({
+			...WIRE,
+			contextWindow: 0,
+			percent: null,
+			measured: false,
+			promptCache: null,
+			lastCompaction: null,
+		}),
+	);
 	assert.equal(view.window, "Window size not reported, so no share of it can be shown.");
 	assert.equal(view.accounting, "20,480 tokens in use, estimated until the provider reports usage.");
 	assert.equal(view.free, "Free space not reported.");

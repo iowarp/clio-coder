@@ -36,7 +36,16 @@ export const FleetPayloads = {
 	"fleet.started": start,
 	"fleet.progress": Type.Object({ ...identity, progressCount: count, truncated: Type.Boolean() }, closed),
 	"fleet.completed": Type.Object(
-		{ ...identity, outcome: nullableId, outcomeCode: nullableId, outcomeDetail, durationMs: count, tokenCount: count },
+		{
+			...identity,
+			outcome: nullableId,
+			outcomeCode: nullableId,
+			outcomeDetail,
+			durationMs: count,
+			tokenCount: count,
+			/** The token count worded by the server's canonical renderer; the browser never formats it (#434). */
+			tokenDisplay: Type.Optional(Type.Union([Type.String({ maxLength: 64 }), Type.Null()])),
+		},
 		closed,
 	),
 	"fleet.failed": Type.Object(

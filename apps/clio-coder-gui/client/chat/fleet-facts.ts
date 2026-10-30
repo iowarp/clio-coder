@@ -40,7 +40,8 @@ export interface FleetRun {
 	readonly progressTruncated: boolean;
 	readonly outcome: string | null;
 	readonly durationMs: number | null;
-	readonly tokenCount: number | null;
+	/** The server's wording of the completed frame's token count; null when the frame reported none. */
+	readonly tokens: string | null;
 	readonly updatedAt: string;
 	readonly receipt?: FleetItem["receipt"];
 }
@@ -115,7 +116,7 @@ function blank(runId: string, at: string): FleetRun {
 		progressTruncated: false,
 		outcome: null,
 		durationMs: null,
-		tokenCount: null,
+		tokens: null,
 		updatedAt: at,
 	};
 }
@@ -151,7 +152,7 @@ function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unk
 				state: "done",
 				outcome: terminalOutcome(payload) ?? base.outcome,
 				durationMs: integer(payload.durationMs) ?? base.durationMs,
-				tokenCount: integer(payload.tokenCount) ?? base.tokenCount,
+				tokens: text(payload.tokenDisplay) ?? base.tokens,
 			};
 		case "fleet.failed":
 			return {
@@ -264,7 +265,7 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 				label: "Run done",
 				tone: "success",
 				known: true,
-				summary: `${terminalOutcome(payload) ?? "Finished"} after ${integer(payload.durationMs) === null ? "an unreported time" : formatDuration(integer(payload.durationMs) ?? 0)}, ${amount(integer(payload.tokenCount))} tokens.`,
+				summary: `${terminalOutcome(payload) ?? "Finished"} after ${integer(payload.durationMs) === null ? "an unreported time" : formatDuration(integer(payload.durationMs) ?? 0)}, ${text(payload.tokenDisplay) ?? "not reported"} tokens.`,
 			};
 		case "fleet.failed":
 			return {

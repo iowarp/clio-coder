@@ -1,5 +1,6 @@
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { WireContextLedger } from "../../contracts/context-ledger.js";
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
 import {
 	ActiveEggs,
@@ -18,6 +19,7 @@ import {
 	ACP_USAGE_META_KEY,
 	ACP_WORKSPACE_META_KEY,
 } from "../../contracts/wire.js";
+import { withLedgerDisplay } from "../services/context-display.js";
 import { AppProblem } from "../services/problem.js";
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -73,7 +75,9 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 				// The v1 frame sends a window it does not know as 0 (src/engine/acp/context-ledger.ts).
 				size: known(update.size) === 0 ? null : known(update.size),
 				...(update.cost !== undefined ? { cost: update.cost } : {}),
-				...(meta[ACP_CONTEXT_META_KEY] !== undefined ? { context: meta[ACP_CONTEXT_META_KEY] } : {}),
+				...(meta[ACP_CONTEXT_META_KEY] !== undefined
+					? { context: withLedgerDisplay(projectTelemetryValue(WireContextLedger, meta[ACP_CONTEXT_META_KEY])) }
+					: {}),
 				...(usage.session != null ? { session: liveSession(record(usage.session)) } : {}),
 			}),
 		};

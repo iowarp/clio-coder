@@ -318,6 +318,7 @@ test("five events about one run fold into one row that carries every reported va
 			outcome: "succeeded",
 			durationMs: 4200,
 			tokenCount: 910,
+			tokenDisplay: "910",
 		}),
 	]);
 	assert.equal(runs.length, 1);
@@ -330,7 +331,7 @@ test("five events about one run fold into one row that carries every reported va
 	assert.equal(run.attempt, 1);
 	assert.equal(run.progressCount, 7);
 	assert.equal(run.progressTruncated, true);
-	assert.equal(run.tokenCount, 910);
+	assert.equal(run.tokens, "910", "the server's display, never a count the browser words");
 	assert.equal(fleetRunDetail(run), "Done · succeeded · 7+ steps · 4.2s");
 	assert.equal(
 		fleetRunDetail({

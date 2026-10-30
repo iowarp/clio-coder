@@ -167,10 +167,10 @@ function RunNode({
 								<dd>{run.attempt}</dd>
 							</div>
 						) : null}
-						{run.tokenCount === null ? null : (
+						{run.tokens === null ? null : (
 							<div>
 								<dt>Tokens</dt>
-								<dd>{run.tokenCount.toLocaleString("en-US")}</dd>
+								<dd>{run.tokens}</dd>
 							</div>
 						)}
 					</dl>
