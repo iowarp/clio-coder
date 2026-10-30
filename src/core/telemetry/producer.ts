@@ -141,6 +141,26 @@ function abandonedSettlement(sent: boolean, cause: FailureCause): Settlement {
 	};
 }
 
+/**
+ * A message alone cannot show a request left Clio. An attempt whose own stages show it never reached the send, and
+ * whose settlement carries no provider evidence, was never sent, whatever an aborted message suggests (#434).
+ */
+function unsentByStages(data: Settlement): Settlement {
+	const notApplicable = { kind: "absent", reason: "not-applicable" } as const;
+	return {
+		...data,
+		disposition: "never_sent",
+		usage: null,
+		pricing: { usd: notApplicable, pricedBy: "none" },
+		cache: {
+			...data.cache,
+			firstDivergentSection: notApplicable,
+			rePrefilledTokens: notApplicable,
+			...(data.cache.bill ? { bill: { usd: notApplicable, pricedBy: "none" } } : {}),
+		},
+	};
+}
+
 /** The unsettled attempt this async context belongs to, so a shared engine seam can time it (#434). */
 export function telemetryCallInContext(): TelemetryCall | undefined {
 	const attemptId = telemetryContext()?.attemptId;
@@ -160,6 +180,8 @@ export function beginCall(
 		const stages: CallSettled["stages"] = { settle: 0 };
 		const metadata: CallStarted = { ...input, ...request, callId, attemptId, attempt: number };
 		let settled = false;
+		// Entering its own context is how a side call's request reaches the engine seam that marks its send (#434).
+		let entered = false;
 		let successor: TelemetryCall | undefined;
 		let response: ObservedResponse | undefined;
 		recordTelemetry("call.started", metadata, scope);
@@ -167,7 +189,10 @@ export function beginCall(
 			callId,
 			attemptId,
 			attempt: number,
-			withContext: (fn) => (scope ? withTelemetryContext(scope, fn) : fn()),
+			withContext: (fn) => {
+				entered = true;
+				return scope ? withTelemetryContext(scope, fn) : fn();
+			},
 			stage(name, phase, facts = {}) {
 				if (settled) return;
 				const elapsed = performance.now() - start;
@@ -196,9 +221,20 @@ export function beginCall(
 				settled = true;
 				liveAttempts.delete(attemptId);
 				stages.settle = performance.now() - start;
+				// Only an attempt whose path marks its send can show it never got there; System One's cannot yet.
+				const tracked =
+					entered || starts.transform !== undefined || starts.auth !== undefined || starts.admission !== undefined;
+				const evidence =
+					data.responseId !== undefined ||
+					reportedModel?.kind === "measured" ||
+					Object.values(data.usage ?? {}).some((fact) => fact.kind === "measured");
+				const settlement =
+					tracked && starts.send === undefined && data.disposition === "sent_unsettled" && !evidence
+						? unsentByStages(data)
+						: data;
 				const facts: CallSettled = {
 					...metadata,
-					...data,
+					...settlement,
 					target: { ...metadata.target, reportedModel: reportedModel ?? metadata.target.reportedModel },
 					stages,
 				};

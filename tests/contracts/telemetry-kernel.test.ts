@@ -130,6 +130,46 @@ test("an abandoned attempt settles once, as never sent before its send stage and
 	}
 });
 
+test("an aborted message cannot claim a send its attempt's stages never reached (#434)", () => {
+	const records: PendingTelemetry[] = [];
+	const release = registerTelemetrySink("unsent-session", { enqueue: (record) => Boolean(records.push(record)) });
+	try {
+		const started = {
+			label: "memory" as const,
+			target: {
+				targetId: "target",
+				runtimeId: "runtime",
+				api: "api",
+				requestedModel: "model",
+				reportedModel: { kind: "unknown", reason: "not-observed" } as const,
+			},
+			roundKind: "normal" as const,
+			toolChoice: "auto" as const,
+		};
+		const ctx = { sessionId: "unsent-session", label: "memory" as const };
+		const aborted = callSettlementFromMessage({ stopReason: "aborted", usage: { input: 0, output: 0 } }, "known");
+		strictEqual(aborted.disposition, "sent_unsettled");
+		const atAuth = beginCall(started, ctx);
+		atAuth.stage("auth", "start");
+		strictEqual(atAuth.settle(aborted)?.disposition, "never_sent");
+		const inScope = beginCall(started, ctx);
+		inScope.withContext(() => undefined);
+		strictEqual(inScope.settle(aborted)?.disposition, "never_sent");
+		const sent = beginCall(started, ctx);
+		sent.stage("send", "start");
+		strictEqual(sent.settle(aborted)?.disposition, "sent_unsettled");
+		// A path that marks no stage at all cannot tell, so the message's word stands.
+		strictEqual(beginCall(started, ctx).settle(aborted)?.disposition, "sent_unsettled");
+		const counted = callSettlementFromMessage({ stopReason: "aborted", usage: { input: 40, output: 0 } }, "known");
+		const reported = beginCall(started, ctx);
+		reported.stage("auth", "start");
+		strictEqual(reported.settle(counted)?.disposition, "sent_unsettled", "a provider's count is evidence of a send");
+		ok(records.every((record) => validPayload(record.kind, record.data)));
+	} finally {
+		release();
+	}
+});
+
 test("run owners stay separate from session owners, including standalone runs", () => {
 	const session: PendingTelemetry[] = [];
 	const run: PendingTelemetry[] = [];
