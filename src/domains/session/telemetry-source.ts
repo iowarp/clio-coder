@@ -577,7 +577,9 @@ function unownedSideCalls(
 		const sessionId = typeof row.sessionId === "string" ? row.sessionId : null;
 		if (sessionId !== null && loaded.has(sessionId)) continue;
 		const owner = sessionId !== null && safeId(sessionId) ? sessionId : NO_SESSION;
-		byOwner.set(owner, [...(byOwner.get(owner) ?? []), { ...row, sessionId: owner }]);
+		const owned = byOwner.get(owner);
+		if (owned) owned.push({ ...row, sessionId: owner });
+		else byOwner.set(owner, [{ ...row, sessionId: owner }]);
 	}
 	return [...byOwner]
 		.sort(([a], [b]) => a.localeCompare(b))
