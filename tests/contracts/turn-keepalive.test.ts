@@ -1,6 +1,8 @@
 /** Hosted prompt-cache keepalive (#423): which routes refresh, when, and when the turn's wait is not Clio's. */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import {
 	type CacheKeepaliveReply,
 	type CacheKeepaliveRequest,
@@ -168,4 +170,35 @@ test("the keepalive stands down without a known lifetime, for cheap prefixes, se
 	await asked.advance();
 	strictEqual(asked.refreshes.length, 0);
 	strictEqual(asked.keepalive.stopReason(), "operator-wait");
+});
+
+test("a journaled refresh carries its call identity so legacy accounting skips it (#434)", async () => {
+	const records: PendingTelemetry[] = [];
+	const unregister = registerTelemetrySink("keepalive-session", { enqueue: (record) => records.push(record) > 0 });
+	try {
+		const run = harness({
+			callJournal: () => ({
+				origin: { id: "keepalive-session", cwdHash: "fixture" },
+				acquire: async () => ({ context: { sessionId: "keepalive-session", label: "prewarm" }, release: async () => {} }),
+				label: "prewarm",
+				targetId: "fixture-target",
+				runtimeId: "fixture-runtime",
+				costProvenance: "estimated",
+			}),
+		});
+		await run.follow(claude);
+		await run.advance();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const call = run.refreshes[0]?.call;
+		ok(call);
+		deepStrictEqual(
+			records.map((record) => [record.kind, record.ctx.callId, record.ctx.label]),
+			[
+				["call.started", call.callId, "prewarm"],
+				["call.settled", call.callId, "prewarm"],
+			],
+		);
+	} finally {
+		unregister();
+	}
 });

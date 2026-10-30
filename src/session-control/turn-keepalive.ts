@@ -11,10 +11,12 @@
  * The keepalive is bound to one turn. It runs only while the turn waits on tools: for as long as an attached
  * dispatch awaits its runs (two hours at most), and for an hour on any other tool. It stands down while a person
  * owns the wait (a parked permission ask or an `ask_user` interview) and between turns, where the next request is
- * the operator's to send. Each refresh is admitted against the session cost ceiling, booked as `prewarm`
- * out-of-turn usage, and recorded on the session ledger with its economics.
+ * the operator's to send. Each refresh is admitted against the session cost ceiling, journaled as a `prewarm`
+ * call, and recorded on the session ledger with its economics.
  */
 
+import type { CallJournalOptions } from "../domains/observability/call-scope.js";
+import { openCallScope } from "../domains/observability/call-scope.js";
 import {
 	CACHE_KEEPALIVE_MIN_SAVINGS_USD,
 	type CacheKeepaliveEconomics,
@@ -55,6 +57,8 @@ export interface KeepaliveRefresh {
 	promptTokens: number;
 	message: CacheKeepaliveReply | null;
 	error: string | null;
+	/** The journaled call identity; present when the call journal owns this refresh's accounting (#434). */
+	call?: { callId: string; attemptId: string };
 }
 
 export interface TurnKeepaliveDeps {
@@ -68,6 +72,8 @@ export interface TurnKeepaliveDeps {
 	canSpend: (usd: number) => boolean;
 	/** Book one sent refresh: usage, out-of-turn row and ledger entry. */
 	record: (runtime: AgentRuntime, refresh: KeepaliveRefresh) => void;
+	/** The session journal that owns a refresh's call facts, as prewarm's does (#434). */
+	callJournal?: (runtime: AgentRuntime) => CallJournalOptions | undefined;
 	/** Holds the runtime's endpoint slot for the refresh, as every out-of-turn round does. */
 	withEndpointSlot?: <T>(runtime: AgentRuntime, round: () => Promise<T>) => Promise<T>;
 	replay?: typeof replayCacheKeepalive;
@@ -159,17 +165,33 @@ export function createTurnKeepalive(deps: TurnKeepaliveDeps): TurnKeepalive {
 		const sentAt = now();
 		let message: CacheKeepaliveReply | null = null;
 		let error: string | null = null;
+		let call: KeepaliveRefresh["call"];
+		// A refresh is a prewarm call: the journal owns its facts, so readers never miss keepalive spend (#434).
+		const scope = await openCallScope(deps.callJournal?.(current.runtime), current.request.model);
 		try {
-			const send = () => replay(current.request, current.outputTokens, current.controller.signal);
+			scope.startAttempt({ roundKind: "normal", toolChoice: "unknown" });
+			const send = () => scope.withContext(() => replay(current.request, current.outputTokens, current.controller.signal));
 			message = await (deps.withEndpointSlot ? deps.withEndpointSlot(current.runtime, send) : send());
 			if (message.stopReason === "error" || message.stopReason === "aborted")
 				error = message.errorMessage ?? message.stopReason;
+			scope.settle(message);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
+			scope.settle({ stopReason: "error", errorMessage: error });
+		} finally {
+			call = scope.identity();
+			await scope.close();
 		}
 		try {
 			// The provider was asked either way, so even a refresh the turn has moved past is booked.
-			deps.record(current.runtime, { phase, economics, promptTokens: current.promptTokens, message, error });
+			deps.record(current.runtime, {
+				phase,
+				economics,
+				promptTokens: current.promptTokens,
+				message,
+				error,
+				...(call ? { call } : {}),
+			});
 		} catch {
 			// Booking is bookkeeping; it must not turn a refresh into a turn failure.
 		}

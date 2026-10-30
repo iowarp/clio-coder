@@ -2238,9 +2238,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return budget === undefined || !sessionCeilingReached(budget.currentUsd + usd, budget.ceilingUsd);
 		},
 		withEndpointSlot,
+		callJournal: (runtime) => sideCallJournal(runtime, "prewarm", deps.session?.current() ?? null).telemetry,
 		record: (runtime, refresh) => {
 			const origin = deps.session?.current() ?? null;
-			recordOutOfTurnUsage(runtime, sideQuestionUsage(refresh.message?.usage), "prewarm", origin);
+			// A journaled refresh carries its call id, so the legacy writer books only unjournaled ones (#434).
+			recordOutOfTurnUsage(
+				runtime,
+				sideQuestionUsage(refresh.message?.usage),
+				"prewarm",
+				origin,
+				refresh.call ? { ...refresh.call, callOutcome: refresh.error === null ? "success" : "error" } : undefined,
+			);
 			try {
 				deps.session?.appendEntry({
 					kind: "custom",
