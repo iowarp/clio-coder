@@ -54,8 +54,8 @@ test("trace detail totals preserve missing token coverage and pricing provenance
 	assert.equal(partial[0]?.value, "24 +? (1 call missing usage)");
 	assert.equal(partial[1]?.value, "~$0.25 +?");
 	assert.equal(runTotals(served({ ...accounted, total_cost_usd: 0, cost_unknown: 1 }), now)[1]?.value, "not measured");
-	// A row recorded before the pricing flags cannot establish a priced amount.
-	assert.equal(runTotals(served(accounted), now)[1]?.value, "not measured");
+	// A row recorded before the pricing flags keeps its recorded amount with unknown coverage, as a v20 receipt does.
+	assert.equal(runTotals(served(accounted), now)[1]?.value, "$0.25 +?");
 	assert.equal(runTotals(served({ ...accounted, cost_estimated: 0, cost_unknown: 0 }), now)[1]?.value, "$0.25");
 });
 

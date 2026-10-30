@@ -156,22 +156,25 @@ export function renderCostAmount(
 	return renderCostAggregate(costAggregateForAmount(usd, provenance, costSummary));
 }
 
-/** Trace rows predating pricing flags cannot establish a priced amount (#434). */
+/**
+ * A trace row recorded before the pricing flags keeps its recorded USD with unknown
+ * coverage, the way a v20 receipt folds; only a row with no amount at all has no claim (#434).
+ */
 export function renderTraceCost(row: {
 	total_cost_usd: number | null;
 	cost_estimated?: number | null;
 	cost_unknown?: number | null;
 	api_calls?: number | null;
 }): string {
-	if (row.total_cost_usd === null || (row.cost_estimated == null && row.cost_unknown == null))
-		return renderCostAggregate(null);
+	if (row.total_cost_usd === null) return renderCostAggregate(null);
+	const legacy = row.cost_estimated == null && row.cost_unknown == null;
 	return renderCostAggregate({
 		knownUsd: row.total_cost_usd,
 		hasEstimated: row.cost_estimated === 1,
-		hasUnknown: row.cost_unknown === 1,
+		hasUnknown: legacy || row.cost_unknown === 1,
 		allKnownFree: false,
 		calls: row.api_calls ?? 0,
-		...(row.api_calls == null ? { unknownCallCoverageRuns: 1 } : {}),
+		...(legacy || row.api_calls == null ? { unknownCallCoverageRuns: 1 } : {}),
 	});
 }
 
