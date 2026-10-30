@@ -3,6 +3,7 @@ import type { CallObservation } from "../core/call-failure.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
+import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
@@ -1912,6 +1913,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	const sideCallJournal = (
+		runtime:
+			| AgentRuntime
+			| { targetId: string; runtimeId: string; costProvenance: AgentRuntime["runtimeResolution"]["costProvenance"] },
+		label: CallJournalOptions["label"],
+		origin: ReturnType<SessionContract["current"]>,
+	): { telemetry?: CallJournalOptions } => {
+		const acquire = deps.observability?.acquireTelemetrySession;
+		return origin && acquire
+			? {
+					telemetry: {
+						origin,
+						acquire,
+						label,
+						targetId: runtime.targetId,
+						runtimeId: runtime.runtimeId,
+						costProvenance:
+							"runtimeResolution" in runtime ? runtime.runtimeResolution.costProvenance : runtime.costProvenance,
+					},
+				}
+			: {};
+	};
+
 	const writeOutOfTurnUsageRow =
 		deps.recordOutOfTurnUsageRow ?? ((row: OutOfTurnUsageRow): void => appendOutOfTurnUsageRow(clioStateDir(), row));
 
@@ -2362,6 +2386,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			let result: SideQuestionResult;
 			try {
 				result = await draftRound({
+					...sideCallJournal(resolved, "helper", origin),
 					onUsage: (usage, observation) => recordOutOfTurnUsageFor(resolved, usage, "side-question", origin, observation),
 					admitFlow: () => deps.admitRuntimeFlow?.(destination) ?? null,
 					model: resolved.model,
@@ -3757,6 +3782,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					sideQuestionRound({
+						...sideCallJournal(prepared.runtime, "btw", prepared.origin),
 						onUsage: (usage, observation) =>
 							recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
@@ -3803,6 +3829,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								samplingTemperature,
 								(sampling) =>
 									draftRound({
+										...sideCallJournal(prepared.runtime, "helper", prepared.origin),
 										onUsage: (usage, observation) =>
 											recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
@@ -3849,6 +3876,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					handoffRound({
+						...sideCallJournal(prepared.runtime, "handoff", prepared.origin),
 						onUsage: (usage, observation) =>
 							recordOutOfTurnUsage(prepared.runtime, usage, "handoff", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,

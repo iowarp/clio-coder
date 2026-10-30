@@ -53,6 +53,7 @@ export interface HandoffRepairInput {
 }
 
 export interface HandoffRoundInput extends SideCallAuth {
+	telemetry?: NonNullable<SideQuestionInput["telemetry"]>;
 	onUsage?: NonNullable<SideQuestionInput["onUsage"]>;
 	model: EngineModel;
 	/** Read-only. The round copies before appending its own message. */

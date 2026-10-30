@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
@@ -9,6 +14,7 @@ import type { AgentMessage } from "../../src/engine/types.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import {
 	closePendingToolCalls,
+	runOutOfTurnRound,
 	runSideQuestion,
 	SIDE_QUESTION_TOOL_CALL_NOTE,
 } from "../../src/session-control/side-question.js";
@@ -118,4 +124,55 @@ test("only a mid-turn call that is still running gets a synthetic result (#415)"
 		["user", "assistant", "toolResult"],
 	);
 	assert.equal((closed[2] as { toolCallId?: unknown }).toolCallId, "call_1");
+});
+
+test("side rounds journal schema retries once and preserve never-sent admission failures", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "side-journal-"));
+	const journals = createSessionJournals(stateDir, () => {});
+	const provider = registerEngineFauxProvider({ api: "side-journal-contract", models: [{ id: "fixture" }] });
+	const telemetry = {
+		origin: { id: "side-session", cwdHash: "repo" },
+		acquire: journals.acquire,
+		label: "btw" as const,
+		targetId: "fixture",
+		runtimeId: "llamacpp",
+		costProvenance: "unknown" as const,
+	};
+	try {
+		provider.setResponses([
+			{
+				...fauxAssistantMessage(""),
+				stopReason: "error",
+				errorMessage: "HTTP 400 response_format json_schema is not supported",
+			},
+			fauxAssistantMessage("answer"),
+		]);
+		const input = {
+			model: provider.getModel(),
+			messages: [],
+			systemPrompt: "side",
+			userText: "ask",
+			thinkingLevel: "off" as const,
+			runtimeId: "llamacpp",
+			telemetry,
+			responseSchema: { name: "answer", schema: { type: "object" } },
+		};
+		assert.equal((await runOutOfTurnRound(input)).text, "answer");
+		await assert.rejects(runOutOfTurnRound({ ...input, admitFlow: () => "refused" }), /refused/);
+		const records = (await readCallJournal(join(stateDir, "sessions", "repo", "side-session"))).records.map(
+			({ record }) => record,
+		);
+		const calls = records.filter((record) => record.k === "call.settled");
+		assert.equal(calls.length, 3);
+		assert.equal(calls[0]?.data.callId, calls[1]?.data.callId);
+		assert.notEqual(calls[0]?.data.attemptId, calls[1]?.data.attemptId);
+		assert.equal(calls[1]?.data.attempt, 1);
+		assert.equal(calls[2]?.data.disposition, "never_sent");
+		assert.equal(calls[2]?.data.usage, null);
+		assert.ok(calls.every((record) => record.ctx.sessionId === "side-session" && record.data.label === "btw"));
+	} finally {
+		provider.unregister();
+		await journals.flush();
+		await rm(stateDir, { recursive: true, force: true });
+	}
 });

@@ -2,6 +2,8 @@ import type { CallObservation } from "../core/call-failure.js";
 import { trackCallFetch } from "../core/call-failure.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.js";
+import type { CallJournalOptions, CallScope } from "../domains/observability/call-scope.js";
+import { openCallScope } from "../domains/observability/call-scope.js";
 /**
  * `/btw`: one model round beside the session, never inside it.
  *
@@ -56,6 +58,7 @@ export interface SideQuestionUsage {
 }
 
 export interface SideQuestionInput extends SideCallAuth {
+	telemetry?: CallJournalOptions;
 	/** Live model the next turn would use, taken from the session's active runtime. */
 	model: EngineModel;
 	/**
@@ -243,14 +246,19 @@ function schemaBindingFor(input: OutOfTurnRoundInput): SchemaBinding | null {
 
 /** The shared round. See {@link OutOfTurnRoundInput}. */
 export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
-	return withOAuthRefresh(input, (auth) => runOutOfTurnAttempt({ ...input, ...auth }));
+	const scope = await openCallScope(input.telemetry, input.model);
+	try {
+		return await withOAuthRefresh(input, (auth) => runOutOfTurnAttempt({ ...input, ...auth }, scope));
+	} finally {
+		await scope.close();
+	}
 }
 
-async function runOutOfTurnAttempt(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
+async function runOutOfTurnAttempt(input: OutOfTurnRoundInput, scope: CallScope): Promise<SideQuestionResult> {
 	const binding = schemaBindingFor(input);
-	if (binding === null) return runRound(input, null);
+	if (binding === null) return runRound(input, null, scope);
 	try {
-		return await runRound(input, binding);
+		return await runRound(input, binding, scope);
 	} catch (error) {
 		// Native enforcement is an optimization here, never a precondition. A
 		// server that refuses the constrained request answers with the same 400
@@ -259,11 +267,16 @@ async function runOutOfTurnAttempt(input: OutOfTurnRoundInput): Promise<SideQues
 		// rejects, so a broken target still costs exactly one round.
 		if (input.signal?.aborted === true) throw error;
 		if (!isResponseSchemaRejection(error instanceof Error ? error.message : String(error))) throw error;
-		return runRound(input, null);
+		return runRound(input, null, scope);
 	}
 }
 
-async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | null): Promise<SideQuestionResult> {
+async function runRound(
+	input: OutOfTurnRoundInput,
+	binding: SchemaBinding | null,
+	scope: CallScope,
+): Promise<SideQuestionResult> {
+	scope.startAttempt();
 	const tracking = trackCallFetch();
 	let observed = false;
 	let terminalError: unknown;
@@ -301,10 +314,12 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 		};
 
 		tracking.start(input.model.api);
-		const events = streamSimple(
-			input.model,
-			context as unknown as Parameters<typeof streamSimple>[1],
-			options as unknown as Parameters<typeof streamSimple>[2],
+		const events = scope.withContext(() =>
+			streamSimple(
+				input.model,
+				context as unknown as Parameters<typeof streamSimple>[1],
+				options as unknown as Parameters<typeof streamSimple>[2],
+			),
 		);
 
 		for await (const event of events) {
@@ -319,6 +334,7 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 				continue;
 			}
 			if (event.type === "done") {
+				scope.settle(event.message);
 				const answer = textFromMessage(event.message).trim();
 				const usage = sideQuestionUsage((event.message as { usage?: unknown }).usage);
 				observed = true;
@@ -330,6 +346,7 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 				const usage = sideQuestionUsage(failed.usage);
 				observed = true;
 				const aborted = event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true;
+				scope.settle({ ...failed, failure: tracking.failure(failed, aborted, usage !== null) });
 				input.onUsage?.(usage, {
 					callOutcome: aborted ? "aborted" : "error",
 					failure: tracking.failure(failed, aborted, usage !== null),
@@ -346,10 +363,15 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 		rememberOAuthCallFailure(error, tracking.failure(error, input.signal?.aborted));
 		throw error;
 	} finally {
-		if (!observed)
+		if (!observed) {
+			scope.settle({
+				stopReason: input.signal?.aborted ? "aborted" : "error",
+				failure: tracking.failure(terminalError, input.signal?.aborted),
+			});
 			input.onUsage?.(null, {
 				callOutcome: input.signal?.aborted ? "aborted" : "error",
 				failure: tracking.failure(terminalError, input.signal?.aborted),
 			});
+		}
 	}
 }

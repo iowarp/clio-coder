@@ -1,0 +1,54 @@
+import type { TelemetryCall } from "../../core/telemetry/producer.js";
+import { beginCall } from "../../core/telemetry/producer.js";
+import type { CallStarted } from "../../core/telemetry/schemas.js";
+import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import { callSettlementFromMessage } from "./call-facts.js";
+import type { ObservabilityContract } from "./contract.js";
+import type { TelemetrySessionOrigin } from "./session-journals.js";
+
+export interface CallJournalOptions {
+	origin: TelemetrySessionOrigin;
+	acquire: NonNullable<ObservabilityContract["acquireTelemetrySession"]>;
+	label: CallStarted["label"];
+	targetId: string;
+	runtimeId: string;
+	costProvenance: CostProvenance;
+}
+
+/** One logical helper call retains its originating writer across schema and auth retries (#434). */
+export async function openCallScope(options: CallJournalOptions | undefined, model: { api: string; id: string }) {
+	const lease = options ? await options.acquire(options.origin, options.label) : undefined;
+	let call: TelemetryCall | undefined;
+	return {
+		startAttempt(): void {
+			if (!options || !lease) return;
+			call = call
+				? (call.nextAttempt() ?? call)
+				: beginCall(
+						{
+							label: options.label,
+							target: {
+								targetId: options.targetId,
+								runtimeId: options.runtimeId,
+								api: model.api,
+								requestedModel: model.id,
+								reportedModel: { kind: "unknown", reason: "not-observed" },
+							},
+							roundKind: "tools-removed",
+							toolChoice: "none",
+						},
+						lease.context,
+					);
+		},
+		settle(message: unknown): void {
+			if (call && options) call.settle(callSettlementFromMessage(message, options.costProvenance));
+		},
+		withContext<T>(work: () => T): T {
+			return call ? call.withContext(work) : work();
+		},
+		async close(): Promise<void> {
+			await lease?.release();
+		},
+	};
+}
+export type CallScope = Awaited<ReturnType<typeof openCallScope>>;
