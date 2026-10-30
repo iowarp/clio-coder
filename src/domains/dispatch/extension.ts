@@ -2997,6 +2997,16 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	);
 	const settings = input.settings ?? config?.get();
 	const spec: WorkerSpec = {
+		...(input.req.runIdHint
+			? {
+					telemetryContext: {
+						sessionId: input.req.ownerSessionId ?? null,
+						runId: input.req.runIdHint,
+						label: "worker" as const,
+						...(input.req.lineage?.parentRunId ? { parentRunId: input.req.lineage.parentRunId } : {}),
+					},
+				}
+			: {}),
 		specVersion: WORKER_SPEC_HOOKLESS_VERSION,
 		settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 		systemPrompt: input.systemPrompt,
@@ -6759,10 +6769,11 @@ export function createDispatchBundle(
 		// with the rules, always: a dispatch is the main agent's call, and a
 		// decision model that could delay it by up to 3s, or change its route,
 		// would be deciding on the agent's behalf.
-		// A top-level run needs its stable identity before it can wait for
+		// Every attempt needs its identity before spawning so worker telemetry
+		// uses the same run id as the eventual ledger row (#434). Top-level runs wait for
 		// capacity. The board can then render the assignment as queued and the
 		// same id becomes the ledger row once its slot opens.
-		if (req.lineage === undefined && req.runIdHint === undefined) req = { ...req, runIdHint: newRunId() };
+		if (req.runIdHint === undefined) req = { ...req, runIdHint: newRunId() };
 		let activeRouteObservation: RouteObservationHandle | null = null;
 		if (req.delegationAgentId === undefined) {
 			const recipe = agents.get(req.agentId);

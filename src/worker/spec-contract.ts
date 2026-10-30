@@ -3,6 +3,8 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protection.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../core/sandbox/types.js";
+import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
+import { isWorkerTelemetryContext } from "../core/telemetry/context.js";
 import { isMcpToolName, mcpToolName, type ToolName } from "../core/tool-names.js";
 import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
@@ -124,6 +126,7 @@ export interface WorkerBudget {
 }
 
 interface WorkerSpecFields {
+	telemetryContext?: WorkerTelemetryContext;
 	turnConstraints?: TurnConstraints;
 	/**
 	 * sha256 of the immutable settings snapshot this dispatch was admitted
@@ -1078,6 +1081,8 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	validateTarget(spec.target, runtimeId, runtimeAliases);
 	readString(spec.wireModelId, "WorkerSpec.wireModelId");
 	readOptionalString(spec, "sessionId", "WorkerSpec");
+	if (spec.telemetryContext !== undefined && !isWorkerTelemetryContext(spec.telemetryContext))
+		throw new Error("WorkerSpec.telemetryContext requires a worker run identity and no call or attempt id");
 	readOptionalString(spec, "apiKey", "WorkerSpec");
 	readOptionalString(spec, "authProfile", "WorkerSpec");
 	readOptionalNumber(spec, "credentialExpiresAt", "WorkerSpec");

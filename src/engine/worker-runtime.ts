@@ -11,6 +11,7 @@ import { getToolStateChanges } from "@earendil-works/pi-ai";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
+import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
@@ -191,6 +192,7 @@ export function workerPermissionCacheKey(call: ClassifierCall, decision: SafetyD
 }
 
 export interface WorkerRunInput {
+	telemetryContext?: WorkerTelemetryContext;
 	sessionId?: string;
 	systemPrompt: string;
 	contextSeed?: WorkerContextSeed;

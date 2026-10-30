@@ -83,6 +83,17 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const spec = specs[0];
 			ok(spec);
 			deepStrictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).contextSeed, spec.contextSeed);
+			ok(spec.telemetryContext?.runId);
+			deepStrictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).telemetryContext, spec.telemetryContext);
+			equal(spec.telemetryContext.sessionId, null, "a history seed does not manufacture a parent session owner");
+			throws(
+				() => parseWorkerSpec({ ...spec, telemetryContext: { sessionId: null, label: "worker" } }),
+				/telemetryContext/,
+			);
+			throws(
+				() => parseWorkerSpec({ ...spec, telemetryContext: { ...spec.telemetryContext, label: "main" } }),
+				/telemetryContext/,
+			);
 			const input = { ...spec, runtime: litellm, cwd: env.dir };
 			// Test the production context path independently of the recipe's report schema.
 			delete input.resultContract;

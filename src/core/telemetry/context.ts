@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { CallLabel } from "./enums.js";
 import { UUID_V7_PATTERN } from "./ids.js";
 
@@ -24,6 +25,18 @@ export const TelemetryContextSchema = Type.Union([
 	Type.Object({ ...contextFields, sessionId: Type.Null(), runId: ExistingId }, { additionalProperties: false }),
 ]);
 export type TelemetryContext = Readonly<Static<typeof TelemetryContextSchema>>;
+export type WorkerTelemetryContext = TelemetryContext & { readonly runId: string; readonly label: "worker" };
+
+/** A parent passes run identity; each worker request mints its own call and attempt ids (#434). */
+export function isWorkerTelemetryContext(value: unknown): value is WorkerTelemetryContext {
+	return (
+		Value.Check(TelemetryContextSchema, value) &&
+		value.runId !== undefined &&
+		value.label === "worker" &&
+		value.callId === undefined &&
+		value.attemptId === undefined
+	);
+}
 
 /** Run facts belong to their run even when a parent session exists (#434). */
 export function telemetryOwner(context: TelemetryContext): string {
