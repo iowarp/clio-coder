@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
@@ -470,6 +471,7 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
  */
 export function createMemoryInterventionRegistration(deps: MemoryInterventionDeps): MemoryInterventionRegistration {
 	let generation = 0;
+	let stepContext: TelemetryContext | undefined;
 	let commitState: MemoryCommitState | null = null;
 	let commitScope: MemoryCommitScope | null = null;
 	let commitBridgeEnabled = false;
@@ -608,6 +610,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			commitScope = { ...scope };
 			commitState = new MemoryCommitState(scope, generation);
 			observedSessionId = scope.sessionId;
+			stepContext = { sessionId: scope.sessionId, label: "memory" };
 		},
 		notifyContextCommitted(input) {
 			return commitState?.notifyContextCommitted(input, generation);
@@ -1101,9 +1104,19 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	function observeSession(input: MiddlewareHookInput): void {
-		if (input.sessionId === undefined) return;
-		if (observedSessionId !== undefined && observedSessionId !== input.sessionId) reset();
-		observedSessionId = input.sessionId;
+		if (input.sessionId !== undefined) {
+			if (observedSessionId !== undefined && observedSessionId !== input.sessionId) reset();
+			observedSessionId = input.sessionId;
+		}
+		const sessionId = input.sessionId ?? (input.runId === undefined ? observedSessionId : undefined);
+		if (sessionId === undefined && input.runId === undefined) return;
+		const owner =
+			sessionId !== undefined
+				? { sessionId, ...(input.runId === undefined ? {} : { runId: input.runId }) }
+				: { sessionId: null, runId: input.runId as string };
+		const sameOwner = stepContext?.sessionId === owner.sessionId && stepContext?.runId === owner.runId;
+		const turnId = input.turnId ?? (sameOwner ? stepContext?.turnId : undefined);
+		stepContext = { ...owner, label: "memory", ...(turnId === undefined ? {} : { turnId }) };
 	}
 
 	function cancelStoppedTurn(): void {
@@ -1191,6 +1204,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		deliveredLessons.clear();
 		contextLostAt = null;
 		observedSessionId = undefined;
+		stepContext = undefined;
 	}
 
 	function settings(): MemoryInterventionSettings {
@@ -1222,6 +1236,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		});
 		const live = settings();
 		const stepGeneration = generation;
+		// A detached answer keeps the turn that launched it, even if the foreground advances (#434).
+		const launchContext = stepContext;
 		const isCurrent = captureContentGuard();
 		const isUsageCurrent = () => !disposed && stepGeneration === generation;
 		// The workspace and the failure episodes this step is reasoning about are
@@ -1349,6 +1365,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 									...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
 								},
 								attemptRoute,
+								launchContext ?? null,
 							);
 							attemptStarted = process.hrtime.bigint();
 							promptedResult = await runClient(fallback, fallbackTimeoutMs);
@@ -1437,6 +1454,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				...(promptedResult.resumeAt === undefined ? {} : { resumeAt: promptedResult.resumeAt }),
 			},
 			attemptRoute,
+			launchContext ?? null,
 		);
 		return {
 			...promptedResult,
@@ -1477,6 +1495,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			droppedOperations: 0,
 		},
 		route?: TaskMemoryRoute,
+		context: TelemetryContext | null | undefined = stepContext,
 	): void {
 		const next = deps.bank.snapshot();
 		const bankDelta = taskMemoryBankDelta(telemetryBankSnapshot, next);
@@ -1484,6 +1503,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const latencyMs = Number(process.hrtime.bigint() - started) / 1_000_000;
 		try {
 			deps.telemetry?.record({
+				...(context == null ? {} : { context }),
 				triggerReasons,
 				tier,
 				bankDelta,

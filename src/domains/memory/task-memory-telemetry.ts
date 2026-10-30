@@ -5,6 +5,9 @@
 
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { Value } from "typebox/value";
+import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { TelemetryContextSchema } from "../../core/telemetry/context.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { TaskMemoryEntry, TaskMemorySnapshot } from "./task-bank.js";
 import type {
@@ -82,6 +85,7 @@ export interface TaskMemoryTokenCost {
 }
 
 export interface TaskMemoryTelemetryRecord {
+	context?: TelemetryContext;
 	calls?: readonly TaskMemoryCallReference[];
 	version: 2;
 	at: string;
@@ -109,6 +113,7 @@ export interface TaskMemoryTelemetryRecord {
 }
 
 export interface TaskMemoryTelemetryStep {
+	context?: TelemetryContext;
 	calls?: readonly TaskMemoryCallReference[];
 	triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>;
 	tier: TaskMemoryTelemetryTier;
@@ -164,10 +169,17 @@ export function createTaskMemoryTelemetrySink(
 }
 
 export function taskMemoryTelemetryRecord(step: TaskMemoryTelemetryStep, at: Date): TaskMemoryTelemetryRecord {
+	const firstCall = step.calls?.[0];
+	const context =
+		step.context ??
+		(firstCall && step.calls?.every((call) => call.sessionId === firstCall.sessionId)
+			? { sessionId: firstCall.sessionId, label: "memory" as const }
+			: undefined);
 	const input = nonNegativeInteger(step.inputTokens);
 	const output = nonNegativeInteger(step.outputTokens);
 	return {
 		version: TASK_MEMORY_TELEMETRY_VERSION,
+		...(context === undefined ? {} : { context: { ...context } }),
 		...(step.calls === undefined ? {} : { calls: step.calls.map((call) => ({ ...call })) }),
 		at: at.toISOString(),
 		triggerReasons: [...new Set(step.triggerReasons)],
@@ -198,7 +210,12 @@ export function taskMemoryBankDelta(before: TaskMemorySnapshot, after: TaskMemor
 export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTelemetryRecord | null {
 	if (
 		!isRecord(value) ||
-		!hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason", "resumeAt", "missingTokenCalls", "calls"])
+		!hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason", "resumeAt", "missingTokenCalls", "calls", "context"])
+	)
+		return null;
+	if (
+		value.context !== undefined &&
+		(!Value.Check(TelemetryContextSchema, value.context) || value.context.label !== "memory")
 	)
 		return null;
 	if (value.calls !== undefined && (!Array.isArray(value.calls) || !value.calls.every(validCallReference))) return null;
@@ -216,6 +233,7 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 	if (bankDelta === null || tokenCost === null || !isNonNegativeFinite(value.latencyMs)) return null;
 	return {
 		version: TASK_MEMORY_TELEMETRY_VERSION,
+		...(value.context === undefined ? {} : { context: { ...(value.context as TelemetryContext) } }),
 		...(value.calls === undefined
 			? {}
 			: { calls: (value.calls as TaskMemoryCallReference[]).map((call) => ({ ...call })) }),

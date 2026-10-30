@@ -1,9 +1,11 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall } from "../../src/core/telemetry/producer.js";
+import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
+import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import {
 	foldTaskMemorySpend,
 	formatTaskMemorySpend,
@@ -46,6 +48,7 @@ test("a step row records the resolved target and model and round-trips through t
 	);
 	strictEqual(row.targetId, "zbook-lemonade");
 	strictEqual(row.calls?.[0]?.sessionId, "original");
+	strictEqual(row.context?.sessionId, "original");
 	strictEqual(
 		parseTaskMemoryTelemetryRecord({ ...row, calls: [{ ...row.calls?.[0], repoIdentity: "../other" }] }),
 		null,
@@ -59,6 +62,48 @@ test("rows written before the route pair existed still parse, and a step without
 	strictEqual("targetId" in row, false);
 	strictEqual("modelId" in row, false);
 	deepStrictEqual(parseTaskMemoryTelemetryRecord(JSON.parse(JSON.stringify(row))), row);
+});
+
+test("rules and model steps retain their launching owner without inventing a provider call", async () => {
+	const rows: TaskMemoryTelemetryStep[] = [];
+	let useModel = false;
+	const registration = createMemoryInterventionRegistration({
+		bank: new TaskMemoryBank(),
+		getModelClient: () =>
+			useModel
+				? {
+						complete: async () => {
+							await Promise.resolve();
+							registration.evaluate({ hook: "before_tool", sessionId: "session-b", turnId: "next-turn" });
+							return { text: "<operations>[]</operations><no_intervention/>" };
+						},
+					}
+				: null,
+		telemetry: { record: (step) => rows.push(step) },
+	});
+	try {
+		registration.evaluate({ hook: "turn_start", sessionId: "session-a", turnId: "turn-a" });
+		await registration.runPromptedStep({ deterministicTrigger: true });
+		strictEqual(rows.length > 0, true);
+		ok(rows[0]);
+		const row = taskMemoryTelemetryRecord(rows[0], AT);
+		deepStrictEqual(row.context, { sessionId: "session-a", turnId: "turn-a", label: "memory" });
+		strictEqual(row.calls, undefined);
+		deepStrictEqual(parseTaskMemoryTelemetryRecord(row), row);
+		strictEqual(parseTaskMemoryTelemetryRecord({ ...row, context: { sessionId: null, label: "memory" } }), null);
+		const standalone = { ...row, context: { sessionId: null, runId: "run", label: "memory" } };
+		deepStrictEqual(parseTaskMemoryTelemetryRecord(standalone), standalone);
+		registration.reset();
+		rows.length = 0;
+		useModel = true;
+		registration.evaluate({ hook: "turn_start", sessionId: "session-b", turnId: "turn-b" });
+		await registration.runPromptedStep({ deterministicTrigger: true });
+		strictEqual(rows[0]?.context?.sessionId, "session-b");
+		strictEqual(rows[0]?.context?.turnId, "turn-b");
+		strictEqual(rows[0]?.tier, "llm");
+	} finally {
+		registration.dispose();
+	}
 });
 
 test("a half-written route pair is a corrupt row", () => {
