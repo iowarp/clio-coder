@@ -266,7 +266,7 @@ export interface TurnRuntime {
 	 * nonzero; this stream carries the registry's actual verdict.
 	 */
 	toolTelemetry: ToolTelemetry;
-	/** The journaled main calls of one user turn, in settle order; older turns' leftovers are dropped (#434). */
+	/** The journaled main calls whose lease was taken for this user turn, in settle order (#434). */
 	takeSettledCalls(userTurnId: string): CallSettled[];
 }
 
@@ -714,13 +714,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		};
 		const recordSettledCall = (
 			facts: CallSettled | undefined,
-			ownerSessionId: string | null | undefined,
+			owner: TelemetrySessionLease["context"] | undefined,
 			hidden = false,
 		): void => {
 			if (facts) settledAttempts.push(facts);
-			if (!facts || !deps.observability || !currentRun() || ownerSessionId !== deps.sessionOrigin?.()?.id) return;
-			const userTurnId = state.activeUserTurnId;
-			if (userTurnId) turnCalls.set(userTurnId, [...(turnCalls.get(userTurnId) ?? []), facts]);
+			if (!facts || !deps.observability || owner?.sessionId !== deps.sessionOrigin?.()?.id) return;
+			// A call belongs to the turn its lease was taken for, never to whichever turn is active when it settles,
+			// including a stream that settles after its run ended (#434).
+			if (owner?.turnId) turnCalls.set(owner.turnId, [...(turnCalls.get(owner.turnId) ?? []), facts]);
+			if (!currentRun()) return;
 			// Final never-sent messages are counted when persisted; hidden retries have no ledger row (#430, #434).
 			if (hidden && facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
 			for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) {
@@ -747,7 +749,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					),
 					reportedModelFromMessage(message),
 				);
-				recordSettledCall(facts, lease?.context.sessionId);
+				recordSettledCall(facts, lease?.context);
 				rememberMessageCalls(message, settledAttempts);
 			}
 			await lease?.release();
@@ -764,7 +766,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (call) {
 				recordSettledCall(
 					call.abandon(state.activeInterruptByOperator ? "operator_cancel" : "internal"),
-					lease?.context.sessionId,
+					lease?.context,
 					true,
 				);
 			}
@@ -896,7 +898,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							),
 							reportedModelFromMessage(message),
 						);
-						recordSettledCall(facts, journalLease?.context.sessionId, true);
+						recordSettledCall(facts, journalLease?.context, true);
 					},
 				);
 			},
@@ -1772,7 +1774,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		toolTelemetry,
 		takeSettledCalls(userTurnId) {
 			const calls = turnCalls.get(userTurnId) ?? [];
-			turnCalls.clear();
+			turnCalls.delete(userTurnId);
+			// Any other turn's calls but the running one's settled after their own turn.settled was written. Each still
+			// carries its turn id in the journal, so releasing them here only bounds this map (#434).
+			for (const turnId of turnCalls.keys()) if (turnId !== state.activeUserTurnId) turnCalls.delete(turnId);
 			return calls;
 		},
 	};
