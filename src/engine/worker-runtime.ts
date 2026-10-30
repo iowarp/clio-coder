@@ -12,7 +12,7 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
-import { observedToolCallOrigin } from "../core/telemetry/context.js";
+import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
@@ -2374,7 +2374,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				emit,
 			)
 		: undefined;
-	const promise = (async (): Promise<WorkerRunResult> => {
+	// The run's identity scopes its tool and middleware records, so the host accepts them as this run's (#434).
+	const runScoped = <T>(work: () => T): T =>
+		input.telemetryContext ? withTelemetryContext(input.telemetryContext, work) : work();
+	const promise = runScoped(async (): Promise<WorkerRunResult> => {
 		try {
 			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
@@ -2455,7 +2458,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				});
 			}
 		}
-	})();
+	});
 
 	return {
 		promise,

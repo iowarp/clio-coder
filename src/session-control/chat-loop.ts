@@ -8,6 +8,7 @@ import type { FailureCause } from "../core/telemetry/enums.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
 import { turnSettlementFromCalls } from "../domains/observability/call-facts.js";
 import type { CallJournalOptions } from "../domains/observability/call-scope.js";
+import type { TelemetrySessionLease } from "../domains/observability/session-journals.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { journalOwnsSideUsage } from "../domains/session/journal-usage.js";
@@ -2644,9 +2645,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			owner = new AbortController();
 			submitOwner?.abort();
 			submitOwner = owner;
+			let turnLease: TelemetrySessionLease | undefined;
 			try {
 				await sessionResetSettlement;
 				if (!admissionCurrent()) return;
+				// The turn holds its session's writer open from submit to settle, so the records it makes outside a model
+				// call (middleware at turn start, tools, snapshots) reach the journal after an idle close (#434).
+				const turnOrigin = deps.session?.current();
+				if (turnOrigin && deps.observability?.acquireTelemetrySession) {
+					try {
+						turnLease = await deps.observability.acquireTelemetrySession(turnOrigin, "main");
+					} catch {
+						// The writer reports its own failures; a turn never waits on telemetry.
+					}
+					if (!admissionCurrent()) return;
+				}
 				state.currentTurnConstraints =
 					options.requestContinuation === true
 						? state.currentTurnConstraints
@@ -3539,6 +3552,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						await queues.resubmitRequestContinuation();
 				}
 			} finally {
+				void turnLease?.release();
 				if (submitOwner === owner) {
 					submitOwner = null;
 					// Template bounds end with their turn; prewarm and jobs see only

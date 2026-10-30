@@ -20,6 +20,9 @@
 import { performance } from "node:perf_hooks";
 import type { TSchema } from "typebox";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
+import type { TelemetryContext } from "../core/telemetry/context.js";
+import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
+import { recordTelemetry } from "../core/telemetry/producer.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
@@ -272,23 +275,30 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		callerOnParked?.(ms);
 	};
 	const executedMs = (): number => Math.max(0, Math.round(performance.now() - startedAtClock) - parkedMs);
+	// The registry scopes its own work the same way, so the record joins its session, turn, tool call and the model
+	// call that asked for it (#434).
+	const telemetryCtx = withToolTelemetryContext(invokeOpts, telemetryContext);
+	const finish = (outcome: ToolOutcome, extra: Parameters<typeof emitFinish>[4], result?: ToolResult): void => {
+		emitFinish(telemetry, spec.name, executedMs, outcome, extra);
+		recordToolSettled(telemetryCtx, spec.name, outcome, executedMs(), parkedMs, extra, result);
+	};
 	const hasInvokeOpts = Object.keys(invokeOpts).length > 0;
 	let verdictPromise: ReturnType<typeof registry.invoke>;
 	try {
 		verdictPromise = registry.invoke({ tool: spec.name, args }, hasInvokeOpts ? invokeOpts : undefined);
 	} catch (err) {
-		emitFinish(telemetry, spec.name, executedMs, "error", { ...withCallId, reason: errorMessage(err) });
+		finish("error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	let verdict: Awaited<typeof verdictPromise>;
 	try {
 		verdict = await verdictPromise;
 	} catch (err) {
-		emitFinish(telemetry, spec.name, executedMs, "error", { ...withCallId, reason: errorMessage(err) });
+		finish("error", { ...withCallId, reason: errorMessage(err) });
 		throw err;
 	}
 	if (verdict.kind !== "ok") {
-		emitFinish(telemetry, spec.name, executedMs, "blocked", {
+		finish("blocked", {
 			...withCallId,
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
@@ -310,11 +320,15 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	const resultAudit = toolAuditFacts(spec.name, args, verdict.result);
 	const withResultAudit = { ...withCallId, ...(resultAudit ? { audit: resultAudit } : {}) };
 	if (verdict.result.kind === "error") {
-		emitFinish(telemetry, spec.name, executedMs, "error", {
-			...withResultAudit,
-			reason: verdict.result.message,
-			decision: verdict.decision,
-		});
+		finish(
+			"error",
+			{
+				...withResultAudit,
+				reason: verdict.result.message,
+				decision: verdict.decision,
+			},
+			verdict.result,
+		);
 		if (
 			input.returnDispositionedErrors === true &&
 			(isDispositionedToolResultError(verdict.result) ||
@@ -340,20 +354,64 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	};
 	if (verdict.result.terminate === true) {
 		result.terminate = true;
-		emitFinish(telemetry, spec.name, executedMs, "ok", {
-			...withResultAudit,
-			terminate: true,
-			decision: verdict.decision,
-			...(skillActivation ? { skillActivation } : {}),
-		});
+		finish(
+			"ok",
+			{
+				...withResultAudit,
+				terminate: true,
+				decision: verdict.decision,
+				...(skillActivation ? { skillActivation } : {}),
+			},
+			verdict.result,
+		);
 	} else {
-		emitFinish(telemetry, spec.name, executedMs, "ok", {
-			...withResultAudit,
-			decision: verdict.decision,
-			...(skillActivation ? { skillActivation } : {}),
-		});
+		finish(
+			"ok",
+			{
+				...withResultAudit,
+				decision: verdict.decision,
+				...(skillActivation ? { skillActivation } : {}),
+			},
+			verdict.result,
+		);
 	}
 	return result;
+}
+
+/** One tool.settled per settled call; the safety audit keeps the decision itself (#434). */
+function recordToolSettled(
+	ctx: TelemetryContext | undefined,
+	tool: string,
+	outcome: ToolOutcome,
+	durationMs: number,
+	parkedMs: number,
+	extra: Parameters<typeof emitFinish>[4],
+	result: ToolResult | undefined,
+): void {
+	if (!ctx) return;
+	const images = result?.kind === "ok" ? (result.images?.length ?? 0) : 0;
+	recordTelemetry(
+		"tool.settled",
+		{
+			tool,
+			outcome,
+			durationMs,
+			...(parkedMs > 0 ? { parkedMs } : {}),
+			...(outcome !== "blocked" && result ? { resultBytes: Buffer.byteLength(toolResultContextText(result)) } : {}),
+			...(images > 0 ? { images } : {}),
+			...(extra?.terminate === true ? { terminate: true as const } : {}),
+			...(outcome === "blocked"
+				? {
+						blocked: extra?.deniedPark
+							? ("denied-park" as const)
+							: extra?.redundantRepeat
+								? ("redundant-repeat" as const)
+								: ("refused" as const),
+					}
+				: {}),
+		},
+		ctx,
+	);
 }
 
 function emitFinish(

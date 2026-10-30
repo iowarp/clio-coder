@@ -10,7 +10,16 @@ export interface WorkerTelemetryFrame {
 	record: TelemetryRecord;
 }
 
-const workerKinds = new Set(["call.started", "call.settled", "run.usage", "gap", "process.started", "process.exited"]);
+const workerKinds = new Set([
+	"call.started",
+	"call.settled",
+	"run.usage",
+	"gap",
+	"process.started",
+	"process.exited",
+	"tool.settled",
+	"middleware.fired",
+]);
 
 /** The parent owns identity and publication; a worker cannot attribute facts to a different run or session (#434). */
 export function readWorkerTelemetryRecord(value: unknown, expected: WorkerTelemetryContext): TelemetryRecord | null {
