@@ -5,7 +5,7 @@ import {
 	recordHarnessTopic,
 	recordLessonShown,
 } from "../../core/harness-profile.js";
-import type { MiddlewareHookRegistration } from "./runtime.js";
+import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
 
 /**
@@ -302,7 +302,10 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 		if (path && ["read", "ls", "grep", "find"].includes(name)) current.paths.push(path);
 	};
 
-	const finish = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
+	const finish = (
+		input: MiddlewareHookInput,
+		evaluation?: MiddlewareHookEvaluationContext,
+	): ReadonlyArray<MiddlewareEffect> => {
 		const current = turn;
 		turn = null;
 		if (current === null) return [];
@@ -330,6 +333,7 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 		turnsSinceTip = 0;
 		profile.lessonShown(pick.lesson.id);
 		const message = firstEver ? `[tip] ${pick.text} Demo guidance in /settings turns tips off.` : `[tip] ${pick.text}`;
+		evaluation?.evidence?.(`guidance:${pick.lesson.id}@turn`);
 		return [{ kind: "notify_operator", message, key: `guidance.${pick.lesson.id}` }];
 	};
 
@@ -337,7 +341,8 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 		id: GUIDANCE_REGISTRATION_ID,
 		description: "after a turn, show the operator one capability tip that fits the turn and what they already know",
 		hooks: ["turn_start", "after_tool", "turn_end"],
-		evaluate(input) {
+		evidence: "match:guidance-entry@turn",
+		evaluate(input, evaluation) {
 			if (input.hook === "turn_start") {
 				trackSession(input);
 				turn = null;
@@ -366,7 +371,7 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 					turn = null;
 					return [];
 				}
-				return finish(input);
+				return finish(input, evaluation);
 			}
 			return [];
 		},

@@ -193,6 +193,7 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 		description:
 			"suggests task-relevant workflows within the skill activation policy; continues a turn that stopped on a suggestion",
 		hooks: ["turn_start", "before_tool", "turn_end"],
+		evidence: "rank:skills@task",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			const constraints = deps.getTurnConstraints?.();
 			const suppressed =

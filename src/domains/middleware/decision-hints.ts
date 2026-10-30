@@ -39,6 +39,7 @@ export function createDecisionHintsRegistration(deps: DecisionHintsDeps): Middle
 		id: DECISION_HINTS_REGISTRATION_ID,
 		description: "passes the turn site's hints to the main agent",
 		hooks: ["turn_start"],
+		evidence: "verdict:system-one.turn@turn",
 		evaluate(input) {
 			// A continuation carries a nudge rather than the operator's request, so a
 			// judgment about the request would be a judgment about the nudge.

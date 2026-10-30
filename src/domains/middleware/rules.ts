@@ -42,5 +42,6 @@ function cloneRuleDefinition(definition: MiddlewareRuleDefinition): MiddlewareRu
 	};
 	if (definition.toolNames !== undefined) cloned.toolNames = [...definition.toolNames];
 	if (definition.predicate !== undefined) cloned.predicate = definition.predicate;
+	if (definition.evidence !== undefined) cloned.evidence = definition.evidence;
 	return cloned;
 }

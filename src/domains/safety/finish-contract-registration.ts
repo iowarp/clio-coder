@@ -142,6 +142,7 @@ export function createFinishContractRegistration(
 		id: FINISH_CONTRACT_REGISTRATION_ID,
 		description: "report completion evidence and advise when a mutation's validation or behavior coverage is unverified",
 		hooks: ["turn_start", "before_tool", "turn_end"],
+		evidence: "check:completion-evidence@turn-end",
 		evaluate(input: MiddlewareHookInput, context): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "turn_start") {
 				if (input.sessionId !== undefined && input.sessionId !== baselineSessionId) {

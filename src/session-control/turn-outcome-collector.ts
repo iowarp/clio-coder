@@ -76,6 +76,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		id: "observer.turn-outcome",
 		description: "collect host facts for the operator turn without steering it",
 		hooks: ["turn_start", "before_tool", "after_tool", "turn_end"],
+		evidence: "observer:turn-outcome@turn",
 		clarificationStreak: () => previousClarificationStreak,
 		recordControl(record) {
 			userTurnId = record.turnId;

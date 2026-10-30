@@ -115,6 +115,7 @@ export function createProtectedArtifactsRegistration(
 		id: PROTECTED_ARTIFACTS_REGISTRATION_ID,
 		description: "blocks mutations of protected paths and absorbs protect_path effects",
 		hooks: ["before_tool", "after_tool"],
+		evidence: "path:protected-artifact@tool-args",
 		state: () => cloneState(state),
 		health: () => ({ ...health }),
 		replaceState(next) {

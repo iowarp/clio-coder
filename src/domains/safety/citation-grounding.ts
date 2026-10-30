@@ -246,6 +246,7 @@ export function createCitationGroundingRegistration(
 		id: CITATION_GROUNDING_REGISTRATION_ID,
 		description: "carry the turn onward once when the final answer cites line numbers no tool printed",
 		hooks: ["turn_start", "after_tool", "turn_end"],
+		evidence: "check:uncited-line-numbers@final-answer",
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			forSession(input.sessionId);
 			if (input.hook === "after_tool") {

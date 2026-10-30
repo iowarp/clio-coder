@@ -20,6 +20,7 @@ export function createToolProseRegistration(): MiddlewareHookRegistration {
 		id: TOOL_PROSE_REGISTRATION_ID,
 		description: "interrupt local model turns that narrate tool calls instead of emitting structured tool calls",
 		hooks: ["turn_end"],
+		evidence: "regex:TOOL_CALL_PROSE@assistant-text",
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
 			const runtimeTier = typeof input.metadata?.runtimeTier === "string" ? input.metadata.runtimeTier : undefined;

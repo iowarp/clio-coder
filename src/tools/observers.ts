@@ -24,6 +24,7 @@ export function createSkillActivationObserver(sink: (activation: SkillActivation
 		id: SKILL_ACTIVATION_OBSERVER_ID,
 		description: "records successful skill activations for the session ledger",
 		hooks: ["after_tool"],
+		evidence: "observer:skill-activation@tool-result",
 		toolNames: [ToolNames.Context],
 		evaluate(input) {
 			if (input.metadata?.resultKind !== "ok") return NO_EFFECTS;
@@ -50,6 +51,7 @@ export function createFileMutationObserver(sink: (event: FileMutationEvent) => v
 		id: FILE_MUTATION_OBSERVER_ID,
 		description: "reports successful file mutations for incremental codewiki refresh",
 		hooks: ["after_tool"],
+		evidence: "observer:file-mutation@tool-result",
 		evaluate(input) {
 			if (input.metadata?.resultKind !== "ok") return NO_EFFECTS;
 			const toolName = input.toolName ?? "";

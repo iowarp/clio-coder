@@ -24,6 +24,8 @@ import { createMiddlewareSnapshot } from "./snapshot.js";
 import type { MiddlewareHookResult, MiddlewareReminderSeverity } from "./types.js";
 
 const SEVERITY_ORDER: ReadonlyArray<MiddlewareReminderSeverity> = ["info", "advisory", "warn", "hard-block"];
+/** The evidence class shape middleware.fired admits; a class built from an operator's id that misses it is dropped. */
+const EVIDENCE_CLASS = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$/;
 
 /**
  * One middleware.fired per rule that emitted, under the hook's own session, run, turn and tool call. Telemetry never
@@ -65,7 +67,7 @@ function recordFiredRules(result: MiddlewareHookResult, phase: "sync" | "async" 
 					ruleId: rule.ruleId,
 					effects: rule.effects.slice(0, 32),
 					...(severity >= 0 ? { severity: SEVERITY_ORDER[severity] as MiddlewareReminderSeverity } : {}),
-					...(rule.evidence !== undefined ? { evidence: rule.evidence } : {}),
+					...(rule.evidence !== undefined && EVIDENCE_CLASS.test(rule.evidence) ? { evidence: rule.evidence } : {}),
 					...(input.toolName !== undefined ? { tool: input.toolName } : {}),
 				},
 				ctx,

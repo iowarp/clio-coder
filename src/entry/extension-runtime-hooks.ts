@@ -511,6 +511,7 @@ export function buildExtensionRuntimeHooks(
 			id,
 			description: `${entry.id} runtime ${point} hook`,
 			hooks: [point],
+			evidence: `extension-hook:${point}@session`,
 			...(hook.tools !== undefined
 				? { toolNames: [...hook.tools], matchesTool: extensionHookToolMatcher(hook.tools, options.mcpOwner) }
 				: {}),

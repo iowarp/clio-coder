@@ -52,6 +52,7 @@ export function createWorkerExtensionHookRegistrations(
 		id: hook.id,
 		description: `${hook.id}, run by the dispatching session`,
 		hooks: [hook.point],
+		evidence: `extension-hook:${hook.point}@worker`,
 		...(hook.tools !== undefined
 			? { toolNames: [...hook.tools], matchesTool: extensionHookToolMatcher(hook.tools) }
 			: {}),

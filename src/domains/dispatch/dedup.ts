@@ -50,6 +50,7 @@ export function createDispatchDedupRegistration(): {
 			id: DISPATCH_DEDUP_REGISTRATION_ID,
 			description: "blocks re-running a dispatch that already completed successfully in this user turn",
 			hooks: ["before_tool", "after_tool"],
+			evidence: "match:completed-dispatch@user-turn",
 			toolNames: [ToolNames.Dispatch],
 			evaluate(input): ReadonlyArray<MiddlewareEffect> {
 				if (input.turnId === undefined || input.metadata?.origin === "harness") return [];

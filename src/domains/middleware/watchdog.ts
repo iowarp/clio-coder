@@ -239,6 +239,7 @@ export function createWatchdogRegistration(deps: WatchdogDeps): WatchdogRegistra
 		id: WATCHDOG_REGISTRATION_ID,
 		description: "review a mutating turn's coalesced diff against the board scope with a read-only verifier run",
 		hooks: ["after_tool", "turn_end"],
+		evidence: "diff:mutating-turn@board-scope",
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			const settings = active();
 			if (settings === null) {

@@ -70,6 +70,7 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 		id: TASK_BOARD_REMINDER_REGISTRATION_ID,
 		description: "once per session, on the first explicitly enumerated multi-step turn, teaches the board-first protocol",
 		hooks: ["turn_start"],
+		evidence: "count:enumerated-steps@operator-request",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			const sessionId = input.sessionId ?? null;
 			if (lastSeenSessionId === undefined || (lastSeenSessionId === null && sessionId !== null)) {

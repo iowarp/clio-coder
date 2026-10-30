@@ -10,6 +10,7 @@ import { beginCall, registerTelemetrySink } from "../../src/core/telemetry/produ
 import { DELTA_GAP_BOUNDS_MS, validPayload } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rules.js";
 import { createHealthWindows } from "../../src/domains/observability/health-window.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -66,6 +67,13 @@ test("middleware.fired names each emitting rule, its own effects and the evidenc
 			registrations: [
 				{ id: "quiet", description: "never fires", hooks: ["turn_end"], evaluate: () => [] },
 				{
+					id: "nudge.static",
+					description: "fires on its declared evidence",
+					hooks: ["turn_end"],
+					evidence: "count:open-tasks@turn-end",
+					evaluate: () => [{ kind: "notify_operator", message: "c", key: "k" }],
+				},
+				{
 					id: "nudge.fixture",
 					description: "fires with evidence",
 					hooks: ["turn_end"],
@@ -81,9 +89,10 @@ test("middleware.fired names each emitting rule, its own effects and the evidenc
 		}).contract;
 		middleware.runHook({ hook: "turn_end", sessionId: "producer-middleware", turnId: "turn-2" });
 		const fired = sink.of("middleware.fired");
-		strictEqual(fired.length, 1);
-		ok(validPayload("middleware.fired", fired[0]?.data));
-		deepStrictEqual(fired[0]?.data, {
+		strictEqual(fired.length, 2);
+		for (const record of fired) ok(validPayload("middleware.fired", record.data));
+		strictEqual((fired[0]?.data as { evidence?: string }).evidence, "count:open-tasks@turn-end");
+		deepStrictEqual(fired[1]?.data, {
 			hook: "turn_end",
 			phase: "sync",
 			ruleId: "nudge.fixture",
@@ -91,10 +100,25 @@ test("middleware.fired names each emitting rule, its own effects and the evidenc
 			severity: "warn",
 			evidence: "regex:PLAN_REQUEST@operator-request",
 		});
-		strictEqual(fired[0]?.ctx.turnId, "turn-2");
+		strictEqual(fired[1]?.ctx.turnId, "turn-2");
 	} finally {
 		sink.release();
 	}
+});
+
+test("every builtin rule definition names its trigger evidence class (#431)", () => {
+	for (const definition of listMiddlewareRuleDefinitions())
+		ok(
+			definition.evidence !== undefined &&
+				validPayload("middleware.fired", {
+					hook: "turn_end",
+					phase: "sync",
+					ruleId: definition.rule.id,
+					effects: ["inject_reminder"],
+					evidence: definition.evidence,
+				}),
+			definition.rule.id,
+		);
 });
 
 test("call.timing.deltas is a gap histogram recorded only where delta capture is on (#428, #434)", () => {

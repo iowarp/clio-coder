@@ -20,6 +20,8 @@ import {
  */
 export interface MiddlewareRuleDefinition {
 	rule: MiddlewareRule;
+	/** The trigger evidence class, as `matcher:subject@scope`; every builtin rule names one (#431). */
+	evidence?: string;
 	/**
 	 * Exact tool names this rule applies to. Absent means the rule applies to
 	 * every hook input, including hooks that carry no tool name. When present,
@@ -51,6 +53,11 @@ export interface MiddlewareHookRegistration {
 	id: string;
 	description: string;
 	hooks: ReadonlyArray<MiddlewareHook>;
+	/**
+	 * The trigger evidence class this rule fires on, as `matcher:subject@scope`, for middleware.fired. An evaluation
+	 * that knows a narrower one reports it through `context.evidence` (#431, §8).
+	 */
+	evidence?: string;
 	/** Exact tool names, same matcher semantics as `MiddlewareRuleDefinition.toolNames`. */
 	toolNames?: ReadonlyArray<string>;
 	/**
@@ -201,6 +208,7 @@ export function registrationFromRuleDefinition(definition: MiddlewareRuleDefinit
 		description: definition.rule.description,
 		hooks: [...definition.rule.hooks],
 		evaluate: (input) => evaluateRuleDefinition(definition, input),
+		...(definition.evidence !== undefined ? { evidence: definition.evidence } : {}),
 	};
 	if (definition.toolNames !== undefined) registration.toolNames = [...definition.toolNames];
 	return registration;
@@ -283,7 +291,7 @@ export function runMiddlewareRegistrations(
 			effects.push(cloneMiddlewareEffect(effect));
 		}
 		if (!ruleIds.includes(registration.id)) ruleIds.push(registration.id);
-		fired.push(firedRule(registration.id, emitted, evidence));
+		fired.push(firedRule(registration.id, emitted, evidence ?? registration.evidence));
 	}
 	return {
 		hook: input.hook,
@@ -340,7 +348,7 @@ export async function runMiddlewareAsyncRegistrations(
 		for (const effect of emitted) effects.push(cloneMiddlewareEffect(effect));
 		if (emitted.length > 0) {
 			ruleIds.push(registration.id);
-			fired.push(firedRule(registration.id, emitted, evidence));
+			fired.push(firedRule(registration.id, emitted, evidence ?? registration.evidence));
 		}
 	}
 	return { hook: input.hook, input: cloneHookInput(input), effects, ruleIds, fired };

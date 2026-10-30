@@ -310,6 +310,7 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 		description:
 			"offers an uninstalled marketplace skill via ask_user when the request matches it; consented installs run gated to Clio's own marketplace, declines are remembered",
 		hooks: ["turn_start", "after_tool"],
+		evidence: "match:marketplace-capability@task",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			trackSession(input);
 			// The offer is deliberately NOT cleared at turn_end. The reminder asks

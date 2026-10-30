@@ -665,6 +665,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		id: MEMORY_INTERVENTION_REGISTRATION_ID,
 		description: "maintain bounded task execution memory and selectively remind after repeated failures or compaction",
 		hooks: ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"],
+		evidence: "count:failure-recurrence@task-memory",
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			observeSession(input);
 			if (input.hook === "turn_end" || input.hook === "turn_start") lastLaunchSkipped = false;

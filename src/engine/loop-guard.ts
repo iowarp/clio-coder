@@ -1187,6 +1187,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		description:
 			"blocks repeated tool calls, enforces tool-call caps, and annotates substantial identical read results across distinct arguments",
 		hooks: ["before_tool", "after_tool"],
+		evidence: "count:repeated-call@tool-args",
 		callCount: () => count,
 		mutationEpoch: (turnId) => mutationEpochByTurn.get(turnId) ?? 0,
 		extendWorkerToolCallPhase(phase): boolean {

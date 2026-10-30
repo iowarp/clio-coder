@@ -52,6 +52,7 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 		id: TASK_NUDGE_REGISTRATION_ID,
 		description: "carry the turn onward when a work turn ends with open task-board tasks",
 		hooks: ["turn_end"],
+		evidence: "count:open-tasks@turn-end",
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
 			if (input.metadata?.turnMode === "proposal" || input.metadata?.turnMode === "answer") return [];

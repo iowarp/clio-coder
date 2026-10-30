@@ -147,6 +147,7 @@ export const STALLED_TURN_RULE_DEFINITION: MiddlewareRuleDefinition = {
 		hooks: ["turn_end"],
 		effectKinds: ["request_continuation"],
 	},
+	evidence: "regex:ANNOUNCED_WORK@assistant-text",
 	effects: [
 		{
 			kind: "request_continuation",

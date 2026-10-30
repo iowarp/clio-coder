@@ -493,6 +493,8 @@ export function userHookToRegistration(
 		id: hook.id,
 		description: `${hook.spec.kind} hook from ${hook.source.origin} (${hook.source.sourcePath})`,
 		hooks: [hook.on],
+		// The operator declared the trigger; the class names its kind, point and layer (#431).
+		evidence: `${hook.spec.kind}-hook:${hook.on}@${hook.source.origin.replace(".", "-")}`,
 		evaluate: (input) => {
 			if (!hook.enabled) return [];
 			try {
