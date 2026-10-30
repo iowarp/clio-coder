@@ -10,7 +10,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../src/core/oauth-retry.js";
+import { isProviderAuthRejection } from "../../src/core/provider-auth-error.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { AuthStorage, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
@@ -18,6 +20,7 @@ import { resolveSideCallAuth } from "../../src/domains/providers/side-call-auth.
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { registerClioOAuthProviders } from "../../src/engine/oauth.js";
+import { retryStreamOnceOnAuthRejection } from "../../src/engine/oauth-retry-stream.js";
 
 // The engine registry is lazy and ALCF joins it only through this call, which
 // the providers extension and the configure and target CLI paths make.
@@ -170,6 +173,109 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(calls.length, 2, "exactly one refresh for the rejection");
 		ok(calls[1]?.url.includes("auth.openai.com/oauth/token"), calls[1]?.url);
 		ok(readFileSync(path, "utf8").includes(codexAccess), "the forced rotation is persisted");
+	});
+
+	it("retries a worker round once on an auth rejection and otherwise keeps the round's own ending (#427)", async () => {
+		type Message = Parameters<ReturnType<typeof createAssistantMessageEventStream>["end"]>[0] & object;
+		const base = {
+			role: "assistant",
+			content: [],
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			model: "m",
+			timestamp: 1,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		};
+		const stream = (text: string | null, errorMessage?: string) => {
+			const s = createAssistantMessageEventStream();
+			const message = {
+				...base,
+				...(errorMessage === undefined ? { stopReason: "stop" } : { stopReason: "error", errorMessage }),
+				content: text === null ? [] : [{ type: "text", text }],
+			} as Message;
+			queueMicrotask(() => {
+				s.push({ type: "start", partial: message });
+				if (text !== null) s.push({ type: "text_delta", contentIndex: 0, delta: text, partial: message });
+				s.push(
+					errorMessage === undefined
+						? { type: "done", reason: "stop", message }
+						: { type: "error", reason: "error", error: message },
+				);
+				s.end(message);
+			});
+			return s;
+		};
+		const rejected = "Your authentication token has expired. Please try refreshing it.";
+		const isAuth = (error: Message) => isProviderAuthRejection(error.errorMessage);
+		const run = async (source: ReturnType<typeof stream>, recover: () => Promise<ReturnType<typeof stream> | null>) => {
+			let recovers = 0;
+			const out = retryStreamOnceOnAuthRejection(source, isAuth, () => {
+				recovers++;
+				return recover();
+			});
+			const events: string[] = [];
+			for await (const event of out) events.push(event.type);
+			const result = await out.result();
+			return {
+				recovers,
+				events,
+				stopReason: result.stopReason,
+				errorMessage: result.errorMessage,
+				text: result.content[0]?.type === "text" ? result.content[0].text : null,
+			};
+		};
+		const recovered = await run(stream(null, rejected), async () => stream("retried"));
+		deepStrictEqual(recovered, {
+			recovers: 1,
+			events: ["start", "text_delta", "done"],
+			stopReason: "stop",
+			errorMessage: undefined,
+			text: "retried",
+		});
+		const noCredential = await run(stream(null, rejected), async () => null);
+		deepStrictEqual(noCredential, {
+			recovers: 1,
+			events: ["start", "error"],
+			stopReason: "error",
+			errorMessage: rejected,
+			text: null,
+		});
+		const remedy =
+			"OAuth credential for target 'codex' could not be refreshed. Run clio-coder auth login openai-codex again.";
+		const failedRefresh = await run(stream(null, rejected), async () => {
+			throw new Error(remedy);
+		});
+		deepStrictEqual(failedRefresh, {
+			recovers: 1,
+			events: ["start", "error"],
+			stopReason: "error",
+			errorMessage: remedy,
+			text: null,
+		});
+		const otherError = await run(stream(null, "503 Service Unavailable"), async () => stream("never"));
+		deepStrictEqual(otherError, {
+			recovers: 0,
+			events: ["start", "error"],
+			stopReason: "error",
+			errorMessage: "503 Service Unavailable",
+			text: null,
+		});
+		// A rejection after content already streamed is the round's own ending; the caller has seen output.
+		const afterOutput = await run(stream("partial", rejected), async () => stream("never"));
+		deepStrictEqual(afterOutput, {
+			recovers: 0,
+			events: ["start", "text_delta", "error"],
+			stopReason: "error",
+			errorMessage: rejected,
+			text: "partial",
+		});
 	});
 
 	it("refreshes once when two stores race on the same file", async () => {

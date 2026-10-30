@@ -190,6 +190,92 @@ test("recovery matrix preserves route, output, cancellation and loading policy",
 		});
 });
 
+test("an OAuth rejection refreshes the sent token once, then retries or ends with the login remedy (#427)", async (t) => {
+	const rejection = "Your authentication token has expired. Please try refreshing it.";
+	// Either a recorded 401 or the body text alone reads as auth, and auth never joins the transient chain.
+	for (const status of [401, undefined]) {
+		const failure = classifyRecoveryFailure({ runtimeId: "openai-codex", message: rejection, status });
+		strictEqual(failure.kind, "auth");
+		strictEqual(isRetryableRecoveryFailure(failure), false);
+	}
+	for (const refreshed of [true, false])
+		await t.test(refreshed ? "refresh succeeds" : "refresh fails", async () => {
+			const errorMessage = (message: unknown): string | undefined =>
+				(message as { errorMessage?: string } | undefined)?.errorMessage;
+			const model = { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-6-luna" };
+			const failed = {
+				role: "assistant",
+				content: [],
+				stopReason: "error",
+				errorMessage: rejection,
+			} as unknown as AgentMessage;
+			const state = { messages: [failed] as AgentMessage[], model };
+			const rejectedKeys: Array<string | undefined> = [];
+			const statuses: Array<{ phase: string; errorMessage?: string }> = [];
+			let continues = 0;
+			const runtime = {
+				runtimeId: "openai-codex",
+				lastProviderStatus: 401,
+				lastAuthResolution: { providerId: "openai-codex", source: "stored-oauth", apiKey: "stale" },
+				runtimeResolution: { target: { id: "codex" }, runtime: { id: "openai-codex" } },
+				agent: {
+					state,
+					async continue() {
+						continues++;
+						state.messages.push({
+							role: "assistant",
+							content: [{ type: "text", text: "ok" }],
+							stopReason: "stop",
+						} as AgentMessage);
+					},
+				},
+			} as unknown as AgentRuntime;
+			const recovery = createTurnRecovery({
+				auth: {
+					resolveForTarget: async (_target: unknown, _runtime: unknown, options?: { rejectedApiKey?: string }) => {
+						rejectedKeys.push(options?.rejectedApiKey);
+						return refreshed
+							? { providerId: "openai-codex", available: true, source: "stored-oauth", apiKey: "fresh" }
+							: { providerId: "openai-codex", available: false, source: "stored-oauth", detail: "refresh rejected" };
+					},
+				} as unknown as NonNullable<TurnRecoveryDeps["auth"]>,
+				state: createTurnState(),
+				persistence: { appendRetryStatus() {}, wasPersisted: () => true } as unknown as TurnRecoveryDeps["persistence"],
+				context: {} as TurnRecoveryDeps["context"],
+				retrySettings: () => ({ ...DEFAULT_RETRY_SETTINGS, enabled: false }),
+				markPersistedUserEcho: async (_text, prompt) => prompt(),
+				emitRetryStatus: (status) =>
+					statuses.push({ phase: status.phase, ...(status.errorMessage ? { errorMessage: status.errorMessage } : {}) }),
+				emitFailureMessage() {},
+				emitNotice() {},
+			});
+			const handled = await recovery.runTransientRetryChain(
+				runtime,
+				"request",
+				{ stopReason: "error", errorMessage: rejection, message: failed },
+				[failed],
+			);
+			strictEqual(handled, true);
+			deepStrictEqual(rejectedKeys, ["stale"], "exactly one forced refresh of the token that was sent");
+			strictEqual(continues, refreshed ? 1 : 0);
+			deepStrictEqual(
+				statuses.map((status) => status.phase),
+				["retrying", refreshed ? "recovered" : "exhausted"],
+			);
+			ok(statuses[0]?.errorMessage?.includes("target 'codex'"), statuses[0]?.errorMessage);
+			const tail = state.messages.at(-1);
+			if (refreshed) {
+				strictEqual(errorMessage(tail), undefined, "the rejected round was pruned before the retry");
+				strictEqual(state.messages.length, 1);
+			} else {
+				const remedy = errorMessage(tail);
+				ok(remedy?.includes("target 'codex'") && remedy.includes("clio-coder auth login openai-codex"), remedy);
+				strictEqual(statuses[1]?.errorMessage, remedy);
+				ok(!remedy?.includes("refresh rejected"), "provider refresh diagnostics stay out of the remedy");
+			}
+		});
+});
+
 test("Stop fences deferred preparation and compaction before model calls or late publication", async (t) => {
 	for (const phase of ["prepare", "compaction"] as const)
 		for (const navigate of [false, true]) {
