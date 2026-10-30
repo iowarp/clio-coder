@@ -198,7 +198,8 @@ function scopedEngineStreamSimple(
 	options: SimpleStreamOptions | undefined,
 	scope: ProviderCallScope,
 ): AssistantMessageEventStream {
-	// A side call opened inside its call scope is timed here; main and worker attempts mark their own stages (#434).
+	// A call whose attempt context this request runs in is timed here: side calls through their call scope and main
+	// attempts through turn-runtime. Main and worker attempts also mark their own stages; each keeps its first (#434).
 	const call = telemetryCallInContext();
 	call?.stage("send", "start");
 	const stream = filterAssistantProseStream(

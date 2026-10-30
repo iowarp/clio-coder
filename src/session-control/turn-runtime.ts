@@ -859,7 +859,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							};
 							unsentColdReasons = [];
 						}
-						const stream = engineMainStreamSimple(currentModel, sent, requestOptions);
+						// The provider stream runs inside the attempt's context, so the engine seam and every observer below it
+						// find this call; the seam's marks agree with the ones taken here because each keeps its first (#434).
+						const stream = attempt
+							? attempt.withContext(() => engineMainStreamSimple(currentModel, sent, requestOptions))
+							: engineMainStreamSimple(currentModel, sent, requestOptions);
 						// send.end is the handoff to Pi's provider, which owns serialization and the socket under
 						// transport option B. The journal's TTFT is firstToken minus this mark (#434).
 						attempt?.stage("send", "end");
