@@ -3,11 +3,14 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { messageUsageForAccounting } from "../core/message-accounting.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall } from "../core/telemetry/producer.js";
+import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { traceObservation } from "../domains/memory/observation-trace.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/observability/session-journals.js";
+import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
+import { recordUsageCall } from "../domains/session/usage-record.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
@@ -632,14 +635,26 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let callTracking: ReturnType<typeof trackCallFetch> | null = null;
 		let modelCall: TelemetryCall | undefined;
 		let journalLease: TelemetrySessionLease | undefined;
-		const settleModelCall = async (message: AgentMessage): Promise<void> => {
+		const recordSettledCall = (
+			facts: CallSettled | undefined,
+			ownerSessionId: string | undefined,
+			hidden = false,
+		): void => {
+			if (!facts || !deps.observability || !currentRun() || ownerSessionId !== deps.sessionOrigin?.()?.id) return;
+			// Final never-sent messages are counted when persisted; hidden retries have no ledger row (#430, #434).
+			if (hidden && facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
+			for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) {
+				recordUsageCall(deps.observability, call);
+			}
+		};
+		const settleModelCall = async (message: AgentMessage): Promise<boolean> => {
 			const call = modelCall;
 			const lease = journalLease;
 			modelCall = undefined;
 			journalLease = undefined;
 			if (call) {
 				Object.assign(message, { callId: call.callId, attemptId: call.attemptId });
-				call.settle(
+				const facts = call.settle(
 					callSettlementFromMessage(
 						message,
 						localRuntime.runtimeResolution.costProvenance,
@@ -649,8 +664,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					),
 					reportedModelFromMessage(message),
 				);
+				recordSettledCall(facts, lease?.context.sessionId);
 			}
 			await lease?.release();
+			return call !== undefined;
 		};
 		let apiCallFirstDeltaAt: number | null = null;
 		// Where a request is before `onStreamInvocation`. A watchdog abort while
@@ -736,13 +753,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const failure = terminal
 							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
 							: undefined;
-						modelCall.settle(
+						const facts = modelCall.settle(
 							callSettlementFromMessage(
 								{ ...message, ...(failure ? { failure } : {}) },
 								localRuntime.runtimeResolution.costProvenance,
 							),
 							reportedModelFromMessage(message),
 						);
+						recordSettledCall(facts, journalLease?.context.sessionId, true);
 					},
 				);
 			},
@@ -1255,6 +1273,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 			}
 			let publicEvent = enrichedEvent;
+			let journalAccounted = false;
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
 				const message = enrichedEvent.message;
 				const usage = (message.usage ?? {}) as unknown as Record<string, unknown>;
@@ -1307,7 +1326,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					// Preserve the display estimate without replacing provider usage (#423, #430).
 					Object.assign(enrichedEvent.message, { estimatedUsage: interruptedUsage });
 				}
-				await settleModelCall(enrichedEvent.message);
+				journalAccounted = await settleModelCall(enrichedEvent.message);
 			}
 
 			if (publicEvent?.type === "message_end" && publicEvent.message.role === "assistant" && apiCallStartedAt !== null) {
@@ -1362,7 +1381,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					unsettledSpendUsd += completed.costUsd;
 				}
 			}
-			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant" && deps.observability) {
+			if (
+				enrichedEvent.type === "message_end" &&
+				enrichedEvent.message.role === "assistant" &&
+				deps.observability &&
+				!journalAccounted
+			) {
 				const summary = sumRunUsage([enrichedEvent.message]);
 				const rawUsage = messageUsageForAccounting(enrichedEvent.message) ?? {};
 				const reported = normalizeTokenUsage(rawUsage ?? {});

@@ -22,8 +22,9 @@ import { createSessionJournals } from "../../src/domains/observability/session-j
 import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
 import { readAuditRows } from "../../src/domains/session/archive-readers.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
+import { usageCallsFromAttempts, usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
+import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -104,8 +105,8 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		strictEqual(call.nextAttempt(), null);
 		call.stage("admission", "start");
 		call.stage("admission", "end", { waitedOn: "budget" });
-		call.settle(unsent);
-		call.settle(unsent);
+		ok(call.settle(unsent));
+		strictEqual(call.settle(unsent), undefined);
 		const retry = call.nextAttempt();
 		ok(retry);
 		strictEqual(retry, call.nextAttempt());
@@ -123,7 +124,8 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 				clioExternal: { tokenUsage: "provider-reported" },
 			},
 		};
-		retry.settle(callSettlementFromMessage(message, "known"), reportedModelFromMessage(message));
+		const liveFacts = retry.settle(callSettlementFromMessage(message, "known"), reportedModelFromMessage(message));
+		ok(liveFacts);
 		strictEqual(journal.health().queueDepth, 4);
 		await journal.flush();
 		const rows = (await readCallJournal(sessionDirectory)).records.map(({ record }) => record);
@@ -143,6 +145,8 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 			rows,
 		);
 		const projected = usageCallsFromJournal(rows);
+		const live = usageCallsFromAttempts([{ started: liveFacts, settled: liveFacts }]);
+		deepStrictEqual(live, projected);
 		strictEqual(projected.length, 1);
 		strictEqual(projected[0]?.attributedModelId, "served-model");
 		strictEqual(projected[0]?.totalTokens, 9);
@@ -173,6 +177,22 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 			ledger,
 			{ journalDirectory: sessionDirectory },
 		);
+		const liveRecorded: unknown[][] = [];
+		for (const call of live)
+			recordUsageCall(
+				{
+					recordTokens: (...args) => {
+						liveRecorded.push(args);
+					},
+				},
+				call,
+			);
+		deepStrictEqual(
+			liveRecorded.map((args) => args.slice(0, -1)),
+			replayed.map((args) => args.slice(0, -1)),
+		);
+		strictEqual(liveRecorded[0]?.[9], false);
+		strictEqual(replayed[0]?.[9], true);
 		strictEqual(replayed.length, 1);
 		strictEqual(replayed[0]?.[1], "served-model");
 		strictEqual(replayed[0]?.[2], 9);

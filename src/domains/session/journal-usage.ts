@@ -4,6 +4,7 @@ import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { FactSum } from "../../core/telemetry/fact.js";
 import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
+import type { FoldedAttempt } from "../observability/folds.js";
 import { foldCallJournal, foldCalls } from "../observability/folds.js";
 import type { LedgerUsageCall } from "./usage.js";
 
@@ -26,7 +27,12 @@ export function usageCallsFromJournal(
 	records: Iterable<TelemetryRecord>,
 	callIds?: ReadonlySet<string>,
 ): LedgerUsageCall[] {
-	return foldCallJournal(records, callIds).attempts.flatMap((attempt) => {
+	return usageCallsFromAttempts(foldCallJournal(records, callIds).attempts);
+}
+
+/** Live settlement and durable replay share the same projection (#434). */
+export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): LedgerUsageCall[] {
+	return attempts.flatMap((attempt) => {
 		const { started, settled } = attempt;
 		if (settled?.disposition === "never_sent") return [];
 		const facts = foldCalls([attempt]);

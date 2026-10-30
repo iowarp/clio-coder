@@ -13,6 +13,8 @@ import { TraceReader, TraceStore } from "../../src/domains/observability/trace-s
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
+import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import type { TurnOutcomeRecord } from "../../src/domains/turn-control/index.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
@@ -83,6 +85,7 @@ for (const continuation of [false, true])
 			const journals = createSessionJournals(clioStateDir(), () => {
 				throw new Error("fixture journal unavailable");
 			});
+			const liveUsage: unknown[][] = [];
 			const loop = createChatLoop({
 				getSettings: () => settings,
 				providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
@@ -120,7 +123,9 @@ for (const continuation of [false, true])
 					acquireTelemetrySession: journals.acquire,
 					recordSessionTurn: (trace: Parameters<ObservabilityContract["recordSessionTurn"]>[0]) =>
 						store.recordSessionTurn(trace),
-					recordTokens() {},
+					recordTokens(...args: unknown[]) {
+						liveUsage.push(args);
+					},
 					recordTokenThroughput() {},
 				} as unknown as ObservabilityContract,
 				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
@@ -167,6 +172,19 @@ for (const continuation of [false, true])
 				const journal = await readCallJournal(join(clioStateDir(), "sessions", "outcome-repo", "outcome-session"));
 				const calls = journal.records.filter(({ record }) => record.k === "call.settled");
 				strictEqual(calls.length, 1, JSON.stringify(journal));
+				const replayed: unknown[][] = [];
+				for (const call of usageCallsFromJournal(journal.records.map(({ record }) => record))) {
+					recordUsageCall(
+						{
+							recordTokens: (...args) => {
+								replayed.push(args);
+							},
+						},
+						call,
+					);
+				}
+				deepStrictEqual(liveUsage, replayed);
+				strictEqual(liveUsage.length, 1);
 				const call = calls[0]?.record;
 				ok(call?.k === "call.settled");
 				strictEqual(call.data.disposition, "settled");

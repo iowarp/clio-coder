@@ -15,49 +15,16 @@
  */
 
 import { writeDiagnostic } from "../../core/diagnostics.js";
-import {
-	addResponseModelIdObservationCount,
-	emptyResponseModelIdObservationCounts,
-	type ResponseModelIdObservationCounts,
-} from "../../core/response-model-id.js";
 import type { CallJournalRead } from "../observability/call-journal.js";
 import { readCallJournalSync } from "../observability/call-journal.js";
-import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
-import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
-import { ledgerCallFailureCounts, ledgerUsageCalls, type SessionUsageDefaults } from "./usage.js";
+import type { SessionUsageDefaults } from "./usage.js";
+import { ledgerCallFailureCounts, ledgerUsageCalls } from "./usage.js";
+import type { SessionUsageSink } from "./usage-record.js";
+import { recordUsageCall } from "./usage-record.js";
 
-/** The slice of ObservabilityContract a reseed needs. */
-export interface SessionUsageSink {
-	resetSession(sessionId?: string | null): void;
-	recordNeverSentCalls?(count: number): void;
-	recordTokens(
-		providerId: string,
-		attributedModelId: string,
-		tokens: number,
-		costUsd?: number,
-		breakdown?: {
-			input: number;
-			output: number;
-			cacheRead: number;
-			cacheWrite: number;
-			cacheWrite1h?: number;
-			reasoningTokens: number;
-			totalTokens: number;
-			apiCalls?: number;
-			missingTokenCalls?: number;
-		},
-		costProvenance?: CostProvenance,
-		modelIdFacts?: {
-			requestedModelIds: ReadonlyArray<string>;
-			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
-		},
-		label?: CostEntryLabel,
-		costSummary?: CostAggregate,
-		replayed?: boolean,
-	): void;
-}
+export type { SessionUsageSink } from "./usage-record.js";
 
 /**
  * Clear the running totals and replay the supplied session's recorded calls
@@ -94,37 +61,5 @@ export function reseedSessionUsageFromLedger(
 	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
 	const records = journal?.records.map(({ record }) => record);
 	sink.recordNeverSentCalls?.(ledgerCallFailureCounts(scoped, records).neverInvokedCalls);
-	for (const call of ledgerUsageCalls(scoped, defaults, records)) {
-		const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
-		addResponseModelIdObservationCount(
-			responseModelIdObservationCounts,
-			call.responseModelIdObservation,
-			call.apiCalls ?? 1,
-		);
-		sink.recordTokens(
-			call.providerId,
-			call.attributedModelId,
-			call.totalTokens,
-			call.costUsd,
-			{
-				input: call.input,
-				output: call.output,
-				cacheRead: call.cacheRead,
-				cacheWrite: call.cacheWrite,
-				...(call.cacheWrite1h === undefined ? {} : { cacheWrite1h: call.cacheWrite1h }),
-				reasoningTokens: call.reasoningTokens,
-				totalTokens: call.totalTokens,
-				apiCalls: call.apiCalls ?? 1,
-				...(call.missingTokenCalls ? { missingTokenCalls: call.missingTokenCalls } : {}),
-			},
-			call.costProvenance,
-			{
-				requestedModelIds: [call.requestedModelId],
-				responseModelIdObservationCounts,
-			},
-			call.label,
-			call.costSummary,
-			true,
-		);
-	}
+	for (const call of ledgerUsageCalls(scoped, defaults, records)) recordUsageCall(sink, call, true);
 }
