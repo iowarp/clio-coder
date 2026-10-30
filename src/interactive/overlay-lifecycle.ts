@@ -162,6 +162,7 @@ export interface OverlayLifecycleController {
 	resetAskUserCancellation(): void;
 	refreshSettingsOverlay(): void;
 	openUsageOverlayState(): void;
+	openHealthOverlayState(): void;
 	openContextViewOverlayState(): void;
 	openContextResetOverlayState(): void;
 	toggleFooterDashboardState(): void;
@@ -581,6 +582,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openTreeOverlayState = overlaySessions.openTree;
 	const openMessagePickerOverlayState = overlaySessions.openMessagePicker;
 	const openUsageOverlayState = overlayGeneralOpeners.openUsage;
+	const openHealthOverlayState = overlayGeneralOpeners.openHealth;
 	const openContextViewOverlayState = overlayGeneralOpeners.openContextView;
 	const openContextResetOverlayState = overlayGeneralOpeners.openContextReset;
 	const toggleFooterDashboardState = overlayGeneralOpeners.toggleFooter;
@@ -607,6 +609,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		resetAskUserCancellation: overlayAskUser.resetCancellation,
 		refreshSettingsOverlay: overlayModelSelectors.refreshSettingsOverlay,
 		openUsageOverlayState,
+		openHealthOverlayState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		toggleFooterDashboardState,

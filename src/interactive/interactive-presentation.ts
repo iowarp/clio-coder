@@ -63,6 +63,7 @@ import { createStatusController } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
+import { createDropAlerts } from "./telemetry-drops.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
@@ -533,6 +534,25 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const unsubscribeTelemetry = (["session", "calls", "cost", "runs"] as const).map(
 		(topic) => deps.observability.telemetry?.subscribe(topic, repaintSpend) ?? (() => {}),
 	);
+	// A journal that loses records raises one notice per owner a minute; a rise held by the window is checked when
+	// the window ends, so it is never left unreported (#434 §14).
+	const dropAlerts = createDropAlerts();
+	let dropCheck: NodeJS.Timeout | undefined;
+	const checkDrops = () => {
+		const telemetry = deps.observability.telemetry;
+		if (!telemetry) return;
+		const now = Date.now();
+		const alerts = dropAlerts.observe(telemetry.health(), now);
+		for (const alert of alerts) notify("warning", alert.text, alert.key);
+		if (alerts.length > 0) requestRender();
+		if (dropCheck) clearTimeout(dropCheck);
+		dropCheck = undefined;
+		const due = dropAlerts.nextCheckAt();
+		if (due === null) return;
+		dropCheck = setTimeout(checkDrops, Math.max(0, due - now));
+		dropCheck.unref();
+	};
+	unsubscribeTelemetry.push(deps.observability.telemetry?.subscribe("health", checkDrops) ?? (() => {}));
 
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
@@ -829,6 +849,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		footer.dispose();
 		unsubscribeObservability();
 		for (const off of unsubscribeTelemetry) off();
+		if (dropCheck) clearTimeout(dropCheck);
 		contextActivityStore.unsubscribe();
 		unsubscribeLoops?.();
 		dispatchBoardStore.unsubscribe();

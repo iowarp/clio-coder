@@ -2103,7 +2103,7 @@ function systemOneSiteRows(settings: Readonly<ClioSettings>, live: () => Readonl
 }
 
 /** One short phrase for a route's breaker, keyed by the model it serves. */
-function routeBreakerPhrase(route: RouteBreakerView): string {
+export function routeBreakerPhrase(route: RouteBreakerView): string {
 	switch (route.state) {
 		case "open":
 			return `${route.wireModelId} open ${Math.ceil(route.remainingMs / 1000)}s after ${route.reason}`;

@@ -46,6 +46,7 @@ import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
 import type { createDispatchBoardView } from "./dispatch-board.js";
 import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
+import { openHealthOverlay } from "./health-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import type { HintEntry } from "./overlay-frame.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -195,6 +196,7 @@ export interface OverlayGeneralOpenersDeps {
 
 export interface OverlayGeneralOpeners {
 	openUsage(): void;
+	openHealth(): void;
 	openContextView(): void;
 	openContextReset(): void;
 	toggleFooter(): void;
@@ -248,6 +250,15 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 						getSessionEntries: () => deps.readSessionEntries?.() ?? [],
 					}
 				: {}),
+		});
+		deps.requestRender();
+	};
+
+	const openHealth = (): void => {
+		if (deps.transitions.state !== "closed") return;
+		deps.transitions.state = "health";
+		deps.transitions.handle = openHealthOverlay(deps.tui, deps.observability.telemetry, {
+			getBreakers: () => deps.dispatch.routeBreakers?.() ?? [],
 		});
 		deps.requestRender();
 	};
@@ -848,6 +859,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 
 	return {
 		openUsage,
+		openHealth,
 		openContextView,
 		openContextReset,
 		toggleFooter,

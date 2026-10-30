@@ -8,6 +8,7 @@ export type OverlayState =
 	| "dispatch-board"
 	| "auth"
 	| "usage"
+	| "health"
 	| "context-view"
 	| "context-reset"
 	| "tasks"
@@ -298,7 +299,7 @@ export function routeOverlayKey(
 		return true;
 	}
 	if (overlayState === "auth") return routeAuthOverlayKey(data, deps);
-	if (overlayState === "usage") return routeReadOnlyOverlayKey(data, deps);
+	if (overlayState === "usage" || overlayState === "health") return routeReadOnlyOverlayKey(data, deps);
 	if (overlayState === "context-view") {
 		routeReadOnlyOverlayKey(data, deps);
 		return true;

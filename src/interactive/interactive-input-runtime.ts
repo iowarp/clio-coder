@@ -610,6 +610,7 @@ function overlayScopeLabel(state: OverlayState): string {
 		"dispatch-board": "Workers",
 		auth: "Authentication",
 		usage: "Usage",
+		health: "Health",
 		"context-view": "Context",
 		"context-reset": "Context reset",
 		tasks: "Tasks",

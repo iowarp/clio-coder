@@ -168,6 +168,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openAskUser: AskUserHandler;
 	openSkillsHub: (request?: LibraryBrowseRequest) => void;
 	openUsage: () => void;
+	openHealth: () => void;
 	/** Run one `/btw` side question in its own overlay. */
 	openSideQuestion: (question: string) => void;
 	/** Run one `/draft` in its own overlay. */
@@ -572,6 +573,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
 		...archiveCommandHost(deps.share),
 		openUsage: deps.openUsage,
+		openHealth: deps.openHealth,
 		openSideQuestion: deps.openSideQuestion,
 		openDraft: deps.openDraft,
 		// `/oracle` is refused, never queued, while a turn streams: the digest it

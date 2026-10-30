@@ -200,6 +200,7 @@ type SlashCommandVariant =
 	| { kind: "loop"; command: LoopCommand }
 	| { kind: "agents"; connect?: boolean }
 	| { kind: "usage" }
+	| { kind: "health" }
 	| { kind: "workspace"; action: "off" | "status" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
@@ -808,6 +809,8 @@ export interface SessionCommandContext {
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openUsage?: () => void;
+	/** `/health`: telemetry journal losses, event-loop lag, the session's transport, quota and route breakers. */
+	openHealth?: () => void;
 	/**
 	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.
 	 * `deep` adds the live tool probe on the session's targets and the
@@ -2125,6 +2128,18 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "health",
+		acp: false,
+		description: "Show telemetry journal losses, event-loop lag, transport, quota and route breakers",
+		group: "Inspect",
+		kinds: ["health"],
+		args: {},
+		fromArgs: fromArgsOrUsage("health", { kind: "health" }),
+		handle(_command, ctx) {
+			ctx.openHealth?.();
+		},
+	},
+	{
 		name: "context",
 		acp: {
 			subcommands: ["compact", "recall", "init", "refresh", "reset", "recover"],
@@ -3372,6 +3387,7 @@ const COMMAND_ORDER = [
 	"view",
 	"panes",
 	"usage",
+	"health",
 	"doctor",
 	"upgrade",
 	"decisions",
