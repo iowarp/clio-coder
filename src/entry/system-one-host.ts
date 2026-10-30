@@ -154,8 +154,9 @@ export function createSystemOneRequestAdmission(deps: {
 						? null
 						: {
 								...usage,
-								// Only the direct HTTP parser proves explicit zero. Pi placeholders remain unknown (#434).
-								clioExternal: usage.providerReported ? { tokenUsage: "provider-reported" } : {},
+								// Only the direct HTTP parser proves explicit zero. Pi placeholders remain unknown, and the
+								// key is omitted for them: a present `clioExternal` without the mark reads as unmeasured (#434).
+								...(usage.providerReported ? { clioExternal: { tokenUsage: "provider-reported" as const } } : {}),
 								...(usage.providerReported && usage.cacheRead === undefined ? { input: undefined } : {}),
 								cost: {
 									total:
