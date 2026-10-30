@@ -9,6 +9,7 @@ import { quantityOf } from "../observability/read-model.js";
 import type { LegacySessionUsage, SessionMeta, SessionUsageProjection } from "./contract.js";
 import { liveSessionOwner } from "./live-owner.js";
 import { loadSessionTelemetrySource } from "./telemetry-source.js";
+import { projectedUsageQuantities, sessionUsageProjection } from "./usage-meta.js";
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 
@@ -24,9 +25,10 @@ export interface UsageRebuildRow {
 /** meta.json usage in one line: the projection with its fold version, or an older running total. */
 function describeUsage(usage: unknown): string {
 	if (!usage || typeof usage !== "object") return "none";
-	const projected = usage as Partial<SessionUsageProjection>;
-	if (projected.usd && projected.tokens && typeof projected.foldVersion === "number")
-		return `${renderCompactCount(projected.tokens.fact)} tok · ${projected.usd.display} (fold v${projected.foldVersion})`;
+	const projected = projectedUsageQuantities(usage);
+	const foldVersion = (usage as Partial<SessionUsageProjection>).foldVersion;
+	if (projected && typeof foldVersion === "number")
+		return `${renderCompactCount(projected.tokens.fact)} tok · ${projected.usd.display} (fold v${foldVersion})`;
 	const legacy = usage as Partial<LegacySessionUsage>;
 	const cost = legacy.cost ? formatCostAggregate(legacy.cost) : null;
 	return `${typeof legacy.tokens === "number" ? legacy.tokens : "?"} tok${cost ? ` · ${cost}` : ""} (running total, no fold version)`;
@@ -34,11 +36,14 @@ function describeUsage(usage: unknown): string {
 
 function projectionKey(usage: unknown): string {
 	const projected = usage as Partial<SessionUsageProjection> | undefined;
+	// The running-total fields count too: a meta whose quantities predate them must be rewritten for older builds.
 	return JSON.stringify([
 		projected?.foldVersion,
-		projected?.tokens?.fact,
-		projected?.usd?.fact,
-		projected?.usd?.display,
+		projected?.quantities?.tokens?.fact,
+		projected?.quantities?.usd?.fact,
+		projected?.quantities?.usd?.display,
+		projected?.tokens,
+		projected?.cost,
 	]);
 }
 
@@ -97,7 +102,7 @@ export function rebuildUsageProjections(
 				rows.push({ sessionId, state: "unreadable", before, after: null });
 				continue;
 			}
-			const next: SessionUsageProjection = { foldVersion: TELEMETRY_FOLD_VERSION, tokens, usd };
+			const next = sessionUsageProjection(TELEMETRY_FOLD_VERSION, { tokens, usd });
 			if (projectionKey(meta.usage) === projectionKey(next)) {
 				rows.push({ sessionId, state: "unchanged", before, after: before });
 				continue;

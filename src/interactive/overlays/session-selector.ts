@@ -5,6 +5,7 @@ import { formatCostAggregate } from "../../domains/observability/cost.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/index.js";
 import { liveSessionOwner } from "../../domains/session/live-owner.js";
+import { projectedUsageQuantities } from "../../domains/session/usage-meta.js";
 import type { TuiMouseEvent, TuiMouseEventResult } from "../../engine/tui.js";
 import {
 	getKeybindings,
@@ -109,7 +110,9 @@ function metaStrip(meta: SessionMeta, now: number): string {
 	const usage = meta.usage;
 	if (!usage) return base;
 	// The read model's projection is already worded by the canonical renderers; an older meta keeps its running total.
-	if ("usd" in usage) return `${base} · ${renderCompactCount(usage.tokens.fact)} tok · ${usage.usd.display}`;
+	const projected = projectedUsageQuantities(usage);
+	if (projected) return `${base} · ${renderCompactCount(projected.tokens.fact)} tok · ${projected.usd.display}`;
+	if (typeof usage.tokens !== "number" || !usage.cost) return base;
 	const cost = formatCostAggregate(usage.cost);
 	return `${base} · ${formatFooterTokens(usage.tokens)} tok${cost !== null ? ` · ${cost}` : ""}`;
 }

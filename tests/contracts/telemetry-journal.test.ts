@@ -1013,7 +1013,10 @@ test("rebuild re-projects a session's meta.json usage from its journal and repor
 		rebuildUsageProjections(stateDir, { apply: true });
 		const usage = JSON.parse(await readFile(metaPath, "utf8")).usage;
 		strictEqual(usage.foldVersion, TELEMETRY_FOLD_VERSION);
-		strictEqual(usage.usd.fact.measured + usage.usd.fact.estimated, 2);
+		strictEqual(usage.quantities.usd.fact.measured + usage.quantities.usd.fact.estimated, 2);
+		// An older build sharing the state dir reads and adds to the running-total fields, the quantities' known part (#439).
+		strictEqual(usage.tokens, usage.quantities.tokens.fact.measured + usage.quantities.tokens.fact.estimated);
+		deepStrictEqual(usage.cost, { knownUsd: 2, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 1 });
 		strictEqual(rebuildUsageProjections(stateDir, { apply: false })[0]?.state, "unchanged");
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });

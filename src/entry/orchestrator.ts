@@ -4531,7 +4531,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const key = JSON.stringify([meta.id, TELEMETRY_FOLD_VERSION, tokens.fact, usd.fact, usd.display]);
 		if (key === projectedUsage) return;
 		try {
-			session.projectUsage({ foldVersion: TELEMETRY_FOLD_VERSION, tokens, usd });
+			session.projectUsage({ foldVersion: TELEMETRY_FOLD_VERSION, quantities: { tokens, usd } });
 			projectedUsage = key;
 		} catch {
 			// The resume picker's spend is a convenience; the journal already holds every call.

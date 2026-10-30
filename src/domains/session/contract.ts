@@ -65,13 +65,16 @@ export type ClioSessionMetaExtension = {
 	pinnedLeafTurnId?: string | null;
 };
 
-/** meta.json `usage` as the read model projects it: the whole-session totals and the fold version that made them. */
-export interface SessionUsageProjection {
+/**
+ * meta.json `usage` as the read model projects it: the whole-session quantities and the fold version that made them.
+ * The running-total fields beside them hold the quantities' known part for an older build sharing the state dir,
+ * and current readers prefer the quantities (#434 §10, #439).
+ */
+export interface SessionUsageProjection extends LegacySessionUsage {
 	foldVersion: number;
-	tokens: Quantity;
-	usd: Quantity;
+	quantities: { tokens: Quantity; usd: Quantity };
 }
-/** The running total a meta written before the projection kept; still read, never written (#434 §10). */
+/** The running total a meta written before the projection kept, and the fields an older build still reads (#434 §10). */
 export interface LegacySessionUsage {
 	tokens: number;
 	cost: CostAggregate;
@@ -128,7 +131,7 @@ export interface SessionContract {
 	/** Append a skill activation ledger entry and mirror it into meta.json. */
 	recordSkillActivation(activation: SkillActivation): SkillActivation;
 	/** Replace the current session's meta.json `usage` with the read model's whole-session projection. */
-	projectUsage(usage: SessionUsageProjection): void;
+	projectUsage(usage: Pick<SessionUsageProjection, "foldVersion" | "quantities">): void;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */
 	checkpoint(reason?: string): Promise<void>;
 	/** Synchronously make current.jsonl appends durable; used by write-ahead safety journals. */
