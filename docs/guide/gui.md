@@ -19,7 +19,7 @@ Start the GUI with `clio-coder gui --open` to open the graphical app. An existin
 
 ```text
 clio-coder gui [--path </app/path>] [--open | --no-open] [--foreground]
-clio-coder gui background install [--open] [--port <1-65535>]
+clio-coder gui background install [--handover] [--open] [--port <1-65535>]
 clio-coder gui background status|start|open|restart [--if-idle]|stop|uninstall
 clio-coder gui launcher install|status|uninstall
 ```
@@ -58,15 +58,15 @@ Launch output is the link `[clio-coder:gui] http://127.0.0.1:<port><path>#token=
 
 | Subcommand | Behavior |
 | --- | --- |
-| `install [--open] [--port N] [--prefix DIR]` | Writes the service files, enables and starts the unit, waits for readiness, then installs the desktop entry. `--port` pins a port (1 to 65535). A reinstall keeps the port the app already has. The reported `origin` carries the port the app listens on, which is 7373 while another program holds 4343. `--open` opens the app afterwards. |
-| `status` | Prints JSON: `status` (`absent` or `installed`), `directory`, `unit`, `port`, `configuredPort`, `origin`, `active`, `enabled`, `pid`, `ready`, `desktop` and `windows` (`unsupported`, `absent`, `installed` or `modified`). |
+| `install [--handover] [--open] [--port N] [--prefix DIR]` | Writes the service files, enables and starts the unit, waits for readiness, then installs the desktop entry. `--port` pins a port (1 to 65535). A reinstall keeps the port the app already has. The reported `origin` carries the port the app listens on, which is 7373 while another program holds 4343. `--open` opens the app afterwards. |
+| `status` | Prints JSON: `status` (`absent` or `installed`), `directory`, `unit`, `port`, `configuredPort`, `origin`, `active`, `enabled`, `pid`, `ready`, `running` (the version the app reports), `idle`, `desktop` and `windows` (`unsupported`, `absent`, `installed` or `modified`). |
 | `start` | Starts the unit and prints the ready origin. |
 | `open` | Starts the unit and opens the app, or focuses its window under WSL. If no opener works it prints the link. |
 | `restart [--if-idle]` | Restarts the unit so it loads a newly installed version. When this installation's Node or entry paths differ from the recorded ones, it first rewrites the config, the unit and the desktop entry to the current paths, so the app is pinned to the version that ran the command. With `--if-idle`, restarts only when the app reports idle (no running operation, CLI child, setup or busy session, and no open session) and otherwise leaves it alone and says why: busy, stopped, or not reporting idleness. A parked task holds no child, so it does not count as an open session. |
 | `stop` | Stops the unit until the next login or the next `clio-coder gui`. |
 | `uninstall` | Disables and stops the unit, removes the desktop entry and Windows shortcuts it owns, deletes the service files and removes the directory when it is empty. |
 
-`--directory <absolute path>` overrides the service directory for any subcommand. `--port`, `--prefix` and `--open` belong to `install` only, and `--if-idle` to `restart` only.
+`--directory <absolute path>` overrides the service directory for any subcommand. `--handover`, `--port`, `--prefix` and `--open` belong to `install` only, and `--if-idle` to `restart` only.
 
 ### Port selection
 
@@ -85,7 +85,7 @@ All service files live in `<state>/gui/background/` unless `--directory` says ot
 
 The unit runs `<node> [--import <tsx loader>] <entry> --persistent <server.json>` with `Restart=on-failure`, `RestartSec=1`, `KillMode=control-group`, `TimeoutStopSec=15`, `UMask=0077` and `WantedBy=default.target`. It is activated with `systemctl --user enable --now -- <unit file>`. The service environment comes from `server.json`: the install-time `PATH`, `CLIO_CODER_PACKAGE_ROOT`, and `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR` and `CLIO_CODER_CACHE_DIR` pinned to the roots at install time. Sessions started from the background app therefore use Clio Coder's saved credentials. A provider key that exists only in a terminal environment is not visible to them, so `install` ends with a reminder to run `clio-coder auth login <target>`.
 
-Reinstalling from the same installation (another version of the same native install counts) with moved Node or entry paths rewrites the config and unit and reloads systemd. Reinstalling with a different port or desktop prefix, or from another installation, fails until `uninstall` has run.
+Reinstalling from the same installation (another version of the same native install counts) with moved Node or entry paths rewrites the config and unit and reloads systemd. Reinstalling with a different port or desktop prefix fails until `uninstall` has run. Reinstalling from another installation fails with `Background setup belongs to another installation. Run: clio-coder gui background install --handover`. `install --handover` transfers the service to this installation while keeping its port, token and desktop location: it requires the same four Clio Coder data roots, refuses while the running app has active work or cannot report that it is idle, then rewrites the config, unit and desktop entry to this installation's paths and restarts the unit. `clio-coder doctor --fix` performs the same handover for a verified idle service.
 
 ### Ownership across native upgrades
 
@@ -184,7 +184,7 @@ The server binds `127.0.0.1` only; there is no host option.
 - **Host and Origin.** A request whose `Host` is not the listener's own address is refused with 421. A request with an `Origin` header that differs from the listener's origin is refused.
 - **Response headers.** Every response carries a strict Content-Security-Policy (`default-src 'self'`, same-origin scripts, no framing, no `object-src`), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` denying camera, microphone, geolocation, payment and USB, and `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` of same-origin.
 - **Body limits.** API bodies are limited to 64 KiB, except a turn request, which may carry images and files up to 1 MiB.
-- **Installable app assets.** `manifest.webmanifest`, `sw.js` and the offline page are served only by the background app. The service worker caches only the public recovery page. Conversations, API responses and tokens never enter its cache. The cache is named `clio-coder-recovery-v4`, and activating the worker deletes every cache whose name starts with `clio-coder-recovery-` and differs from it. The favicon and the 192 and 512 pixel app icons center the mark in a 94% safe area. `index.html` references the favicon and `manifest.webmanifest` the two app icons, each with a `?v=` query of the first 12 hex characters of the file's SHA-256, so a browser fetches an icon when it changes. `apps/clio-coder-gui/client/public/brand/provenance.json` records the full digests and the icon treatment.
+- **Installable app assets.** `manifest.webmanifest`, `sw.js` and the offline page are served only by the background app. The service worker caches only the public recovery page. Conversations, API responses and tokens never enter its cache. The cache is named `clio-coder-recovery-v5`, and activating the worker deletes every cache whose name starts with `clio-coder-recovery-` and differs from it. The favicon and the 192 and 512 pixel app icons center the mark in a 94% safe area. `index.html` references the favicon and `manifest.webmanifest` the two app icons, each with a `?v=` query of the first 12 hex characters of the file's SHA-256, so a browser fetches an icon when it changes. `apps/clio-coder-gui/client/public/brand/provenance.json` records the full digests and the icon treatment.
 
 ### What the server exposes
 
@@ -311,8 +311,18 @@ The ACP child pushes session telemetry and the server forwards it to every windo
 | Plan | `plan` with up to 100 entries (`pending`, `in_progress`, `completed`, `blocked`, each with an optional reason) and a truncation flag | The Plan section and the Plan drill-in's plan. A truncated plan shows `The plan shows its first 100 steps.` Without a pushed plan, both read the plan from `_clio-coder/session/board`. |
 | Workspace | `_meta["clio-coder/workspace"]` on the `session/new`, `session/load` and `session/resume` results and on `session_info_update` | The Workspace section. |
 | Trust | `_meta["clio-coder/trust"]` on the same results | The notice under [Untrusted project files](#untrusted-project-files). |
+| Notices | `agent_message_chunk` frames marked `_meta["clio-coder/notice"]` | The task's newest 32 distinct notice texts. |
+| Budget | `_meta["clio-coder/budget"]` on a cost ceiling notice | The budget banner described below. |
+| Memory guardian | `_meta["clio-coder/memory"]` on `session_info_update` | A `Memory reviewing` or `Memory waiting` mark beside the task title while the session is live. |
+| Eggs | `_meta["clio-coder/eggs"]` on `session_info_update` | The rubber duck badge while `/eggs` has it active. |
+
+The pushed usage totals also carry `calls`, `missingTokenCalls` and `hasEstimatedCost`, so the live view can say when token amounts are known subtotals or cost is partly estimated.
 
 A `session.reset` after a branch switch drops the pushed usage and plan and keeps the workspace and trust facts. A resume or fork reports its own workspace and trust again.
+
+### Budget banner
+
+When a paid request reaches the session cost ceiling, the request parks inside the turn and the task shows a banner above the transcript beside the approval banner (`client/chat/BudgetBanner.tsx`). It reads `Paid requests are paused at the session cost ceiling.`, or `above` once spend has passed it, with the spend against the ceiling and the context tokens the next call would send. `Raise ceiling to $<n>` writes the suggested ceiling to `safety.limits.sessionCostUsd` through the same settings write the Settings page uses, and `Open setting` opens that row for another value. The engine re-reads the ceiling while the request waits, so a saved raise resumes the turn within about a second; the banner then reads `Ceiling raised to $<n>.` and clears when the turn produces output. A raise that fails to save says why in the banner.
 
 ### Artifacts
 
@@ -384,7 +394,7 @@ See [Safety Model](../architecture/safety-model.md) for how the child classifies
 
 ## ACP frames the application consumes
 
-The application initializes ACP protocol version 1 as client `clio-coder-gui`, with no file-system or terminal client capability, and opts into `clio-coder/events` (twelve kinds), `clio-coder/toolProgress`, `clio-coder/interviews` and `clio-coder/workerPermissions`.
+The application initializes ACP protocol version 1 as client `clio-coder-gui`, with no file-system or terminal client capability, and opts into `clio-coder/events` (fourteen kinds), `clio-coder/toolProgress`, `clio-coder/interviews` and `clio-coder/workerPermissions`.
 
 | Frame | Use |
 | --- | --- |
@@ -395,7 +405,7 @@ The application initializes ACP protocol version 1 as client `clio-coder-gui`, w
 | `session_info_update` | Its `_meta["clio-coder/workspace"]`, when present, updates the telemetry's workspace snapshot. Nothing else in it is projected. |
 | `current_mode_update`, `available_commands_update` | Accepted and not projected. Mode and command catalog are read through their own calls. |
 | `_meta["clio-coder/replay"]`, `["clio-coder/agent"]` | Replay turn markers on `session/load` and per-frame agent attribution. |
-| `_clio-coder/event` | Twelve kinds: `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, `dispatch.failed` and `safety.loopBlocked` become fleet rows, `accountability.evidenceReady` becomes an evidence bundle row in the Evidence section, and `compaction.end`, `context.warning`, `safety.toolBudgetExceeded`, `provider.health` and `dispatch.scopeNotice` become session health notices. An unrecognized kind is logged on stderr and dropped. |
+| `_clio-coder/event` | Fourteen kinds: `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, `dispatch.failed` and `safety.loopBlocked` become fleet rows, `accountability.evidenceReady` becomes an evidence bundle row in the Evidence section, and `compaction.end`, `context.warning`, `safety.toolBudgetExceeded`, `provider.health` and `dispatch.scopeNotice` become session health notices. `context.activity` reports a running context operation; one that names another workspace is treated as an upstream ACP error and fails the turn, and a finished operation refreshes the task's context, usage, artifacts, tree and board. `job.changed` keeps the job strip at the transcript's live edge current, one row per recurring job with its counts, next due time, last outcome and the pause, resume, stop and cancel controls `/loop` admits. An unrecognized kind is logged on stderr and dropped. |
 
 The results of `session/new`, `session/load` and `session/resume` carry `_meta["clio-coder/workspace"]` and `_meta["clio-coder/trust"]`, which seed the telemetry. A terminal `_clio-coder/event` frame may carry `_meta["clio-coder/receipt"]`, which becomes the run's receipt line (see [Worker receipts](#worker-receipts)). The Artifacts drill-in calls `_clio-coder/artifacts/list` and `_clio-coder/artifacts/read`. A `sessionUpdate` kind the application does not know is logged as `dropped an unrecognized ACP sessionUpdate kind` and dropped without failing the turn. Metadata updates that arrive before `session/new` has bound the session identifier are ignored. The pull calls `_clio-coder/context/ledger`, `_clio-coder/usage/read` and `_clio-coder/session/board` supply the settled figures and the detail views. [ACP](../architecture/acp.md) documents what the server pushes.
 

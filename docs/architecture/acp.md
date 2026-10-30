@@ -43,7 +43,7 @@ Framing rules:
 
 ## Initialize, capabilities, and authentication
 
-`initialize` must be the first request and runs once. `agentInfo` is `{name: "clio-coder", title: "Clio Coder", version}`. The standard capability fields are:
+`initialize` must be the first request and runs once. Its `protocolVersion` must be a non-negative integer, or it fails `-32602`. `agentInfo` is `{name: "clio-coder", title: "Clio Coder", version}`. The standard capability fields are:
 
 | Field | Value |
 | --- | --- |
@@ -61,6 +61,7 @@ Every Clio Coder extension is namespaced under `agentCapabilities._meta`, so a s
 | `clio-coder/settings` | `{get_safe, patch_safe}` | always |
 | `clio-coder/targets` | `{list, probe}` | always |
 | `clio-coder/trust` | `{version: 1, meta, surfaces: ["settings", "hooks", "safety", "extensions", "plugins"], refresh: "_clio-coder/session/trust", results: ["session/new", "session/load", "session/resume"]}` | always |
+| `clio-coder/budget` | `{version: 1, meta: "clio-coder/budget", update: "agent_message_chunk", setting: "safety.limits.sessionCostUsd", replay: true}` | always; see [Session cost ceiling stops](#session-cost-ceiling-stops) |
 | `clio-coder/ceiling` | `{version: 1, meta: "clio-coder/ceiling", fields: ["allowedTools", "delegatedTools", "delegation", "readOnly"]}` | the chat can enforce client ceilings |
 | `clio-coder/queue` | `{version: 1, edit: "_clio-coder/session/queue_edit", ops: ["remove", "restore", "move", "set_kind", "send_now"], notification: "_clio-coder/session/queue_changed"}` | queue editing is wired |
 | `clio-coder/shell` | `{version: 1, run: "_clio-coder/session/shell", timeoutMs: 300000}` | operator shell and branch/session support are wired |
@@ -74,17 +75,18 @@ Every Clio Coder extension is namespaced under `agentCapabilities._meta`, so a s
 | `clio-coder/board` | `{version: 1, method, supersede?, proposeMemory?}` | the task board is wired; the two action methods need board actions |
 | `clio-coder/branches` | `{version: 1, tree, switchTurn, fork}` | session branching is wired |
 | `clio-coder/handoff` | `{version: 1, prepare, commit, cancel}` | the handoff service is wired |
-| `clio-coder/context` | `{version: 1, ledger}` | the context ledger is wired |
+| `clio-coder/context` | `{version: 1, ledger, status, activity?, invoke?}` | the context ledger is wired; `activity: "context.activity"` when an event bus is wired, `invoke` when a command host is |
+| `clio-coder/jobs` | `{version: 1, list: "_clio-coder/jobs/list", event: "job.changed"}` | the session's job controller is wired |
 | `clio-coder/accounting` | `{version: 1, read}` | usage accounting is wired |
 | `clio-coder/workspace` | `{version: 1, update: "session_info_update"}` | workspace facts are wired |
 | `clio-coder/artifacts` | `{version: 1, list, read, categories, perCategory: 200}` | `/view` artifacts are wired |
-| `clio-coder/fleet` | `{version: 1, preview, run, receiptFacts: true}` | fleet control is wired |
+| `clio-coder/fleet` | `{version: 1, preview, run, receiptFacts: true, resume: true}` | fleet control is wired |
 | `clio-coder/extensions` | `{version: 1, list, reload}` | extension control is wired |
 | `clio-coder/library` | `{version: 1, reload}` | library reload is wired |
 | `clio-coder/aside` | `{version: 1, ask, draft, cancel, draftCounts: {min: 1, max: 4, default: 3}}` | side rounds are wired |
 | `clio-coder/interviews` | `{version: 1, request, cancel}` | echoed only when the client opted in |
 
-The `kinds` list under `clio-coder/events` is the 12-kind allowlist in [Opt-in extension events](#opt-in-extension-events). Each `method`, `list`, `read`, and similar field holds the literal method name from the table in [Method surface](#method-surface). The exceptions are booleans: every field under `clio-coder/session`, `clio-coder/settings`, and `clio-coder/targets`, and `main` and `dispatch` under `clio-coder/steering`.
+The `kinds` list under `clio-coder/events` is the 14-kind allowlist in [Opt-in extension events](#opt-in-extension-events). Each `method`, `list`, `read`, and similar field holds the literal method name from the table in [Method surface](#method-surface). The exceptions are booleans: every field under `clio-coder/session`, `clio-coder/settings`, and `clio-coder/targets`, and `main` and `dispatch` under `clio-coder/steering`.
 
 ### Client opt-ins
 
@@ -102,7 +104,7 @@ A client opts into optional behavior under `initialize.params.clientCapabilities
 
 `authMethods` is empty unless the client advertises `clientCapabilities.auth.terminal: true`. Then it holds one method, `{id: "clio-login", name: "Clio Coder Target Auth & Setup", type: "terminal", args: ["auth", "login"]}`. A client appends those args to the ACP launch command it already uses, including any `--cwd`, which opens `clio-coder acp auth login` in a terminal. Authentication happens in that separate process, so `authenticate` rejects every method id with `-32602`.
 
-`logout` ends the connection's authenticated state and returns `{}`. Afterwards `session/new`, `session/load`, `session/resume`, `session/prompt`, and the other mutating methods fail with `-32000` `authentication_required` until the client reconnects.
+`logout` ends the connection's authenticated state and returns `{}`. Afterwards `session/new`, `session/load`, `session/resume`, `session/prompt`, the other mutating methods, and the session read methods (`session/list`, `session/board`, `jobs/list`, `session/tree`, `usage/read`, `extensions/list`, `context/ledger`, `context/status`, `settings/get_safe`, `session/queue` and the artifact reads) fail with `-32000` `authentication_required` until the client reconnects.
 
 Before it admits a prompt, the server checks that the selected target has usable credentials through the provider auth contract, without resolving or echoing a secret. A desktop service does not inherit a terminal's API keys: save one with `clio-coder auth login <target>`, then reopen the session on a fresh server process, because a running server does not reread the credential store. A missing credential fails the prompt with `-32000` `prompt_not_admitted` and reason `authentication-required`.
 
@@ -123,7 +125,7 @@ Anything not listed returns `-32601` `method_not_found`. Methods answer after `i
 | `session/list` | client to server | Lists workspace sessions newest first with cursor paging. |
 | `session/delete` | client to server | Permanently deletes a closed workspace session. |
 | `session/set_mode` | client to server | Sets autonomy to `default` or `yolo` while idle. |
-| `session/set_config_option` | client to server | Sets autonomy, model, or thinking level while idle; returns the full option list. |
+| `session/set_config_option` | client to server | Sets autonomy, target, model, or thinking level while idle; returns the full option list. |
 | `session/prompt` | client to server | Submits a user prompt. |
 | `session/cancel` | client to server | Cancels the in-flight prompt, running tools, and any outstanding permission request. Accepted as a request (returns `{}`) and as a notification. |
 | `session/close` | client to server | Cancels an active prompt, waits for its writer to settle, and closes the durable session. Idempotent. |
@@ -153,6 +155,8 @@ Anything not listed returns `-32601` `method_not_found`. Methods answer after `i
 | `_clio-coder/session/fork` | client to server | Starts a new session from a turn and replays it. |
 | `_clio-coder/session/handoff/prepare`, `commit`, `cancel` | client to server | The `/handoff` flow: render for review, seed a successor, or discard. |
 | `_clio-coder/context/ledger` | client to server | Reads the `/context` window ledger. |
+| `_clio-coder/context/status` | client to server | Reads the running context operation and the latest finished one. |
+| `_clio-coder/jobs/list` | client to server | Lists the jobs the bound session owns. |
 | `_clio-coder/usage/read` | client to server | Reads the `/usage` numbers: session cost and tokens plus cached quota reports. |
 | `_clio-coder/aside/ask`, `draft`, `cancel` | client to server | The `/btw` and `/draft` rounds beside the session. |
 | `_clio-coder/extensions/list`, `reload` | client to server | Lists the running session's extensions and reloads them. |
@@ -188,11 +192,11 @@ JSON-RPC layer codes follow the pinned ACP v1 schema: `-32700` parse, `-32600` i
 | `authentication_required` | -32000 | `logout` ended the authenticated state. |
 | `invalid_ceiling`, `ceiling_unsupported`, `ceiling_refused` | -32602 | Malformed ceiling, host cannot enforce it, or a command would exceed the applied ceiling. |
 | `shell_active` | -32602 | Another shell line or context command is running. |
-| `invalid_params` | -32602 | A missing required value, an unknown key, an out-of-set enum value, an exceeded bound, a C0 or DEL character in peer text, or any other shape violation. `reason` refines: `target-unknown` for an unconfigured target, and for `commands/invoke` one of `argv_too_long`, `argv_invalid`, `command_not_exposed`, `command_unavailable`, `subcommand_not_exposed`, `not_wired`, or `invalid_params` for a non-string `command`. |
+| `invalid_params` | -32602 | A missing required value, an unknown key, an out-of-set enum value, an exceeded bound, a C0 or DEL character in peer text, or any other shape violation. A model or target selection the target does not declare carries `modelSelection: {code: "model_not_declared", targetId, requestedModel, availableModels, remedy}` beside `code`, with at most 64 available models drawn from the target's default, `wireModels`, discovered and catalog models; the remedy is to add the model to `targets[].wireModels` and restart the ACP session. `reason` refines: `target-unknown` for an unconfigured target, and for `commands/invoke` one of `argv_too_long`, `argv_invalid`, `command_not_exposed`, `command_unavailable`, `subcommand_not_exposed`, `not_wired`, or `invalid_params` for a non-string `command`. |
 | `session_cwd_mismatch` | -32602 | A session request names a canonical directory other than the bound root. |
 | `session_limit` | -32602 | A second opener while a session is hosted. |
 | `session_unknown` | -32002 | A session id is not hosted, or is not in this workspace's history. The server does not disclose whether it exists under another workspace. |
-| `session_open` | -32602 | Load or delete targets the hosted session or a record whose `endedAt` is null. There is no cross-process lease, so an unclean crash is indistinguishable from another live process. |
+| `session_open` | -32602 | Load, resume or delete targets the hosted session or a record whose `endedAt` is null. ACP refuses every unended record, including one whose owner process has exited; the terminal's `/resume` is what checks the recorded owner (`src/domains/session/live-owner.ts`) and reopens a crashed session. |
 | `session_not_bound` | -32002 | An artifact method names a session other than the bound one. |
 | `prompt_active` | -32602 | A second `session/prompt`, or a settings, mode, configuration, or other state-changing request, during a prompt. `reason: "steer-instead"` marks a `commands/invoke` of a command that injects a user turn. |
 | `prompt_not_admitted` | -32603, or -32000 for `authentication-required` | Clio refused to start the turn. `reason` is from [Admission failure](#admission-failure). |
@@ -238,13 +242,13 @@ Every replay notification precedes the load response and carries `_meta["clio-co
 
 `_clio-coder/session/label` accepts `{sessionId, label}` with a label of 0 to 256 UTF-8 bytes free of C0 and DEL characters; empty clears it. It writes the session-wide name that `session/list` reads back as `title`, and a hosted session also emits a `session_info_update` with the new `title`. `session/delete` accepts `{sessionId}` and removes only a record whose `endedAt` is set; hosted or unended records fail `session_open`, and unknown or cross-workspace ids fail `session_unknown`. Both are legal during an unrelated prompt.
 
-`modes` offers `default` and `yolo`. `session/set_mode` takes `{sessionId, modeId}`, changes the hosted session's autonomy, emits `current_mode_update` and `config_option_update`, and returns `{}`. A client's choice of `yolo` counts as the operator's yolo acceptance and writes nothing; while Clio runs as root outside a detected container, `yolo` fails with error code `yolo_refused`. The same control is the `autonomy` config option (category `mode`). A `model` option (category `model`) appears when a model is selected, listing the target's configured and discovered models, a `target` option (category `_target`) lists orchestrator-eligible configured targets when provider routing is wired, and `thinkingLevel` (category `thought_level`) offers only the selected model's resolved supported levels, with an empty list when unresolved. `session/set_config_option` takes `{sessionId, configId, value, type?}` where `type`, if present, must be `select`, and returns the full list. Model and thinking changes apply to the session route without saving a default. All route, thinking and mode controls fail `prompt_active` during a prompt. A global autonomy patch changes the default for future sessions and never mutates a bound session.
+`modes` offers `default` and `yolo`. `session/set_mode` takes `{sessionId, modeId}`, changes the hosted session's autonomy, emits `current_mode_update` and `config_option_update`, and returns `{}`. A client's choice of `yolo` counts as the operator's yolo acceptance and writes nothing; while Clio runs as root outside a detected container, `yolo` fails with error code `yolo_refused`. The same control is the `autonomy` config option (category `mode`). A `model` option (category `model`) appears when a model is selected, listing the target's configured and discovered models, a `target` option (category `_target`) lists orchestrator-eligible configured targets when provider routing is wired, and `thinkingLevel` (category `thought_level`) offers only the selected model's resolved supported levels, with an empty list when unresolved. `session/set_config_option` takes `{sessionId, configId, value, type?}` where `type`, if present, must be `select`, and returns the full list. Target, model and thinking changes apply to the session route without saving a default. A model the target does not declare fails `invalid_params` with the `model_not_declared` detail described in the [error envelope](#error-envelope). All route, thinking and mode controls fail `prompt_active` during a prompt. A global autonomy patch changes the default for future sessions and never mutates a bound session.
 
 ### Slash commands
 
-The server sends `available_commands_update` when a session binds. The entries are the allowlisted operator commands (`src/engine/acp/commands.ts`): `mcp`, `doctor`, `share`, `archive`, `oracle`, `council`, `skill`, `context`, `tasks`, `memory`, and `export`, each only when its host dependency is wired. `context` admits the verbs `compact`, `recall`, `init`, `refresh`, `reset`, and `recover`; `tasks` admits `add`, `hand`, `done`, and `drop`; `memory` admits `seed`. `run` and `delegate` stream worker output through dispatch events and are reachable through `_clio-coder/commands/invoke` but are not advertised in this update. Every other slash command is refused by name, because an allowlist is the whole security posture for peer-chosen text.
+The server sends `available_commands_update` when a session binds. The entries are the 13 allowlisted operator commands (`src/engine/acp/commands.ts`): `eggs`, `skill`, `mcp`, `doctor`, `share`, `archive`, `oracle`, `council`, `loop`, `context`, `tasks`, `memory`, and `export`, each only when its host dependency is wired. The allowlist lives on each entry of the slash registry, which `ACP_COMMAND_RULES` reads. `context` admits the verbs `compact`, `recall`, `init`, `refresh`, `reset`, and `recover`; `tasks` admits `add`, `hand`, `done`, and `drop`; `memory` admits `seed`. `run` and `delegate` stream worker output through dispatch events and are reachable through `_clio-coder/commands/invoke` but are not advertised in this update. Every other slash command is refused by name, because an allowlist is the whole security posture for peer-chosen text.
 
-A prompt that starts with `/name` for an advertised command, with no attached resources, runs that command instead of a model turn, and the result returns as an `agent_message_chunk`. Commands that inject a user turn (`share`, `oracle`, `skill`, `tasks`) are refused through `commands/invoke` while a prompt is active with `prompt_active` and reason `steer-instead`. `council` and `context recover` run as conversation turns and are refused through `commands/invoke` with `prompt_turn_required`. A command-shaped line that is neither an admitted command nor a loaded prompt template fails `unknown_command` or `command_unavailable` before it reaches the model, and `\/` sends the line as text. A loaded prompt template expands as in the terminal, and a display-only template answers without a turn.
+A prompt that starts with `/name` for an advertised command, with no attached resources, runs that command instead of a model turn, and the result returns as an `agent_message_chunk`. Commands that inject a user turn (`share`, `oracle`, `skill`, `tasks`, and `loop` when it schedules a job) are refused through `commands/invoke` while a prompt is active with `prompt_active` and reason `steer-instead`. `loop list`, `status`, `pause`, `resume`, `stop` and `cancel` submit nothing and stay available during a prompt, so a runaway loop can be stopped mid-turn. `council` and `context recover` run as conversation turns and are refused through `commands/invoke` with `prompt_turn_required`. A command-shaped line that is neither an admitted command nor a loaded prompt template fails `unknown_command` or `command_unavailable` before it reaches the model, and `\/` sends the line as text. A loaded prompt template expands as in the terminal, and a display-only template answers without a turn.
 
 `_clio-coder/commands/list` accepts `{}` and returns the catalog `{version: 1, commands: [...]}` plus the loaded template names under `prompts` (at most 256). Each descriptor carries `name`, `summary`, `usage`, `group`, a grammar `args` of flags, positionals, and subcommands, and the flags `requiresSubcommand`, `streams`, `injectsUserTurn`, and `promptTurn` where they apply. `commands/invoke` accepts `{sessionId, command, argv}` and returns `{level, lines}`. A result holds at most 200 lines of at most 1 KiB each, with a trailing `…output truncated at 200 lines`. `argv` holds at most 32 elements of at most 4 KiB. Elements are joined with single spaces and never quoted, so a quote character, a control character, or whitespace in any element except the last is refused. The last element is taken verbatim as the rest positional.
 
@@ -259,9 +263,9 @@ Prompt content is read only from `params.prompt`, the ACP v1 array of content bl
 - `text` blocks contribute their text. `resource_link` blocks contribute `Resource: <name> (<uri>)`. Parts are joined with a newline and trimmed.
 - `resource` blocks (`embeddedContext`) must carry a `uri` and a `text` body. At most 8 per prompt, each at most 256 KiB. They are appended after host expansion as `<file name="...">` blocks and are never scanned for `@path` or `/name` syntax. A `blob` resource is refused with `invalid_params`, so a client never believes the model saw a file it did not.
 - `image` blocks need `mimeType` and base64 `data`, at most 4 per prompt. The host decides from the bytes whether it accepts an image, and the client's `mimeType` is carried but not trusted.
-- Audio and unknown block types contribute nothing.
+- Audio and unknown block types are refused by the validation below.
 
-A prompt with no text and no embedded resource fails `invalid_params`, so an image needs accompanying text. `params.content`, `params.message`, and a bare string `params.prompt` fail the same way, so a client's framing bug fails here as it would against any other ACP agent.
+Every block is validated before any is read, so a block the server would otherwise drop refuses the whole prompt with `invalid_params` and a message naming `prompt block <index>`. Each block must be an object with a known `type` (`text`, `image`, `resource` or `resource_link`); a text block needs string `text`, a resource link a string `name` and `uri` and a non-negative integer `size` when present, and string-typed fields, `_meta` and `annotations` (audience `user` or `assistant`, numeric `priority`, string `lastModified`) must have their declared types. The image and embedded-resource counts above apply during validation. A prompt with no text and no embedded resource fails `invalid_params`, so an image needs accompanying text. `params.content`, `params.message`, and a bare string `params.prompt` fail the same way, so a client's framing bug fails here as it would against any other ACP agent.
 
 ### Streaming updates and stop reasons
 
@@ -363,6 +367,8 @@ The remaining `_clio-coder/*` methods project terminal views as bounded read mod
 | `_clio-coder/session/handoff/prepare` | `{sessionId, goal}` | `{status: "ready", handoffId, goal, fromSessionId, document}` or `{status: "refused", level, code, reason}`. `goal` is at most 2048 bytes. The document is at most 128 KiB. Nothing is written. |
 | `_clio-coder/session/handoff/commit` | `{sessionId, handoffId, document}` | `{status: "committed", sessionId, fromSessionId, warnings, modes, configOptions, _meta}`, or a refusal with the same shape as `prepare`. The reviewed document replaces the draft, and `code: "stale"` marks a conversation that moved since `prepare`. |
 | `_clio-coder/session/handoff/cancel` | `{sessionId, handoffId}` | `{cancelled}` |
+| `_clio-coder/jobs/list` | `{sessionId}` | `{jobs}`, at most 32, live jobs first and then the newest finished ones. Each job is `{jobId, revision, state, reason, runner, taskPreview, intervalMs, count, starts, settled, timeoutMs, nextDueAt, deadlineAt, cancelRequested, running, turn, pendingReason, consecutiveFailures, last, delivery, costUsd, saved, complete}`; `runner` is `main` or `command`, `taskPreview` is the prompt or argv prefix, `last` is `{outcome, summary, truncated}` or null. Bound session only. A client reads it once after binding and folds `job.changed` events after it. |
+| `_clio-coder/context/status` | `{sessionId}` | `{version: 1, active, latest}`: the running context operation's latest activity payload, or null, and the newest finished operation from the live event or the session ledger, or null. Bound session only. A context operation itself runs through `commands/invoke` with `command: "context"`. |
 | `_clio-coder/context/ledger` | `{sessionId}` | The `/context` view: window, used, reserve, free, groups (at most 32), compaction state, and prompt-cache facts. Unknown stays unknown, so a window of 0 and a null percentage travel as they are. |
 | `_clio-coder/usage/read` | `{sessionId}` | `{version: 1, session, quota}`. `session` holds cost and per-provider, per-model token rows (at most 32). `quota` is `{status: "read", providers}` (at most 16) or `{status: "failed", reason}`; a quota failure never fails the session numbers. |
 | `_clio-coder/aside/ask` | `{sessionId, question}` | `{status: "answered" or "aborted" or "refused" or "failed", text or reason}`. Question at most 8000 characters. Answers at most 64 KiB. |
@@ -371,8 +377,8 @@ The remaining `_clio-coder/*` methods project terminal views as bounded read mod
 | `_clio-coder/extensions/list` | `{sessionId}` | `{version: 1, extensions, truncated}`, at most 64, each with a `state` of `eligible`, `shadowed`, `disabled`, `incompatible`, or `invalid`. |
 | `_clio-coder/extensions/reload` | `{sessionId}` | `{status: "committed", generation, ...}` or `{status: "rejected", reason, generation}`. Idle only. |
 | `_clio-coder/library/reload` | `{sessionId}` | `{status: "refreshed", generation, previousGeneration, changed}` or `{status: "failed", error}`. Idle only. |
-| `_clio-coder/fleet/preview` | `{sessionId, name, vars?}` | `{status: "ready", name, planHash, stepCount, waves, budget, truncated}` or `{status: "refused", diagnostics}`. At most 64 steps. `vars` holds at most 32 strings. |
-| `_clio-coder/fleet/run` | `{sessionId, name, vars?, planHash}` | `{status: "started", fleetRootId, stepCount}`, `{status: "changed", planHash, reason}` when the fresh plan hash differs from `planHash` (nothing dispatched), or `{status: "failed", reason}`. Idle only. |
+| `_clio-coder/fleet/preview` | `{sessionId, name, vars?, resume?}` | `{status: "ready", name, planHash, stepCount, waves, budget, truncated, resume?}` or `{status: "refused", diagnostics}`. At most 64 steps. `vars` holds at most 32 strings. `resume` names a prior fleet root whose successful prefix the run replays; the preview then reports `{fromRunId, replayed}` and marks replayed steps. |
+| `_clio-coder/fleet/run` | `{sessionId, name, vars?, planHash, resume?}` | `{status: "started", fleetRootId, stepCount}`, `{status: "changed", planHash, reason}` when the fresh plan hash differs from `planHash` (nothing dispatched), or `{status: "failed", reason}`. Idle only. |
 
 Asides run beside a turn in flight over a snapshot of its history and are never a turn, a session entry, or a `session/update`. One aside runs at a time.
 
@@ -404,11 +410,13 @@ An opted-in client (see [Client opt-ins](#client-opt-ins)) receives `_clio-coder
 | `dispatch.completed` | `{runId, agentId, outcome, outcomeCode, outcomeDetail, durationMs, tokenCount}` with `_meta["clio-coder/receipt"]`. | `true` |
 | `dispatch.failed` | `{runId, agentId, outcome, reason, outcomeCode, outcomeDetail, durationMs}` with `_meta["clio-coder/receipt"]`. | `true` |
 | `accountability.evidenceReady` | `{runId, evidenceId, firstPassSuccess, findingCount, tags}`. At most 32 tags of 64 bytes. | `true` |
-| `compaction.end` | `{trigger}` | `false` |
+| `compaction.end` | `{trigger, outcome?}` | `false` |
+| `context.activity` | `{kind, phase, status, at, message, operation, current?, total?, detail?, stages?, timing?}` for a context operation (`/compact`, recall, init, refresh, reset and the like) of the bound session and workspace. `message` and `detail` are at most 1024 bytes. `operation` carries its id, kind, origin, reason, start time and, once settled, `outcome`, `facts`, `warnings` and runtime-estimated `tokens`. | `true` once `operation.outcome` is set |
 | `context.warning` | `{warning}`, a control-stripped sentence of at most 256 bytes, or `null` for the clearing edge. | `false` |
 | `safety.toolBudgetExceeded` | `{tool, callsThisTurn, softBudget, hardCeiling, interrupted}` | `true` exactly when `interrupted` |
 | `provider.health` | `{targetId, status, available, latencyMs}`. `status` is `healthy`, `degraded`, `unknown`, or `down`. | `false` |
 | `dispatch.scopeNotice` | `{code, level, message}`. `code` is one of `write_root_dot_unconfined`, `write_roots_checks_withheld`, `typed_scope_replaced_inferred_paths`, `legacy_scope_inferred`, `legacy_scope_empty`. `level` is `warning`. `message` is at most 1024 bytes. | `false` |
+| `job.changed` | One job record as `_clio-coder/jobs/list` returns it. A scheduled `/loop` turn re-sends the record with `turn: true` when its first frame opens and `turn: false` when it releases. | `true` when the job is complete |
 
 `dispatch.*` ids are at most 128 bytes. The event forwarder tracks at most 512 live runs and evicts the oldest. The exact task and raw progress or failure prose never cross; `outcomeDetail` is the only free text and is at most 2048 bytes. `safety.loopBlocked` and `safety.toolBudgetExceeded` fire only during the hosted active prompt, since both name per-turn budgets. The loop detector fires before the blocked call executes, so no executed tool-call id exists and `toolCallId` and `shape` stay null rather than fabricated. `accountability.evidenceReady` follows the terminal event of a run whose evidence bundle landed; the bundle's findings and overview prose never cross. `compaction.end` omits the producer timestamp because a client re-stamps on arrival. `context.warning` is a transition channel, so `{warning: null}` crosses as itself; dropping it would leave a client's banner up forever. `provider.health` leaves `lastError` behind because provider prose quotes URLs and response bodies.
 
@@ -441,6 +449,10 @@ Every frame the server writes is bounded (`src/engine/acp/types.ts`, `src/engine
 - `locations` carries the resolved absolute path for the path-bearing tools (`read`, `write`, `edit`, `ls`, `grep`, `find`) when the arguments name one, at most 4 KiB and deliberately not realpath'ed, since an `edit` or `write` target may not exist yet. The field is omitted rather than sent as `null` or `[]`. The permission request reuses the exact bounded snapshot.
 - A live prompt emits at most 128 `tool_call` starts. The 129th start emits no call, cancels the turn, suppresses later chat events, fails every open call, and resolves `session/prompt` with `max_turn_requests`. Clio Coder's configurable execution guard is a separate engine policy.
 
+### Session cost ceiling stops
+
+When a request reaches the session cost ceiling (`safety.limits.sessionCostUsd`) during a prompt, the request parks inside that prompt, and the stop crosses as one `agent_message_chunk` ([budget-notice.ts](../../src/engine/acp/budget-notice.ts)). The text is the same notice the terminal shows, under `_meta["clio-coder/notice"] = {level}` with `warning` at the ceiling and `error` past it. Beside it, `_meta["clio-coder/budget"]` carries `{version: 1, level, currentUsd, ceilingUsd, contextTokens, raiseToUsd, setting: "safety.limits.sessionCostUsd"}`. `level` is `at` or `over`, `contextTokens` is the context the next call would send or null, and `raiseToUsd` is a suggested new ceiling above the current spend, so a client can offer the raise instead of showing a silent turn. The parked request re-reads the ceiling while it waits, so raising `safety.limits.sessionCostUsd` in the operator's settings resumes it; `settings/patch_safe` cannot write that key. A stop between prompts has no turn to belong to and sends nothing. The stop is also written to the ledger as a `budgetBlock` entry, and branch replay re-sends the same frame, so a loaded session shows the stop it ended on.
+
 ### Admission failure
 
 A prompt Clio cannot start fails `prompt_not_admitted` with zero preceding `session/update` notifications. `reason` is one of `orchestrator-not-configured`, `target-unknown`, `target-not-configured`, `target-not-found`, `runtime-not-registered`, `model-not-configured`, `chat-unsupported`, `streaming-unsupported`, `context-window-exceeded`, `authentication-required`, or the catch-all `admission-failed`. The engine's runtime-resolution diagnostics are a larger vocabulary, and any reason outside this list is reported as `admission-failed`. No `chat.target` reports `orchestrator-not-configured`, and a target with no `chat.model` reports `model-not-configured`. The message is a sanitized one-line sentence with no settings path, and `authentication-required` carries no environment variable name, credential, or provider text. A failure after admission fails `turn_failed`.
@@ -468,7 +480,7 @@ At autonomy `default` the main session's safety judge reviews a main-agent ask b
 
 The outbound `session/request_permission` carries `{sessionId, toolCall: {toolCallId, title, kind, status, rawInput, locations?}, options}`. `toolCallId` is always the id of a `tool_call` the client already rendered and has not seen finish. The tool name is in `title`, never folded into `rawInput`. `status` is `pending` for a main-agent ask and `in_progress` for a forwarded worker ask.
 
-Options are `allow-once` (kind `allow_once`), `reject-once` (kind `reject_once`), and `reject-and-stop` (kind `reject_once`), in that order. Only the exact `optionId: "allow-once"` under `outcome: "selected"` grants. `reject-once` denies the presented request and the model sees the denial as the tool result. `reject-and-stop` denies every other parked request from the turn and aborts the prompt, which settles `cancelled`. `outcome: "cancelled"` from the client aborts the prompt the same way. Any other `optionId` is a denial, so a client cannot mint `allow-always`. At most one request is outstanding and the queue is serial. Transport loss denies every queued request and cancels the parked calls. `session/cancel` while a request is outstanding stops the server waiting on it, cancels the parked tool, and settles the prompt `cancelled`; a late answer is ignored.
+Options are `allow-once` (kind `allow_once`), `reject-once` (kind `reject_once`), and `reject-and-stop` (kind `reject_once`), in that order. Only the exact `optionId: "allow-once"` under `outcome: "selected"` grants. `reject-once` denies the presented request and the model sees the denial as the tool result. `reject-and-stop` denies every other parked request from the turn and aborts the prompt, which settles `cancelled`. `outcome: "cancelled"` from the client aborts the prompt the same way. A reply that is neither `cancelled` nor `selected` with one of the three offered option ids is malformed: the request is denied with `decidedBy: "error"`, every queued request from the turn is resolved the same way, and the run stops, so a client cannot mint `allow-always`. At most one request is outstanding and the queue is serial. Transport loss denies every queued request and cancels the parked calls. `session/cancel` while a request is outstanding stops the server waiting on it, cancels the parked tool, and settles the prompt `cancelled`; a late answer is ignored.
 
 `params._meta["clio-coder/decision"]` carries the classification the server already computed to pick option labels: `{version: 1, tier, tierLabel, title, semanticToken, authorizationCopy, consequenceCopy, reversibilityCopy, requestedByCopy, actionClass, axis, origin, exposure, affectedScope, reversibility, target?, consequenceLines?}`. Without it a client would re-derive a tier and a consequence from a tool name, which is a second and worse classifier. `tier` is `conversation`, `workspace`, `outward`, `safety-net`, `system`, or `worker`. `semanticToken` is `accent`, `action`, or `warning`. `target` is a one-line allowlisted render of the arguments. `consequenceLines` appears for a bash ask: at most nine host-written sentences, one per step of the command, the text the terminal card shows as its Effect row. Every string is control-stripped and at most 512 bytes, and no model-authored prose reaches this record.
 
@@ -518,7 +530,10 @@ Per-message `_meta` keys, beyond the capability keys above. The pushed telemetry
 | `clio-coder/receipt` | `dispatch.completed` and `dispatch.failed` events | Receipt facts. |
 | `clio-coder/decision`, `clio-coder/workerAsk`, `clio-coder/dispatchPlan` | `session/request_permission` | Classification, worker provenance, and plan view. |
 | `clio-coder/truncated` | `targets/list` result | `true` only when the byte budget omitted an entry. |
-| `clio-coder/error` | `error.data._meta` | `{version, code, reason?}`. |
+| `clio-coder/error` | `error.data._meta` | `{version, code, reason?, modelSelection?}`. |
+| `clio-coder/budget` | `agent_message_chunk` carrying a session cost ceiling stop, live and replayed | `{version: 1, level, currentUsd, ceilingUsd, contextTokens, raiseToUsd, setting}`. |
+| `clio-coder/memory` | `session_info_update` update | `{state}` of the memory guardian, sent when it changes. |
+| `clio-coder/eggs` | `session_info_update` update | The ids of the session's active conversation eggs (`/eggs`), sent when they change. |
 
 ## Tool presentation and outbound delegation governance
 
@@ -598,7 +613,7 @@ The server side uses `AcpRequestError`, which owns the JSON-RPC code, the host-a
 To list Clio Coder in the upstream Agent Client Protocol registry (the registry the Zed editor consumes), repository assets live under `assets/acp-registry/`:
 
 - `assets/acp-registry/agent.json`: the registry manifest. It holds the agent id `clio-coder`, the display name, the release version, a description, the repository, website, license (`Apache-2.0`) with its `license_url`, and author. The `distribution.npx` entry runs the `@iowarp/clio-coder` package with `args: ["acp"]`, so a client without a global install can fetch and start it.
-- `assets/acp-registry/icon.svg`: a 16x16 monochrome icon whose strokes use `currentColor`.
+- `assets/acp-registry/icon.svg`: a 16x16 monochrome icon, the canonical Clio mark traced to one filled `currentColor` path.
 
 The submission procedure:
 

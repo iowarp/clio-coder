@@ -23,11 +23,11 @@ The module loads `node:sqlite` lazily, on first use. Node's `ExperimentalWarning
 
 ## Tables
 
-The six Clio Coder trace tables are `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, and `processes`. The `meta` table carries the schema version.
+The six Clio Coder trace tables are `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, and `processes`. The `meta` table carries the schema version and the capture accounting described in [Failure behavior](#failure-behavior).
 
 | Table | Columns |
 | --- | --- |
-| `meta` | `key` (primary key), `value`. One row, `schema_version`. |
+| `meta` | `key` (primary key), `value`. `schema_version`, plus the capture counters `capture_dropped_progress`, `capture_dropped_package_activity`, `capture_failed_rows` and `capture_degraded`, the high-water mark `capture_peak_pending_writes`, and one `dispatch_window:<runId>` row per span of overlapping dispatches. |
 | `runs` | `run_id` (primary key), `assignment_id`, `request`, `status`, `agent`, `target`, `model`, `runtime`, `node`, `started_at`, `ended_at`, `total_tokens`, `total_cost_usd`, `source`. |
 | `phases` | `phase_id` (primary key), `run_id`, `seq`, `name`, `kind`, `owner`, `description`, `status`, `attempt`, `retries`, `error`, `started_at`, `ended_at`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cache_write_1h_tokens`, `reasoning_tokens`, `total_tokens`, `total_cost_usd`, `context_tokens`, `context_window`. |
 | `events` | `event_id` (primary key), `run_id`, `phase_id`, `parent_id`, `type`, `name`, `payload_json`, `tokens`, `started_at`, `ended_at`. |
@@ -128,9 +128,11 @@ The limit is capped at `TRACE_EVENT_POLL_LIMIT`, which is 500. A consumer retain
 
 ## Failure behavior
 
-The observability subscriber schedules each dispatch event onto a serialized, best-effort queue capped at `TRACE_WRITE_QUEUE_LIMIT` (2,048) pending writes. Lifecycle, terminal, tool-span, attempt, and usage facts are retained. Display-only progress may be dropped with a warning when the cap is full. Interactive session turns are never dropped. SQLite work never runs in the worker event pump and never participates in receipt correctness.
+Display deltas never reach the store: a dispatch progress event of type `message_update`, `text_delta`, `thinking_delta`, `toolcall_delta` or `tool_execution_update` carries no durable fact and is discarded before it is queued. Every other dispatch event, session turn and package activity record is scheduled onto a serialized, best-effort queue capped at `TRACE_WRITE_QUEUE_LIMIT` (2,048) pending writes. Lifecycle, terminal, tool-span, attempt, and usage facts are retained when the cap is full; other progress is dropped with one warning until the queue drains below half, and the drops are counted in `capture_dropped_progress`. Interactive session turns are never dropped. Package activity records the host had to drop, past the 200-record pending queue or while no writer was bound, are counted in `capture_dropped_package_activity` when the next record lands. SQLite work never runs in the worker event pump and never participates in receipt correctness.
 
-A write, open, or schema failure emits one `[clio-coder:trace]` warning and degrades the mirror for the rest of the process without failing the run. Domain shutdown closes the mirror, flushing queued trace writes, before it waits for slower evidence builds. The mirror is off for the short-lived internal generators in [wiki-generate.ts](../../src/cli/wiki-generate.ts) and [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts), which create the observability module with `dispatchTrace: false`.
+The queue drains once per event-loop tick, and one tick's facts share one `BEGIN IMMEDIATE` transaction with reused prepared statements. Each fact runs inside its own savepoint, so a fact that fails rolls back alone: its channel and run get one warning (at most a bounded number per process, the rest summed at flush), `capture_failed_rows` counts it, and the rest of the batch commits. The same transaction records the peak queue depth. While dispatches run, the mirror samples event-loop lag and writes a `dispatch_window:<runId>` row with the sample count, p99 and maximum lag and the peak pending writes when the last overlapping dispatch ends.
+
+A failed batch commit, a store that cannot open, a schema failure, or a counter that cannot be written degrades the mirror for the rest of the process without failing the run: one `[clio-coder:trace]` warning, and `capture_degraded` marked when the database is still writable. Every `clio-coder trace` read subcommand prints the database-wide coverage on stderr first, as `trace capture (database-wide): <status>; dropped progress=…, dropped package activity=…, failed rows=…`, where the status is `degraded`, `known loss` or `unreported`. Domain shutdown closes the mirror, flushing queued trace writes, before it waits for slower evidence builds. The mirror is off for the short-lived internal generators in [wiki-generate.ts](../../src/cli/wiki-generate.ts) and [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts), which create the observability module with `dispatchTrace: false`.
 
 ## Retention and pruning
 

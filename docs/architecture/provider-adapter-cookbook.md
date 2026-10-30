@@ -23,6 +23,8 @@ Every model runtime (e.g., Local Native, Cloud HTTP, Subprocess) implements the 
 
 Three descriptor fields carry behavior beyond the template. `tier` contributes a pricing fallback: after explicit target pricing, a `local-native` runtime defaults to `known_free`; a `protocol` runtime does not receive that fallback, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes. `enforcement` declares what Clio Coder can guarantee for a worker on a runtime that is not `http`; a non-HTTP runtime that declares nothing is treated as unmediated and refused write-capable work unless the operator sets `trustedUnmediated`. `gatewayUrl` marks a remote gateway whose URL the operator must supply, so configure offers no localhost default.
 
+Endpoint capacity counts streams per endpoint key ([endpoint-capacity.ts](../../src/domains/providers/endpoint-capacity.ts)). The `litellm` and `openrouter` runtimes are model-routed gateways ([model-routed-gateway.ts](../../src/domains/providers/model-routed-gateway.ts)): each model runs on its own backend deployment, so `modelEndpointKey` keys a stream as `<url>#model=<id>` and also counts it under the plain gateway URL. Dispatch admission and the settings endpoint rows read the gateway key and see unchanged totals, while background memory on a gateway with no declared or discovered capacity admits against its own model's key, so a turn on another model no longer marks it busy. Every other runtime, `openai-compat` included, keeps the plain URL as its key, because a generic protocol endpoint is often one local server that answers any model name.
+
 For an in-tree adapter alongside `src/domains/providers/runtimes/local-native/vllm.ts`, use erased engine types. Only `src/engine/**` imports Pi packages, including type-only imports ([check-boundaries.ts](../../tests/boundaries/check-boundaries.ts)). The descriptor skeleton is:
 
 ```typescript
@@ -138,6 +140,16 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
 
 When a model family requires response parsing or sentinel stripping before the payload reaches the core logic, Clio applies runtime-agnostic stream filters in the engine stream adapter after model synthesis. For example, if the resolved model family is `gemma-4`, a dedicated `createGemmaChannelFilter` intercepts and reclassifies `<|channel>thought` markers directly from the `text_delta` stream into `thinking_delta` events, dropping orphan channel closers and own-thought labels seamlessly.
 
+gpt-oss models resolve to the Harmony response parser ([harmony-response.ts](../../src/engine/harmony-response.ts), [harmony-stream.ts](../../src/engine/harmony-stream.ts)) when the profile declares `thinkingFormat: harmony`, the family is `openai-gpt-oss` or the model id contains `gpt-oss`. A vLLM server started without `--reasoning-parser openai_gptoss` or `--tool-call-parser openai`, such as ALCF Sophia, returns the raw chat-template text, so the parser reads `<|start|>…<|channel|>…<|message|>` frames off the completions stream before the sentinel filter runs:
+
+- The `final` channel becomes text, while `analysis`, commentary without a tool recipient and any recipient outside `functions.*` become thinking.
+- A frame addressed to `functions.<name>` becomes a tool call, and a tool frame the stream ends without `<|call|>` is flushed as incomplete.
+- Recovered thinking replays under `reasoning_content` unless the catalog's `quirks.harmony.recoveredReasoningField` names another field, per runtime if needed; a reasoning field the server streamed keeps its own signature.
+- Two deterministic vLLM failures, a `HarmonyError` 500 before any content and a stop that carries neither text nor a tool call, get one engine retry with both calls' usage summed, then a terminal message that the turn-level retry does not repeat.
+- On the request side, an assistant tool turn that carries text and reasoning together replays as one analysis block, because the gpt-oss template rejects both on one tool turn. The saved transcript never changes.
+
+`clio-coder targets --probe --tools` reports how much of the Harmony format the server parsed itself.
+
 ### 3.2 OpenAI-compatible sampling and vLLM budgets
 
 Sampling catalog entries keep Clio Coder's per-mode sampler in `quirks.sampling`, using the typed names
@@ -166,6 +178,9 @@ budget-based models. Clio Coder's request controls in `src/engine/provider-paylo
 and effort only on forced-tool rounds for Claude models that accept forced choice. Models that
 reject forced choice keep thinking and use automatic tool selection. OpenAI Responses, Azure
 Responses and Codex use Pi's stock `reasoning.summary: "auto"`; Clio Coder does not override it.
+A required-tool round on Codex always sends `tool_choice: "auto"` over the narrowed tool surface: Pi's
+WebSocket continuation delta omits `tools`, and Codex rejects a `required` or named choice without
+them, while a text-only `none` is accepted.
 [thinking-off-wire.test.ts](../../tests/extended/thinking-off-wire.test.ts) locks the local LM Studio and
 llama.cpp controls used when thinking is off. Anthropic request assembly is
 inherited from the pinned Pi dependency, and no Clio Coder test reconstructs Pi's whole adaptive or
@@ -180,6 +195,12 @@ A gateway alias is not an upstream runtime identity. Clio consumes the optional 
 The model's profile still determines whether thinking is switchable and which active levels exist. A declared LM Studio route receives `reasoning_effort: "none"` for an effective off choice; a llama.cpp route uses its template switch. LiteLLM's generic OpenAI adapter may silently filter a resolved effort for local model names, so Clio adds `allowed_openai_params: ["reasoning_effort"]` only when it sends that model and runtime's resolved `reasoning_effort`; unrelated parameters and unknown off mechanisms are not newly allowed. This is a request control and not a change to gateway configuration. See [LiteLLM parameter forwarding](https://docs.litellm.ai/docs/completion/drop_params).
 
 Gateway aliases need declared upstream capabilities to select the appropriate thinking control. Heterogeneous or unknown upstream runtimes cannot establish a single request dialect; explicit parameter forwarding remains subject to the gateway's configured filtering.
+
+### 3.4 Cache retention and the Codex transport
+
+`synthesizeCatalogBackedModel` in [catalog.ts](../../src/domains/providers/catalog.ts) carries a target's `cache` block and an optional `mainThreadCacheRetention` into the model's Clio Coder metadata. A runtime sets `mainThreadCacheRetention: "long"` only when its main turns should ask for the 1-hour Anthropic retention; `anthropic-max` does, and workers and side calls keep the provider default. The resolution order and the hosted keepalive that reuses these lifetimes are in [the model catalog](model-catalog.md#prompt-cache-retention-and-keepalive).
+
+The `openai-codex` runtime sends `originator: clio-coder` and a `clio-coder` User-Agent as model headers, and a target's own `auth.headers` still win. Its WebSocket transport is Pi's; [codex-transport.ts](../../src/engine/apis/codex-transport.ts) observes it per session. When Pi has fallen back to SSE after a failure before the message stream started, the first idle request past a cooldown of 30 seconds, doubling per failure up to 5 minutes, closes the session's socket so Pi tries one new WebSocket connection with a full request. A provider 401 resets the socket once no other stream on that session is running.
 
 ---
 
