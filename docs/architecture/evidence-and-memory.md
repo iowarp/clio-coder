@@ -93,7 +93,7 @@ Readers open the named core files above. Bundles built by older releases may hol
 
 | File | Purpose |
 | --- | --- |
-| `overview.json` | Stable summary (`version: 1`): source, runs, sessions, statuses, tasks, models, totals, tags, redaction count, resolved decisions and file list. |
+| `overview.json` | Stable summary (`version: 1`): source, runs, sessions, statuses, tasks, models, totals, tags, redaction count, resolved decisions and file list. Token and cost totals fold only the verified receipts the bundle seals, so they stay the same after run journals are pruned. `tokenCoverage` counts the calls those receipts sealed without usage and the runs with no verified receipt or no call coverage; when either is non-zero, `tokens` is a lower bound and `/view` shows it with `≥`. A run with no verified receipt makes the cost summary unknown, never zero. |
 | `transcript.md` | Human-readable run or session transcript. A skill activation names its owning plugin (`owner=<id>@<version> digest=<digest>`) when a plugin supplied the skill. |
 | `tool-events.jsonl` | Tool summaries from session entries, audit rows, or receipts. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |

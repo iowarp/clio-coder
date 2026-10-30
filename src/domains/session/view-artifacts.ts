@@ -726,7 +726,7 @@ function renderEvidenceMarkdown(
 		`- tool calls: ${overview.totals.toolCalls}`,
 		`- tool errors: ${overview.totals.toolErrors}`,
 		`- blocked tool calls: ${overview.totals.blockedToolCalls}`,
-		`- tokens: ${formatFooterTokens(overview.totals.tokens)}`,
+		`- tokens: ${evidenceTokens(overview.totals)}`,
 		`- cost: ${renderCostAggregate(overview.totals.costSummary)}`,
 		`- protected artifacts: ${overview.totals.protectedArtifacts}`,
 		`- wall time: ${formatDurationMs(overview.totals.wallTimeMs)}`,
@@ -822,7 +822,7 @@ function renderEvidenceSummary(
 		"",
 		"## What happened",
 		`${overview.totals.runs} runs · ${overview.totals.toolCalls} tool calls · ${overview.totals.toolErrors} errors · ${overview.totals.blockedToolCalls} blocked`,
-		`${formatDurationMs(overview.totals.wallTimeMs)} · ${formatFooterTokens(overview.totals.tokens)} tokens · ${renderCostAggregate(overview.totals.costSummary)}`,
+		`${formatDurationMs(overview.totals.wallTimeMs)} · ${evidenceTokens(overview.totals, " tokens")} · ${renderCostAggregate(overview.totals.costSummary)}`,
 		"",
 		"Press i for all bundle details and backing files.",
 	];
@@ -1902,4 +1902,16 @@ export async function listViewArtifacts(providers: ReadonlyArray<ArtifactProvide
 		}),
 	);
 	return sortViewArtifacts(groups.flat());
+}
+
+/** A bundle's sealed token total, shown as a lower bound when its receipts do not cover every call (#434, L3). */
+function evidenceTokens(totals: EvidenceOverview["totals"], unit = ""): string {
+	const tokens = `${formatFooterTokens(totals.tokens)}${unit}`;
+	const gap = totals.tokenCoverage;
+	if (gap === undefined || (gap.unknownCalls === 0 && gap.unknownRuns === 0)) return tokens;
+	const parts = [
+		...(gap.unknownCalls > 0 ? [`${gap.unknownCalls} ${gap.unknownCalls === 1 ? "call" : "calls"}`] : []),
+		...(gap.unknownRuns > 0 ? [`${gap.unknownRuns} ${gap.unknownRuns === 1 ? "run" : "runs"}`] : []),
+	];
+	return `≥${tokens} (${parts.join(", ")} unmeasured)`;
 }

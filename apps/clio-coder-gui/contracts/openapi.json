@@ -6137,6 +6137,19 @@
 																	"tokens": {
 																		"type": "number"
 																	},
+																	"tokenCoverage": {
+																		"type": "object",
+																		"required": ["unknownCalls", "unknownRuns"],
+																		"properties": {
+																			"unknownCalls": {
+																				"type": "number"
+																			},
+																			"unknownRuns": {
+																				"type": "number"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
 																	"costUsd": {
 																		"type": "number"
 																	},
@@ -6604,6 +6617,19 @@
 														},
 														"tokens": {
 															"type": "number"
+														},
+														"tokenCoverage": {
+															"type": "object",
+															"required": ["unknownCalls", "unknownRuns"],
+															"properties": {
+																"unknownCalls": {
+																	"type": "number"
+																},
+																"unknownRuns": {
+																	"type": "number"
+																}
+															},
+															"additionalProperties": false
 														},
 														"costUsd": {
 															"type": "number"
@@ -51808,6 +51834,19 @@
 																								"tokens": {
 																									"type": "number"
 																								},
+																								"tokenCoverage": {
+																									"type": "object",
+																									"required": ["unknownCalls", "unknownRuns"],
+																									"properties": {
+																										"unknownCalls": {
+																											"type": "number"
+																										},
+																										"unknownRuns": {
+																											"type": "number"
+																										}
+																									},
+																									"additionalProperties": false
+																								},
 																								"costUsd": {
 																									"type": "number"
 																								},
@@ -53061,6 +53100,19 @@
 																								},
 																								"tokens": {
 																									"type": "number"
+																								},
+																								"tokenCoverage": {
+																									"type": "object",
+																									"required": ["unknownCalls", "unknownRuns"],
+																									"properties": {
+																										"unknownCalls": {
+																											"type": "number"
+																										},
+																										"unknownRuns": {
+																											"type": "number"
+																										}
+																									},
+																									"additionalProperties": false
 																								},
 																								"costUsd": {
 																									"type": "number"
@@ -66512,6 +66564,19 @@
 																									},
 																									"tokens": {
 																										"type": "number"
+																									},
+																									"tokenCoverage": {
+																										"type": "object",
+																										"required": ["unknownCalls", "unknownRuns"],
+																										"properties": {
+																											"unknownCalls": {
+																												"type": "number"
+																											},
+																											"unknownRuns": {
+																												"type": "number"
+																											}
+																										},
+																										"additionalProperties": false
 																									},
 																									"costUsd": {
 																										"type": "number"

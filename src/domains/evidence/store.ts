@@ -285,8 +285,20 @@ function readTotals(value: unknown, source: string): EvidenceOverview["totals"] 
 		linkedToolEvents: readOptionalNumber(value, source, "linkedToolEvents", 0),
 		protectedArtifacts: readOptionalNumber(value, source, "protectedArtifacts", 0),
 		tokens: readNumber(value, source, "tokens"),
+		// A bundle built before token coverage existed reads without it; its total cannot say what it misses (#434).
+		...(value.tokenCoverage === undefined
+			? {}
+			: { tokenCoverage: readTokenCoverage(value.tokenCoverage, `${source}.tokenCoverage`) }),
 		costUsd: readNumber(value, source, "costUsd"),
 		wallTimeMs: readNumber(value, source, "wallTimeMs"),
+	};
+}
+
+function readTokenCoverage(value: unknown, source: string): NonNullable<EvidenceOverview["totals"]["tokenCoverage"]> {
+	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	return {
+		unknownCalls: readNumber(value, source, "unknownCalls"),
+		unknownRuns: readNumber(value, source, "unknownRuns"),
 	};
 }
 

@@ -73,7 +73,13 @@ export interface EvidenceTotals {
 	toolEvents: number;
 	linkedToolEvents: number;
 	protectedArtifacts: number;
+	/** The verified receipts' sealed token counts; a lower bound whenever `tokenCoverage` names a gap. */
 	tokens: number;
+	/**
+	 * What `tokens` cannot cover: calls sealed without usage, and runs whose receipt is missing, failed
+	 * verification, or predates call coverage. Absent on bundles built before it existed (#434, P5).
+	 */
+	tokenCoverage?: { unknownCalls: number; unknownRuns: number };
 	costUsd: number;
 	wallTimeMs: number;
 }

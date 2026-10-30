@@ -267,13 +267,29 @@ function buildOverview(
 		const receipt = authenticatedReceipt(item);
 		return receipt === null ? [] : [receipt];
 	});
-	const costSummary = aggregateCostAmounts(
-		receipts.map((receipt) => ({
+	// Totals fold only what the bundle seals: each verified receipt's own call fold. A run without one is unknown in
+	// tokens and cost, never zero, so the totals survive journal pruning unchanged (#434, P5).
+	const unverifiedRuns = runSources.length - receipts.length;
+	const costSummary = aggregateCostAmounts([
+		...receipts.map((receipt) => ({
 			usd: receipt.costUsd,
 			provenance: receipt.costProvenance ?? "unknown",
 			...callCoverageForRun(receipt),
 			...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
 		})),
+		...(unverifiedRuns > 0
+			? [{ usd: 0, provenance: "unknown" as const, apiCalls: 0, unknownCallCoverageRuns: unverifiedRuns }]
+			: []),
+	]);
+	const tokenCoverage = receipts.reduce(
+		(coverage, receipt) => {
+			const calls = callCoverageForRun(receipt);
+			return {
+				unknownCalls: coverage.unknownCalls + calls.missingTokenCalls,
+				unknownRuns: coverage.unknownRuns + calls.unknownCallCoverageRuns,
+			};
+		},
+		{ unknownCalls: 0, unknownRuns: unverifiedRuns },
 	);
 	const toolStats = receipts.flatMap((receipt) => receipt.toolStats);
 	const runIds = envelopes.map((envelope) => envelope.id).sort(compareStrings);
@@ -314,6 +330,7 @@ function buildOverview(
 			linkedToolEvents: toolEventRows.filter((event) => event.source !== "receipt-aggregate").length,
 			protectedArtifacts: protectedArtifacts.artifacts.length,
 			tokens: receipts.reduce((total, receipt) => total + receipt.tokenCount, 0),
+			tokenCoverage,
 			costUsd: costSummary.knownUsd,
 			costSummary,
 			wallTimeMs,

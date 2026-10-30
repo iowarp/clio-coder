@@ -69,6 +69,7 @@ export const EvidenceOverview = Type.Object(
 				linkedToolEvents: Type.Number(),
 				protectedArtifacts: Type.Number(),
 				tokens: Type.Number(),
+				tokenCoverage: Type.Optional(Type.Object({ unknownCalls: Type.Number(), unknownRuns: Type.Number() }, closed)),
 				costUsd: Type.Number(),
 				costDisplay: Type.Optional(Type.String()),
 				wallTimeMs: Type.Number(),
