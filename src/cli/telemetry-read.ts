@@ -261,8 +261,18 @@ function printTimeline(dto: TimelineV1): string {
 				return `${entry.at}  compact  ${entry.outcome} · ${entry.callIds.length} call(s)`;
 			case "session":
 				return `${entry.at}  session  ${entry.event}${entry.detail ? ` ${entry.detail}` : ""}`;
-			default:
+			case "gap":
 				return `${entry.at}  gap      ${entry.sink} ${entry.reason} × ${entry.count}`;
+			case "config": {
+				const paths = entry.paths
+					? [...entry.paths.hotReload, ...entry.paths.nextTurn, ...entry.paths.restartRequired]
+					: [];
+				return `${entry.at}  config   ${entry.event}${entry.source ? ` by ${entry.source}` : ""}${paths.length > 0 ? ` · ${paths.join(", ")}` : ""}`;
+			}
+			case "budget":
+				return `${entry.at}  budget   ${entry.event} ${entry.level} · spend ${entry.spend.display} of ${entry.ceiling.display}${entry.waited ? ` · waited ${entry.waited.display}` : ""}${entry.outcome ? ` · ${entry.outcome}` : ""}${entry.raisedTo ? ` to ${entry.raisedTo.display}` : ""}${entry.raisedBy ? ` by ${entry.raisedBy}` : ""}`;
+			default:
+				return `${entry.at}  quota    ${entry.provider} ${entry.source}${entry.limitReached ? " · limit reached" : ""} · ${entry.windows.map((window) => `${window.key} ${window.usedPct.display}`).join(", ")}`;
 		}
 	});
 	return lines.length === 0 ? "no entries\n" : `${lines.join("\n")}\n`;

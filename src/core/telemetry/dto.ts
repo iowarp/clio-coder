@@ -13,7 +13,7 @@ import {
 } from "./enums.js";
 import { factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
-import { CallSettledSchema, PricingSchema, UtcSchema } from "./schemas.js";
+import { CallSettledSchema, ObjectRefSchema, PricingSchema, UtcSchema } from "./schemas.js";
 
 /**
  * Read-model DTOs (#434 §11.2). TUI, ACP, CLI `--json` and the GUI serve these shapes unchanged, so one fact has one
@@ -467,6 +467,14 @@ export const CacheReportSchema = Type.Object(
 export type CacheReportV1 = Static<typeof CacheReportSchema>;
 
 const at = { at: UtcSchema };
+/** A value a record carries rather than a fold; explained through its record, so it names no reference. */
+const shown = Type.Object(
+	{ fact: Type.Union([factSchema(nonNegative), FactSumSchema]), display: Type.String() },
+	closed,
+);
+/** A configured amount such as a ceiling: a setting, not spend, so it carries no provenance. */
+const limit = Type.Object({ usd: nonNegative, display: Type.String() }, closed);
+const settingsSource = vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]);
 export const TimelineEntrySchema = Type.Union([
 	Type.Object(
 		{
@@ -529,6 +537,72 @@ export const TimelineEntrySchema = Type.Union([
 		closed,
 	),
 	Type.Object({ kind: Type.Literal("gap"), ...at, sink: ExistingId, reason: text, count: count }, closed),
+	/** The effective settings when the writer opened (`snapshot`), or one change with the paths it touched (#434 §8). */
+	Type.Object(
+		{
+			kind: Type.Literal("config"),
+			...at,
+			event: vocabulary(["snapshot", "changed"]),
+			source: Type.Union([settingsSource, Type.Null()]),
+			paths: Type.Union([
+				Type.Object({ hotReload: Type.Array(text), nextTurn: Type.Array(text), restartRequired: Type.Array(text) }, closed),
+				Type.Null(),
+			]),
+			settings: ObjectRefSchema,
+			previous: Type.Union([ObjectRefSchema, Type.Null()]),
+			settingsFingerprint: text,
+		},
+		closed,
+	),
+	/**
+	 * Priced spend reaching a ceiling (`crossing`), or a paid request held there until the hold ended (`wait`). `spend`
+	 * is what admission saw, marked estimated when any call settled before it was, with the unpriced calls beside it.
+	 */
+	Type.Object(
+		{
+			kind: Type.Literal("budget"),
+			...at,
+			event: vocabulary(["crossing", "wait"]),
+			level: vocabulary(["at", "over"]),
+			callId: Type.Union([CallIdSchema, Type.Null()]),
+			attemptId: Type.Union([AttemptIdSchema, Type.Null()]),
+			spend: shown,
+			ceiling: limit,
+			contextTokens: Type.Union([shown, Type.Null()]),
+			outcome: Type.Union([vocabulary(["raised", "removed", "cleared", "refused", "aborted"]), Type.Null()]),
+			waited: Type.Union([shown, Type.Null()]),
+			raisedTo: Type.Union([limit, Type.Null()]),
+			raisedBy: Type.Union([settingsSource, Type.Null()]),
+		},
+		closed,
+	),
+	/** A provider's quota windows as one reading saw them; journaled at a turn's first reading and on change. */
+	Type.Object(
+		{
+			kind: Type.Literal("quota"),
+			...at,
+			provider: ExistingId,
+			targetId: ExistingId,
+			source: vocabulary(["response-headers", "stream-event", "poll"]),
+			observedAt: UtcSchema,
+			/** Null when the reading did not say. */
+			limitReached: Type.Union([Type.Boolean(), Type.Null()]),
+			windows: Type.Array(
+				Type.Object(
+					{
+						key: ExistingId,
+						usedPct: Type.Object(
+							{ fact: factSchema(Type.Number({ minimum: 0, maximum: 100 })), display: Type.String() },
+							closed,
+						),
+						resetsAt: Type.Union([UtcSchema, Type.Null()]),
+					},
+					closed,
+				),
+			),
+		},
+		closed,
+	),
 ]);
 export type TimelineEntry = Static<typeof TimelineEntrySchema>;
 export const TimelineSchema = Type.Object(

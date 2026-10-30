@@ -22,6 +22,7 @@ import {
 	WhyStoppedSchema,
 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
@@ -233,4 +234,72 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	ok(tampered.integrity.detail);
 	strictEqual(tampered.sealed, null);
 	strictEqual(tampered.trust.artifactIntegrity.state, "failed");
+});
+
+test("the timeline carries config, budget and quota records, the spend admission saw marked as its calls were priced (#434 §8)", () => {
+	const ctx = { sessionId: "timeline-records", label: "main" as const };
+	const clock = (t: string) => ({ t, mono: 0 });
+	const object = {
+		label: "resolvable" as const,
+		function: "sha256" as const,
+		canonicalization: "json-sorted-v1" as const,
+		subject: "config" as const,
+		id: `obj_${"a".repeat(64)}`,
+	};
+	const priced = telemetryCall("timeline-records", { at: "2026-10-30T00:00:01.000Z", usd: 4, pricedBy: "catalog" });
+	const unpriced = telemetryCall("timeline-records", { at: "2026-10-30T00:00:02.000Z", usd: null });
+	const records: TelemetryRecord[] = [
+		makeTelemetryRecord(
+			"config.snapshot",
+			{ settings: object, settingsFingerprint: "f".repeat(64) },
+			ctx,
+			clock("2026-10-30T00:00:00.000Z"),
+		),
+		...priced,
+		...unpriced,
+		makeTelemetryRecord(
+			"budget.crossing",
+			{ level: "at", spendUsd: 5, ceilingUsd: 5, contextTokens: 1200 },
+			ctx,
+			clock("2026-10-30T00:00:03.000Z"),
+		),
+		makeTelemetryRecord(
+			"budget.wait",
+			{
+				level: "at",
+				spendUsd: 5,
+				ceilingUsd: 5,
+				outcome: "raised",
+				waitedMs: 1500,
+				raisedToUsd: 10,
+				raisedBy: "settings-ui",
+			},
+			ctx,
+			clock("2026-10-30T00:00:04.000Z"),
+		),
+		makeTelemetryRecord(
+			"quota.reading",
+			{
+				provider: "codex",
+				targetId: "fixture",
+				source: "stream-event",
+				observedAt: "2026-10-30T00:00:05.000Z",
+				windows: [{ key: "primary", usedPct: { kind: "measured", value: 42, source: "provider" } }],
+				limitReached: false,
+			},
+			ctx,
+			clock("2026-10-30T00:00:05.000Z"),
+		),
+	];
+	const dto = timeline({ ...source, sessionId: "timeline-records", journal: { ...source.journal, records } }, null, now);
+	ok(Value.Check(TimelineSchema, dto), [...Value.Errors(TimelineSchema, dto)][0]?.message);
+	deepStrictEqual(
+		dto.entries.filter((entry) => entry.kind !== "call").map((entry) => entry.kind),
+		["config", "budget", "budget", "quota"],
+	);
+	const [crossing, wait] = dto.entries.filter((entry) => entry.kind === "budget");
+	// A catalog-priced call settled before the crossing makes the spend an estimate; the unpriced call stays beside it.
+	strictEqual(crossing?.kind === "budget" ? crossing.spend.display : null, "~$5.00 +?");
+	strictEqual(wait?.kind === "budget" ? wait.waited?.display : null, "1.50s");
+	strictEqual(wait?.kind === "budget" ? wait.raisedBy : null, "settings-ui");
 });

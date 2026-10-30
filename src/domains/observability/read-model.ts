@@ -30,6 +30,7 @@ import {
 	renderFact,
 	renderTextFact,
 	renderUsdFact,
+	renderUsdLimit,
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
 import type { CallSettled, CallUsage, Payload } from "../../core/telemetry/schemas.js";
@@ -200,6 +201,14 @@ const notApplicable: Fact<number> = { kind: "absent", reason: "not-applicable" }
 const unobserved = { kind: "unknown", reason: "not-observed" } as const satisfies Fact<number>;
 const localClock = (value: number): Fact<number> => ({ kind: "measured", value, source: "local-clock" });
 const counted = (value: number): FactSum => foldFacts([{ kind: "measured", value, source: "local-count" }]);
+/** One estimate whose producer named no method; a sum marks it `~` without claiming one (R3). */
+const estimatedSum = (value: number): FactSum => ({
+	measured: 0,
+	estimated: value,
+	unknownCount: 0,
+	absentCount: 0,
+	coverage: { measured: 0, estimated: 1, unknown: 0 },
+});
 const unknownSum = (count: number): FactSum => foldFacts(Array.from({ length: count }, () => unobserved));
 const header = (options: ReadOptions) => ({
 	v: TELEMETRY_DTO_VERSION as typeof TELEMETRY_DTO_VERSION,
@@ -1620,6 +1629,29 @@ export function timeline(
 	const analysis = analyze(source);
 	const id = source.sessionId;
 	const entries: TimelineEntry[] = [];
+	/**
+	 * The spend admission saw at `t`, marked as the session's priced calls settled by then were: estimated when any was,
+	 * with every sent call it could not price beside it, as the cost tracker that fed admission words it (#434 §8).
+	 */
+	const spendAt = (usd: number, t: string): FactSum => {
+		let estimated = false;
+		let unpriced = 0;
+		const visit = (attempt: Attempt) => {
+			if (!invoked(attempt) || !attempt.settled || attempt.settledAt === null || attempt.settledAt > t) return;
+			const fact = attempt.settled.pricing.usd;
+			if (fact.kind === "estimated") estimated = true;
+			else if (fact.kind === "unknown") unpriced += 1;
+		};
+		for (const attempt of analysis.attempts) visit(attempt);
+		for (const run of analysis.runs.values()) for (const attempt of run.attempts) visit(attempt);
+		return {
+			measured: estimated ? 0 : usd,
+			estimated: estimated ? usd : 0,
+			unknownCount: unpriced,
+			absentCount: 0,
+			coverage: { measured: estimated ? 0 : 1, estimated: estimated ? 1 : 0, unknown: unpriced },
+		};
+	};
 	for (const attempt of analysis.attempts) {
 		const q = (metric: FactMetric) => quantity(view, own(id, metric, { attemptId: attempt.started.attemptId }));
 		entries.push({
@@ -1683,6 +1715,77 @@ export function timeline(
 			case "gap":
 				entries.push({ kind: "gap", at, sink: record.data.sink, reason: record.data.reason, count: record.data.count });
 				break;
+			case "config.snapshot":
+				entries.push({
+					kind: "config",
+					at,
+					event: "snapshot",
+					source: null,
+					paths: null,
+					settings: record.data.settings,
+					previous: null,
+					settingsFingerprint: record.data.settingsFingerprint,
+				});
+				break;
+			case "config.changed":
+				entries.push({
+					kind: "config",
+					at,
+					event: "changed",
+					source: record.data.source,
+					paths: record.data.paths,
+					settings: record.data.after,
+					previous: record.data.before,
+					settingsFingerprint: record.data.settingsFingerprint,
+				});
+				break;
+			case "budget.crossing":
+			case "budget.wait": {
+				const data = record.data;
+				const wait = record.k === "budget.wait" ? record.data : null;
+				const waited = wait ? localClock(wait.waitedMs) : null;
+				const spend = spendAt(data.spendUsd, at);
+				entries.push({
+					kind: "budget",
+					at,
+					event: wait ? "wait" : "crossing",
+					level: data.level,
+					callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
+					attemptId: (record.ctx.attemptId ?? null) as CallRowV1["attemptId"] | null,
+					spend: { fact: spend, display: renderUsdSum(spend, false) },
+					ceiling: { usd: data.ceilingUsd, display: renderUsdLimit(data.ceilingUsd) },
+					// Admission's own estimate of what the held request re-sends; it names no method, so it reads `~`.
+					contextTokens:
+						data.contextTokens === undefined
+							? null
+							: (() => {
+									const sum = estimatedSum(data.contextTokens);
+									return { fact: sum, display: renderCountSum(sum) };
+								})(),
+					outcome: wait?.outcome ?? null,
+					waited: waited ? { fact: waited, display: renderFact(waited, "duration") } : null,
+					raisedTo:
+						wait?.raisedToUsd === undefined ? null : { usd: wait.raisedToUsd, display: renderUsdLimit(wait.raisedToUsd) },
+					raisedBy: wait?.raisedBy ?? null,
+				});
+				break;
+			}
+			case "quota.reading":
+				entries.push({
+					kind: "quota",
+					at,
+					provider: record.data.provider,
+					targetId: record.data.targetId,
+					source: record.data.source,
+					observedAt: record.data.observedAt,
+					limitReached: record.data.limitReached ?? null,
+					windows: record.data.windows.map((window) => ({
+						key: window.key,
+						usedPct: { fact: window.usedPct, display: renderFact(window.usedPct, "percent") },
+						resetsAt: window.resetsAt ?? null,
+					})),
+				});
+				break;
 		}
 	}
 	for (const run of analysis.runs.values())
@@ -1694,7 +1797,17 @@ export function timeline(
 				event: "settled",
 				terminalReason: run.settled.data.terminalReason,
 			});
-	const order: Record<TimelineEntry["kind"], number> = { session: 0, gap: 1, call: 2, compaction: 3, run: 4, turn: 5 };
+	const order: Record<TimelineEntry["kind"], number> = {
+		session: 0,
+		gap: 1,
+		config: 2,
+		quota: 3,
+		budget: 4,
+		call: 5,
+		compaction: 6,
+		run: 7,
+		turn: 8,
+	};
 	const within = (at: string) => !range || (at >= range.from && at <= range.to);
 	return {
 		...header(options),
