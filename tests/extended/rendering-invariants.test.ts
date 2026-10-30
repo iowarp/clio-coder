@@ -36,6 +36,7 @@ import { appendNotice } from "../../src/interactive/command-output.js";
 import { openContextOverlay } from "../../src/interactive/context-overlay.js";
 import { dockTop } from "../../src/interactive/dock.js";
 import { createEditorSubmitController, type EditorSubmitDeps } from "../../src/interactive/editor-submit.js";
+import { openHealthOverlay } from "../../src/interactive/health-overlay.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
@@ -1047,6 +1048,27 @@ describe("Pi TUI compatibility", () => {
 			const plain = (dockTop(tui)?.frame.renderDockBody(120, 60) ?? []).map(stripTerminalSequences).join("\n");
 			match(plain, /backend partly reused · re-prefilled 3,000 · cache read 9,000/u);
 			doesNotMatch(plain, /backend reused/u);
+		} finally {
+			handle.hide();
+		}
+	});
+
+	it("lists System One's engine breakers on /health beside the route breakers", () => {
+		const tui = {
+			showOverlay: () => ({ hide() {} }),
+			requestRender() {},
+		} as unknown as TUI;
+		const handle = openHealthOverlay(tui, undefined, {
+			getSystemOneBreakers: () => [
+				{ engine: "local-small", site: "turn", moment: null, state: "open", failures: 3, remainingMs: 120_000 },
+				{ engine: "derived", site: "consult", moment: null, state: "disabled", failures: 3, remainingMs: 0 },
+			],
+		});
+		try {
+			const plain = (dockTop(tui)?.frame.renderDockBody(120, 80) ?? []).map(stripTerminalSequences).join("\n");
+			match(plain, /System One breakers/u);
+			match(plain, /local-small turn open 120s after 3 consecutive timeouts/u);
+			match(plain, /derived consult disabled for this session after 3 failed decisions/u);
 		} finally {
 			handle.hide();
 		}

@@ -224,6 +224,23 @@ export interface SiteBindingInfo {
 	readonly routes?: Readonly<Partial<Record<DecisionTask, string>>>;
 }
 
+/** One engine's timeout breaker at one site and moment, as `/health` shows it (#434 §11.3). */
+export interface SystemOneBreakerView {
+	readonly engine: string;
+	readonly site: SiteId;
+	readonly moment: string | null;
+	/**
+	 * `closed` while it counts timeouts below the threshold, `open` while it cools down, `probing` while the one call
+	 * past the cooldown runs, `half-open` once the next call may probe, and `disabled` for a derived engine this
+	 * session turned off after repeated failed decisions.
+	 */
+	readonly state: "closed" | "open" | "probing" | "half-open" | "disabled";
+	/** Consecutive timeouts, or consecutive failed decisions for a disabled engine. */
+	readonly failures: number;
+	/** Cooldown left while open or probing, else 0. */
+	readonly remainingMs: number;
+}
+
 export interface SystemOne {
 	/** Whether the site has a usable binding. Cheap: constructs no engine and reads no credential. */
 	bound(site: SiteId): boolean;
@@ -255,6 +272,8 @@ export interface SystemOne {
 	 * carries no configuration value in the clear.
 	 */
 	identity?(site: SiteId): string | null;
+	/** Every engine breaker that counts a failure or is tripped, in this process and the current session. */
+	breakers?(): ReadonlyArray<SystemOneBreakerView>;
 }
 
 export type CallOutcome =

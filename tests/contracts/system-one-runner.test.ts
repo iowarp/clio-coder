@@ -250,6 +250,23 @@ describe("System One runner", () => {
 		strictEqual(fake.calls(), BREAKER_THRESHOLD);
 	});
 
+	it("reports each engine breaker for /health, counting timeouts and then open (#434)", async () => {
+		const { runner, bind } = harness();
+		const binding = bind(fakeEngine(hangs));
+		deepStrictEqual(runner.breakers(), []);
+		for (let index = 1; index < BREAKER_THRESHOLD; index += 1) await runner.run(binding, site(), "x", {});
+		deepStrictEqual(
+			runner.breakers().map(({ engine, state, failures, remainingMs }) => ({ engine, state, failures, remainingMs })),
+			[{ engine: "fake", state: "closed", failures: BREAKER_THRESHOLD - 1, remainingMs: 0 }],
+		);
+		await runner.run(binding, site(), "x", {});
+		const [open] = runner.breakers();
+		strictEqual(open?.state, "open");
+		strictEqual(open.failures, BREAKER_THRESHOLD);
+		strictEqual(open.site, site().id);
+		ok(open.remainingMs > 0);
+	});
+
 	it("records system_one.decision with its breaker moves and the calls its engine opened (#429)", async () => {
 		const records: PendingTelemetry[] = [];
 		const release = registerTelemetrySink("decision-session", { enqueue: (record) => Boolean(records.push(record)) });

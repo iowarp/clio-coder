@@ -3818,6 +3818,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		describe: () => systemOneCore.describe(),
 		identity: (site) => systemOneCore.identity?.(site) ?? null,
 		settled: (maxWaitMs) => systemOneCore.settled(maxWaitMs),
+		breakers: () => systemOneCore.breakers?.() ?? [],
 		...(systemOneCore.limits !== undefined ? { limits: (site, task) => systemOneCore.limits?.(site, task) ?? null } : {}),
 		run: (site, object, options) => {
 			const carried = flowLedger.current();

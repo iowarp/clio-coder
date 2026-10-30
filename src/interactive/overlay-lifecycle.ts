@@ -511,6 +511,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		tui,
 		transitions: overlayTransitions,
 		observability: deps.app.observability,
+		systemOne: () => deps.app.systemOne,
 		...(deps.getQuotaSnapshots ? { getQuotaSnapshots: deps.getQuotaSnapshots } : {}),
 		...(deps.getDispatchRows ? { getDispatchRows: deps.getDispatchRows } : {}),
 		...(deps.app.getSessionId ? { getSessionId: deps.app.getSessionId } : {}),

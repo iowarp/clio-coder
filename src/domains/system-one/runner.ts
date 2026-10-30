@@ -32,6 +32,7 @@ import type {
 	SiteCuts,
 	SiteDefinition,
 	SiteId,
+	SystemOneBreakerView,
 	Verdict,
 } from "./types.js";
 
@@ -118,11 +119,18 @@ export interface Runner {
 	 * from this against live settings rather than trusting a cached verdict.
 	 */
 	answeredIdentity(digest: string, site: SiteId, moment?: string): { identity: string; contract: CallContract } | null;
+	/** Every breaker that counts a timeout or is tripped, and the derived engines the current session disabled. */
+	breakers(): SystemOneBreakerView[];
 }
 
 interface BreakerState {
 	failures: number;
 	openUntil: number;
+	/** The one call past the cooldown is running. */
+	probing?: boolean;
+	engine: string;
+	site: SiteId;
+	moment: string | null;
 }
 
 /** The journal calls a decision's model requests open, collected while its engines run (#429, #434). */
@@ -159,6 +167,8 @@ export function createRunner(deps: RunnerDeps): Runner {
 	const breakers = new Map<string, BreakerState>();
 	// A derived outage stays disabled past the timeout breaker's cooldown in its own session (#429).
 	const derivedFailures = new Map<string | null, Map<string, number>>();
+	/** The engine and site behind each derived key, for `/health`. */
+	const derivedEngines = new Map<string, { engine: string; site: SiteId }>();
 	// Calls that have not left their record yet. A turn waits only briefly for a
 	// slow answer, and the call goes on to record it whenever it settles, so a
 	// process that exits in between would lose the row without something to wait on.
@@ -298,6 +308,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 				} else if (["failed", "timeout", "overflow", "unsupported"].includes(plan.outcome)) {
 					const failures = previous + 1;
 					failedDecisions.set(key, failures);
+					derivedEngines.set(key, { engine: plan.route.name, site: site.id });
 					if (failures === BREAKER_THRESHOLD) {
 						breakerMoves.set(plan, "disabled");
 						writeDiagnostic(
@@ -559,6 +570,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 			// timed out three times in a row.
 			if (breaker !== undefined && breaker.failures >= BREAKER_THRESHOLD) {
 				breaker.openUntil = performance.now() + deadlineMs;
+				breaker.probing = true;
 				breakerMoves.set(plan, "probe");
 			}
 			plan.outcome = "answered";
@@ -620,6 +632,9 @@ export function createRunner(deps: RunnerDeps): Runner {
 								breakers.set(key, {
 									failures,
 									openUntil: failures >= BREAKER_THRESHOLD ? performance.now() + BREAKER_COOLDOWN_MS : 0,
+									engine: plan.route.name,
+									site: site.id,
+									moment: site.moment ?? null,
 								});
 								if (failures >= BREAKER_THRESHOLD) breakerMoves.set(plan, "opened");
 								plan.outcome = "timeout";
@@ -756,5 +771,34 @@ export function createRunner(deps: RunnerDeps): Runner {
 			: null;
 	}
 
-	return { run, settled, answeredIdentity };
+	function breakerViews(): SystemOneBreakerView[] {
+		const now = performance.now();
+		const views: SystemOneBreakerView[] = [];
+		for (const breaker of breakers.values()) {
+			const tripped = breaker.failures >= BREAKER_THRESHOLD;
+			const remainingMs = tripped ? Math.max(0, breaker.openUntil - now) : 0;
+			views.push({
+				engine: breaker.engine,
+				site: breaker.site,
+				moment: breaker.moment,
+				state: !tripped ? "closed" : remainingMs === 0 ? "half-open" : breaker.probing ? "probing" : "open",
+				failures: breaker.failures,
+				remainingMs,
+			});
+		}
+		let session: string | null | undefined;
+		try {
+			session = deps.currentSession?.();
+		} catch {
+			session = undefined;
+		}
+		for (const [key, failures] of derivedFailures.get(session ?? null) ?? []) {
+			const named = derivedEngines.get(key);
+			if (named === undefined || failures < BREAKER_THRESHOLD) continue;
+			views.push({ engine: named.engine, site: named.site, moment: null, state: "disabled", failures, remainingMs: 0 });
+		}
+		return views;
+	}
+
+	return { run, settled, answeredIdentity, breakers: breakerViews };
 }

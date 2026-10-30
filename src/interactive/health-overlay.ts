@@ -1,6 +1,7 @@
 import type { HealthV1, QuotaStateV1, SessionTelemetryV1 } from "../core/telemetry/dto.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { TelemetryReadModel } from "../domains/observability/contract.js";
+import type { SystemOneBreakerView } from "../domains/system-one/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -9,8 +10,9 @@ import { clioTheme } from "./theme/index.js";
 
 /**
  * `/health`: what Clio's own telemetry can vouch for right now (#434 §14). Journal writers and their losses, the
- * producer, event-loop lag, the session's transport, provider quota and route breakers. Every number is the read
- * model's own display, read on render from memory; nothing here reads a journal.
+ * producer, event-loop lag, the session's transport, provider quota, route breakers and System One's engine
+ * breakers. Every telemetry number is the read model's own display, and the breakers are their owners' live state,
+ * all read on render from memory; nothing here reads a journal.
  */
 const HEALTH_OVERLAY_WIDTH = 96;
 const NOT_AVAILABLE = "not available: this session has no telemetry read model";
@@ -20,6 +22,25 @@ interface HealthData {
 	transport: SessionTelemetryV1["transport"] | undefined;
 	quota: QuotaStateV1 | null;
 	breakers: ReadonlyArray<RouteBreakerView>;
+	/** Null when this process has no System One. */
+	systemOne: ReadonlyArray<SystemOneBreakerView> | null;
+}
+
+/** One System One breaker's state, worded as the route breakers are. */
+function systemOneBreakerPhrase(breaker: SystemOneBreakerView): string {
+	const timeouts = `${breaker.failures} consecutive timeout${breaker.failures === 1 ? "" : "s"}`;
+	switch (breaker.state) {
+		case "open":
+			return `open ${Math.ceil(breaker.remainingMs / 1000)}s after ${timeouts}`;
+		case "probing":
+			return `probing after ${timeouts}`;
+		case "half-open":
+			return `half-open after ${timeouts}; the next call probes`;
+		case "disabled":
+			return `disabled for this session after ${breaker.failures} failed decisions`;
+		case "closed":
+			return timeouts;
+	}
 }
 
 const lost = (quantity: HealthV1["journals"][number]["dropped"]) =>
@@ -121,6 +142,17 @@ function healthLines(data: HealthData): string[] {
 		lines.push(
 			`  ${theme.fg("footerIdentity", route.targetId)} ${theme.fg(route.state === "closed" ? "counter" : "warning", routeBreakerPhrase(route))}`,
 		);
+
+	lines.push("", heading("System One breakers"));
+	if (data.systemOne === null) lines.push(note("  not available: this process has no System One"));
+	else if (data.systemOne.length === 0) lines.push(note("  no engine breaker is open or counting timeouts"));
+	for (const breaker of data.systemOne ?? [])
+		lines.push(
+			`  ${theme.fg("footerIdentity", breaker.engine)} ${note(`${breaker.site}${breaker.moment ? `/${breaker.moment}` : ""}`)} ${theme.fg(
+				breaker.state === "closed" ? "counter" : "warning",
+				systemOneBreakerPhrase(breaker),
+			)}`,
+		);
 	return lines;
 }
 
@@ -176,6 +208,8 @@ class HealthOverlayBody implements Component {
 
 export interface OpenHealthOverlayOptions {
 	getBreakers?: () => ReadonlyArray<RouteBreakerView>;
+	/** Absent when this process has no System One. */
+	getSystemOneBreakers?: () => ReadonlyArray<SystemOneBreakerView>;
 }
 
 /** Mount the read-only health overlay; it repaints on the read model's coalesced health, quota and session updates. */
@@ -190,6 +224,7 @@ export function openHealthOverlay(
 			transport: telemetry ? (telemetry.live()?.session().transport ?? null) : undefined,
 			quota: telemetry?.quota() ?? null,
 			breakers: options?.getBreakers?.() ?? [],
+			systemOne: options?.getSystemOneBreakers?.() ?? null,
 		}),
 		() => tui.requestRender(),
 	);

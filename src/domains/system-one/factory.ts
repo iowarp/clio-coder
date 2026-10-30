@@ -382,5 +382,6 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 			});
 		},
 		settled: (maxWaitMs) => runner.settled(maxWaitMs),
+		breakers: () => runner.breakers(),
 	};
 }

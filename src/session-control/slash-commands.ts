@@ -809,7 +809,7 @@ export interface SessionCommandContext {
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openUsage?: () => void;
-	/** `/health`: telemetry journal losses, event-loop lag, the session's transport, quota and route breakers. */
+	/** `/health`: telemetry journal losses, event-loop lag, the session's transport, quota, route and System One breakers. */
 	openHealth?: () => void;
 	/**
 	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.
@@ -2130,7 +2130,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "health",
 		acp: false,
-		description: "Show telemetry journal losses, event-loop lag, transport, quota and route breakers",
+		description: "Show telemetry journal losses, event-loop lag, transport, quota, route and System One breakers",
 		group: "Inspect",
 		kinds: ["health"],
 		args: {},

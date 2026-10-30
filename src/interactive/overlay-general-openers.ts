@@ -32,7 +32,7 @@ import type { ArtifactProviderDeps } from "../domains/session/view-artifacts.js"
 import { createDefaultArtifactProviders } from "../domains/session/view-artifacts.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import { probeGitChangesAsync } from "../domains/session/workspace/git-probe.js";
-import type { OutcomeRecord } from "../domains/system-one/index.js";
+import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import { draftTakenOutcome } from "../domains/system-one/outcomes.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -95,6 +95,8 @@ export interface OverlayGeneralOpenersDeps {
 	dataDir: string;
 	notify: (level: "info" | "success" | "warning" | "error", text: string, key?: string) => void;
 	dispatch: DispatchContract;
+	/** The process's System One, whose engine breakers `/health` shows; read when the overlay opens. */
+	systemOne?: () => SystemOne | undefined;
 	stateDir: string;
 	getSessionMeta: () => SessionMeta | null;
 	/** Every session of this workspace, for the usage activity graph. */
@@ -257,8 +259,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const openHealth = (): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "health";
+		const systemOne = deps.systemOne?.();
 		deps.transitions.handle = openHealthOverlay(deps.tui, deps.observability.telemetry, {
 			getBreakers: () => deps.dispatch.routeBreakers?.() ?? [],
+			...(systemOne?.breakers ? { getSystemOneBreakers: () => systemOne.breakers?.() ?? [] } : {}),
 		});
 		deps.requestRender();
 	};
