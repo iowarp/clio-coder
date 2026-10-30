@@ -132,6 +132,7 @@ interface Binding {
 	version: number;
 	view?: { version: number; view: TelemetryView };
 	quota: QuotaCursor;
+	health: HealthCursor;
 }
 
 type QuotaReading = Payload<"quota.reading">;
@@ -145,6 +146,12 @@ interface QuotaCursor {
 /** The account a reading names, as the process's own observations key it: Codex readings are per target. */
 const quotaAccount = (reading: QuotaReading) =>
 	reading.provider === "codex" ? `codex:${reading.targetId}` : reading.provider;
+/** The newest health.window the bound session's journal holds, scanned forward as the journal grows (#434 §14). */
+interface HealthCursor {
+	records: readonly TelemetryRecord[] | null;
+	scanned: number;
+	latest: { at: string; data: Payload<"health.window"> } | null;
+}
 
 function owned(owner: string): Owned {
 	return {
@@ -233,6 +240,7 @@ function topicsFor(owner: string, root: string, records: readonly TelemetryRecor
 			topics.add("session");
 			topics.add("health");
 		} else if (record.k === "quota.reading") topics.add("quota");
+		else if (record.k === "health.window") topics.add("health");
 		else {
 			topics.add("session");
 			topics.add("timeline");
@@ -468,6 +476,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			off: [],
 			version: 0,
 			quota: { records: null, scanned: 0, latest: new Map() },
+			health: { records: null, scanned: 0, latest: null },
 		};
 		current = binding;
 		binding.off.push(subscribeAllPersistedTelemetry(onEvent(binding)));
@@ -543,6 +552,25 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			const account = quotaAccount(record.data);
 			const prior = cursor.latest.get(account);
 			if (!prior || record.data.observedAt > prior.observedAt) cursor.latest.set(account, record.data);
+		}
+		return cursor.latest;
+	};
+
+	/** The session's newest health window, from records already in memory; never a cold read (#434 §14). */
+	const latestHealthWindow = (): HealthCursor["latest"] => {
+		const binding = current;
+		const records = binding?.owners.get(sessionOwner(binding.sessionId))?.records;
+		if (!binding || !records) return null;
+		const cursor = binding.health;
+		if (cursor.records !== records) {
+			cursor.records = records;
+			cursor.scanned = 0;
+			cursor.latest = null;
+		}
+		for (; cursor.scanned < records.length; cursor.scanned += 1) {
+			const record = records[cursor.scanned];
+			if (record?.k !== "health.window") continue;
+			if (!cursor.latest || record.t >= cursor.latest.at) cursor.latest = { at: record.t, data: record.data };
 		}
 		return cursor.latest;
 	};
@@ -662,9 +690,16 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		},
 		health() {
 			const producer = telemetryProducerHealth();
-			// Loop lag stays unknown until a health.window record measures it (#434 §14).
-			const unobserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
-			const lag = { fact: unobserved, display: renderFact(unobserved, "duration") };
+			// Loop lag is the session's newest health.window: unknown until one lands, or when no sample landed in that
+			// window (#434 §14).
+			const window = latestHealthWindow()?.data.loopLag;
+			const lag = (ms: number | undefined) => {
+				const fact: Fact<number> =
+					ms === undefined
+						? { kind: "unknown", reason: "not-observed" }
+						: { kind: "measured", value: ms, source: "local-clock" };
+				return { fact, display: renderFact(fact, "duration") };
+			};
 			return {
 				v: TELEMETRY_DTO_VERSION,
 				foldVersion: TELEMETRY_FOLD_VERSION,
@@ -685,7 +720,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 					unownedRecords: localCount(producer.unownedRecords),
 					sinkFailures: localCount(producer.sinkFailures),
 				},
-				loopLag: { p50: lag, p99: lag, max: lag },
+				loopLag: { p50: lag(window?.p50Ms), p99: lag(window?.p99Ms), max: lag(window?.maxMs) },
 			} satisfies HealthV1;
 		},
 		subscribe(topic, listener) {
