@@ -3,8 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import type { UsageBreakdown } from "../../src/domains/observability/cost.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import anthropicRuntime from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -45,7 +47,9 @@ function paidTarget(runtime: string, url?: string): TargetDescriptor {
 }
 
 const directories: string[] = [];
-afterEach(() => {
+const flushers: Array<() => Promise<void>> = [];
+afterEach(async () => {
+	await Promise.all(flushers.splice(0).map((flush) => flush()));
 	mock.restoreAll();
 	for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true });
 });
@@ -70,7 +74,12 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 			await gate?.(admitted);
 		},
 	};
-	const observability: Pick<ObservabilityContract, "recordTokens"> = {
+	const journals = createSessionJournals(stateDir, () => {
+		throw new Error("journal unavailable");
+	});
+	flushers.push(journals.flush);
+	const observability: Pick<ObservabilityContract, "recordTokens" | "acquireTelemetrySession"> = {
+		acquireTelemetrySession: journals.acquire,
 		recordTokens(_provider, _model, tokens, costUsd, breakdown, provenance, _facts, label) {
 			charges.push({ tokens, costUsd, breakdown, provenance, label });
 		},
@@ -81,14 +90,25 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 		observability: observability as ObservabilityContract,
 		getCeilingUsd: () => 1,
 		currentSession: () => "session-1",
-		repoIdentity: () => null,
+		repoIdentity: () => "repo",
 		stateDir,
 	});
 	const rows = (): unknown[] => {
 		const file = join(stateDir, "usage", "out-of-turn.jsonl");
 		return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
 	};
-	return { admit, charges, admitted: () => admitted, rows };
+	return {
+		admit,
+		charges,
+		admitted: () => admitted,
+		rows,
+		async calls() {
+			await journals.flush();
+			return (await readCallJournal(join(stateDir, "sessions", "repo", "session-1"))).records
+				.map(({ record }) => record)
+				.filter((record) => record.k === "call.settled");
+		},
+	};
 }
 
 function assertCharged(charge: Charge | undefined): void {
@@ -142,9 +162,32 @@ const host = { auth: undefined, credentialsPresent: () => new Set<string>() };
 const urgent = { urgent: yesNo("Urgent?", "it is", "it is not") };
 
 describe("System One paid requests: admission and accounting", () => {
+	it("journals measured zero, missing usage, duplicate callbacks and admission cancellation separately", async () => {
+		const { admit, calls } = ledger(paidTarget("llamacpp"));
+		const signal = new AbortController().signal;
+		const zero = await admit({ targetId: "paid", model: "m", signal });
+		zero({ input: 0, output: 0, providerReported: true }, { callOutcome: "success" });
+		zero(null);
+		const missing = await admit({ targetId: "paid", model: "m", signal });
+		missing(null, { callOutcome: "success" });
+		await rejects(admit({ targetId: "paid", model: "m", signal: AbortSignal.abort() }));
+		const settled = await calls();
+		strictEqual(settled.length, 3);
+		const measured = settled.find((row) => row.data.disposition === "settled");
+		strictEqual(measured?.data.usage?.output.kind, "measured");
+		strictEqual(measured?.data.usage?.cacheRead.kind, "unknown");
+		strictEqual(
+			measured?.data.usage?.input.kind,
+			"unknown",
+			"a prompt total without cache coverage is not uncached input",
+		);
+		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);
+		strictEqual(settled.find((row) => row.data.disposition === "never_sent")?.data.usage, null);
+	});
+
 	it("admits each HTTP request, the schema retry included, and charges the usage of a decision that failed", async () => {
 		const target = paidTarget("llamacpp", "http://accounting.test");
-		const { admit, charges, admitted, rows } = ledger(target);
+		const { admit, charges, admitted, rows, calls } = ledger(target);
 		const bodies = fakeFetch(async (body) =>
 			body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
@@ -177,6 +220,11 @@ describe("System One paid requests: admission and accounting", () => {
 			.map((row) => JSON.parse(row) as { usage: { totalTokens: number | null; costUsd: number | null } })
 			.find((row) => row.usage.totalTokens === null);
 		strictEqual(missing?.usage.costUsd, null);
+		const settled = await calls();
+		strictEqual(settled.length, bodies.length);
+		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);
+		strictEqual(settled.filter((row) => row.data.disposition === "settled").length, 5);
+		ok(settled.every((row) => row.ctx.sessionId === "session-1" && row.data.label === "system-one"));
 	});
 
 	it("admits each one-shot attempt, the schema retry included, and charges the answer's usage", async () => {

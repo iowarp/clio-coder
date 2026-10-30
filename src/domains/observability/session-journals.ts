@@ -106,7 +106,8 @@ export function createSessionJournals(stateDir: string, unavailable: () => void)
 			await Promise.all(
 				[...entries.values()].map(async (entry) => {
 					try {
-						await (await entry.journal)?.flush();
+						if (entry.closing) await entry.closing;
+						else await (await entry.journal)?.flush();
 					} catch {
 						report();
 					}

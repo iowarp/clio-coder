@@ -11,6 +11,8 @@ import type { TargetDescriptor } from "../../providers/types/target-descriptor.j
 export type EngineAuth = Partial<Pick<ProvidersContract, "auth">>["auth"];
 
 export interface LlmRequestUsage {
+	/** True only when fields were read directly from provider usage, including explicit zero (#434). */
+	readonly providerReported?: boolean;
 	readonly input: number;
 	readonly output: number;
 	readonly cacheRead?: number;

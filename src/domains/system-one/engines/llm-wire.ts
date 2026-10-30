@@ -151,10 +151,11 @@ function usageOf(data: ChatCompletion): LlmRequestUsage | undefined {
 	const reasoning = data.usage?.completion_tokens_details?.reasoning_tokens;
 	const total = data.usage?.total_tokens;
 	return {
+		providerReported: true,
 		input: input - cacheRead,
 		output,
-		cacheRead,
-		reasoning: typeof reasoning === "number" && Number.isFinite(reasoning) ? Math.max(0, reasoning) : 0,
+		...(typeof cached === "number" && Number.isFinite(cached) ? { cacheRead } : {}),
+		...(typeof reasoning === "number" && Number.isFinite(reasoning) ? { reasoning: Math.max(0, reasoning) } : {}),
 		totalTokens: typeof total === "number" && Number.isFinite(total) && total >= 0 ? total : input + output,
 	};
 }
@@ -225,15 +226,6 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 	let token: Promise<string | undefined> | null = null;
 
 	async function post(body: Record<string, unknown>): Promise<ChatCompletion> {
-		token ??= resolveToken(host, target, runtime, signal);
-		const bearer = await token;
-		signal.throwIfAborted();
-		const headers: Record<string, string> = {
-			...(runtime.id === "openrouter" ? OPENROUTER_HEADERS : {}),
-			...(target.auth?.headers ?? {}),
-			"content-type": "application/json",
-			...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
-		};
 		let recordUsage: Awaited<ReturnType<NonNullable<EngineHost["admitLlmRequest"]>>> | undefined;
 		try {
 			recordUsage = await host.admitLlmRequest?.({ targetId: target.id, model, signal });
@@ -241,18 +233,28 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			if (error instanceof LlmAdmissionRefused) input.onAdmissionRefused?.(error);
 			throw error;
 		}
-		signal.throwIfAborted();
 		const tracking = trackCallFetch();
-		const response = await probeJson<ChatCompletion>({
-			fetch: tracking.fetch,
-			url: `${baseUrl}/chat/completions`,
-			method: "POST",
-			timeoutMs: HTTP_CEILING_MS,
-			headers,
-			body: JSON.stringify(body),
-			signal,
-			readErrorBody: true,
-		}).catch((error: unknown) => {
+		const response = await (async () => {
+			token ??= resolveToken(host, target, runtime, signal);
+			const bearer = await token;
+			signal.throwIfAborted();
+			const headers: Record<string, string> = {
+				...(runtime.id === "openrouter" ? OPENROUTER_HEADERS : {}),
+				...(target.auth?.headers ?? {}),
+				"content-type": "application/json",
+				...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+			};
+			return probeJson<ChatCompletion>({
+				fetch: tracking.fetch,
+				url: `${baseUrl}/chat/completions`,
+				method: "POST",
+				timeoutMs: HTTP_CEILING_MS,
+				headers,
+				body: JSON.stringify(body),
+				signal,
+				readErrorBody: true,
+			});
+		})().catch((error: unknown) => {
 			recordUsage?.(null, {
 				callOutcome: signal.aborted ? "aborted" : "error",
 				failure: tracking.failure(error, signal.aborted),

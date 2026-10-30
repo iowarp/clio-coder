@@ -1,3 +1,5 @@
+import { beginCall } from "../core/telemetry/producer.js";
+import { callSettlementFromMessage } from "../domains/observability/call-facts.js";
 import type { CostEntryLabel } from "../domains/observability/cost.js";
 /**
  * What the composition root keeps between System One calls.
@@ -72,6 +74,34 @@ export function createSystemOneRequestAdmission(deps: {
 			deps.providers.getRuntime?.(target.runtime) ?? { id: target.runtime },
 			model,
 		);
+		const lease =
+			session && repoIdentity
+				? await deps.observability?.acquireTelemetrySession?.({ id: session, cwdHash: repoIdentity }, label)
+				: undefined;
+		const call = lease
+			? beginCall(
+					{
+						label,
+						target: {
+							targetId,
+							runtimeId: target.runtime,
+							api: deps.providers.getRuntime?.(target.runtime)?.apiFamily ?? "unknown",
+							requestedModel: model,
+							reportedModel: { kind: "unknown", reason: "not-observed" },
+						},
+						roundKind: "tools-removed",
+						toolChoice: "none",
+					},
+					lease.context,
+				)
+			: undefined;
+		let settled = false;
+		const settle = (message: unknown): void => {
+			if (settled) return;
+			settled = true;
+			call?.settle(callSettlementFromMessage(message, pricing.provenance));
+			void lease?.release();
+		};
 		try {
 			signal.throwIfAborted();
 			if (pricing.provenance === "known" || pricing.provenance === "estimated") {
@@ -86,9 +116,44 @@ export function createSystemOneRequestAdmission(deps: {
 			signal.throwIfAborted();
 			if (deps.currentSession() !== session) throw new Error("System One session changed before the request");
 		} catch (error) {
+			settle({
+				stopReason: signal.aborted ? "aborted" : "error",
+				callInvoked: false,
+				failure: { invoked: false, stage: "admission" },
+			});
 			throw new LlmAdmissionRefused(error instanceof Error ? error.message : String(error), { cause: error });
 		}
 		return (usage, observation) => {
+			if (settled) return;
+			settle({
+				stopReason:
+					observation?.callOutcome === "aborted"
+						? "aborted"
+						: observation?.callOutcome === "error" || (observation === undefined && usage === null)
+							? "error"
+							: "stop",
+				...(observation?.failure ? { failure: observation.failure } : {}),
+				usage:
+					usage === null
+						? null
+						: {
+								...usage,
+								// Only the direct HTTP parser proves explicit zero. Pi placeholders remain unknown (#434).
+								clioExternal: usage.providerReported ? { tokenUsage: "provider-reported" } : {},
+								...(usage.providerReported && usage.cacheRead === undefined ? { input: undefined } : {}),
+								cost: {
+									total:
+										usage.costUsd ??
+										calculatePricingCostUsd(pricing.rates, {
+											input: usage.input,
+											output: usage.output,
+											cacheRead: usage.cacheRead ?? 0,
+											cacheWrite: usage.cacheWrite ?? 0,
+											cacheWrite1h: usage.cacheWrite1h ?? 0,
+										}),
+								},
+							},
+			});
 			// Admission alone is not evidence of spending when the deadline wins (#429).
 			if (observation?.failure?.invoked === false) return;
 			const outcome = observation ?? {
