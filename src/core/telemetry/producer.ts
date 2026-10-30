@@ -30,6 +30,7 @@ export interface TelemetrySink {
 }
 
 const sinks = new Map<string, TelemetrySink>();
+const liveAttempts = new Map<string, TelemetryCall>();
 let unownedRecords = 0;
 let sinkFailures = 0;
 
@@ -85,6 +86,12 @@ export interface TelemetryCall {
 	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall | null;
 }
 
+/** The unsettled attempt this async context belongs to, so a shared engine seam can time it (#434). */
+export function telemetryCallInContext(): TelemetryCall | undefined {
+	const attemptId = telemetryContext()?.attemptId;
+	return attemptId === undefined ? undefined : liveAttempts.get(attemptId);
+}
+
 export function beginCall(
 	input: Omit<CallStarted, "callId" | "attemptId" | "attempt">,
 	ctx = telemetryContext(),
@@ -100,7 +107,7 @@ export function beginCall(
 		let settled = false;
 		let successor: TelemetryCall | undefined;
 		recordTelemetry("call.started", metadata, scope);
-		return {
+		const handle: TelemetryCall = {
 			callId,
 			attemptId,
 			attempt: number,
@@ -125,6 +132,7 @@ export function beginCall(
 			settle(data, reportedModel) {
 				if (settled) return;
 				settled = true;
+				liveAttempts.delete(attemptId);
 				stages.settle = performance.now() - start;
 				const facts: CallSettled = {
 					...metadata,
@@ -141,6 +149,8 @@ export function beginCall(
 				return successor;
 			},
 		};
+		liveAttempts.set(attemptId, handle);
+		return handle;
 	};
 	return attempt(0);
 }

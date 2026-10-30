@@ -24,6 +24,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
+import { telemetryCallInContext } from "../core/telemetry/producer.js";
 import { withAnthropicDiagnostics } from "./apis/anthropic-diagnostics.js";
 import { observeAnthropicResponse } from "./apis/anthropic-response.js";
 import { withCodexConfiguration } from "./apis/codex-configuration.js";
@@ -35,6 +36,7 @@ import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { withClioIdentity } from "./client-identity.js";
 import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
+import { onFirstGeneration } from "./generation-delta.js";
 import { instrumentProviderCall, type ProviderCallScope } from "./provider-diagnostics.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
@@ -193,7 +195,10 @@ function scopedEngineStreamSimple(
 	options: SimpleStreamOptions | undefined,
 	scope: ProviderCallScope,
 ): AssistantMessageEventStream {
-	return filterAssistantProseStream(
+	// A side call opened inside its call scope is timed here; main and worker attempts mark their own stages (#434).
+	const call = telemetryCallInContext();
+	call?.stage("send", "start");
+	const stream = filterAssistantProseStream(
 		guardToolArgumentStream(model, context, options, (guarded) =>
 			instrumentProviderCall(
 				model,
@@ -217,6 +222,10 @@ function scopedEngineStreamSimple(
 		),
 		model,
 	);
+	if (!call) return stream;
+	// Pi's provider owns the request from here under transport option B; TTFT is firstToken minus send.end.
+	call.stage("send", "end");
+	return onFirstGeneration(stream, () => call.mark("firstToken"));
 }
 
 export async function completeEngineSimple(

@@ -207,6 +207,9 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 		assert.equal(calls[1]?.data.attempt, 1);
 		assert.equal(calls[2]?.data.disposition, "never_sent");
 		assert.equal(calls[2]?.data.usage, null);
+		// The engine seam times a side call's handoff and first token; a refused call never reaches it (#434).
+		assert.ok(calls[1]?.data.stages.send && calls[1].data.stages.firstToken !== undefined, JSON.stringify(calls[1]));
+		assert.equal(calls[2]?.data.stages.send, undefined);
 		assert.ok(calls.every((record) => record.ctx.sessionId === "side-session" && record.data.label === "btw"));
 	} finally {
 		provider.unregister();
