@@ -5,6 +5,7 @@ import {
 	readDiscoveredEndpointSlots,
 	recordDiscoveredEndpointSlots,
 } from "./endpoint-slots-store.js";
+import { isModelRoutedGatewayRuntime } from "./model-routed-gateway.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
@@ -40,15 +41,6 @@ export function canonicalEndpointKey(value: TargetDescriptor | string): string |
 	return canonicalEndpointUrl(typeof value === "string" ? value : value.url);
 }
 
-/**
- * Gateways that route every model to its own backend deployment. Behind one of
- * these the scheduler that owns a request's slot is that model's backend, not
- * the gateway URL: live, the main agent streaming qwopus (dynamo) through the
- * same `litellm` target marked memory's ornith (mini) busy and dropped 12 of
- * its steps per run. A generic protocol endpoint (`openai-compat`) is often a
- * single local server that answers any model name, so it keeps one key.
- */
-const MODEL_ROUTED_GATEWAY_RUNTIMES: ReadonlySet<string> = new Set(["litellm", "openrouter"]);
 const MODEL_KEY_SEPARATOR = "#model=";
 
 /**
@@ -60,7 +52,7 @@ const MODEL_KEY_SEPARATOR = "#model=";
  */
 export function modelEndpointKey(target: TargetDescriptor, wireModelId: string | null | undefined): string | null {
 	const key = canonicalEndpointKey(target);
-	if (key === null || !wireModelId || !MODEL_ROUTED_GATEWAY_RUNTIMES.has(target.runtime)) return key;
+	if (key === null || !wireModelId || !isModelRoutedGatewayRuntime(target.runtime)) return key;
 	return `${key}${MODEL_KEY_SEPARATOR}${encodeURIComponent(wireModelId)}`;
 }
 

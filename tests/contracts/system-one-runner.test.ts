@@ -124,20 +124,51 @@ describe("System One runner", () => {
 	});
 
 	it("derives relevance from context.memory only for a local target, under the site deadline (#429)", () => {
-		const derive = (runtime: string, url?: string) =>
-			capabilitySettings({
+		const settingsFor = (runtime: string, url?: string, model = "side-model") =>
+			({
 				chat: { target: "chat", model: "chat-model" },
-				context: { memory: { enabled: true, target: "memory", model: "side-model" } },
+				context: { memory: { enabled: true, target: "memory", model } },
 				targets: [{ id: "memory", runtime, ...(url === undefined ? {} : { url }) }],
 				systemOne: { engines: {}, sites: {}, cuts: {}, record: false, retentionDays: 30, maxMiB: 64 },
-			} as unknown as ClioSettings).systemOne;
+			}) as unknown as ClioSettings;
+		const derive = (runtime: string, url?: string, model?: string) =>
+			capabilitySettings(settingsFor(runtime, url, model)).systemOne;
 		// A remote subscription or cloud memory model must not be auto-bound to a per-turn site.
 		deepStrictEqual(derive("openai-codex").sites, {});
 		deepStrictEqual(derive("openrouter", "https://openrouter.ai/api/v1").sites, {});
+		for (const runtime of ["litellm", "openrouter"]) {
+			for (const url of [
+				"http://10.0.0.1:4000",
+				"http://172.16.0.1:4000",
+				"http://192.168.86.1:4000",
+				"http://localhost:4000",
+				"http://127.0.0.1:4000",
+				"http://[::1]:4000",
+				"http://[fd00::1]:4000",
+			]) {
+				for (const model of ["gpt-6-luna", "unknown-alias"]) {
+					const settings = settingsFor(runtime, url, model);
+					strictEqual(capabilitySettings(settings), settings, `${runtime}/${model} through ${url}`);
+				}
+			}
+		}
+		for (const runtime of ["openai-codex", "claude-code"]) {
+			deepStrictEqual(derive(runtime, "http://127.0.0.1:4000", "gpt-6-luna").sites, {});
+		}
+		const gateway = settingsFor("llamacpp", "http://127.0.0.1:8080");
+		gateway.targets = gateway.targets.map((target) => ({ ...target, gateway: true }));
+		strictEqual(capabilitySettings(gateway), gateway);
 		// A local one derives without the 800 ms override, so the site's own deadline applies.
 		deepStrictEqual(derive("llamacpp", "http://127.0.0.1:8080").sites, {
 			relevance: { engine: "clio-capability-side-model" },
 		});
+		deepStrictEqual(derive("openai-compat", "http://192.168.86.1:8080").sites, {
+			relevance: { engine: "clio-capability-side-model" },
+		});
+		const explicit = settingsFor("litellm", "http://192.168.86.1:4000", "gpt-6-luna");
+		explicit.systemOne.engines.manual = { kind: "llm", target: "memory", model: "gpt-6-luna", mode: "auto" };
+		explicit.systemOne.sites.relevance = { engine: "manual", timeoutMs: 5000 };
+		strictEqual(capabilitySettings(explicit), explicit);
 	});
 
 	it("asks nothing and records nothing when state() is null", async () => {

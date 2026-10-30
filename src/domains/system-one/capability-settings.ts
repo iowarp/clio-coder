@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { isLocalAddress } from "../providers/cache-deployment.js";
+import { isModelRoutedGatewayRuntime } from "../providers/model-routed-gateway.js";
 import { getRuntimeRegistry } from "../providers/registry.js";
 import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
 
@@ -18,6 +19,16 @@ export function capabilitySettings(settings: Readonly<ClioSettings>): Readonly<C
 	const destination = settings.targets.find((entry) => entry.id === target);
 	if (destination === undefined) return settings;
 	const runtime = getRuntimeRegistry().get(destination.runtime) ?? findBuiltinRuntimeBootMetadata(destination.runtime);
+	// A gateway's address proves nothing about the selected model's locality.
+	// Without downstream evidence, keep relevance opt-in through systemOne (#429).
+	if (
+		destination.gateway ||
+		isModelRoutedGatewayRuntime(runtime?.id ?? destination.runtime) ||
+		runtime?.tier === "cloud" ||
+		runtime?.tier === "subscription"
+	) {
+		return settings;
+	}
 	let local = runtime?.tier === "local-native";
 	if (!local && destination.url) {
 		try {
