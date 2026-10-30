@@ -160,6 +160,8 @@ export interface DispatchRequest extends JobSpec {
 	 * model-authored: the argument parser builds requests field by field.
 	 */
 	ownerSessionId?: string | null;
+	/** Original session directory identity, captured with its id and retained by retries (#434). */
+	ownerSessionCwdHash?: string;
 	/**
 	 * Whether the caller can yield to the main agent when a worker parks an ask
 	 * for a live grant (Phase D). The dispatch tool stamps it from its own

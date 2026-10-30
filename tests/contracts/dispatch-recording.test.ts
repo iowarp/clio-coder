@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, match, ok, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
@@ -20,6 +20,7 @@ import { exportEvidenceRecordings } from "../../src/domains/evidence/recordings.
 import { inspectEvidence } from "../../src/domains/evidence/store.js";
 import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import { readCallJournal } from "../../src/domains/observability/call-journal.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -195,7 +196,18 @@ it("dispatch preserves the explicit capture option with journal history disabled
 	for (const placed of [false, true]) {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.nodes = [{ id: node.id, host: node.host, maxWorkers: 1 }];
-		const context = dispatchStubContext({ settings });
+		const base = dispatchStubContext({ settings });
+		const journals = createSessionJournals(clioStateDir(), () => {
+			throw new Error("session journal unavailable");
+		});
+		const context = {
+			bus: base.bus,
+			getContract: ((name: string) =>
+				name === "observability"
+					? { acquireTelemetrySession: journals.acquire }
+					: base.getContract(name)) as typeof base.getContract,
+		};
+		let selectedSession = placed ? null : { id: "original-session", cwdHash: "original-cwd" };
 		const originalPath = process.env.PATH;
 		const bin = join(env.dir, "bin");
 		mkdirSync(bin, { recursive: true });
@@ -208,6 +220,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			promise: Promise.resolve({ exitCode: 0, signal: null, droppedDisplayFrames: placed ? 3 : 0 }),
 			events: (async function* () {
 				ok(spec.telemetryContext);
+				selectedSession = { id: "next-session", cwdHash: "different-cwd" };
 				const call: CallStarted = {
 					callId: newCallId(),
 					attemptId: newAttemptId(),
@@ -265,6 +278,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker,
 			journalRunEvents: false,
+			getSessionOrigin: () => selectedSession,
 			...(placed ? { resolveNode: () => ({ node, spawn: spawnWorker }), previewNode: () => ({ node }) } : {}),
 		});
 		await bundle.extension.start();
@@ -288,10 +302,26 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			ok(
 				journal.records.every(
 					({ record, origin }) =>
-						record.ctx.sessionId === null && origin.host === (placed ? "remote-worker" : "local-worker"),
+						record.ctx.sessionId === (placed ? null : "original-session") &&
+						origin.host === (placed ? "remote-worker" : "local-worker"),
 				),
 			);
 			deepStrictEqual(readRunEventJournal(handle.runId).lines, [], "disabled display history never suppresses call facts");
+			const session = await readCallJournal(join(clioStateDir(), "sessions", "original-cwd", "original-session"));
+			const references = session.records.filter(({ record }) => record.k === "call.ref");
+			equal(references.length, 1, "only the parented run adds a reference, once per logical call");
+			if (!placed) {
+				const reference = references[0]?.record;
+				ok(reference?.k === "call.ref");
+				equal(reference.data.runId, handle.runId);
+				equal(reference.data.callId, journal.records[0]?.record.ctx.callId);
+				equal(reference.ctx.runId, undefined, "references use the session writer, never the run writer");
+			}
+			equal(
+				existsSync(join(clioStateDir(), "sessions", "different-cwd")),
+				false,
+				"session switches cannot move ownership",
+			);
 			const run = bundle.contract.listRuns().find((run) => run.id === handle.runId);
 			ok(run?.recording);
 			const source = readRunRecording(clioStateDir(), handle.runId);

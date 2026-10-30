@@ -155,6 +155,8 @@ import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } 
 import { compileHandbook, selectWorkerHandbook, workerHandbookAudience } from "../context/handbook-units.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
+import type { ObservabilityContract } from "../observability/contract.js";
+import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../observability/session-journals.js";
 import { workerPermitLine, workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
 import { selectProjectPreload } from "../prompts/preload.js";
@@ -630,6 +632,7 @@ export interface DispatchBundleOptions {
 	 * project instead.
 	 */
 	getSessionId?: () => string | null;
+	getSessionOrigin?: () => TelemetrySessionOrigin | null;
 	/** Interactive sessions park paid routes until their session ceiling is raised. */
 	budgetWaitForRaise?: boolean;
 	/**
@@ -7231,6 +7234,14 @@ export function createDispatchBundle(
 			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
 		let worker: SpawnedWorker;
 		let runJournal: RunTelemetryJournal | undefined;
+		let parentJournal: TelemetrySessionLease | undefined;
+		const closeRunJournal = async () => {
+			try {
+				await runJournal?.close();
+			} finally {
+				await parentJournal?.release();
+			}
+		};
 		let adoptedHeldWorker = false;
 		try {
 			if (spec.telemetryContext) {
@@ -7239,6 +7250,12 @@ export function createDispatchBundle(
 						spec.telemetryContext,
 						join(runEventJournalRoot(), spec.telemetryContext.runId),
 					);
+					if (req.ownerSessionId && req.ownerSessionCwdHash) {
+						parentJournal = await context
+							.getContract<ObservabilityContract>("observability")
+							?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, "worker");
+						if (parentJournal) runJournal.linkSession(parentJournal.context);
+					}
 				} catch (error) {
 					reportDispatchDiagnostic("open run telemetry journal", error);
 				}
@@ -7274,7 +7291,7 @@ export function createDispatchBundle(
 			preparation?.signal?.throwIfAborted();
 			worker = adopted ?? (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
-			await runJournal?.close();
+			await closeRunJournal();
 			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
@@ -7965,7 +7982,7 @@ export function createDispatchBundle(
 			} catch (abortError) {
 				reportDispatchDiagnostic("abort orphaned worker after ledger failure", abortError);
 			}
-			await runJournal?.close();
+			await closeRunJournal();
 			leaseSlot.release();
 			throw error;
 		}
@@ -9045,7 +9062,7 @@ export function createDispatchBundle(
 				});
 				throw error;
 			} finally {
-				await runJournal?.close();
+				await closeRunJournal();
 				unsubscribeAgentLedger?.();
 				leaseSlot.release();
 			}
@@ -9104,7 +9121,11 @@ export function createDispatchBundle(
 	}> {
 		// A retry re-enters here with the request it was first admitted under, so
 		// only a request that has never been stamped takes the current session.
-		if (req.ownerSessionId === undefined) req = { ...req, ownerSessionId: options?.getSessionId?.() ?? null };
+		const sessionOrigin = options?.getSessionOrigin?.();
+		if (req.ownerSessionId === undefined)
+			req = { ...req, ownerSessionId: sessionOrigin?.id ?? options?.getSessionId?.() ?? null };
+		if (req.ownerSessionCwdHash === undefined && sessionOrigin && sessionOrigin.id === req.ownerSessionId)
+			req = { ...req, ownerSessionCwdHash: sessionOrigin.cwdHash };
 		const constraints = snapshotTurnConstraints(preparation?.turnConstraints ?? req.turnConstraints);
 		if (constraints) {
 			req = { ...req, turnConstraints: constraints, ...(constraints.skills === "disabled" ? { noSkills: true } : {}) };

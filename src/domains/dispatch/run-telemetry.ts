@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
-import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
+import { recordTelemetry } from "../../core/telemetry/producer.js";
 import type { CallJournal } from "../observability/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
 
@@ -10,6 +11,7 @@ export interface RunTelemetryJournal {
 	context: WorkerTelemetryContext;
 	closed: boolean;
 	worker(frame: unknown): boolean;
+	linkSession(context: TelemetryContext): void;
 	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
 	feed(body: RunEventJournalBody, capBytes: number): void;
 	flush(): Promise<void>;
@@ -65,6 +67,8 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 		writer: { clioVersion: pkg.version, piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown" },
 	});
 	let closing: Promise<void> | undefined;
+	let parent: TelemetryContext | undefined;
+	const references = new Set<string>();
 	let feedClosed = previous.records.some(
 		({ record }) => record.k === "run.feed" && record.data.body.kind === "terminal",
 	);
@@ -86,9 +90,20 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 	const journal: RunTelemetryJournal = {
 		context,
 		closed: false,
+		linkSession(owner) {
+			if (owner.sessionId === null || owner.sessionId !== context.sessionId || owner.runId !== undefined)
+				throw new Error("run call reference requires its parent session owner");
+			parent = owner;
+		},
 		worker(frame) {
 			const record = readWorkerTelemetryFrame(frame, context);
-			return !journal.closed && record !== null && writer.enqueue(record);
+			if (journal.closed || record === null || !writer.enqueue(record)) return false;
+			if (parent && (record.kind === "call.started" || record.kind === "call.settled")) {
+				const callId = record.data.callId;
+				if (!references.has(callId) && recordTelemetry("call.ref", { runId: context.runId, callId }, parent))
+					references.add(callId);
+			}
+			return true;
 		},
 		gap(reason, count = 1) {
 			if (journal.closed) return;

@@ -55,6 +55,7 @@ export function routeValidationProjection(
 		// Stamped by the dispatch domain from the process owner; a model must
 		// not be able to file a run under another session.
 		ownerSessionId,
+		ownerSessionCwdHash,
 		resolvedVerification,
 		resultContractOverride,
 		resultSummary,
@@ -95,6 +96,7 @@ export function routeValidationProjection(
 			...(parentToolCallId !== undefined ? { parentToolCallId } : {}),
 			...(decisionRefs !== undefined ? { decisionRefs } : {}),
 			...(ownerSessionId !== undefined ? { ownerSessionId } : {}),
+			...(ownerSessionCwdHash !== undefined ? { ownerSessionCwdHash } : {}),
 			...(resolvedVerification !== undefined
 				? { resolvedVerification: resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
 				: {}),

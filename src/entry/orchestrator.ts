@@ -2192,7 +2192,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
 	// Bound once the session flow ledger exists; dispatch reads it per request.
 	let flowRestrictionsForDispatch: (() => FlowRestrictionSet | null) | null = null;
-	let sessionIdForDispatch: (() => string | null) | null = null;
+	let sessionOriginForDispatch: (() => { id: string; cwdHash: string } | null) | null = null;
 	// Bound once the safety judge and the autonomy resolver exist; a worker ask
 	// that arrives before then finds no judge and is denied.
 	let workerAskJudgeForDispatch: {
@@ -2319,7 +2319,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				getFlowPolicy: () => workerFlowPolicyInput(safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY),
 				// Stamps every run with the session that dispatched it, which is what
 				// keeps a sibling Clio process's runs and batches out of this one.
-				getSessionId: () => sessionIdForDispatch?.() ?? null,
+				getSessionId: () => sessionOriginForDispatch?.()?.id ?? null,
+				getSessionOrigin: () => sessionOriginForDispatch?.() ?? null,
 				// The domain owns the durable journal here, not the dispatch
 				// tool's event registry: `/run`, a watchdog run, and a model
 				// dispatch all have to leave the same transcript behind, and only
@@ -2438,7 +2439,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	/** The same admission for a round that sends the live agent runtime's context. */
 	const admitRuntimeFlow = (runtime: { targetId: string; runtimeId: string; wireModelId: string }): string | null =>
 		admitModelFlow({ targetId: runtime.targetId, runtimeId: runtime.runtimeId, wireModelId: runtime.wireModelId });
-	sessionIdForDispatch = () => session?.current()?.id ?? null;
+	sessionOriginForDispatch = () => session?.current() ?? null;
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const agents = result.getContract<AgentsContract>("agents");
 	const resources = result.getContract<ResourcesContract>("resources");
