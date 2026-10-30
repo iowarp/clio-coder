@@ -4,6 +4,7 @@ import { reportedCount } from "../client/design/facts-model.js";
 import { toolCandidateNote, toolResolution } from "../client/pages/toolchain-model.js";
 import { histogram, orderedPhases, runTone, runTotals } from "../client/pages/traces/trace-model.js";
 import type { TracePhase, TraceRun } from "../contracts/traces.js";
+import { renderTraceCost } from "../server/clio/http-shims.js";
 
 const tool = (supported: boolean, source: "path" | "vendored" | "none") => ({
 	supported,
@@ -75,22 +76,25 @@ const run = (over: Partial<TraceRun> = {}): TraceRun => ({
 	...over,
 });
 
+/** The traces adapter renders each row's cost on the server; the client shows that display (#434). */
+const served = (row: TraceRun): TraceRun => ({ ...row, costDisplay: renderTraceCost(row) });
+
 test("a run's four totals are tokens, cost, wall time and the runtime that produced them", () => {
-	assert.deepEqual(runTotals(run(), Date.parse("2026-09-20T10:05:00.000Z")), [
+	assert.deepEqual(runTotals(served(run({ cost_unknown: 0, api_calls: 1 })), Date.parse("2026-09-20T10:05:00.000Z")), [
 		{ label: "Tokens", value: "4,200" },
 		// A local runtime that prices at zero is not a run whose cost was never recorded.
-		{ label: "Cost", value: "$0.00 (pricing unknown)" },
+		{ label: "Cost", value: "$0.00" },
 		{ label: "Wall time", value: "30s" },
 		{ label: "Runtime", value: "openai" },
 	]);
 	// A live run measures against now, not against a missing end.
 	const live = runTotals(
-		run({ status: "running", ended_at: null, total_tokens: null, total_cost_usd: null }),
+		served(run({ status: "running", ended_at: null, total_tokens: null, total_cost_usd: null })),
 		Date.parse("2026-09-20T10:01:00.000Z"),
 	);
 	assert.deepEqual(live.slice(0, 3), [
 		{ label: "Tokens", value: "not recorded" },
-		{ label: "Cost", value: "not recorded" },
+		{ label: "Cost", value: "not measured" },
 		{ label: "Wall time", value: "1m 0s" },
 	]);
 });

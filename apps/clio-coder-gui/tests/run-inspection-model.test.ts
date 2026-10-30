@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { evidenceDestination, listDestination, matchesText } from "../client/pages/run-inspection-model.js";
 import { phasePosition, runTotals } from "../client/pages/traces/trace-model.js";
 import type { TracePhase, TraceRun } from "../contracts/traces.js";
+import { renderTraceCost } from "../server/clio/http-shims.js";
 
 const run = {
 	started_at: "2026-09-26T10:00:00Z",
@@ -18,6 +19,8 @@ const phase = {
 	status: "success",
 } as TracePhase;
 const now = Date.parse("2026-09-26T10:02:00Z");
+/** The traces adapter renders each row's cost on the server; the client shows that display (#434). */
+const served = (row: TraceRun): TraceRun => ({ ...row, costDisplay: renderTraceCost(row) });
 
 test("trace geometry uses recorded timestamps and refuses to invent missing phase timing", () => {
 	assert.deepEqual(phasePosition(phase, run, now), { left: 25, width: 25, duration: 15000 });
@@ -38,21 +41,22 @@ test("trace geometry uses recorded timestamps and refuses to invent missing phas
 });
 
 test("finished records without an end retain unknown wall time and accounting", () => {
-	const totals = runTotals({ ...run, ended_at: null }, now);
+	const totals = runTotals(served({ ...run, ended_at: null }), now);
 	assert.equal(totals.find((total) => total.label === "Wall time")?.value, "not recorded");
-	assert.equal(totals.find((total) => total.label === "Cost")?.value, "not recorded");
+	assert.equal(totals.find((total) => total.label === "Cost")?.value, "not measured");
 	assert.equal(totals.find((total) => total.label === "Tokens")?.value, "not recorded");
 	assert.equal(runTotals({ ...run, ended_at: null, status: "running" }, now)[2]?.value, "2m 0s");
 });
 
 test("trace detail totals preserve missing token coverage and pricing provenance", () => {
-	const accounted = { ...run, total_tokens: 24, missing_token_calls: 1, total_cost_usd: 0.25 };
-	const partial = runTotals({ ...accounted, cost_estimated: 1, cost_unknown: 1 }, now);
+	const accounted = { ...run, total_tokens: 24, missing_token_calls: 1, total_cost_usd: 0.25, api_calls: 2 };
+	const partial = runTotals(served({ ...accounted, cost_estimated: 1, cost_unknown: 1 }), now);
 	assert.equal(partial[0]?.value, "24 +? (1 call missing usage)");
-	assert.equal(partial[1]?.value, "about $0.25 subtotal, some calls unpriced");
-	assert.equal(runTotals({ ...accounted, total_cost_usd: 0, cost_unknown: 1 }, now)[1]?.value, "Cost not measured");
-	assert.equal(runTotals(accounted, now)[1]?.value, "$0.25 (pricing unknown)");
-	assert.equal(runTotals({ ...accounted, cost_estimated: 0, cost_unknown: 0 }, now)[1]?.value, "$0.25");
+	assert.equal(partial[1]?.value, "~$0.25 +?");
+	assert.equal(runTotals(served({ ...accounted, total_cost_usd: 0, cost_unknown: 1 }), now)[1]?.value, "not measured");
+	// A row recorded before the pricing flags cannot establish a priced amount.
+	assert.equal(runTotals(served(accounted), now)[1]?.value, "not measured");
+	assert.equal(runTotals(served({ ...accounted, cost_estimated: 0, cost_unknown: 0 }), now)[1]?.value, "$0.25");
 });
 
 test("list navigation preserves owned filters and never propagates launch credentials", () => {
