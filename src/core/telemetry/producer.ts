@@ -1,3 +1,4 @@
+import { captureAdmits, STANDARD_CAPTURE } from "./capture.js";
 import type { TelemetryContext } from "./context.js";
 import { telemetryContext, telemetryOwner, withTelemetryContext } from "./context.js";
 import type { ClockOrigin } from "./envelope.js";
@@ -27,6 +28,8 @@ export interface CallMessageObserver {
 export interface TelemetrySink {
 	/** Enqueue only. Ownership of data transfers to the sink; callers must not mutate it (#434). */
 	enqueue(record: PendingTelemetry): boolean;
+	/** Whether the owner's current mode captures this kind. A sink without it captures standard kinds only (#434). */
+	admits?(kind: Kind): boolean;
 }
 
 const sinks = new Map<string, TelemetrySink>();
@@ -54,6 +57,10 @@ export function telemetryProducerHealth(): { unownedRecords: number; sinkFailure
 	return { unownedRecords, sinkFailures };
 }
 
+function sinkAdmits(sink: TelemetrySink, kind: Kind): boolean {
+	return sink.admits ? sink.admits(kind) : captureAdmits(STANDARD_CAPTURE, kind);
+}
+
 /** No serialization, filesystem access, or locks may enter this call stack (#434, rule13). */
 export function recordTelemetry<K extends Kind>(kind: K, data: Payload<K>, ctx = telemetryContext()): boolean {
 	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
@@ -62,6 +69,8 @@ export function recordTelemetry<K extends Kind>(kind: K, data: Payload<K>, ctx =
 		return false;
 	}
 	try {
+		// Not capturing a kind the mode excludes is policy, not a drop: it is neither a gap nor a failure (#434, R10).
+		if (!sinkAdmits(sink, kind)) return false;
 		return sink.enqueue({ kind, data, ctx, wallMs: Date.now(), mono: performance.now() } as PendingTelemetry);
 	} catch {
 		// Accounting cannot turn a completed call into a retry (#434).

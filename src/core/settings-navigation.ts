@@ -119,5 +119,6 @@ export function settingsGroupForPath(path: string): string {
 	if (path.startsWith("integrations.library")) return "Resource library";
 	if (path.startsWith("integrations.externalAgents")) return "External agents";
 	if (path.startsWith("integrations.")) return "Skills, plugins & Git";
+	if (path === "telemetry" || path.startsWith("telemetry.")) return "Telemetry";
 	return "";
 }

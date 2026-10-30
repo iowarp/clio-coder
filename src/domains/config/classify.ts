@@ -106,6 +106,9 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"integrations.projectResources",
 	"integrations.externalAgents",
 	"integrations.library",
+	// Session journal writers read the capture before each batch and open a new
+	// segment on a change; a running worker keeps the mode it started with (#434).
+	"telemetry",
 ]);
 
 const RESTART_REQUIRED_FIELDS = new Set<string>([

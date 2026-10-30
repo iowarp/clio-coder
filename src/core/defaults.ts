@@ -15,6 +15,7 @@ import type { SiteId } from "../domains/system-one/types.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 import type { SandboxMode, UnixSocketMode } from "./sandbox/types.js";
+import type { TelemetrySettings } from "./telemetry/capture.js";
 
 export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 export type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -925,6 +926,10 @@ export const DEFAULT_SETTINGS = {
 		git: { commitAttribution: true },
 		music: { enabled: false, station: DEFAULT_MUSIC_STATION, agentControl: false },
 	} as IntegrationsSettings,
+	telemetry: {
+		mode: "standard",
+		research: { content: false, deltas: true, providerHeaders: true, systemOneDataset: true, busTrace: false },
+	} as TelemetrySettings,
 };
 
 /**
@@ -1162,6 +1167,19 @@ integrations:
     enabled: false
     station: http://radio.cliamp.stream/lofi/stream
     agentControl: false
+
+# Accountability telemetry is always recorded. Standard mode keeps it content-free
+# or structural; research adds the flags below. Content capture also needs
+# clio-coder telemetry consent for the workspace, and a project file can only
+# lower capture.
+telemetry:
+  mode: standard
+  research:
+    content: false
+    deltas: true
+    providerHeaders: true
+    systemOneDataset: true
+    busTrace: false
 `;
 
 /**

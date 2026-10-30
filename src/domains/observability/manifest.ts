@@ -6,5 +6,6 @@ export const ObservabilityManifest: DomainManifest = {
 	// between observability and dispatch (scheduling -> observability, dispatch
 	// -> scheduling) without a topological cycle.
 	name: "observability",
-	dependsOn: ["providers", "session"],
+	// Telemetry capture follows the operator's `telemetry` settings (#434).
+	dependsOn: ["config", "providers", "session"],
 };

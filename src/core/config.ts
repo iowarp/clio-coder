@@ -1549,6 +1549,32 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 	}
 }
 
+const TELEMETRY_CAPTURE_FLAGS = ["content", "deltas", "providerHeaders", "systemOneDataset", "busTrace"] as const;
+
+function validateTelemetry(issues: Issues, raw: unknown, settings: ClioSettings): void {
+	if (!isPlainObject(raw)) {
+		issues.add("telemetry", `expected a map, got ${describe(raw)}`);
+		return;
+	}
+	issues.unknownKeys("telemetry", raw, ["mode", "research"]);
+	const next = settings.telemetry;
+	if ("mode" in raw) {
+		const parsed = expectEnum(issues, "telemetry.mode", raw.mode, ["standard", "research"] as const);
+		if (parsed !== undefined) next.mode = parsed;
+	}
+	if (!("research" in raw)) return;
+	if (!isPlainObject(raw.research)) {
+		issues.add("telemetry.research", `expected a map, got ${describe(raw.research)}`);
+		return;
+	}
+	issues.unknownKeys("telemetry.research", raw.research, TELEMETRY_CAPTURE_FLAGS);
+	for (const flag of TELEMETRY_CAPTURE_FLAGS) {
+		if (!(flag in raw.research)) continue;
+		const parsed = expectBoolean(issues, `telemetry.research.${flag}`, raw.research[flag]);
+		if (parsed !== undefined) next.research[flag] = parsed;
+	}
+}
+
 const TOP_LEVEL_KEYS = [
 	"version",
 	"turnControl",
@@ -1560,6 +1586,7 @@ const TOP_LEVEL_KEYS = [
 	"safety",
 	"interface",
 	"integrations",
+	"telemetry",
 	...V1_ONLY_ROOTS,
 ] as const;
 
@@ -2754,6 +2781,8 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			}
 		}
 	}
+
+	if ("telemetry" in raw) validateTelemetry(issues, raw.telemetry, settings);
 
 	return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
 }

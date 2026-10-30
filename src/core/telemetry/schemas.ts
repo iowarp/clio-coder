@@ -1,6 +1,7 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import type { CaptureFlag } from "./capture.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./context.js";
 import type { ContentClass, Tier } from "./enums.js";
 import {
@@ -301,6 +302,8 @@ interface KindDefinition {
 	schema: TSchema;
 	tier: Tier;
 	cc: ContentClass;
+	/** The research flag that admits a research-tier kind; without one, research mode alone admits it (#434). */
+	capture?: CaptureFlag;
 	/** Older kind versions are accepted only through explicit, version-indexed conversions (#434). */
 	upcast?: Readonly<Record<number, (data: unknown) => unknown>>;
 }
@@ -333,6 +336,8 @@ export const KIND_REGISTRY = {
 					"unknown-version",
 					"invalid-record",
 					"rotation",
+					// The segment's mode or capture flags no longer admitted a record queued before a change (#434).
+					"mode-filtered",
 				]),
 				count: Type.Integer({ minimum: 1 }),
 			},

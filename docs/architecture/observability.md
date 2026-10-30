@@ -1,6 +1,6 @@
 # Observability
 
-Clio Coder records what a session and its workers did in a small set of local, durable files, and exposes them through the `/view` artifact viewer, the `clio-coder` inspection commands, ACP, and the graphical application. Every store below is a local file. No settings key named for telemetry exists. The one outbound read in this area is the subscription quota request each connected provider answers ([Subscription Quota](#subscription-quota)).
+Clio Coder records what a session and its workers did in a small set of local, durable files, and exposes them through the `/view` artifact viewer, the `clio-coder` inspection commands, ACP, and the graphical application. Every store below is a local file. `telemetry.mode` decides what the per-session call journal admits beyond the accountability records it always keeps ([Diagnostic Tracing Toggles](#diagnostic-tracing-toggles)). The one outbound read in this area is the subscription quota request each connected provider answers ([Subscription Quota](#subscription-quota)).
 
 | Store | Path | Written by | Read by |
 | --- | --- | --- | --- |
@@ -488,7 +488,7 @@ A clean interactive exit prints a branded session summary according to `interfac
 
 ## Diagnostic Tracing Toggles
 
-No settings key controls whether Clio Coder records observability data. The trace mirror, receipts, ledgers, and audit rows are always written. The mirror is skipped only in the short-lived internal generators for wiki and bootstrap output, and its retention is bounded by two environment variables ([Trace Store](trace-store.md#retention-and-pruning)). The settings that shape what is recorded are `targets[].pricing` (cost), `safety.limits.sessionCostUsd` (spend ceiling), and `interface.exitSummary` (the exit report).
+No settings key turns observability recording off. The trace mirror, receipts, ledgers, audit rows and the call journal's accountability records are always written. `telemetry.mode` (`standard` by default, or `research`) and the `telemetry.research` flags decide only which research-tier records the call journal also admits, and each journal segment header records the mode and effective flags it was written under ([settings inventory](../guide/configuration-and-targets.md#telemetry)). A project layer can lower capture but never raise it. The mirror is skipped only in the short-lived internal generators for wiki and bootstrap output, and its retention is bounded by two environment variables ([Trace Store](trace-store.md#retention-and-pruning)). The settings that shape what is recorded are `targets[].pricing` (cost), `safety.limits.sessionCostUsd` (spend ceiling), and `interface.exitSummary` (the exit report).
 
 Debug traces are opt-in environment variables, documented with their values in [environment-variables.md](../guide/environment-variables.md):
 

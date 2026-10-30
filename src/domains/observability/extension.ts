@@ -12,7 +12,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
+import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
+import type { ConfigContract } from "../config/index.js";
 import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
@@ -160,8 +163,19 @@ export function createObservabilityBundle(
 	options: ObservabilityBundleOptions = {},
 ): DomainBundle<ObservabilityContract> {
 	const cost = createCostTracker();
-	const journals = createSessionJournals(clioStateDir(), () =>
-		writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
+	// Writers ask before every record and batch, so reuse the capture until the settings snapshot changes (#434).
+	let captureFor: { settings: TelemetrySettings; capture: TelemetryCapture } | undefined;
+	const journals = createSessionJournals(
+		clioStateDir(),
+		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
+		() => {
+			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
+			if (!settings) return STANDARD_CAPTURE;
+			if (captureFor?.settings !== settings)
+				// No consent store exists yet, so no workspace has granted content capture (#434, O6).
+				captureFor = { settings, capture: effectiveTelemetryCapture(settings, false) };
+			return captureFor.capture;
+		},
 	);
 	let sessionId: string | null | undefined;
 	const recordedRuns = new Set<string>();

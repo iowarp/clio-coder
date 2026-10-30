@@ -4,6 +4,8 @@ import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utime
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { readLayeredSettings } from "../../src/core/settings-layers.js";
+import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../src/core/telemetry/capture.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
@@ -11,7 +13,8 @@ import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/co
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js";
-import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
+import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
+import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
@@ -569,6 +572,63 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 		await journal.close();
 		await rm(sessionDirectory, { recursive: true, force: true });
 	}
+});
+
+test("a segment header says what its mode admits, and a mode change opens a new segment in place (#434)", async () => {
+	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	let capture = STANDARD_CAPTURE;
+	const journal = await openCallJournal({ sessionDirectory, context, writer, capture: () => capture });
+	try {
+		recordTelemetry("session.opened", {}, context);
+		await journal.flush();
+		const research = { content: true, deltas: true, providerHeaders: false, systemOneDataset: true, busTrace: false };
+		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
+		recordTelemetry("session.resumed", {}, context);
+		await journal.flush();
+		const rows = scanTelemetrySegment(await readFile(join(sessionDirectory, "calls.jsonl"))).rows;
+		deepStrictEqual(
+			rows.map((row) =>
+				row.kind === "header" ? `header:${row.header.mode}` : row.kind === "record" ? row.record.k : row.reason,
+			),
+			["header:standard", "session.opened", "segment.closed", "header:research", "session.resumed"],
+		);
+		const header = rows[3];
+		ok(header?.kind === "header");
+		deepStrictEqual(header.header.capture, { ...research, content: false }, "content needs workspace consent");
+	} finally {
+		await journal.close();
+		await rm(sessionDirectory, { recursive: true, force: true });
+	}
+});
+
+test("a project layer may lower telemetry capture but never raise it above user settings (#434)", async (t) => {
+	const home = await isolateClioEnv("clio-telemetry-project-");
+	t.after(() => home.restore());
+	const workspace = join(home.dir, "workspace");
+	await mkdir(join(workspace, ".clio-coder"), { recursive: true });
+	await mkdir(join(home.dir, "config"), { recursive: true });
+	const user = join(home.dir, "config", "settings.yaml");
+	await writeFile(
+		join(workspace, ".clio-coder", "settings.yaml"),
+		"telemetry:\n  mode: research\n  research:\n    content: true\n    busTrace: true\n    deltas: false\n",
+	);
+	const snapshot = captureProjectSurface(workspace, "settings");
+	ok(snapshot.contentHash);
+	recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+	await writeFile(user, "version: 2\ntelemetry:\n  mode: research\n");
+	const research = readLayeredSettings(workspace);
+	deepStrictEqual(research.settings.telemetry, {
+		mode: "research",
+		research: { content: false, deltas: false, providerHeaders: true, systemOneDataset: true, busTrace: false },
+	});
+	deepStrictEqual(
+		research.issues.filter((issue) => issue.origin === "project").map((issue) => issue.path),
+		["telemetry.research.content", "telemetry.research.busTrace"],
+	);
+	await writeFile(user, "version: 2\n");
+	const standard = readLayeredSettings(workspace);
+	strictEqual(standard.settings.telemetry.mode, "standard");
+	ok(standard.issues.some((issue) => issue.origin === "project" && issue.path === "telemetry.mode"));
 });
 
 test("only the next owner repairs torn tails; future records survive reopening and reads do not repair", async () => {

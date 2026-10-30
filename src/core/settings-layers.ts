@@ -11,7 +11,7 @@
  * team configuration and must stay secrets-free, so credential-bearing keys are
  * stripped from the project and project.local layers with a diagnostic.
  * Autonomy is operator-owned and is also stripped from project layers, as are
- * yolo's scratch roots.
+ * yolo's scratch roots and any raise of telemetry capture.
  *
  * Merge semantics, documented and explicit: objects deep-merge key by key;
  * arrays and scalars replace wholesale (a later layer's array wins entirely).
@@ -40,6 +40,7 @@ import {
 	updateSavedSettingsDocument,
 	validateSettings,
 } from "./config.js";
+import { DEFAULT_SETTINGS } from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import {
@@ -267,6 +268,58 @@ function stripProjectAutonomy(
 }
 
 /**
+ * A repository may lower telemetry capture but never raise it, so opening a
+ * cloned project cannot switch the operator into research mode or turn on a
+ * research flag their own file leaves off (#434, O6). Content capture still
+ * needs the operator's workspace consent, which no settings layer grants.
+ */
+function stripProjectTelemetry(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+	if (!isRecord(blob.telemetry)) return blob;
+	const operator = isRecord(userBlob?.telemetry) ? userBlob.telemetry : {};
+	const operatorResearch = isRecord(operator.research) ? operator.research : {};
+	const telemetry: Record<string, unknown> = { ...blob.telemetry };
+	let stripped = false;
+	const reject = (path: string) => {
+		issues.push({
+			origin,
+			path,
+			message: "a project may only lower telemetry capture from user settings; project value ignored",
+		});
+		stripped = true;
+	};
+	if (Object.hasOwn(telemetry, "mode")) {
+		const operatorMode = operator.mode === "research" ? "research" : DEFAULT_SETTINGS.telemetry.mode;
+		if (telemetry.mode !== "standard" && telemetry.mode !== operatorMode) {
+			reject("telemetry.mode");
+			delete telemetry.mode;
+		}
+	}
+	if (isRecord(telemetry.research)) {
+		const research: Record<string, unknown> = { ...telemetry.research };
+		for (const [flag, requested] of Object.entries(research)) {
+			if (requested === false || !Object.hasOwn(DEFAULT_SETTINGS.telemetry.research, flag)) continue;
+			const fallback = DEFAULT_SETTINGS.telemetry.research[flag as keyof ClioSettings["telemetry"]["research"]];
+			const operatorFlag = typeof operatorResearch[flag] === "boolean" ? operatorResearch[flag] : fallback;
+			if (requested === true && operatorFlag === true) continue;
+			reject(`telemetry.research.${flag}`);
+			delete research[flag];
+		}
+		if (Object.keys(research).length === 0) delete telemetry.research;
+		else telemetry.research = research;
+	}
+	if (!stripped) return blob;
+	const cleaned = { ...blob };
+	if (Object.keys(telemetry).length === 0) delete cleaned.telemetry;
+	else cleaned.telemetry = telemetry;
+	return cleaned;
+}
+
+/**
  * Safety keys only the operator's own file may set. Scratch roots widen where
  * yolo may delete outside the workspace (#419), so a repository can neither set
  * nor extend them. The unattended window decides how long Clio waits for this
@@ -435,10 +488,15 @@ function prepareProjectLayers(
 		const blob =
 			raw.blob === undefined
 				? undefined
-				: stripProjectOperatorSafety(
-						stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+				: stripProjectTelemetry(
+						stripProjectOperatorSafety(
+							stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+							origin,
+							issues,
+						),
 						origin,
 						issues,
+						userBlob,
 					);
 		if (snapshot.verdict !== "trusted") {
 			issues.push({ origin, path, message: projectSurfaceTrustNotice(snapshot, file.path) });

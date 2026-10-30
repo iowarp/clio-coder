@@ -113,6 +113,7 @@ export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly stri
 		"Size limits",
 		"Context tuning",
 		"Experimental",
+		"Telemetry",
 		"Raw collections",
 		"Other",
 	],
@@ -272,6 +273,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 	if (under(path, "safety.review")) return place("safety", "Review");
 	if (under(path, "safety.judge")) return place("safety", "Autonomy");
 	if (under(path, "systemOne") || under(path, "chat.steering")) return place("advanced", "Experimental");
+	if (under(path, "telemetry")) return place("advanced", "Telemetry");
 	if (under(path, "context.workingSet") || under(path, "context.memory") || under(path, "context.compaction"))
 		return place("advanced", "Context tuning");
 	return place("advanced", "Other");

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
@@ -40,7 +41,11 @@ interface Entry {
 export const JOURNAL_IDLE_CLOSE_MS = 30_000;
 
 /** Active work, rather than the selected UI session, owns the writer's lifetime (#434). */
-export function createSessionJournals(stateDir: string, unavailable: () => void) {
+export function createSessionJournals(
+	stateDir: string,
+	unavailable: () => void,
+	capture?: (origin: TelemetrySessionOrigin) => TelemetryCapture,
+) {
 	const entries = new Map<string, Entry>();
 	let versions: Promise<SegmentHeader["writer"]> | undefined;
 	const writer = () =>
@@ -98,6 +103,7 @@ export function createSessionJournals(stateDir: string, unavailable: () => void)
 							sessionDirectory: join(stateDir, "sessions", origin.cwdHash, origin.id),
 							context,
 							writer,
+							...(capture ? { capture: () => capture(origin) } : {}),
 						}),
 					)
 					.catch(() => {

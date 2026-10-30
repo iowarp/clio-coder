@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
 import { processBirthToken } from "../../core/process-identity.js";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
+import type { TelemetryCapture } from "../../core/telemetry/capture.js";
+import { captureAdmits, STANDARD_CAPTURE, sameTelemetryCapture } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryOwner } from "../../core/telemetry/context.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
@@ -21,6 +23,8 @@ export interface JournalHealth {
 	persisted: number;
 	dropped: number;
 	invalid: number;
+	/** Records queued under a mode their segment no longer admitted at write time (#434). */
+	filtered: number;
 	writeErrors: number;
 	skipped: number;
 }
@@ -36,6 +40,8 @@ export interface CallJournalOptions {
 	writer: SegmentHeader["writer"];
 	queueCapacity?: number;
 	segmentBytes?: number;
+	/** Read when a segment opens and before every batch; a change opens a new segment. Defaults to standard (#434). */
+	capture?: () => TelemetryCapture;
 }
 
 export type JournalFileName = "calls.jsonl" | "events.ndjson";
@@ -52,13 +58,16 @@ function journalFiles(names: string[], fileName: JournalFileName): string[] {
 }
 
 /** Fork initialization and live owners use the same segment and clock contract (#434). */
-export function callJournalHeader(writer: SegmentHeader["writer"]): SegmentHeader {
+export function callJournalHeader(
+	writer: SegmentHeader["writer"],
+	capture: TelemetryCapture = STANDARD_CAPTURE,
+): SegmentHeader {
 	return {
 		v: 1,
 		k: "segment.open",
 		schemaSet: "clio-telemetry/1",
-		mode: "standard",
-		capture: { content: false, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false },
+		mode: capture.mode,
+		capture: { ...capture.capture },
 		clockOrigin: {
 			host: hostname(),
 			pid: process.pid,
@@ -86,10 +95,19 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 	});
 	let unregister: (() => void) | undefined;
 	let handle: FileHandle | undefined;
+	// A mode lookup that throws captures standard only; the segment header must still say what it admits (#434).
+	const captureNow = (): TelemetryCapture => {
+		try {
+			return options.capture?.() ?? STANDARD_CAPTURE;
+		} catch {
+			return STANDARD_CAPTURE;
+		}
+	};
 	const owner = withStateFileLock(
 		path,
 		async () => {
-			const header = callJournalHeader(options.writer);
+			let capture = captureNow();
+			let header = callJournalHeader(options.writer, capture);
 			let bytes: Buffer;
 			try {
 				const existing = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -109,7 +127,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				// Another installation may own a newer segment format. Never truncate or retire it (#434).
 				throw new Error("call journal segment header is unsupported");
 			}
-			const gap = (reason: "torn-tail" | "writer-drop" | "invalid-record", count: number) =>
+			const gap = (reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered", count: number) =>
 				makeTelemetryRecord("gap", { sink: fileName, reason, count }, options.context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
@@ -139,6 +157,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			let dropped = 0;
 			let reportedDrops = 0;
 			let invalid = 0;
+			let filtered = 0;
 			let persisted = 0;
 			let writeErrors = 0;
 			let closed = false;
@@ -147,7 +166,15 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			let flushing: Promise<void> | undefined;
 			let closing: Promise<void> | undefined;
 			const skipped = scan.rows.filter((row) => row.kind === "skipped").length;
-			const health = (): JournalHealth => ({ queueDepth: count, persisted, dropped, invalid, writeErrors, skipped });
+			const health = (): JournalHealth => ({
+				queueDepth: count,
+				persisted,
+				dropped,
+				invalid,
+				filtered,
+				writeErrors,
+				skipped,
+			});
 			const schedule = () => {
 				if (scheduled || flushing || closed || failed) return;
 				scheduled = setImmediate(() => {
@@ -168,11 +195,20 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					let dequeued = 0;
 					try {
 						const lines: Buffer[] = [];
+						// Records already queued are written under the new mode, so a change record enqueued after
+						// the settings changed is the first record of the new segment (#434).
+						const next = captureNow();
+						const modeChanged = !sameTelemetryCapture(next, capture);
+						if (modeChanged) {
+							capture = next;
+							header = callJournalHeader(options.writer, capture);
+						}
 						if (dropped > reportedDrops) {
 							lines.push(encodeTelemetryLine(gap("writer-drop", dropped - reportedDrops)));
 							reportedDrops = dropped;
 						}
 						let invalidBatch = 0;
+						let filteredBatch = 0;
 						while (count > 0) {
 							const pending = ring[head];
 							ring[head] = undefined;
@@ -180,6 +216,10 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							count -= 1;
 							if (!pending) continue;
 							dequeued += 1;
+							if (!captureAdmits(capture, pending.kind)) {
+								filteredBatch += 1;
+								continue;
+							}
 							const record = redactSecretsDeep(
 								{
 									...makeTelemetryRecord(pending.kind, pending.data, pending.ctx, {
@@ -200,6 +240,8 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						}
 						invalid += invalidBatch;
 						if (invalidBatch) lines.push(encodeTelemetryLine(gap("invalid-record", invalidBatch)));
+						filtered += filteredBatch;
+						if (filteredBatch) lines.push(encodeTelemetryLine(gap("mode-filtered", filteredBatch)));
 						if (!handle) throw new Error("call journal closed before flush");
 						if (size >= (options.segmentBytes ?? 32 * 1024 * 1024)) {
 							await appendAll(
@@ -218,6 +260,17 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							await safeResourceWriteAsync(path, encodeTelemetryLine(header), { mode: 0o600 });
 							handle = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
 							size = encodeTelemetryLine(header).length;
+						} else if (modeChanged) {
+							// A mode change closes the segment in place and opens one whose header admits what follows.
+							lines.unshift(
+								encodeTelemetryLine(
+									makeTelemetryRecord("segment.closed", { reason: "mode-change" }, options.context, {
+										t: new Date().toISOString(),
+										mono: performance.now(),
+									}),
+								),
+								encodeTelemetryLine(header),
+							);
 						}
 						const batch = Buffer.concat(lines);
 						await appendAll(handle, batch);
@@ -239,6 +292,9 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				return flushing;
 			};
 			const journal: CallJournal = {
+				admits(kind) {
+					return captureAdmits(captureNow(), kind);
+				},
 				enqueue(record) {
 					if (closed || failed || telemetryOwner(record.ctx) !== telemetryOwner(options.context) || count === capacity) {
 						dropped += 1;

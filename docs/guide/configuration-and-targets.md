@@ -322,6 +322,19 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `integrations.music.station` | `http://radio.cliamp.stream/lofi/stream` | immediately, at the next `/music` |
 | `integrations.music.agentControl` | `false` | restart |
 
+### Telemetry
+
+`telemetry.mode` sets what each session's call journal admits. `standard`, the default, keeps accountability and operational records, all of them content-free or structural. `research` also admits the research-tier records that the `telemetry.research` flags turn on, and `content` additionally needs the operator's consent for the workspace. Every journal segment header records the mode and the effective flags, and a change starts a new segment at the journal's next write. A project or local layer can lower capture but never raise it above user settings.
+
+| Key | Default | When it applies |
+| --- | --- | --- |
+| `telemetry.mode` | `standard` | next turn; a running worker keeps its mode, and a project layer can only lower it |
+| `telemetry.research.content` | `false` | next turn, in research mode with workspace consent |
+| `telemetry.research.deltas` | `true` | next turn, in research mode |
+| `telemetry.research.providerHeaders` | `true` | next turn, in research mode |
+| `telemetry.research.systemOneDataset` | `true` | next turn, in research mode |
+| `telemetry.research.busTrace` | `false` | next turn, in research mode |
+
 Renamed version-1 paths and retired keys, including the version-2 keys `fleet.decisionProfiles`, `turnControl.interpretation` and the per-agent `permissionTimeoutMs` and `labels`, are listed in the [version 1 to version 2 key map](configuration-reference.md#version-1-to-version-2-key-map) and [retired keys and values](configuration-reference.md#retired-keys-and-values). A user `settings.yaml` that names one is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. The decision-layer replacement is described in the [System One guide](system-one.md).
 
 ---

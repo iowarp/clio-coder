@@ -469,6 +469,7 @@ export interface SettingControl {
 
 const CHOICES: Record<string, readonly string[]> = {
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
+	"telemetry.mode": ["standard", "research"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.sandbox": ["auto", "required", "off"],
 	"safety.sandboxUnixSockets": ["block", "allow"],
@@ -665,6 +666,30 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"chat.steering.triage.autoInterrupt": [
 		"Steering triage may interrupt",
 		"Let a confident stop reading cancel the run and deliver that message now. Off, it is only marked as urgent in the queue panel.",
+	],
+	"telemetry.mode": [
+		"Telemetry mode",
+		"Standard keeps call accounting and operational records without prompts, replies or other content. Research adds the capture switches below for this machine's sessions. Accountability records are kept in both modes. A project file can only lower it.",
+	],
+	"telemetry.research.content": [
+		"Research: capture content",
+		"In research mode, also keep prompt text and request bodies, with secrets removed. Takes effect only in a workspace you consented for with clio-coder telemetry consent.",
+	],
+	"telemetry.research.deltas": [
+		"Research: token timing",
+		"In research mode, keep a per-call histogram of gaps between streamed tokens. Never one record per token.",
+	],
+	"telemetry.research.providerHeaders": [
+		"Research: provider headers",
+		"In research mode, keep allow-listed provider response headers, such as rate-limit windows. Credentials are never kept.",
+	],
+	"telemetry.research.systemOneDataset": [
+		"Research: decision dataset",
+		"In research mode, keep the System One decision dataset that systemOne.record keeps.",
+	],
+	"telemetry.research.busTrace": [
+		"Research: bus trace",
+		"In research mode, record shutdown and domain lifecycle bus events.",
 	],
 	"systemOne.record": [
 		"Save decision examples",
