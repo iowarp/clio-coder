@@ -603,14 +603,38 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(calls.length, 1);
 	});
 
-	it("caps generated summaries at 8192 tokens on a large-output route", async () => {
+	it("sizes a non-reasoning summary to the reserve's room under a large output limit", async () => {
 		await compact({
 			entries: evictedHistory(),
 			model: model(131072, 32768),
-			reserveTokens: 65536,
+			reserveTokens: 16384,
 			keepRecentTokens: 10000,
 		});
-		strictEqual(calls[0]?.maxTokens, 8192);
+		strictEqual(calls[0]?.maxTokens, 13107);
+	});
+
+	it("gives a reasoning route its output limit until it reports a share, then the room plus that share", async () => {
+		const reasoning = { ...model(131072, 32768), reasoning: true, baseUrl: "https://reasoning-share.invalid" };
+		const caps: Array<number | undefined> = [];
+		// Faux usage carries no reasoning split, so the summarizer seam reports one directly.
+		const summarize = async (request: { maxTokens?: number }) => {
+			caps.push(request.maxTokens);
+			return {
+				text: syntheticCompactionSummary("Reasoned checkpoint"),
+				usage: { input: 10, output: 2000, reasoning: 1000, totalTokens: 2010 },
+			};
+		};
+		const input = {
+			entries: evictedHistory(),
+			model: reasoning,
+			reserveTokens: 8192,
+			keepRecentTokens: 10000,
+			summarize,
+		};
+		await compact(input);
+		await compact(input);
+		// Half of the observed output was reasoning, so the 6553-token room doubles.
+		deepStrictEqual(caps, [32768, 13106]);
 	});
 
 	it("caps summary output at the resolved model limit", async () => {

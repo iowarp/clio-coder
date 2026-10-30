@@ -53,9 +53,8 @@ import {
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
+import { noteSummaryUsage, summaryReasoningShare } from "./reasoning-share.js";
 import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
-
-export const COMPACTION_SUMMARY_MAX_TOKENS = 8192;
 
 interface FileOperations {
 	read: Set<string>;
@@ -988,6 +987,8 @@ async function runSummaryAttempt(
 		rememberOAuthCallFailure(error, failure);
 		throw error;
 	} finally {
+		// A summary stopped at the cap reports the reasoning that filled it; the next cap learns from it.
+		noteSummaryUsage(input.model, outcome === "success" ? usage : reported);
 		input.onCall?.({
 			...(failure === undefined ? {} : { failure }),
 			outcome: outcome === "error" && input.signal?.aborted ? "aborted" : outcome,
@@ -1227,14 +1228,26 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	}
 	// A route that reports no output limit gets no explicit cap and the server
 	// decides; refusing it would leave a reactive overflow compaction with no way out.
+	// The summary text keeps the reserve's room in the next context. A route that
+	// reasons spends output on reasoning first, so the cap adds the reasoning share
+	// observed on that route, up to the model's output limit; a reasoning route with
+	// nothing observed yet gets its whole limit. A fixed cap let reasoning consume it
+	// and the summary was never saved (pi upstream #9512).
+	const outputLimit =
+		Number.isFinite(input.model.maxTokens) && input.model.maxTokens >= 1 ? Math.floor(input.model.maxTokens) : undefined;
+	const summaryRoom = Math.max(1024, Math.floor(reserveTokens * 0.8));
+	const reasoningShare = summaryReasoningShare(input.model);
 	const maxTokens =
-		Number.isFinite(input.model.maxTokens) && input.model.maxTokens >= 1
-			? Math.min(
-					COMPACTION_SUMMARY_MAX_TOKENS,
-					Math.floor(input.model.maxTokens),
-					Math.max(1024, Math.floor(reserveTokens * 0.8)),
-				)
-			: undefined;
+		outputLimit === undefined
+			? undefined
+			: Math.min(
+					outputLimit,
+					reasoningShare === undefined
+						? input.model.reasoning
+							? outputLimit
+							: summaryRoom
+						: Math.ceil(summaryRoom / (1 - reasoningShare)),
+				);
 	let memoryOffer: MemoryCompactionOffer | null = null;
 	// Recorded only once the request is actually sent, so a request skipped as a
 	// repeat leaves no offer-used event behind.
