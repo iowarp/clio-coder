@@ -1576,7 +1576,7 @@ try {
 		// context ring opens it.
 		await chipOrSlash(/Open the context window\.$/, "context");
 		const contextPanel = pane.locator(".context-panel");
-		await contextPanel.locator(".context-panel__figure strong", { hasText: "16%" }).waitFor();
+		await contextPanel.locator(".context-panel__figure strong", { hasText: "15.6%" }).waitFor();
 		assert.equal((await contextPanel.locator(".context-panel__of").innerText()).trim(), "20,480 of 131,072 tokens");
 		await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
 		await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();

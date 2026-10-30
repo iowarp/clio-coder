@@ -78,7 +78,7 @@ export const TelemetryChips = memo(function TelemetryChips({
 							strokeDasharray={`${(meter.percent / 100) * RING} ${RING}`}
 						/>
 					</svg>
-					<span>{Math.round(meter.percent)}%</span>
+					{meter.figure !== null ? <span>{meter.figure}</span> : null}
 				</button>
 			) : null}
 			{spend.cost || spend.tokens !== null ? (

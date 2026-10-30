@@ -496,7 +496,7 @@ export function SessionOverview({
 								title="Context"
 								icon="layers"
 								open={() => onOpen("context")}
-								aside={meter ? <span className="pane-card__state">{Math.round(meter.percent)}%</span> : null}
+								aside={meter?.figure ? <span className="pane-card__state">{meter.figure}</span> : null}
 							>
 								{meter ? (
 									<div className="pane-meter" data-tone={meter.tone}>

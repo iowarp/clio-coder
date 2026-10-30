@@ -56,6 +56,8 @@ export function compactDuration(ms: number): string {
 export interface ContextMeter {
 	/** 0 to 100, clamped for drawing. */
 	readonly percent: number;
+	/** The share in use as the server worded it, or null when the ledger reports no share. */
+	readonly figure: string | null;
 	readonly tone: "ok" | "warn" | "full";
 	/** "43K of 128K tokens", with "estimated" until the provider reports usage. */
 	readonly label: string;
@@ -79,6 +81,7 @@ export function contextMeter(
 	const label = `${meter.used} of ${meter.window} tokens${ledger.measured ? "" : ", estimated"}`;
 	return {
 		percent,
+		figure: ledger.display.percent,
 		tone,
 		label,
 		text: `Context window ${ledger.display.percent ?? "share not reported"} used, ${label}`,
