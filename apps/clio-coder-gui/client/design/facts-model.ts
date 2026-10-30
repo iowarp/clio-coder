@@ -82,10 +82,12 @@ const clip = (text: string) => (text.length > FACT_LIMITS.text ? `${text.slice(0
 export function scalarText(
 	key: string,
 	value: string | number | boolean | null | undefined,
-	costDisplay?: string,
+	display?: string,
 ): { text: string; tone?: "absent" | "yes" | "no"; mono?: boolean } {
+	// A number the server already worded (a `<key>Display` sibling) is shown as worded; the client never re-formats it (#434).
+	if (display !== undefined && typeof value !== "string") return { text: display };
 	// Monetary claims arrive rendered from the server; missing display is never measured zero (#434).
-	if (/usd$/i.test(key) && typeof value !== "string") return { text: costDisplay ?? "not measured" };
+	if (/usd$/i.test(key) && typeof value !== "string") return { text: "not measured" };
 	// Absent and zero are different non-monetary facts.
 	if (value === null || value === undefined) return { text: "Not recorded", tone: "absent" };
 	if (typeof value === "boolean") return value ? { text: "Yes", tone: "yes" } : { text: "No", tone: "no" };

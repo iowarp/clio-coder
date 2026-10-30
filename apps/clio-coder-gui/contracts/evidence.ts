@@ -70,8 +70,10 @@ export const EvidenceOverview = Type.Object(
 				protectedArtifacts: Type.Number(),
 				tokens: Type.Number(),
 				tokenCoverage: Type.Optional(Type.Object({ unknownCalls: Type.Number(), unknownRuns: Type.Number() }, closed)),
+				/** The sealed total as the server words it: a lower bound with its coverage marker when receipts leave a gap. */
+				tokensDisplay: Type.String(),
 				costUsd: Type.Number(),
-				costDisplay: Type.Optional(Type.String()),
+				costDisplay: Type.String(),
 				wallTimeMs: Type.Number(),
 			},
 			closed,

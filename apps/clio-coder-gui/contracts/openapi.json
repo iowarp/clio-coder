@@ -3240,7 +3240,7 @@
 										"items": {
 											"type": "array",
 											"items": {
-												"$ref": "#/components/schemas/Object_overview_verdict_643b5e1a"
+												"$ref": "#/components/schemas/Object_overview_verdict_bb8c079c"
 											}
 										},
 										"nextCursor": {
@@ -3328,7 +3328,7 @@
 									],
 									"properties": {
 										"overview": {
-											"$ref": "#/components/schemas/Object_agentIds_cwds_decisions_20974901"
+											"$ref": "#/components/schemas/Object_agentIds_cwds_decisions_f3b8fb8f"
 										},
 										"verdict": {
 											"$ref": "#/components/schemas/Union_f7f3bd9a"
@@ -18123,7 +18123,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_88fefa1f"
+									"$ref": "#/components/schemas/Union_03684919"
 								}
 							}
 						},
@@ -18218,7 +18218,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_88fefa1f"
+									"$ref": "#/components/schemas/Union_03684919"
 								}
 							}
 						},
@@ -20467,7 +20467,7 @@
 										"type": "string"
 									},
 									"operation": {
-										"$ref": "#/components/schemas/Union_88fefa1f"
+										"$ref": "#/components/schemas/Union_03684919"
 									}
 								}
 							}
@@ -21071,7 +21071,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentIds_cwds_decisions_20974901": {
+			"Object_agentIds_cwds_decisions_f3b8fb8f": {
 				"type": "object",
 				"required": [
 					"version",
@@ -21094,7 +21094,7 @@
 					"totals"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_5c588440"
+					"$ref": "#/components/schemas/Shape_c6add9f2"
 				},
 				"additionalProperties": false
 			},
@@ -21332,11 +21332,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_artifact_exitCode_id_582375bf": {
+			"Object_artifact_exitCode_id_1d676309": {
 				"type": "object",
 				"required": ["kind", "id", "exitCode", "message", "artifact"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_a4ff1da8"
+					"$ref": "#/components/schemas/Shape_48e336de"
 				},
 				"additionalProperties": false
 			},
@@ -21385,7 +21385,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_auditRows_blockedToolCalls_costDisplay_9a20835b": {
+			"Object_auditRows_blockedToolCalls_costDisplay_80b41069": {
 				"type": "object",
 				"required": [
 					"runs",
@@ -21399,11 +21399,13 @@
 					"linkedToolEvents",
 					"protectedArtifacts",
 					"tokens",
+					"tokensDisplay",
 					"costUsd",
+					"costDisplay",
 					"wallTimeMs"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_72cc6811"
+					"$ref": "#/components/schemas/Shape_43643112"
 				},
 				"additionalProperties": false
 			},
@@ -21874,11 +21876,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_cancellable_finishedAt_id_3bf1274a": {
+			"Object_cancellable_finishedAt_id_6767afd0": {
 				"type": "object",
 				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "result"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_d5691ef1"
+					"$ref": "#/components/schemas/Shape_d090b763"
 				},
 				"additionalProperties": false
 			},
@@ -22994,11 +22996,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_overview_verdict_643b5e1a": {
+			"Object_overview_verdict_bb8c079c": {
 				"type": "object",
 				"required": ["overview", "verdict"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_523d8af4"
+					"$ref": "#/components/schemas/Shape_54b1436a"
 				},
 				"additionalProperties": false
 			},
@@ -23844,6 +23846,56 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
 				}
 			},
+			"Shape_43643112": {
+				"runs": {
+					"type": "number"
+				},
+				"receipts": {
+					"type": "number"
+				},
+				"toolCalls": {
+					"type": "number"
+				},
+				"toolErrors": {
+					"type": "number"
+				},
+				"blockedToolCalls": {
+					"type": "number"
+				},
+				"sessionEntries": {
+					"type": "number"
+				},
+				"auditRows": {
+					"type": "number"
+				},
+				"toolEvents": {
+					"type": "number"
+				},
+				"linkedToolEvents": {
+					"type": "number"
+				},
+				"protectedArtifacts": {
+					"type": "number"
+				},
+				"tokens": {
+					"type": "number"
+				},
+				"tokenCoverage": {
+					"$ref": "#/components/schemas/Object_unknownCalls_unknownRuns_220fb923"
+				},
+				"tokensDisplay": {
+					"type": "string"
+				},
+				"costUsd": {
+					"type": "number"
+				},
+				"costDisplay": {
+					"type": "string"
+				},
+				"wallTimeMs": {
+					"type": "number"
+				}
+			},
 			"Shape_48539726": {
 				"verdict": {
 					"enum": ["hot", "partial", "cold", "small", "unknown"]
@@ -23862,6 +23914,26 @@
 				},
 				"breakUsd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				}
+			},
+			"Shape_48e336de": {
+				"kind": {
+					"type": "string",
+					"const": "evidence"
+				},
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"exitCode": {
+					"type": "number",
+					"const": 0
+				},
+				"message": {
+					"type": "string"
+				},
+				"artifact": {
+					"$ref": "#/components/schemas/Object_overview_verdict_bb8c079c"
 				}
 			},
 			"Shape_4d7a3f49": {
@@ -23932,20 +24004,20 @@
 					"$ref": "#/components/schemas/Object_issues_layers_rows_bb43261c"
 				}
 			},
-			"Shape_523d8af4": {
-				"overview": {
-					"$ref": "#/components/schemas/Object_agentIds_cwds_decisions_20974901"
-				},
-				"verdict": {
-					"$ref": "#/components/schemas/Union_f7f3bd9a"
-				}
-			},
 			"Shape_52860844": {
 				"fact": {
 					"$ref": "#/components/schemas/Union_76c8bc43"
 				},
 				"display": {
 					"type": "string"
+				}
+			},
+			"Shape_54b1436a": {
+				"overview": {
+					"$ref": "#/components/schemas/Object_agentIds_cwds_decisions_f3b8fb8f"
+				},
+				"verdict": {
+					"$ref": "#/components/schemas/Union_f7f3bd9a"
 				}
 			},
 			"Shape_585334d3": {
@@ -24036,121 +24108,6 @@
 							"type": "null"
 						}
 					]
-				}
-			},
-			"Shape_5c588440": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"evidenceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"source": {
-					"$ref": "#/components/schemas/Union_38ecd717"
-				},
-				"generatedAt": {
-					"type": "string"
-				},
-				"runIds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"sessionId": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"statuses": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"startedAt": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"endedAt": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"tasks": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"cwds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"agentIds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"targetIds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"runtimeIds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"modelIds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"tags": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"files": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"totals": {
-					"$ref": "#/components/schemas/Object_auditRows_blockedToolCalls_costDisplay_9a20835b"
-				},
-				"redactionCount": {
-					"type": "number"
-				},
-				"decisions": {
-					"$ref": "#/components/schemas/Array_9ecffbdb"
 				}
 			},
 			"Shape_5c9dc44e": {
@@ -24325,53 +24282,6 @@
 				},
 				"problem": {
 					"$ref": "#/components/schemas/Problem"
-				}
-			},
-			"Shape_72cc6811": {
-				"runs": {
-					"type": "number"
-				},
-				"receipts": {
-					"type": "number"
-				},
-				"toolCalls": {
-					"type": "number"
-				},
-				"toolErrors": {
-					"type": "number"
-				},
-				"blockedToolCalls": {
-					"type": "number"
-				},
-				"sessionEntries": {
-					"type": "number"
-				},
-				"auditRows": {
-					"type": "number"
-				},
-				"toolEvents": {
-					"type": "number"
-				},
-				"linkedToolEvents": {
-					"type": "number"
-				},
-				"protectedArtifacts": {
-					"type": "number"
-				},
-				"tokens": {
-					"type": "number"
-				},
-				"tokenCoverage": {
-					"$ref": "#/components/schemas/Object_unknownCalls_unknownRuns_220fb923"
-				},
-				"costUsd": {
-					"type": "number"
-				},
-				"costDisplay": {
-					"type": "string"
-				},
-				"wallTimeMs": {
-					"type": "number"
 				}
 			},
 			"Shape_73088e00": {
@@ -24664,26 +24574,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_agentId_durationMs_outcome_c0dc9dc3"
-				}
-			},
-			"Shape_a4ff1da8": {
-				"kind": {
-					"type": "string",
-					"const": "evidence"
-				},
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"exitCode": {
-					"type": "number",
-					"const": 0
-				},
-				"message": {
-					"type": "string"
-				},
-				"artifact": {
-					"$ref": "#/components/schemas/Object_overview_verdict_643b5e1a"
 				}
 			},
 			"Shape_a6ef072d": {
@@ -25201,6 +25091,121 @@
 					"$ref": "#/components/schemas/Union_e4fc00ad"
 				}
 			},
+			"Shape_c6add9f2": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"evidenceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"source": {
+					"$ref": "#/components/schemas/Union_38ecd717"
+				},
+				"generatedAt": {
+					"type": "string"
+				},
+				"runIds": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"sessionId": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"statuses": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"startedAt": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"endedAt": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"tasks": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"cwds": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"agentIds": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"targetIds": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"runtimeIds": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"modelIds": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"tags": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"files": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"totals": {
+					"$ref": "#/components/schemas/Object_auditRows_blockedToolCalls_costDisplay_80b41069"
+				},
+				"redactionCount": {
+					"type": "number"
+				},
+				"decisions": {
+					"$ref": "#/components/schemas/Array_9ecffbdb"
+				}
+			},
 			"Shape_cd30fe87": {
 				"input": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
@@ -25227,25 +25232,7 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
 				}
 			},
-			"Shape_d4f7cc87": {
-				"id": {
-					"$ref": "#/components/schemas/Union_c6270044"
-				},
-				"currentValue": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 256,
-					"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-				},
-				"notice": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"options": {
-					"$ref": "#/components/schemas/Array_881efca5"
-				}
-			},
-			"Shape_d5691ef1": {
+			"Shape_d090b763": {
 				"id": {
 					"type": "string",
 					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -25274,7 +25261,25 @@
 					"type": "string"
 				},
 				"result": {
-					"$ref": "#/components/schemas/Union_6560ec66"
+					"$ref": "#/components/schemas/Union_0be6c8c8"
+				}
+			},
+			"Shape_d4f7cc87": {
+				"id": {
+					"$ref": "#/components/schemas/Union_c6270044"
+				},
+				"currentValue": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 256,
+					"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+				},
+				"notice": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"options": {
+					"$ref": "#/components/schemas/Array_881efca5"
 				}
 			},
 			"Shape_d58bb926": {
@@ -25983,16 +25988,6 @@
 					}
 				]
 			},
-			"Union_01929249": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_artifact_exitCode_id_582375bf"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_2de8a772"
-					}
-				]
-			},
 			"Union_0198081c": {
 				"anyOf": [
 					{
@@ -26006,6 +26001,22 @@
 					{
 						"type": "string",
 						"const": "json"
+					}
+				]
+			},
+			"Union_03684919": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_6767afd0"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bb0fe198"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
 					}
 				]
 			},
@@ -26082,6 +26093,19 @@
 					{
 						"type": "string",
 						"const": "remove"
+					}
+				]
+			},
+			"Union_0be6c8c8": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_id_message_304430bd"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_847e19f3"
+					},
+					{
+						"$ref": "#/components/schemas/Union_ef7f544f"
 					}
 				]
 			},
@@ -26570,19 +26594,6 @@
 					}
 				]
 			},
-			"Union_6560ec66": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_id_message_304430bd"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_847e19f3"
-					},
-					{
-						"$ref": "#/components/schemas/Union_01929249"
-					}
-				]
-			},
 			"Union_6872feba": {
 				"anyOf": [
 					{
@@ -26798,22 +26809,6 @@
 					{
 						"type": "string",
 						"const": "over"
-					}
-				]
-			},
-			"Union_88fefa1f": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_3bf1274a"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bb0fe198"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
 					}
 				]
 			},
@@ -27393,6 +27388,16 @@
 					{
 						"type": "string",
 						"const": "failed"
+					}
+				]
+			},
+			"Union_ef7f544f": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_artifact_exitCode_id_1d676309"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_2de8a772"
 					}
 				]
 			},

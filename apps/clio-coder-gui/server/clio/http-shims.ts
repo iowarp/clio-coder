@@ -3,6 +3,7 @@ export { resolvePackageRoot } from "../../../../src/core/package-root.js";
 export { processAlive, processBirthToken } from "../../../../src/core/process-identity.js";
 export { pendingInstalledVersion, registerRunningBuild } from "../../../../src/core/running-build.js";
 export { clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "../../../../src/core/xdg.js";
+export { renderEvidenceTokens } from "../../../../src/domains/evidence/index.js";
 export { getVersionInfo } from "../../../../src/domains/lifecycle/version.js";
 export type { CostAggregate } from "../../../../src/domains/observability/cost.js";
 export {

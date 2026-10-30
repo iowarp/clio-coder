@@ -27,6 +27,8 @@ test("absent and zero are different facts, and the key chooses the unit", () => 
 	assert.deepEqual(scalarText("costUsd", 0.004, "$0.0040"), { text: "$0.0040" });
 	assert.deepEqual(scalarText("wallTimeMs", 61_000), { text: "1m 1s" });
 	assert.deepEqual(scalarText("tokens", 1234567), { text: "1,234,567" });
+	// A server-worded sibling wins for any key, lower-bound marker and all (#434).
+	assert.deepEqual(scalarText("tokens", 1234, "≥1,234 (1 call unmeasured)"), { text: "≥1,234 (1 call unmeasured)" });
 	assert.deepEqual(scalarText("readBytes", 2048), { text: "2,048 bytes" });
 	assert.deepEqual(scalarText("tokens", Number.NaN), { text: "Not recorded", tone: "absent" });
 	assert.deepEqual(scalarText("verified", true), { text: "Yes", tone: "yes" });

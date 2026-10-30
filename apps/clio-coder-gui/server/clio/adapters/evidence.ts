@@ -10,12 +10,17 @@ import {
 	loadEvidenceRunProvenance,
 	loadEvidenceTrustStatus,
 } from "../../../../../src/domains/evidence/store.js";
-import { summarizeTrustStatus, trustVerdict } from "../../../../../src/domains/evidence/trust-projection.js";
+import {
+	summarizeTrustStatus,
+	trustVerdict,
+	worstTrustVerdict,
+} from "../../../../../src/domains/evidence/trust-projection.js";
 import type { EvidenceTrustStatusView } from "../../../../../src/domains/evidence/types.js";
 import { Id } from "../../../contracts/common.js";
 import { EvidenceOverview, type EvidenceRequest } from "../../../contracts/evidence.js";
 import { withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
+import { renderEvidenceTokens } from "../http-shims.js";
 import { artifactPage, containedFile } from "./storage.js";
 
 /** Preflight the exact files a root seam reads, including optional files. Never follow an escaping symlink. */
@@ -34,17 +39,17 @@ function guard(data: string, id: string, names: string[]): number {
 	}
 	return bytes;
 }
-// Bundle presentation follows the CLI inventory's severity order; axis interpretation remains in src/.
+// The bundle verdict is the inventory's: the worst of its runs, as src/ orders them.
 function verdict(trust: EvidenceTrustStatusView) {
-	const values = trust.runs.map((run) => trustVerdict(run.status));
-	return (
-		(["compromised", "unverified", "unknown", "grounded", "reviewed"] as const).find((value) => values.includes(value)) ??
-		"unknown"
-	);
+	return worstTrustVerdict(trust.runs.map((run) => trustVerdict(run.status)));
 }
+/**
+ * A bundle's totals are the ones its receipts sealed; the server words tokens as a lower bound with the coverage
+ * marker and cost through the shared renderer, so the browser shows strings and sums nothing (#434).
+ */
 function displayOverview(overview: Awaited<ReturnType<typeof listEvidenceOverviews>>[number]) {
 	const { costSummary: _summary, ...totals } = withCostDisplay({ ...overview.totals });
-	return { ...overview, totals };
+	return { ...overview, totals: { ...totals, tokensDisplay: renderEvidenceTokens(overview.totals) } };
 }
 async function inventory(data: string) {
 	let entries: string[];

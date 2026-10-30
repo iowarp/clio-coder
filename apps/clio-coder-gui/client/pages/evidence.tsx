@@ -402,7 +402,8 @@ export function EvidencePage({ client }: { client: Client }) {
 						<p className="inspection-id">{overview.evidenceId}</p>
 						{overview.tasks.length > 1 && <p>{overview.tasks.slice(1).join(" · ")}</p>}
 						<p>
-							{overview.totals.runs} runs · {overview.totals.receipts} receipts
+							{overview.totals.runs} runs · {overview.totals.receipts} receipts · {overview.totals.tokensDisplay} tokens ·{" "}
+							{overview.totals.costDisplay}
 						</p>
 					</article>
 				))}
@@ -466,6 +467,8 @@ export function EvidenceDetail({ client }: { client: Client }) {
 								label: "Tool calls / errors",
 								value: `${data.overview.totals.toolCalls} / ${data.overview.totals.toolErrors}`,
 							},
+							{ label: "Tokens", value: data.overview.totals.tokensDisplay },
+							{ label: "Cost", value: data.overview.totals.costDisplay },
 						]}
 					/>
 					<details className="trace-panel">

@@ -23,6 +23,8 @@ const httpModules = new Map([
 	["src/core/context-operation.ts", new Set(["ACP_CONTEXT_STATUS_METHOD"])],
 	["src/core/process-identity.ts", new Set(["processAlive", "processBirthToken"])],
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
+	// A bundle's sealed token total with its coverage marker, worded once for the TUI and the GUI (#434).
+	["src/domains/evidence/index.ts", new Set(["renderEvidenceTokens"])],
 ]);
 // The read-model DTO schemas and types cross into the browser contract through wire-shims (#434). dto.ts keeps a
 // typebox-only value-import closure, which the closure test below holds for the whole contract directory.
