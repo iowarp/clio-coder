@@ -12,7 +12,7 @@ import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
-import { aggregateCostAmounts, type CostAmount, renderCostAmount } from "../observability/cost.js";
+import { aggregateCostAmounts, type CostAmount, callCoverageForRun, renderCostAmount } from "../observability/cost.js";
 import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
@@ -4357,8 +4357,8 @@ export function createDispatchBundle(
 		finalizedCosts.push({
 			usd: receipt.costUsd,
 			provenance: receipt.costProvenance ?? "unknown",
-			apiCalls: receipt.apiCalls ?? (receipt.tokenCount > 0 ? 1 : 0),
-			missingTokenCalls: receipt.missingTokenCalls ?? 0,
+			// An omitted count is unknown coverage, never one call per token-positive run (#434).
+			...callCoverageForRun(receipt),
 			...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
 		});
 		const startMs = Date.parse(receipt.startedAt);
@@ -6326,6 +6326,8 @@ export function createDispatchBundle(
 			const canonical = callUsage?.snapshot();
 			const usage = canonical ? { ...result.usage, ...canonical } : result.usage;
 			const adapterReportedUsage = canonical !== undefined || usage.tokensReported;
+			// An unreported peer call count stays unknown coverage instead of a measured zero (#434).
+			const observedApiCalls = adapterReportedUsage ? usage.apiCalls : tokenMeter.apiCalls;
 			if (adapterReportedUsage) {
 				tokenMeter.inputTokens = usage.inputTokens;
 				tokenMeter.outputTokens = usage.outputTokens;
@@ -6382,9 +6384,13 @@ export function createDispatchBundle(
 						: result.exitCode,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
-				apiCalls: adapterReportedUsage ? (usage.apiCalls ?? 0) : (tokenMeter.apiCalls ?? 0),
+				...(observedApiCalls !== undefined
+					? {
+							apiCalls: observedApiCalls,
+							missingTokenCalls: (adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? 0,
+						}
+					: {}),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
-				missingTokenCalls: (adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? 0,
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
 				...(canonical && canonical.usageFacts.cacheRead.unknownCount > 0
@@ -8253,9 +8259,11 @@ export function createDispatchBundle(
 				outcomeDetail: finalOutcomeDetail,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
-				apiCalls: tokenMeter.apiCalls ?? (tokenCount > 0 ? 1 : 0),
+				// A meter that observed no call frames cannot claim zero calls; omission reads as unknown coverage (#434).
+				...(tokenMeter.apiCalls !== undefined
+					? { apiCalls: tokenMeter.apiCalls, missingTokenCalls: tokenMeter.missingTokenCalls ?? 0 }
+					: {}),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
-				missingTokenCalls: tokenMeter.missingTokenCalls ?? 0,
 				...(tokenMeter.costSummary ? { costSummary: tokenMeter.costSummary } : {}),
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
@@ -10354,8 +10362,7 @@ export function createDispatchBundle(
 			costAmounts.push({
 				usd: costUsd,
 				provenance: costProvenance,
-				apiCalls: meter.apiCalls ?? (totalTokens > 0 ? 1 : 0),
-				missingTokenCalls: meter.missingTokenCalls ?? 0,
+				...callCoverageForRun(meter),
 				...(meter.costSummary ? { costSummary: meter.costSummary } : {}),
 			});
 			totals.runtimeSeconds += elapsedMs / 1000;
