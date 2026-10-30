@@ -5,7 +5,7 @@
  * neither unknown nor zero). The detectors live in tests/harness/telemetry-lies.ts so the GUI route tests run the
  * same ones over the DTOs they serve.
  */
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +33,7 @@ import { clioDataDir } from "../../src/core/xdg.js";
 import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { applyReceiptPrune, planReceiptPrune } from "../../src/domains/dispatch/receipt-prune.js";
+import { readReceiptTextSync } from "../../src/domains/dispatch/receipt-store.js";
 import { openCallJournal } from "../../src/domains/observability/call-journal.js";
 import type { RepoSource, SessionSource } from "../../src/domains/observability/read-model.js";
 import {
@@ -293,6 +294,11 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	strictEqual(applyReceiptPrune(plan).pruned.length, 1);
 	ok(readFileSync(join(stateDir, "receipts", "run-evidence.json"), "utf8").includes("clio-receipt-tombstone/1"));
 	strictEqual(read().integrity.state, "verified");
+	// A tombstone answers only for the run its file is named after, never as another run's receipt.
+	const misplaced = join(stateDir, "receipts", "run-misplaced.json");
+	writeFileSync(misplaced, readFileSync(join(stateDir, "receipts", "run-evidence.json")));
+	throws(() => readReceiptTextSync(misplaced), { code: "ENOENT" });
+	rmSync(misplaced);
 	strictEqual(
 		imported(JSON.parse(readFileSync(join(stateDir, "receipts", "run-evidence.json"), "utf8")))?.usage.input.kind,
 		"measured",

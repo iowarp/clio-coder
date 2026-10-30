@@ -11,7 +11,7 @@
 
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import { clioDataDir } from "../../core/xdg.js";
 
@@ -81,21 +81,35 @@ export function receiptFromEvidenceCopy(
 	return null;
 }
 
-function prunedReceiptMissing(tombstone: ReceiptTombstone): NodeJS.ErrnoException {
-	const error: NodeJS.ErrnoException = new Error(
-		`receipt ${tombstone.runId} was pruned and evidence ${tombstone.evidenceId} no longer holds it under its seal`,
-	);
+function missingReceipt(message: string): NodeJS.ErrnoException {
+	const error: NodeJS.ErrnoException = new Error(message);
 	error.code = "ENOENT";
 	return error;
 }
 
+function prunedReceiptMissing(tombstone: ReceiptTombstone): NodeJS.ErrnoException {
+	return missingReceipt(
+		`receipt ${tombstone.runId} was pruned and evidence ${tombstone.evidenceId} no longer holds it under its seal`,
+	);
+}
+
+/** The tombstone the receipt file at `path` holds. It answers only for the run the file is named after. */
+function tombstoneAt(path: string, text: string): ReceiptTombstone | null {
+	const tombstone = receiptTombstoneOf(text);
+	// One naming another run would hand that run's receipt over as this one's, so it reads as a missing receipt.
+	if (tombstone !== null && tombstone.runId !== basename(path, ".json"))
+		throw missingReceipt(`receipt ${basename(path, ".json")} is a tombstone for run ${tombstone.runId}`);
+	return tombstone;
+}
+
 /**
  * A receipt's JSON text at `path`, following a pruned receipt's tombstone to its evidence copy. Throws as
- * `readFileSync` does; a tombstone whose copy is gone throws ENOENT, as a missing receipt does.
+ * `readFileSync` does; a tombstone whose copy is gone, or that names another run, throws ENOENT, as a missing receipt
+ * does.
  */
 export function readReceiptTextSync(path: string, dataDir?: string): string {
 	const text = readFileSync(path, "utf8");
-	const tombstone = receiptTombstoneOf(text);
+	const tombstone = tombstoneAt(path, text);
 	if (tombstone === null) return text;
 	let copy: string | null;
 	try {
@@ -112,7 +126,7 @@ export function readReceiptTextSync(path: string, dataDir?: string): string {
 /** The asynchronous {@link readReceiptTextSync}. */
 export async function readReceiptText(path: string, dataDir?: string): Promise<string> {
 	const text = await readFile(path, "utf8");
-	const tombstone = receiptTombstoneOf(text);
+	const tombstone = tombstoneAt(path, text);
 	if (tombstone === null) return text;
 	const copy = await readFile(evidenceReceiptCopyPath(tombstone.evidenceId, dataDir), "utf8").catch(() => null);
 	const receipt = receiptFromEvidenceCopy(tombstone, copy);
