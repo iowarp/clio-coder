@@ -114,16 +114,28 @@ function loadSession(stateDir: string, target: string): SessionSource | null {
 
 const show = (quantity: Quantity) => quantity.display;
 
+/** A close only the ledger recorded has no reason, so none is printed (#434 §6.1). */
+function lifetimeState(lifetime: SessionTelemetryV1["lifetime"]): string {
+	if (lifetime.closed)
+		return `closed${lifetime.closed.reason ? ` ${lifetime.closed.reason}` : ""} at ${lifetime.closed.at}`;
+	switch (lifetime.state) {
+		case "open":
+			return "open";
+		case "ended-abnormally":
+			return "ended without a close";
+		case "unverifiable":
+			return "open or ended on another host";
+		default:
+			return "no owner to check";
+	}
+}
+
 function printSession(dto: SessionTelemetryV1): string {
 	const journal = dto.journal;
 	const lines = [
 		`session ${dto.sessionId}${dto.modes.length > 0 ? ` (${dto.modes.join(" → ")} mode)` : ""}`,
 		`journal   ${journal.present ? `${journal.records} records` : "none"} · ${journal.skipped} skipped · ${journal.damaged} damaged · ${journal.gapRecords} gaps (${journal.droppedRecords} dropped) · ${journal.unattributedAggregates} unattributed legacy rows`,
-		`lifetime  ${dto.lifetime.firstRecordAt ?? "no records"} → ${dto.lifetime.lastRecordAt ?? "no records"} · ${
-			dto.lifetime.closed
-				? `closed ${dto.lifetime.closed.reason} at ${dto.lifetime.closed.at}`
-				: "open, or ended without a close"
-		}`,
+		`lifetime  ${dto.lifetime.firstRecordAt ?? "no records"} → ${dto.lifetime.lastRecordAt ?? "no records"} · ${lifetimeState(dto.lifetime)}`,
 	];
 	if (dto.lineage.parent)
 		lines.push(
