@@ -975,6 +975,9 @@ describe("production compaction controls", () => {
 		ok(persisted?.kind === "compactionSummary");
 		strictEqual(persisted.usage?.targetId, "summary-target");
 		strictEqual(persisted.usage?.modelId, "summary");
+		const journalCalls = await f.journalCalls();
+		deepStrictEqual(persisted.callIds, [...new Set(journalCalls.map((row) => row.data.callId))]);
+		strictEqual(persisted.callIds?.length, f.calls.length);
 	});
 	it("reads the configured system prompt at call time, separate from focus", async () => {
 		const f = fixture();

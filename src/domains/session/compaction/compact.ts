@@ -103,6 +103,8 @@ function validateHistorySummary(text: string): void {
 
 /** One invoked summary stream, including failed calls that produce no checkpoint. */
 export interface CompactionCallObservation {
+	callId?: string;
+	attemptId?: string;
 	failure?: CallFailureRecord;
 	outcome: "success" | "error" | "aborted";
 	usage: unknown;
@@ -195,6 +197,8 @@ export interface CompactInput extends SideCallAuth {
 export type CompactEmptyReason = "protected-recent" | "protected-skill" | "repeat-no-gain";
 
 export interface CompactResult {
+	/** Journal calls belonging to this checkpoint attempt, including retries (#434). */
+	callIds?: string[];
 	providerCheckpoint?: ProviderCheckpointHandle;
 	/** Called synchronously by the session owner immediately before its durable ledger append (#423). */
 	publishProviderCheckpoint?: () => void;
@@ -1026,6 +1030,7 @@ async function runSummaryRequest(
 		// A summary stopped at the cap reports the reasoning that filled it; the next cap learns from it.
 		noteSummaryUsage(input.model, outcome === "success" ? usage : reported);
 		input.onCall?.({
+			...scope.identity(),
 			...(failure === undefined ? {} : { failure }),
 			outcome: outcome === "error" && input.signal?.aborted ? "aborted" : outcome,
 			usage: outcome === "success" ? usage : reported,
@@ -1042,6 +1047,23 @@ async function runSummaryRequest(
  * message list for `entries.slice(firstKeptEntryIndex)`.
  */
 export async function compact(input: CompactInput): Promise<CompactResult> {
+	if (!input.telemetry) return compactWithCalls(input);
+	const callIds = new Set<string>();
+	const telemetry = input.telemetry;
+	const result = await compactWithCalls({
+		...input,
+		telemetry: {
+			...telemetry,
+			onSettled: (facts) => {
+				callIds.add(facts.callId);
+				telemetry.onSettled?.(facts);
+			},
+		},
+	});
+	return { ...result, callIds: [...callIds] };
+}
+
+async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	let nativeUsage: CompactionUsage | undefined;
 	let fallbackReason = input.providerFallbackReason;
 	const providerCompaction = input.providerCompaction;
@@ -1057,7 +1079,9 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 				throw new ProviderCompactionError("native-skills-unverified");
 			await input.beforeSummaryCall?.();
 			input.signal?.throwIfAborted();
-			const native = await scope.withContext(() => providerCompaction(input.onCall, scope));
+			const native = await scope.withContext(() =>
+				providerCompaction((call) => input.onCall?.({ ...call, ...scope.identity() }), scope),
+			);
 			scope.settle({ stopReason: "stop", usage: native.usage });
 			nativeUsage = addCompactionUsage(undefined, native.usage);
 			input.signal?.throwIfAborted();

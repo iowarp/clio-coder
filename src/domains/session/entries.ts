@@ -310,6 +310,8 @@ export function latestSkillContextState(entries: ReadonlyArray<SessionEntry>): S
 }
 
 export interface CompactionSummaryEntry extends BaseSessionEntry {
+	/** Calls used by this checkpoint; provider outcomes remain in calls.jsonl (#434). */
+	callIds?: string[];
 	providerCheckpoint?: ProviderCheckpointHandle;
 	providerFallbackReason?: string;
 	memoryReceipt?: MemoryConsumptionReceipt;
@@ -891,6 +893,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			return isString(v.fromTurnId) && isString(v.summary);
 		case "compactionSummary":
 			return (
+				(v.callIds === undefined || isStringArray(v.callIds)) &&
 				(v.providerCheckpoint === undefined || isProviderCheckpointHandle(v.providerCheckpoint)) &&
 				isOptionalString(v.providerFallbackReason) &&
 				isString(v.summary) &&

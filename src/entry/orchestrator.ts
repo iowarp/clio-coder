@@ -1731,6 +1731,7 @@ async function runCompactionFlow(
 		};
 	const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 		kind: "compactionSummary",
+		...(result.callIds === undefined ? {} : { callIds: result.callIds }),
 		turnId: randomUUID(),
 		parentTurnId: result.checkpointParentTurnId ?? result.firstKeptTurnId ?? null,
 		summary: result.summary,
