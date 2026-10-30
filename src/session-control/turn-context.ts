@@ -57,6 +57,7 @@ import type {
 	BackendCacheVerdict,
 	BackendCompletionTimings,
 	CacheCallBaseline,
+	CacheCallTransport,
 	CacheRequestFingerprint,
 } from "../core/cache-telemetry.js";
 import { buildCacheCallObservation, uncachedPrefillTokens } from "../core/cache-telemetry.js";
@@ -147,7 +148,14 @@ import {
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import type { AgentMessage, AnthropicResponseObservation, CodexConfiguration, Usage } from "../engine/types.js";
+import { cacheLifetimeSeconds } from "../engine/cache-keepalive.js";
+import type {
+	AgentMessage,
+	AnthropicResponseObservation,
+	CodexConfiguration,
+	CodexTransportObservation,
+	Usage,
+} from "../engine/types.js";
 import { capabilityArgumentShape, capabilityStarterArgs } from "../tools/gateway/guidance.js";
 import { TOOL_PLANES } from "../tools/policy.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -406,6 +414,7 @@ export interface TurnContext {
 		usage: Usage,
 		backend?: BackendCompletionTimings,
 		anthropicResponse?: AnthropicResponseObservation,
+		transport?: CodexTransportObservation,
 	): Record<string, unknown>;
 	/** Record the settled run's cache summary for /context. */
 	noteRunCacheSummary(messages: ReadonlyArray<AgentMessage>, runFirstCallVerdict: BackendCacheVerdict | null): void;
@@ -664,16 +673,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						input?: number;
 						cacheRead?: number;
 						cacheWrite?: number;
-						observation?: { requestFingerprint?: CacheRequestFingerprint };
+						observation?: { requestFingerprint?: CacheRequestFingerprint; transport?: CacheCallTransport };
 					};
 				} | null;
 				const prior = payload?.promptCache;
 				const endedAt = Date.parse(entry.timestamp);
 				if (typeof prior?.input === "number" && Number.isFinite(endedAt)) {
+					const transportRequest = prior.observation?.transport?.request;
 					cacheCallBaseline = {
 						inclusiveInputTokens: prior.input + (prior.cacheRead ?? 0) + (prior.cacheWrite ?? 0),
 						endedAt,
 						...(prior.observation?.requestFingerprint ? { requestFingerprint: prior.observation.requestFingerprint } : {}),
+						...(transportRequest ? { transportRequest } : {}),
 					};
 				}
 				break;
@@ -3204,6 +3215,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			usage: Usage,
 			backend?: BackendCompletionTimings,
 			anthropicResponse?: AnthropicResponseObservation,
+			transport?: CodexTransportObservation,
 		): Record<string, unknown> {
 			// Per-call prompt-cache record (T3.2) keeps normalized provider usage
 			// beside any timings captured from the server response. The run's first
@@ -3231,6 +3243,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const replayTruncationHash =
 				truncated.length > 0 ? createHash("sha256").update(JSON.stringify(truncated)).digest("hex") : undefined;
 			const now = Date.now();
+			// #423: the lifetime the keepalive would have refreshed against is the one idle is judged by.
+			const model = state.runtime?.agent.state.model;
+			const lifetimeSeconds = model ? cacheLifetimeSeconds(model, undefined) : undefined;
 			const observation = buildCacheCallObservation(
 				{ input, cacheRead, cacheWrite },
 				cacheCallBaseline,
@@ -3245,6 +3260,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							...(replayTruncationHash === undefined ? {} : { replayTruncationHash }),
 						}
 					: undefined,
+				{
+					ttlMs: lifetimeSeconds === undefined ? null : lifetimeSeconds * 1000,
+					...(transport
+						? {
+								transport: {
+									mode: transport.mode,
+									request: transport.request,
+									...(transport.reason ? { reason: transport.reason } : {}),
+									...(transport.recovery ? { recovery: true } : {}),
+								},
+							}
+						: {}),
+				},
 			);
 			// #423: named provider misses outrank host attribution; pending diagnostics preserve no-break.
 			const messageStart = anthropicResponse?.messageStart;
@@ -3284,6 +3312,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				inclusiveInputTokens: observation.inclusiveInputTokens,
 				endedAt: now,
 				...(observation.requestFingerprint ? { requestFingerprint: observation.requestFingerprint } : {}),
+				...(observation.transport ? { transportRequest: observation.transport.request } : {}),
 			};
 			const promptCache: Record<string, unknown> = {
 				input,

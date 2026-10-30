@@ -5,7 +5,7 @@
  * append advances `state.lastTurnId`.
  */
 
-import type { BackendCompletionTimings, CacheCallObservation } from "../core/cache-telemetry.js";
+import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { PackageIdentity } from "../core/package-identity.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
@@ -75,6 +75,7 @@ export interface TurnPersistenceDeps {
 		usage: Usage,
 		backend?: BackendCompletionTimings,
 		anthropicResponse?: AnthropicResponseObservation,
+		transport?: CodexTransportObservation,
 	) => Record<string, unknown>;
 	/**
 	 * Prompt-side tokens the live context accounting holds for the turn in
@@ -421,16 +422,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
 			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-			const promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse);
-			if (transport) {
-				const observation = promptCache.observation as CacheCallObservation;
-				observation.transport = {
-					mode: transport.mode,
-					request: transport.request,
-					...(transport.reason ? { reason: transport.reason } : {}),
-				};
-			}
-			payload.promptCache = promptCache;
+			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse, transport);
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = appendTurn(deps.session, {

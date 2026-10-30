@@ -71,7 +71,24 @@ export interface CacheCallObservation {
 	comparisonId?: string;
 	changedSection?: string;
 	requestFingerprint?: CacheRequestFingerprint;
-	transport?: { mode: "websocket" | "sse" | "http" | "unknown"; request: "full" | "delta" | "unknown"; reason?: string };
+	transport?: CacheCallTransport;
+}
+
+/** How the call physically reached the provider, as persisted on the observation (#423). */
+export interface CacheCallTransport {
+	mode: "websocket" | "sse" | "http" | "unknown";
+	request: "full" | "delta" | "unknown";
+	reason?: string;
+}
+
+/** What the route and the transport knew about the call before its usage arrived (#423). */
+export interface CacheCallRoute {
+	/** The cache lifetime the route declares, null when none is known. */
+	ttlMs: number | null;
+	transport?: CacheCallTransport & {
+		/** The call reset its transport session before sending, so its full frame is a recovery, not an append. */
+		recovery?: boolean;
+	};
 }
 
 export interface CacheRequestFingerprint {
@@ -86,6 +103,8 @@ export interface CacheCallBaseline {
 	inclusiveInputTokens: number;
 	endedAt: number;
 	requestFingerprint?: CacheRequestFingerprint;
+	/** How the previous call reached the provider; a full frame after a delta is a continuation reset. */
+	transportRequest?: CacheCallTransport["request"];
 }
 
 /** #423: keep provider usage unchanged and compare only within one context generation. */
@@ -95,6 +114,7 @@ export function buildCacheCallObservation(
 	hostColdReasons: readonly string[],
 	now: number,
 	requestFingerprint?: CacheRequestFingerprint,
+	route?: CacheCallRoute,
 ): CacheCallObservation {
 	const hostCauses: Readonly<Record<string, CacheBreakCause>> = {
 		model_changed: "model_changed",
@@ -125,7 +145,23 @@ export function buildCacheCallObservation(
 							: undefined
 			: undefined;
 	const reason = hostColdReasons.find((candidate) => hostCauses[candidate] !== undefined);
-	const cause = fingerprintCause ?? (reason === undefined ? undefined : hostCauses[reason]);
+	const hostCause = fingerprintCause ?? (reason === undefined ? undefined : hostCauses[reason]);
+	const idleMs = previous === null ? null : Math.max(0, now - previous.endedAt);
+	const ttlMs = route?.ttlMs !== undefined && route.ttlMs !== null && route.ttlMs > 0 ? route.ttlMs : null;
+	// A host-known change is certain; the entry outliving its lifetime is likely; a full frame after a delta or a
+	// transport recovery means the continuation was rebuilt, which is all the host can say about the bytes it sent.
+	const idleExpired = idleMs !== null && ttlMs !== null && idleMs >= ttlMs;
+	const transportReset =
+		route?.transport?.request === "full" && (previous?.transportRequest === "delta" || route.transport.recovery === true);
+	const cause: CacheBreakCause | undefined =
+		hostCause ?? (idleExpired ? "idle_expiry" : transportReset ? "transport_reset" : undefined);
+	const transport = route?.transport
+		? {
+				mode: route.transport.mode,
+				request: route.transport.request,
+				...(route.transport.reason ? { reason: route.transport.reason } : {}),
+			}
+		: undefined;
 	return {
 		expectedCachedTokens: expected,
 		cacheReadTokens: usage.cacheRead,
@@ -133,9 +169,10 @@ export function buildCacheCallObservation(
 		inclusiveInputTokens: usage.input + usage.cacheRead + usage.cacheWrite,
 		shortfallTokens: shortfall,
 		cause: broke ? (cause ?? "unknown") : "none",
-		causeBasis: broke && cause !== undefined ? "host" : "inferred",
+		causeBasis: broke && cause !== undefined && cause !== "idle_expiry" ? "host" : "inferred",
 		...(requestFingerprint ? { requestFingerprint } : {}),
-		idleMs: previous === null ? null : Math.max(0, now - previous.endedAt),
-		ttl: { ms: null, source: "unknown" },
+		idleMs,
+		ttl: ttlMs === null ? { ms: null, source: "unknown" } : { ms: ttlMs, source: "declared" },
+		...(transport ? { transport } : {}),
 	};
 }

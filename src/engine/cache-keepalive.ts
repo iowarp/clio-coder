@@ -55,35 +55,56 @@ function route(ttlSeconds: number | undefined, outputTokens: number): CacheKeepa
 		: { ok: true, ttlMs, delayMs, outputTokens };
 }
 
+/** The lifetime of a cached prefix on this route under `retention`, in seconds, or undefined when none is known. */
+function lifetimeSeconds(model: Model<Api>, retention: "short" | "long"): number | undefined {
+	const declared = model.promptCache?.[retention];
+	switch (model.api) {
+		case "openai-responses": {
+			const compat = (model as Model<"openai-responses">).compat;
+			const extended = retention === "long" && compat?.supportsLongCacheRetention !== false;
+			return declared ?? (extended ? OPENAI_EXTENDED_CACHE_SECONDS : OPENAI_IN_MEMORY_CACHE_SECONDS);
+		}
+		case "openai-codex-responses":
+			// Measured on gpt-6-luna, 2026-10-30 (#423): the backend rejects prompt_cache_retention ("Unsupported
+			// parameter"), so Codex has no retention path and declares no lifetime; OpenAI's documented floor holds.
+			return OPENAI_IN_MEMORY_CACHE_SECONDS;
+		default:
+			return declared;
+	}
+}
+
+/**
+ * How long a cached prefix lives on `model`'s route for a main-turn request with `options`, in seconds. Undefined
+ * when caching is off for the request or the route declares no lifetime. The keepalive and the per-call cache
+ * telemetry read the same answer, so idle expiry is judged against the lifetime a refresh would have kept (#423).
+ */
+export function cacheLifetimeSeconds(model: Model<Api>, options: SimpleStreamOptions | undefined): number | undefined {
+	const retention = effectiveCacheRetention(model, options, "main") ?? "short";
+	return retention === "none" ? undefined : lifetimeSeconds(model, retention);
+}
+
 /** Whether a keepalive can replay `request` with a bounded output, and how long its cache entry lives. */
 export function cacheKeepaliveRoute(request: CacheKeepaliveRequest): CacheKeepaliveRoute {
 	const { model, options } = request;
 	const retention = effectiveCacheRetention(model, options, "main") ?? "short";
 	if (retention === "none") return { ok: false, reason: "retention-none" };
-	const declared = model.promptCache?.[retention];
+	const lifetime = lifetimeSeconds(model, retention);
 	switch (model.api) {
 		case "anthropic-messages":
 			// Budget thinking needs max_tokens above its budget, so a one-token replay is rejected; adaptive has none.
 			if (options?.reasoning && (model as Model<"anthropic-messages">).compat?.forceAdaptiveThinking !== true)
 				return { ok: false, reason: "budget-thinking" };
-			return route(declared, 1);
-		case "openai-responses": {
-			const compat = (model as Model<"openai-responses">).compat;
-			if (compat?.supportsMaxOutputTokens === false) return { ok: false, reason: "output-uncapped" };
-			const extended = retention === "long" && compat?.supportsLongCacheRetention !== false;
-			return route(
-				declared ?? (extended ? OPENAI_EXTENDED_CACHE_SECONDS : OPENAI_IN_MEMORY_CACHE_SECONDS),
-				OPENAI_RESPONSES_MIN_OUTPUT_TOKENS,
-			);
-		}
+			return route(lifetime, 1);
+		case "openai-responses":
+			if ((model as Model<"openai-responses">).compat?.supportsMaxOutputTokens === false)
+				return { ok: false, reason: "output-uncapped" };
+			return route(lifetime, OPENAI_RESPONSES_MIN_OUTPUT_TOKENS);
 		case "openai-codex-responses":
-			// Measured on gpt-6-luna, 2026-10-30 (#423): the backend rejects prompt_cache_retention ("Unsupported
-			// parameter"), so Codex has no retention path; it accepts max_output_tokens, and the unmodified follow-up
-			// to a 16-token-capped request read 1280 of its 1408 prompt tokens from cache. Pi's adapter sends no cap,
-			// so the replay adds it to the body. The backend declares no lifetime, so OpenAI's documented floor holds.
-			return route(OPENAI_IN_MEMORY_CACHE_SECONDS, OPENAI_RESPONSES_MIN_OUTPUT_TOKENS);
+			// Codex accepts max_output_tokens (the 16-token-capped request's unmodified follow-up read 1280 of its
+			// 1408 prompt tokens from cache, 2026-10-30); Pi's adapter sends no cap, so the replay adds it to the body.
+			return route(lifetime, OPENAI_RESPONSES_MIN_OUTPUT_TOKENS);
 		default:
-			return route(declared, 1);
+			return route(lifetime, 1);
 	}
 }
 
