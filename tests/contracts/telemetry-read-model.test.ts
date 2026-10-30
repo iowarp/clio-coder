@@ -47,7 +47,7 @@ import {
 import { createLiveTelemetryModel } from "../../src/domains/observability/telemetry-live.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
-import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import {
 	absentRenderedOtherwise,
@@ -260,6 +260,19 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	ok(tampered.integrity.detail);
 	strictEqual(tampered.sealed, null);
 	strictEqual(tampered.trust.artifactIntegrity.state, "failed");
+
+	// A run with no journal imports its receipt under the same seal: a current one that fails keeps only the target.
+	const imported = (value: unknown) => {
+		writeReceipt(value);
+		const usage = loadRunTelemetrySource(stateDir, "run-evidence").records.find((record) => record.k === "run.usage");
+		return usage?.k === "run.usage" ? usage.data : undefined;
+	};
+	strictEqual(imported(receipt)?.usage.input.kind, "measured");
+	const failed = imported({ ...receipt, outcome: "failed" });
+	strictEqual(failed?.usage.input.kind, "unknown");
+	strictEqual(failed?.pricing.usd.kind, "unknown");
+	strictEqual(failed?.target.targetId, envelope.targetId);
+	strictEqual(imported({ ...receipt, integrity: undefined })?.usage.input.kind, "measured");
 });
 
 test("the timeline and why-stopped carry config, budget and quota records, spend marked as its calls were priced (#434 §8, §12.6)", () => {

@@ -5,6 +5,9 @@ import { assertSafeId } from "../../core/safe-id.js";
 import type { ReceiptEvidenceV1 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { readReceiptEvidence } from "../dispatch/receipt-facts.js";
+import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
+import type { ReceiptIntegrityOutcome } from "../evidence/trust-status.js";
+import { verifyReceiptIntegrityOutcome } from "../evidence/trust-status.js";
 import type { CallJournalRead } from "../observability/call-journal.js";
 import { readCallJournal, readCallJournalSync } from "../observability/call-journal.js";
 import type { OutOfTurnUsageRow } from "../observability/out-of-turn-usage.js";
@@ -13,6 +16,7 @@ import type { JournalSource, ProcessIdentity, SessionSource } from "../observabi
 import { journalSourceFromRead } from "../observability/read-model.js";
 import type { SessionEntry, SessionHeader } from "./entries.js";
 import { isSessionEntry, isSessionHeader } from "./entries.js";
+import type { LegacyReceiptSeal } from "./legacy-import.js";
 import { importLegacyReceipt, importLegacySession } from "./legacy-import.js";
 
 /**
@@ -32,7 +36,9 @@ type Io =
 	| { op: "text"; path: string }
 	| { op: "list"; path: string }
 	| { op: "exists"; path: string }
-	| { op: "mtime"; path: string };
+	| { op: "mtime"; path: string }
+	| { op: "runRow"; ledger: string; runId: string };
+type FileIo = Exclude<Io, { op: "runRow" }>;
 type Load<T> = Generator<Io, T, unknown>;
 
 function* journal(directory: string, file: "calls.jsonl" | "events.ndjson"): Load<CallJournalRead> {
@@ -49,12 +55,16 @@ function* list(path: string): Load<string[] | null> {
 function* exists(path: string): Load<boolean> {
 	return (yield { op: "exists", path }) as boolean;
 }
+/** The run's `runs.json` row, read once per load and only when a receipt needs it; null when the ring holds none. */
+function* runRow(stateDir: string, runId: string): Load<Record<string, unknown> | null> {
+	return (yield { op: "runRow", ledger: join(stateDir, "runs.json"), runId }) as Record<string, unknown> | null;
+}
 /** Last write time in epoch ms; null when the file cannot be stat'ed. */
 function* mtime(path: string): Load<number | null> {
 	return (yield { op: "mtime", path }) as number | null;
 }
 
-function performSync(io: Io): unknown {
+function performSync(io: FileIo): unknown {
 	switch (io.op) {
 		case "journal":
 			return readCallJournalSync(io.directory, io.file);
@@ -84,7 +94,7 @@ function performSync(io: Io): unknown {
 	}
 }
 
-async function performAsync(io: Io): Promise<unknown> {
+async function performAsync(io: FileIo): Promise<unknown> {
 	switch (io.op) {
 		case "journal":
 			return readCallJournal(io.directory, io.file);
@@ -106,13 +116,35 @@ async function performAsync(io: Io): Promise<unknown> {
 }
 
 /** `texts` keeps each file read once across one load, such as the machine-wide out-of-turn store. */
+/** A run ledger's rows by id; an unreadable or torn ledger holds none, so each receipt verifies on its seal alone. */
+function runRowsOf(text: unknown): Map<string, Record<string, unknown>> {
+	let parsed: unknown = null;
+	try {
+		parsed = typeof text === "string" ? JSON.parse(text) : null;
+	} catch {
+		// A torn ledger authenticates no receipt; each reads as one whose row the ring evicted.
+		parsed = null;
+	}
+	const rows = new Map<string, Record<string, unknown>>();
+	if (Array.isArray(parsed))
+		for (const row of parsed)
+			if (row && typeof row === "object" && typeof (row as { id?: unknown }).id === "string")
+				rows.set((row as { id: string }).id, row as Record<string, unknown>);
+	return rows;
+}
+
 function runSync<T>(load: Load<T>, texts?: Map<string, unknown>): T {
+	const ledgers = new Map<string, Map<string, Record<string, unknown>>>();
 	let step = load.next();
 	while (!step.done) {
 		let value: unknown;
 		try {
 			const io = step.value;
-			if (texts && io.op === "text") {
+			if (io.op === "runRow") {
+				const rows = ledgers.get(io.ledger) ?? runRowsOf(performSync({ op: "text", path: io.ledger }));
+				ledgers.set(io.ledger, rows);
+				value = rows.get(io.runId) ?? null;
+			} else if (texts && io.op === "text") {
 				if (!texts.has(io.path)) texts.set(io.path, performSync(io));
 				value = texts.get(io.path);
 			} else value = performSync(io);
@@ -126,11 +158,17 @@ function runSync<T>(load: Load<T>, texts?: Map<string, unknown>): T {
 }
 
 async function runAsync<T>(load: Load<T>): Promise<T> {
+	const ledgers = new Map<string, Map<string, Record<string, unknown>>>();
 	let step = load.next();
 	while (!step.done) {
 		let value: unknown;
 		try {
-			value = await performAsync(step.value);
+			const io = step.value;
+			if (io.op === "runRow") {
+				const rows = ledgers.get(io.ledger) ?? runRowsOf(await performAsync({ op: "text", path: io.ledger }));
+				ledgers.set(io.ledger, rows);
+				value = rows.get(io.runId) ?? null;
+			} else value = await performAsync(io);
 		} catch (error) {
 			step = load.throw(error);
 			continue;
@@ -205,8 +243,28 @@ function* receiptSource(stateDir: string, runId: string): Load<JournalSource | n
 		// A torn receipt holds no totals to keep; the run stays unknown coverage.
 		return null;
 	}
-	const record = importLegacyReceipt(runId, value);
+	const record = importLegacyReceipt(runId, value, yield* receiptSeal(stateDir, runId, value));
 	return record ? { present: true, records: [record], modes: [], skipped: 0, damaged: 0 } : null;
+}
+
+/**
+ * The receipt's seal through the verifier every receipt reader uses, against its ledger row when the ring still holds
+ * it. A retired seal or none at all is a legacy receipt this build cannot check; only a current seal that fails to
+ * verify reads as failed (#434).
+ */
+function* receiptSeal(stateDir: string, runId: string, value: unknown): Load<LegacyReceiptSeal> {
+	if (!value || typeof value !== "object" || (value as { integrity?: unknown }).integrity === undefined) return "legacy";
+	let outcome: ReceiptIntegrityOutcome;
+	try {
+		outcome = verifyReceiptIntegrityOutcome(
+			value as RunReceipt,
+			(yield* runRow(stateDir, runId)) as unknown as RunEnvelope | null,
+		);
+	} catch {
+		// A receipt the verifier cannot even read is no evidence of what it claims.
+		return "failed";
+	}
+	return outcome.ok ? "verified" : outcome.retired ? "legacy" : "failed";
 }
 
 function* loadRun(stateDir: string, runId: string): Load<JournalSource> {

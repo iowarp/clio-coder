@@ -220,14 +220,24 @@ function receiptPricing(raw: Record<string, unknown>): Pick<RunUsage, "pricing" 
  * receipt never shows which calls it folded, so its call counts stay unknown coverage and a sum over it reads as a
  * lower bound. Null when the value is not a receipt for this run.
  */
-export function importLegacyReceipt(runId: string, value: unknown): TelemetryRecord | null {
+/**
+ * What a receipt's seal says about its totals: `verified` and `legacy` (a retired seal or none, which this build cannot
+ * check) import as recorded; a current seal that `failed` keeps only the target, its counts and cost unknown (#434).
+ */
+export type LegacyReceiptSeal = "verified" | "legacy" | "failed";
+
+export function importLegacyReceipt(runId: string, value: unknown, seal: LegacyReceiptSeal): TelemetryRecord | null {
 	if (!value || typeof value !== "object") return null;
 	const raw = value as Record<string, unknown>;
 	const endedAt = typeof raw.endedAt === "string" ? Date.parse(raw.endedAt) : Number.NaN;
 	if (raw.runId !== runId || !Number.isFinite(endedAt)) return null;
 	const external = raw.externalTelemetry;
+	const trusted = seal !== "failed";
 	const verified =
-		!external || typeof external !== "object" || (external as Record<string, unknown>).tokenUsage === "provider-reported";
+		trusted &&
+		(!external ||
+			typeof external !== "object" ||
+			(external as Record<string, unknown>).tokenUsage === "provider-reported");
 	const token = (field: unknown) => (verified ? receiptCount(field) : legacyUnknown);
 	const usage: CallUsage = {
 		input: token(raw.inputTokenCount),
@@ -237,7 +247,7 @@ export function importLegacyReceipt(runId: string, value: unknown): TelemetryRec
 		cacheWrite1h: token(raw.cacheWrite1hTokenCount),
 		reasoning: token(raw.reasoningTokenCount),
 	};
-	const missingTokenCalls = receiptCount(raw.missingTokenCalls);
+	const missingTokenCalls = trusted ? receiptCount(raw.missingTokenCalls) : legacyUnknown;
 	const data: RunUsage = {
 		source: "legacy-import",
 		scope: "run",
@@ -248,7 +258,9 @@ export function importLegacyReceipt(runId: string, value: unknown): TelemetryRec
 				? "complete"
 				: "partial",
 		callCountCoverage: "unknown",
-		...receiptPricing(raw),
+		...(trusted
+			? receiptPricing(raw)
+			: { pricing: { usd: legacyUnknown, pricedBy: "none" as const }, pricingCoverage: "unknown" as const }),
 		target: {
 			targetId: text(raw.targetId) ?? "unknown",
 			runtimeId: text(raw.runtimeId) ?? "unknown",
@@ -258,7 +270,7 @@ export function importLegacyReceipt(runId: string, value: unknown): TelemetryRec
 		},
 		usage,
 		totalTokens: token(raw.tokenCount),
-		apiCalls: receiptCount(raw.apiCalls),
+		apiCalls: trusted ? receiptCount(raw.apiCalls) : legacyUnknown,
 		missingTokenCalls,
 	};
 	const sessionId = text(raw.sessionId);
