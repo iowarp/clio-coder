@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { telemetryContext } from "../../src/core/telemetry/context.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
-import { beginCall, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import { abandonedSettlement, beginCall, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import { DELTA_GAP_BOUNDS_MS, validPayload } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
@@ -273,4 +273,32 @@ test("research capture keeps a request body and only allowlisted headers, and st
 		deep.release();
 		standard.release();
 	}
+});
+
+test("an attempt whose stages never reached its send keeps no interrupted-call estimate (R2, L2)", () => {
+	const call = beginCall(
+		{
+			label: "main",
+			target: {
+				targetId: "t",
+				runtimeId: "r",
+				api: "a",
+				requestedModel: "m",
+				reportedModel: { kind: "unknown", reason: "not-observed" },
+			},
+			roundKind: "normal",
+			toolChoice: "auto",
+		},
+		{ sessionId: "unsent-estimate", label: "main" },
+	);
+	call.stage("admission", "start");
+	const settled = call.settle({
+		...abandonedSettlement(true, "operator_cancel"),
+		interruptedEstimate: {
+			input: { kind: "estimated", value: 300_000, method: "prompt-side-only" },
+			output: { kind: "estimated", value: 0, method: "chars/4" },
+		},
+	});
+	strictEqual(settled?.disposition, "never_sent");
+	strictEqual(settled?.interruptedEstimate, undefined, "never-sent is not spent");
 });
