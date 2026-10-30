@@ -77,12 +77,6 @@ export interface TurnPersistenceDeps {
 		transport?: CodexTransportObservation,
 	) => Record<string, unknown>;
 	/**
-	 * Prompt-side tokens the live context accounting holds for the turn in
-	 * flight. Used only to record what an interrupted call is known to have
-	 * spent when the provider reported no usage at all; 0 when unknown.
-	 */
-	promptSideTokens: () => number;
-	/**
 	 * Second sink for the same rows, mirroring the operator's own turns into the
 	 * trace database beside the runs this session dispatched. Optional: absent
 	 * observability leaves every append exactly as it was. The mirror is

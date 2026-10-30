@@ -282,7 +282,6 @@ test("an unknown dynamic tool reads by its persisted action class, live and on r
 		consumePersistedEcho: () => false,
 		removeQueuedMirrorEntry: () => {},
 		promptCachePayloadForAssistant: () => ({}),
-		promptSideTokens: () => 0,
 	});
 	const args = { stage: "staging" };
 	// Enriched the way the turn runtime enriches every end event it forwards.
@@ -351,7 +350,6 @@ test("a refused skill load reads the same live and on replay, from its persisted
 		consumePersistedEcho: () => false,
 		removeQueuedMirrorEntry: () => {},
 		promptCachePayloadForAssistant: () => ({}),
-		promptSideTokens: () => 0,
 	});
 	const args = { scope: "skills", name: "tech-spec" };
 	const result = {

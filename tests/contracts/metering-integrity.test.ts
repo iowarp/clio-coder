@@ -383,7 +383,6 @@ describe("contracts/metering integrity", () => {
 				consumePersistedEcho: () => false,
 				removeQueuedMirrorEntry: () => undefined,
 				promptCachePayloadForAssistant: () => ({}),
-				promptSideTokens: () => 326_637,
 				observability,
 			});
 			persistence.appendAssistantTurn(message);

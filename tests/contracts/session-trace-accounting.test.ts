@@ -52,7 +52,6 @@ it("session traces retain known subtotals, call coverage, and pricing uncertaint
 				consumePersistedEcho: () => false,
 				removeQueuedMirrorEntry: () => {},
 				promptCachePayloadForAssistant: () => ({}),
-				promptSideTokens: () => 0,
 				observability: { recordSessionTurn: (trace) => store.recordSessionTurn(trace) } as ObservabilityContract,
 			});
 			const interrupted = persistence.appendSubmittedUserTurn(runtime, "interrupted", undefined, false);

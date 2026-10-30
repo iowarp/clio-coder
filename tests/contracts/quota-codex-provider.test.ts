@@ -318,7 +318,6 @@ it("captures stream quota without a request and keeps target/account evidence di
 		consumePersistedEcho: () => false,
 		removeQueuedMirrorEntry: () => undefined,
 		promptCachePayloadForAssistant: () => ({}),
-		promptSideTokens: () => 0,
 	});
 	persistence.appendAssistantTurn(result);
 	const observed = observedCodexQuota("stream-test", account, Date.parse(quota.observedAt));

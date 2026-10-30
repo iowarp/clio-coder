@@ -1656,7 +1656,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
 		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
 			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
-		promptSideTokens: () => context.promptSideTokens(),
 		observability: deps.observability,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();

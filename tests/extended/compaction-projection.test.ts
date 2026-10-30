@@ -280,7 +280,6 @@ describe("compaction working-set provider boundary", () => {
 			consumePersistedEcho: (text) => text === "Continue.",
 			removeQueuedMirrorEntry: () => {},
 			promptCachePayloadForAssistant: () => ({}),
-			promptSideTokens: () => 0,
 		});
 		persistence.appendQueuedUserTurn({ role: "user", content: "Continue.", timestamp: Date.now() } as AgentMessage);
 		match(JSON.stringify(state.runtime?.agent.state.messages), /Active user instructions \(verbatim\):\\nFix the seed/);
