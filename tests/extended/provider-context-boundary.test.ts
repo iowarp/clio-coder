@@ -13,7 +13,10 @@ import {
 import { findEngineEnvKeys, getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import type { AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
-import { assistantSessionPayload } from "../../src/session-control/chat-loop-messages.js";
+import {
+	assistantSessionPayload,
+	estimatedUsageForInterruptedTurn,
+} from "../../src/session-control/chat-loop-messages.js";
 
 function bashEntry(
 	id: string,
@@ -210,4 +213,19 @@ it("preserves mid-conversation system messages through Clio's native completions
 		payload.messages.filter(({ role }) => role === "system").map(({ content }) => content),
 		["base policy", "updated policy"],
 	);
+});
+
+it("persisted assistant usage distinguishes unsent calls from measured zero (#434)", () => {
+	const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } };
+	const base = { role: "assistant", content: [{ type: "text", text: "cancelled" }], stopReason: "aborted", usage };
+	for (const marker of [{ callInvoked: false }, { usage: { ...usage, callInvoked: false } }]) {
+		const message = { ...base, ...marker, estimatedUsage: { totalTokens: 10 } } as unknown as AgentMessage;
+		const payload = JSON.parse(JSON.stringify(assistantSessionPayload(message, null)));
+		strictEqual(payload.usage, null);
+		strictEqual(payload.callInvoked, false);
+		strictEqual(payload.estimatedUsage, undefined);
+		strictEqual(estimatedUsageForInterruptedTurn(message, 100), null);
+	}
+	const reported = { ...base, stopReason: "stop", usage: { ...usage, callInvoked: true, usageObserved: true } };
+	deepStrictEqual(assistantSessionPayload(reported as unknown as AgentMessage, null).usage, reported.usage);
 });
