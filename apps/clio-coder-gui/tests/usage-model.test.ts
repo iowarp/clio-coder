@@ -13,15 +13,43 @@ const report = (facts: UsageReport["facts"], opportunities: UsageReport["opportu
 	opportunities,
 });
 
+/** A read-model quantity as the CLI emits it; `known: false` is a fact with no measured part. */
+const quantity = (display: string, measured: number, unknownCount = 0, known = true) => ({
+	fact: {
+		measured,
+		estimated: 0,
+		unknownCount,
+		absentCount: 0,
+		coverage: { measured: known ? 1 : 0, estimated: 0, unknown: unknownCount },
+	},
+	display,
+	ref: "repo:all-30d#total",
+});
+const pricedBy = { provider: 0, "target-rates": 2, catalog: 0, free: 0, none: 0 };
 const tokens = {
-	apiCalls: 12,
-	input: 700,
-	output: 500,
-	cacheRead: 1000,
-	cacheWrite: 0,
-	reasoningTokens: 250,
-	totalTokens: 2450,
-	costUsd: 0.02,
+	name: "telemetry-tokens",
+	values: {
+		tokens: {
+			input: quantity("700", 700),
+			output: quantity("500", 500),
+			cacheRead: quantity("1,000", 1000),
+			cacheWrite: quantity("0", 0),
+			cacheWrite1h: quantity("0", 0),
+			reasoning: quantity("250", 250),
+			prompt: quantity("1,700", 1700),
+			total: quantity("2,200", 2200),
+		},
+	},
+};
+const cost = (groupBy: "label" | "model", total: Record<string, unknown>, groups: Record<string, unknown>[] = []) => ({
+	name: "telemetry-cost",
+	values: { groupBy, report: { kind: "cost", scope: { repo: "all", days: 30 }, groupBy, total, groups } },
+});
+const exactTotal = {
+	calls: quantity("12", 12),
+	tokens: quantity("2,200", 2200),
+	usd: quantity("$0.02", 0.02),
+	pricedBy,
 };
 
 test("the window is stated as the report's own two dates", () => {
@@ -35,8 +63,8 @@ test("the window is stated as the report's own two dates", () => {
 	assert.match(instants.window, /^from \d{4}-\d{2}-\d{2} through \d{4}-\d{2}-\d{2}$/u);
 });
 
-test("five token bars compare with one another and carry the caveat", () => {
-	const view = usageView(report([{ name: "tokens", values: tokens }]));
+test("five token bars compare the read model's fields with one another and carry the caveat", () => {
+	const view = usageView(report([tokens]));
 	assert.deepEqual(
 		view.bars.map((bar) => bar.label),
 		["Input", "Output", "Cache read", "Cache write", "Reasoning"],
@@ -54,38 +82,47 @@ test("five token bars compare with one another and carry the caveat", () => {
 	assert.match(view.barsCaveat, /not additive percentages/u);
 });
 
-test("a field with nothing observed reads as not recorded, and zero reads as zero", () => {
-	const view = usageView(
-		report([{ name: "tokens", values: { ...tokens, cacheWrite: 0, reasoningTokens: null, knownSubtotals: true } }]),
-	);
-	const by = new Map(view.bars.map((bar) => [bar.label, bar.value]));
-	assert.equal(by.get("Cache write"), "0");
-	assert.equal(by.get("Reasoning"), "not recorded");
-	assert.match(String(view.knownSubtotals), /known subtotals/u);
-});
-
-test("the headline includes worker totals and marks partial estimated costs", () => {
+test("a field with nothing observed shows the server's word, and a lower bound draws its known part", () => {
 	const view = usageView(
 		report([
-			{ name: "tokens", values: tokens },
 			{
-				name: "all-recorded-tokens",
+				name: "telemetry-tokens",
 				values: {
-					knownSubtotal: 2850,
-					apiCalls: 14,
-					missingTokenCalls: 1,
-					costDisplay: "~$0.03 +?",
-					cost: { knownUsd: 0.03, calls: 14, hasEstimated: true, hasUnknown: true },
+					tokens: {
+						...tokens.values.tokens,
+						cacheRead: quantity("≥1,000 (1 call unknown)", 1000, 1),
+						reasoning: quantity("unknown (2 calls unknown)", 0, 2, false),
+					},
 				},
 			},
 		]),
 	);
+	const by = new Map(view.bars.map((bar) => [bar.label, bar]));
+	assert.equal(by.get("Cache write")?.value, "0");
+	assert.equal(by.get("Reasoning")?.value, "unknown (2 calls unknown)");
+	assert.equal(by.get("Reasoning")?.share, 0);
+	assert.equal(by.get("Cache read")?.share, 1);
+	assert.match(view.barsCaveat, /known subtotals/u);
+});
+
+test("the headline reads the read model's window totals and names an unpriced remainder", () => {
+	const view = usageView(
+		report([
+			cost("label", {
+				calls: quantity("≥14 (1 call unknown)", 14, 1),
+				tokens: quantity("≥2,850 (1 call unknown)", 2850, 1),
+				usd: quantity("$0.03 +?", 0.03, 1),
+				pricedBy: { ...pricedBy, none: 1 },
+			}),
+		]),
+	);
 	const by = new Map(view.headline.map((figure) => [figure.label, figure]));
-	assert.equal(by.get("Tokens")?.value, "2,850");
-	assert.equal(by.get("Tokens")?.note, "14 API calls");
-	assert.equal(by.get("Cost")?.value, "~$0.03 +?");
+	assert.equal(by.get("Tokens")?.value, "≥2,850 (1 call unknown)");
+	assert.equal(by.get("Tokens")?.note, "API calls: ≥14 (1 call unknown)");
+	assert.equal(by.get("Cost")?.value, "$0.03 +?");
 	assert.equal(by.get("Cost")?.note, "Known subtotal; some calls are unpriced");
-	assert.match(view.knownSubtotals ?? "", /1 recorded calls are missing token usage/u);
+	assert.match(view.knownSubtotals ?? "", /known subtotals/u);
+	assert.equal(usageView(report([cost("label", exactTotal)])).knownSubtotals, null);
 });
 
 test("a missing store reads as a dash and says what a dash means", () => {
@@ -104,33 +141,40 @@ test("a missing store reads as a dash and says what a dash means", () => {
 	assert.match(view.missingStores[0] as string, /\/home\/clio\/state\/sessions/u);
 });
 
-test("the origin split appears only when something out of turn was recorded", () => {
-	const plain = usageView(report([{ name: "tokens", values: tokens }]));
-	assert.deepEqual(plain.origins, []);
-	assert.match(plain.originsNote, /every recorded call belongs to a turn/u);
-
-	const split = usageView(report([{ name: "tokens", values: { ...tokens, turns: 9, sideQuestions: 2, handoffs: 1 } }]));
-	assert.deepEqual(
-		split.origins.map((origin) => `${origin.label}:${origin.value}`),
-		["Conversation and compaction calls:9", "Side questions:2", "Handoffs:1"],
-	);
-	assert.match(split.originsNote, /several conversation calls/u);
-});
-
-test("models and skills keep the report's order and nothing else is dropped", () => {
+test("call origins are the label report's groups, in the server's words", () => {
+	assert.match(usageView(report([])).originsNote, /were not recorded/u);
 	const view = usageView(
 		report([
-			{ name: "tokens", values: tokens },
-			{ name: "model-usage", values: { attributedModelId: "big", totalTokens: 2000 } },
-			{ name: "model-usage", values: { attributedModelId: "small", totalTokens: 400 } },
+			cost("label", exactTotal, [
+				{ key: "btw", calls: quantity("1", 1), tokens: quantity("40", 40), usd: quantity("$0.00", 0), pricedBy },
+				{ key: "main", calls: quantity("9", 9), tokens: quantity("2,000", 2000), usd: quantity("$0.02", 0.02), pricedBy },
+				{
+					key: "worker",
+					calls: quantity("≥2 (1 call unknown)", 2, 1),
+					tokens: quantity("160", 160),
+					usd: quantity("$0.00", 0),
+					pricedBy,
+				},
+			]),
+		]),
+	);
+	assert.deepEqual(
+		view.origins.map((origin) => `${origin.label}:${origin.value}`),
+		["Side questions:1", "Conversation calls:9", "Worker run calls:≥2 (1 call unknown)"],
+	);
+	assert.match(view.originsNote, /sealed receipt/u);
+});
+
+test("skills keep the report's order, the read model's rows are claimed, and nothing else is dropped", () => {
+	const view = usageView(
+		report([
+			tokens,
+			cost("label", exactTotal),
+			cost("model", exactTotal),
 			{ name: "skill-activated", values: { skill: "map-codebase", activations: 2 } },
 			{ name: "skill-never-activated", values: { skill: "slurm-jobs" } },
 			{ name: "memory", values: { approved: 1, pending: 0 } },
 		]),
-	);
-	assert.deepEqual(
-		view.models.map((model) => model.values.attributedModelId),
-		["big", "small"],
 	);
 	assert.equal(view.skillsActivated.length, 1);
 	assert.deepEqual(view.skillsDormant, ["slurm-jobs"]);
@@ -138,6 +182,7 @@ test("models and skills keep the report's order and nothing else is dropped", ()
 		view.rest.map((fact) => fact.label),
 		["Memory"],
 	);
+	assert.deepEqual(view.tables, []);
 });
 
 test("an unknown fact still reads as words", () => {
@@ -157,10 +202,10 @@ test("a fact recorded many times is one bounded table, and one recorded once sta
 		facts: [
 			fact("memory", { approved: 0, pending: 2 }),
 			...Array.from({ length: 30 }, (_, index) =>
-				fact("session-cache", {
+				fact("session-recall", {
 					sessionId: `s${index}`,
-					uncachedPrefillTokens: null,
-					verdictCounts: { hot: 0, cold: index },
+					readmittedTokens: null,
+					recalls: { tool: 0, operator: index },
 				}),
 			),
 			fact("top-tool", { tool: "read", count: 173, a: 1, b: 2, c: 3, d: 4, e: 5 }),
@@ -172,11 +217,11 @@ test("a fact recorded many times is one bounded table, and one recorded once sta
 		view.rest.map((row) => row.name),
 		["memory"],
 	);
-	const cache = view.tables.find((table) => table.name === "session-cache");
-	assert.deepEqual(cache?.columns, ["Session ID", "Uncached prefill tokens", "Verdict counts"]);
-	assert.deepEqual([cache?.total, cache?.rows.length, cache?.omitted], [30, 24, 6]);
+	const recall = view.tables.find((table) => table.name === "session-recall");
+	assert.deepEqual(recall?.columns, ["Session ID", "Readmitted tokens", "Recalls"]);
+	assert.deepEqual([recall?.total, recall?.rows.length, recall?.omitted], [30, 24, 6]);
 	// Absent is not zero, and a nested record reads as words rather than JSON.
-	assert.deepEqual(cache?.rows[3], ["s3", "Not recorded", "hot 0 · cold 3"]);
+	assert.deepEqual(recall?.rows[3], ["s3", "Not recorded", "tool 0 · operator 3"]);
 	const tools = view.tables.find((table) => table.name === "top-tool");
 	assert.deepEqual([tools?.columns.length, tools?.omittedColumns, tools?.omitted], [6, 1, 0]);
 });

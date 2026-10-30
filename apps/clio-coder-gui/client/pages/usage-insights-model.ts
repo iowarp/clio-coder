@@ -1,5 +1,7 @@
 import type { UsageReport } from "../../contracts/reports.js";
-import { countText } from "../telemetry/quantity-model.js";
+import type { CostReportV1, Quantity } from "../../contracts/wire.js";
+import { countText, quantityParts } from "../telemetry/quantity-model.js";
+import { cacheReportsOf, costReportOf } from "./usage-model.js";
 
 export type UsageMetric = "calls" | "tokens" | "cost";
 export const USAGE_METRICS: ReadonlyArray<{ id: UsageMetric; label: string; description: string }> = [
@@ -13,103 +15,76 @@ export const USAGE_METRICS: ReadonlyArray<{ id: UsageMetric; label: string; desc
 ];
 
 export interface UsageAmount {
+	/** The amount bars scale by, a lower bound while `partial`; null when nothing is known or the kinds mix. */
 	value: number | null;
 	partial: boolean;
 	estimated: boolean;
 	label: string;
-	/** Server-rendered cost text; only the server interprets pricing (#434). Null for calls and tokens. */
-	display: string | null;
+	/** The canonical renderer's wording; the only text shown for the amount (#434). */
+	display: string;
 }
 export interface UsageModelInsight {
 	id: string;
 	model: string;
 	target: string;
-	sources: string[];
 	facts: UsageReport["facts"];
 	calls: UsageAmount;
 	tokens: UsageAmount;
 	cost: UsageAmount;
 }
 
-const number = (value: unknown): number | null =>
-	typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-const name = (value: unknown, fallback: string): string =>
-	typeof value === "string" && value.trim() ? value : fallback;
-const record = (value: unknown): Record<string, unknown> | null =>
-	value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-const text = (value: unknown): string | null => (typeof value === "string" && value.length > 0 ? value : null);
+type CostGroup = CostReportV1["groups"][number];
 
-function costOf(values: Record<string, unknown>): UsageAmount {
-	const cost = record(values.cost);
-	const estimated = cost?.hasEstimated === true;
-	const partial = cost?.hasUnknown === true || (number(values.unpricedRuns) ?? 0) > 0;
-	const amount = number(cost ? cost.knownUsd : (values.costUsd ?? values.knownCostUsd));
-	const value = cost?.calls === 0 || (partial && amount === 0) ? null : amount;
-	return {
-		value,
-		partial,
-		estimated,
-		display: text(values.costDisplay) ?? text(cost?.costDisplay),
-		label:
-			value === null
-				? partial
-					? "Unpriced"
-					: "Not recorded"
-				: `${estimated ? "Estimated" : cost ? (cost.allKnownFree === true ? "Known free" : "Reported") : "Pricing provenance unavailable"}${partial ? " · unpriced calls" : ""}`,
-	};
+function amountOf(quantity: Quantity, metric: UsageMetric, pricedBy: CostGroup["pricedBy"]): UsageAmount {
+	const parts = quantityParts(quantity);
+	const partial = parts.unknown > 0;
+	const estimated = parts.estimated > 0;
+	const { free, ...priced } = pricedBy;
+	const label =
+		metric === "calls"
+			? partial
+				? "Known subtotal · unknown call coverage"
+				: "Recorded calls"
+			: metric === "tokens"
+				? !parts.known
+					? "Missing usage"
+					: partial
+						? "Known subtotal · missing usage"
+						: "Recorded tokens"
+				: !parts.known
+					? partial
+						? "Unpriced"
+						: "Not recorded"
+					: `${estimated ? "Estimated" : free > 0 && Object.values(priced).every((count) => count === 0) ? "Known free" : "Reported"}${partial ? " · unpriced calls" : ""}`;
+	return { value: parts.amount, partial, estimated, label, display: quantity.display };
 }
 
-function amountsOf(values: Record<string, unknown>) {
-	const calls = number(values.apiCalls);
-	const missing = Math.max(number(values.missingTokenCalls) ?? 0, number(values.missingTokenRuns) ?? 0);
-	const partial = missing > 0 || values.knownSubtotals === true;
-	const total = number(values.totalTokens);
-	const tokens = total === 0 && missing > 0 && (calls === null || missing >= calls) ? null : total;
-	return {
-		calls: {
-			value: calls,
-			partial: false,
-			estimated: false,
-			display: null,
-			label: calls === null ? "Not recorded" : "Recorded calls",
-		},
-		tokens: {
-			value: tokens,
-			partial,
-			estimated: false,
-			display: null,
-			label: tokens === null ? "Missing usage" : partial ? "Known subtotal · missing usage" : "Recorded tokens",
-		},
-		cost: costOf(values),
-	};
+/** A model group's key is `<target>/<model>`; a target id holds no slash, while a model id may. */
+function identity(key: string): { target: string; model: string } {
+	const slash = key.indexOf("/");
+	return slash < 0
+		? { target: "Unknown target", model: key || "Unknown model" }
+		: { target: key.slice(0, slash) || "Unknown target", model: key.slice(slash + 1) || "Unknown model" };
 }
 
 /**
- * One row per source and model pair: the session's calls and the worker receipts for the same model stay two
- * rows, because adding their counts here would be a client total of two server facts (#434).
+ * One row per target and model, from the read model's model groups over the window: a model's session calls and its
+ * workers' runs are one fold on the server, so nothing here adds two rows (#434).
  */
 export function usageModelInsights(report: UsageReport): UsageModelInsight[] {
-	const models = new Map<string, UsageModelInsight>();
-	for (const fact of report.facts) {
-		if (fact.name !== "model-usage" && fact.name !== "worker-model-usage") continue;
-		const worker = fact.name === "worker-model-usage";
-		const target = name(worker ? fact.values.targetId : fact.values.providerId, "Unknown target");
-		const model = name(worker ? fact.values.modelId : fact.values.attributedModelId, "Unknown model");
-		const source = worker ? "Worker receipts" : "Session & side calls";
-		const id = JSON.stringify([target, model, source]);
-		const amounts = amountsOf(fact.values);
-		const existing = models.get(id);
-		if (!existing) models.set(id, { id, target, model, ...amounts, sources: [source], facts: [fact] });
-		else existing.facts.push(fact);
-	}
-	return [...models.values()];
+	const byModel = costReportOf(report, "model");
+	return (byModel?.groups ?? []).map((group) => ({
+		id: group.key,
+		...identity(group.key),
+		facts: [{ name: "telemetry-cost", values: group }],
+		calls: amountOf(group.calls, "calls", group.pricedBy),
+		tokens: amountOf(group.tokens, "tokens", group.pricedBy),
+		cost: amountOf(group.usd, "cost", group.pricedBy),
+	}));
 }
 
-export function usageAmountText(amount: UsageAmount, metric: UsageMetric): string {
-	if (metric === "cost") return amount.display ?? (amount.partial ? "Unpriced" : "Not recorded");
-	if (amount.value === null) return "Not recorded";
-	// A partial count is named by its label, never marked by a suffix the client invents.
-	return `${amount.estimated ? "~" : ""}${countText(amount.value)}`;
+export function usageAmountText(amount: UsageAmount): string {
+	return amount.display;
 }
 
 export function compareUsageModels(models: UsageModelInsight[], metric: UsageMetric) {
@@ -126,28 +101,30 @@ export function compareUsageModels(models: UsageModelInsight[], metric: UsageMet
 	return rows.map((row) => ({ ...row, width: max > 0 ? ((row[metric].value ?? 0) / max) * 100 : 0 }));
 }
 
-/** The report's own attributed API call count, the only denominator a share may use (#434). */
+/**
+ * The model groups' own total: the denominator comes from the report the shares come from, so they partition it
+ * (#434). Null unless the server measured that total exactly.
+ */
 export function attributedCalls(report: UsageReport): number | null {
-	const fact = report.facts.find((item) => item.name === "tokens");
-	return fact ? number(fact.values.apiCalls) : null;
+	const byModel = costReportOf(report, "model");
+	return byModel ? quantityParts(byModel.total.calls).exact : null;
 }
 
-/** Shares of the report's attributed calls; null until every row's count is known and the report names the total. */
+/** Shares of the model total; null until every row's count is exact and the rows partition the total. */
 export function usageCallShares(models: UsageModelInsight[], total: number | null) {
 	if (total === null || total <= 0) return null;
 	if (!models.length || models.some((row) => row.calls.value === null || row.calls.partial)) return null;
 	let offset = 0;
-	return {
-		total,
-		segments: models
-			.filter((row) => (row.calls.value ?? 0) > 0)
-			.map((row) => {
-				const share = (row.calls.value ?? 0) / total;
-				const segment = { id: row.id, model: row.model, target: row.target, calls: row.calls.value, share, offset };
-				offset += share;
-				return segment;
-			}),
-	};
+	const segments = models
+		.filter((row) => (row.calls.value ?? 0) > 0)
+		.map((row) => {
+			const share = (row.calls.value ?? 0) / total;
+			const segment = { id: row.id, model: row.model, target: row.target, calls: row.calls.value, share, offset };
+			offset += share;
+			return segment;
+		});
+	// A call that failed over to another model is one call in each group; such groups overlap and make no pie.
+	return offset > 1 + 1e-9 ? null : { total, segments };
 }
 
 export function filterUsageModels(
@@ -157,7 +134,7 @@ export function filterUsageModels(
 ): UsageModelInsight[] {
 	const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
 	return models.filter((row) => {
-		const text = [row.model, row.target, ...row.sources].join(" ").toLocaleLowerCase();
+		const text = [row.model, row.target].join(" ").toLocaleLowerCase();
 		const incomplete = [row.calls, row.tokens, row.cost].some((amount) => amount.value === null || amount.partial);
 		return terms.every((term) => text.includes(term)) && (coverage !== "incomplete" || incomplete);
 	});
@@ -165,24 +142,19 @@ export function filterUsageModels(
 
 /** Session prompt-cache telemetry is a separate observation, never another token or cost total. */
 export function usageCacheEvidence(report: UsageReport) {
-	const facts = report.facts.filter((fact) => fact.name === "session-cache");
+	const reports = cacheReportsOf(report);
 	return {
-		total: facts.length,
-		omitted: Math.max(0, facts.length - 24),
-		rows: facts.slice(0, 24).map((fact, index) => {
-			const values = fact.values;
-			const verdicts = record(values.verdictCounts);
-			const count = (value: unknown) => countText(number(value));
-			return {
-				key: `${index}:${name(values.sessionId, "unknown")}`,
-				session: name(values.sessionId, "Session not recorded"),
-				uncached: count(values.uncachedPrefillTokens),
-				reprocessed: count(values.reprefilledTokens),
-				breaks: count(values.cacheBreakCalls),
-				verdicts: ["hot", "partial", "cold", "small", "unknown"]
-					.map((verdict) => `${verdict}: ${count(verdicts?.[verdict])}`)
-					.join(" · "),
-			};
-		}),
+		total: reports.length,
+		omitted: Math.max(0, reports.length - 24),
+		rows: reports.slice(0, 24).map((cache) => ({
+			key: cache.sessionId,
+			session: cache.sessionId,
+			uncached: cache.uncachedPrefill.display,
+			reprocessed: cache.rePrefilled.display,
+			breaks: countText(cache.breaks.length),
+			verdicts: (["hot", "partial", "cold", "small", "unknown"] as const)
+				.map((verdict) => `${verdict}: ${countText(cache.verdicts[verdict])}`)
+				.join(" · "),
+		})),
 	};
 }

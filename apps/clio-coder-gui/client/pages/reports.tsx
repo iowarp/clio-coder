@@ -181,8 +181,8 @@ export function UsagePage({ client }: { client: Client }) {
 						</summary>
 						<p className="usage-chart-footnote">
 							Session and dispatch records are filtered to this workspace. Audit, evidence, and memory also include shared
-							installation records. Model rows combine disjoint session and worker sources; aggregate totals are never added
-							again.
+							installation records. Model rows are the server's one fold of sessions and their workers' runs per model; no
+							total is added again here.
 						</p>
 						<div className="usage-explore-controls">
 							<label>

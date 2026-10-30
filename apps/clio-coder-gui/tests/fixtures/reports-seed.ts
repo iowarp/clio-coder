@@ -14,7 +14,17 @@ const entries: SessionEntry[] = [
 		role: "assistant" as const,
 		turnId: `turn-${index}`,
 		payload: {
-			usage: { input: 7, output: 5, cacheRead: 10, cacheWrite: 0, reasoning: 2, totalTokens: 22, cost: { total: 0.01 } },
+			stopReason: "stop",
+			usage: {
+				input: 7,
+				output: 5,
+				cacheRead: 10,
+				cacheWrite: 0,
+				reasoning: 2,
+				totalTokens: 22,
+				cost: { total: 0.01 },
+				costProvenance: "estimated",
+			},
 		},
 	})),
 ];

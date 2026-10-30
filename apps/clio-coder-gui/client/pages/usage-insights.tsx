@@ -57,7 +57,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 							value={query}
 							onChange={(event) => setQuery(event.target.value)}
 							maxLength={256}
-							placeholder="Model, target or source"
+							placeholder="Model or target"
 						/>
 					</label>
 					<label>
@@ -116,12 +116,10 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 									</span>
 									<span className="usage-model-identity">
 										<strong>{row.model}</strong>
-										<small>
-											{row.target} · {row.sources.join(" + ")}
-										</small>
+										<small>{row.target}</small>
 									</span>
 									<span className="usage-model-amount">
-										<strong>{usageAmountText(row[metric], metric)}</strong>
+										<strong>{usageAmountText(row[metric])}</strong>
 										<small>{row[metric].label}</small>
 									</span>
 									<span
@@ -154,15 +152,13 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 								<Icon name="close" />
 							</button>
 						</header>
-						<p>
-							{selected.target} · {selected.sources.join(" + ")}
-						</p>
+						<p>{selected.target}</p>
 						<dl className="usage-model-measures">
 							{USAGE_METRICS.map((item) => (
 								<div key={item.id}>
 									<dt>{item.label}</dt>
 									<dd>
-										{usageAmountText(selected[item.id], item.id)}
+										{usageAmountText(selected[item.id])}
 										<small>{selected[item.id].label}</small>
 									</dd>
 								</div>

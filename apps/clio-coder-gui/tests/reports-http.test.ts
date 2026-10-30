@@ -14,15 +14,24 @@ test("usage JSON Lines bridge reports exact canonical workspace usage and distin
 		const path = `/api/workspaces/${workspace.id}/usage`;
 		const empty = await json(await h.request(path), UsageReport);
 		assert.ok(empty.facts.some((row) => row.name === "session-store-missing"));
-		assert.ok(!empty.facts.some((row) => row.name === "tokens"));
+		assert.ok(!empty.facts.some((row) => row.name.startsWith("telemetry-")));
 		await seedReports(h.home.path, h.home.env);
 		const report = await json(await h.request(path), UsageReport);
 		assert.equal(report.facts.find((row) => row.name === "sessions")?.values.value, 1);
-		const usage = report.facts.find((row) => row.name === "tokens")?.values;
-		assert.equal(usage?.apiCalls, 2);
-		assert.equal(usage?.totalTokens, 44);
-		assert.equal(usage?.costUsd, 0.02);
-		assert.equal(usage?.costDisplay, "~$0.02 est");
+		// Spend is the read model's, worded by the canonical renderer; the server only checked each row's shape (#434).
+		const spend = report.facts.find((row) => row.name === "telemetry-cost" && row.values.groupBy === "label")?.values
+			.report as { total: Record<"calls" | "tokens" | "usd", { display: string }> } | undefined;
+		assert.deepEqual(
+			[spend?.total.calls.display, spend?.total.tokens.display, spend?.total.usd.display],
+			["2", "44", "~$0.02 est"],
+		);
+		const fields = report.facts.find((row) => row.name === "telemetry-tokens")?.values.tokens as
+			| Record<string, { display: string }>
+			| undefined;
+		assert.deepEqual(
+			["input", "output", "cacheRead", "cacheWrite", "reasoning", "total"].map((key) => fields?.[key]?.display),
+			["14", "10", "20", "0", "4", "44"],
+		);
 		const foreign = join(h.home.path, "another-workspace");
 		await mkdir(foreign);
 		const other = await h.workspaces.open(foreign);

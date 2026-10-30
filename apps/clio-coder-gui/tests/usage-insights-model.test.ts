@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
 	attributedCalls,
 	usageAmountText,
+	usageCacheEvidence,
 	usageCallShares,
 	usageModelInsights,
 } from "../client/pages/usage-insights-model.js";
@@ -18,52 +19,74 @@ const report = (facts: UsageReport["facts"]): UsageReport => ({
 	opportunities: [],
 });
 
-test("a model's session calls and worker receipts stay two rows, never one client-side sum (#434)", () => {
+const quantity = (display: string, measured: number, unknownCount = 0) => ({
+	fact: {
+		measured,
+		estimated: 0,
+		unknownCount,
+		absentCount: 0,
+		coverage: { measured: 1, estimated: 0, unknown: unknownCount },
+	},
+	display,
+	ref: "repo:all-30d#calls",
+});
+const pricedBy = { provider: 0, "target-rates": 1, catalog: 0, free: 0, none: 0 };
+const group = (key: string, calls: ReturnType<typeof quantity>, tokens = quantity("100", 100)) => ({
+	key,
+	calls,
+	tokens,
+	usd: quantity("$0.01", 0.01),
+	pricedBy,
+});
+const byModel = (
+	total: ReturnType<typeof quantity>,
+	groups: ReturnType<typeof group>[],
+): UsageReport["facts"][number] => ({
+	name: "telemetry-cost",
+	values: {
+		groupBy: "model",
+		report: {
+			kind: "cost",
+			scope: { repo: "all", days: 30 },
+			groupBy: "model",
+			total: { calls: total, tokens: quantity("900", 900), usd: quantity("$0.03", 0.03), pricedBy },
+			groups,
+		},
+	},
+});
+
+test("a model's session calls and worker runs are one server row, read as the server wrote it (#434)", () => {
 	const models = usageModelInsights(
 		report([
-			{ name: "tokens", values: { apiCalls: 12, totalTokens: 900 } },
-			{
-				name: "model-usage",
-				values: { providerId: "anthropic", attributedModelId: "sonnet", apiCalls: 8, totalTokens: 600 },
-			},
-			{ name: "worker-model-usage", values: { targetId: "anthropic", modelId: "sonnet", apiCalls: 4, totalTokens: 300 } },
+			byModel(quantity("12", 12), [
+				group("anthropic/sonnet", quantity("12", 12), quantity("≥900 (1 call unknown)", 900, 1)),
+			]),
 		]),
 	);
 	assert.deepEqual(
-		models.map((row) => [row.sources[0], row.calls.value, row.tokens.value]),
-		[
-			["Session & side calls", 8, 600],
-			["Worker receipts", 4, 300],
-		],
+		models.map((row) => [row.target, row.model, row.calls.value, row.tokens.value, row.tokens.partial]),
+		[["anthropic", "sonnet", 12, 900, true]],
 	);
-	assert.equal(
-		usageAmountText(
-			models[0]?.tokens ?? { value: null, partial: false, estimated: false, label: "", display: null },
-			"tokens",
-		),
-		"600",
-	);
-	// A partial count is named by its label; the client appends no marker of its own.
-	assert.equal(
-		usageAmountText(
-			{ value: 600, partial: true, estimated: false, label: "Known subtotal · missing usage", display: null },
-			"tokens",
-		),
-		"600",
+	// The client shows the canonical display and appends no marker of its own.
+	const tokens = models[0]?.tokens;
+	assert.ok(tokens);
+	assert.equal(usageAmountText(tokens), "≥900 (1 call unknown)");
+	assert.equal(tokens.label, "Known subtotal · missing usage");
+	// A model id may hold a slash; the target id never does.
+	assert.deepEqual(
+		usageModelInsights(report([byModel(quantity("1", 1), [group("dynamo/qwen/coder", quantity("1", 1))])])).map((row) => [
+			row.target,
+			row.model,
+		]),
+		[["dynamo", "qwen/coder"]],
 	);
 });
 
-test("call shares use the report's own attributed total, and stay absent without it or with an unknown row", () => {
-	const facts: UsageReport["facts"] = [
-		{ name: "model-usage", values: { providerId: "a", attributedModelId: "big", apiCalls: 9 } },
-		{ name: "model-usage", values: { providerId: "a", attributedModelId: "small", apiCalls: 3 } },
-	];
-	const models = usageModelInsights(report(facts));
-	assert.equal(usageCallShares(models, attributedCalls(report(facts))), null, "no attributed total in the report");
-	const shares = usageCallShares(
-		models,
-		attributedCalls(report([{ name: "tokens", values: { apiCalls: 12 } }, ...facts])),
-	);
+test("call shares divide by the model report's own total, and stay absent unless the groups partition it", () => {
+	const big = group("a/big", quantity("9", 9));
+	const groups = [big, group("a/small", quantity("3", 3))];
+	const facts = [byModel(quantity("12", 12), groups)];
+	const shares = usageCallShares(usageModelInsights(report(facts)), attributedCalls(report(facts)));
 	assert.equal(shares?.total, 12);
 	assert.deepEqual(
 		shares?.segments.map((segment) => [segment.model, segment.share]),
@@ -72,8 +95,43 @@ test("call shares use the report's own attributed total, and stay absent without
 			["small", 0.25],
 		],
 	);
-	const unknown = usageModelInsights(
-		report([...facts, { name: "model-usage", values: { providerId: "a", attributedModelId: "odd" } }]),
+	assert.equal(attributedCalls(report([])), null, "no model report, no denominator");
+	const partialTotal = [byModel(quantity("≥12 (1 call unknown)", 12, 1), groups)];
+	assert.equal(attributedCalls(report(partialTotal)), null, "a lower-bound total divides nothing");
+	const partialRow = [byModel(quantity("12", 12), [big, group("a/small", quantity("≥3 (1 call unknown)", 3, 1))])];
+	assert.equal(usageCallShares(usageModelInsights(report(partialRow)), 12), null, "a partial row makes no share");
+	// A call that failed over is one call in each model's group, so the groups overlap the total.
+	const overlap = [byModel(quantity("12", 12), [big, group("a/small", quantity("6", 6))])];
+	assert.equal(usageCallShares(usageModelInsights(report(overlap)), attributedCalls(report(overlap))), null);
+});
+
+test("prompt-cache evidence reads each session's cache report displays", () => {
+	const cache = usageCacheEvidence(
+		report([
+			{
+				name: "telemetry-cache",
+				values: {
+					sessionId: "s1",
+					report: {
+						kind: "cache",
+						sessionId: "s1",
+						verdicts: { hot: 4, partial: 1, cold: 1, small: 0, unknown: 0 },
+						uncachedPrefill: quantity("1,200", 1200),
+						rePrefilled: quantity("~800", 800),
+						breaks: [{}, {}],
+					},
+				},
+			},
+		]),
 	);
-	assert.equal(usageCallShares(unknown, 12), null, "a row without a count makes no share");
+	assert.deepEqual(cache.rows, [
+		{
+			key: "s1",
+			session: "s1",
+			uncached: "1,200",
+			reprocessed: "~800",
+			breaks: "2",
+			verdicts: "hot: 4 · partial: 1 · cold: 1 · small: 0 · unknown: 0",
+		},
+	]);
 });

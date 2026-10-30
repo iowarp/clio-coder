@@ -4,10 +4,11 @@
 // Pure, so the wording and the ordering are testable without a browser.
 
 import type { UsageReport } from "../../contracts/reports.js";
+import type { CacheReportV1, CostReportV1, SessionTelemetryV1 } from "../../contracts/wire.js";
 import { formatDay } from "../api/clock.js";
 import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { emptyState } from "../design/panel-model.js";
-import { countText } from "../telemetry/quantity-model.js";
+import { countText, quantityParts } from "../telemetry/quantity-model.js";
 
 export interface UsageFigure {
 	label: string;
@@ -31,7 +32,7 @@ export interface UsageGroup {
 }
 
 /**
- * Facts that repeat, such as one `session-cache` row per session, read as one table rather than as
+ * Facts that repeat, such as one `top-tool` row per tool, read as one table rather than as
  * one card each. A month of real use records dozens of them, and a card apiece made the page thirty
  * screens tall.
  */
@@ -57,7 +58,6 @@ export interface UsageView {
 	origins: UsageFigure[];
 	originsNote: string;
 	missingStores: string[];
-	models: UsageGroup[];
 	skillsActivated: UsageGroup[];
 	skillsDormant: string[];
 	/** Facts recorded once, shown as a card each. */
@@ -70,38 +70,79 @@ export interface UsageView {
 export const BARS_CAVEAT =
 	"Bars compare token fields with one another; they are not additive percentages. Provider accounting can overlap cache and reasoning fields.";
 
-const TOKEN_BARS: ReadonlyArray<readonly [string, string]> = [
+type TokenQuantities = SessionTelemetryV1["own"]["tokens"];
+const TOKEN_BARS: ReadonlyArray<readonly [keyof TokenQuantities, string]> = [
 	["input", "Input"],
 	["output", "Output"],
 	["cacheRead", "Cache read"],
 	["cacheWrite", "Cache write"],
-	["reasoningTokens", "Reasoning"],
+	["reasoning", "Reasoning"],
 ];
 
-const ORIGINS: ReadonlyArray<readonly [string, string]> = [
-	["turns", "Conversation and compaction calls"],
-	["sideQuestions", "Side questions"],
-	["handoffs", "Handoffs"],
-	["prewarms", "Pre-warms"],
-	["backgroundMemorySteps", "Background memory steps"],
-	["failedCompactionCalls", "Failed compaction calls"],
-	["systemOneCalls", "System One calls"],
-	["safetyJudgeCalls", "Safety judge calls"],
-];
+/** The read model's call labels in the operator's words; a label added later reads through the humanizer. */
+const ORIGINS: Readonly<Record<string, string>> = {
+	main: "Conversation calls",
+	compaction: "Compaction calls",
+	btw: "Side questions",
+	handoff: "Handoffs",
+	prewarm: "Pre-warms",
+	memory: "Background memory steps",
+	"system-one": "System One calls",
+	"safety-judge": "Safety judge calls",
+	helper: "Helper calls",
+	worker: "Worker run calls",
+};
 
-/** These four are read out of the report by name; everything else keeps its wire shape. */
+/** These are read out of the report by name; everything else keeps its wire shape. */
 const CLAIMED = new Set([
-	"tokens",
-	"all-recorded-tokens",
-	"worker-model-usage",
+	"telemetry-cost",
+	"telemetry-cache",
+	"telemetry-tokens",
 	"sessions",
 	"dispatch-runs",
 	"session-store-missing",
 	"receipt-store-missing",
-	"model-usage",
 	"skill-activated",
 	"skill-never-activated",
 ]);
+
+/**
+ * The report's spend for one group-by: the read model's cost report over the window, every figure carrying the
+ * canonical renderer's display. The server checked its shape (#434 §11.3).
+ */
+export function costReportOf(report: UsageReport, groupBy: "label" | "model"): CostReportV1 | null {
+	const fact = report.facts.find((item) => item.name === "telemetry-cost" && item.values.groupBy === groupBy);
+	const value = fact?.values.report as CostReportV1 | undefined;
+	return value?.kind === "cost" ? value : null;
+}
+
+/** The window's token fields as the read model measured them over the same scope as the cost reports. */
+export function tokenQuantitiesOf(report: UsageReport): TokenQuantities | null {
+	const value = report.facts.find((item) => item.name === "telemetry-tokens")?.values.tokens as
+		| TokenQuantities
+		| undefined;
+	return value?.total ? value : null;
+}
+
+/** One read-model cache report per session that recorded a cache verdict, in session order. */
+export function cacheReportsOf(report: UsageReport): CacheReportV1[] {
+	return report.facts.flatMap((item) => {
+		const value = item.name === "telemetry-cache" ? (item.values.report as CacheReportV1 | undefined) : undefined;
+		return value?.kind === "cache" ? [value] : [];
+	});
+}
+
+function costNote(total: CostReportV1["total"]): string {
+	const usd = quantityParts(total.usd);
+	const { free, ...priced } = total.pricedBy;
+	if (!usd.known)
+		return usd.unknown > 0 ? "No call in this window was priced" : "No priced calls recorded in this window";
+	if (usd.unknown > 0) return "Known subtotal; some calls are unpriced";
+	if (usd.estimated > 0) return "Includes estimated prices";
+	return free > 0 && Object.values(priced).every((count) => count === 0)
+		? "Every recorded call is known free"
+		: "Recorded prices";
+}
 
 const number = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const single = (values: Record<string, unknown>): string | null => {
@@ -173,21 +214,7 @@ export function usageView(report: UsageReport): UsageView {
 	}));
 	const first = (name: string) => rows.find((row) => row.name === name)?.values;
 	const all = (name: string) => rows.filter((row) => row.name === name);
-	const sessionTokens = first("tokens") ?? {};
-	const overall = first("all-recorded-tokens");
-	const workers = first("worker-tokens");
-	const tokens = overall ?? sessionTokens;
-	const cost = tokens.cost as
-		| {
-				knownUsd?: number;
-				hasEstimated?: boolean;
-				hasUnknown?: boolean;
-				allKnownFree?: boolean;
-				calls?: number;
-				costDisplay?: string;
-		  }
-		| undefined;
-	const missing = number(overall?.missingTokenCalls ?? sessionTokens.missingTokenCalls) ?? 0;
+	const byOrigin = costReportOf(report, "label");
 
 	const missingStores: string[] = [];
 	for (const [name, subject] of [
@@ -205,84 +232,55 @@ export function usageView(report: UsageReport): UsageView {
 		return { label, value: countText(count) };
 	};
 
-	const apiCalls = number(tokens.apiCalls);
-	const measuredTokens = number(overall?.knownSubtotal ?? tokens.totalTokens);
-	const totalTokens =
-		measuredTokens === 0 && missing > 0 && apiCalls !== null && missing >= apiCalls ? null : measuredTokens;
+	const total = byOrigin?.total;
 	const headline: UsageFigure[] = [
-		{
-			label: "Tokens",
-			value: countText(totalTokens),
-			...(apiCalls === null ? {} : { note: `${countText(apiCalls)} API calls` }),
-		},
-		{
-			label: "Cost",
-			value: text(tokens.costDisplay) ?? cost?.costDisplay ?? "not measured",
-			note:
-				cost?.calls === 0
-					? "No priced calls recorded in this window"
-					: cost?.hasUnknown
-						? "Known subtotal; some calls are unpriced"
-						: cost?.hasEstimated
-							? "Includes estimated prices"
-							: cost
-								? cost.allKnownFree
-									? "Every recorded call is known free"
-									: "Recorded prices"
-								: "Historical cost; pricing provenance unavailable",
-		},
+		total
+			? { label: "Tokens", value: total.tokens.display, note: `API calls: ${total.calls.display}` }
+			: { label: "Tokens", value: countText(null) },
+		total
+			? { label: "Cost", value: total.usd.display, note: costNote(total) }
+			: { label: "Cost", value: "not measured", note: "No spend was measured in this window" },
 		store("sessions", "session-store-missing", "Sessions"),
 		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
 	];
 
-	const partialBreakdown = missing > 0 || (number(workers?.missingBreakdownRuns) ?? 0) > 0;
-	const measured = TOKEN_BARS.map(([key, label]) => {
-		const value = number(tokens[key]);
-		return { label, tokens: value === 0 && partialBreakdown ? null : value };
+	const tokens = tokenQuantitiesOf(report);
+	// Each bar is one server fact against the widest; a field that is a lower bound draws its known part (#434).
+	const fields = TOKEN_BARS.map(([key, label]) => ({ label, quantity: tokens?.[key] ?? null }));
+	const amounts = fields.map((field) => (field.quantity ? quantityParts(field.quantity).amount : null));
+	const widest = Math.max(0, ...amounts.map((amount) => amount ?? 0));
+	const bars: UsageBar[] = fields.map((field, index) => {
+		const amount = amounts[index] ?? null;
+		return {
+			label: field.label,
+			value: field.quantity?.display ?? countText(null),
+			share: amount !== null && widest > 0 ? amount / widest : 0,
+		};
 	});
-	const widest = Math.max(0, ...measured.map((bar) => bar.tokens ?? 0));
-	const bars: UsageBar[] = measured.map((bar) => ({
-		label: bar.label,
-		value: countText(bar.tokens),
-		share: bar.tokens && widest > 0 ? bar.tokens / widest : 0,
+	const partialFields = fields.some((field) => field.quantity && quantityParts(field.quantity).unknown > 0);
+
+	const origins = (byOrigin?.groups ?? []).map((group) => ({
+		label: Object.hasOwn(ORIGINS, group.key) ? (ORIGINS[group.key] as string) : humanizeKey(group.key),
+		value: group.calls.display,
 	}));
-
-	const hasOriginSplit = ORIGINS.some(([key]) => Object.hasOwn(sessionTokens, key));
-	const origins = ORIGINS.flatMap(([key, label]) => {
-		if (!Object.hasOwn(sessionTokens, key)) return [];
-		const value = number(sessionTokens[key]);
-		return [{ label, value: countText(value) }];
-	});
-	if (!hasOriginSplit && first("tokens") && workers) {
-		const calls = number(sessionTokens.apiCalls);
-		origins.push({
-			label: "Session and side calls",
-			value: countText(calls),
-		});
-	}
-
-	if (workers) {
-		const calls = number(workers.apiCalls);
-		origins.push({ label: "Worker calls", value: countText(calls) });
-	}
 	const leftover = tablesOf(rows.filter((row) => !CLAIMED.has(row.name)));
 	return {
 		window: `from ${formatDay(report.from)} through ${formatDay(report.to)}`,
 		headline,
 		bars,
-		barsCaveat: `${BARS_CAVEAT}${partialBreakdown ? " Some calls lack token fields; displayed fields are known subtotals, and absent amounts do not mean zero." : ""}`,
+		barsCaveat: `${BARS_CAVEAT}${partialFields ? " Some calls lack token fields; displayed fields are known subtotals, and absent amounts do not mean zero." : ""}`,
+		// The displays already carry the marker; this names what a lower bound means here, never how many (#434).
 		knownSubtotals:
-			missing > 0 || sessionTokens.knownSubtotals === true || overall?.knownSubtotals === true
-				? `${missing > 0 ? `${countText(missing)} recorded calls are missing token usage. ` : ""}Token amounts are known subtotals; missing usage is not zero. Reports cover retained local records, not provider invoices.`
+			total && (quantityParts(total.tokens).unknown > 0 || quantityParts(total.calls).unknown > 0)
+				? "Token amounts are known subtotals: some recorded calls lack token usage or a call count, and missing usage is not zero. Reports cover retained local records, not provider invoices."
 				: null,
 		origins,
 		originsNote: origins.length
-			? "Session and side-call counts come from session usage; worker calls come from disjoint receipt totals, including shadow and internal helpers. A tool loop can make several conversation calls."
-			: first("tokens")
-				? "No origin split was recorded. The total alone does not establish that every recorded call belongs to a turn."
+			? "Calls by what asked for them, in one fold over the window's sessions and runs. Worker calls come from each run's journal, or from its sealed receipt when it left none. A tool loop can make several conversation calls."
+			: byOrigin
+				? "No call was recorded in this window."
 				: "Call origins were not recorded in this window.",
 		missingStores,
-		models: [...all("model-usage"), ...all("worker-model-usage")],
 		skillsActivated: all("skill-activated"),
 		skillsDormant: all("skill-never-activated").flatMap((row) => {
 			const name = text(row.values.skill);
