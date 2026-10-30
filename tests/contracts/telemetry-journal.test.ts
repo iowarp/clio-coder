@@ -23,6 +23,7 @@ import {
 	STANDARD_CAPTURE,
 	systemOneDatasetRecording,
 } from "../../src/core/telemetry/capture.js";
+import type { CostReportV1 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
@@ -361,13 +362,22 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line) as Record<string, unknown>);
-		strictEqual(
-			rows.find((row) => row.fact === "all-recorded-tokens")?.knownSubtotal,
-			tracker.sessionTokens().totalTokens,
+		// The report reads the run's aggregate through the read model; the receipt's own 99 tokens are not a second source.
+		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "label")?.report as
+			| CostReportV1
+			| undefined;
+		ok(cost, "the report carries the read model's cost by origin");
+		deepStrictEqual(cost.scope, { repo: "all", days: 30 });
+		const tokens = cost.total.tokens.fact;
+		strictEqual("kind" in tokens ? Number.NaN : tokens.measured, tracker.sessionTokens().totalTokens);
+		strictEqual(cost.total.tokens.display, "9");
+		deepStrictEqual(
+			cost.groups.map((group) => group.key),
+			["worker"],
 		);
-		strictEqual(rows.find((row) => row.fact === "worker-tokens")?.apiCalls, 0);
-		strictEqual(rows.find((row) => row.fact === "all-recorded-tokens")?.unknownCallCoverageRuns, 1);
-		strictEqual(rows.find((row) => row.fact === "worker-audience-usage" && row.audience === "shadow")?.totalTokens, 9);
+		// The aggregate names no call count, so the calls figure is partial rather than a measured zero.
+		const calls = cost.total.calls.fact;
+		strictEqual("kind" in calls ? -1 : calls.unknownCount, 1);
 	} finally {
 		await run.close();
 		await parent.release();
@@ -1653,7 +1663,10 @@ test("usage report discovers a standalone run journal that has no session and no
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line) as Record<string, unknown>);
-		strictEqual(rows.find((row) => row.fact === "worker-tokens")?.totalTokens, 21);
+		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "label")?.report as
+			| CostReportV1
+			| undefined;
+		strictEqual(cost?.total.tokens.display, "21");
 	} finally {
 		await run.close();
 		await rm(scratch, { recursive: true, force: true });

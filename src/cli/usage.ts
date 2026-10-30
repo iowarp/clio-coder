@@ -1,50 +1,21 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import {
-	addResponseModelIdObservationCount,
-	emptyResponseModelIdObservationCounts,
-	type ResponseModelIdObservationCounts,
-	responseModelIdObservationCountsLabel,
-} from "../core/response-model-id.js";
+import { join, resolve } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
-import { readCallJournal } from "../domains/observability/call-journal.js";
-import {
-	failedCompactionUsageFromCalls,
-	summarizeFailedCompactionUsage,
-} from "../domains/observability/compaction-usage.js";
-import type { CostAggregate } from "../domains/observability/cost.js";
-import {
-	accumulateCostAmount,
-	aggregateCostAmounts,
-	callCoverageForRun,
-	emptyCostAggregate,
-	renderCostAggregate,
-} from "../domains/observability/cost.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
-import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
-import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
-import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
+import type { RepoSource } from "../domains/observability/read-model.js";
+import { cacheReport, repoCostReport, repoOwner, repoTokenQuantities } from "../domains/observability/read-model.js";
 import { loadSkills } from "../domains/resources/index.js";
-import type { SessionCallJournalRead } from "../domains/session/fork-journal.js";
-import { readSessionCallJournalSync } from "../domains/session/fork-journal.js";
 import {
-	foldPromptCacheTelemetry,
 	foldRecallTelemetry,
-	hasPromptCacheTelemetry,
 	hasRecallTelemetry,
-	type LedgerUsageCall,
-	ledgerUsageCalls,
 	listSessionLedgerRefs,
-	type PromptCacheTelemetry,
 	parseSessionEntries,
 	type RecallTelemetry,
 	readAuditRows,
 } from "../domains/session/index.js";
-import { journalUsageWindow, uniqueUsageCalls } from "../domains/session/journal-usage.js";
-import { runJournalsInWindow, usageCallsFromRunJournals } from "../domains/session/run-journal-usage.js";
-import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
+import { loadRepoTelemetrySources } from "../domains/session/telemetry-source.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
 import { expandChainMessages } from "../tools/surface.js";
@@ -52,11 +23,14 @@ import { formatColumns, printError } from "./shared.js";
 
 const HELP = `clio-coder usage report [--repo <path>] [--days <n>] [--json]
 
-Cross-session usage analyzer (experimental, read-only). Reads the local usage
-archive (receipts, session ledgers, the out-of-turn usage store, audit rows,
-evidence index, memory store) and reports facts plus improvement opportunities,
-every line citing ids and counts. Nothing is written or stored; suggestions are
-printed only.
+Cross-session usage analyzer (experimental, read-only). Spend comes from the
+telemetry read model: session and run call journals, plus the ledger and
+out-of-turn rows no journal holds and the sealed receipt of a run with no
+journal, whose known totals count with unknown call coverage. Receipts, session
+ledgers, audit rows, the
+evidence index and the memory store supply the other facts and the improvement
+opportunities, every line citing ids and counts. Nothing is written or stored;
+suggestions are printed only.
 
 Flags:
   --repo <path>   restrict sessions (and runs via the run ledger) to one repo
@@ -78,206 +52,16 @@ const NON_FAILURE_TAGS = new Set([
 	"audit-missing",
 ]);
 
+/** What the tool, skill, recipe and opportunity facts read from a receipt; spend is the read model's (#434). */
 interface UsageReceipt {
-	unknownCallCoverageRuns: number;
-	costSummary?: CostAggregate;
 	cwd: string | null;
-	usageSessionId: string | null;
-	apiCalls: number;
-	missingTokenCalls: number;
-	costProvenance: CostProvenance;
 	runId: string;
 	agentId: string;
 	task: string;
-	startedAt: string;
 	endedAt: string;
 	sessionId: string | null;
 	toolStats: Array<{ tool: string; count: number; ok: number; errors: number; blocked: number }>;
 	skillActivations: string[];
-	targetId: string;
-	modelId: string;
-	audience: string;
-	tokenCount: number | null;
-	inputTokenCount: number | null;
-	outputTokenCount: number | null;
-	cacheReadTokenCount: number | null;
-	cacheWriteTokenCount: number | null;
-	reasoningTokenCount: number | null;
-	costUsd: number | null;
-	missingTokenUsage: boolean;
-}
-
-interface WorkerUsageTotals {
-	unknownCallCoverageRuns: number;
-	apiCalls: number;
-	missingTokenCalls: number;
-	cost: CostAggregate;
-	runs: number;
-	missingTokenRuns: number;
-	missingBreakdownRuns: number;
-	unpricedRuns: number;
-	totalTokens: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoningTokens: number;
-	knownCostUsd: number;
-}
-
-function emptyWorkerUsageTotals(): WorkerUsageTotals {
-	return {
-		unknownCallCoverageRuns: 0,
-		runs: 0,
-		apiCalls: 0,
-		missingTokenCalls: 0,
-		cost: emptyCostAggregate(),
-		missingTokenRuns: 0,
-		missingBreakdownRuns: 0,
-		unpricedRuns: 0,
-		totalTokens: 0,
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoningTokens: 0,
-		knownCostUsd: 0,
-	};
-}
-
-type WorkerUsageContribution = Pick<
-	UsageReceipt,
-	| "unknownCallCoverageRuns"
-	| "costSummary"
-	| "apiCalls"
-	| "missingTokenCalls"
-	| "costProvenance"
-	| "tokenCount"
-	| "inputTokenCount"
-	| "outputTokenCount"
-	| "cacheReadTokenCount"
-	| "cacheWriteTokenCount"
-	| "reasoningTokenCount"
-	| "costUsd"
-	| "missingTokenUsage"
-	| "targetId"
-	| "modelId"
-	| "audience"
-> & { missingBreakdownUsage?: boolean };
-
-/** One run's journal-folded usage as a worker contribution; the journal outranks receipt totals (#434). */
-function runCallContribution(call: LedgerUsageCall, audience: string): WorkerUsageContribution {
-	return {
-		targetId: call.providerId,
-		modelId: call.attributedModelId,
-		audience,
-		apiCalls: call.apiCalls ?? 0,
-		missingTokenCalls: call.missingTokenCalls ?? 0,
-		unknownCallCoverageRuns: call.costSummary?.unknownCallCoverageRuns ?? 0,
-		...(call.costSummary ? { costSummary: call.costSummary } : {}),
-		costProvenance: call.costProvenance ?? "unknown",
-		tokenCount: call.totalTokens,
-		inputTokenCount: call.input,
-		outputTokenCount: call.output,
-		cacheReadTokenCount: call.cacheRead,
-		cacheWriteTokenCount: call.cacheWrite,
-		reasoningTokenCount: call.reasoningTokens,
-		costUsd: call.costUsd,
-		missingTokenUsage: call.tokenUsageMissing ?? true,
-		missingBreakdownUsage:
-			!call.usageFacts ||
-			[call.usageFacts.input, call.usageFacts.output, call.usageFacts.cacheRead, call.usageFacts.cacheWrite].some(
-				(sum) => sum.unknownCount > 0,
-			),
-	};
-}
-
-async function newestSegmentWriteMs(directory: string): Promise<number> {
-	let newest = Number.NEGATIVE_INFINITY;
-	for (const name of await readdir(directory)) {
-		if (!/^events(?:\.rec_[0-9a-f-]+)?\.ndjson$/u.test(name)) continue;
-		try {
-			newest = Math.max(newest, (await stat(join(directory, name))).mtimeMs);
-		} catch {
-			// A segment rotated away mid-scan was written recently; read the run rather than skip it.
-			return Number.POSITIVE_INFINITY;
-		}
-	}
-	return newest;
-}
-
-/**
- * A run with no parent session and no receipt (a standalone `run` that crashed before sealing, say) still spent
- * money; only its own journal says how much. Parented runs belong to their session's accounting (#434).
- */
-async function standaloneRunCalls(
-	stateDir: string,
-	from: number,
-	to: number,
-	known: (runId: string) => boolean,
-	repoRunIds: ReadonlySet<string> | null,
-	diagnostics: Diagnostics,
-): Promise<LedgerUsageCall[]> {
-	const root = join(stateDir, "runs");
-	let names: string[];
-	try {
-		names = await readdir(root);
-	} catch {
-		// No run journals were ever written.
-		return [];
-	}
-	const runs: SessionCallJournalRead["runs"] = new Map();
-	for (const runId of names) {
-		if (!/^[a-zA-Z0-9_-]+$/u.test(runId) || known(runId) || (repoRunIds !== null && !repoRunIds.has(runId))) continue;
-		const directory = join(root, runId);
-		try {
-			// An append bumps its segment's mtime, never the directory's, so a run created before the window can
-			// still settle inside it. Only a run whose newest segment predates the window, beyond worker clock skew,
-			// is skipped; runJournalsInWindow then selects by each call's own settled time (#434).
-			if ((await newestSegmentWriteMs(directory)) < from - USAGE_WINDOW_FUTURE_SKEW_MS) continue;
-			const journal = await readCallJournal(directory, "events.ndjson");
-			if (journal.records.some(({ record }) => record.ctx.sessionId !== null)) continue;
-			runs.set(runId, { ...journal, throughMs: to });
-		} catch (error) {
-			diagnostics.notes.push(`run journal ${runId} unreadable: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-	return usageCallsFromRunJournals(
-		runJournalsInWindow({ records: [], skipped: 0, damaged: 0, runs }, from, to + USAGE_WINDOW_FUTURE_SKEW_MS),
-	);
-}
-
-function addWorkerReceipt(totals: WorkerUsageTotals, receipt: WorkerUsageContribution): void {
-	totals.runs += 1;
-	totals.apiCalls += receipt.apiCalls;
-	totals.missingTokenCalls += receipt.missingTokenCalls;
-	totals.unknownCallCoverageRuns += receipt.unknownCallCoverageRuns;
-	totals.cost = accumulateCostAmount(totals.cost, {
-		usd: receipt.costUsd ?? 0,
-		...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
-		provenance: receipt.costProvenance,
-		apiCalls: receipt.apiCalls,
-		missingTokenCalls: receipt.missingTokenCalls,
-		unknownCallCoverageRuns: receipt.unknownCallCoverageRuns,
-	});
-	if (receipt.missingTokenUsage) totals.missingTokenRuns += 1;
-	if (
-		receipt.missingBreakdownUsage ||
-		receipt.inputTokenCount === null ||
-		receipt.outputTokenCount === null ||
-		receipt.cacheReadTokenCount === null ||
-		receipt.cacheWriteTokenCount === null
-	)
-		totals.missingBreakdownRuns += 1;
-	if (receipt.costUsd === null || receipt.costSummary?.hasUnknown) totals.unpricedRuns += 1;
-	totals.totalTokens += receipt.tokenCount ?? 0;
-	totals.input += receipt.inputTokenCount ?? 0;
-	totals.output += receipt.outputTokenCount ?? 0;
-	totals.cacheRead += receipt.cacheReadTokenCount ?? 0;
-	totals.cacheWrite += receipt.cacheWriteTokenCount ?? 0;
-	totals.reasoningTokens += receipt.reasoningTokenCount ?? 0;
-	totals.knownCostUsd +=
-		receipt.costSummary?.knownUsd ?? (receipt.costProvenance === "unknown" ? 0 : (receipt.costUsd ?? 0));
 }
 
 interface SessionUsage {
@@ -288,181 +72,8 @@ interface SessionUsage {
 	bashShapes: Map<string, number>;
 	skillActivations: Set<string>;
 	entriesInWindow: number;
-	/** Completed API calls this session recorded in the window, one per call. */
-	usageCalls: LedgerUsageCall[];
-	workerCalls: LedgerUsageCall[];
-	failureCounts: ReturnType<typeof ledgerCallFailureCounts>;
-	/** Backend prompt-cache facts persisted on assistant calls in the window. */
-	promptCache: PromptCacheTelemetry;
 	/** #422: working-set recalls in the window and the tokens they sent back into context. */
 	recall: RecallTelemetry;
-}
-
-/** Per-call usage folded over one grouping (a model, or the whole window). */
-interface UsageTotals {
-	cost: CostAggregate;
-	apiCalls: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	cacheWrite1h?: number;
-	reasoningTokens: number;
-	totalTokens: number;
-	costUsd: number;
-}
-
-function emptyUsageTotals(): UsageTotals {
-	return {
-		cost: emptyCostAggregate(),
-		apiCalls: 0,
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoningTokens: 0,
-		totalTokens: 0,
-		costUsd: 0,
-	};
-}
-
-function addResponseModelIdObservation(counts: ResponseModelIdObservationCounts, call: LedgerUsageCall): void {
-	addResponseModelIdObservationCount(counts, call.responseModelIdObservation, call.apiCalls ?? 1);
-}
-
-/**
- * How the folded calls split between the session's own turns and the rounds
- * that were billed beside it. A `/btw` side question, a `/handoff` round, a
- * session pre-warm, and a proactive-memory step are real spend and belong in
- * the token and cost totals, but none of them is a turn: they never entered
- * the session. `turns` therefore subtracts them from the folded row count,
- * which is exactly what the `/usage` overlay does.
- */
-interface CallOrigins {
-	rows: number;
-	sideQuestions: number;
-	handoffs: number;
-	prewarms: number;
-	backgroundMemory: number;
-	failedCompaction: number;
-	systemOne: number;
-	safetyJudge: number;
-}
-
-function emptyCallOrigins(): CallOrigins {
-	return {
-		rows: 0,
-		sideQuestions: 0,
-		handoffs: 0,
-		prewarms: 0,
-		backgroundMemory: 0,
-		failedCompaction: 0,
-		systemOne: 0,
-		safetyJudge: 0,
-	};
-}
-
-function turnsOf(origins: CallOrigins): number {
-	return (
-		origins.rows -
-		origins.sideQuestions -
-		origins.handoffs -
-		origins.prewarms -
-		origins.backgroundMemory -
-		origins.failedCompaction -
-		origins.systemOne -
-		origins.safetyJudge
-	);
-}
-
-function hasLabelledCall(origins: CallOrigins): boolean {
-	return (
-		origins.sideQuestions > 0 ||
-		origins.handoffs > 0 ||
-		origins.prewarms > 0 ||
-		origins.backgroundMemory > 0 ||
-		origins.failedCompaction > 0 ||
-		origins.systemOne > 0 ||
-		origins.safetyJudge > 0
-	);
-}
-
-function addOutOfTurnRow(origins: CallOrigins, row: OutOfTurnUsageRow): void {
-	origins.rows += 1;
-	if (row.label === "side-question") origins.sideQuestions += 1;
-	else if (row.label === "prewarm") origins.prewarms += 1;
-	else if (row.label === "background-memory") origins.backgroundMemory += 1;
-	else if (row.label === "failed-compaction") origins.failedCompaction += 1;
-	else if (row.label === "system-one") origins.systemOne += 1;
-	else if (row.label === "safety-judge") origins.safetyJudge += 1;
-	else origins.handoffs += 1;
-}
-
-/** The out-of-turn store keeps its own usage shape; fold it as one completed call. */
-function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
-	return {
-		providerId: row.target,
-		attributedModelId: row.attributedModelId,
-		requestedModelId: row.attributedModelId,
-		responseModelIdObservation: { state: "not-observed" },
-		input: row.usage.input ?? 0,
-		output: row.usage.output ?? 0,
-		cacheRead: row.usage.cacheRead ?? 0,
-		cacheWrite: row.usage.cacheWrite ?? 0,
-		...(typeof row.usage.cacheWrite1h === "number" ? { cacheWrite1h: row.usage.cacheWrite1h } : {}),
-		reasoningTokens: row.usage.reasoning ?? 0,
-		totalTokens: row.usage.totalTokens ?? 0,
-		costUsd: row.usage.costUsd ?? 0,
-		costProvenance: row.usage.costProvenance ?? "unknown",
-		missingTokenCalls: row.usage.totalTokens === null && row.failure?.invoked !== false ? 1 : 0,
-	};
-}
-
-/** Existing numeric accumulators sum known contributions; the report retains missing coverage. */
-function reportedUsageTotals(
-	totals: UsageTotals,
-	rows: ReadonlyArray<OutOfTurnUsageRow>,
-	calls: readonly LedgerUsageCall[] = [],
-) {
-	const failedCompaction = summarizeFailedCompactionUsage([...rows, ...failedCompactionUsageFromCalls(calls)]);
-	const missingSessionCalls = calls.reduce((sum, call) => sum + (call.missingTokenCalls ?? 0), 0);
-	const missingTokenCalls =
-		rows.filter((row) => row.usage.totalTokens === null && row.failure?.invoked !== false).length + missingSessionCalls;
-	if (failedCompaction.calls === 0 && missingTokenCalls === 0) return totals;
-	const reported: Record<string, unknown> = {
-		...totals,
-		knownSubtotals: true,
-		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
-		...(failedCompaction.calls > 0 ? { failedCompaction } : {}),
-	};
-	for (const [field, missing] of Object.entries(failedCompaction.unobservedUsageCalls)) {
-		const key = field === "reasoning" ? "reasoningTokens" : field;
-		if (missing > 0 && reported[key] === 0) reported[key] = null;
-	}
-	return reported;
-}
-
-function usageAmount(value: unknown): string {
-	return typeof value === "number" ? String(value) : "unknown";
-}
-
-function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
-	totals.apiCalls += call.apiCalls ?? 1;
-	totals.input += call.input;
-	totals.output += call.output;
-	totals.cacheRead += call.cacheRead;
-	totals.cacheWrite += call.cacheWrite;
-	if (call.cacheWrite1h !== undefined) totals.cacheWrite1h = (totals.cacheWrite1h ?? 0) + call.cacheWrite1h;
-	totals.reasoningTokens += call.reasoningTokens;
-	totals.totalTokens += call.totalTokens;
-	totals.cost = accumulateCostAmount(totals.cost, {
-		usd: call.costUsd,
-		provenance: call.costProvenance ?? (call.costUsd > 0 ? "estimated" : "unknown"),
-		apiCalls: call.apiCalls ?? 1,
-		...(call.costSummary ? { costSummary: call.costSummary } : {}),
-		missingTokenCalls: call.missingTokenCalls ?? 0,
-	});
-	totals.costUsd = totals.cost.knownUsd;
 }
 
 /**
@@ -614,50 +225,34 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			repoRunIds.has(receipt.runId) ||
 			(receipt.sessionId !== null && repoSessions?.has(receipt.sessionId)),
 	);
-	const workerUsage = emptyWorkerUsageTotals();
-	const workerUsageByModel = new Map<string, { targetId: string; modelId: string; totals: WorkerUsageTotals }>();
-	const workerUsageByAudience = new Map<string, WorkerUsageTotals>();
-	const meteredSessions = new Set(sessions.filter((row) => row.usageCalls.length > 0).map((row) => row.sessionId));
-	const contributions = new Map<string, WorkerUsageContribution>();
-	const excludedRuns = new Set<string>();
-	for (const receipt of receipts) {
-		if (receipt.usageSessionId !== null && meteredSessions.has(receipt.usageSessionId)) {
-			excludedRuns.add(receipt.runId);
-			continue;
-		}
-		contributions.set(receipt.runId, receipt);
-	}
-	for (const call of uniqueUsageCalls(sessions.flatMap((session) => session.workerCalls))) {
-		if (!call.runId || excludedRuns.has(call.runId)) continue;
-		const receipt = contributions.get(call.runId);
-		if (call.runJournalUnavailable && receipt) continue;
-		contributions.set(call.runId, runCallContribution(call, receipt?.audience ?? "unknown"));
-	}
-	const known = (runId: string) => contributions.has(runId) || excludedRuns.has(runId);
-	for (const call of await standaloneRunCalls(stateDir, windowStart, now, known, repoRunIds, diagnostics))
-		if (call.runId) contributions.set(call.runId, runCallContribution(call, "unknown"));
-	for (const receipt of contributions.values()) {
-		addWorkerReceipt(workerUsage, receipt);
-		const audience = workerUsageByAudience.get(receipt.audience) ?? emptyWorkerUsageTotals();
-		addWorkerReceipt(audience, receipt);
-		workerUsageByAudience.set(receipt.audience, audience);
-		const key = `${receipt.targetId}::${receipt.modelId}`;
-		const model = workerUsageByModel.get(key) ?? {
-			targetId: receipt.targetId,
-			modelId: receipt.modelId,
-			totals: emptyWorkerUsageTotals(),
-		};
-		addWorkerReceipt(model.totals, receipt);
-		workerUsageByModel.set(key, model);
-	}
+	// Every token and cost figure is the read model's: one window over the sessions and the runs they reference, plus
+	// standalone runs, folded once and worded by the canonical renderer, so nothing here sums spend (#434 §11.3).
+	const telemetry = loadRepoTelemetrySources(stateDir, {
+		cwdHash: repoHash ?? null,
+		from: windowStart,
+		to: now + USAGE_WINDOW_FUTURE_SKEW_MS,
+		// A receipt from before run journals may have left the run ledger's ring; its own cwd still attributes it.
+		standaloneRuns: repoRunIds === null ? "all" : new Set([...repoRunIds, ...receipts.map((receipt) => receipt.runId)]),
+	});
+	const repo: RepoSource = { owner: repoOwner(repoHash ?? null, parsed.days), ...telemetry };
+	const scope = { repo: repoPath ?? "all", days: parsed.days };
+	const costReports = (["label", "model"] as const).map((groupBy) => repoCostReport(repo, scope, groupBy));
+	const tokens = repoTokenQuantities(repo);
+	const cacheReports = telemetry.sessions
+		.map((source) => cacheReport(source))
+		.filter((report) => Object.values(report.verdicts).some((count) => count > 0))
+		.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+	const unreadableJournals = telemetry.sessions.filter(
+		(source) => source.journal.skipped > 0 || source.journal.damaged > 0,
+	).length;
+	if (unreadableJournals > 0)
+		diagnostics.notes.push(
+			`${unreadableJournals} session call journal(s) have unreadable records; the totals they feed are partial`,
+		);
+	// Spend needs a store to measure: a missing session store with no standalone run has nothing to report.
+	const spendMeasurable = presence.sessionsPresent || telemetry.runs.size > 0;
 	const harnessActions = sessions.reduce((total, session) => total + session.harnessActions, 0);
 	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
-	// Older helpers and callers still awaiting journal migration retain this store (#434).
-	const outOfTurn = readOutOfTurnUsageRows(stateDir);
-	for (const error of outOfTurn.errors) diagnostics.notes.push(error);
-	const outOfTurnRows = outOfTurn.rows.filter(
-		(row) => inWindow(row.timestamp, windowStart, now) && (repoHash === undefined || row.repoIdentity === repoHash),
-	);
 	const auditRows = await readAuditRows(stateDir);
 	diagnostics.malformedAuditRows = auditRows.errors.length;
 	const auditInWindow = auditRows.rows.filter((row) => row.ts !== null && inWindow(row.ts, windowStart, now));
@@ -740,100 +335,6 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	}
 
-	// Token and cost facts fold the same per-call usage the `/usage` overlay
-	// reseeds from, through the same session-domain function, so the report and
-	// the overlay cannot disagree about what a session spent.
-	// Keyed by the model id accounting attributes the call to. A reported LM
-	// Link peer id gets its own row, while an observed omission becomes unknown.
-	// Requested ids and observation-state counts remain alongside that row.
-	const usageByModel = new Map<
-		string,
-		{
-			providerId: string;
-			attributedModelId: string;
-			requestedModelIds: Set<string>;
-			responseModelIdObservationCounts: ResponseModelIdObservationCounts;
-			totals: UsageTotals;
-		}
-	>();
-	const usageTotals = emptyUsageTotals();
-	const sessionCalls = uniqueUsageCalls(sessions.flatMap((session) => session.usageCalls));
-	const callOrigins = emptyCallOrigins();
-	const foldCall = (call: LedgerUsageCall): void => {
-		addUsageCall(usageTotals, call);
-		const key = `${call.providerId}::${call.attributedModelId}`;
-		const entry = usageByModel.get(key) ?? {
-			providerId: call.providerId,
-			attributedModelId: call.attributedModelId,
-			requestedModelIds: new Set<string>(),
-			responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
-			totals: emptyUsageTotals(),
-		};
-		entry.requestedModelIds.add(call.requestedModelId);
-		addResponseModelIdObservation(entry.responseModelIdObservationCounts, call);
-		addUsageCall(entry.totals, call);
-		usageByModel.set(key, entry);
-	};
-	for (const call of sessionCalls) {
-		foldCall(call);
-		callOrigins.rows += 1;
-		if (call.label === "side-question" || call.label === "helper") callOrigins.sideQuestions += 1;
-		else if (call.label === "handoff") callOrigins.handoffs += 1;
-		else if (call.label === "prewarm") callOrigins.prewarms += 1;
-		else if (call.label === "system-one") callOrigins.systemOne += 1;
-		else if (call.label === "safety-judge") callOrigins.safetyJudge += 1;
-		else if (call.label === "background-memory") callOrigins.backgroundMemory += 1;
-		else if (call.label === "failed-compaction") callOrigins.failedCompaction += 1;
-	}
-	for (const row of outOfTurnRows) {
-		if (row.failure?.invoked === false) continue;
-		foldCall(outOfTurnUsageCall(row));
-		addOutOfTurnRow(callOrigins, row);
-	}
-	// Token and cost facts need one of their two inputs on disk. A machine whose
-	// session store is gone can still have recorded out-of-turn spend, and
-	// dropping those rows would report money that was spent as nothing at all.
-	const usageMeasurable = presence.sessionsPresent || outOfTurnRows.length > 0;
-	// Standalone run journals count even where no receipt store exists yet (#434).
-	const workerMeasurable = presence.receiptsPresent || workerUsage.runs > 0;
-	const missingSessionCalls = sessionCalls.reduce((missing, call) => missing + (call.missingTokenCalls ?? 0), 0);
-	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows, sessionCalls);
-	const compactionRows = [...outOfTurnRows, ...failedCompactionUsageFromCalls(sessionCalls)];
-	const failedCompaction = summarizeFailedCompactionUsage(compactionRows);
-	const allRecordedTokens = usageTotals.totalTokens + workerUsage.totalTokens;
-	const missingTokenCalls =
-		missingSessionCalls +
-		outOfTurnRows.filter((row) => row.usage.totalTokens === null && row.failure?.invoked !== false).length +
-		workerUsage.missingTokenCalls;
-	const outOfTurnFailureCounts = {
-		invokedUnknownCalls: outOfTurnRows.filter((row) => row.failure?.invoked === true && row.usage.totalTokens === null)
-			.length,
-		neverInvokedCalls: outOfTurnRows.filter((row) => row.failure?.invoked === false).length,
-	};
-	const sessionFailureCounts = sessions.reduce(
-		(counts, session) => ({
-			invokedUnknownCalls: counts.invokedUnknownCalls + session.failureCounts.invokedUnknownCalls,
-			neverInvokedCalls: counts.neverInvokedCalls + session.failureCounts.neverInvokedCalls,
-		}),
-		{ invokedUnknownCalls: 0, neverInvokedCalls: 0 },
-	);
-	const allCost: CostAggregate = {
-		...(workerUsage.unknownCallCoverageRuns > 0 ? { unknownCallCoverageRuns: workerUsage.unknownCallCoverageRuns } : {}),
-		knownUsd: usageTotals.cost.knownUsd + workerUsage.cost.knownUsd,
-		calls: usageTotals.cost.calls + workerUsage.cost.calls,
-		hasEstimated: usageTotals.cost.hasEstimated || workerUsage.cost.hasEstimated,
-		hasUnknown: usageTotals.cost.hasUnknown || workerUsage.cost.hasUnknown,
-		allKnownFree:
-			(usageTotals.cost.calls === 0 || usageTotals.cost.allKnownFree) &&
-			((workerUsage.cost.calls === 0 && workerUsage.unknownCallCoverageRuns === 0) || workerUsage.cost.allKnownFree) &&
-			usageTotals.cost.calls + workerUsage.cost.calls > 0,
-	};
-	const usageRows = [...usageByModel.values()].sort(
-		(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.providerId.localeCompare(b.providerId),
-	);
-	const cacheSessions = sessions
-		.filter((session) => hasPromptCacheTelemetry(session.promptCache))
-		.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
 	const recallSessions = sessions
 		.filter((session) => hasRecallTelemetry(session.recall))
 		.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
@@ -920,57 +421,11 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		emit({ kind: "fact", fact: "ungrounded-claims", value: accountability.ungroundedClaims });
 		emit({ kind: "fact", fact: "audit-tool-calls", value: auditToolCalls.length, blocked: auditBlocked.length });
 		emit({ kind: "fact", fact: "permission-approval", ...permissions });
-		if (usageMeasurable) {
-			// The origin split is emitted only when something out of turn was
-			// recorded, so a report over an archive with no `/btw`, `/handoff`, or
-			// pre-warm round in it stays byte-identical to what it printed before.
-			emit({
-				kind: "fact",
-				fact: "tokens",
-				...reportedTotals,
-				...(hasLabelledCall(callOrigins)
-					? {
-							turns: turnsOf(callOrigins),
-							sideQuestions: callOrigins.sideQuestions,
-							handoffs: callOrigins.handoffs,
-							prewarms: callOrigins.prewarms,
-							backgroundMemorySteps: callOrigins.backgroundMemory,
-							...(callOrigins.failedCompaction > 0 ? { failedCompactionCalls: callOrigins.failedCompaction } : {}),
-							...(callOrigins.systemOne > 0 ? { systemOneCalls: callOrigins.systemOne } : {}),
-							...(callOrigins.safetyJudge > 0 ? { safetyJudgeCalls: callOrigins.safetyJudge } : {}),
-						}
-					: {}),
-			});
-			for (const row of usageRows) {
-				emit({
-					kind: "fact",
-					fact: "model-usage",
-					providerId: row.providerId,
-					attributedModelId: row.attributedModelId,
-					requestedModelIds: [...row.requestedModelIds].sort(),
-					responseModelIdObservationCounts: row.responseModelIdObservationCounts,
-					...reportedUsageTotals(
-						row.totals,
-						outOfTurnRows.filter(
-							(call) => call.target === row.providerId && call.attributedModelId === row.attributedModelId,
-						),
-						sessionCalls.filter(
-							(call) => call.providerId === row.providerId && call.attributedModelId === row.attributedModelId,
-						),
-					),
-				});
-			}
-			for (const session of cacheSessions) {
-				emit({
-					kind: "fact",
-					fact: "session-cache",
-					sessionId: session.sessionId,
-					uncachedPrefillTokens: session.promptCache.uncachedPrefillTokens,
-					reprefilledTokens: session.promptCache.reprefilledTokens,
-					cacheBreakCalls: session.promptCache.cacheBreakCalls,
-					verdictCounts: session.promptCache.verdictCounts,
-				});
-			}
+		if (spendMeasurable) {
+			for (const report of costReports) emit({ kind: "fact", fact: "telemetry-cost", groupBy: report.groupBy, report });
+			emit({ kind: "fact", fact: "telemetry-tokens", tokens });
+			for (const report of cacheReports)
+				emit({ kind: "fact", fact: "telemetry-cache", sessionId: report.sessionId, report });
 			for (const session of recallSessions) {
 				emit({
 					kind: "fact",
@@ -981,37 +436,6 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 					operatorRecalls: session.recall.operatorRecalls,
 					readmittedTokens: session.recall.readmittedTokens,
 				});
-			}
-		}
-		if (usageMeasurable || workerMeasurable) {
-			emit({
-				kind: "fact",
-				fact: "all-recorded-tokens",
-				outOfTurnFailureCounts,
-				sessionFailureCounts,
-				knownSubtotal: allRecordedTokens,
-				input: usageTotals.input + workerUsage.input,
-				output: usageTotals.output + workerUsage.output,
-				cacheRead: usageTotals.cacheRead + workerUsage.cacheRead,
-				cacheWrite: usageTotals.cacheWrite + workerUsage.cacheWrite,
-				reasoningTokens: usageTotals.reasoningTokens + workerUsage.reasoningTokens,
-				apiCalls: allCost.calls,
-				cost: allCost,
-				sessionAndSideCallTokens: usageTotals.totalTokens,
-				workerRunTokens: workerUsage.totalTokens,
-				missingTokenCalls,
-				unknownCallCoverageRuns: workerUsage.unknownCallCoverageRuns,
-			});
-		}
-		if (workerMeasurable) {
-			emit({ kind: "fact", fact: "worker-tokens", ...workerUsage });
-			for (const [audience, totals] of workerUsageByAudience) {
-				emit({ kind: "fact", fact: "worker-audience-usage", audience, ...totals });
-			}
-			for (const row of [...workerUsageByModel.values()].sort(
-				(a, b) => b.totals.totalTokens - a.totals.totalTokens || a.targetId.localeCompare(b.targetId),
-			)) {
-				emit({ kind: "fact", fact: "worker-model-usage", targetId: row.targetId, modelId: row.modelId, ...row.totals });
 			}
 		}
 		for (const [tool, totals] of topTools) emit({ kind: "fact", fact: "top-tool", tool, ...totals });
@@ -1065,150 +489,57 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		`  permission decisions: ${permissions.requested} requested, ${permissions.granted} granted, ${permissions.denied} denied, ${permissions.expired} expired; approval rate ${permissions.approvalRate === null ? "n/a" : `${(permissions.approvalRate * 100).toFixed(1)}%`}`,
 	);
 	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
-	if (usageMeasurable || workerMeasurable) {
-		out(`  all recorded cost in window: ${renderCostAggregate(allCost)} (${allCost.calls} recorded model calls)`);
-		if (workerUsage.unknownCallCoverageRuns > 0)
-			out(
-				`  call coverage unknown for ${workerUsage.unknownCallCoverageRuns} worker receipts; call counts are known subtotals`,
-			);
+	const [byOrigin] = costReports;
+	if (spendMeasurable && byOrigin)
 		out(
-			`  all recorded tokens in window: ${allRecordedTokens} known subtotal (session and side calls ${usageTotals.totalTokens}, worker runs ${workerUsage.totalTokens}; ${missingTokenCalls} calls missing token usage)`,
+			`  recorded spend in window: ${byOrigin.total.usd.display} over ${byOrigin.total.tokens.display} tokens in ${byOrigin.total.calls.display} calls (sessions, side calls and worker runs)`,
 		);
-	}
-	if (usageMeasurable) {
-		if (sessionFailureCounts.invokedUnknownCalls > 0 || sessionFailureCounts.neverInvokedCalls > 0)
-			console.log(
-				`  session failures: ${usageCoverageLabel(sessionFailureCounts.invokedUnknownCalls, sessionFailureCounts.neverInvokedCalls)}${sessionFailureCounts.neverInvokedCalls > 0 ? " (excluded from spending)" : ""}`,
-			);
-		if (outOfTurnFailureCounts.invokedUnknownCalls > 0 || outOfTurnFailureCounts.neverInvokedCalls > 0)
-			out(
-				`  out-of-turn failures: ${usageCoverageLabel(outOfTurnFailureCounts.invokedUnknownCalls, outOfTurnFailureCounts.neverInvokedCalls)}${outOfTurnFailureCounts.neverInvokedCalls > 0 ? " (excluded from spending)" : ""}`,
-			);
+	if (spendMeasurable)
 		out(
-			`  session and side-call tokens in window: ${usageAmount(reportedTotals.totalTokens)} over ${usageTotals.apiCalls} model calls (input ${usageAmount(reportedTotals.input)}, output ${usageAmount(reportedTotals.output)}, cache read ${usageAmount(reportedTotals.cacheRead)}, cache write ${usageAmount(reportedTotals.cacheWrite)}, reasoning ${usageAmount(reportedTotals.reasoningTokens)})`,
+			`  token fields: input ${tokens.input.display}, output ${tokens.output.display}, cache read ${tokens.cacheRead.display}, cache write ${tokens.cacheWrite.display}, reasoning ${tokens.reasoning.display}`,
 		);
-		if (hasLabelledCall(callOrigins)) {
-			// Only printed when a labelled call is in the window. Over an archive
-			// with none, these three lines would say nothing the line above does
-			// not already say, and their absence keeps the older output intact.
-			out(`  conversation and compaction calls in window: ${turnsOf(callOrigins)}`);
-			if (callOrigins.sideQuestions > 0) out(`  side questions in window: ${callOrigins.sideQuestions}`);
-			if (callOrigins.handoffs > 0) out(`  handoffs in window: ${callOrigins.handoffs}`);
-			if (callOrigins.prewarms > 0) out(`  pre-warms in window: ${callOrigins.prewarms}`);
-			if (callOrigins.backgroundMemory > 0) {
-				out(`  background memory steps in window: ${callOrigins.backgroundMemory}`);
-			}
-			if (callOrigins.safetyJudge > 0) out(`  safety judge calls in window: ${callOrigins.safetyJudge}`);
-			if (callOrigins.systemOne > 0) out(`  System One calls in window: ${callOrigins.systemOne}`);
-		}
-		if (failedCompaction.calls > 0) {
-			const erroredCompactionCost = aggregateCostAmounts(
-				compactionRows
-					.filter(
-						(row) => row.label === "failed-compaction" && row.callOutcome === "error" && row.failure?.invoked !== false,
-					)
-					.map((row) => ({ usd: row.usage.costUsd ?? 0, provenance: row.usage.costProvenance ?? "unknown" })),
-			);
-			out(
-				`  failed-compaction streams: ${failedCompaction.calls} (${failedCompaction.erroredCalls} errored, ${failedCompaction.abortedCalls} aborted, ${failedCompaction.successfulCalls} completed before the attempt failed)`,
-			);
-			out("  usage figures are known subtotals; missing compaction usage is not zero or a complete spending bound");
-			out(`  errored compaction known cost: ${renderCostAggregate(erroredCompactionCost)}`);
-		}
-		out(
-			`  ${missingTokenCalls > 0 ? "known cost subtotal" : "reported/estimated cost"} in window: ${renderCostAggregate(usageTotals.cost)}`,
-		);
-	}
-	if (usageRows.length > 0) {
+	for (const report of spendMeasurable ? costReports : []) {
+		if (report.groups.length === 0) continue;
+		const subject = report.groupBy === "label" ? "origin" : "target/model";
 		out("");
-		out("  tokens by attributed model (from session ledgers and provider-reported usage)");
+		out(`  spend by ${subject}`);
+		process.stdout.write(
+			indent(
+				formatColumns([
+					[subject, "calls", "tokens", "cost"],
+					...report.groups.map((group) => [group.key, group.calls.display, group.tokens.display, group.usd.display]),
+				]),
+			),
+		);
+	}
+	if (spendMeasurable && cacheReports.length > 0) {
+		out("");
+		out("  prompt cache by session");
 		process.stdout.write(
 			indent(
 				formatColumns([
 					[
-						"provider",
-						"attributed model",
-						"requested model ids",
-						"response model id observation",
-						"calls",
-						"input",
-						"output",
+						"session",
 						"cache read",
-						"reasoning",
-						"tokens",
-						"cost",
+						"cache write",
+						"uncached prefill",
+						"re-prefilled",
+						"cache-break bill",
+						"hot/partial/cold/small/unknown",
 					],
-					...usageRows.map((row) => {
-						const reported = reportedUsageTotals(
-							row.totals,
-							outOfTurnRows.filter(
-								(call) => call.target === row.providerId && call.attributedModelId === row.attributedModelId,
-							),
-						);
-						return [
-							row.providerId,
-							row.attributedModelId,
-							[...row.requestedModelIds].sort().join(","),
-							responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts),
-							String(row.totals.apiCalls),
-							usageAmount(reported.input),
-							usageAmount(reported.output),
-							usageAmount(reported.cacheRead),
-							usageAmount(reported.reasoningTokens),
-							usageAmount(reported.totalTokens),
-							renderCostAggregate(row.totals.cost),
-						];
-					}),
-				]),
-			),
-		);
-	}
-	if (workerUsage.runs > 0) {
-		out("");
-		out(
-			`  worker runs: ${workerUsage.runs}, ${workerUsage.missingTokenRuns} missing token usage, ${workerUsage.missingBreakdownRuns} missing input/output/cache breakdown, ${workerUsage.unpricedRuns} unpriced`,
-		);
-		out(
-			`  worker known subtotals: input ${workerUsage.input}, output ${workerUsage.output}, cache read ${workerUsage.cacheRead}, cache write ${workerUsage.cacheWrite}, reasoning ${workerUsage.reasoningTokens}, cost ${renderCostAggregate(workerUsage.cost)}`,
-		);
-		out(
-			`  worker audiences: ${[...workerUsageByAudience].map(([audience, totals]) => `${audience} ${totals.runs} runs / ${totals.totalTokens} known tokens`).join(", ")}`,
-		);
-		process.stdout.write(
-			indent(
-				formatColumns([
-					["worker target", "model", "runs", "tokens", "missing usage", "known cost"],
-					...[...workerUsageByModel.values()]
-						.sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || a.targetId.localeCompare(b.targetId))
-						.map((row) => [
-							row.targetId,
-							row.modelId,
-							String(row.totals.runs),
-							String(row.totals.totalTokens),
-							String(row.totals.missingTokenRuns),
-							renderCostAggregate(row.totals.cost),
-						]),
-				]),
-			),
-		);
-	}
-	if (cacheSessions.length > 0) {
-		out("");
-		out("  prompt cache by session (from backend timings and persisted verdicts)");
-		process.stdout.write(
-			indent(
-				formatColumns([
-					["session", "uncached prefill", "re-prefilled (estimate)", "hot/partial/cold/small/unknown"],
-					...cacheSessions.map((session) => [
-						session.sessionId,
-						session.promptCache.uncachedPrefillTokens === null ? "n/a" : String(session.promptCache.uncachedPrefillTokens),
-						session.promptCache.reprefilledTokens === null ? "n/a" : String(session.promptCache.reprefilledTokens),
+					...cacheReports.map((report) => [
+						report.sessionId,
+						report.cacheRead.display,
+						report.cacheWrite.display,
+						report.uncachedPrefill.display,
+						report.rePrefilled.display,
+						report.breakUsd.display,
 						[
-							session.promptCache.verdictCounts.hot,
-							session.promptCache.verdictCounts.partial,
-							session.promptCache.verdictCounts.cold,
-							session.promptCache.verdictCounts.small,
-							session.promptCache.verdictCounts.unknown,
+							report.verdicts.hot,
+							report.verdicts.partial,
+							report.verdicts.cold,
+							report.verdicts.small,
+							report.verdicts.unknown,
 						].join("/"),
 					]),
 				]),
@@ -1408,82 +739,18 @@ async function readReceipts(
 		const skillActivations = Array.isArray(parsed.skillActivations)
 			? parsed.skillActivations.flatMap((entry) => (isRecord(entry) && typeof entry.name === "string" ? [entry.name] : []))
 			: [];
-		const unverifiedTokens =
-			isRecord(parsed.externalTelemetry) && parsed.externalTelemetry.tokenUsage !== "provider-reported";
-		const coverage = callCoverageForRun(parsed);
 		receipts.push({
 			runId: parsed.runId,
-			...(isRecord(parsed.costSummary) &&
-			nonnegativeNumberOrNull(parsed.costSummary.knownUsd) !== null &&
-			typeof parsed.costSummary.hasEstimated === "boolean" &&
-			typeof parsed.costSummary.hasUnknown === "boolean" &&
-			typeof parsed.costSummary.allKnownFree === "boolean" &&
-			nonnegativeNumberOrNull(parsed.costSummary.calls) !== null
-				? { costSummary: parsed.costSummary as unknown as CostAggregate }
-				: {}),
 			cwd: typeof parsed.cwd === "string" ? parsed.cwd : null,
-			usageSessionId:
-				parsed.agentId === "main-agent" && typeof parsed.sessionId === "string"
-					? parsed.sessionId
-					: isRecord(parsed.delegation) && typeof parsed.delegation.acpSessionId === "string"
-						? parsed.delegation.acpSessionId
-						: null,
-			...coverage,
-			costProvenance: resolveCostProvenance(parsed.costProvenance, "unknown"),
 			agentId: typeof parsed.agentId === "string" ? parsed.agentId : "unknown",
 			task: typeof parsed.task === "string" ? parsed.task : "",
-			startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : parsed.endedAt,
 			endedAt: parsed.endedAt,
 			sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : null,
 			toolStats,
 			skillActivations,
-			targetId: typeof parsed.targetId === "string" ? parsed.targetId : "unknown",
-			modelId: typeof parsed.wireModelId === "string" ? parsed.wireModelId : "unknown",
-			audience:
-				parsed.agentAudience === "base" ||
-				parsed.agentAudience === "shadow" ||
-				parsed.agentAudience === "internal" ||
-				parsed.agentAudience === "custom"
-					? parsed.agentAudience
-					: "unknown",
-			tokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.tokenCount),
-			inputTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.inputTokenCount),
-			outputTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.outputTokenCount),
-			cacheReadTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.cacheReadTokenCount),
-			cacheWriteTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.cacheWriteTokenCount),
-			reasoningTokenCount: unverifiedTokens ? null : nonnegativeNumberOrNull(parsed.reasoningTokenCount),
-			costUsd:
-				parsed.costProvenance === "known" || parsed.costProvenance === "known_free" || parsed.costProvenance === "estimated"
-					? nonnegativeNumberOrNull(parsed.costUsd)
-					: null,
-			missingTokenUsage:
-				nonnegativeNumberOrNull(parsed.tokenCount) === null ||
-				unverifiedTokens ||
-				nonnegativeNumberOrNull(parsed.missingTokenCalls) === null ||
-				coverage.missingTokenCalls > 0,
 		});
 	}
 	return receipts;
-}
-
-/** Newest modification across a session's call journal segments; negative infinity without one. */
-async function latestCallJournalMtime(sessionDirectory: string): Promise<number> {
-	let names: string[];
-	try {
-		names = await readdir(sessionDirectory);
-	} catch {
-		return Number.NEGATIVE_INFINITY;
-	}
-	let latest = Number.NEGATIVE_INFINITY;
-	for (const name of names) {
-		if (name !== "calls.jsonl" && !/^calls\.rec_[0-9a-f-]+\.jsonl$/.test(name)) continue;
-		try {
-			latest = Math.max(latest, (await stat(join(sessionDirectory, name))).mtimeMs);
-		} catch {
-			// A segment rotated away between listing and stat; the live file still answers.
-		}
-	}
-	return latest;
 }
 
 async function readSessions(
@@ -1495,7 +762,6 @@ async function readSessions(
 ): Promise<SessionUsage[]> {
 	const refs = await listSessionLedgerRefs(stateDir, repoHash);
 	const sessions: SessionUsage[] = [];
-	const seenFailures = new Set<string>();
 	for (const ref of refs) {
 		let mtimeMs: number;
 		try {
@@ -1504,9 +770,8 @@ async function readSessions(
 			// A session directory without current.jsonl (e.g. archived) is not an error.
 			continue;
 		}
-		// Ledgers and journals untouched since before the window cannot contain in-window entries. Side calls
-		// settle after the last ledger append, so the journal files answer for themselves (#434).
-		if (mtimeMs < windowStart && (await latestCallJournalMtime(dirname(ref.path))) < windowStart) continue;
+		// A ledger untouched since before the window holds no in-window entry; spend is read through the read model.
+		if (mtimeMs < windowStart) continue;
 		let raw: string;
 		try {
 			raw = await readFile(ref.path, "utf8");
@@ -1519,21 +784,6 @@ async function readSessions(
 		const accountingEntries = parsedEntries.entries.filter(
 			(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
 		);
-		let journal: SessionCallJournalRead = { records: [], skipped: 0, damaged: 0, runs: new Map() };
-		try {
-			journal = readSessionCallJournalSync(dirname(ref.path), accountingEntries);
-		} catch {
-			diagnostics.notes.push(`session ${ref.sessionId}: call journal unavailable; using legacy ledger coverage`);
-		}
-		if (journal.skipped || journal.damaged)
-			diagnostics.notes.push(
-				`session ${ref.sessionId}: call journal has ${journal.skipped} skipped records and ${journal.damaged} damaged segments`,
-			);
-		const usageRecords = journalUsageWindow(
-			journal.records.map(({ record }) => record),
-			windowStart,
-			windowEnd + USAGE_WINDOW_FUTURE_SKEW_MS,
-		);
 		const usage: SessionUsage = {
 			harnessActions: 0,
 			duplicateDispatches: 0,
@@ -1542,15 +792,6 @@ async function readSessions(
 			bashShapes: new Map(),
 			skillActivations: new Set(),
 			entriesInWindow: 0,
-			// modelChange rows are kept regardless of the window: they carry no
-			// usage of their own, and dropping the ones that predate the window
-			// would attribute in-window calls to the wrong target.
-			usageCalls: ledgerUsageCalls(accountingEntries, {}, usageRecords),
-			workerCalls: usageCallsFromRunJournals(
-				runJournalsInWindow(journal, windowStart, windowEnd + USAGE_WINDOW_FUTURE_SKEW_MS),
-			),
-			failureCounts: ledgerCallFailureCounts(accountingEntries, usageRecords, seenFailures),
-			promptCache: foldPromptCacheTelemetry(accountingEntries),
 			recall: foldRecallTelemetry(accountingEntries),
 		};
 		for (const entry of parsedEntries.entries) {
@@ -1589,13 +830,7 @@ async function readSessions(
 				if (shape.length > 0) usage.bashShapes.set(shape, (usage.bashShapes.get(shape) ?? 0) + 1);
 			}
 		}
-		if (
-			usage.entriesInWindow > 0 ||
-			usage.usageCalls.length > 0 ||
-			usage.workerCalls.length > 0 ||
-			usage.failureCounts.neverInvokedCalls > 0
-		)
-			sessions.push(usage);
+		if (usage.entriesInWindow > 0) sessions.push(usage);
 	}
 	return sessions;
 }
@@ -1707,10 +942,6 @@ function maybeJsonRecord(value: unknown): Record<string, unknown> | null {
 
 function numberOr0(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function nonnegativeNumberOrNull(value: unknown): number | null {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1292,19 +1292,18 @@ describe("production compaction controls", () => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
-		const tokens = facts.find((fact) => fact.fact === "tokens");
-		ok(tokens);
-		strictEqual(tokens.totalTokens, null);
-		strictEqual(tokens.costUsd, null);
-		strictEqual(tokens.knownSubtotals, true);
-		strictEqual(tokens.missingTokenCalls, 1);
-		strictEqual(tokens.failedCompaction.erroredCalls, 1);
-		strictEqual(tokens.failedCompaction.unobservedUsageCalls.totalTokens, 1);
-		strictEqual(tokens.failedCompactionCalls, 1);
-		strictEqual(tokens.handoffs, 0);
-		const model = facts.find((fact) => fact.fact === "model-usage");
-		strictEqual(model.totalTokens, null);
-		strictEqual(model.costUsd, null);
+		// The failed stream's placeholder zeros measured nothing: its call counts, its tokens and cost stay unknown (#434).
+		const cost = (groupBy: string) => facts.find((fact) => fact.fact === "telemetry-cost" && fact.groupBy === groupBy);
+		const byLabel = cost("label")?.report;
+		ok(byLabel);
+		strictEqual(byLabel.total.calls.display, "1");
+		strictEqual(byLabel.total.tokens.display, "unknown (1 call unknown)");
+		strictEqual(byLabel.total.usd.display, "not measured");
+		deepStrictEqual(
+			byLabel.groups.map((group: { key: string; tokens: { display: string } }) => [group.key, group.tokens.display]),
+			[["compaction", "unknown (1 call unknown)"]],
+		);
+		strictEqual(cost("model")?.report.groups[0]?.usd.display, "not measured");
 	});
 	it("retains positive partial-response usage when a terminal error supplies normalized zeros", async () => {
 		const f = fixture(true);

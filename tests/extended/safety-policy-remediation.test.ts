@@ -158,7 +158,16 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 		kind: "assistant",
 		payload: {
 			text: "done",
-			usage: { input: 100, output: 50, totalTokens: 150, cost: { total: 0.03 }, costProvenance: "known" },
+			stopReason: "stop",
+			usage: {
+				input: 100,
+				output: 50,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 150,
+				cost: { total: 0.03 },
+				costProvenance: "known",
+			},
 		},
 	});
 	session.flushAppends?.();
@@ -230,11 +239,12 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 		.split("\n")
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
-	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.knownSubtotal, 280);
-	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.missingTokenCalls, 0);
-	assert.equal(rows.find((row) => row.fact === "all-recorded-tokens")?.unknownCallCoverageRuns, 2);
-	assert.equal(rows.find((row) => row.fact === "worker-tokens")?.apiCalls, 1);
-	assert.equal(rows.find((row) => row.fact === "worker-tokens")?.missingTokenRuns, 2);
-	assert.equal(rows.find((row) => row.fact === "worker-model-usage" && row.targetId === "worker-target")?.runs, 3);
-	assert.equal(rows.find((row) => row.fact === "worker-audience-usage" && row.audience === "shadow")?.totalTokens, 130);
+	// Spend is the read model's: the ledger's call, plus each receipt with no run journal at its sealed totals with
+	// unknown call coverage, so the totals read as lower bounds. The main-agent mirror is the session's own spend (#434).
+	const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "label")?.report as
+		| { total: Record<"calls" | "tokens" | "usd", { display: string }> }
+		| undefined;
+	assert.equal(cost?.total.tokens.display, "≥280 (1 call unknown)");
+	assert.equal(cost?.total.usd.display, "$0.05 +?");
+	assert.equal(cost?.total.calls.display, "≥2 (3 calls unknown)");
 });

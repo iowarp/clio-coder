@@ -1488,6 +1488,11 @@ export function repoCostReport(
 	};
 }
 
+/** A repository window's token fields: the session view's token quantities over the `repo` scope (#434 §11.1). */
+export function repoTokenQuantities(repo: RepoSource): SessionTelemetryV1["own"]["tokens"] {
+	return tokenQuantities({ repo }, { scope: "repo", owner: repo.owner });
+}
+
 export function runCostReport(
 	runId: string,
 	source: JournalSource,

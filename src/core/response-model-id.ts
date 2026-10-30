@@ -50,15 +50,6 @@ export function addResponseModelIdObservationCounts(
 	counts.legacyDifferenceOnlyCalls += additional.legacyDifferenceOnlyCalls;
 }
 
-export function responseModelIdObservationCountsLabel(counts: ResponseModelIdObservationCounts): string {
-	const parts: string[] = [];
-	if (counts.reportedCalls > 0) parts.push(`reported ${counts.reportedCalls}`);
-	if (counts.notReportedCalls > 0) parts.push(`not reported ${counts.notReportedCalls}`);
-	if (counts.notObservedCalls > 0) parts.push(`not observed ${counts.notObservedCalls}`);
-	if (counts.legacyDifferenceOnlyCalls > 0) parts.push(`legacy difference-only ${counts.legacyDifferenceOnlyCalls}`);
-	return parts.join(", ");
-}
-
 function nonEmptyString(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
