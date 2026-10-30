@@ -33,6 +33,7 @@ import { observeCodexTransport } from "./apis/codex-transport.js";
 import { withProviderCheckpoint } from "./apis/openai-compaction.js";
 import { observeResponsesModelId } from "./apis/responses-model-id.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
+import { withClioIdentity } from "./client-identity.js";
 import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { instrumentProviderCall, type ProviderCallScope } from "./provider-diagnostics.js";
@@ -118,9 +119,10 @@ function resolved(api: Api): EngineRegisteredApiProvider {
 function dispatchEngineStream(
 	model: Model<Api>,
 	context: Context,
-	options?: StreamOptions,
+	requested?: StreamOptions,
 ): AssistantMessageEventStream {
 	registerEngineBuiltins();
+	const options = withClioIdentity(requested);
 	if (compatUniverse) return compatUniverse.stream(model, context, options);
 	return resolved(model.api).stream(model, normalizeContext(context), withEnvApiKey(model, options));
 }
@@ -128,9 +130,10 @@ function dispatchEngineStream(
 function dispatchEngineStreamSimple(
 	model: Model<Api>,
 	context: Context,
-	options?: SimpleStreamOptions,
+	requested?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	registerEngineBuiltins();
+	const options = withClioIdentity(requested);
 	if (compatUniverse) return compatUniverse.streamSimple(model, context, options);
 	return resolved(model.api).streamSimple(model, normalizeContext(context), withEnvApiKey(model, options));
 }

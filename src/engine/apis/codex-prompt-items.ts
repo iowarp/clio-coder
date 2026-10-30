@@ -56,7 +56,12 @@ function moveCodexPromptIntoInput(payload: Payload): Payload {
 			tools: [{ type: "namespace", name: "functions", description: "", tools: item.tools }],
 		};
 	});
-	return { ...rest, input: [...leading, ...history] };
+	// Pi 1.4 already declares the initial tools in an additional_tools item at the head of the input instead of
+	// top-level tools (upstream #10940). Keep that item ahead of the instructions, where top-level tools land, so
+	// the leading prefix stays byte-identical across the upgrade and cached continuations survive it.
+	const head =
+		tools.length === 0 && isRecord(history[0]) && history[0].type === "additional_tools" ? history.slice(0, 1) : [];
+	return { ...rest, input: [...head, ...leading, ...history.slice(head.length)] };
 }
 
 /**

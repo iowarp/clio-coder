@@ -36,4 +36,4 @@ overrides:
   # GHSA-27r3-jxmh-p828 (high): reached through the MCP SDK's express.
   "body-parser@<2.4.0": "2.4.0"
 patchedDependencies:
-  '@earendil-works/pi-tui@1.1.0': patches/@earendil-works__pi-tui@1.1.0.patch
+  '@earendil-works/pi-tui@1.4.0': patches/@earendil-works__pi-tui@1.4.0.patch

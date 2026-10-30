@@ -53,6 +53,10 @@ function vendorTuiNotices(): void {
 	cpSync("src/engine/notices/pi-tui-LICENSE", join(target, "pi-tui-LICENSE"));
 	cpSync(join(dirname(piRequire.resolve("marked/package.json")), "LICENSE"), join(target, "marked-LICENSE"));
 	cpSync(
+		join(dirname(piRequire.resolve("marked-cjk-friendly/package.json")), "LICENSE"),
+		join(target, "marked-cjk-friendly-LICENSE"),
+	);
+	cpSync(
 		join(dirname(piRequire.resolve("get-east-asian-width")), "license"),
 		join(target, "get-east-asian-width-LICENSE"),
 	);
@@ -129,6 +133,7 @@ export default defineConfig({
 		"@vscode/tree-sitter-wasm",
 		/^@earendil-works\/pi-tui(?:\/|$)/,
 		"marked",
+		"marked-cjk-friendly",
 		"get-east-asian-width",
 	],
 	// The shebang comes from the hashbang line in each entry source file;

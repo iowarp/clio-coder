@@ -32,6 +32,13 @@ test("a continuable Codex body carries its prompt and tools as leading input ite
 	]);
 });
 
+// Pi 1.4 (#10940) declares the initial tools in a head additional_tools item; the continuation prefix must not move.
+test("a Pi 1.4 Codex body with head-declared tools keeps the tools item ahead of the instructions", async () => {
+	const head = { type: "additional_tools", role: "developer", tools: [tool] };
+	const piBody = { model: "gpt-6-luna", instructions: "system", input: [head, user], prompt_cache_key: "s1" };
+	deepStrictEqual(await finish(codex, piBody), await finish(codex, body({ prompt_cache_key: "s1" })));
+});
+
 test("a Codex body that cannot continue keeps its stock shape", async () => {
 	deepStrictEqual(await finish(codex, body()), body());
 	deepStrictEqual(await finish(codex, body({ prompt_cache_key: "s1" }), "sse"), body({ prompt_cache_key: "s1" }));

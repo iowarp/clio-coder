@@ -1,19 +1,19 @@
 # Dependency patches
 
-## Pi TUI 1.1.0: why the patch remains
+## Pi TUI 1.4.0: why the patch remains
 
-`@earendil-works__pi-tui@1.1.0.patch` is the sole Pi dependency patch, applied
+`@earendil-works__pi-tui@1.4.0.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
 unpatched.** The patch has fifteen hunks in ten `dist/` files and applies to the
-published, unmodified 1.1.0 package. It carries the semantic edit and search
-operations that stock 1.1.0 keeps private, a wrapping fix for styled
+published, unmodified 1.4.0 package. It carries the semantic edit and search
+operations that stock 1.4.0 keeps private, a wrapping fix for styled
 whitespace and the regular-screen render memo. Everything else earlier
 revisions patched is now stock Pi or an engine module, as
 [recorded below](#what-was-removed). The table lists every
-hunk; `grep -c '^@@' patches/@earendil-works__pi-tui@1.1.0.patch` must equal the
+hunk; `grep -c '^@@' patches/@earendil-works__pi-tui@1.4.0.patch` must equal the
 hunk total.
 
-| Hunks | Patched API | Required behavior | Why stock 1.1.0 is insufficient |
+| Hunks | Patched API | Required behavior | Why stock 1.4.0 is insufficient |
 | --- | --- | --- | --- |
 | 2: `components/editor.d.ts`, `components/editor.js` | `Editor.applyEdit` | Invoke undo and the six delete operations (character and word deletion in both directions, and deletion to line start and end) directly after Clio resolves a semantic keyboard action, without passing through submission or a second keybinding lookup. | The edit operations are private and `handleInput` interprets bytes against configurable bindings. `setText` alone does not express the same undo, cursor and kill-ring semantics. |
 | 2: `components/input.d.ts`, `components/input.js` | `Input.applyEdit` | The same operations plus `clear`, which keeps undo and kill-ring behavior. | The same private operations on `Input`. |
@@ -73,6 +73,14 @@ virtualizes the transcript, and its large-transcript benchmarks cover only that
 mode. The two removed hunks cost at most 1.5x frame time or extra bytes written
 and were dropped. `git log` on the patch file finds the commits that removed
 hunks. The memo stays until Pi ships the change upstream (draft 0003).
+
+Since 1.2.0, stock `TuiMainScreen.doRender` passes every rendered row through
+`resolveFakeCursors` (an `includes` scan and a new array) before compositing,
+so the memo keys on resolved rows and stays correct. That stock step is not
+memoized and grows with the transcript: a copy of the 1.4.0 function over
+synthetic 138-character styled rows cost 0.07 ms per frame at 2.2k rows,
+0.80 ms at 22.9k and 1.37 ms at 40k (Node 24, load average 0.5). The patch
+leaves it stock for the 1.4.0 upgrade; memoizing it is a separate decision.
 
 ## Alternatives considered
 

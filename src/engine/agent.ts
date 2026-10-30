@@ -37,6 +37,7 @@ export {
 import { engineMainStreamSimple, engineStreamSimple } from "./api-registry.js";
 import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
+import { clioClientIdentity } from "./client-identity.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
 export type EngineStreamFn = (...args: Parameters<typeof engineStreamSimple>) => ReturnType<StreamFn>;
@@ -320,6 +321,8 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		}
 	};
 	const agent = new Agent({
+		// Pi 1.4's Agent attributes requests to pi unless the host names its own identity.
+		identity: clioClientIdentity(),
 		...agentOptions,
 		streamFn: beforeStreamRequest ? admit : invoke,
 		...(beforeToolBatch ? { beforeToolCall: batchAwareBeforeToolCall(beforeToolBatch, options.beforeToolCall) } : {}),

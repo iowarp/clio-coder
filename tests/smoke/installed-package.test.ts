@@ -765,7 +765,12 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				},
 			);
 			match(keyboardReceipt, /packed-keyboard-ok/u);
-			for (const notice of ["pi-tui-LICENSE", "marked-LICENSE", "get-east-asian-width-LICENSE"]) {
+			for (const notice of [
+				"pi-tui-LICENSE",
+				"marked-LICENSE",
+				"marked-cjk-friendly-LICENSE",
+				"get-east-asian-width-LICENSE",
+			]) {
 				ok(existsSync(join(packageRoot, "dist", "assets", "tui-notices", notice)));
 			}
 

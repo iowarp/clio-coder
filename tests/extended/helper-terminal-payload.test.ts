@@ -86,9 +86,16 @@ const names = (tools: unknown) =>
 	(tools as Array<{ name?: string; function?: { name: string }; type?: string }>)
 		.map((entry) => entry.function?.name ?? entry.name)
 		.filter((entry) => entry !== "__pi_deferred_placeholder__");
+// Pi 1.4 (#10940) declares Responses and Codex tools in a head additional_tools item instead of top-level tools.
+const declared = (body: Record<string, unknown>) => {
+	if (body.tools !== undefined) return names(body.tools);
+	const head = (body.input as Array<{ type?: string; tools?: Array<{ type?: string; tools?: unknown[] }> }>)?.[0];
+	if (head?.type !== "additional_tools" || head.tools === undefined) return undefined;
+	return names(head.tools.flatMap((entry) => (entry.type === "namespace" ? (entry.tools ?? []) : [entry])));
+};
 
 test("terminal handoff overrides work-tool lock with one required tool", async () => {
-	const model = catalog("openrouter", "google/gemini-2.5-flash:batch");
+	const model = catalog("openrouter", "google/gemini-2.5-flash");
 	const body = await wire(model, [handoff, lock]);
 	deepStrictEqual(names(body.tools), [name]);
 	strictEqual(body.tool_choice, "required");
@@ -126,7 +133,7 @@ for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "c
 }
 test("Responses terminal handoff uses native function choice", async () => {
 	const body = await wire(catalog("openai", "gpt-5.6-luna"), [handoff]);
-	deepStrictEqual(names(body.tools), [name]);
+	deepStrictEqual(declared(body), [name]);
 	deepStrictEqual(body.tool_choice, { type: "function", name });
 	strictEqual(body.parallel_tool_calls, false);
 });
@@ -150,7 +157,7 @@ test("Codex sends only accepted tool_choice shapes and retries one rejected choi
 	for (const [label, round, tools, choice] of rounds) {
 		const body = await wire(codex, round, true, { apiKey });
 		bodies.set(label, body);
-		deepStrictEqual(body.tools === undefined ? undefined : names(body.tools), tools, label);
+		deepStrictEqual(declared(body), tools, label);
 		// Pi's own default may be omitted on an ordinary round; any forced round must spell its choice.
 		if (label === "ordinary") ok(body.tool_choice === undefined || body.tool_choice === "auto", label);
 		else strictEqual(body.tool_choice, choice, label);
@@ -304,7 +311,7 @@ test("deterministic sampling is limited to compatible self-hosted APIs", async (
 	strictEqual(claude.temperature, undefined);
 	strictEqual(claude.seed, undefined);
 	// Hosted dialects may reject a seed or a zero temperature, so a runtime outside the self-hosted list sends neither.
-	const hosted = await sampled(catalog("openrouter", "google/gemini-2.5-flash:batch"), "openrouter");
+	const hosted = await sampled(catalog("openrouter", "google/gemini-2.5-flash"), "openrouter");
 	strictEqual(hosted.temperature, undefined);
 	strictEqual(hosted.seed, undefined);
 	// Ollama has no Pi serializer; its adapter carries the seed as a nested option.

@@ -66,7 +66,13 @@ test("prompt arguments retain quoted, positional, slice and raw substitution sem
 	const raw = "  first\t\"two words\"  'three words' ";
 	const args = parseCommandArgs(raw);
 	deepStrictEqual(args, ["first", "two words", "three words"]);
-	deepStrictEqual(parseCommandArgs('"" one\ntwo'), ["one", "two"]);
+	// Pi 1.3.0 (#10867): a quoted empty argument keeps its position, so later arguments do not shift.
+	deepStrictEqual(parseCommandArgs('"" one\ntwo'), ["", "one", "two"]);
+	deepStrictEqual(parseCommandArgs("a '' c"), ["a", "", "c"]);
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("$2|${1:-correctness}", parseCommandArgs('"" src/x.ts')), "src/x.ts|correctness");
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.
+	strictEqual(substituteArgs("${ARGUMENTS:-d}|$ARGUMENTS", parseCommandArgs('""'), '""'), 'd|""');
 	deepStrictEqual(parseCommandArgs('"a\nb" c\nd'), ["a\nb", "c", "d"]);
 	strictEqual(
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: These are prompt placeholders passed to the substitution API.

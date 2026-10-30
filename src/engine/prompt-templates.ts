@@ -1,8 +1,13 @@
-// Derived from pi-coding-agent packages/coding-agent/src/core/prompt-templates.ts at v1.0.0 (MIT license).
-/** Parse bash-style quoted arguments. Unquoted whitespace of any kind, including newlines, separates arguments. */
+// Derived from pi-coding-agent packages/coding-agent/src/core/prompt-templates.ts at v1.0.0 (MIT license),
+// with the v1.3.0 empty-argument fix (upstream #10867).
+/**
+ * Parse bash-style quoted arguments. Unquoted whitespace of any kind, including newlines, separates arguments.
+ * A quoted empty string (`""` or `''`) is an argument, so later positions do not shift and `${N:-default}` applies.
+ */
 export function parseCommandArgs(argsString: string): string[] {
 	const args: string[] = [];
 	let current = "";
+	let hasToken = false;
 	let inQuote: string | null = null;
 
 	for (const char of argsString) {
@@ -11,16 +16,19 @@ export function parseCommandArgs(argsString: string): string[] {
 			else current += char;
 		} else if (char === '"' || char === "'") {
 			inQuote = char;
+			hasToken = true;
 		} else if (/\s/.test(char)) {
-			if (current) {
+			if (hasToken) {
 				args.push(current);
 				current = "";
+				hasToken = false;
 			}
 		} else {
 			current += char;
+			hasToken = true;
 		}
 	}
-	if (current) args.push(current);
+	if (hasToken) args.push(current);
 	return args;
 }
 
@@ -52,7 +60,7 @@ export function substituteArgs(content: string, args: string[], rawArguments?: s
 			(match: string, target?: string, fallback?: string, from?: string, count?: string, simple?: string) => {
 				if (target !== undefined) {
 					const value =
-						target === "ARGUMENTS" ? (args.length > 0 ? exactArgs : "") : target === "@" ? allArgs : args[Number(target) - 1];
+						target === "ARGUMENTS" ? (allArgs ? exactArgs : "") : target === "@" ? allArgs : args[Number(target) - 1];
 					return value || (fallback ?? "");
 				}
 				if (from !== undefined) {

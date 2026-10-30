@@ -38,7 +38,7 @@ index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb6
      private layoutText;
      getText(): string;
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index f02bf7f5ac3ea8466431ce4ae3171ae4bb37eb86..c39760f36d7623c26823a63276ba6b9e0289eb1d 100644
+index 56956760b6c31aedb2ca6df160256140e5af2fef..fe98784aed9660d8fc557e8b3f6682a0193d29c0 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -545,6 +545,18 @@ export class Editor {
@@ -73,7 +73,7 @@ index 982a3d9888fa79ed008f643beaf9461b068aed9e..4df94e925f63c8d9cfd2a4e40189b0a9
      handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
      private insertCharacter;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5e7fffa205390c2b2ff906a5386275c9197490fa..73428b2ee1c8b555bd3a8eed2dd88e11b1e851f2 100644
+index a27023e070788d2f143b77743eef1c8a5ad0de58..1c8341115ccc621b5a916bf2bb96da1a929fd514 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -40,6 +40,26 @@ export class Input {
@@ -104,10 +104,10 @@ index 5e7fffa205390c2b2ff906a5386275c9197490fa..73428b2ee1c8b555bd3a8eed2dd88e11
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index 0c488810118e4d5f4ee18ccbd3dd4de8778b7e2c..c7672b9ab7e86dac0fd3981b369ab21e833fc205 100644
+index d0f203ab61aa753ca124bfe7806cd927436a390b..15ba50e9c8080436bc10772156dc3a584f9bcb91 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
-@@ -107,11 +107,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -109,11 +109,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
      scrollBy(lines: number): void;
      scrollToTop(): void;
      scrollToBottom(): void;
@@ -126,10 +126,10 @@ index 0c488810118e4d5f4ee18ccbd3dd4de8778b7e2c..c7672b9ab7e86dac0fd3981b369ab21e
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index afc1e6ebe4a8412430c910938e0a995e1b1f0adb..0e0608ef0de71062b7562504b83721d8b4f4af4f 100644
+index 043d2c7952af7908b7cbb576f47d2bc18adada22..bbfce45bd6462f1b2206ea3078b0f54962fd3823 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -314,6 +314,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -324,6 +324,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -144,7 +144,7 @@ index afc1e6ebe4a8412430c910938e0a995e1b1f0adb..0e0608ef0de71062b7562504b83721d8
          if (this.activeSearch) {
              this.closeSearch();
 diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
-index 896bb501fc5d6e7b0bf76faa8d97dcd045e95526..57cfbca2322993438bb96c4c3c69c6ca5e084fe7 100644
+index 88eca823778ee1d70143bd94588437021f856333..aa68458082c89deaba1785ebef84a7483aa3411e 100644
 --- a/dist/tui-main-screen.js
 +++ b/dist/tui-main-screen.js
 @@ -3,7 +3,8 @@ import * as os from "node:os";
@@ -248,7 +248,7 @@ index 896bb501fc5d6e7b0bf76faa8d97dcd045e95526..57cfbca2322993438bb96c4c3c69c6ca
                      continue;
                  const blockEnd = i + this.getKittyImageReservedRows(lines, i) - 1;
 diff --git a/dist/utils.js b/dist/utils.js
-index e6b878c5234f1bb456033c429e699e1b62629c28..55903d69b1797025229a8d37487ea1c407dc5334 100644
+index 946da9df9f098c55272410a78e31363623fdc219..cfac4215d0c9e9731b2f5f0429ceafa53d6905fc 100644
 --- a/dist/utils.js
 +++ b/dist/utils.js
 @@ -856,7 +856,9 @@ function wrapSingleLine(line, width) {
