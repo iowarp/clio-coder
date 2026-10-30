@@ -155,11 +155,10 @@ Deleting SQLite rows creates reusable pages but does not normally reduce the fil
 
 ## CLI Commands
 
-The `clio-coder trace` command has eight subcommands for inspecting, bounding, and querying the SQLite trace mirror, plus the code-step record files beside it:
+The `clio-coder trace` command has seven subcommands for inspecting, bounding, and querying the SQLite trace mirror, plus the code-step record files beside it:
 
 ```bash
 clio-coder trace runs [--db PATH] [--limit N] [--json]
-clio-coder trace inspect --json
 clio-coder trace phases <runId> [--db PATH]
 clio-coder trace tail <runId> [--follow] [--db PATH]
 clio-coder trace procs <runId> [--db PATH]
@@ -170,7 +169,7 @@ clio-coder trace sql <SELECT query> [--db PATH]
 
 `clio-coder trace --help`, `-h`, and `trace help` print usage on stdout and exit with code 0. A bare `clio-coder trace` prints the same usage and exits 2.
 
-Flag values are validated before any database work. `--limit` is an integer from 1 to 500. `--max-age-days` is an integer from 1 to 36500. `--max-bytes` is an integer of at least 1,048,576. `--db` takes a path. A missing flag value, an out-of-range number, or an unknown flag exits 2. `--json` is accepted on every subcommand but only `runs`, `inspect`, `code-steps`, and `prune` use it.
+Flag values are validated before any database work. `--limit` is an integer from 1 to 500. `--max-age-days` is an integer from 1 to 36500. `--max-bytes` is an integer of at least 1,048,576. `--db` takes a path. A missing flag value, an out-of-range number, or an unknown flag exits 2. `--json` is accepted on every subcommand but only `runs`, `code-steps`, and `prune` use it.
 
 `trace code-steps` is the one subcommand that does not read the mirror. A deterministic fleet code step is a subprocess, not a model run, so [code-step-store.ts](../../src/domains/dispatch/code-step-store.ts) writes its `CodeStepRecord` to `<stateDir>/code-steps/<rootId>/<runId>.json` instead of fabricating route rows in the ledger. The command reads those files back oldest first by `startedAt`, prints the records verbatim under `--json`, skips unreadable or non-version-1 files, and treats an absent root directory as the empty state with exit 0. `--db` is ignored.
 
@@ -178,7 +177,7 @@ Flag values are validated before any database work. `--limit` is an integer from
 
 When resolving the SQLite database path:
 
-- **Default database path.** If `--db` is omitted and no database has been created yet, human-readable commands print an informational notice (`no trace database yet at <path>`) and exit with code 0. Machine-readable commands keep their schemas. `runs --json` emits `[]`. `inspect --json` emits `{version:1, generatedAt, available:false, runs:[], truncated:false}`. `prune --json` emits `{available:false, policy, runsRemoved:0, rowsRemoved:0, bytesRemoved:0, vacuumed:false, protectedRuns:0}`.
+- **Default database path.** If `--db` is omitted and no database has been created yet, human-readable commands print an informational notice (`no trace database yet at <path>`) and exit with code 0. Machine-readable commands keep their schemas. `runs --json` emits `[]`. `prune --json` emits `{available:false, policy, runsRemoved:0, rowsRemoved:0, bytesRemoved:0, vacuumed:false, protectedRuns:0}`.
 - **Explicit database path.** If `--db <path>` names a file that does not exist, `clio-coder trace` prints `trace database not found: <path>` with the default-path remedy and exits with code 1.
 - **Usage before storage.** Command, positional, flag, and SQL read-only validation happens before database resolution. A missing database therefore cannot turn `trace bogus`, a missing run id, or mutating SQL into a successful empty-state response.
 - **Unreadable database.** A database that fails to open, has an unsupported schema version, or is not in WAL mode prints `trace database: <reason>` and exits 1.
@@ -186,12 +185,11 @@ When resolving the SQLite database path:
 ### Subcommand Specifications
 
 1. **`runs`** lists recent dispatch runs and interactive session turns, newest `started_at` first. `--limit` sets the maximum rows (1 to 500, default 50). `--json` emits the selected `runs` rows as an array, request text included. Text mode prints status, `source`, start time, total tokens, total USD cost, and run id, with `—` for a `NULL` figure.
-2. **`inspect`** accepts only `--json`, reads only the default database, and takes no caller-controlled path, limit, or window. Any extra argument exits 2. The version-1 snapshot carries at most 8 newest runs (`TRACE_INSPECT_MAX_RUNS`) with at most 16 phases each, 12 event kinds, and 8 process kinds per run. It reports counts and spans, not rows. It omits request text, phase error prose, event payloads, command lines, PIDs, hosts, and database paths, and it reports only whether a phase recorded an error. `available` distinguishes a missing database (`false`) from an existing database with no readable runs (`true`).
-3. **`phases`** lists the phases of a run: status, attempt (one-based), owner, total tokens, USD cost, and name.
-4. **`tail`** prints append-ordered event rows for a run: `rowid`, start time, type, name, and duration for spans, followed by `owner=` and `outcome=` when the payload carries a package owner or an outcome. With `--follow` it polls every 500 ms until two consecutive polls return no new rows while the run is no longer `queued` or `running`.
-5. **`procs`** lists the worker process rows of a run: state (`live` while `ended_at` is null, else `ended`), pid, kind, name, and command.
-6. **`prune`** applies the resolved retention policy (defaults from `DEFAULT_TRACE_RETENTION_POLICY`, overridable with `CLIO_CODER_TRACE_RETENTION_DAYS` and `CLIO_CODER_TRACE_MAX_BYTES`, or per command with `--max-age-days` and `--max-bytes`) while protecting queued and running runs. Text output reports runs and rows removed, bytes reclaimed from `trace.sqlite` and its WAL and shared-memory sidecars, whether `VACUUM` ran, and how many live runs were protected. `--json` emits `{policy, runsRemoved, rowsRemoved, bytesBefore, bytesAfter, bytesRemoved, vacuumed, protectedRuns}`. An invalid environment value exits 1.
-7. **`sql`** executes one read-only statement against the database and prints the rows as a JSON array, with BigInt values as strings. The statement must start with `SELECT` or `WITH`. It is rejected with exit 2 when it contains a semicolon or any of `INSERT`, `UPDATE`, `DELETE`, `REPLACE`, `CREATE`, `ALTER`, `DROP`, `ATTACH`, `DETACH`, `VACUUM`, or `PRAGMA`. The check runs before the database opens, and the connection is read-only as well.
+2. **`phases`** lists the phases of a run: status, attempt (one-based), owner, total tokens, USD cost, and name.
+3. **`tail`** prints append-ordered event rows for a run: `rowid`, start time, type, name, and duration for spans, followed by `owner=` and `outcome=` when the payload carries a package owner or an outcome. With `--follow` it polls every 500 ms until two consecutive polls return no new rows while the run is no longer `queued` or `running`.
+4. **`procs`** lists the worker process rows of a run: state (`live` while `ended_at` is null, else `ended`), pid, kind, name, and command.
+5. **`prune`** applies the resolved retention policy (defaults from `DEFAULT_TRACE_RETENTION_POLICY`, overridable with `CLIO_CODER_TRACE_RETENTION_DAYS` and `CLIO_CODER_TRACE_MAX_BYTES`, or per command with `--max-age-days` and `--max-bytes`) while protecting queued and running runs. Text output reports runs and rows removed, bytes reclaimed from `trace.sqlite` and its WAL and shared-memory sidecars, whether `VACUUM` ran, and how many live runs were protected. `--json` emits `{policy, runsRemoved, rowsRemoved, bytesBefore, bytesAfter, bytesRemoved, vacuumed, protectedRuns}`. An invalid environment value exits 1.
+6. **`sql`** executes one read-only statement against the database and prints the rows as a JSON array, with BigInt values as strings. The statement must start with `SELECT` or `WITH`. It is rejected with exit 2 when it contains a semicolon or any of `INSERT`, `UPDATE`, `DELETE`, `REPLACE`, `CREATE`, `ALTER`, `DROP`, `ATTACH`, `DETACH`, `VACUUM`, or `PRAGMA`. The check runs before the database opens, and the connection is read-only as well.
 
 ### Web Trace History
 

@@ -19,11 +19,9 @@ import {
 	TraceStore,
 	traceDatabasePath,
 } from "../domains/observability/trace-store.js";
-import { runTraceInspect } from "./trace-inspect.js";
 
 const HELP = `Usage:
   clio-coder trace runs [--db PATH] [--limit N] [--json]
-  clio-coder trace inspect --json         a fixed bounded window with no request text
   clio-coder trace phases <runId> [--db PATH]
   clio-coder trace tail <runId> [--follow] [--db PATH]
   clio-coder trace procs <runId> [--db PATH]
@@ -92,7 +90,7 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 }
 
 /** Every subcommand `trace` answers to. Anything else is a usage error. */
-const TRACE_COMMANDS = new Set(["runs", "inspect", "phases", "tail", "procs", "code-steps", "prune", "sql"]);
+const TRACE_COMMANDS = new Set(["runs", "phases", "tail", "procs", "code-steps", "prune", "sql"]);
 
 /** The subcommands whose first positional is a run id. */
 const TRACE_COMMANDS_NEEDING_RUN_ID = new Set(["phases", "tail", "procs"]);
@@ -109,6 +107,14 @@ const TRACE_COMMANDS_NEEDING_RUN_ID = new Set(["phases", "tail", "procs"]);
  * home that had a database exited 2, which is the documented behavior.
  */
 function invocationError(command: string, runId: string | undefined): number | null {
+	// The bounded accounting window over this mirror had no caller once the GUI read the call journals; run and
+	// session spend come from the read model now (#434 §11.3).
+	if (command === "inspect") {
+		process.stderr.write(
+			"trace inspect was removed: read run and session telemetry with `clio-coder telemetry inspect <runId|sessionId> --json`\n",
+		);
+		return 2;
+	}
 	if (!TRACE_COMMANDS.has(command)) {
 		process.stderr.write(`unknown trace command: ${command}\n${HELP}`);
 		return 2;
@@ -163,21 +169,6 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 	// ignores --db. An absent root directory is the empty state: the root either
 	// never ran a code step or its records were pruned with the state tree.
 	if (command === "code-steps") return runTraceCodeSteps(runId ?? "", parsed.json);
-
-	// `inspect` answers ahead of the no-database courtesy below, because its
-	// answer to a state tree nothing has written to is a JSON snapshot saying
-	// the trace database is unavailable, not a sentence on stdout.
-	if (command === "inspect") {
-		return runTraceInspect(
-			parsed.positional.length === 1 &&
-				parsed.json &&
-				!parsed.dbExplicit &&
-				!parsed.follow &&
-				parsed.limit === DEFAULT_TRACE_LIMIT &&
-				parsed.maxAgeDays === undefined &&
-				parsed.maxBytes === undefined,
-		);
-	}
 
 	// A database that was never written is the empty state, not a failure. Handing
 	// the absent path to node:sqlite produced "unable to open database file",

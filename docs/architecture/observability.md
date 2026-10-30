@@ -465,7 +465,6 @@ A clean interactive exit prints a branded session summary according to `interfac
 | Command | Reads | Notes |
 | --- | --- | --- |
 | `clio-coder trace runs\|phases\|tail\|procs\|sql\|prune` | the trace mirror | Flags, exit codes, and the schema are in [Trace Store](trace-store.md). |
-| `clio-coder trace inspect --json` | the trace mirror | Fixed bounded snapshot with no request text, for hosts that must not steer the read. |
 | `clio-coder trace code-steps <rootId>` | `<stateDir>/code-steps/` | Deterministic fleet code-step records. |
 | `clio-coder usage report` | ledgers, receipts, out-of-turn rows, audit rows, evidence index, memory | [Cross-Session Usage Facts](#cross-session-usage-facts). |
 | `clio-coder telemetry inspect\|calls\|cost\|cache\|timeline\|why-stopped\|explain` | session and run call journals, through the read model | `--json` prints the read-model DTO. |

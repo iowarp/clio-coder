@@ -1,22 +1,18 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import type { TraceInspectSnapshot } from "../../src/cli/trace-inspect.js";
-import { runTraceInspect } from "../../src/cli/trace-inspect.js";
 import type { DispatchCompletedPayload } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { clioStatePath } from "../../src/core/xdg.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
-import { TraceReader, TraceStore, traceDatabasePath } from "../../src/domains/observability/trace-store.js";
+import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
 import type { CostProvenance } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import type { AgentRuntime, ChatTurnState } from "../../src/session-control/turn-state.js";
-import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("session traces retain known subtotals, call coverage, and pricing uncertainty", () => {
 	const scratch = mkdtempSync(join(tmpdir(), "clio-coder-session-trace-cost-"));
@@ -120,57 +116,6 @@ it("session traces retain known subtotals, call coverage, and pricing uncertaint
 		store.close();
 		rmSync(scratch, { recursive: true, force: true });
 	}
-});
-
-it("trace inspect retains partial accounting and rejects unreadable stores", async (t) => {
-	const env = await isolateClioEnv("clio-coder-trace-inspect-");
-	t.after(() => env.restore());
-	const path = traceDatabasePath(clioStatePath());
-	const store = new TraceStore(path);
-	store.finishRun(
-		{
-			runId: "partial",
-			agentId: "coder",
-			targetId: "target",
-			wireModelId: "model",
-			runtimeId: "litellm",
-			tokenCount: 12,
-			apiCalls: 3,
-			missingTokenCalls: 1,
-			costSummary: { knownUsd: 0.25, calls: 3, hasEstimated: true, hasUnknown: true, allKnownFree: false },
-		} as DispatchCompletedPayload,
-		true,
-	);
-	store.recordCaptureLoss("progress", 3);
-	store.close();
-	let output = "";
-	const write = t.mock.method(process.stdout, "write", (chunk: string) => {
-		output += chunk;
-		return true;
-	});
-	try {
-		strictEqual(runTraceInspect(true), 0);
-	} finally {
-		write.mock.restore();
-	}
-	const snapshot = JSON.parse(output) as TraceInspectSnapshot;
-	deepStrictEqual(snapshot.captureCoverage, {
-		status: "known_loss",
-		droppedProgress: 3,
-		droppedPackageActivity: null,
-		failedRows: null,
-	});
-	const run = snapshot.runs[0];
-	for (const row of [run, run?.phases[0]]) {
-		strictEqual(row?.totalTokens, 12);
-		strictEqual(row?.totalCostUsd, 0.25);
-		strictEqual(row?.apiCalls, 3);
-		strictEqual(row?.missingTokenCalls, 1);
-		strictEqual(row?.costEstimated, true);
-		strictEqual(row?.costUnknown, true);
-	}
-	writeFileSync(path, "unreadable trace");
-	throws(() => runTraceInspect(true));
 });
 
 it("dispatch traces keep declared costs and withhold amounts with unknown or absent pricing", () => {

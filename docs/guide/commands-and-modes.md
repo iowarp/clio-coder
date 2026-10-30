@@ -90,7 +90,6 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder interop inspect [--json]` | Show the host inventory of detected coding agents and how far each one is wired. Changes no host or project files and starts no agent session. |
 | `clio-coder interop adopt <host> [--kind skill\|agent\|prompt\|plugin] [--project\|--user] [--yes] [--dry-run]` | Review and adopt safe resources from a detected host. Wiring a host as a delegation peer is `clio-coder configure --interop`. |
 | `clio-coder trace runs [--db PATH] [--limit N] [--json]` | List runs recorded in the durable trace mirror beside the ledger. |
-| `clio-coder trace inspect --json` | Emit the fixed, bounded recent accounting projection used by the graphical application. It accepts no path, identifier, or limit and omits request text, error prose, event payloads, process commands, PIDs, and hosts. |
 | `clio-coder trace phases <runId> [--db PATH]` | Show one run's recorded phases. |
 | `clio-coder trace tail <runId> [--follow] [--db PATH]` | Tail one run's recorded events; `--follow` streams as they land. |
 | `clio-coder trace procs <runId> [--db PATH]` | Show the processes one run spawned. |

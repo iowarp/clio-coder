@@ -1425,34 +1425,6 @@ export class TraceReader {
 			.sort((left, right) => right.count - left.count || left.type.localeCompare(right.type));
 	}
 
-	/** Total events and the wall span they cover, without reading one of them. */
-	eventSpan(runId: string): { total: number; firstAt: string | null; lastAt: string | null } {
-		const row = this.db
-			.prepare(
-				`SELECT COUNT(*) AS total, MIN(started_at) AS firstAt,
-					MAX(COALESCE(ended_at, started_at)) AS lastAt FROM events WHERE run_id=?`,
-			)
-			.get(runId) as unknown as { total: number; firstAt: string | null; lastAt: string | null } | undefined;
-		return row ?? { total: 0, firstAt: null, lastAt: null };
-	}
-
-	/**
-	 * Per-kind process tallies for one run.
-	 *
-	 * Same reason as {@link eventKindCounts}, and more sharply: a process row
-	 * carries the command line, the pid, and the host, none of which a shape
-	 * count needs.
-	 */
-	processKindCounts(runId: string): Array<{ kind: string; total: number; running: number }> {
-		return this.db
-			.prepare(
-				`SELECT kind, COUNT(*) AS total,
-					SUM(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END) AS running
-				 FROM processes WHERE run_id=? GROUP BY kind ORDER BY total DESC, kind`,
-			)
-			.all(runId) as unknown as Array<{ kind: string; total: number; running: number }>;
-	}
-
 	processes(runId: string): TraceProcessRow[] {
 		return this.db
 			.prepare("SELECT * FROM processes WHERE run_id=? ORDER BY ended_at IS NOT NULL, id")
