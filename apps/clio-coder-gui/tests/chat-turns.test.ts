@@ -668,6 +668,34 @@ test("an uninterrupted budget breach and a partially reported provider still rea
 	assert.equal(summary.providers[0]?.detail, "Not reachable, reported unknown, latency not reported.");
 });
 
+test("a terminal fleet frame forwards the engine's token wording and call coverage, and words no count itself", () => {
+	const payload = (kind: string, extra: Record<string, unknown>) => {
+		const projected = fleetEvent(
+			{
+				version: 1,
+				sessionId: "session",
+				sequence: 1,
+				kind,
+				payload: { runId: "run-1", agentId: "a", outcome: "error", outcomeDetail: null, durationMs: 1, ...extra },
+			},
+			"session",
+			0,
+		);
+		assert.ok("item" in projected && projected.item);
+		return projected.item.fact.payload as Record<string, unknown>;
+	};
+	const coverage = { tokenCount: 1200, apiCalls: 3, missingTokenCalls: 1, tokenDisplay: "≥1,200 (1 call unknown)" };
+	const completed = payload("dispatch.completed", { outcomeCode: null, ...coverage });
+	assert.equal(completed.tokenDisplay, "≥1,200 (1 call unknown)");
+	assert.equal(completed.missingTokenCalls, 1);
+	assert.equal(payload("dispatch.failed", { reason: "tool_failed", ...coverage }).tokenDisplay, coverage.tokenDisplay);
+	assert.equal(
+		payload("dispatch.completed", { outcomeCode: null, tokenCount: 1200 }).tokenDisplay,
+		undefined,
+		"an older engine's bare count is not worded as whole",
+	);
+});
+
 test("compaction attempts report their outcome without inferring success for legacy frames", () => {
 	for (const [outcome, label, tone] of [
 		["completed", "Context compacted", "neutral"],

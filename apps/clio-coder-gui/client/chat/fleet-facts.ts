@@ -160,6 +160,7 @@ function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unk
 				state: "failed",
 				outcome: terminalOutcome(payload) ?? base.outcome,
 				durationMs: integer(payload.durationMs) ?? base.durationMs,
+				tokens: text(payload.tokenDisplay) ?? base.tokens,
 			};
 		default:
 			return base;

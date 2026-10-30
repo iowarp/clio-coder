@@ -18,6 +18,16 @@ const start = Type.Object(
 	},
 	closed,
 );
+/**
+ * A terminal run's call coverage beside its token count, as the engine forwards it: null where the run never recorded
+ * it. `tokenDisplay` is the engine's wording of the count through the read model, a lower bound beside the calls that
+ * reported no usage, so neither the server nor the browser formats it (#434). An older engine sends none of them.
+ */
+const tokenCoverage = {
+	apiCalls: Type.Optional(count),
+	missingTokenCalls: Type.Optional(count),
+	tokenDisplay: Type.Optional(Type.Union([Type.String({ maxLength: 64 }), Type.Null()])),
+};
 export const FleetPayloads = {
 	"fleet.loopBlocked": Type.Object(
 		{
@@ -43,8 +53,7 @@ export const FleetPayloads = {
 			outcomeDetail,
 			durationMs: count,
 			tokenCount: count,
-			/** The token count worded by the server's canonical renderer; the browser never formats it (#434). */
-			tokenDisplay: Type.Optional(Type.Union([Type.String({ maxLength: 64 }), Type.Null()])),
+			...tokenCoverage,
 		},
 		closed,
 	),
@@ -56,6 +65,9 @@ export const FleetPayloads = {
 			outcomeCode: Type.Optional(nullableId),
 			outcomeDetail,
 			durationMs: count,
+			/** A failed run carries its tokens only when it reported a count. */
+			tokenCount: Type.Optional(count),
+			...tokenCoverage,
 		},
 		closed,
 	),

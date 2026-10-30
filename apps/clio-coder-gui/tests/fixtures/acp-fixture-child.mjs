@@ -509,7 +509,17 @@ const fleet = () => {
 		["dispatch.progress", { runId: "run-1", agentId: "worker-1", progressCount: 1, truncated: false }],
 		[
 			"dispatch.completed",
-			{ runId: "run-1", agentId: "worker-1", outcome: "success", outcomeCode: "done", durationMs: 10, tokenCount: 23 },
+			{
+				runId: "run-1",
+				agentId: "worker-1",
+				outcome: "success",
+				outcomeCode: "done",
+				durationMs: 10,
+				tokenCount: 23,
+				apiCalls: 2,
+				missingTokenCalls: 0,
+				tokenDisplay: "23",
+			},
 		],
 		["dispatch.failed", { runId: "run-2", agentId: "worker-2", outcome: "error", reason: "tool_failed", durationMs: 12 }],
 		[
