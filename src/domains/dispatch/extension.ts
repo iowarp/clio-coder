@@ -396,6 +396,8 @@ import {
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
 import { reduceRouteQuality } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
+import type { RunCallUsage } from "./run-call-usage.js";
+import { createRunCallUsage } from "./run-call-usage.js";
 import { defaultRunEventJournal, runEventJournalRoot } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
@@ -486,6 +488,9 @@ import {
 import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from "./write-boundary.js";
 
 interface RunTokenMeter {
+	callFacts?: RunCallUsage["callFacts"];
+	costSummary?: RunCallUsage["costSummary"];
+	costProvenance?: RunCallUsage["costProvenance"];
 	toolRounds?: ToolRoundRecord[];
 	apiCalls?: number;
 	missingTokenCalls?: number;
@@ -512,6 +517,7 @@ function meterCostProvenance(
 	base: EffectivePricing["provenance"],
 	costUsd: number,
 ): EffectivePricing["provenance"] {
+	if (meter.costProvenance !== undefined) return meter.costProvenance;
 	if (base === "known_free") return base;
 	if (meter.tokenUsageMissing === true && costUsd === 0) return "unknown";
 	return base === "unknown" && costUsd > 0 ? "estimated" : base;
@@ -7233,6 +7239,7 @@ export function createDispatchBundle(
 		const checkoutBefore =
 			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
 		let worker: SpawnedWorker;
+		const callUsage = spec.telemetryContext ? createRunCallUsage(spec.telemetryContext) : undefined;
 		let runJournal: RunTelemetryJournal | undefined;
 		let parentJournal: TelemetrySessionLease | undefined;
 		const closeRunJournal = async () => {
@@ -7435,6 +7442,14 @@ export function createDispatchBundle(
 		const foldWorkerEvent = (raw: unknown): void => {
 			if (raw !== null && typeof raw === "object" && "type" in raw && raw.type === "clio_coder_telemetry") {
 				if (runJournal && !runJournal.worker(raw)) runJournal.gap("invalid-record");
+				if (callUsage && !callUsage.observe(raw)) callUsage.gap();
+				if (callUsage) {
+					const usage = callUsage.snapshot();
+					if (usage) {
+						Object.assign(tokenMeter, usage);
+						stopRunsAtRunCostCap();
+					}
+				}
 				return;
 			}
 			outputCapture.observe(raw);
@@ -7670,7 +7685,7 @@ export function createDispatchBundle(
 					// A message Clio wrote into the loop (a result-contract repair, a
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
-					accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates, failure);
+					if (!callUsage?.snapshot()) accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates, failure);
 					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
@@ -7680,7 +7695,7 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
-					if (failure?.invoked === true)
+					if (failure?.invoked === true && !callUsage?.snapshot())
 						accumulateNativeUsage(tokenMeter, { usageReported: false }, lifecycle.target.effectivePricing.rates, failure);
 					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, lifecycle.target.wireModelId);
 					if (row !== null) upstreamResponses.push(row);
@@ -8173,9 +8188,12 @@ export function createDispatchBundle(
 				apiCalls: tokenMeter.apiCalls ?? (tokenCount > 0 ? 1 : 0),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
 				missingTokenCalls: tokenMeter.missingTokenCalls ?? 0,
+				...(tokenMeter.costSummary ? { costSummary: tokenMeter.costSummary } : {}),
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
-				cacheReadTokenCount: tokenMeter.cacheReadTokens,
+				...(tokenMeter.callFacts && tokenMeter.callFacts.usage.cacheRead.unknownCount > 0
+					? {}
+					: { cacheReadTokenCount: tokenMeter.cacheReadTokens }),
 				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
 				...(tokenMeter.cacheWrite1hTokens === undefined ? {} : { cacheWrite1hTokenCount: tokenMeter.cacheWrite1hTokens }),
 				reasoningTokenCount: tokenMeter.reasoningTokens,
@@ -8360,6 +8378,7 @@ export function createDispatchBundle(
 				// subscribed, so a fast worker cannot seal a zero-token receipt.
 				if (!(await awaitEventDrain(eventPump.done))) {
 					runJournal?.gap("writer-drop");
+					callUsage?.gap();
 					recordingJournal.gap(envelope.id, 1);
 					toolTelemetryIngestionErrors += 1;
 					reportDispatchDiagnostic(
@@ -8367,6 +8386,13 @@ export function createDispatchBundle(
 						new Error("event stream did not drain before receipt finalization"),
 					);
 				}
+				const lostCallFrames = malformedWorkerStdoutLineCount(result) + (result.evidenceIncomplete !== undefined ? 1 : 0);
+				if (lostCallFrames > 0) {
+					runJournal?.gap("invalid-record", lostCallFrames);
+					callUsage?.gap(lostCallFrames);
+				}
+				const finalCallUsage = callUsage?.snapshot();
+				if (finalCallUsage) Object.assign(tokenMeter, finalCallUsage);
 				// The worker is gone: every grant it held settles now, after its last
 				// execution report drained. Retries run as new attempts with new requests.
 				if (grantAttempt !== undefined) {
@@ -10261,6 +10287,7 @@ export function createDispatchBundle(
 				provenance: costProvenance,
 				apiCalls: meter.apiCalls ?? (totalTokens > 0 ? 1 : 0),
 				missingTokenCalls: meter.missingTokenCalls ?? 0,
+				...(meter.costSummary ? { costSummary: meter.costSummary } : {}),
 			});
 			totals.runtimeSeconds += elapsedMs / 1000;
 		}

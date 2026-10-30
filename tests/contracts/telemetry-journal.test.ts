@@ -11,6 +11,7 @@ import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
+import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
@@ -81,6 +82,22 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 			frames.map((frame) => frame.record.k),
 			["call.started", "call.settled", "gap"],
 		);
+		const meter = createRunCallUsage(run);
+		strictEqual(meter.snapshot(), undefined);
+		for (const frame of frames) ok(meter.observe(frame));
+		strictEqual(meter.snapshot()?.apiCalls, 0);
+		strictEqual(meter.snapshot()?.callFacts.neverSent, 1);
+		strictEqual(meter.snapshot()?.costSummary.unknownCallCoverageRuns, 1);
+		const clean = createRunCallUsage(run);
+		ok(
+			clean.observe({
+				type: "clio_coder_telemetry",
+				record: { ...makeTelemetryRecord("process.started", {}, run, { t: new Date().toISOString(), mono: 0 }), origin },
+			}),
+		);
+		strictEqual(clean.snapshot()?.apiCalls, 0);
+		clean.gap();
+		strictEqual(clean.snapshot()?.costSummary.unknownCallCoverageRuns, 1);
 		ok(frames.every(isReceiptBearingFrame));
 		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, runId: "different-run" }), null);
 		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, sessionId: "different-session" }), null);
@@ -472,6 +489,12 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		priced,
 		{ ...zero, id: makeTelemetryRecord("session.opened", {}, context, clock).id },
 	];
+	const run = runUsageFromCallRecords(rows);
+	strictEqual(run.totalTokens, 22);
+	strictEqual(run.costUsd, 0.125);
+	strictEqual(run.apiCalls, 2);
+	strictEqual(run.costSummary.unknownCallCoverageRuns, 1);
+	deepStrictEqual(runUsageFromCallRecords([...rows].reverse()), run);
 	const fold = foldCallJournal(rows);
 	deepStrictEqual(foldCallJournal([...rows].reverse()).totals, fold.totals);
 	strictEqual(fold.totals.logicalCalls, 3);

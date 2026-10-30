@@ -13,7 +13,7 @@ export interface WorkerTelemetryFrame {
 const workerKinds = new Set(["call.started", "call.settled", "gap", "process.started", "process.exited"]);
 
 /** The parent owns identity and publication; a worker cannot attribute facts to a different run or session (#434). */
-export function readWorkerTelemetryFrame(value: unknown, expected: WorkerTelemetryContext): PendingTelemetry | null {
+export function readWorkerTelemetryRecord(value: unknown, expected: WorkerTelemetryContext): TelemetryRecord | null {
 	if (
 		!value ||
 		typeof value !== "object" ||
@@ -36,6 +36,12 @@ export function readWorkerTelemetryFrame(value: unknown, expected: WorkerTelemet
 		record.ctx.turnId !== expected.turnId
 	)
 		return null;
+	return record;
+}
+
+export function readWorkerTelemetryFrame(value: unknown, expected: WorkerTelemetryContext): PendingTelemetry | null {
+	const record = readWorkerTelemetryRecord(value, expected);
+	if (!record) return null;
 	return {
 		kind: record.k,
 		data: record.data,

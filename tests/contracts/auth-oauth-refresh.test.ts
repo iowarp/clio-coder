@@ -248,6 +248,7 @@ describe("contracts/auth OAuth refresh", () => {
 			"unknown",
 			(frame) => frames.push(frame),
 		);
+		strictEqual(frames[0]?.record.k, "process.started", "announce canonical accounting before requests start");
 		try {
 			const request = { roundKind: "normal", toolChoice: "auto" } as const;
 			telemetry.begin(request);

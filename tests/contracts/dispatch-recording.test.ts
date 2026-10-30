@@ -253,6 +253,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 					message: {
 						role: "assistant",
 						stopReason: "stop",
+						usage: { input: 999, output: 999, cost: { total: 999 } },
 						content: JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] }),
 					},
 				};
@@ -293,6 +294,11 @@ it("dispatch preserves the explicit capture option with journal history disabled
 				resultContractOverride: { kind: "provenance-report" },
 			});
 			const receipt = await handle.finalPromise;
+			equal(receipt.tokenCount, 6);
+			equal(receipt.apiCalls, 1);
+			equal(receipt.missingTokenCalls, 1);
+			equal(receipt.costProvenance, "unknown");
+			equal(receipt.cacheReadTokenCount, undefined);
 			const journal = await readCallJournal(join(clioStateDir(), "runs", handle.runId), "events.ndjson");
 			equal(journal.damaged, 0);
 			deepStrictEqual(
