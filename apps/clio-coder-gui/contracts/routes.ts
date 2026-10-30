@@ -86,6 +86,19 @@ import {
 import { Interop, InteropDecided, InteropDecision, InteropQuery, SystemReport } from "./system.js";
 import { SessionTargets, TargetProbe } from "./targets.js";
 import { CliTargets, Routing } from "./targets-cli.js";
+import {
+	TelemetryCache,
+	TelemetryCalls,
+	TelemetryCallsQuery,
+	TelemetryCost,
+	TelemetryCostQuery,
+	TelemetryExplainQuery,
+	TelemetryExplanation,
+	TelemetryRangeQuery,
+	TelemetrySession,
+	TelemetryTimeline,
+	TelemetryWhyStopped,
+} from "./telemetry.js";
 import { Install, Tools } from "./toolchain.js";
 import {
 	RowCursor,
@@ -1013,6 +1026,59 @@ export const routes = {
 		response: Type.String(),
 		stream: true,
 		summary: "Live rowid event tail",
+	}),
+	telemetrySession: defineRoute({
+		...get,
+		path: "/api/telemetry/sessions/:id",
+		params: operationParams,
+		response: TelemetrySession,
+		summary:
+			"Session telemetry from the call journal: counts, tokens, cost, runs and lineage, each with its fact and reference",
+	}),
+	telemetryCalls: defineRoute({
+		...get,
+		path: "/api/telemetry/sessions/:id/calls",
+		params: operationParams,
+		query: TelemetryCallsQuery,
+		response: TelemetryCalls,
+		summary: "The session's provider calls, one row per attempt, filtered by label, disposition, turn, run or time",
+	}),
+	telemetryCost: defineRoute({
+		...get,
+		path: "/api/telemetry/sessions/:id/cost",
+		params: operationParams,
+		query: TelemetryCostQuery,
+		response: TelemetryCost,
+		summary: "Session cost grouped by label, model or turn",
+	}),
+	telemetryCache: defineRoute({
+		...get,
+		path: "/api/telemetry/sessions/:id/cache",
+		params: operationParams,
+		response: TelemetryCache,
+		summary: "Prompt-cache verdicts, breaks by cause, re-prefilled tokens and the cache-break bill",
+	}),
+	telemetryTimeline: defineRoute({
+		...get,
+		path: "/api/telemetry/sessions/:id/timeline",
+		params: operationParams,
+		query: TelemetryRangeQuery,
+		response: TelemetryTimeline,
+		summary: "Calls with stage offsets, turns, runs, compactions and gaps in time order",
+	}),
+	telemetryWhyStopped: defineRoute({
+		...get,
+		path: "/api/telemetry/sessions/:id/why-stopped",
+		params: operationParams,
+		response: TelemetryWhyStopped,
+		summary: "Why the session stopped, slowed or got expensive, from journal facts alone",
+	}),
+	telemetryExplain: defineRoute({
+		...get,
+		path: "/api/telemetry/explain",
+		query: TelemetryExplainQuery,
+		response: TelemetryExplanation,
+		summary: "The fold rule, value and contributing calls behind one quantity's reference",
 	}),
 	meta: defineRoute({ ...get, path: "/api/meta", response: Meta, summary: "Application and Clio versions" }),
 	openapi: defineRoute({

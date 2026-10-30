@@ -3,6 +3,7 @@ import { Problem } from "./common.js";
 import { Event } from "./events.js";
 import { APP_VERSION } from "./meta.js";
 import { routes } from "./routes.js";
+import { TELEMETRY_DTO_SCHEMAS } from "./wire.js";
 
 function parameters(schema: TSchema, location: "path" | "query") {
 	const object = schema as TSchema & { properties?: Record<string, TSchema>; required?: string[] };
@@ -15,8 +16,28 @@ function parameters(schema: TSchema, location: "path" | "query") {
 		schema: value,
 	}));
 }
+// Every named schema in the document: the read-model DTOs a route or notification serves, under their versioned
+// names (#434 §11.2). Run rows join when the run routes land; quota and health stay live-only.
+const components = {
+	Problem,
+	Event,
+	SessionTelemetryV1: TELEMETRY_DTO_SCHEMAS.session,
+	CallsReportV1: TELEMETRY_DTO_SCHEMAS.calls,
+	CostReportV1: TELEMETRY_DTO_SCHEMAS.cost,
+	CacheReportV1: TELEMETRY_DTO_SCHEMAS.cache,
+	TimelineV1: TELEMETRY_DTO_SCHEMAS.timeline,
+	WhyStoppedV1: TELEMETRY_DTO_SCHEMAS.whyStopped,
+	ExplanationV1: TELEMETRY_DTO_SCHEMAS.explanation,
+	TelemetryUpdateV1: TELEMETRY_DTO_SCHEMAS.update,
+} satisfies Record<string, TSchema>;
 export function openapi() {
 	const paths: Record<string, Record<string, unknown>> = {};
+	const named = new Map<TSchema, string>(Object.entries(components).map(([name, schema]) => [schema, name]));
+	// A response that is a named component is referenced, not inlined, so the document carries each DTO once.
+	const response = (schema: TSchema) => {
+		const name = named.get(schema);
+		return name ? { $ref: `#/components/schemas/${name}` } : schema;
+	};
 	for (const [id, route] of Object.entries(routes)) {
 		const path = route.path.replace(/:([A-Za-z0-9]+)/g, "{$1}");
 		const contentType = route.stream ? "text/event-stream" : "application/json";
@@ -54,7 +75,7 @@ export function openapi() {
 			responses: {
 				[route.status]: {
 					description: route.status === 202 ? "Accepted" : "Success",
-					content: { [contentType]: { schema: route.response } },
+					content: { [contentType]: { schema: response(route.response) } },
 					headers: {
 						"X-Clio-Epoch": { schema: { type: "string" }, description: "Server epoch" },
 						"X-Clio-Seq": { schema: { type: "integer" }, description: "Sequence before assembling the snapshot" },
@@ -77,7 +98,7 @@ export function openapi() {
 				bearer: { type: "http", scheme: "bearer" },
 				eventToken: { type: "apiKey", in: "query", name: "token" },
 			},
-			schemas: { Problem, Event },
+			schemas: components,
 		},
 	};
 }

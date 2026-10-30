@@ -24,6 +24,31 @@ const httpModules = new Map([
 	["src/core/process-identity.ts", new Set(["processAlive", "processBirthToken"])],
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
 ]);
+// The read-model DTO schemas and types cross into the browser contract through wire-shims (#434). dto.ts keeps a
+// typebox-only value-import closure, which the closure test below holds for the whole contract directory.
+const wireDtoNames = new Set([
+	"CacheReportV1",
+	"CallFilter",
+	"CallRowV1",
+	"CallsReportV1",
+	"CostReportV1",
+	"ExplanationV1",
+	"FactRef",
+	"Quantity",
+	"RunRowV1",
+	"RunTelemetryV1",
+	"SessionTelemetryV1",
+	"TelemetryTopic",
+	"TelemetryUpdateV1",
+	"TimelineEntry",
+	"TimelineV1",
+	"WhyStoppedV1",
+	"CallFilterSchema",
+	"FactRefSchema",
+	"parseFactRef",
+	"TELEMETRY_DTO_SCHEMAS",
+	"TELEMETRY_TOPICS",
+]);
 const adapters = new Set([
 	"src/domains/interop/index.ts",
 	"src/domains/lifecycle/doctor.ts",
@@ -137,10 +162,12 @@ function violations(file: string, source: string): string[] {
 					["src/core/bus-events.ts", new Set(["ContextActivityPayload"])],
 				]);
 				const contextTypes = sharedContextTypes.get(rootTarget);
+				const dtoNames = rootTarget === "src/core/telemetry/dto.ts" ? wireDtoNames : undefined;
 				if (
 					!(
 						(rootTarget === "src/engine/acp/types.ts" && names.every((symbol) => symbol === "*")) ||
-						(typeOnly && contextTypes && names.every((symbol) => contextTypes.has(symbol)))
+						(typeOnly && contextTypes && names.every((symbol) => contextTypes.has(symbol))) ||
+						(dtoNames && names.every((symbol) => dtoNames.has(symbol)))
 					)
 				)
 					errors.push(`wire shim allowlist: ${rootTarget} ${names}`);
@@ -220,4 +247,25 @@ test("boundary checker rejects representative bypasses", () => {
 		'import { createStdioTransport as spawnAcp } from "../clio/http-shims.js";',
 	])
 		assert.ok(violations(resolve(app, "server/http/escape.ts"), source).length > 0, source);
+});
+
+test("the browser contract reaches no Node builtin through its value imports, root modules included", () => {
+	const seen = new Set<string>();
+	const reached: string[] = [];
+	const visit = (file: string) => {
+		if (seen.has(file) || !existsSync(file)) return;
+		seen.add(file);
+		const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+		ts.forEachChild(tree, (node) => {
+			if (!(ts.isImportDeclaration(node) || ts.isExportDeclaration(node))) return;
+			if (!node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) return;
+			if (ts.isImportDeclaration(node) ? node.importClause?.isTypeOnly : node.isTypeOnly) return;
+			const specifier = node.moduleSpecifier.text;
+			if (/^node:|^(?:async_hooks|child_process|crypto|fs|http|https|net|os|path|tls|worker_threads)$/.test(specifier))
+				reached.push(`${relative(root, file)} -> ${specifier}`);
+			if (specifier.startsWith(".")) visit(resolve(dirname(file), specifier).replace(/\.js$/, ".ts"));
+		});
+	};
+	for (const file of files(resolve(app, "contracts"))) visit(file);
+	assert.deepEqual(reached, []);
 });
