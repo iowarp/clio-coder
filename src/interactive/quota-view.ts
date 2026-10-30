@@ -1,4 +1,3 @@
-import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { QuotaSeverity } from "../domains/quota/presentation.js";
 import {
 	foldDuplicateAccounts,
@@ -12,7 +11,7 @@ import type { UsageSnapshot } from "../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { type DispatchBoardRow, dispatchStatusPresentation } from "./dispatch-board.js";
+import { type DispatchBoardRow, dispatchStatusPresentation, dispatchUsageText } from "./dispatch-board.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import type { ClioToken } from "./theme/index.js";
 import { clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
@@ -214,8 +213,7 @@ export function renderWorkerUsage(
 	];
 	if (!rows.length) out.push("", "No worker invocations recorded.");
 	for (const row of rows) {
-		const cost =
-			formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary)) ?? "cost not reported";
+		const usage = dispatchUsageText(row.usage);
 		const status = dispatchStatusPresentation(row.status);
 		out.push(
 			"",
@@ -223,11 +221,13 @@ export function renderWorkerUsage(
 		);
 		out.push(clean(`${row.targetId} / ${row.wireModelId}${row.node ? ` · ${row.node}` : ""}`));
 		out.push(
-			row.tokenCount > 0 || row.inputTokens > 0 || row.outputTokens > 0 || row.progress?.inputTokens !== undefined
-				? `${formatFooterTokens(row.tokenCount)} recorded tokens · input ${formatFooterTokens(row.inputTokens)} · output ${formatFooterTokens(row.outputTokens)} · ${cost}`
-				: `Token usage not reported · ${cost}`,
+			row.usage.kind === "ready"
+				? `${usage.total} recorded tokens · input ${usage.prompt} · output ${usage.output} · ${usage.cost}`
+				: row.usage.kind === "pending"
+					? "Token usage awaiting the run's first journaled call"
+					: "Token usage not available",
 		);
-		if (row.lastContextTokens !== undefined)
+		if (row.lastContextTokens !== null)
 			out.push(
 				`Context ${formatFooterTokens(row.lastContextTokens)}${row.contextWindow ? ` / ${formatFooterTokens(row.contextWindow)}` : ""}`,
 			);

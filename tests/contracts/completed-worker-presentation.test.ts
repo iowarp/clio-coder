@@ -55,10 +55,8 @@ function board(entry: WorkerEntryState, width: number): string[] {
 		wireModelId: "test",
 		status: entry.pending ? "running" : entry.receipt?.outcome === "failed" ? "failed" : "completed",
 		elapsedMs: 0,
-		tokenCount: 0,
-		costUsd: 0,
-		inputTokens: 0,
-		outputTokens: 0,
+		usage: { kind: "pending" },
+		lastContextTokens: null,
 		ttftMs: null,
 		...(kind && contract ? { resultContract: { kind, conformance: contract } } : {}),
 		progress: {

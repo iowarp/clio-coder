@@ -33,10 +33,7 @@ function islandRow(snapshot: WorkerProgressSnapshot): string {
 		wireModelId: "ornith1.5-35b-moe-q4km",
 		status: "running",
 		elapsedMs: 20_000,
-		tokenCount: 0,
-		inputTokens: 0,
-		outputTokens: 0,
-		costUsd: 0,
+		usage: { kind: "pending" },
 		progress: snapshot,
 	} as unknown as DispatchBoardRow;
 	return stripTerminalSequences(formatTaskIslandLines([row])[1] ?? "");

@@ -238,16 +238,20 @@ export interface WorkerContextView {
  * usage has been observed yet. The percentage is capped at 100: a provider
  * report past the window is a full window, not a >100% claim.
  */
-function workerContextView(usedTokens: number, contextWindow: number | undefined | null): WorkerContextView | null {
+function workerContextView(
+	usedTokens: number | null,
+	contextWindow: number | undefined | null,
+): WorkerContextView | null {
 	if (contextWindow === undefined || contextWindow === null || contextWindow <= 0) return null;
-	if (!Number.isFinite(usedTokens) || usedTokens <= 0) return null;
+	// Unknown occupancy draws no meter rather than an empty one (#434).
+	if (usedTokens === null || !Number.isFinite(usedTokens) || usedTokens <= 0) return null;
 	const pct = Math.min(100, Math.round((usedTokens / contextWindow) * 100));
 	return { pct, severity: workerContextSeverity(pct), usedTokens, contextWindow };
 }
 
 /** Compact colored `ctx NN%` unit for board cards and /fleet rows; null when unknown. */
 export function formatWorkerContextMeter(
-	usedTokens: number,
+	usedTokens: number | null,
 	contextWindow: number | undefined | null,
 	theme: ClioTheme = clioTheme(),
 ): string | null {

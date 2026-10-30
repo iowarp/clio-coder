@@ -1,3 +1,6 @@
+import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
+import { factRef } from "../core/telemetry/dto.js";
+import { renderCompactCount } from "../core/telemetry/render.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import {
@@ -11,12 +14,13 @@ import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
 import { trustStateWord } from "../domains/evidence/trust-projection.js";
-import type { ObservabilityContract, ObservabilityRunSummary } from "../domains/observability/contract.js";
-import type { CostAggregate } from "../domains/observability/cost.js";
+import type {
+	ObservabilityContract,
+	ObservabilityRunSummary,
+	TelemetryView,
+} from "../domains/observability/contract.js";
 import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
-import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import type { WorkerAction, WorkerProgressSnapshot } from "../domains/observability/worker-progress.js";
-import type { CostProvenance } from "../domains/providers/index.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -27,7 +31,6 @@ import { isHelperRun } from "../session-control/worker-stream.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
 import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
-import { formatFooterTokens } from "./footer-panel.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
@@ -85,13 +88,8 @@ export interface DispatchBoardRow {
 	budget?: RunToolBudgetEnvelope;
 	status: DispatchBoardStatus;
 	elapsedMs: number;
-	tokenCount: number;
-	costUsd: number;
-	/** Pricing truth for costUsd; a progress event that omits it reads as unknown. */
-	costProvenance?: CostProvenance;
-	costSummary?: CostAggregate;
-	inputTokens: number;
-	outputTokens: number;
+	/** Tokens and cost from the telemetry read model; never the projection's own tally (#434 §11.3). */
+	usage: DispatchRunUsage;
 	ttftMs: number | null;
 	outcomeDetail?: string | null;
 	/** Fleet node id; absent renders as the local node. */
@@ -114,8 +112,8 @@ export interface DispatchBoardRow {
 	failoverHops?: number;
 	/** Model context window for the per-worker context meter. */
 	contextWindow?: number;
-	/** Last assistant message's input+cacheRead+cacheWrite+output: current context occupancy. */
-	lastContextTokens?: number;
+	/** Last assistant message's input+cacheRead+cacheWrite+output: current context occupancy; null until reported. */
+	lastContextTokens: number | null;
 	/** Tool currently executing in the worker; null between calls. Projected from `progress`. */
 	currentTool?: string | null;
 	/** Recently finished tools, newest first, bounded. Projected from `progress`. */
@@ -149,6 +147,59 @@ export interface DispatchBoardRow {
 	 * board's phase column empty rather than claiming a position it has none of.
 	 */
 	phase?: DispatchBoardPhase;
+}
+
+/**
+ * A run's tokens and cost as the bound session's telemetry view reads them (#434 §11.3): `unavailable` without a
+ * read model, `pending` until the session's journal references the run.
+ */
+export type DispatchRunUsage =
+	| { kind: "unavailable" }
+	| { kind: "pending" }
+	| { kind: "ready"; prompt: Quantity; output: Quantity; total: Quantity; usd: Quantity };
+
+/** What every run surface says of a run's usage, so the board, the footer and /usage word it identically. */
+export interface DispatchUsageText {
+	prompt: string;
+	output: string;
+	total: string;
+	cost: string;
+	/** Output tokens when every call reported them; a rate over a partial or estimated count would mislead. */
+	measuredOutput: number | null;
+}
+
+const UNAVAILABLE_USAGE: DispatchUsageText = {
+	prompt: "n/a",
+	output: "n/a",
+	total: "n/a",
+	cost: "not available",
+	measuredOutput: null,
+};
+const PENDING_USAGE: DispatchUsageText = { prompt: "—", output: "—", total: "—", cost: "—", measuredOutput: null };
+
+function measuredCount(fact: Quantity["fact"]): number | null {
+	if ("kind" in fact) return fact.kind === "measured" ? fact.value : null;
+	return fact.unknownCount === 0 && fact.coverage.estimated === 0 && fact.coverage.measured > 0 ? fact.measured : null;
+}
+
+export function dispatchUsageText(usage: DispatchRunUsage): DispatchUsageText {
+	if (usage.kind === "unavailable") return UNAVAILABLE_USAGE;
+	if (usage.kind === "pending") return PENDING_USAGE;
+	return {
+		prompt: renderCompactCount(usage.prompt.fact),
+		output: renderCompactCount(usage.output.fact),
+		total: renderCompactCount(usage.total.fact),
+		cost: usage.usd.display,
+		measuredOutput: measuredCount(usage.output.fact),
+	};
+}
+
+/** Output tokens per wall second, or null when the output is not wholly measured or nothing ran yet. */
+function wallTokenRate(row: DispatchBoardRow, usage: DispatchUsageText): number | null {
+	const elapsedSec = row.elapsedMs / 1000;
+	if (row.status === "enqueued" || usage.measuredOutput === null || elapsedSec <= 0.1) return null;
+	const rate = Math.round(usage.measuredOutput / elapsedSec);
+	return rate > 0 ? rate : null;
 }
 
 /** One fleet plan position: the wave index and the step the run executes. */
@@ -614,8 +665,8 @@ function renderDispatchCard(
 	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost =
-		formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary)) ?? COST_NOT_MEASURED;
+	const usage = dispatchUsageText(row.usage);
+	const cost = usage.cost;
 	const detail = terminalDetail(row);
 
 	const presentation = dispatchStatusPresentation(row.status, {
@@ -638,16 +689,11 @@ function renderDispatchCard(
 			? `${theme.fg("selectedOption", GLYPH.cursor)} ${rowPrefix.text}${theme.fg("selectedOption", clampedLabel)}`
 			: `${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}`;
 
-	const elapsedSec = row.elapsedMs / 1000;
-	const wallTokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
 	// A queued run has produced nothing yet, so it never carries a throughput.
-	const showRate = row.status !== "enqueued" && wallTokensPerSec > 0;
-	const up = theme.fg("body", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
-	const down = theme.fg(
-		"body",
-		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${wallTokensPerSec}/s wall avg)` : ""}`,
-	);
-	const total = theme.fg("body", `total ${formatFooterTokens(row.tokenCount)}`);
+	const rate = wallTokenRate(row, usage);
+	const up = theme.fg("body", `${GLYPH.up} ${usage.prompt}`);
+	const down = theme.fg("body", `${GLYPH.down} ${usage.output}${rate !== null ? ` (${rate}/s wall avg)` : ""}`);
+	const total = theme.fg("body", `total ${usage.total}`);
 
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
@@ -677,7 +723,7 @@ function renderDispatchCard(
 		`${theme.fg("annotation", "ttft")} ${theme.fg("body", ttft)}`,
 		`${theme.fg("annotation", "cost")} ${theme.fg("body", cost)}`,
 	];
-	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
+	const contextUnit = formatWorkerContextMeter(row.lastContextTokens, row.contextWindow, theme);
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
 	// position, so the column reads as "not a fleet step" and not as wave zero.
@@ -786,8 +832,8 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost =
-		formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary)) ?? COST_NOT_MEASURED;
+	const usage = dispatchUsageText(row.usage);
+	const cost = usage.cost;
 
 	const dot = dotSep(theme);
 	const presentation = dispatchStatusPresentation(row.status, {
@@ -832,15 +878,10 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 	// Worker identity, function phase, outcome and telemetry each keep their role.
 	const line1 = `${glyph} ${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}${dot}${statusStr}${dot}${theme.fg("toolMetadata", elapsed)}${showPhase ? phaseColumn : ""}`;
 
-	const elapsedSec = row.elapsedMs / 1000;
-	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
 	// A queued run has produced nothing yet, so it never carries a throughput.
-	const showRate = row.status !== "enqueued" && tokensPerSec > 0;
-	const up = theme.fg("body", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
-	const down = theme.fg(
-		"body",
-		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${tokensPerSec}/s)` : ""}`,
-	);
+	const rate = wallTokenRate(row, usage);
+	const up = theme.fg("body", `${GLYPH.up} ${usage.prompt}`);
+	const down = theme.fg("body", `${GLYPH.down} ${usage.output}${rate !== null ? ` (${rate}/s)` : ""}`);
 	const telemetry = row.retry
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
 		: `  ${up}${dot}${down}${dot}${theme.fg("body", cost)}`;
@@ -1240,7 +1281,7 @@ function isTerminalStatus(status: DispatchBoardStatus): boolean {
 	return status === "completed" || status === "failed" || status === "aborted" || status === "dead";
 }
 
-function toRow(entry: ObservabilityRunSummary, now: number): DispatchBoardRow {
+function toRow(entry: ObservabilityRunSummary, now: number, usage: DispatchRunUsage): DispatchBoardRow {
 	const retry = entry.retry;
 	const progress = entry.progress;
 	return {
@@ -1259,12 +1300,7 @@ function toRow(entry: ObservabilityRunSummary, now: number): DispatchBoardRow {
 		...(entry.budget !== undefined ? { budget: entry.budget } : {}),
 		status: entry.status,
 		elapsedMs: entry.durationMs ?? Math.max(0, (entry.finishedAtMs ?? now) - entry.startedAtMs),
-		tokenCount: entry.tokens.total,
-		costUsd: entry.costUsd,
-		...(entry.costProvenance !== undefined ? { costProvenance: entry.costProvenance } : {}),
-		...(entry.costSummary ? { costSummary: entry.costSummary } : {}),
-		inputTokens: entry.tokens.input,
-		outputTokens: entry.tokens.output,
+		usage,
 		ttftMs: entry.ttftMs ?? null,
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
 		...(entry.node !== undefined ? { node: entry.node } : {}),
@@ -1275,7 +1311,7 @@ function toRow(entry: ObservabilityRunSummary, now: number): DispatchBoardRow {
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
-		lastContextTokens: entry.lastContextTokens ?? 0,
+		lastContextTokens: entry.lastContextTokens ?? null,
 		...(entry.receiptId !== undefined ? { receiptId: entry.receiptId } : {}),
 		...(entry.phase !== undefined ? { phase: { ...entry.phase } } : {}),
 		// Both tool fields are views of the one projection, so the compact card and
@@ -1288,9 +1324,36 @@ function toRow(entry: ObservabilityRunSummary, now: number): DispatchBoardRow {
 	};
 }
 
-/** The board keeps display order and reads every run fact from observability. */
+const UNAVAILABLE: DispatchRunUsage = { kind: "unavailable" };
+const PENDING: DispatchRunUsage = { kind: "pending" };
+const runUsages = new WeakMap<TelemetryView, Map<string, DispatchRunUsage>>();
+
+/** Each run the bound session references, read once per view: the read model folds, the board only looks up. */
+function runUsagesOf(view: TelemetryView): Map<string, DispatchRunUsage> {
+	let usages = runUsages.get(view);
+	if (usages) return usages;
+	usages = new Map();
+	for (const run of view.runs()) {
+		const quantity = (metric: FactMetric) => view.quantity(factRef({ scope: "run", owner: run.runId, metric }));
+		const prompt = quantity("prompt");
+		const output = quantity("output");
+		usages.set(
+			run.runId,
+			prompt && output ? { kind: "ready", prompt, output, total: run.tokens, usd: run.usd } : PENDING,
+		);
+	}
+	runUsages.set(view, usages);
+	return usages;
+}
+
+/** A run's usage in one telemetry view: unavailable without a view, pending until the view's session references it. */
+export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: string): DispatchRunUsage {
+	return view ? (runUsagesOf(view).get(runId) ?? PENDING) : UNAVAILABLE;
+}
+
+/** The board keeps display order and reads every run fact from observability; tokens and cost from its read model. */
 export function createDispatchBoardStore(
-	projection: Pick<ObservabilityContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase">,
+	projection: Pick<ObservabilityContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "telemetry">,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
@@ -1303,6 +1366,7 @@ export function createDispatchBoardStore(
 		current = snapshot;
 	});
 	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
+		const view = projection.telemetry?.live() ?? null;
 		return [...current.runs]
 			.reverse()
 			.sort(
@@ -1310,7 +1374,7 @@ export function createDispatchBoardStore(
 					STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
 					(b.finishedAtMs ?? b.startedAtMs) - (a.finishedAtMs ?? a.startedAtMs),
 			)
-			.map((run) => toRow(run, current.generatedAt))
+			.map((run) => toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId)))
 			.filter((row) => !activeOnly || !isTerminalStatus(row.status));
 	};
 	return {

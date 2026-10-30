@@ -9,6 +9,8 @@ import type { JournalSource } from "../../src/domains/observability/read-model.j
 import { telemetryView } from "../../src/domains/observability/telemetry-live.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
+import type { DispatchRunUsage } from "../../src/interactive/dispatch-board.js";
+import { dispatchRunUsage } from "../../src/interactive/dispatch-board.js";
 
 /**
  * A `TelemetryView` built through the real read model, for surface fixtures (#434 §11.3). A surface test feeds it
@@ -68,7 +70,8 @@ export function telemetryCall(sessionId: string, options: TelemetryCallOptions =
 	if (settled?.k !== "call.settled" || settled.data.usage === null) throw new Error("golden settled call missing");
 	const started = golden.find((record) => record.k === "call.started" && record.data.callId === settled.data.callId);
 	if (started?.k !== "call.started") throw new Error("golden started call missing");
-	const base = settled.data.usage;
+	// The golden call's reported total describes its own counts, not the ones given here.
+	const { total: _total, ...base } = settled.data.usage;
 	const label = options.label ?? "main";
 	const callId = newCallId();
 	const attemptId = newAttemptId();
@@ -119,4 +122,14 @@ export function telemetryCall(sessionId: string, options: TelemetryCallOptions =
 			},
 		},
 	];
+}
+
+/** A board run's usage read through the real read model from the calls its run journal holds (#434 §11.3). */
+export function runUsageOf(
+	runId: string,
+	calls: readonly TelemetryCallOptions[],
+	sessionId = "fixture-session",
+): DispatchRunUsage {
+	const records = calls.flatMap((call) => telemetryCall(sessionId, call));
+	return dispatchRunUsage(telemetryViewOf(sessionId, [], new Map([[runId, records]])), runId);
 }

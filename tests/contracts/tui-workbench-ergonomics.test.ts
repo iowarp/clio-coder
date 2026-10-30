@@ -59,10 +59,8 @@ function boardRow(id: string): DispatchBoardRow {
 		wireModelId: "mini/qwopus3.8-27b-q6",
 		status: "enqueued",
 		elapsedMs: 1000,
-		tokenCount: 0,
-		costUsd: 0,
-		inputTokens: 0,
-		outputTokens: 0,
+		usage: { kind: "pending" },
+		lastContextTokens: null,
 		ttftMs: null,
 		taskSummary: "Inspect 研究 paths",
 	};

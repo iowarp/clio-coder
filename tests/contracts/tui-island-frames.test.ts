@@ -167,8 +167,7 @@ const run: DispatchBoardRow = {
 	elapsed: "12s",
 	elapsedMs: 12_000,
 	startedAtMs: 0,
-	tokenCount: 1200,
-	costUsd: 0,
+	usage: { kind: "pending" },
 	task: "map the render path of the fleet island",
 } as unknown as DispatchBoardRow;
 

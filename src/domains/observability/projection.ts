@@ -366,7 +366,6 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			progressFold: createWorkerProgressFold(),
 			startedAtClockMs: null,
 			ttftMs: null,
-			lastContextTokens: 0,
 			...(phase !== undefined ? { phase: { ...phase } } : {}),
 			status: "enqueued",
 			startedAtMs: now,

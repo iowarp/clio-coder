@@ -1,5 +1,4 @@
 import { renderCostAmount } from "../../domains/observability/cost.js";
-import { costAggregateForAmount, formatCostAggregate } from "../../domains/observability/index.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
 /** Expanded footer pages: dense inspection, separate from transcript output style. */
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
@@ -7,7 +6,7 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
-import { dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
+import { dispatchStatusPresentation, dispatchUsageText, renderDispatchActivity } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
@@ -53,16 +52,20 @@ function agentCard(
 		lines.push(...(compact ? previewRows(field("Task", row.taskSummary), 2, width) : field("Task", row.taskSummary)));
 	const activity = renderDispatchActivity(row, width);
 	lines.push(...(compact ? activity.slice(0, 2) : activity));
-	const usage: string[] = [];
-	if (row.progress?.inputTokens !== undefined || row.inputTokens > 0 || row.outputTokens > 0)
-		usage.push(
-			`${GLYPH.up} ${formatFooterTokens(row.inputTokens)} input`,
-			`${GLYPH.down} ${formatFooterTokens(row.outputTokens)} output`,
-		);
+	const usage = dispatchUsageText(row.usage);
 	const context = row.progress?.contextTokens ?? row.lastContextTokens;
-	lines.push(...field("Tokens", usage.length ? usage.join(" · ") : "awaiting reported measurements"));
+	lines.push(
+		...field(
+			"Tokens",
+			row.usage.kind === "ready"
+				? `${GLYPH.up} ${usage.prompt} input · ${GLYPH.down} ${usage.output} output`
+				: row.usage.kind === "pending"
+					? "awaiting the run's first journaled call"
+					: "not available",
+		),
+	);
 	const workload: string[] = [];
-	if (context !== undefined && context > 0)
+	if (context !== undefined && context !== null && context > 0)
 		workload.push(
 			`context ${formatFooterTokens(context)}${row.contextWindow ? ` / ${formatFooterTokens(row.contextWindow)}` : ""}`,
 		);
@@ -71,8 +74,7 @@ function agentCard(
 	if (workload.length) lines.push(...field("Work", workload.join(" · ")));
 	const timing: string[] = [];
 	if (row.ttftMs !== null) timing.push(`first token ${formatCompactMs(row.ttftMs)}`);
-	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance, row.costSummary));
-	if (cost) timing.push(cost);
+	if (row.usage.kind === "ready") timing.push(usage.cost);
 	if (!compact && timing.length) lines.push(...field("Timing", timing.join(" · ")));
 	if (!compact && row.budget)
 		lines.push(
@@ -159,10 +161,8 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 				(_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`,
 			);
 			const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal" : "fleet";
-			const usage =
-				row.inputTokens > 0 || row.outputTokens > 0
-					? ` · ${GLYPH.up} ${formatFooterTokens(row.inputTokens)} ${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`
-					: "";
+			const tokens = dispatchUsageText(row.usage);
+			const usage = row.usage.kind === "ready" ? ` · ${GLYPH.up} ${tokens.prompt} ${GLYPH.down} ${tokens.output}` : "";
 			const compact = [
 				...wrapTextWithAnsi(
 					`${theme.fg(presentation.token, presentation.glyph)} ${theme.fg("footerIdentity", name)} · ${theme.fg(presentation.token, presentation.label)} · ${theme.fg("annotation", audience)} · ${theme.fg("counter", `${formatCompactMs(row.elapsedMs)}${usage}`)}`,

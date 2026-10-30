@@ -1,7 +1,7 @@
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
-import { telemetryViewOf } from "./telemetry-view.js";
+import { runUsageOf, telemetryViewOf } from "./telemetry-view.js";
 
 export function footerState(): FooterDashboardRenderState {
 	const ledger = buildContextLedger({
@@ -27,10 +27,7 @@ export function footerState(): FooterDashboardRenderState {
 		taskSummary: "Explore the dispatch architecture and explain worker handoffs",
 		status: "running" as const,
 		elapsedMs: 12000,
-		tokenCount: 70000,
-		costUsd: 0,
-		inputTokens: 68000,
-		outputTokens: 2000,
+		usage: runUsageOf("scout-run", [{ usage: { input: 68000, output: 2000 }, usd: null }]),
 		ttftMs: 300,
 		lastContextTokens: 17000,
 		contextWindow: 262144,

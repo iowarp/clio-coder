@@ -23,7 +23,7 @@ import {
 } from "../../src/interactive/renderers/tool-execution.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import { telemetryViewOf } from "../harness/telemetry-view.js";
+import { runUsageOf, telemetryViewOf } from "../harness/telemetry-view.js";
 
 function state(): FooterDashboardRenderState {
 	const ledger = buildContextLedger({
@@ -49,10 +49,7 @@ function state(): FooterDashboardRenderState {
 		taskSummary: "Explore the dispatch architecture and explain worker handoffs",
 		status: "running" as const,
 		elapsedMs: 12000,
-		tokenCount: 70000,
-		costUsd: 0,
-		inputTokens: 68000,
-		outputTokens: 2000,
+		usage: runUsageOf("scout-run", [{ usage: { input: 68000, output: 2000 }, usd: null }]),
 		ttftMs: 300,
 		lastContextTokens: 17000,
 		contextWindow: 262144,

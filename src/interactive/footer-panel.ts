@@ -19,23 +19,21 @@ export const FAILED_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Se
 
 export { formatFooterTokens };
 
+/** Run counts only: tokens are the read model's to total, and the footer already shows the session's (#434 §11.3). */
 function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {
 	active: number;
 	completed: number;
 	failed: number;
-	tokens: number;
 } {
 	let active = 0;
 	let completed = 0;
 	let failed = 0;
-	let tokens = 0;
 	for (const row of rows) {
 		if (ACTIVE_DISPATCH_STATUSES.has(row.status)) active += 1;
 		else if (row.status === "completed") completed += 1;
 		else if (FAILED_DISPATCH_STATUSES.has(row.status)) failed += 1;
-		tokens += Math.max(0, row.tokenCount);
 	}
-	return { active, completed, failed, tokens };
+	return { active, completed, failed };
 }
 
 export function dispatchSegment(rows: ReadonlyArray<DispatchBoardRow> | null | undefined): string | null {
@@ -65,7 +63,6 @@ export function dispatchSegment(rows: ReadonlyArray<DispatchBoardRow> | null | u
 			if (counts.active > 0) parts.push(`${counts.active} active`);
 			if (counts.completed > 0) parts.push(`${counts.completed} done`);
 			if (counts.failed > 0) parts.push(`${counts.failed} failed`);
-			if (counts.tokens > 0) parts.push(`${formatFooterTokens(counts.tokens)}tok`);
 			return `${group.label} ${parts.length > 0 ? parts.join(" ") : `${group.rows.length} runs`}`;
 		})
 		.join(" · ");

@@ -3,14 +3,17 @@ import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
+import type { TelemetryReadModel } from "../../src/domains/observability/contract.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
 import { createObservabilityProjection } from "../../src/domains/observability/projection.js";
-import { createDispatchBoardStore } from "../../src/interactive/dispatch-board.js";
+import { createDispatchBoardStore, dispatchUsageText } from "../../src/interactive/dispatch-board.js";
+import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 // BT-007: at 55s the Fleet runs island said `↑ 5.9k · ↓ 450` while the inline
 // worker card said `24.3k tokens`. The card folds cache reads into input, as
-// every settled receipt does; the live dispatch snapshot left them out.
-test("the island's live input counts cache reads, so ↑ plus ↓ is the card's processed total", () => {
+// every settled receipt does. The island reads the run's prompt tokens from the
+// telemetry read model, which folds them the same way (#434 §11.3).
+test("the island's input counts cache reads, so ↑ plus ↓ is the card's processed total", () => {
 	const usage = { input: 5_900, output: 450, cacheRead: 17_950, cacheWrite: 0 };
 	const bus = createSafeEventBus();
 	const running: DispatchSnapshot["running"] = [
@@ -46,7 +49,14 @@ test("the island's live input counts cache reads, so ↑ plus ↓ is the card's 
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
 	});
-	const store = createDispatchBoardStore(projection);
+	const view = telemetryViewOf("session-1", [], new Map([["run-1", telemetryCall("session-1", { usage })]]));
+	const store = createDispatchBoardStore({
+		snapshot: () => projection.snapshot(),
+		subscribe: (listener) => projection.subscribe(listener),
+		reconcileRuns: () => projection.reconcileRuns(),
+		setFleetPhase: (runId, phase) => projection.setFleetPhase(runId, phase),
+		telemetry: { live: () => view } as unknown as TelemetryReadModel,
+	});
 	try {
 		bus.emit(BusChannels.DispatchStarted, {
 			runId: "run-1",
@@ -70,9 +80,14 @@ test("the island's live input counts cache reads, so ↑ plus ↓ is the card's 
 		assert.ok(row, "the run is on the board");
 		const processed = row.progress?.processedTokens;
 		assert.equal(processed, 24_300, "the card's processed count");
-		assert.equal(row.inputTokens, usage.input + usage.cacheRead);
-		assert.equal(row.inputTokens + row.outputTokens + usage.cacheWrite, processed);
-		assert.equal(row.tokenCount, processed);
+		assert.equal(row.usage.kind, "ready");
+		if (row.usage.kind !== "ready") return;
+		const count = (fact: (typeof row.usage.prompt)["fact"]) => ("kind" in fact ? Number.NaN : fact.measured);
+		assert.equal(count(row.usage.prompt.fact), usage.input + usage.cacheRead + usage.cacheWrite);
+		assert.equal(count(row.usage.prompt.fact) + count(row.usage.output.fact), processed);
+		assert.equal(count(row.usage.total.fact), processed);
+		const text = dispatchUsageText(row.usage);
+		assert.deepEqual([text.prompt, text.output, text.total], ["23.9k", "450", "24.3k"]);
 	} finally {
 		store.unsubscribe();
 	}

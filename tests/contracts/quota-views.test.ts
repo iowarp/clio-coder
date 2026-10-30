@@ -12,6 +12,7 @@ import {
 	routeWeeklyQuota,
 	workerQuotaLabel,
 } from "../../src/interactive/quota-view.js";
+import { runUsageOf } from "../harness/telemetry-view.js";
 
 const now = Date.parse("2026-09-21T14:00:00Z");
 const account: UsageSnapshot = {
@@ -123,20 +124,22 @@ test("worker quota joins only known local credential owners and does not claim a
 		wireModelId: "gemini-pro",
 		status: "running",
 		elapsedMs: 1000,
-		tokenCount: 1234,
-		inputTokens: 1000,
-		outputTokens: 234,
-		costUsd: 0,
+		usage: runUsageOf("run", [{ usage: { input: 1000, output: 234 }, usd: null }]),
+		lastContextTokens: null,
 		ttftMs: null,
 	};
 	const text = plain(renderWorkerUsage([row], [account], 100));
 	match(text, /1.2k recorded tokens/);
-	match(text, /cost not reported/);
+	match(text, /not measured/);
 	match(text, /Shared Antigravity/);
 	doesNotMatch(text, /\$0.00|quota saved/);
 	match(
-		plain(renderWorkerUsage([{ ...row, tokenCount: 0, inputTokens: 0, outputTokens: 0 }], [account], 80)),
-		/Token usage not reported/,
+		plain(renderWorkerUsage([{ ...row, usage: { kind: "unavailable" } }], [account], 80)),
+		/Token usage not available/,
+	);
+	match(
+		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], [account], 80)),
+		/awaiting the run's first journaled call/,
 	);
 });
 
@@ -185,10 +188,8 @@ test("weekly badges select the model's own group and never infer another account
 		targetId: "agy",
 		status: "running",
 		elapsedMs: 1000,
-		tokenCount: 100,
-		inputTokens: 80,
-		outputTokens: 20,
-		costUsd: 0,
+		usage: { kind: "pending" },
+		lastContextTokens: null,
 		ttftMs: null,
 	};
 	const island = formatTaskIslandLines([row], 1, [account]);

@@ -37,6 +37,7 @@ import { createWorkerStream } from "../../src/session-control/worker-stream.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { runUsageOf } from "../harness/telemetry-view.js";
 
 it("gives running Fleet work the dispatch tone with an activity glyph and leaves queued work in body text", () => {
 	const running = dispatchStatusPresentation("running");
@@ -164,10 +165,6 @@ function commonRow(row: DispatchBoardRow) {
 		runId: row.runId,
 		agentId: row.agentId,
 		status: row.status,
-		input: row.inputTokens,
-		output: row.outputTokens,
-		total: row.tokenCount,
-		cost: row.costUsd,
 		detail: row.outcomeDetail,
 		phase: row.phase,
 		progress: row.progress,
@@ -178,10 +175,6 @@ function commonSummary(row: ObservabilityRunSummary) {
 		runId: row.runId,
 		agentId: row.agentId,
 		status: row.status,
-		input: row.tokens.input,
-		output: row.tokens.output,
-		total: row.tokens.total,
-		cost: row.costUsd,
 		detail: row.outcomeDetail,
 		phase: row.phase,
 		progress: row.progress,
@@ -243,14 +236,16 @@ describe("dispatch board uses the observability projection", () => {
 					.sort((a, b) => a.runId.localeCompare(b.runId)),
 			);
 		}
+		// The wall rate divides the read model's measured output (30 tokens) by the run's 1.5 s.
+		const usage = runUsageOf(IDENTITY.runId, [{ usage: { input: 80, output: 30, cacheRead: 10 } }]);
 		const view = createDispatchBoardView(
-			() => board.rows(),
+			() => board.rows().map((row) => ({ ...row, usage })),
 			() => projection.snapshot(),
 		);
 		const rendered = view.render(180).join("\n");
 		match(rendered, /coder/);
 		match(rendered, /check failed/);
-		match(stripTerminalSequences(rendered), /20\/s wall avg/);
+		match(stripTerminalSequences(rendered), /↑ 90 · ↓ 30 \(20\/s wall avg\)/);
 		strictEqual(
 			projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence?.evidenceId,
 			"run-board-run",
@@ -311,11 +306,7 @@ describe("dispatch board uses the observability projection", () => {
 				host: row.hostVerification,
 				hops: row.failoverHops,
 				elapsed: row.elapsedMs,
-				input: row.inputTokens,
-				output: row.outputTokens,
-				tokens: row.tokenCount,
-				cost: row.costUsd,
-				pricing: row.costProvenance,
+				usage: row.usage,
 				detail: row.outcomeDetail,
 			},
 			{
@@ -339,11 +330,8 @@ describe("dispatch board uses the observability projection", () => {
 				host: "verified",
 				hops: 1,
 				elapsed: 1500,
-				input: 90,
-				output: 30,
-				tokens: 123,
-				cost: 0.25,
-				pricing: "estimated",
+				// Tokens and cost are the telemetry read model's; without one the board says so (#434 §11.3).
+				usage: { kind: "unavailable" },
 				detail: COMPLETED.outcomeDetail,
 			},
 		);
@@ -385,8 +373,8 @@ describe("dispatch board uses the observability projection", () => {
 		board.reconcile();
 		strictEqual(board.rows()[0]?.status, "failed");
 		strictEqual(board.rows()[0]?.outcomeDetail, null);
-		strictEqual(board.rows()[0]?.inputTokens, 10);
-		strictEqual(board.rows()[0]?.outputTokens, 0);
+		strictEqual(projection.snapshot().runs[0]?.tokens.input, 10);
+		strictEqual(projection.snapshot().runs[0]?.tokens.output, 0);
 		deepStrictEqual(board.rows().map(commonRow), projection.snapshot().runs.map(commonSummary));
 	});
 
@@ -415,7 +403,6 @@ describe("dispatch board uses the observability projection", () => {
 		});
 		board.reconcile();
 		strictEqual(projection.snapshot().runs[0]?.tokens.total, 15);
-		strictEqual(board.rows()[0]?.tokenCount, 15);
 		live.running = [];
 		bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, outcome: "failed", reason: "failed" });
 		live.retrying.push({
@@ -495,12 +482,12 @@ describe("dispatch board uses the observability projection", () => {
 		ok(terminal, "the newest settlement must survive despite its old enqueue position");
 		strictEqual(terminal.status, "completed");
 		strictEqual(terminal.receiptId, IDENTITY.runId);
-		strictEqual(terminal.tokenCount, COMPLETED.tokenCount);
 		strictEqual(terminal.elapsedMs, COMPLETED.durationMs);
 		strictEqual(terminal.outcomeDetail, COMPLETED.outcomeDetail);
 		const canonical = projection.snapshot().runs.find((run) => run.runId === IDENTITY.runId);
 		ok(canonical);
 		ok(canonical.finishedAtMs !== null);
+		strictEqual(canonical.tokens.total, COMPLETED.tokenCount);
 		deepStrictEqual(commonRow(terminal), commonSummary(canonical));
 
 		for (let i = 0; i < MAX_PROJECTION_RUNS; i += 1)

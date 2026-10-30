@@ -524,10 +524,8 @@ describe("evidence build failure", () => {
 			wireModelId: "model",
 			status: "completed",
 			elapsedMs: 0,
-			tokenCount: 0,
-			costUsd: 0,
-			inputTokens: 0,
-			outputTokens: 0,
+			usage: { kind: "pending" },
+			lastContextTokens: null,
 			ttftMs: null,
 		};
 		const board = createDispatchBoardView(
