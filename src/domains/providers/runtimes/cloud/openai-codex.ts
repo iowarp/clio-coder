@@ -1,4 +1,6 @@
+import { arch, platform, release } from "node:os";
 import { performance } from "node:perf_hooks";
+import { readClioVersion } from "../../../../core/package-root.js";
 import type { Api, Model } from "../../../../engine/types.js";
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import { probeJson } from "../../probe/http.js";
@@ -202,6 +204,11 @@ const openaiCodexRuntime: RuntimeDescriptor = {
 			api: "openai-codex-responses",
 			provider: "openai-codex",
 			defaultBaseUrl: DEFAULT_BASE_URL,
+			// Pi's transport defaults both headers to its own name; model headers override them on SSE and WebSocket.
+			defaultHeaders: {
+				originator: "clio-coder",
+				"User-Agent": `clio-coder/${readClioVersion()} (${platform()} ${release()}; ${arch()})`,
+			},
 		});
 		// Explicit triggers are a runtime capability of the GPT-6 family, not an engine model-name rule (#423).
 		if (/^gpt-6(?:[.-]|$)/u.test(wireModelId))

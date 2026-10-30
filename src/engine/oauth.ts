@@ -21,6 +21,7 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { alcfOAuthProvider } from "./alcf-oauth.js";
+import { withClioAnthropicBrowserLogin, withCodexCallbackHandoff } from "./oauth-browser.js";
 
 export type { OAuthCredentials, OAuthLoginCallbacks, OAuthSelectPrompt };
 
@@ -91,14 +92,25 @@ function interactionFromLoginCallbacks(callbacks: OAuthLoginCallbacks): Provider
 	return interaction;
 }
 
-function fromOAuthAuth(id: string, auth: OAuthAuth | undefined, usesCallbackServer: boolean): EngineOAuthProvider {
+type PiLogin = (interaction: ProviderAuthInteraction) => Promise<OAuthCredentials>;
+
+function fromOAuthAuth(
+	id: string,
+	auth: OAuthAuth | undefined,
+	usesCallbackServer: boolean,
+	signIn: (interaction: ProviderAuthInteraction, login: PiLogin) => Promise<OAuthCredentials> = (interaction, login) =>
+		login(interaction),
+): EngineOAuthProvider {
 	if (!auth) throw new Error(`provider "${id}" does not expose an OAuth flow`);
 	return {
 		id,
 		name: auth.name,
 		usesCallbackServer,
 		async login(callbacks) {
-			return auth.login(interactionFromLoginCallbacks(callbacks));
+			// Without agentName pi introduces itself, so OpenAI's authorize URL carried originator=pi.
+			return signIn(interactionFromLoginCallbacks(callbacks), (interaction) =>
+				auth.login(interaction, { agentName: "clio-coder" }),
+			);
 		},
 		async refreshToken(credentials, signal) {
 			return auth.refresh({ ...credentials, type: "oauth" }, signal);
@@ -117,8 +129,8 @@ let providers: Map<string, EngineOAuthProvider> | null = null;
 
 function builtinProviders(): EngineOAuthProvider[] {
 	return [
-		fromOAuthAuth("anthropic-max", anthropicProvider().auth.oauth, true),
-		fromOAuthAuth("openai-codex", openaiCodexProvider().auth.oauth, true),
+		fromOAuthAuth("anthropic-max", anthropicProvider().auth.oauth, true, withClioAnthropicBrowserLogin),
+		fromOAuthAuth("openai-codex", openaiCodexProvider().auth.oauth, true, withCodexCallbackHandoff),
 		fromOAuthAuth("github-copilot", githubCopilotProvider().auth.oauth, false),
 	];
 }

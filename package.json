@@ -74,6 +74,7 @@
 		"docs/**/*.md",
 		"!docs/wiki/**",
 		"docs/corpus.json",
+		"assets/clio-mark-gui.webp",
 		"README.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",
