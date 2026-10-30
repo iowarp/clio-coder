@@ -178,6 +178,17 @@ const DECLARATIONS: ReadonlyArray<DeclarationRow> = [
 
 const HASH_KEY = /(?:Hash|hash|Digest|digest|Signature|Fingerprint|fingerprint|^sha256)$/u;
 
+/**
+ * Subtrees a receipt seals verbatim from another process: the ACP peer's
+ * `initialize` capabilities and the inputs of the tool calls it made. Their
+ * keys are the peer's, not Clio's hashes, so R7 does not bind them and the
+ * walk skips them instead of refusing the seal on a key the peer chose (#434).
+ */
+const OPAQUE_SUBTREES: ReadonlyArray<RegExp> = [
+	/^delegation\.agentCapabilities$/u,
+	/^delegation\.toolCallLog\[\]\.arguments$/u,
+];
+
 /** The declaration for one normalized receipt path, or null when the set does not declare it. */
 function receiptHashDeclaration(path: string, agentId: string): ReceiptHashDeclaration | null {
 	const row = DECLARATIONS.find((candidate) => candidate.path.test(path));
@@ -189,6 +200,7 @@ function receiptHashDeclaration(path: string, agentId: string): ReceiptHashDecla
 export function undeclaredReceiptHashes(draft: object, agentId: string): string[] {
 	const undeclared = new Set<string>();
 	const visit = (value: unknown, path: string) => {
+		if (OPAQUE_SUBTREES.some((subtree) => subtree.test(path))) return;
 		if (Array.isArray(value)) {
 			for (const item of value) visit(item, `${path}[]`);
 			return;

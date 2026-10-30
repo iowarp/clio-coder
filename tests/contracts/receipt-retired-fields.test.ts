@@ -157,6 +157,35 @@ describe("receipt v21 seal (#434)", () => {
 		const envelope = fixtureEnvelope("v21-undeclared");
 		const draft = { ...fixtureReceiptDraft(envelope), novelDigest: "a".repeat(64) } as unknown as RunReceiptDraft;
 		throws(() => withReceiptIntegrity(draft, envelope), /undeclared hashes novelDigest/);
+		// Peer JSON sealed verbatim (ACP capabilities, tool-call inputs) carries the peer's keys, not Clio's hashes.
+		const peer = {
+			...fixtureReceiptDraft(envelope),
+			delegation: {
+				agentConfigId: "peer",
+				command: "peer",
+				args: [],
+				acpSessionId: null,
+				acpProtocolVersion: 1,
+				acpAgentName: null,
+				acpAgentVersion: null,
+				agentCapabilities: { promptHash: "p".repeat(64) },
+				toolCallsRequested: 1,
+				toolCallsApproved: 1,
+				toolCallsDenied: 0,
+				toolGovernance: "clio-coder-policy",
+				toolCallLog: [
+					{
+						callId: "call-1",
+						tool: "bash",
+						arguments: { digest: "d".repeat(64) },
+						decision: "approved",
+						durationMs: 1,
+						timestamp: envelope.startedAt,
+					},
+				],
+			},
+		} as unknown as RunReceiptDraft;
+		equal(withReceiptIntegrity(peer, envelope).hashSet, RECEIPT_HASH_SET);
 	});
 
 	it("names how the worker loop ended apart from the host's verdict", () => {
