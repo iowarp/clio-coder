@@ -123,7 +123,10 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 	const protectedPaths = input.protectedPaths ?? [];
 	const options = [
 		...(offersMerge(input) ? [{ label: MERGE, description: `Land it on ${destinationOf(input)} now.` }] : []),
-		{ label: KEEP, description: `Leave it on ${input.branch}; \`git merge ${input.branch}\` applies it later.` },
+		{
+			label: KEEP,
+			description: `Leave it on ${input.branch}; \`clio-coder fleet land ${input.branch}\` lands it later.`,
+		},
 		{ label: DISCARD, description: "Delete the branch and its worktree after one more confirmation." },
 	];
 	return {

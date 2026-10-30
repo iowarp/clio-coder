@@ -197,7 +197,7 @@ function configuredGitValue(cwd: string, key: string): string | null {
  * commits carry; `identity` fills in only what is not configured, so a
  * merged task never lands under a synthetic author the operator did not pick.
  */
-function hostCommitIdentity(cwd: string, identity: string): string[] {
+export function hostCommitIdentity(cwd: string, identity: string): string[] {
 	const config: string[] = [];
 	if (configuredGitValue(cwd, "user.name") === null) config.push("-c", `user.name=${identity}`);
 	if (configuredGitValue(cwd, "user.email") === null) config.push("-c", `user.email=${identity}@local`);
@@ -278,21 +278,13 @@ export function mergeWorktreeBranch(
 		const gitDir = git(root, ["rev-parse", "--absolute-git-dir"]);
 		mergeHeadPath = join(gitDir, "MERGE_HEAD");
 		// A task must not interrupt the operator's partially completed Git operation.
-		for (const [marker, operation] of [
-			["MERGE_HEAD", "merge"],
-			["CHERRY_PICK_HEAD", "cherry-pick"],
-			["REVERT_HEAD", "revert"],
-			["rebase-merge", "rebase"],
-			["rebase-apply", "rebase"],
-			["sequencer", "cherry-pick or revert sequence"],
-		] as const) {
-			if (existsSync(join(gitDir, marker))) {
-				return {
-					ok: false,
-					code: WORKTREE_DESTINATION_BUSY,
-					reason: `Cannot merge: a ${operation} is already in progress in the destination checkout.`,
-				};
-			}
+		const operation = gitOperationInProgress(gitDir);
+		if (operation !== null) {
+			return {
+				ok: false,
+				code: WORKTREE_DESTINATION_BUSY,
+				reason: `Cannot merge: a ${operation} is already in progress in the destination checkout.`,
+			};
 		}
 		mergeAttempted = true;
 		git(
@@ -347,6 +339,21 @@ export function mergeWorktreeBranch(
 			reason: `${reason}${mergeLeftInProgress ? ` ; this task merge was left in progress; run git merge --abort in ${root}` : ""}`,
 		};
 	}
+}
+
+/** The Git operation an operator left in progress in `gitDir`, or null when none is. */
+export function gitOperationInProgress(gitDir: string): string | null {
+	for (const [marker, operation] of [
+		["MERGE_HEAD", "merge"],
+		["CHERRY_PICK_HEAD", "cherry-pick"],
+		["REVERT_HEAD", "revert"],
+		["rebase-merge", "rebase"],
+		["rebase-apply", "rebase"],
+		["sequencer", "cherry-pick or revert sequence"],
+	] as const) {
+		if (existsSync(join(gitDir, marker))) return operation;
+	}
+	return null;
 }
 
 function validateRunId(runId: string): void {
@@ -442,6 +449,15 @@ export function createTaskWorktree(
 		path,
 		resolvedBase,
 	]);
+	// Git config outlives the claim, so a branch kept after its claim is
+	// released still names where it was cut and which branch it lands on.
+	// `git branch -D` removes the section with the branch.
+	try {
+		git(canonical, ["config", `branch.${branch}.clio-coder-base`, resolvedBase]);
+		if (sourceBranch.length > 0) git(canonical, ["config", `branch.${branch}.clio-coder-source`, sourceBranch]);
+	} catch {
+		// Only `fleet land` of a claimless branch reads these; the claim carries the same facts.
+	}
 	const ownerToken = randomBytes(16).toString("hex");
 	writeFileSync(
 		claimPathFor(canonical, runId),
@@ -805,7 +821,7 @@ function headContainsBase(root: string, base: string): "yes" | "no" | "unknown" 
 }
 
 /** Why the source checkout cannot take this task's merge as it stands, or null when it can. */
-function destinationRefusal(worktree: TaskWorktree, destination: string): string | null {
+export function destinationRefusal(worktree: TaskWorktree, destination: string): string | null {
 	const kept = `Nothing was merged; the task branch ${worktree.branch} is preserved.`;
 	const dispatched = worktree.sourceBranch;
 	if (dispatched !== undefined && destination !== dispatched) {
@@ -1229,6 +1245,44 @@ export function recoverTaskWorktrees(
 		}
 	}
 	return result;
+}
+
+/**
+ * A finished run's task worktree as `fleet land` needs it, ownership token
+ * included so landing can release the claim. A claim whose owner is alive is a
+ * run in flight whose worker may still write, so it is reported as running.
+ */
+export function loadKeptTaskWorktree(
+	root: string,
+	runId: string,
+	allowedParents?: ReadonlyArray<string>,
+): { kind: "kept"; worktree: TaskWorktree } | { kind: "running" } | null {
+	if (!SAFE_RUN_ID.test(runId)) return null;
+	let canonical: string;
+	try {
+		canonical = realpathSync(root);
+	} catch {
+		return null;
+	}
+	const claim = readTaskClaims(canonical, allowedParents ?? [diskWorktreeParent(canonical)]).find(
+		(candidate) => candidate.runId === runId,
+	);
+	if (claim === undefined || typeof claim.marker.ownerToken !== "string") return null;
+	if (claim.state === "active" && claim.owner !== null && ownerIsAlive(claim.owner)) return { kind: "running" };
+	const sourceBranch = typeof claim.marker.sourceBranch === "string" ? claim.marker.sourceBranch : undefined;
+	return {
+		kind: "kept",
+		worktree: {
+			root: canonical,
+			runId,
+			path: claim.path,
+			parent: dirname(claim.path),
+			branch: claim.branch,
+			base: claim.base,
+			...(sourceBranch !== undefined && sourceBranch.length > 0 ? { sourceBranch } : {}),
+			ownerToken: claim.marker.ownerToken,
+		},
+	};
 }
 
 /**

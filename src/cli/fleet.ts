@@ -101,6 +101,7 @@ Author and check playbooks with clio-coder playbook.
 
 Subcommands:
   nodes add|list|remove|test     manage SSH worker nodes and project verification
+  land [<run>] [--squash] [--yes]  list, preview or land task branches finished runs kept
   run <playbook> [--var k=v ...]  preflight and execute a playbook
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON

@@ -350,7 +350,9 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 		async (subArgs) =>
 			subArgs[0] === "nodes"
 				? (await import("./fleet-nodes.js")).runFleetNodes(subArgs.slice(1))
-				: (await import("./fleet.js")).runFleetCommand(subArgs),
+				: subArgs[0] === "land"
+					? (await import("./fleet-land.js")).runFleetLand(subArgs.slice(1))
+					: (await import("./fleet.js")).runFleetCommand(subArgs),
 	],
 	["playbook", async (subArgs) => (await import("./playbook.js")).runPlaybookCommand(subArgs)],
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],

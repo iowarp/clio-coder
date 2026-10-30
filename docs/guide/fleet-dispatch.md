@@ -717,6 +717,37 @@ receipt's `worktree.detail` records the decision: a landed merge reads `merged <
 discard begins `operator keep:` or `operator discard:` (with `worktree.reason`
 `operator_discarded` after a full discard).
 
+#### Landing a kept branch later
+
+`clio-coder fleet land` lists the task branches finished runs kept: settled, abandoned by
+a crash, or left without a claim. `clio-coder fleet land <run id>` (or the
+`clio-coder/task/<run id>` branch) previews the landing: the branch's commits, the
+changes, the destination, whether it fast-forwards, and any conflict. The preview changes
+nothing. Conflicts come from `git merge-tree --write-tree`, so Git 2.38 or newer is required.
+
+```sh
+clio-coder fleet land                              # what is left to land
+clio-coder fleet land <run id>                     # preview, with a plan id
+clio-coder fleet land <run id> --yes --plan <id>   # land exactly that preview
+clio-coder fleet land <run id> --yes --squash      # one commit instead of the history
+```
+
+The run lands on the branch it was dispatched from, which must be checked out and still
+contain the task base; an operation in progress (merge, rebase, cherry-pick) refuses it.
+The landing commit is built with `commit-tree`: a merge commit, a fast-forward when the
+destination has not moved, or with `--squash` one commit that keeps a single commit's
+message and author, or lists several. `--message` replaces the message. The only step
+that touches the checkout is `git merge --ff-only`, which Git refuses when it would
+overwrite a local change; unrelated local edits are carried. Uncommitted work in a kept
+worktree, common after a crash, is counted in the preview and committed onto the task
+branch only when landing. `--plan` refuses a landing whose branch tip, worktree,
+destination or mode changed since that preview. After landing, the branch, its worktree
+and its claim are removed; `--keep` keeps them. A branch already on the destination is
+only cleaned up. Each task branch also records its base and source branch in Git config
+(`branch.<branch>.clio-coder-base` and `clio-coder-source`), so a branch whose claim was
+released still lands on the right branch. The `Keep branch` choice on the merge card
+names this command.
+
 `fleet.worktrees.root` (`/settings workspace`, Task copies) chooses where the working tree is created:
 
 | Value | Location |
