@@ -10,6 +10,7 @@ import type {
 import { getToolStateChanges } from "@earendil-works/pi-ai";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
+import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
@@ -20,6 +21,7 @@ import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
 import { recommendedOutputTokens, resolvePressureOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
+import { retryStreamOnceOnAuthRejection } from "./oauth-retry-stream.js";
 import { retryStreamOnceOnOverflow } from "./overflow-retry-stream.js";
 import { boundWorkerResponse } from "./worker-response-stream.js";
 /**
@@ -71,6 +73,7 @@ import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
+import type { AuthResolution } from "../domains/providers/auth/storage.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type {
 	CapabilityFlags,
@@ -673,6 +676,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// APIs (openai-codex keeps only the body text), and the dispatch retry policy
 	// needs it to tell a rejected request from a transient failure.
 	let lastProviderHttpStatus: number | null = null;
+	// Status of the current round's own attempt; a stale status from an earlier
+	// round must not veto the message-based rejection check (#427).
+	let roundProviderHttpStatus: number | null = null;
+	// The credential the current request carries, so a server rejection refreshes
+	// exactly that token under the shared storage lock (#427).
+	let lastAuthResolution: AuthResolution | null = null;
+	const refreshWorkerOAuthKey = async (): Promise<string | null> => {
+		const rejected = lastAuthResolution;
+		if (!input.authProfile || rejected?.source !== "stored-oauth" || rejected.apiKey === undefined) return null;
+		process.stderr.write(`[worker] refreshing the OAuth credential for target '${input.target.id}' and retrying once\n`);
+		const refreshed = await openAuthStorage().forceRefreshApiKey(input.authProfile, rejected.apiKey, input.signal);
+		if (!refreshed.available || refreshed.apiKey === undefined) {
+			// Reuse the CLI login syntax, and keep refresh-provider diagnostics out of the remedy (#427).
+			throw new Error(
+				`OAuth credential for target '${input.target.id}' could not be refreshed. Run clio-coder auth login ${rejected.providerId} again.`,
+			);
+		}
+		lastAuthResolution = refreshed;
+		return refreshed.apiKey;
+	};
 	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
 	// For synthesis:false, the loop guard records the final admitted call while
@@ -1272,6 +1295,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// because it names its tool and keeps the surface a lock would remove. A
 			// locked round has no declarations left, so neither middleware round
 			// applies to it.
+			// A refreshed credential replaces the one Pi resolved for this round; the
+			// next round resolves its own through getApiKey (#427).
+			let roundApiKey: string | undefined;
 			const request = (projected: AgentMessage[]) => {
 				const middlewareChoice = middlewareToolChoice.current();
 				// Codex retains the work phase's parallel setting for WS deltas;
@@ -1283,7 +1309,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						...(systemPrompt !== undefined ? { systemPrompt } : {}),
 						messages: projected as typeof currentContext.messages,
 					},
-					requestOptions,
+					roundApiKey === undefined ? requestOptions : { ...requestOptions, apiKey: roundApiKey },
 					[
 						terminalHandoffActive(currentModel.api)
 							? { kind: "required", toolName: INTERNAL_HELPER_RESULT_TOOL, handoff: !codexToolChanges }
@@ -1374,6 +1400,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						const tracking = trackCallFetch(fetchImpl);
 						callTracking = tracking;
 						callUsageReported = false;
+						roundProviderHttpStatus = null;
 						tracking.start(currentModel.api, attempt.options?.transport);
 						const lockedRound = synthesisToolLock || helperTerminalPhase;
 						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attempt.options ?? {};
@@ -1397,6 +1424,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 									fetch: async (url, init) => {
 										const response = await tracking.fetch(url, init);
 										lastProviderHttpStatus = response.status;
+										roundProviderHttpStatus = response.status;
 										return response;
 									},
 									onProviderStreamEvent: async (data, eventModel) => {
@@ -1418,7 +1446,19 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					input.target.id,
 				);
 			};
-			const first = request(messages);
+			// A token the server rejects as expired earns one locked refresh and one
+			// retry of the same request, as the main turn does; a failed refresh ends
+			// the round with the login remedy (#427).
+			const first = retryStreamOnceOnAuthRejection(
+				request(messages),
+				(error) => isProviderAuthRejection(error.errorMessage, roundProviderHttpStatus ?? undefined),
+				async () => {
+					const apiKey = await refreshWorkerOAuthKey();
+					if (apiKey === null) return null;
+					roundApiKey = apiKey;
+					return request(messages);
+				},
+			);
 			// The server is the authority on its own limit. An unreported window, a
 			// window that changed since it was resolved, or a server tokenizer that
 			// counts above Clio's estimate all surface as a server overflow. It earns
@@ -1445,6 +1485,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (!resolved.available || !resolved.apiKey) {
 				throw new Error(resolved.detail ?? `Credential '${input.authProfile}' is unavailable. Log in again.`);
 			}
+			lastAuthResolution = resolved;
 			return resolved.apiKey;
 		},
 	};
