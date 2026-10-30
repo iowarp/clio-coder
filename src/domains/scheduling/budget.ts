@@ -1,3 +1,4 @@
+import { renderUsdSetting } from "../../core/telemetry/render.js";
 import { renderCostAmount } from "../observability/cost.js";
 /**
  * Session budget state. Admission checks priced spend before the next paid
@@ -65,7 +66,7 @@ export function describeBudgetBlock(block: BudgetBlockView): { level: "warn" | "
 		block.contextTokens !== undefined
 			? ` The next call sends ~${Math.round(block.contextTokens).toLocaleString("en-US")} context tokens.`
 			: "";
-	const remedy = `raise ${SESSION_COST_CEILING_SETTING} to ${block.raiseToUsd} to resume.`;
+	const remedy = `raise ${SESSION_COST_CEILING_SETTING} to ${renderUsdSetting(block.raiseToUsd)} to resume.`;
 	if (block.level === "over") {
 		return {
 			level: "error",

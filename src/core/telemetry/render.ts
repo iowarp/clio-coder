@@ -31,6 +31,16 @@ export function renderUsdLimit(value: number | null | undefined): string {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? renderUsd(value) : "not set";
 }
 
+/**
+ * A USD figure the operator types into a setting, such as the raise a ceiling stop names: the bare number, rounded up
+ * at four decimals so the typed value is never below the one that clears the stop (#424, #434).
+ */
+export function renderUsdSetting(value: number): string {
+	if (!Number.isFinite(value) || value <= 0) return "0";
+	// The epsilon absorbs binary error in `value * 10_000`, so an exact four-decimal raise stays as written.
+	return String(Math.ceil(value * 10_000 - 1e-6) / 10_000);
+}
+
 function renderDurationMs(value: number): string {
 	const ms = Math.max(0, value);
 	if (ms < 1000) return `${Math.round(ms)}ms`;
