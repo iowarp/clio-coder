@@ -18,6 +18,11 @@ export interface TelemetrySessionOrigin {
 }
 export interface TelemetrySessionLease {
 	context: TelemetryContext;
+	/**
+	 * Whether the session's writer opened. Without it records under this lease reach no sink, so a side call keeps
+	 * its spend in the out-of-turn store instead of minting a call id no journal holds (#434).
+	 */
+	journaled: boolean;
 	/** Cold request preparation, before beginCall enters the enqueue-only lane (#434). */
 	storeRequestObjects?(input: {
 		/** `systemPrompt` is content: it is kept only under research content capture (#434). */
@@ -105,7 +110,7 @@ export function createSessionJournals(
 		const context: TelemetryContext = { sessionId: origin.id, label, ...(turnId ? { turnId } : {}) };
 		if (!/^[a-zA-Z0-9_-]+$/.test(origin.id) || !/^[a-zA-Z0-9_-]+$/.test(origin.cwdHash)) {
 			report();
-			return { context, async release() {} };
+			return { context, journaled: false, async release() {} };
 		}
 		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
 		try {
@@ -155,11 +160,12 @@ export function createSessionJournals(
 		if (entry.idle) clearTimeout(entry.idle);
 		entry.idle = undefined;
 		entry.users += 1;
-		await entry.journal;
+		const journaled = (await entry.journal) !== null;
 		const owned = entry;
 		let released = false;
 		return {
 			context,
+			journaled,
 			async storeRequestObjects(input) {
 				const refs: NonNullable<CallStarted["objects"]> = {};
 				const journal = released ? null : await owned.journal;

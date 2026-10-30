@@ -1,6 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
+import type { CallObservation } from "../../src/core/call-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -312,6 +314,70 @@ it("a side call times its admission gate as its admission stage and names the ce
 		strictEqual(admission?.waitedOn, "budget");
 		ok(admission.end > admission.start, "the wait is inside the admission span");
 		ok((settled[0]?.stages.send?.start ?? -1) >= admission.end, "the send follows admission");
+	} finally {
+		await journals.closeAll();
+		faux.unregister();
+		env.restore();
+	}
+});
+
+it("a side call whose session writer cannot open settles no call id, so its spend stays in the out-of-turn store (#434)", async () => {
+	const env = await isolateClioEnv("clio-coder-call-stages-");
+	const faux = registerEngineFauxProvider({
+		api: "side-unjournaled-fixture",
+		models: [{ id: "side" }],
+		tokensPerSecond: 0,
+	});
+	faux.setResponses([
+		{
+			role: "assistant",
+			content: [{ type: "text", text: "answer" }],
+			api: faux.api,
+			provider: "fixture",
+			model: "side",
+			stopReason: "stop",
+			timestamp: Date.now(),
+			usage: {
+				input: 3,
+				output: 2,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 5,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		},
+	]);
+	const model = faux.getModel("side");
+	ok(model);
+	// A state directory that is a file: the session writer cannot open beneath it.
+	const blocked = join(env.dir, "state-is-a-file");
+	writeFileSync(blocked, "");
+	let unavailable = 0;
+	const journals = createSessionJournals(blocked, () => {
+		unavailable += 1;
+	});
+	const observations: Array<CallObservation | undefined> = [];
+	try {
+		const result = await runOutOfTurnRound({
+			telemetry: {
+				origin: { id: "side-unjournaled", cwdHash: "sidehash" },
+				acquire: journals.acquire,
+				label: "btw",
+				targetId: "side-target",
+				runtimeId: "fixture",
+				costProvenance: "known",
+			},
+			model,
+			messages: [],
+			systemPrompt: "fixture",
+			userText: "question",
+			thinkingLevel: "off",
+			onUsage: (_usage, observation) => observations.push(observation),
+		});
+		ok(result.usage, "the round's usage still reaches its writer");
+		ok(unavailable > 0);
+		strictEqual(observations.length, 1);
+		strictEqual(observations[0]?.callId, undefined, "a call id would make every usage writer skip the round");
 	} finally {
 		await journals.closeAll();
 		faux.unregister();

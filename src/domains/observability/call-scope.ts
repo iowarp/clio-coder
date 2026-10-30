@@ -24,7 +24,10 @@ export interface AdmissionHold {
 
 /** One logical helper call retains its originating writer across schema and auth retries (#434). */
 export async function openCallScope(options: CallJournalOptions | undefined, model: { api: string; id: string }) {
-	const lease = options ? await options.acquire(options.origin, options.label) : undefined;
+	const acquired = options ? await options.acquire(options.origin, options.label) : undefined;
+	// A writer that failed to open owns no call: its rounds settle no call id, so their writers keep the spend in the
+	// out-of-turn store rather than skip it for a journal that never received it (#434).
+	const lease = acquired?.journaled ? acquired : undefined;
 	let call: TelemetryCall | undefined;
 	let settledIdentity: { callId: string; attemptId: string } | undefined;
 	const settled = (facts: CallSettled | undefined): CallSettled | undefined => {
@@ -88,7 +91,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 		async close(): Promise<void> {
 			// An attempt that got no message before its helper finished still settles; a settled one is untouched (#434).
 			if (call) settled(call.abandon("internal"));
-			await lease?.release();
+			await acquired?.release();
 		},
 	};
 }

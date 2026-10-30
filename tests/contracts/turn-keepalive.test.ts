@@ -179,7 +179,11 @@ test("a journaled refresh carries its call identity so legacy accounting skips i
 		const run = harness({
 			callJournal: () => ({
 				origin: { id: "keepalive-session", cwdHash: "fixture" },
-				acquire: async () => ({ context: { sessionId: "keepalive-session", label: "prewarm" }, release: async () => {} }),
+				acquire: async () => ({
+					context: { sessionId: "keepalive-session", label: "prewarm" },
+					journaled: true,
+					release: async () => {},
+				}),
 				label: "prewarm",
 				targetId: "fixture-target",
 				runtimeId: "fixture-runtime",

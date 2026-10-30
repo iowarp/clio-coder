@@ -81,7 +81,8 @@ export function createSystemOneRequestAdmission(deps: {
 			session && repoIdentity
 				? await deps.observability?.acquireTelemetrySession?.({ id: session, cwdHash: repoIdentity }, label)
 				: undefined;
-		const call = lease
+		// Without an open writer the decision mints no call, so its spend reaches the out-of-turn store (#434).
+		const call = lease?.journaled
 			? beginCall(
 					{
 						label,
