@@ -81,6 +81,7 @@
 
 .composer__actions {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--space-2);
@@ -96,8 +97,10 @@
 .composer__tools {
 	flex: none;
 }
+/* Never squeezed: a narrow tray (the 200% zoom desktop) puts the route actions on a row of their own
+   instead of sliding the route chip under Send. */
 .composer__route-actions {
-	flex: 1;
+	flex: 1 0 auto;
 	justify-content: flex-end;
 }
 /* `.primary` lays a label and a trailing mark out with space-between and a gap; a round button holding

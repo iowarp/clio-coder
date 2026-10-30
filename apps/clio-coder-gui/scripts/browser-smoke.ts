@@ -941,10 +941,11 @@ try {
 				return `${element.className || element.tagName}:${Math.round(box.width)}@${Math.round(box.top)}`;
 			}),
 		);
-		// The tray carries its heading and hint lines around a one-line field and one row of actions;
-		// those lines wrap at 800px, and a wrapped action row would still add a further 44px.
+		// The tray carries its heading and hint lines around a one-line field and one row of actions.
+		// At 800px those lines wrap and the route actions take a row of their own; a wrapped action
+		// row at any wider size would still add 44px and fail here.
 		assert.ok(
-			restingComposer <= 230,
+			restingComposer <= (width <= 800 ? 280 : 230),
 			`resting composer is ${restingComposer}px tall at ${width}px; actions ${actionBoxes.join(", ")}`,
 		);
 		const restingField = await composerField.evaluate((element) => element.getBoundingClientRect().height);
