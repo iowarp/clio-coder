@@ -16,7 +16,7 @@ import { branchView } from "./branch-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
 import { summarizeHealth } from "./health.js";
-import { compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
+import { compactDuration, contextMeter, taskOverview } from "./overview-model.js";
 import { ProjectTrustNotice } from "./ProjectTrustNotice.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
 import { ReceiptLine } from "./ReceiptLine.js";
@@ -211,7 +211,7 @@ export function SessionOverview({
 	const facts = sessionFacts(session.notices, session.telemetry?.notices);
 	const health = summarizeHealth(session.health);
 	const meter = ledger.data ? contextMeter(ledger.data) : null;
-	const segments = ledger.data ? contextSegments(ledger.data) : [];
+	const segments = ledger.data?.display.segments ?? [];
 	const overview = useMemo(() => taskOverview(session.turns, nowMs), [session.turns, nowMs]);
 	const changes = useMemo(() => summarizeChanges(session.tools, workspaceRoot), [session.tools, workspaceRoot]);
 	const runs = useMemo(() => foldFleetRuns(session.fleet), [session.fleet]);
@@ -507,7 +507,7 @@ export function SessionOverview({
 											aria-label="Context window"
 											aria-valuemin={0}
 											aria-valuemax={100}
-											aria-valuenow={Math.round(meter.percent)}
+											aria-valuenow={meter.percent}
 											aria-valuetext={meter.text}
 										>
 											{segments.map((segment, index) => (
@@ -515,8 +515,8 @@ export function SessionOverview({
 													key={segment.key}
 													className="pane-stack__part"
 													data-index={index}
-													style={{ width: `${segment.percent}%` }}
-													title={`${segment.label} ${segment.percent.toFixed(1)}%`}
+													style={{ width: `${segment.fill}%` }}
+													title={`${segment.label} ${segment.share}`}
 												/>
 											))}
 										</div>
@@ -525,7 +525,7 @@ export function SessionOverview({
 											<ul className="pane-legend" aria-label="What fills the window">
 												{segments.map((segment, index) => (
 													<li key={segment.key} data-index={index}>
-														{segment.label} <span>{segment.percent < 1 ? "<1" : Math.round(segment.percent)}%</span>
+														{segment.label} <span>{segment.share}</span>
 													</li>
 												))}
 											</ul>

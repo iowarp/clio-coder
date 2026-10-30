@@ -9,7 +9,7 @@ import { ContextWorkCard } from "./ContextWorkCard.js";
 import { useStopContext } from "./context-command.js";
 import { contextView, contextWorkspaceFacts } from "./context-model.js";
 import { contextWorkView } from "./context-work-model.js";
-import { contextMeter, contextSegments } from "./overview-model.js";
+import { contextMeter } from "./overview-model.js";
 import { useContextLedger, useContextWork } from "./session-telemetry.js";
 import "./session-board.css";
 import "./pane-inspection.css";
@@ -55,7 +55,7 @@ export const ContextPanel = memo(function ContextPanel({
 	const stop = useStopContext(client, sessionId);
 	const view = ledger.data ? contextView(ledger.data) : null;
 	const meter = ledger.data ? contextMeter(ledger.data) : null;
-	const segments = ledger.data ? contextSegments(ledger.data) : [];
+	const segments = ledger.data?.display.segments ?? [];
 	return (
 		<div className="pane-drill drill context-panel">
 			{sessionOpen && supported && (
@@ -152,7 +152,7 @@ export const ContextPanel = memo(function ContextPanel({
 									aria-label="Context window"
 									aria-valuemin={0}
 									aria-valuemax={100}
-									aria-valuenow={Math.round(meter.percent)}
+									aria-valuenow={meter.percent}
 									aria-valuetext={meter.text}
 								>
 									{segments.map((segment, index) => (
@@ -160,8 +160,8 @@ export const ContextPanel = memo(function ContextPanel({
 											key={segment.key}
 											className="pane-stack__part"
 											data-index={index}
-											style={{ width: `${segment.percent}%` }}
-											title={`${segment.label} ${segment.percent.toFixed(1)}%`}
+											style={{ width: `${segment.fill}%` }}
+											title={`${segment.label} ${segment.share}`}
 										/>
 									))}
 								</div>
@@ -169,7 +169,7 @@ export const ContextPanel = memo(function ContextPanel({
 									<ul className="pane-legend" aria-label="What fills the window">
 										{segments.map((segment, index) => (
 											<li key={segment.key} data-index={index}>
-												{segment.label} <span>{segment.percent < 1 ? "<1" : Math.round(segment.percent)}%</span>
+												{segment.label} <span>{segment.share}</span>
 											</li>
 										))}
 									</ul>

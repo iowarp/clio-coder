@@ -63,3 +63,25 @@ test("an unknown window is said, not shown as zero, and estimates say so", () =>
 	assert.equal(view.free, "Free space not reported.");
 	assert.equal(view.cache, null);
 });
+
+test("the window bar's parts come worded from the server, the smallest categories folded into one", () => {
+	const groups = [
+		{ category: "system", label: "System prompt", tokens: 4096, percent: 3.125 },
+		{ category: "messages", label: "Conversation", tokens: 16384, percent: 12.5 },
+		{ category: "tools", label: "Tools", tokens: 1310, percent: 1 },
+		{ category: "memory", label: "Memory", tokens: 655, percent: 0.5 },
+		{ category: "skills", label: "Skills", tokens: 262, percent: 0.2 },
+	];
+	const { segments } = withLedgerDisplay({ ...WIRE, groups }).display;
+	assert.deepEqual(
+		segments.map(({ label, share }) => [label, share]),
+		[
+			["Conversation", "12.5%"],
+			["System prompt", "3.1%"],
+			["Tools", "1.0%"],
+			["Other", "0.7%"],
+		],
+	);
+	assert.equal(segments[3]?.fill, 0.7, "the folded part's width is the folded shares");
+	assert.deepEqual(withLedgerDisplay({ ...WIRE, contextWindow: 0, groups }).display.segments, []);
+});
