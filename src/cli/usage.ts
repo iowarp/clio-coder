@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
+import { readReceiptText } from "../domains/dispatch/receipt-store.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
@@ -741,7 +742,8 @@ async function readReceipts(
 	for (const name of files) {
 		let parsed: unknown;
 		try {
-			parsed = JSON.parse(await readFile(join(root, name), "utf8"));
+			// A pruned receipt reads back from its evidence copy, as every receipt reader's does (#434).
+			parsed = JSON.parse(await readReceiptText(join(root, name)));
 		} catch {
 			diagnostics.malformedReceipts += 1;
 			continue;
