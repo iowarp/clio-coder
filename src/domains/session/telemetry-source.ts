@@ -182,11 +182,8 @@ function* legacyRecords(
 	copied: ReadonlySet<string>,
 ): Load<SessionSource["legacy"]> {
 	const journaled = new Set<string>();
-	let firstJournalAt: string | null = null;
-	for (const record of journal) {
+	for (const record of journal)
 		if (record.k === "call.started" || record.k === "call.settled") journaled.add(record.data.callId);
-		if (firstJournalAt === null || record.t < firstJournalAt) firstJournalAt = record.t;
-	}
 	// Only rows the journal never held: an assistant message or checkpoint whose call ids resolve is journal-owned.
 	const unjournaled = entries.filter((entry) => {
 		if (copied.has(entry.turnId) && (entry.kind === "compactionSummary" || entry.kind === "message")) return false;
@@ -196,8 +193,11 @@ function* legacyRecords(
 		const callId = (entry.payload as { callId?: unknown } | null)?.callId;
 		return !(typeof callId === "string" && journaled.has(callId));
 	});
-	// The out-of-turn store keeps being written beside the journal; only rows from before it opened are legacy.
-	// The store is machine-wide; a safe session id appears verbatim in its own rows, so parse only those lines.
+	// Every writer of this store skips a call that carries a journal call id (`recordOutOfTurnUsageFor` in
+	// chat-loop.ts, turn-prewarm.ts, system-one-host.ts, compaction-usage.ts), so each row is a call no journal
+	// holds and counts whole. A time boundary would drop a row written after the journal opened for a round that
+	// had no owned journal. The store is machine-wide; a safe session id appears verbatim in its own rows, so only
+	// those lines are parsed.
 	const path = outOfTurnUsagePath(stateDir);
 	const raw = yield* text(path);
 	const mine = raw
@@ -205,9 +205,7 @@ function* legacyRecords(
 		.filter((line) => line.includes(sessionId))
 		.join("\n");
 	const rows: OutOfTurnUsageRow[] = mine ? parseOutOfTurnUsageRows(mine, path).rows : [];
-	const outOfTurn = rows.filter(
-		(row) => row.sessionId === sessionId && (firstJournalAt === null || row.timestamp < firstJournalAt),
-	);
+	const outOfTurn = rows.filter((row) => row.sessionId === sessionId);
 	const imported = importLegacySession(sessionId, unjournaled, { outOfTurn, ids: "derived" });
 	return { records: imported.records, aggregates: imported.aggregates + imported.invalid };
 }
