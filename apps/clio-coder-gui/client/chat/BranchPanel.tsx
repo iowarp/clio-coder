@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import type { SessionTree } from "../../contracts/branches.js";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
@@ -93,7 +94,16 @@ export const BranchPanel = memo(function BranchPanel({
 			requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>("h3")?.focus());
 		},
 	});
-	const view = tree.data ? branchView(tree.data) : null;
+	// A switch also publishes session.reset, which resets this read in place: the key does not move, so
+	// keepPreviousData has nothing to keep and the section would unmount until the refetch lands. When that reset
+	// arrives after the heading took focus, focus fell to the page. The last tree read for this session stays on
+	// screen until the next one does.
+	const held = useRef<{ sessionId: string; data: SessionTree } | undefined>(undefined);
+	if (tree.data) held.current = { sessionId, data: tree.data };
+	const data =
+		tree.data ??
+		(sessionOpen && supported && !tree.error && held.current?.sessionId === sessionId ? held.current.data : undefined);
+	const view = data ? branchView(data) : null;
 	const busy = change.isPending || running;
 	const rows = paneBranchRows(view?.rows ?? [], query, kind);
 	const tip = view?.rows.find((row) => row.tip && row.active);
@@ -101,7 +111,7 @@ export const BranchPanel = memo(function BranchPanel({
 		<>
 			{!sessionOpen ? <p>This task is not open. Open it to read its branches.</p> : null}
 			{sessionOpen && !supported ? <p>Clio does not report branches for this task.</p> : null}
-			{tree.isPending && sessionOpen && supported ? <p>Reading the branches…</p> : null}
+			{tree.isPending && sessionOpen && supported && !data ? <p>Reading the branches…</p> : null}
 			{tree.error ? (
 				<div className="pane-inspection-error" role="alert">
 					<p>{tree.error.message}</p>
