@@ -82,6 +82,66 @@ async function researchBytesOnDisk(directory: string, fileName: JournalFileName,
 
 export type JournalFileName = "calls.jsonl" | "events.ndjson";
 
+/**
+ * What one owner's writer made durable, published after fsync so a live fold reads exactly the bytes a cold reader
+ * would (#434 §11). `rewritten` means the writer replaced bytes an earlier read may hold (a torn-tail repair), so a
+ * live reader re-reads instead of appending; `failed` means the writer stopped and its health changed.
+ */
+export type PersistedTelemetry =
+	| { kind: "appended"; bytes: Buffer; origin: ClockOrigin }
+	| { kind: "rewritten" }
+	| { kind: "failed" };
+type PersistedListener = (owner: string, event: PersistedTelemetry) => void;
+const persistedListeners = new Map<string, Set<PersistedListener>>();
+const anyOwnerListeners = new Set<PersistedListener>();
+const openJournalHealth = new Map<string, () => JournalHealth>();
+
+function subscribed(owner: string): boolean {
+	return anyOwnerListeners.size > 0 || persistedListeners.has(owner);
+}
+
+function addListener(set: Set<PersistedListener>, listener: PersistedListener): PersistedListener {
+	// Each subscription is its own entry, so subscribing one callback twice needs two unsubscribes.
+	const entry: PersistedListener = (owner, event) => listener(owner, event);
+	set.add(entry);
+	return entry;
+}
+
+/** Owner keys are `telemetryOwner()` values; the listener runs inside the writer's flush and must stay cheap. */
+export function subscribePersistedTelemetry(owner: string, listener: PersistedListener): () => void {
+	let set = persistedListeners.get(owner);
+	if (!set) {
+		set = new Set();
+		persistedListeners.set(owner, set);
+	}
+	const entry = addListener(set, listener);
+	return () => {
+		set.delete(entry);
+		if (set.size === 0 && persistedListeners.get(owner) === set) persistedListeners.delete(owner);
+	};
+}
+
+/** Every owner's batches, for a reader that learns which owners it needs only after a cold read (#434). */
+export function subscribeAllPersistedTelemetry(listener: PersistedListener): () => void {
+	const entry = addListener(anyOwnerListeners, listener);
+	return () => anyOwnerListeners.delete(entry);
+}
+
+function publishPersisted(owner: string, event: PersistedTelemetry): void {
+	for (const listener of [...(persistedListeners.get(owner) ?? []), ...anyOwnerListeners]) {
+		try {
+			listener(owner, event);
+		} catch {
+			// A reader's failure never reaches the writer; durability already happened (#434).
+		}
+	}
+}
+
+/** Health of every journal this process holds open, keyed by owner. */
+export function openCallJournalHealth(): Array<{ owner: string; health: JournalHealth }> {
+	return [...openJournalHealth].map(([owner, health]) => ({ owner, health: health() }));
+}
+
 function rotatedName(fileName: JournalFileName, id: string): string {
 	return fileName === "calls.jsonl" ? `calls.${id}.jsonl` : `events.${id}.ndjson`;
 }
@@ -131,6 +191,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 	});
 	let unregister: (() => void) | undefined;
 	let handle: FileHandle | undefined;
+	const hubOwner = telemetryOwner(options.context);
 	// A mode lookup that throws captures standard only; the segment header must still say what it admits (#434).
 	const captureNow = (): TelemetryCapture => {
 		try {
@@ -186,6 +247,11 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				await appendAll(handle, opening);
 				await handle.sync();
 			}
+			if (subscribed(hubOwner))
+				publishPersisted(
+					hubOwner,
+					scan.tornTailBytes > 0 ? { kind: "rewritten" } : { kind: "appended", bytes: opening, origin: header.clockOrigin },
+				);
 			let size = prefix.length + opening.length;
 			const researchCap = options.researchBytes ?? RESEARCH_SESSION_BYTES;
 			let researchBytes = await researchBytesOnDisk(options.sessionDirectory, fileName, scan).catch(() => researchCap);
@@ -304,23 +370,24 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							reportedCapped = capped;
 						}
 						if (!handle) throw new Error("call journal closed before flush");
+						let rotation: Buffer[] = [];
 						if (size >= (options.segmentBytes ?? 32 * 1024 * 1024)) {
-							await appendAll(
-								handle,
-								encodeTelemetryLine(
-									makeTelemetryRecord("segment.closed", { reason: "rotation" }, options.context, {
-										t: new Date().toISOString(),
-										mono: performance.now(),
-									}),
-								),
+							const closing = encodeTelemetryLine(
+								makeTelemetryRecord("segment.closed", { reason: "rotation" }, options.context, {
+									t: new Date().toISOString(),
+									mono: performance.now(),
+								}),
 							);
+							await appendAll(handle, closing);
 							await handle.sync();
 							await handle.close();
 							handle = undefined;
 							await rename(path, join(options.sessionDirectory, rotatedName(fileName, newRecordId())));
-							await safeResourceWriteAsync(path, encodeTelemetryLine(header), { mode: 0o600 });
+							const opened = encodeTelemetryLine(header);
+							await safeResourceWriteAsync(path, opened, { mode: 0o600 });
 							handle = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
-							size = encodeTelemetryLine(header).length;
+							size = opened.length;
+							rotation = [closing, opened];
 						} else if (modeChanged) {
 							// A mode change closes the segment in place and opens one whose header admits what follows.
 							lines.unshift(
@@ -338,6 +405,13 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						await handle.sync();
 						size += batch.length;
 						persisted += batchCount;
+						// Nothing is decoded or copied for a headless run or worker that nobody reads live (#434).
+						if (subscribed(hubOwner))
+							publishPersisted(hubOwner, {
+								kind: "appended",
+								bytes: rotation.length > 0 ? Buffer.concat([...rotation, batch]) : batch,
+								origin: header.clockOrigin,
+							});
 					} catch {
 						// A partial write is repaired by the next owner. Do not append behind an uncertain tail (#434).
 						writeErrors += 1;
@@ -345,6 +419,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						dropped += dequeued + count;
 						ring.fill(undefined);
 						count = 0;
+						if (subscribed(hubOwner)) publishPersisted(hubOwner, { kind: "failed" });
 					}
 				})().finally(() => {
 					flushing = undefined;
@@ -395,12 +470,14 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			if (options.context.runId !== undefined) unregister = registerRunTelemetrySink(options.context.runId, journal);
 			else if (options.context.sessionId !== null) unregister = registerTelemetrySink(options.context.sessionId, journal);
 			else throw new Error("telemetry journal requires a session or run owner");
+			openJournalHealth.set(hubOwner, health);
 			ready(journal);
 			await lifetime;
 		},
 		{ timeoutMs: 0 },
 	).finally(async () => {
 		unregister?.();
+		openJournalHealth.delete(hubOwner);
 		await handle?.close();
 	});
 	void owner.catch(reject);
@@ -465,10 +542,15 @@ async function readCallJournalSnapshot(
 	return result;
 }
 
-function appendReadSegment(result: CallJournalRead, bytes: Buffer): void {
+/** Fold one published batch into a read exactly as a cold read of the same bytes would (#434 §11). */
+export function appendPersistedTelemetry(result: CallJournalRead, batch: { bytes: Buffer; origin: ClockOrigin }): void {
+	appendReadSegment(result, batch.bytes, batch.origin);
+}
+
+function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: ClockOrigin): void {
 	const scan = scanTelemetrySegment(bytes);
 	if (scan.corruptOffset !== null || scan.tornTailBytes > 0) result.damaged += 1;
-	let origin: ClockOrigin | undefined;
+	let origin: ClockOrigin | undefined = continuing;
 	for (const row of scan.rows) {
 		if (row.kind === "header") {
 			origin = row.header.clockOrigin;
