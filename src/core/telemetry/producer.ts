@@ -272,7 +272,8 @@ export function beginCall(
 				settled = true;
 				liveAttempts.delete(attemptId);
 				stages.settle = performance.now() - start;
-				// Only an attempt whose path marks its send can show it never got there; System One's cannot yet.
+				// Only an attempt whose path marks its send can show it never got there; one that entered its own context
+				// or staged its preparation has such a path (#429, #434).
 				const tracked =
 					entered || starts.transform !== undefined || starts.auth !== undefined || starts.admission !== undefined;
 				const evidence =

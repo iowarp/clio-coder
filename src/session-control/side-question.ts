@@ -123,7 +123,13 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	 * Optional host admission and accounting apply to each attempt, including a schema retry. Its time is the
 	 * attempt's admission stage; it sets `hold.waitedOn` when a ceiling or capacity held the request (#434).
 	 */
-	beforeRequest?: (hold: AdmissionHold) => Promise<void>;
+	// biome-ignore lint/suspicious/noConfusingVoidType: an admission that mints no call of its own returns nothing.
+	beforeRequest?: (hold: AdmissionHold) => Promise<void | RequestCallContext>;
+}
+
+/** A caller that minted its own journal call for the request runs the stream inside it (#429, #434). */
+export interface RequestCallContext {
+	withContext?: <T>(work: () => T) => T;
 }
 
 export interface SideQuestionResult {
@@ -285,10 +291,11 @@ async function runRound(
 	let terminalError: unknown;
 	let text = "";
 	try {
+		let requestCall: RequestCallContext | undefined;
 		await scope.admit(async (hold) => {
 			const flowRefusal = input.admitFlow?.() ?? null;
 			if (flowRefusal !== null) throw new Error(flowRefusal);
-			await input.beforeRequest?.(hold);
+			requestCall = (await input.beforeRequest?.(hold)) ?? undefined;
 		});
 		input.signal?.throwIfAborted();
 		const options: Record<string, unknown> = {
@@ -319,13 +326,16 @@ async function runRound(
 		};
 
 		tracking.start(input.model.api);
-		const events = scope.withContext(() =>
-			streamSimple(
-				input.model,
-				context as unknown as Parameters<typeof streamSimple>[1],
-				options as unknown as Parameters<typeof streamSimple>[2],
-			),
-		);
+		const stream = () =>
+			scope.withContext(() =>
+				streamSimple(
+					input.model,
+					context as unknown as Parameters<typeof streamSimple>[1],
+					options as unknown as Parameters<typeof streamSimple>[2],
+				),
+			);
+		// The round's own scope stays innermost, so a journaled round keeps its call either way.
+		const events = requestCall?.withContext ? requestCall.withContext(stream) : stream();
 
 		for await (const event of events) {
 			if (event.type === "text_delta") {

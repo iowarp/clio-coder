@@ -810,6 +810,7 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 			runtimeId: refined.runtime.id,
 			beforeRequest: async () => {
 				recordUsage = await admitRequest({ targetId: request.targetId, model: wireModelId, signal: request.signal });
+				return recordUsage.withContext ? { withContext: recordUsage.withContext } : undefined;
 			},
 			onUsage: (usage, observation) => recordUsage?.(usage, observation),
 			...sideAuth,

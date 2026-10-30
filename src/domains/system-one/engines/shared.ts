@@ -23,12 +23,20 @@ export interface LlmRequestUsage {
 	readonly costUsd?: number;
 }
 
+/**
+ * The per-request accounting sink. `withContext` runs the request inside its journal call, so the engine seam marks
+ * the send and a request that never left reads as never sent by its own stages (#429, #434).
+ */
+export type LlmRequestAccounting = ((usage: LlmRequestUsage | null, observation?: CallObservation) => void) & {
+	readonly withContext?: <T>(work: () => T) => T;
+};
+
 /** Admission captures the originating session and returns its per-request accounting sink. */
 export type LlmRequestAdmission = (request: {
 	readonly targetId: string;
 	readonly model: string;
 	readonly signal: AbortSignal;
-}) => Promise<(usage: LlmRequestUsage | null, observation?: CallObservation) => void>;
+}) => Promise<LlmRequestAccounting>;
 
 /** A refused request invalidates the whole decision, including answers from earlier requests. */
 export class LlmAdmissionRefused extends Error {}

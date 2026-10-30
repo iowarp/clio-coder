@@ -1,4 +1,5 @@
 import { trackCallFetch } from "../../../core/call-failure.js";
+import { telemetryCallInContext } from "../../../core/telemetry/producer.js";
 /**
  * How an LLM engine talks to a model: direct chat-completions HTTP for the
  * OpenAI-compatible runtimes, or an injected one-shot port for the runtimes
@@ -234,9 +235,13 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			throw error;
 		}
 		const tracking = trackCallFetch();
-		const response = await (async () => {
+		const request = async () => {
+			// This wire bypasses the engine seam, so it marks its own auth and send for the call it runs in (#429).
+			const call = telemetryCallInContext();
+			call?.stage("auth", "start");
 			token ??= resolveToken(host, target, runtime, signal);
 			const bearer = await token;
+			call?.stage("auth", "end");
 			signal.throwIfAborted();
 			const headers: Record<string, string> = {
 				...(runtime.id === "openrouter" ? OPENROUTER_HEADERS : {}),
@@ -244,6 +249,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 				"content-type": "application/json",
 				...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
 			};
+			call?.stage("send", "start");
 			return probeJson<ChatCompletion>({
 				fetch: tracking.fetch,
 				url: `${baseUrl}/chat/completions`,
@@ -254,13 +260,16 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 				signal,
 				readErrorBody: true,
 			});
-		})().catch((error: unknown) => {
-			recordUsage?.(null, {
-				callOutcome: signal.aborted ? "aborted" : "error",
-				failure: tracking.failure(error, signal.aborted),
-			});
-			throw error;
-		});
+		};
+		const response = await (recordUsage?.withContext ? recordUsage.withContext(request) : request()).catch(
+			(error: unknown) => {
+				recordUsage?.(null, {
+					callOutcome: signal.aborted ? "aborted" : "error",
+					failure: tracking.failure(error, signal.aborted),
+				});
+				throw error;
+			},
+		);
 		recordUsage?.(
 			response.data ? (usageOf(response.data) ?? null) : null,
 			response.ok

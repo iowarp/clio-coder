@@ -1,3 +1,4 @@
+import type { CallObservation } from "../core/call-failure.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { beginCall } from "../core/telemetry/producer.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
@@ -36,11 +37,12 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import type {
 	DecisionRecorder,
 	LlmRequestAdmission,
+	LlmRequestUsage,
 	OutcomeRecord,
 	SystemOne,
 	Verdict,
 } from "../domains/system-one/index.js";
-import { LlmAdmissionRefused } from "../domains/system-one/index.js";
+import { LlmAdmissionRefused, noteSystemOneCall } from "../domains/system-one/index.js";
 import { STEER_SITE } from "../domains/system-one/sites/steer.js";
 import { TOOL_CALL_GATE_SITE } from "../domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE } from "../domains/system-one/sites/tool-result.js";
@@ -99,6 +101,7 @@ export function createSystemOneRequestAdmission(deps: {
 					lease.context,
 				)
 			: undefined;
+		if (call) noteSystemOneCall(call.callId);
 		let settled = false;
 		const settle = (message: unknown): void => {
 			if (settled) return;
@@ -140,7 +143,7 @@ export function createSystemOneRequestAdmission(deps: {
 			});
 			throw new LlmAdmissionRefused(error instanceof Error ? error.message : String(error), { cause: error });
 		}
-		return (usage, observation) => {
+		const account = (usage: LlmRequestUsage | null, observation?: CallObservation): void => {
 			if (settled) return;
 			settle({
 				stopReason:
@@ -268,6 +271,8 @@ export function createSystemOneRequestAdmission(deps: {
 				},
 			});
 		};
+		// The engine runs its request inside the call, so its own stages say whether the request ever left (#429).
+		return call ? Object.assign(account, { withContext: <T>(work: () => T): T => call.withContext(work) }) : account;
 	};
 }
 

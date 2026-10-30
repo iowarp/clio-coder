@@ -1,11 +1,16 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
+import { newCallId } from "../../src/core/telemetry/ids.js";
+import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import type { Payload } from "../../src/core/telemetry/schemas.js";
+import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
 import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
-import { BREAKER_THRESHOLD, createRunner } from "../../src/domains/system-one/runner.js";
+import { BREAKER_THRESHOLD, createRunner, noteSystemOneCall } from "../../src/domains/system-one/runner.js";
 import type {
 	Answer,
 	DecisionEngine,
@@ -243,6 +248,43 @@ describe("System One runner", () => {
 			["timeout", "timeout", "timeout", "breaker-open"],
 		);
 		strictEqual(fake.calls(), BREAKER_THRESHOLD);
+	});
+
+	it("records system_one.decision with its breaker moves and the calls its engine opened (#429)", async () => {
+		const records: PendingTelemetry[] = [];
+		const release = registerTelemetrySink("decision-session", { enqueue: (record) => Boolean(records.push(record)) });
+		try {
+			const runner = createRunner({
+				recorder: () => ({ decision: () => {}, outcome: () => {} }),
+				cutOverrides: () => ({}),
+				currentSession: () => "decision-session",
+			});
+			const callId = newCallId();
+			const fake = fakeEngine(() => {
+				noteSystemOneCall(callId);
+				return hangs();
+			});
+			const binding = { routes: [{ name: "fake", engine: fake.engine, digest: "digest-decision", tasks: null }] };
+			for (let index = 0; index <= BREAKER_THRESHOLD; index += 1) await runner.run(binding, site(), "x", {});
+		} finally {
+			release();
+		}
+		const decisions = records.filter((record) => record.kind === "system_one.decision");
+		strictEqual(decisions.length, BREAKER_THRESHOLD + 1);
+		for (const decision of decisions)
+			ok(validPayload("system_one.decision", decision.data), JSON.stringify(decision.data));
+		const data = decisions.map((decision) => decision.data as Payload<"system_one.decision">);
+		deepStrictEqual(
+			data.map((decision) => [decision.outcome, decision.routes[0]?.breaker ?? null]),
+			[
+				["timeout", null],
+				["timeout", null],
+				["timeout", "opened"],
+				["breaker-open", null],
+			],
+		);
+		strictEqual(data[0]?.callIds.length, 1);
+		deepStrictEqual(data[3]?.callIds, [], "an engine the breaker skipped opened no call");
 	});
 
 	it("returns null with one canceled record when the caller aborts mid-call", async () => {

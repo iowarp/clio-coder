@@ -7,8 +7,11 @@
  * it behaves as if System One did not exist, so nothing in here throws.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { recordTelemetry } from "../../core/telemetry/producer.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
 import { createRedactionTally } from "../evidence/redact.js";
 import type { CallContract } from "./calibration.js";
 import { cutsFor, validationOf } from "./calibration.js";
@@ -120,6 +123,14 @@ export interface Runner {
 interface BreakerState {
 	failures: number;
 	openUntil: number;
+}
+
+/** The journal calls a decision's model requests open, collected while its engines run (#429, #434). */
+const decisionCalls = new AsyncLocalStorage<Set<string>>();
+
+/** The host's request admission names the call it opened, so system_one.decision can cite it (#429). */
+export function noteSystemOneCall(callId: string): void {
+	decisionCalls.getStore()?.add(callId);
 }
 
 /** The same chars/4 estimate the rest of the harness budgets with. */
@@ -261,6 +272,9 @@ export function createRunner(deps: RunnerDeps): Runner {
 		}));
 		// Cut keys the site's policy read, so a route's validation names only cuts that mattered.
 		const cutKeys = new Set<string>();
+		// What this call did to each route's breaker, and the calls its engines opened (#429).
+		const breakerMoves = new Map<RoutePlan, "opened" | "probe" | "closed" | "disabled">();
+		const callIds = new Set<string>();
 		const planOf = (task: DecisionTask): RoutePlan =>
 			plans.find((plan, index) => index > 0 && plan.tasks.has(task)) ?? (plans[0] as RoutePlan);
 
@@ -285,6 +299,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 					const failures = previous + 1;
 					failedDecisions.set(key, failures);
 					if (failures === BREAKER_THRESHOLD) {
+						breakerMoves.set(plan, "disabled");
 						writeDiagnostic(
 							`[clio-coder:system-one] Disabled engine '${plan.route.name}' at site '${site.id}' for this session after ${failures} consecutive failed decisions. It was derived from ${plan.route.derivedFrom}; configure systemOne.sites.${site.id} explicitly to choose an engine.`,
 						);
@@ -365,7 +380,45 @@ export function createRunner(deps: RunnerDeps): Runner {
 				...(detail.policy !== undefined ? { policy: detail.policy } : {}),
 				...(routes.length > 0 ? { routes } : {}),
 			});
+			recordDecision(outcome, latencyMs, detail.fitted);
 			return latencyMs;
+		};
+		const recordDecision = (outcome: CallOutcome, latencyMs: number, fitted: boolean | undefined): void => {
+			if (typeof session !== "string" || session.length === 0) return;
+			const asked = plans.filter(
+				(plan) => Object.keys(plan.questions).length > 0 || Object.keys(plan.abstained).length > 0,
+			);
+			const routes: Payload<"system_one.decision">["routes"] = (asked.length > 0 ? asked : plans)
+				.slice(0, 16)
+				.map((plan) => {
+					const breaker = breakerMoves.get(plan);
+					return {
+						engine: plan.route.name,
+						kind: plan.route.engine.kind,
+						outcome: plan.outcome,
+						...(plan.reply?.roundTripMs !== undefined ? { roundTripMs: plan.reply.roundTripMs } : {}),
+						...(breaker !== undefined ? { breaker } : {}),
+					};
+				});
+			if (routes.length === 0) return;
+			try {
+				recordTelemetry(
+					"system_one.decision",
+					{
+						site: site.id,
+						...(site.moment !== undefined ? { moment: site.moment } : {}),
+						outcome,
+						latencyMs,
+						deadlineMs,
+						...(fitted !== undefined ? { fitted } : {}),
+						routes,
+						callIds: [...callIds],
+					},
+					{ sessionId: session, label: "system-one" },
+				);
+			} catch {
+				// The decision's record never changes the decision (#434).
+			}
 		};
 
 		let questions: Readonly<Record<string, Question>>;
@@ -506,6 +559,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 			// timed out three times in a row.
 			if (breaker !== undefined && breaker.failures >= BREAKER_THRESHOLD) {
 				breaker.openUntil = performance.now() + deadlineMs;
+				breakerMoves.set(plan, "probe");
 			}
 			plan.outcome = "answered";
 		}
@@ -543,39 +597,42 @@ export function createRunner(deps: RunnerDeps): Runner {
 		});
 
 		try {
-			await Promise.all(
-				sending.map(async (plan) => {
-					const key = breakerKey(plan.route, site);
-					try {
-						plan.reply = await Promise.race([
-							plan.route.engine.decide({
-								state: state as Readonly<Record<string, unknown>>,
-								questions: plan.questions,
-								tasks: plan.taskOf,
-								...(Object.keys(plan.compact).length > 0 ? { compact: plan.compact } : {}),
-								signal: controller.signal,
-							}),
-							aborted,
-						]);
-						breakers.delete(key);
-					} catch (error) {
-						plan.error = errorText(error);
-						if (timedOut) {
-							const failures = (breakers.get(key)?.failures ?? 0) + 1;
-							breakers.set(key, {
-								failures,
-								openUntil: failures >= BREAKER_THRESHOLD ? performance.now() + BREAKER_COOLDOWN_MS : 0,
-							});
-							plan.outcome = "timeout";
-						} else if (upstream?.aborted === true) {
-							plan.outcome = "canceled";
-						} else {
-							// An answer or a refusal both prove the engine responds.
-							breakers.delete(key);
-							plan.outcome = "failed";
+			await decisionCalls.run(callIds, () =>
+				Promise.all(
+					sending.map(async (plan) => {
+						const key = breakerKey(plan.route, site);
+						try {
+							plan.reply = await Promise.race([
+								plan.route.engine.decide({
+									state: state as Readonly<Record<string, unknown>>,
+									questions: plan.questions,
+									tasks: plan.taskOf,
+									...(Object.keys(plan.compact).length > 0 ? { compact: plan.compact } : {}),
+									signal: controller.signal,
+								}),
+								aborted,
+							]);
+							if (breakers.delete(key)) breakerMoves.set(plan, "closed");
+						} catch (error) {
+							plan.error = errorText(error);
+							if (timedOut) {
+								const failures = (breakers.get(key)?.failures ?? 0) + 1;
+								breakers.set(key, {
+									failures,
+									openUntil: failures >= BREAKER_THRESHOLD ? performance.now() + BREAKER_COOLDOWN_MS : 0,
+								});
+								if (failures >= BREAKER_THRESHOLD) breakerMoves.set(plan, "opened");
+								plan.outcome = "timeout";
+							} else if (upstream?.aborted === true) {
+								plan.outcome = "canceled";
+							} else {
+								// An answer or a refusal both prove the engine responds.
+								if (breakers.delete(key)) breakerMoves.set(plan, "closed");
+								plan.outcome = "failed";
+							}
 						}
-					}
-				}),
+					}),
+				),
 			);
 		} finally {
 			clearTimeout(timer);
