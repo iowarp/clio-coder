@@ -91,6 +91,37 @@ function buildTurn(turnId: string, items: readonly TimelineItem[], status: Turn[
 	};
 }
 
+/** Streaming normally changes only the final exchange. Check the retained prefix without
+ * allocating a bucket and map entry for every settled exchange on each display frame. */
+function updateLastTurn(
+	timeline: readonly TimelineItem[],
+	statuses: TurnStatuses,
+	previous: readonly ChatTurn[],
+): readonly ChatTurn[] | null {
+	const last = previous.at(-1);
+	if (!last) return null;
+	let offset = 0;
+	for (let index = 0; index < previous.length - 1; index++) {
+		const turn = previous[index];
+		if (!turn || turn.settled !== isSettled(turn.items, statuses.get(turn.turnId))) return null;
+		for (const item of turn.items) {
+			if (timeline[offset] !== item) return null;
+			offset++;
+		}
+	}
+	if (offset === timeline.length) return null;
+	let unchanged = timeline.length - offset === last.items.length;
+	for (let index = offset; index < timeline.length; index++) {
+		const item = timeline[index];
+		// Interleaved turns, new exchanges and retention changes use the general grouping below.
+		if (item?.turnId !== last.turnId) return null;
+		if (last.items[index - offset] !== item) unchanged = false;
+	}
+	const status = statuses.get(last.turnId);
+	if (unchanged && last.settled === isSettled(last.items, status)) return previous;
+	return [...previous.slice(0, -1), buildTurn(last.turnId, timeline.slice(offset), status)];
+}
+
 /**
  * Groups timeline items into turns, in first-appearance order. A turn whose items are all identical
  * to the previous grouping keeps its object identity, and the returned array is the previous array
@@ -101,6 +132,8 @@ export function groupTurns(
 	statuses: TurnStatuses,
 	previous: readonly ChatTurn[] = [],
 ): readonly ChatTurn[] {
+	const updated = updateLastTurn(timeline, statuses, previous);
+	if (updated) return updated;
 	const order: string[] = [];
 	const byTurn = new Map<string, TimelineItem[]>();
 	for (const item of timeline) {

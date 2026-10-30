@@ -1,6 +1,6 @@
 // Pushed context and totals share the session snapshot; settled accounting still supplies model and quota details.
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ContextLedger } from "../../contracts/context-ledger.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
@@ -50,7 +50,12 @@ export function useContextLedger(client: Client, sessionId: string, settled: num
 	const queries = useQueryClient();
 	const live = useSessionTelemetry(client, sessionId)?.usage?.context;
 	const operation = useContextWork(client, sessionId)?.latest;
-	const pushedRevision = useQuery<number>({ queryKey: ["session-context-push", sessionId], enabled: false }).data ?? 0;
+	const pushedRevision =
+		useQuery<number>({
+			queryKey: ["session-context-push", sessionId],
+			queryFn: skipToken,
+			enabled: false,
+		}).data ?? 0;
 	const scope = sessionReadScope(sessionId);
 	const query = useQuery({
 		queryKey: ["session-context", sessionId, settled, operation?.id ?? null, scope],

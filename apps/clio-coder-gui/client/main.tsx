@@ -7,6 +7,7 @@ import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
 import { Home } from "./pages/home.js";
+import { ClioPulse, PULSE_SIZE } from "./shell/ClioMark.js";
 import "./styles.css";
 import "./design/tokens.css";
 import "./render/markdown.css";
@@ -61,6 +62,12 @@ const router = createBrowserRouter([
 	{
 		element: <App client={client} />,
 		errorElement: <RouteError />,
+		hydrateFallbackElement: (
+			<main className="app-opening" role="status">
+				<ClioPulse size={PULSE_SIZE.stage} />
+				<p>Opening Clio Coder…</p>
+			</main>
+		),
 		children: [
 			{
 				path: "/evidence",

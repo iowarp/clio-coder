@@ -68,6 +68,14 @@ body {
 	margin: min(12dvh, 8rem) auto;
 	max-width: 42rem;
 }
+.app-opening {
+	display: grid;
+	place-content: center;
+	justify-items: center;
+	gap: var(--space-3);
+	min-height: 100dvh;
+	color: var(--ink-muted);
+}
 .route-error p:not(.eyebrow) {
 	color: var(--ink-muted);
 	line-height: var(--leading-reading);
