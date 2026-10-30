@@ -329,6 +329,8 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 	} finally {
 		await run.close();
 		await parent.release();
+		// The idle hold keeps the session owner registered after release; later tests open "parent" themselves (#434).
+		await journals.closeAll();
 		await rm(scratch, { recursive: true, force: true });
 	}
 });

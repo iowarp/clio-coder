@@ -1243,7 +1243,7 @@ describe("production compaction controls", () => {
 		strictEqual(summary.erroredCalls, 1);
 		strictEqual(summary.knownUsage.totalTokens, 15);
 		strictEqual(summary.erroredKnownUsage.totalTokens, null);
-		strictEqual(summary.unobservedUsageCalls.totalTokens, 2, "even the completed call omitted its cache counts");
+		strictEqual(summary.unobservedUsageCalls.totalTokens, 1, "only the unsettled stream lacks its token counts");
 		strictEqual(summary.unobservedUsageCalls.costUsd, 2);
 		strictEqual(f.liveUsage.length, 2);
 		strictEqual(
