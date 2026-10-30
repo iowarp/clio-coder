@@ -67,7 +67,9 @@ const SHIPPED_SCRIPTS = new Set(manifest.requiredFiles.filter((file) => file.sta
 // Grammars stay local for offline use, and src/** supports Clio reading its own
 // code (#66). The total unpacked ceiling is derived from the class ceilings.
 // At release, re-pin each class ceiling to its last qualified release size rounded
-// up to the next 0.5 MB plus that class's cycle allowance.
+// up to the next 0.5 MB plus that class's cycle allowance. A re-pin needs the
+// maintainer's explicit approval in the release session; a gate the release
+// session raises on its own gates nothing (#442).
 const SIZE_BUDGETS = [
 	{
 		class: "grammars",
@@ -96,8 +98,9 @@ const SIZE_BUDGETS = [
 	{
 		class: "src",
 		match: (path) => path.startsWith("src/"),
-		// 0.6.4 shipped 18,567,179 bytes: 19.0 MB rounded up plus a 0.5 MB cycle allowance.
-		maxBytes: 19_500_000,
+		// 0.6.5 shipped 19,059,405 bytes: 19.5 MB rounded up plus a 0.5 MB cycle allowance,
+		// confirmed by the maintainer for the 0.6.6 cycle (#442).
+		maxBytes: 20_000_000,
 	},
 	{
 		class: "docs",
