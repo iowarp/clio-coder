@@ -53,6 +53,7 @@ export const RunTerminalReason = vocabulary([
 	"completed",
 	"cancelled_by_parent",
 	"cancelled_by_operator",
+	"cancelled_by_peer",
 	"preempted",
 	"bound_reached",
 	"final_output_missing_no_repair",

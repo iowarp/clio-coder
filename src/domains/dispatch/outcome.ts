@@ -139,8 +139,10 @@ export function resolveRunTerminalReason(
 ): ResolvedTerminalReason {
 	if (evidence.policyDenied !== null) return { terminalReason: "denied_by_policy" };
 	if (evidence.stallKilled) return { terminalReason: "stalled" };
-	if (evidence.abortedByOperator || evidence.stopReason === "cancelled") {
-		switch (evidence.abortedByOperator ? evidence.abortCause : "operator") {
+	// A peer that reports cancellation with no abort from this side canceled on its own (#434).
+	if (!evidence.abortedByOperator && evidence.stopReason === "cancelled") return { terminalReason: "cancelled_by_peer" };
+	if (evidence.abortedByOperator) {
+		switch (evidence.abortCause) {
 			case "timeout":
 				return { terminalReason: "bound_reached", boundKind: "time" };
 			case "budget":

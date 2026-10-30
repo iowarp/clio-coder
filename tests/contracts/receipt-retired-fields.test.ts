@@ -230,6 +230,9 @@ describe("receipt v21 seal (#434)", () => {
 			boundKind: "time",
 		});
 		deepStrictEqual(resolveRunTerminalReason(aborted, null), { terminalReason: "cancelled_by_operator" });
+		deepStrictEqual(resolveRunTerminalReason({ ...evidence, stopReason: "cancelled" }, null), {
+			terminalReason: "cancelled_by_peer",
+		});
 		deepStrictEqual(resolveRunTerminalReason({ ...evidence, exitCode: 1, channelFailure: "steer" }, null), {
 			terminalReason: "channel_failure",
 		});
