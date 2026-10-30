@@ -2,6 +2,7 @@ import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import {
+	observedToolCallOrigin,
 	TelemetryContextSchema,
 	telemetryContext,
 	withTelemetryContext,
@@ -54,11 +55,21 @@ test("telemetry keeps existing ids, mints namespaced UUIDv7 ids, and isolates co
 
 test("tool contexts retain provider attribution only within the same owner and turn", () => {
 	const call = { ...context, turnId: "turn", callId: newCallId(), attemptId: newAttemptId() };
+	const message = { ...call, role: "assistant", content: [{ type: "toolCall", id: "tool" }] };
+	deepStrictEqual(observedToolCallOrigin([message], "tool"), { callId: call.callId, attemptId: call.attemptId });
+	strictEqual(observedToolCallOrigin([message], "different-tool"), undefined);
+	strictEqual(observedToolCallOrigin([message, { ...message, callId: "peer-id" }], "tool"), undefined);
 	withTelemetryContext(call, () => {
 		withToolTelemetryContext({ sessionId: context.sessionId, turnId: "turn", toolCallId: "tool" }, () => {
 			strictEqual(telemetryContext()?.callId, call.callId);
 			strictEqual(telemetryContext()?.toolCallId, "tool");
 		});
+		const next = { callId: newCallId(), attemptId: newAttemptId() };
+		withToolTelemetryContext({ sessionId: "next-session", ...next }, () => {
+			strictEqual(telemetryContext()?.callId, next.callId);
+			strictEqual(telemetryContext()?.attemptId, next.attemptId);
+		});
+		withToolTelemetryContext({ callId: next.callId }, () => strictEqual(telemetryContext()?.attemptId, undefined));
 		for (const identity of [{ sessionId: "other" }, { turnId: "next" }, { runId: "standalone" }]) {
 			withToolTelemetryContext(identity, () => {
 				strictEqual(telemetryContext()?.callId, undefined);

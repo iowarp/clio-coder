@@ -55,7 +55,14 @@ export function withTelemetryContext<T>(context: TelemetryContext, fn: () => T):
 
 /** Tool admission uses host identities, never ids supplied in model arguments (#434). */
 export function withToolTelemetryContext<T>(
-	identity: { sessionId?: string; runId?: string; turnId?: string; toolCallId?: string },
+	identity: {
+		sessionId?: string;
+		runId?: string;
+		turnId?: string;
+		toolCallId?: string;
+		callId?: string;
+		attemptId?: string;
+	},
 	work: () => T,
 ): T {
 	const parent = telemetryContext();
@@ -76,16 +83,44 @@ export function withToolTelemetryContext<T>(
 				: undefined);
 	if (!owner) return work();
 	// A new turn cannot inherit the preceding request's provider attribution (#434).
-	const { callId, attemptId, ...base } = owner;
+	const { callId: parentCallId, attemptId: parentAttemptId, ...base } = owner;
 	const sameTurn = identity.turnId === undefined || identity.turnId === owner.turnId;
+	const explicitCall = Value.Check(CallIdSchema, identity.callId) && Value.Check(AttemptIdSchema, identity.attemptId);
+	const inheritCall = sameTurn && identity.callId === undefined && identity.attemptId === undefined;
+	const callId = explicitCall ? identity.callId : inheritCall ? parentCallId : undefined;
+	const attemptId = explicitCall ? identity.attemptId : inheritCall ? parentAttemptId : undefined;
 	return withTelemetryContext(
 		{
 			...base,
-			...(sameTurn && callId !== undefined ? { callId } : {}),
-			...(sameTurn && attemptId !== undefined ? { attemptId } : {}),
+			...(callId !== undefined ? { callId } : {}),
+			...(attemptId !== undefined ? { attemptId } : {}),
 			...(identity.turnId === undefined ? {} : { turnId: identity.turnId }),
 			...(identity.toolCallId === undefined ? {} : { toolCallId: identity.toolCallId }),
 		},
 		work,
 	);
+}
+
+/** Match the actual tool block to ids Clio attached at settlement; provider ids are never inferred (#434). */
+export function observedToolCallOrigin(
+	messages: readonly unknown[],
+	toolCallId: string | undefined,
+): { callId: string; attemptId: string } | undefined {
+	if (!toolCallId) return undefined;
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (!message || typeof message !== "object") continue;
+		const row = message as Record<string, unknown>;
+		if (row.role !== "assistant" || !Array.isArray(row.content)) continue;
+		if (
+			!row.content.some(
+				(block) => block && typeof block === "object" && block.type === "toolCall" && block.id === toolCallId,
+			)
+		)
+			continue;
+		return Value.Check(CallIdSchema, row.callId) && Value.Check(AttemptIdSchema, row.attemptId)
+			? { callId: row.callId, attemptId: row.attemptId }
+			: undefined;
+	}
+	return undefined;
 }

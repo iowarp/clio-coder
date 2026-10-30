@@ -3,6 +3,7 @@ import type { CallObservation } from "../core/call-failure.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
+import { observedToolCallOrigin } from "../core/telemetry/context.js";
 import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
@@ -1390,9 +1391,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().chat.retry);
 
 	const hostRunContext = new AsyncLocalStorage<ToolInvokeOptions["hostRun"]>();
-	const currentToolInvokeOptions = (): Partial<ToolInvokeOptions> => {
+	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
+			...observedToolCallOrigin(state.runtime?.agent.state.messages ?? [], toolCallId),
 		};
 		const hostRun = hostRunContext.getStore();
 		if (hostRun !== undefined) options.hostRun = hostRun;

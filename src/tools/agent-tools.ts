@@ -195,7 +195,7 @@ export interface ResolveAgentToolsInput {
 	agentId?: string;
 	task?: string;
 	telemetry?: ToolTelemetry;
-	invokeOptions?: () => Partial<ToolInvokeOptions>;
+	invokeOptions?: (toolCallId?: string) => Partial<ToolInvokeOptions>;
 	includeInteractiveTools?: boolean;
 }
 
@@ -453,7 +453,7 @@ function toAgentTool(
 	spec: ToolSpec,
 	registry: ToolRegistry,
 	telemetry: ToolTelemetry | undefined,
-	invokeOptions: (() => Partial<ToolInvokeOptions>) | undefined,
+	invokeOptions: ((toolCallId?: string) => Partial<ToolInvokeOptions>) | undefined,
 ): AgentTool<TSchema> {
 	const tool: AgentTool<TSchema> = {
 		name: spec.name,
@@ -466,7 +466,7 @@ function toAgentTool(
 			signal?: AbortSignal,
 			onUpdate?: AgentToolUpdateCallback,
 		): Promise<WorkerAgentToolResult> {
-			const options = invokeOptions?.() ?? {};
+			const options = invokeOptions?.(toolCallId) ?? {};
 			if (toolCallId.length > 0) options.toolCallId = toolCallId;
 			if (onUpdate !== undefined) {
 				options.onUpdate = (partialResult) => onUpdate(projectToolResult(partialResult));
@@ -529,8 +529,8 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	specs.sort((a, b) => a.name.localeCompare(b.name));
 	// Bind the same immutable ceiling to execution as to schema selection.
 	// Hiding a schema alone does not protect a retained tool handle or nested call.
-	const invokeOptions = () => ({
-		...input.invokeOptions?.(),
+	const invokeOptions = (toolCallId?: string) => ({
+		...input.invokeOptions?.(toolCallId),
 		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 		...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
 	});
@@ -622,17 +622,17 @@ export async function invokeRegisteredTool(
 export function resolveSessionTools(
 	runtime: { runtimeResolution: ResolvedRuntimeTarget },
 	toolRegistry: ToolRegistry | undefined,
-	invokeOptions?: () => Partial<ToolInvokeOptions>,
+	invokeOptions?: (toolCallId?: string) => Partial<ToolInvokeOptions>,
 	telemetry?: ToolTelemetry,
 	schemaCeiling?: TurnConstraints,
 ): AgentTool[] {
 	if (!toolRegistry || runtime.runtimeResolution.capabilityDecisions.tools !== true) return [];
 	const input: ResolveAgentToolsInput = { registry: toolRegistry };
 	if (schemaCeiling) input.schemaCeiling = schemaCeiling;
-	input.invokeOptions = () => {
+	input.invokeOptions = (toolCallId?: string) => {
 		const contextWindow = runtime.runtimeResolution.contextWindowDetails?.effectiveContextWindow;
 		return {
-			...invokeOptions?.(),
+			...invokeOptions?.(toolCallId),
 			supportsImages: acceptsImageInput({
 				runtimeId: runtime.runtimeResolution.runtime.id,
 				vision: runtime.runtimeResolution.capabilityDecisions.vision,

@@ -561,6 +561,9 @@ export interface ToolInvokeOptions {
 	sessionId?: string;
 	turnId?: string;
 	toolCallId?: string;
+	/** Provider request identity observed on the assistant message that supplied this tool block (#434). */
+	callId?: string;
+	attemptId?: string;
 	correlationId?: string;
 	/** Session-effective ceiling for one tool result, read again before every invocation. */
 	toolResultMaxBytes?: number;

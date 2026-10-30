@@ -12,6 +12,7 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
+import { observedToolCallOrigin } from "../core/telemetry/context.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
@@ -1054,7 +1055,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		agentId: input.agentId,
 		task: input.task,
 		includeInteractiveTools: false,
-		invokeOptions: () => ({
+		invokeOptions: (toolCallId) => ({
+			...observedToolCallOrigin(agent.state.messages, toolCallId),
 			...(input.telemetryContext === undefined
 				? {}
 				: {

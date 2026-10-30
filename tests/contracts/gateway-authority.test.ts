@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { telemetryContext, withToolTelemetryContext } from "../../src/core/telemetry/context.js";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { ToolCallAuditInput, ToolCallAuditRecord } from "../../src/domains/safety/audit.js";
 import { buildAuditRecord } from "../../src/domains/safety/audit.js";
@@ -152,6 +153,7 @@ describe("direct and gateway invocation preserve the same authority", () => {
 
 	it("keeps concurrent host identities on gateway and capability audits without trusting model arguments", async () => {
 		const gateway = harness(scratch(), "yolo", "gateway", "approve");
+		const origin = { callId: newCallId(), attemptId: newAttemptId() };
 		await Promise.all(
 			["first", "second"].map(async (id) => {
 				const verdict = await gateway.registry.invoke(
@@ -168,7 +170,7 @@ describe("direct and gateway invocation preserve the same authority", () => {
 							},
 						},
 					},
-					{ runId: id, turnId: `turn-${id}`, toolCallId: `tool-${id}` },
+					{ runId: id, turnId: `turn-${id}`, toolCallId: `tool-${id}`, ...(id === "first" ? origin : {}) },
 				);
 				okResult(verdict);
 			}),
@@ -183,8 +185,8 @@ describe("direct and gateway invocation preserve the same authority", () => {
 				strictEqual(row.sessionId, null);
 				strictEqual(row.turnId, `turn-${id}`);
 				strictEqual(row.toolCallId, `tool-${id}`);
-				strictEqual(row.callId, undefined);
-				strictEqual(row.attemptId, undefined);
+				strictEqual(row.callId, id === "first" ? origin.callId : undefined);
+				strictEqual(row.attemptId, id === "first" ? origin.attemptId : undefined);
 			}
 		}
 		strictEqual(telemetryContext(), undefined);
