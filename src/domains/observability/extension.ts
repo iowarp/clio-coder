@@ -31,7 +31,7 @@ import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
-import type { SessionCapture } from "./session-journals.js";
+import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
 import { createLiveTelemetryModel } from "./telemetry-live.js";
 import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
@@ -206,6 +206,12 @@ export function createObservabilityBundle(
 		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");
 	// Writes of config.changed still storing their documents; shutdown waits for them before closing writers (#434).
 	const pendingSettingsRecords = new Set<Promise<void>>();
+	// Writers still storing the settings they opened under. A change arriving meanwhile is journaled after that
+	// snapshot, so the session neither loses the change nor reads it before the settings it changed (#434).
+	const openingSnapshots = new Map<
+		string,
+		{ origin: TelemetrySessionOrigin; sessionDirectory: string; stored: Promise<void> }
+	>();
 	const healthWindows = createHealthWindows({
 		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
 		record: (sessionId, data) => recordTelemetry("health.window", data, sessionContext(sessionId)),
@@ -224,12 +230,19 @@ export function createObservabilityBundle(
 				// A writer that opens before the config domain starts has no settings to record yet.
 			}
 			if (!settings) return;
-			const ref = await storeTelemetryObject(sessionDirectory, "config", settings);
-			recordTelemetry(
-				"config.snapshot",
-				{ settings: ref, settingsFingerprint: computeSettingsFingerprint(settings) },
-				sessionContext(origin.id),
-			);
+			const stored = storeTelemetryObject(sessionDirectory, "config", settings).then((ref) => {
+				recordTelemetry(
+					"config.snapshot",
+					{ settings: ref, settingsFingerprint: computeSettingsFingerprint(settings) },
+					sessionContext(origin.id),
+				);
+			});
+			openingSnapshots.set(origin.id, { origin, sessionDirectory, stored });
+			try {
+				await stored;
+			} finally {
+				openingSnapshots.delete(origin.id);
+			}
 		},
 	);
 	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir });
@@ -248,11 +261,18 @@ export function createObservabilityBundle(
 			},
 			settingsFingerprint: computeSettingsFingerprint(payload.settings),
 		};
-		for (const { origin, sessionDirectory } of journals.openSessions()) {
-			const write: Promise<void> = Promise.all([
-				storeTelemetryObject(sessionDirectory, "config", previous),
-				storeTelemetryObject(sessionDirectory, "config", payload.settings),
-			])
+		const targets: Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string; stored?: Promise<void> }> = [
+			...journals.openSessions(),
+			...openingSnapshots.values(),
+		];
+		for (const { origin, sessionDirectory, stored } of targets) {
+			const store = () =>
+				Promise.all([
+					storeTelemetryObject(sessionDirectory, "config", previous),
+					storeTelemetryObject(sessionDirectory, "config", payload.settings),
+				]);
+			// A snapshot that failed to store still leaves the change worth recording; its own failure was reported.
+			const write: Promise<void> = (stored ? stored.then(store, store) : store())
 				.then(([before, after]) => {
 					recordTelemetry("config.changed", { ...data, before, after }, sessionContext(origin.id));
 				})
