@@ -533,15 +533,21 @@ waves. A two-slot endpoint with one foreground request can admit memory; a full
 one-slot endpoint skips it. Known dedicated saturation does not itself initiate
 chat fallback. Larger declared capacities work without a new constant.
 
-LiteLLM is a gateway protocol, so Clio does not invent a local one-slot limit for
-its URL. Distinct model routes can share that gateway URL (for example, separate
-chat and memory target profiles pointing to the same LiteLLM proxy); the gateway
-owns their physical routing and backend residency. An explicit or observed
-endpoint-wide bound still applies when present. When the gateway has no
-declared or discovered capacity, a `litellm` or `openrouter` memory step counts
-only streams on its own model, plus gateway streams attributed to no model, so a
-turn on another model through the same gateway no longer skips it
-(`src/domains/providers/endpoint-capacity.ts`). Clio Coder's process-local foreground
+LiteLLM and OpenRouter are model-routed gateways, so Clio does not invent a local
+one-slot limit for their URL. Distinct model routes can share that gateway URL (for
+example, separate chat and memory target profiles pointing to the same LiteLLM
+proxy); the gateway owns their physical routing and backend residency. Behind a
+`litellm` or `openrouter` target, `modelEndpointKey` keys each stream as
+`<url>#model=<id>` and also counts it under the plain gateway URL, so dispatch
+admission and the settings endpoint rows, which read the gateway key, see the same
+totals as before (`src/domains/providers/endpoint-capacity.ts`). Every other
+runtime keeps the plain URL as its key. An explicit or discovered endpoint-wide
+bound on the gateway still applies when present: the memory step then admits
+against the gateway total. When the gateway has no declared or discovered
+capacity, the memory step admits against its own model's key, counting only
+streams on its own model plus gateway streams attributed to no model, so a turn on
+another model through the same gateway no longer skips it
+(`backgroundMemoryEndpointKey` in `src/entry/orchestrator.ts`). Clio Coder's process-local foreground
 holds and observed dispatch state are not a global scheduler for every client
 using the gateway. Slot holds are released on success, failure and abort.
 
