@@ -250,6 +250,9 @@ export function subscribe(
 		for (const id of gaps) void queries.invalidateQueries({ queryKey: ["session", id] });
 		for (const id of new Set([...resumed, ...reset]))
 			for (const key of SESSION_CACHES) {
+				// A branch switch runs inside the same agent process, so what that process announced still holds. Dropping it
+				// unmounted every surface it gates until the re-read landed, the branch panel and its focused heading too.
+				if (key === "session-capabilities" && !resumed.has(id)) continue;
 				void queries.cancelQueries({ queryKey: [key, id] });
 				// A replacement runtime or branch cannot inherit the previous read's successful data.
 				void queries.resetQueries({ queryKey: [key, id] });
