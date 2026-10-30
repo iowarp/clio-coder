@@ -1,6 +1,5 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
-import { AttemptIdSchema, CallIdSchema, ExistingId } from "./context.js";
 import {
 	CallLabel,
 	Disposition,
@@ -13,6 +12,7 @@ import {
 	vocabulary,
 } from "./enums.js";
 import { factSchema } from "./fact.js";
+import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
 import { CallSettledSchema, PricingSchema, UtcSchema } from "./schemas.js";
 
 /**

@@ -23,6 +23,7 @@ import {
 	loadEvidenceTrustStatus,
 	type TrustVerdict,
 	trustVerdict,
+	worstTrustVerdict,
 } from "./index.js";
 import { compareCodepoints } from "./ordering.js";
 
@@ -30,16 +31,6 @@ export const EVIDENCE_INVENTORY_MAX_ARTIFACTS = 12;
 export const EVIDENCE_INVENTORY_MAX_IDS = 8;
 
 const IDENTITY_WIDTH = 128;
-
-/**
- * Worst verdict first.
- *
- * An artifact covering several runs is only as trustworthy as its weakest run,
- * so the fold takes the worst rather than the newest or the most common. A
- * `compromised` run inside an otherwise clean bundle is the fact the operator
- * needs, and averaging it away would be the one summary worth not printing.
- */
-const VERDICT_SEVERITY: ReadonlyArray<TrustVerdict> = ["compromised", "unverified", "unknown", "grounded", "reviewed"];
 
 export interface EvidenceInventoryArtifact {
 	readonly evidenceId: string;
@@ -150,7 +141,7 @@ export async function evidenceInventorySnapshot(
 			historical = status.projection !== "canonical";
 			runsCovered = status.runs.length;
 			const verdicts = status.runs.map((run) => trustVerdict(run.status));
-			verdict = VERDICT_SEVERITY.find((candidate) => verdicts.includes(candidate)) ?? "unknown";
+			verdict = worstTrustVerdict(verdicts);
 		} catch {
 			verdict = "unknown";
 		}

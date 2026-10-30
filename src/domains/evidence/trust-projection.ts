@@ -222,6 +222,24 @@ export function trustVerdict(status: CanonicalTrustStatus): TrustVerdict {
 	return "unverified";
 }
 
+/**
+ * Worst verdict first. An artifact covering several runs is only as trustworthy as its weakest run, so a bundle takes
+ * the worst rather than the newest or the most common: a `compromised` run inside an otherwise clean bundle is the
+ * fact the operator needs, and averaging it away would be the one summary worth not printing.
+ */
+export const TRUST_VERDICT_SEVERITY: ReadonlyArray<TrustVerdict> = [
+	"compromised",
+	"unverified",
+	"unknown",
+	"grounded",
+	"reviewed",
+];
+
+/** The verdict of a bundle of runs, as the CLI inventory and the GUI both show it; no runs is unknown. */
+export function worstTrustVerdict(verdicts: readonly TrustVerdict[]): TrustVerdict {
+	return TRUST_VERDICT_SEVERITY.find((candidate) => verdicts.includes(candidate)) ?? "unknown";
+}
+
 function claimantOf(status: CanonicalTrustStatus): string {
 	const state = status.validationGrounding.state;
 	if (state === "absent" || state === "ungrounded") return "worker";

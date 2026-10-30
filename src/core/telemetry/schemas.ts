@@ -2,7 +2,6 @@ import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { CaptureFlag } from "./capture.js";
-import { AttemptIdSchema, CallIdSchema, ExistingId } from "./context.js";
 import type { ContentClass, Tier } from "./enums.js";
 import {
 	CallLabel,
@@ -16,6 +15,7 @@ import {
 	vocabulary,
 } from "./enums.js";
 import { factSchema } from "./fact.js";
+import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
 
 const closed = { additionalProperties: false };
 const count = Type.Integer({ minimum: 0 });

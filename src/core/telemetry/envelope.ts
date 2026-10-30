@@ -4,7 +4,8 @@ import { Value } from "typebox/value";
 import type { TelemetryContext } from "./context.js";
 import { TelemetryContextSchema } from "./context.js";
 import { ContentClass, Tier, vocabulary } from "./enums.js";
-import { newRecordId, UUID_V7_PATTERN } from "./ids.js";
+import { UUID_V7_PATTERN } from "./id-schemas.js";
+import { newRecordId } from "./ids.js";
 import type { Kind, Payload } from "./schemas.js";
 import { isKind, KIND_REGISTRY, UtcSchema, upcastPayload, validPayload } from "./schemas.js";
 

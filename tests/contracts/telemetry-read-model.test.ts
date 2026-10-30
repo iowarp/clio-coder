@@ -2,19 +2,18 @@
  * P3 lie detectors over the read model (#434 §13.1): the golden P0 ledger, imported with stable ids, builds every
  * session DTO, and every quantity in them must hold L1 (unknown never zero), L2 (never-sent carries nothing), L3 (a
  * partial sum is never a total), L5 (every number resolves through explain to the same fact) and L9 (absent is
- * neither unknown nor zero).
+ * neither unknown nor zero). The detectors live in tests/harness/telemetry-lies.ts so the GUI route tests run the
+ * same ones over the DTOs they serve.
  */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
-import type { Quantity } from "../../src/core/telemetry/dto.js";
 import {
 	CacheReportSchema,
 	CallsReportSchema,
 	CostReportSchema,
-	parseFactRef,
 	SessionTelemetrySchema,
 	TimelineSchema,
 	WhyStoppedSchema,
@@ -31,6 +30,13 @@ import {
 } from "../../src/domains/observability/read-model.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
+import {
+	absentRenderedOtherwise,
+	quantitiesOf,
+	unknownRenderedAsTotal,
+	unmarkedEstimates,
+	unparsableRefs,
+} from "../harness/telemetry-lies.js";
 
 const ledger = readFileSync(new URL("../fixtures/telemetry/golden/p0/current.jsonl", import.meta.url), "utf8")
 	.trim()
@@ -57,16 +63,7 @@ const dtos: Array<[string, TSchema, unknown]> = [
 	["why-stopped", WhyStoppedSchema, whyStopped(source, now)],
 ];
 
-function quantities(value: unknown, out: Quantity[] = []): Quantity[] {
-	if (Array.isArray(value)) for (const item of value) quantities(item, out);
-	else if (value && typeof value === "object") {
-		if ("fact" in value && "display" in value && "ref" in value) out.push(value as Quantity);
-		else for (const item of Object.values(value)) quantities(item, out);
-	}
-	return out;
-}
-const all = dtos.flatMap(([, , dto]) => quantities(dto));
-const zero = /^(?:~?\$?0(?:\.0+)?|\$0\.00 local)$/;
+const all = dtos.flatMap(([, , dto]) => quantitiesOf(dto));
 
 test("every DTO matches its published schema", () => {
 	for (const [name, schema, dto] of dtos)
@@ -82,25 +79,14 @@ test("legacy ids are derived from ledger entries, so references survive a re-rea
 });
 
 test("L5: every quantity names a reference that explains to the same fact and wording", () => {
-	for (const quantity of all) {
-		ok(parseFactRef(quantity.ref), quantity.ref);
+	deepStrictEqual(unparsableRefs(all), []);
+	deepStrictEqual(unmarkedEstimates(all), []);
+	for (const quantity of all)
 		deepStrictEqual(explain(quantity.ref, { session: source }, now)?.value, quantity, quantity.ref);
-		if (!("kind" in quantity.fact) && quantity.fact.coverage.estimated > 0) ok(quantity.display.includes("~"));
-		if ("kind" in quantity.fact && quantity.fact.kind === "estimated") ok(quantity.display.includes("~"));
-	}
 });
 
 test("L1 and L3: unknown is never zero, and a partial sum is never shown as a total", () => {
-	for (const { fact, display, ref } of all) {
-		if ("kind" in fact) {
-			if (fact.kind === "unknown") ok(!zero.test(display) && /unknown|not measured/.test(display), `${ref}: ${display}`);
-			continue;
-		}
-		if (fact.unknownCount === 0) continue;
-		ok(!zero.test(display), `${ref}: ${display}`);
-		const known = fact.coverage.measured + fact.coverage.estimated > 0;
-		ok(known ? /≥|\+\?/.test(display) : /unknown|not measured/.test(display), `${ref}: ${display}`);
-	}
+	deepStrictEqual(unknownRenderedAsTotal(all), []);
 });
 
 test("L2 and L9: a never-sent call carries no usage, and absent renders as not applicable", () => {
@@ -108,11 +94,5 @@ test("L2 and L9: a never-sent call carries no usage, and absent renders as not a
 	strictEqual(calls.length, 1);
 	strictEqual(calls[0]?.usage, null);
 	strictEqual("kind" in (calls[0]?.usd.fact ?? {}) ? (calls[0]?.usd.fact as { kind: string }).kind : null, "absent");
-	for (const { fact, display, ref } of all) {
-		const absent =
-			"kind" in fact
-				? fact.kind === "absent"
-				: fact.absentCount > 0 && fact.coverage.measured + fact.coverage.estimated + fact.unknownCount === 0;
-		if (absent) ok(display === "n/a" || display === "not captured (standard mode)", `${ref}: ${display}`);
-	}
+	deepStrictEqual(absentRenderedOtherwise(all), []);
 });

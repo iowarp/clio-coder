@@ -3,11 +3,10 @@ import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { CallLabel } from "./enums.js";
-import { UUID_V7_PATTERN } from "./ids.js";
+import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
 
-export const CallIdSchema = Type.String({ pattern: `^cal_${UUID_V7_PATTERN}$` });
-export const AttemptIdSchema = Type.String({ pattern: `^att_${UUID_V7_PATTERN}$` });
-export const ExistingId = Type.String({ minLength: 1, maxLength: 512 });
+export { AttemptIdSchema, CallIdSchema, ExistingId };
+
 const contextFields = {
 	toolCallId: Type.Optional(ExistingId),
 	turnId: Type.Optional(ExistingId),
