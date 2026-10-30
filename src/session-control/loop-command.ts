@@ -539,7 +539,8 @@ export function loopJobDetail(job: JobRecord, now: number): string[] {
 			`${job.delivery.kind === "main_turn" ? "follow-up turn" : "notice"} ${job.delivery.state}${job.delivery.reason ? `: ${preview(job.delivery.reason, SUMMARY_CHARS)}` : ""}`,
 		);
 	}
-	if (job.costUsd !== null) lines.push(`cost ${renderCostAmount(job.costUsd, undefined)}`);
+	// A job cost is null unless every component was priced; the components are rate or catalog estimates (#434).
+	if (job.costUsd !== null) lines.push(`cost ${renderCostAmount(job.costUsd, "estimated")}`);
 	for (const warning of jobWarnings(job, now)) lines.push(`warning: ${warning}`);
 	return lines;
 }

@@ -2143,7 +2143,8 @@ function jobEventPayload(job: JobRecord, complete: boolean, turn: boolean): AcpJ
 						truncated: last.truncated,
 					},
 		delivery: job.delivery === null ? null : { kind: job.delivery.kind, state: job.delivery.state },
-		costDisplay: renderCostAmount(job.costUsd ?? 0, undefined),
+		// Null means a component had unknown pricing; a priced job is a sum of rate or catalog estimates (#434).
+		costDisplay: job.costUsd === null ? renderCostAmount(0, "unknown") : renderCostAmount(job.costUsd, "estimated"),
 		costUsd: job.costUsd !== null && Number.isFinite(job.costUsd) && job.costUsd >= 0 ? job.costUsd : null,
 		saved: job.persistenceError === null,
 		complete,
