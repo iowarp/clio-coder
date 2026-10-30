@@ -102,18 +102,23 @@ Pricing is separate from token provenance: `pricing.usd` is a fact, and `pricing
 | `run.settled`, `run.usage`, `run.ref` | accountability | content-free (`run.usage` structural) | A run's settlement, its reported usage aggregate, and a session's pointer to it. |
 | `run.feed` | operational | structural | The bounded display history of a run. |
 | `process.started`, `process.exited` | accountability | content-free | A worker process's start and exit code, in its run journal. |
+| `quota.reading` | operational | content-free | A provider's quota windows, and whether it reported the account limited, at a turn's first reading and whenever the reading changes, from Codex rate-limit stream events or Anthropic rate-limit response headers. |
+| `budget.crossing`, `budget.wait` | accountability | content-free | The session's priced spend reaching a ceiling, once per ceiling, and each paid request held at one: how long it waited, how the hold ended, and the raise that released it. |
+| `config.snapshot`, `config.changed` | operational | structural | The effective settings when a session's writer opens, and each settings change with the paths it touched by effect kind. Both documents are `config` objects, beside the settings fingerprint a worker spec carries. |
 | `prompt.text` | research | content-bearing | Each distinct compiled system prompt, stored as a `prompt-text` object. Needs `telemetry.research.content` and consent. |
 | `memory.trace` | research | content-bearing | A task-memory step's decision, counts and sizes, with its prompt and reply in a `memory-trace` object. Needs `content` and consent. |
 | `memory.observation` | research | content-bearing | One memory or compaction observation event, with its facts in an `observation-trace` object. Needs `content` and consent. |
 
 The kind registry with schemas, tiers, content classes and capture flags is `KIND_REGISTRY` in [schemas.ts](../../src/core/telemetry/schemas.ts).
 
+There is no transport-state record. Each `call.settled` carries its own transport facts, and a session's transport state is that of its latest call.
+
 ## Capture modes
 
 `telemetry.mode` is `standard` (the default) or `research` ([settings inventory](../guide/configuration-and-targets.md#telemetry)). Accountability records are written in both modes; there is no off.
 
 - **Standard** admits accountability and operational records, all of them content-free or structural. It writes no content-bearing record.
-- **Research** also admits the research-tier kinds that the `telemetry.research` flags turn on. `content` additionally needs the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. `systemOneDataset` needs `content` and consent too, and `busTrace` writes `<stateDir>/telemetry/research/bus-trace.jsonl`.
+- **Research** also admits the research-tier kinds that the `telemetry.research` flags turn on. `content` additionally needs the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. `systemOneDataset` needs `content` and consent too, and `busTrace` writes `<stateDir>/telemetry/research/bus-trace.jsonl`. `deltas` and `providerHeaders` record nothing in this build.
 - A project or local settings layer can lower capture but never raise it.
 - Research capture is capped at 256 MiB per session, counting its research records and the preimages they store. A refusal is a `gap{research-cap}`, and accountability records continue.
 - The journal writer stores a research record's content in `objects/`, reserving it against the cap first, before writing the record that cites it. Content that could not be stored drops its record as a `gap{writer-drop}`.
@@ -122,7 +127,7 @@ The environment variables `CLIO_CODER_MEMORY_TRACE`, `CLIO_CODER_OBSERVATION_TRA
 
 ## Objects
 
-`objects/` in a session directory holds `obj_<sha256>.json` files: canonical sorted JSON (`json-sorted-v1`), redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/observability/objects.ts)). The structural subjects are `prompt-structure` and `tool-schemas`. The content subjects are `prompt-text`, `memory-trace` and `observation-trace`. A reader that finds a missing object reports it as missing, and a digest mismatch is an error.
+`objects/` in a session directory holds `obj_<sha256>.json` files: canonical sorted JSON (`json-sorted-v1`), redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/observability/objects.ts)). The structural subjects are `prompt-structure`, `tool-schemas` and `config`; a `config` object keeps the names of every `headers` and `env` map but withholds their values, which carry whatever an operator typed. The content subjects are `prompt-text`, `memory-trace` and `observation-trace`. A reader that finds a missing object reports it as missing, and a digest mismatch is an error.
 
 ## Export, import and retention
 
@@ -150,11 +155,12 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 ## Planned
 
-These parts of the design are not in this build:
+These parts of the design are not in this build and are planned for 0.6.7:
 
-- Research capture of allow-listed provider response headers (`telemetry.research.providerHeaders`), request bodies, and per-call token timing histograms (`telemetry.research.deltas`). Both flags record nothing today.
+- The records `auth.event`, `middleware.fired`, `system_one.decision` and `worker.channel`, and `tool.settled` unless a lane builds it sooner.
+- Research capture of request bodies and allow-listed provider response headers.
 - Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
 - `clio-coder telemetry rebuild`, which rebuilds projections from journals and reports rule drift.
-- The operational signals `health.window`, `middleware.fired` and `config.changed`.
+- The GUI explain popover and timeline view.
 
 Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.
