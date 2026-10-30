@@ -21,8 +21,8 @@ it("lists frontier models and preserves native Haiku 5.5 capabilities", () => {
 		strictEqual(haiku.contextWindow, 1_000_000);
 		strictEqual(haiku.maxTokens, 128_000);
 		strictEqual(haiku.reasoning, true);
+		// Pi 1.3 made off a real level for Haiku 5.5 (upstream #10753), so its map no longer refuses it.
 		deepStrictEqual(haiku.thinkingLevelMap, {
-			off: null,
 			minimal: null,
 			low: "low",
 			medium: "medium",

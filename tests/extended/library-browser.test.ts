@@ -12,7 +12,7 @@ import type {
 	LibraryPackageRecord,
 	LibraryRefreshResult,
 } from "../../src/domains/resources/index.js";
-import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
+import { type OverlayHandle, type TUI, visibleWidth } from "../../src/engine/tui.js";
 import { openLibraryOverlay } from "../../src/interactive/overlays/library.js";
 import type { LibraryLifecyclePort } from "../../src/interactive/overlays/library-lifecycle.js";
 import {
@@ -860,7 +860,8 @@ describe("library browser behavior", () => {
 		view.setViewportRows(18);
 		const narrow = plain(view.render(48).join("\n"));
 		match(narrow, /materio/, "the name survives at 48 columns");
-		for (const line of view.render(48)) equal(stripVTControlCharacters(line).length <= 48, true);
+		// Pi-tui draws an input's cursor between zero-width APC markers that Node's stripper keeps.
+		for (const line of view.render(48)) equal(visibleWidth(line) <= 48, true);
 	});
 
 	it("draws the Installed empty text in Installed mode and the Browse one in Browse", () => {
