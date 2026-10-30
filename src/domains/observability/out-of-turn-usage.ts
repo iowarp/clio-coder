@@ -130,6 +130,11 @@ export function readOutOfTurnUsageRows(stateDir: string): OutOfTurnUsageReadResu
 		if (err.code === "ENOENT" || err.code === "ENOTDIR") return { rows: [], errors: [] };
 		return { rows: [], errors: [`out-of-turn usage store unreadable: ${messageOf(error)}`] };
 	}
+	return parseOutOfTurnUsageRows(raw, path);
+}
+
+/** The store's text as read by any reader, sync or async; `path` only labels errors. */
+export function parseOutOfTurnUsageRows(raw: string, path: string): OutOfTurnUsageReadResult {
 	const rows: OutOfTurnUsageRow[] = [];
 	const errors: string[] = [];
 	const lines = raw.split("\n");

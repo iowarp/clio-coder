@@ -64,6 +64,27 @@ export interface ReadOptions {
 	now?: Date;
 }
 
+/** A journal read as the read model holds it; a run's journal keeps only records its run owns (#434). */
+export function journalSourceFromRead(
+	read: {
+		records: ReadonlyArray<{ record: TelemetryRecord }>;
+		modes?: readonly Mode[];
+		skipped: number;
+		damaged: number;
+	},
+	fileExists: boolean,
+	runId?: string,
+): JournalSource {
+	const records = read.records.map(({ record }) => record);
+	return {
+		present: fileExists || records.length > 0,
+		records: runId === undefined ? records : records.filter((record) => record.ctx.runId === runId),
+		modes: read.modes ?? [],
+		skipped: read.skipped,
+		damaged: read.damaged,
+	};
+}
+
 interface Attempt extends FoldedAttempt {
 	startedAt: string;
 	settledAt: string | null;
