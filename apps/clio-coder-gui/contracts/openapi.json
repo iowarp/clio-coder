@@ -22164,6 +22164,52 @@
 													},
 													"additionalProperties": false
 												},
+												"budget": {
+													"type": "object",
+													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "at"
+																},
+																{
+																	"type": "string",
+																	"const": "over"
+																}
+															]
+														},
+														"currentUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"ceilingUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"contextTokens": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"raiseToUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"setting": {
+															"type": "string",
+															"maxLength": 4096
+														}
+													},
+													"additionalProperties": false
+												},
 												"notices": {
 													"type": "array",
 													"items": {
@@ -27169,6 +27215,52 @@
 													},
 													"additionalProperties": false
 												},
+												"budget": {
+													"type": "object",
+													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "at"
+																},
+																{
+																	"type": "string",
+																	"const": "over"
+																}
+															]
+														},
+														"currentUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"ceilingUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"contextTokens": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"raiseToUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"setting": {
+															"type": "string",
+															"maxLength": 4096
+														}
+													},
+													"additionalProperties": false
+												},
 												"notices": {
 													"type": "array",
 													"items": {
@@ -30759,6 +30851,52 @@
 													},
 													"additionalProperties": false
 												},
+												"budget": {
+													"type": "object",
+													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "at"
+																},
+																{
+																	"type": "string",
+																	"const": "over"
+																}
+															]
+														},
+														"currentUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"ceilingUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"contextTokens": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"raiseToUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"setting": {
+															"type": "string",
+															"maxLength": 4096
+														}
+													},
+													"additionalProperties": false
+												},
 												"notices": {
 													"type": "array",
 													"items": {
@@ -34309,6 +34447,52 @@
 																	"additionalProperties": false
 																},
 																"maxItems": 64
+															}
+														},
+														"additionalProperties": false
+													},
+													"budget": {
+														"type": "object",
+														"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
+														"properties": {
+															"level": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "at"
+																	},
+																	{
+																		"type": "string",
+																		"const": "over"
+																	}
+																]
+															},
+															"currentUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"ceilingUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"contextTokens": {
+																"anyOf": [
+																	{
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"raiseToUsd": {
+																"type": "number",
+																"minimum": 0
+															},
+															"setting": {
+																"type": "string",
+																"maxLength": 4096
 															}
 														},
 														"additionalProperties": false
@@ -38110,6 +38294,52 @@
 																"additionalProperties": false
 															},
 															"maxItems": 64
+														}
+													},
+													"additionalProperties": false
+												},
+												"budget": {
+													"type": "object",
+													"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
+													"properties": {
+														"level": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "at"
+																},
+																{
+																	"type": "string",
+																	"const": "over"
+																}
+															]
+														},
+														"currentUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"ceilingUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"contextTokens": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 0
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"raiseToUsd": {
+															"type": "number",
+															"minimum": 0
+														},
+														"setting": {
+															"type": "string",
+															"maxLength": 4096
 														}
 													},
 													"additionalProperties": false
@@ -47867,6 +48097,52 @@
 															"additionalProperties": false
 														},
 														"maxItems": 64
+													}
+												},
+												"additionalProperties": false
+											},
+											"budget": {
+												"type": "object",
+												"required": ["level", "currentUsd", "ceilingUsd", "contextTokens", "raiseToUsd", "setting"],
+												"properties": {
+													"level": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "at"
+															},
+															{
+																"type": "string",
+																"const": "over"
+															}
+														]
+													},
+													"currentUsd": {
+														"type": "number",
+														"minimum": 0
+													},
+													"ceilingUsd": {
+														"type": "number",
+														"minimum": 0
+													},
+													"contextTokens": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"raiseToUsd": {
+														"type": "number",
+														"minimum": 0
+													},
+													"setting": {
+														"type": "string",
+														"maxLength": 4096
 													}
 												},
 												"additionalProperties": false

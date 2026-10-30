@@ -8,6 +8,7 @@ import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
 import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
+import { BudgetBanner } from "../chat/BudgetBanner.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
@@ -491,6 +492,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								{resume.error.message}
 							</ConversationBanner>
 						) : null}
+						<BudgetBanner client={client} session={snapshot} />
 						<ApprovalBanner client={client} session={snapshot} />
 					</div>
 					<div className="chat-transcript" ref={scroll}>

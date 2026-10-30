@@ -37,6 +37,7 @@ import {
 import { PERMISSION_WITHDRAW_METHOD, type PermissionDecision } from "../../contracts/permissions.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
+import { BudgetBlock } from "../../contracts/session-telemetry.js";
 import {
 	Provenance,
 	type SessionDelta,
@@ -72,6 +73,7 @@ import {
 	ACP_ASIDE_CANCEL_METHOD,
 	ACP_ASIDE_DRAFT_METHOD,
 	ACP_BOARD_METHOD,
+	ACP_BUDGET_META_KEY,
 	ACP_COMMANDS_INVOKE_METHOD,
 	ACP_COMMANDS_LIST_METHOD,
 	ACP_CONTEXT_LEDGER_METHOD,
@@ -127,7 +129,7 @@ import { Interviews } from "./interviews.js";
 import { JOB_QUIET_MS, jobChangeIsStructural, scheduledTurnPrompt } from "./jobs.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
-import { sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
+import { projectTelemetryValue, sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
 
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
@@ -899,6 +901,16 @@ export class Supervisor {
 						type: "session.telemetry",
 						payload: { resource: entry.id, revision: common.revision, telemetry: { notices: [...notices, text].slice(-32) } },
 					});
+				// A ceiling stop also stands as state until the turn moves again, so the
+				// banner can offer the raise while the request is parked (#424).
+				if (meta[ACP_BUDGET_META_KEY] !== undefined) {
+					const { version: _version, ...block } = record(meta[ACP_BUDGET_META_KEY]);
+					const budget = projectTelemetryValue(BudgetBlock, block);
+					this.publish({
+						type: "session.telemetry",
+						payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { budget } },
+					});
+				}
 				return;
 			}
 			this.publish({

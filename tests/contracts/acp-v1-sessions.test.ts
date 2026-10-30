@@ -1,11 +1,15 @@
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.js";
+import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
 
 function fixture(
 	entries: ReadonlyArray<SessionEntry> = [],
@@ -13,6 +17,7 @@ function fixture(
 	commands?: AcpCommandControl,
 	saveSettings = false,
 	settlement?: { wait: () => Promise<void>; cancel?: () => void },
+	bus?: SafeEventBus,
 ) {
 	const requests = new Map<string, (params: unknown) => unknown>();
 	const updates: Array<Record<string, unknown>> = [];
@@ -115,6 +120,7 @@ function fixture(
 			},
 		},
 		...(commands ? { commands } : {}),
+		...(bus ? { bus } : {}),
 		setSessionRouting: (patch) => {
 			routingChanges.push(patch);
 		},
@@ -730,4 +736,106 @@ test("ACP session/new carries the workspace view and an edit that dirties the tr
 	strictEqual(infos[0]?._meta["clio-coder/workspace"]?.dirty, true);
 	close();
 	await served;
+});
+
+test("ACP carries a session cost ceiling stop as a notice chunk with its figures, live and on replay", async () => {
+	const budgetMeta = (frame: Record<string, unknown>) => (frame._meta as Record<string, unknown>)["clio-coder/budget"];
+	const text = (frame: Record<string, unknown>) =>
+		((frame.update as { content: { text: string } }).content as { text: string }).text;
+	// Live: the alert the admission wait raises inside a prompt crosses as that prompt's chunk,
+	// with the TUI's exact notice text and the raise a client can apply.
+	const bus = createSafeEventBus();
+	const live = fixture([], undefined, undefined, false, undefined, bus);
+	const alert = { level: "at" as const, currentUsd: 5.0008, ceilingUsd: 5, contextTokens: 12345.4 };
+	try {
+		const init = (await live.call("initialize", { protocolVersion: 1 })) as {
+			agentCapabilities: { _meta: Record<string, unknown> };
+		};
+		deepStrictEqual(init.agentCapabilities._meta["clio-coder/budget"], {
+			version: 1,
+			meta: "clio-coder/budget",
+			update: "agent_message_chunk",
+			setting: "safety.limits.sessionCostUsd",
+			replay: true,
+		});
+		bus.emit(BusChannels.BudgetAlert, alert);
+		strictEqual(live.updates.length, 0, "an alert outside a prompt has no turn to belong to");
+		const opened = (await live.call("session/new", { cwd: live.cwd, mcpServers: [] })) as { sessionId: string };
+		const prompt = live.call("session/prompt", { sessionId: opened.sessionId, prompt: [{ type: "text", text: "Go" }] });
+		await Promise.resolve();
+		const before = live.updates.length;
+		bus.emit(BusChannels.BudgetAlert, alert);
+		const frame = live.updates[before];
+		if (frame === undefined) throw new Error("the parked prompt sent no budget frame");
+		strictEqual((frame.update as { sessionUpdate: string }).sessionUpdate, "agent_message_chunk");
+		strictEqual(text(frame), `${budgetAlertNotice(alert)?.text}\n`);
+		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/notice"], { level: "warning" });
+		deepStrictEqual(budgetMeta(frame), {
+			version: 1,
+			level: "at",
+			currentUsd: 5.0008,
+			ceilingUsd: 5,
+			contextTokens: 12345,
+			raiseToUsd: suggestedSessionCostCeilingUsd(5.0008, 5),
+			setting: "safety.limits.sessionCostUsd",
+		});
+		await live.call("session/cancel", { sessionId: opened.sessionId });
+		strictEqual(((await prompt) as { stopReason: string }).stopReason, "cancelled");
+	} finally {
+		await live.stop();
+	}
+	// Replay: the durable block comes back inside its turn with the raise it recorded, and no
+	// other custom entry crosses.
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const block = {
+		level: "over" as const,
+		currentUsd: 5.2,
+		ceilingUsd: 5,
+		contextTokens: 9000,
+		raiseToUsd: 5.72,
+		setting: "safety.limits.sessionCostUsd" as const,
+	};
+	const loaded = fixture([
+		{ kind: "message", role: "user", turnId: "ask", parentTurnId: null, timestamp, payload: "Ship it" },
+		{
+			kind: "custom",
+			customType: "budgetBlock",
+			turnId: "stop",
+			parentTurnId: "ask",
+			timestamp,
+			display: true,
+			data: block,
+		},
+		{
+			kind: "custom",
+			customType: "retryStatus",
+			turnId: "retry",
+			parentTurnId: "ask",
+			timestamp,
+			display: true,
+			data: {},
+		},
+	]);
+	try {
+		await loaded.call("initialize", { protocolVersion: 1 });
+		await loaded.call("session/load", { sessionId: "session-1", cwd: loaded.cwd, mcpServers: [] });
+		const frames = loaded.updates.filter((frame) => budgetMeta(frame) !== undefined);
+		strictEqual(frames.length, 1);
+		const frame = frames[0];
+		if (frame === undefined) throw new Error("unreachable");
+		strictEqual(loaded.updates.filter((candidate) => text(candidate) === "").length, 0);
+		strictEqual(text(frame), `${budgetAlertNotice(block)?.text}\n`);
+		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1 });
+		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/notice"], { level: "error" });
+		deepStrictEqual(budgetMeta(frame), { version: 1, ...block });
+		strictEqual(
+			loaded.updates.filter(
+				(candidate) => (candidate.update as { sessionUpdate: string }).sessionUpdate !== "user_message_chunk",
+			).length,
+			1,
+			"the retry status entry stays off the wire",
+		);
+	} finally {
+		await loaded.stop();
+	}
 });

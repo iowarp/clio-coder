@@ -13,6 +13,71 @@ export function suggestedSessionCostCeilingUsd(currentUsd: number, ceilingUsd: n
 	return Math.ceil(Math.max(currentUsd * 1.1, ceilingUsd + 0.01) * 10_000) / 10_000;
 }
 
+/** The setting a ceiling stop asks the operator to raise. */
+export const SESSION_COST_CEILING_SETTING = "safety.limits.sessionCostUsd";
+
+/**
+ * One ceiling stop as every surface describes it: the live `BudgetAlert`
+ * payload, the durable `budgetBlock` ledger entry and the ACP frame all read
+ * through here, so the TUI, ACP clients and the GUI name the same spend,
+ * ceiling and raise (#424).
+ */
+export interface BudgetBlockView {
+	level: "at" | "over";
+	currentUsd: number;
+	ceilingUsd: number;
+	contextTokens?: number;
+	raiseToUsd: number;
+}
+
+const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+/** Null for a payload that is not a ceiling stop; a missing or stale raise is recomputed. */
+export function readBudgetBlock(value: unknown): BudgetBlockView | null {
+	if (!value || typeof value !== "object") return null;
+	const p = value as Record<string, unknown>;
+	if (p.level !== "at" && p.level !== "over") return null;
+	if (!finite(p.currentUsd) || !finite(p.ceilingUsd)) return null;
+	const raiseToUsd =
+		finite(p.raiseToUsd) && p.raiseToUsd > p.currentUsd
+			? p.raiseToUsd
+			: suggestedSessionCostCeilingUsd(p.currentUsd, p.ceilingUsd);
+	return {
+		level: p.level,
+		currentUsd: p.currentUsd,
+		ceilingUsd: p.ceilingUsd,
+		...(finite(p.contextTokens) && p.contextTokens > 0 ? { contextTokens: p.contextTokens } : {}),
+		raiseToUsd,
+	};
+}
+
+/** `$5.00 of $5.00 ceiling`, with more digits for a sub-cent ceiling. */
+export function budgetBlockSpendText(block: Pick<BudgetBlockView, "currentUsd" | "ceilingUsd">): string {
+	const digits = block.ceilingUsd < 0.01 ? Math.min(8, Math.max(4, Math.ceil(-Math.log10(block.ceilingUsd)))) : 2;
+	return `$${block.currentUsd.toFixed(digits)} of $${block.ceilingUsd.toFixed(digits)} ceiling`;
+}
+
+/** The one-line operator notice for a ceiling stop; `error` once spend has passed the ceiling. */
+export function describeBudgetBlock(block: BudgetBlockView): { level: "warn" | "error"; text: string } {
+	const spend = budgetBlockSpendText(block);
+	// Per-call context is what a raise would keep paying for, so the stop names it (#423).
+	const perCall =
+		block.contextTokens !== undefined
+			? ` The next call sends ~${Math.round(block.contextTokens).toLocaleString("en-US")} context tokens.`
+			: "";
+	const remedy = `raise ${SESSION_COST_CEILING_SETTING} to ${block.raiseToUsd} to resume.`;
+	if (block.level === "over") {
+		return {
+			level: "error",
+			text: `[budget] Session priced spend ${spend} exceeded.${perCall} Paid requests are paused; ${remedy}`,
+		};
+	}
+	return {
+		level: "warn",
+		text: `[budget] Session priced spend ${spend} reached.${perCall} Paid requests are paused; ${remedy}`,
+	};
+}
+
 export class SessionCostCeilingError extends Error {
 	override readonly name = "SessionCostCeilingError";
 	constructor(

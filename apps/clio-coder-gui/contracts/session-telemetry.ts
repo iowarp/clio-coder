@@ -94,6 +94,24 @@ export const ProjectTrust = Type.Object(
 
 export const ActiveEggs = Type.Array(Type.Literal("duck"), { maxItems: 1 });
 
+/**
+ * A session cost ceiling stop, as the ACP notice chunk carries it under
+ * `_meta["clio-coder/budget"]` (#424). It stands while the parked request
+ * waits for a raise and clears once the turn produces output again.
+ */
+export const BudgetBlock = Type.Object(
+	{
+		level: Type.Union([Type.Literal("at"), Type.Literal("over")]),
+		currentUsd: Type.Number({ minimum: 0 }),
+		ceilingUsd: Type.Number({ minimum: 0 }),
+		contextTokens: Type.Union([count, Type.Null()]),
+		raiseToUsd: Type.Number({ minimum: 0 }),
+		setting: text,
+	},
+	closed,
+);
+export type BudgetBlock = Static<typeof BudgetBlock>;
+
 /** What Clio's always-on memory guardian is doing, as last pushed. */
 export const MemoryGuardian = Type.Object(
 	{
@@ -117,6 +135,7 @@ export const SessionTelemetry = Type.Object(
 		plan: Type.Optional(SessionPlan),
 		workspace: Type.Optional(SessionWorkspace),
 		trust: Type.Optional(ProjectTrust),
+		budget: Type.Optional(BudgetBlock),
 		notices: Type.Optional(Type.Array(Type.String({ maxLength: 16384 }), { maxItems: 32 })),
 	},
 	closed,

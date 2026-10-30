@@ -14,12 +14,16 @@ export function createSchedulingDomainModule(options: SchedulingBundleOptions): 
 	};
 }
 
-export type { BudgetVerdict, RunCostCap } from "./budget.js";
+export type { BudgetBlockView, BudgetVerdict, RunCostCap } from "./budget.js";
 export {
+	budgetBlockSpendText,
 	createRunCostCap,
+	describeBudgetBlock,
+	readBudgetBlock,
 	runCostCeilingUsd,
 	SESSION_COST_CEILING_EXIT_CODE,
 	SESSION_COST_CEILING_REASON,
+	SESSION_COST_CEILING_SETTING,
 	SessionCostCeilingError,
 } from "./budget.js";
 export type { SchedulingContract } from "./contract.js";

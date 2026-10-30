@@ -132,6 +132,17 @@ function narrativeId(timeline: readonly TimelineItem[], turnId: string, kind: Na
 	return base;
 }
 
+/**
+ * A ceiling stop says paid requests are paused. Model text, reasoning or a tool call arriving after
+ * it is a paid request that ran, so the stop is over; a prompt, a notice or a turn boundary proves
+ * nothing, and a replay that ends on the stop keeps it standing for the next prompt (#424).
+ */
+function withoutBudgetBlock(state: SessionSnapshot): SessionSnapshot {
+	if (state.telemetry?.budget === undefined) return state;
+	const { budget: _budget, ...telemetry } = state.telemetry;
+	return { ...state, telemetry };
+}
+
 export function applySessionDelta(current: SessionSnapshot, event: SessionDelta): SessionSnapshot {
 	if (event.payload.resource !== current.id || event.payload.revision <= current.revision) return current;
 	if (event.payload.revision !== current.revision + 1) throw new Error("Session revision gap requires a snapshot.");
@@ -243,7 +254,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		case "session.configured":
 			return { ...state, config: event.payload.config };
 		case "session.reset": {
-			const { usage: _usage, plan: _plan, ...telemetry } = state.telemetry ?? {};
+			const { usage: _usage, plan: _plan, budget: _budget, ...telemetry } = state.telemetry ?? {};
 			const { contextWork: _contextWork, ...branchState } = state;
 			// Turns, their items and their approvals belong to the branch that was left.
 			return {
@@ -288,6 +299,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			const { turnId, text, origin, provenance } = event.payload,
 				kind = event.type === "turn.text" ? "text" : event.type === "turn.thought" ? "thought" : "user";
 			const identity = provenanceKey(provenance);
+			if (kind !== "user") state = withoutBudgetBlock(state);
 			if (kind === "user" && origin === "replay")
 				state = {
 					...state,
@@ -310,6 +322,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			break;
 		}
 		case "turn.tool":
+			if (event.payload.item.kind === "tool") state = withoutBudgetBlock(state);
 			upsert(event.payload.item);
 			break;
 		case "permission.requested":

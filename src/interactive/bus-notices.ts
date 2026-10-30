@@ -6,14 +6,13 @@
  */
 
 import type {
-	BudgetAlertPayload,
 	MiddlewareHookFailedPayload,
 	PermissionRequestedPayload,
 	SafetyBlockedPayload,
 } from "../core/bus-events.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { safetyNetRailText } from "../domains/safety/decision-presentation.js";
-import { suggestedSessionCostCeilingUsd } from "../domains/scheduling/budget.js";
+import { describeBudgetBlock, readBudgetBlock } from "../domains/scheduling/budget.js";
 import type { NoticeSource } from "../session-control/notice-source.js";
 import { askAxis } from "./permission-overlay.js";
 
@@ -31,43 +30,11 @@ export interface MiddlewareHookFailedNoticeOptions {
 	noteBudgetWarningSuppression?: boolean;
 }
 
-function isBudgetAlertPayload(value: unknown): value is BudgetAlertPayload {
-	if (!value || typeof value !== "object") return false;
-	const p = value as Record<string, unknown>;
-	if (p.level !== "at" && p.level !== "over") return false;
-	if (typeof p.currentUsd !== "number" || !Number.isFinite(p.currentUsd)) return false;
-	if (typeof p.ceilingUsd !== "number" || !Number.isFinite(p.ceilingUsd)) return false;
-	return true;
-}
-
 export function budgetAlertNotice(payload: unknown): BusNotice | null {
-	if (!isBudgetAlertPayload(payload)) return null;
-	const digits = payload.ceilingUsd < 0.01 ? Math.min(8, Math.max(4, Math.ceil(-Math.log10(payload.ceilingUsd)))) : 2;
-	const spend = `$${payload.currentUsd.toFixed(digits)} of $${payload.ceilingUsd.toFixed(digits)} ceiling`;
-	// Per-call context is what a raise would keep paying for, so the stop names it (#423).
-	const tokens = payload.contextTokens;
-	const perCall =
-		typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0
-			? ` The next call sends ~${Math.round(tokens).toLocaleString("en-US")} context tokens.`
-			: "";
-	const suggested = (payload as { raiseToUsd?: unknown }).raiseToUsd;
-	const raiseToUsd =
-		typeof suggested === "number" && Number.isFinite(suggested) && suggested > payload.currentUsd
-			? suggested
-			: suggestedSessionCostCeilingUsd(payload.currentUsd, payload.ceilingUsd);
-	const remedy = `raise safety.limits.sessionCostUsd to ${raiseToUsd} to resume.`;
-	if (payload.level === "over") {
-		return {
-			level: "error",
-			text: `[budget] Session priced spend ${spend} exceeded.${perCall} Paid requests are paused; ${remedy}`,
-			source: "budget",
-		};
-	}
-	return {
-		level: "warn",
-		text: `[budget] Session priced spend ${spend} reached.${perCall} Paid requests are paused; ${remedy}`,
-		source: "budget",
-	};
+	const block = readBudgetBlock(payload);
+	if (block === null) return null;
+	// One formatter for the live alert, the replayed ledger entry and the ACP frame (#424).
+	return { ...describeBudgetBlock(block), source: "budget" };
 }
 
 /**

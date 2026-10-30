@@ -88,6 +88,12 @@ export const ACP_WORKSPACE_META_KEY = "clio-coder/workspace";
 export const ACP_PLAN_META_KEY = "clio-coder/plan";
 export const ACP_TRUST_META_KEY = "clio-coder/trust";
 /**
+ * A session cost ceiling stop. It rides on the `agent_message_chunk` that
+ * carries the stop's notice text, live while the prompt waits and again on
+ * replay, so a client can offer the raise instead of showing a silent turn (#424).
+ */
+export const ACP_BUDGET_META_KEY = "clio-coder/budget";
+/**
  * A client's enforced capability ceiling: `params._meta` on `session/new` (the
  * whole session) and `session/prompt` (that prompt), echoed as applied on both
  * responses. It only narrows the limits the operator started `acp` with.
@@ -683,6 +689,30 @@ export type AcpWire<T> =
 			? { readonly [K in keyof T]: AcpWire<T[K]> }
 			: T;
 
+/** `_meta["clio-coder/budget"]` beside `_meta["clio-coder/notice"]` on the chunk that reports a ceiling stop. */
+export interface AcpBudgetBlock {
+	version: 1;
+	/** `over` once spend has passed the ceiling, `at` when it reached it exactly. */
+	level: "at" | "over";
+	currentUsd: number;
+	ceilingUsd: number;
+	/** Estimated input tokens of the parked request, or null when unknown. */
+	contextTokens: number | null;
+	/** The value that admits the parked request again. */
+	raiseToUsd: number;
+	/** The settings path to raise; the same value every surface names. */
+	setting: string;
+}
+
+/** The ceiling stop's capability entry: where the block lands and which setting lifts it. */
+export interface AcpBudgetCapability {
+	version: 1;
+	meta: typeof ACP_BUDGET_META_KEY;
+	update: "agent_message_chunk";
+	setting: string;
+	replay: true;
+}
+
 /** The trust report's capability entry. `surfaces` are `ProjectTrustSurface` names. */
 export interface AcpTrustCapability {
 	version: 1;
@@ -726,6 +756,7 @@ export interface AcpAgentCapabilitiesMeta {
 	[ACP_SETTINGS_META_KEY]: AcpSettingsCapability;
 	[ACP_TARGETS_META_KEY]: AcpTargetsCapability;
 	[ACP_TRUST_META_KEY]: AcpTrustCapability;
+	[ACP_BUDGET_META_KEY]: AcpBudgetCapability;
 	[ACP_CEILING_META_KEY]?: AcpCeilingCapability;
 	[ACP_COMMANDS_META_KEY]?: AcpCommandsCapability;
 	[ACP_STEERING_META_KEY]: AcpWire<AcpSteeringCapability>;

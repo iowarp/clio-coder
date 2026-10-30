@@ -64,7 +64,8 @@ const NOTES: Record<string, string> = {
 	"safety.review.cadenceToolCalls": "Used by terminal sessions only; ACP runs never fire the review.",
 	"safety.autonomy":
 		"This is the default for new sessions. A conversation that is already open keeps the autonomy it was bound to.",
-	"safety.limits.sessionCostUsd": "The alert is informational. It never rejects a request.",
+	"safety.limits.sessionCostUsd":
+		"Reaching it pauses paid requests until it is raised. A raise reaches a waiting request within a second; 0 means no ceiling.",
 	"fleet.history.journal": "Turning this off blinds the run journal views in this app.",
 	"chat.prewarm": "Applies to local native connections and interactive sessions only.",
 	"integrations.library.remote":

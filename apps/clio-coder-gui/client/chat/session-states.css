@@ -130,6 +130,13 @@
 	font-size: 12.5px;
 	white-space: nowrap;
 }
+/* The ceiling stop offers the raise and the setting side by side (#424). */
+.budget-banner__actions {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+}
 
 /* A turn that has run for a while says so once, quietly. */
 .chat-response__long {

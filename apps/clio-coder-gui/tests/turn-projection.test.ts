@@ -202,3 +202,50 @@ test("narrative written after a tool call becomes a new passage below it, in wir
 		snapshot.timeline.map((_item, index) => index + 1),
 	);
 });
+
+test("a session cost ceiling stop stands until model output or a tool call follows it", () => {
+	const budget = {
+		level: "at" as const,
+		currentUsd: 5,
+		ceilingUsd: 5,
+		contextTokens: 1200,
+		raiseToUsd: 5.5,
+		setting: "safety.limits.sessionCostUsd",
+	};
+	let revision = 1;
+	let snapshot = streamed(0).snapshot;
+	const apply = (type: SessionDelta["type"], payload: Record<string, unknown>) =>
+		(snapshot = applySessionDelta(snapshot, {
+			type,
+			payload: { resource: "session", revision: ++revision, ...payload },
+		} as SessionDelta));
+	apply("session.telemetry", { telemetry: { budget } });
+	assert.deepEqual(snapshot.telemetry?.budget, budget);
+	// A notice, the operator's own words and a cancelled wait prove no paid request ran.
+	apply("turn.tool", {
+		item: {
+			id: "turn:notice",
+			turnId: "turn",
+			sequence: 0,
+			kind: "notice",
+			text: "paused",
+			status: "completed",
+			origin: "live",
+		},
+	});
+	apply("turn.user", { turnId: "turn", text: "still there?", origin: "live" });
+	apply("turn.finished", { turnId: "turn", stopReason: "cancelled", usage: null, problem: null, finishedAt: null });
+	assert.ok(snapshot.telemetry?.budget, "nothing paid ran, so the stop stands");
+	apply("turn.text", { turnId: "turn", text: "resumed", origin: "live" });
+	assert.equal(snapshot.telemetry?.budget, undefined, "model text ends the stop");
+	apply("session.telemetry", { telemetry: { budget } });
+	snapshot = applySessionDelta(snapshot, toolDelta(snapshot, ++revision, 1));
+	assert.equal(snapshot.telemetry?.budget, undefined, "a tool call ends the stop");
+	apply("session.telemetry", { telemetry: { budget } });
+	apply("session.reset", {});
+	assert.equal(
+		snapshot.telemetry?.budget,
+		undefined,
+		"a branch switch drops it; the replay brings it back if it stands",
+	);
+});

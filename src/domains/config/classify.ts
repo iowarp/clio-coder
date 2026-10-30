@@ -26,6 +26,9 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"interface.exitSummary",
 	"interface.keybindings",
 	"safety.autonomy",
+	// The parked request re-reads the ceiling every 250 ms, and dispatch admission
+	// reads it per call, so a raise lifts a live wait (#424).
+	"safety.limits.sessionCostUsd",
 	"chat.modelPicker",
 	"interface.outputDetail",
 	"interface.demo",

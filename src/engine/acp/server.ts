@@ -52,6 +52,7 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import { type BashCommandProgress, combineBashOutput } from "../../core/bash-exec.js";
 import {
 	type AccountabilityEvidenceReadyPayload,
+	type BudgetAlertPayload,
 	BusChannels,
 	type CompactionPayload,
 	type ContextWarningPayload,
@@ -146,6 +147,12 @@ import {
 	projectDraftOutcome,
 } from "./aside.js";
 import { ACP_BOARD_META_KEY, ACP_BOARD_METHOD, type AcpBoardSource, projectSessionBoard } from "./board.js";
+import {
+	ACP_BUDGET_CAPABILITY,
+	ACP_BUDGET_META_KEY,
+	budgetBlockFrame,
+	budgetBlockReplayFrame,
+} from "./budget-notice.js";
 import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_CONTEXT_LEDGER_METHOD, ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
 import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
@@ -2304,6 +2311,14 @@ function prepareAcpReplay(
 			current.frames.push(...replayShellLine(entry));
 			continue;
 		}
+		if (entry.kind === "custom") {
+			// A ceiling stop is the only custom entry a client needs back: it says why
+			// the turn after it waited or ended, and it sits inside that turn (#424).
+			const frame = budgetBlockReplayFrame(entry);
+			if (frame === null || current === null) continue;
+			current.frames.push({ update: frame.update, meta: frame.meta });
+			continue;
+		}
 		if (entry.kind !== "message") continue;
 		const payload = payloadRecord(entry.payload);
 		if (entry.role === "user") {
@@ -3614,6 +3629,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 							probe: features.providers,
 						},
 						[ACP_TRUST_META_KEY]: ACP_TRUST_CAPABILITY,
+						[ACP_BUDGET_META_KEY]: ACP_BUDGET_CAPABILITY,
 						...(features.ceiling === true
 							? {
 									[ACP_CEILING_META_KEY]: {
@@ -4139,6 +4155,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						_meta: { [ACP_MEMORY_META_KEY]: { state: payload.state } },
 					},
 				});
+			}),
+			bus.on(BusChannels.BudgetAlert, (payload: BudgetAlertPayload) => {
+				// The stop parks the request inside the running prompt, so it crosses
+				// as that prompt's notice chunk, figures beside the text (#424). Between
+				// prompts nothing is parked and the alert has no turn to belong to.
+				const active = activePromptState;
+				const sessionId = activeSessionId ?? boundSessionId;
+				if (active === null || active.cancelled || sessionId === null) return;
+				const frame = budgetBlockFrame(payload);
+				if (frame === null) return;
+				sendUpdate(options.transport, sessionId, active, frame.update, { ...ORCHESTRATOR_UPDATE_META, ...frame.meta });
 			}),
 			bus.on(BusChannels.LoopBlocked, (payload: LoopBlockedPayload) => {
 				// Loop blocks describe the turn that is running, so unlike a dispatch
