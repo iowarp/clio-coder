@@ -22,6 +22,7 @@ export {
 	loadEvidenceRunProvenance,
 	loadEvidenceTrustStatus,
 } from "./store.js";
+export { renderEvidenceTokens } from "./totals-display.js";
 export type { TrustSummaryProjection, TrustVerdict } from "./trust-projection.js";
 export {
 	formatTrustAxes,
