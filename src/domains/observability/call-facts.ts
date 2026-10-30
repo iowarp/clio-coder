@@ -1,7 +1,7 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { Fact } from "../../core/telemetry/fact.js";
-import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
+import type { CallSettled, CallStarted, CallUsage, Payload } from "../../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 
@@ -142,5 +142,45 @@ export function callSettlementFromMessage(
 			verdict: "unknown",
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),
+	};
+}
+
+const STOP_REASONS = new Set(["stop", "toolUse", "length", "error", "aborted"]);
+
+/**
+ * A turn's terminal facts come from its own calls, never from prose (#430, #434). `fallbackCause` is a cause the
+ * host knows structurally, such as an operator cancel that landed while no call was failing.
+ */
+export function turnSettlementFromCalls(
+	stopReason: unknown,
+	calls: readonly CallSettled[],
+	retries: number,
+	fallbackCause?: FailureCause,
+): Payload<"turn.settled"> {
+	const reason = (
+		typeof stopReason === "string" && STOP_REASONS.has(stopReason) ? stopReason : "error"
+	) as Payload<"turn.settled">["stopReason"];
+	const last = calls.at(-1);
+	const stages = last?.stages;
+	return {
+		stopReason: reason,
+		terminal: {
+			cause: (reason === "error" || reason === "aborted" ? last?.stop.failure : undefined) ?? fallbackCause ?? null,
+			stage: !stages
+				? null
+				: stages.firstToken !== undefined
+					? "firstToken"
+					: stages.send
+						? "send"
+						: stages.admission
+							? "admission"
+							: stages.auth
+								? "auth"
+								: stages.transform
+									? "transform"
+									: null,
+			retries: Math.max(0, Math.trunc(retries)),
+			callIds: [...new Set(calls.map((call) => call.callId))],
+		},
 	};
 }

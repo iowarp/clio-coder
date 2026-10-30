@@ -19,7 +19,7 @@ import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-it("a main call journals its stages in Pi's order and a budget refusal never reaches send (#434)", async () => {
+it("a main call journals its stages in Pi's order, a budget refusal never reaches send, and each turn settles once (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-call-stages-");
 	const faux = registerEngineFauxProvider({ api: "call-stages-fixture", models: [{ id: "chat" }], tokensPerSecond: 0 });
 	faux.setResponses([
@@ -181,6 +181,18 @@ it("a main call journals its stages in Pi's order and a budget refusal never rea
 		strictEqual(refused.stages.admission?.waitedOn, "budget");
 		strictEqual(refused.stages.send, undefined);
 		strictEqual(refused.stages.firstToken, undefined);
+		// Each user turn settles once, from its own calls: a budget refusal ends at admission, never as a stall.
+		const turns = journal.records.flatMap(({ record }) => (record.k === "turn.settled" ? [record.data] : []));
+		deepStrictEqual(turns, [
+			{
+				stopReason: "stop",
+				terminal: { cause: null, stage: "firstToken", retries: 0, callIds: [sent.callId] },
+			},
+			{
+				stopReason: "error",
+				terminal: { cause: "budget_wait_aborted", stage: "admission", retries: 0, callIds: [refused.callId] },
+			},
+		]);
 	} finally {
 		loop.dispose();
 		faux.unregister();

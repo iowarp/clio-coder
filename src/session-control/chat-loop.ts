@@ -4,6 +4,9 @@ import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { observedToolCallOrigin } from "../core/telemetry/context.js";
+import type { FailureCause } from "../core/telemetry/enums.js";
+import { recordTelemetry } from "../core/telemetry/producer.js";
+import { turnSettlementFromCalls } from "../domains/observability/call-facts.js";
 import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
@@ -2121,6 +2124,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		lateReceiptWatchers.add(stop);
 	};
 
+	/** One turn.settled per settled user turn, from the turn's own call facts (#430, #434). */
+	const recordTurnSettled = async (
+		userTurnId: string,
+		stopReason: unknown,
+		retries: number,
+		fallbackCause?: FailureCause,
+	): Promise<void> => {
+		const calls = turnRuntime.takeSettledCalls(userTurnId);
+		const origin = deps.session?.current();
+		const acquire = deps.observability?.acquireTelemetrySession;
+		if (!origin || !acquire) return;
+		try {
+			const lease = await acquire(origin, "main", userTurnId);
+			try {
+				recordTelemetry("turn.settled", turnSettlementFromCalls(stopReason, calls, retries, fallbackCause), lease.context);
+			} finally {
+				await lease.release();
+			}
+		} catch {
+			// Recording an outcome never costs the turn it describes; the journal reports its own write gaps.
+		}
+	};
+
 	/**
 	 * A turn the operator cancelled before admission (the pre-turn reads, the
 	 * orientation act or pre-submit compaction) leaves no user turn, so the settle
@@ -2166,6 +2192,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				data: record,
 			});
 			outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
+			await recordTurnSettled(input.userTurnId, "aborted", 0, "operator_cancel");
 			const outcomeRef = input.continuation && previousOperatorTurn !== null ? previousOperatorTurn.id : input.userTurnId;
 			deps.recordOutcome?.({
 				ref: outcomeRef,
@@ -3430,6 +3457,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								data: record,
 							});
 							outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
+							await recordTurnSettled(
+								userTurnId,
+								record.stopReason,
+								turnRetryAttempts + providerRetryAttempts,
+								canceled ? "operator_cancel" : undefined,
+							);
 							// The turn-end reading asked for a continuation, and every decision about
 							// the request carries the operator turn's id. A row filed under the
 							// continuation's own id would join no decision when the dataset exports.

@@ -262,6 +262,8 @@ export interface TurnRuntime {
 	 * nonzero; this stream carries the registry's actual verdict.
 	 */
 	toolTelemetry: ToolTelemetry;
+	/** The journaled main calls of one user turn, in settle order; older turns' leftovers are dropped (#434). */
+	takeSettledCalls(userTurnId: string): CallSettled[];
 }
 
 export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
@@ -319,6 +321,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 * transcript notice. Detailed diagnostics remain on the resolution.
 	 */
 	const announcedResolutionWarnings = new Set<string>();
+	const turnCalls = new Map<string, CallSettled[]>();
 
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
@@ -646,6 +649,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		): void => {
 			if (facts) settledAttempts.push(facts);
 			if (!facts || !deps.observability || !currentRun() || ownerSessionId !== deps.sessionOrigin?.()?.id) return;
+			const userTurnId = state.activeUserTurnId;
+			if (userTurnId) turnCalls.set(userTurnId, [...(turnCalls.get(userTurnId) ?? []), facts]);
 			// Final never-sent messages are counted when persisted; hidden retries have no ledger row (#430, #434).
 			if (hidden && facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
 			for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) {
@@ -1665,5 +1670,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		cancelRunWatchdog: () => clearCurrentWatchdog(),
 		cleanupSessionResources,
 		toolTelemetry,
+		takeSettledCalls(userTurnId) {
+			const calls = turnCalls.get(userTurnId) ?? [];
+			turnCalls.clear();
+			return calls;
+		},
 	};
 }

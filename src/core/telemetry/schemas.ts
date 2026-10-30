@@ -343,7 +343,8 @@ export const KIND_REGISTRY = {
 				terminal: Type.Object(
 					{
 						cause: Type.Union([FailureCause, Type.Null()]),
-						stage: Type.Union([text, Type.Null()]),
+						// The last stage the turn's final call completed; nothing has emitted this kind before #434's P2.
+						stage: Type.Union([vocabulary(["transform", "auth", "admission", "send", "firstToken"]), Type.Null()]),
 						retries: count,
 						callIds: Type.Array(CallIdSchema),
 					},
