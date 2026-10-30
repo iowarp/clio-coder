@@ -87,6 +87,7 @@ Usage:
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
+  clio-coder telemetry import-legacy  rebuild call facts from a pre-journal session ledger
   clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
@@ -320,6 +321,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
 	["semantic", async (subArgs) => (await import("./semantic.js")).runSemanticCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
+	["telemetry", async (subArgs) => (await import("./telemetry.js")).runTelemetryCommand(subArgs)],
 	["session", async (subArgs) => (await import("./session.js")).runSessionCommand(subArgs)],
 	["systemone", async (subArgs) => (await import("./system-one.js")).runSystemOneCommand(subArgs)],
 	["trace", async (subArgs) => (await import("./trace.js")).runTraceCommand(subArgs)],
