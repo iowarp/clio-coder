@@ -940,6 +940,13 @@ function attachWorkerChannel(
 			pipeDrainIncomplete = Boolean(
 				(child.stdout && !child.stdout.readableEnded) || (child.stderr && !child.stderr.readableEnded),
 			);
+			// #425: the worker drained before its clean exit, so frames still unread
+			// here are lost on this side and the trail cannot seal as whole.
+			if (leaderExit?.code === 0 && child.stdout && !child.stdout.readableEnded) {
+				markEvidenceIncomplete(
+					`orchestrator did not read worker stdout within ${SAFE_EXEC_PIPE_DRAIN_BOUND_MS} ms after exit`,
+				);
+			}
 			child.stdout?.destroy();
 			child.stderr?.destroy();
 			finish();
