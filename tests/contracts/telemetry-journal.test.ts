@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { appendFile, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -19,7 +19,10 @@ import {
 	telemetryPromptStructure,
 } from "../../src/domains/observability/objects.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
+import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
+import { readAuditRows } from "../../src/domains/session/archive-readers.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const context = { sessionId: "journal-session", label: "main" as const };
 const writer = { clioVersion: "fixture", piVersion: "fixture" };
@@ -333,5 +336,43 @@ test("session objects retain canonical redacted preimages, distinguish commitmen
 		await rejects(storeTelemetryObject(directory, "tool-schemas", { invalid: Number.NaN }), /non-finite/);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("audit writes rotate at UTC midnight and readers merge legacy days without changing old files", async () => {
+	const env = await isolateClioEnv("telemetry-audit-");
+	let now = new Date("2026-10-30T23:59:59.000Z");
+	const writer = openAuditWriter({ dateFn: () => now });
+	try {
+		process.env.TZ = "America/Los_Angeles";
+		const stateDir = join(env.dir, "state");
+		const directory = join(stateDir, "audit");
+		await mkdir(directory, { recursive: true });
+		const legacy = `${JSON.stringify({ kind: "tool_call", ts: "2026-10-30T23:59:58.000Z", correlationId: "legacy" })}\n`;
+		await writeFile(join(directory, "2026-10-30.jsonl"), legacy);
+		const row = () =>
+			buildAuditRecord({ tool: "read", classification: { actionClass: "read", reasons: [] }, decision: "allowed", now });
+		writer.write(row());
+		now = new Date("2026-10-31T00:00:01.000Z");
+		writer.write(row());
+		process.env.TZ = "Pacific/Kiritimati";
+		now = new Date("2026-10-31T23:00:00.000Z");
+		writer.write(row());
+		await writer.close();
+		deepStrictEqual((await readdir(directory)).sort(), [
+			"2026-10-30.jsonl",
+			"2026-10-30.utc.jsonl",
+			"2026-10-31.utc.jsonl",
+		]);
+		strictEqual(await readFile(join(directory, "2026-10-30.jsonl"), "utf8"), legacy);
+		const read = await readAuditRows(stateDir);
+		deepStrictEqual(read.errors, []);
+		deepStrictEqual(
+			read.rows.map((row) => row.ts),
+			["2026-10-30T23:59:58.000Z", "2026-10-30T23:59:59.000Z", "2026-10-31T00:00:01.000Z", "2026-10-31T23:00:00.000Z"],
+		);
+	} finally {
+		await writer.close();
+		env.restore();
 	}
 });

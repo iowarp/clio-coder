@@ -53,7 +53,8 @@ function normalizeReleasedCustomType(entry: SessionEntry): SessionEntry {
 }
 
 /**
- * Read every `<stateDir>/audit/<date>.jsonl` row. Malformed lines are skipped
+ * Read legacy `<date>.jsonl` and UTC `<date>.utc.jsonl` audit rows together (#434).
+ * Filenames never establish event order. Malformed lines are skipped
  * and reported in `errors` instead of failing the read.
  */
 export async function readAuditRows(stateDir: string): Promise<AuditReadResult> {
@@ -105,6 +106,13 @@ export async function readAuditRows(stateDir: string): Promise<AuditReadResult> 
 			});
 		}
 	}
+	rows.sort((left, right) => {
+		const instant = (row: AuditJsonRow) => {
+			const parsed = row.ts === null ? Number.NaN : Date.parse(row.ts);
+			return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+		};
+		return instant(left) - instant(right) || compareStrings(left.file, right.file) || left.line - right.line;
+	});
 	return { rows, errors };
 }
 

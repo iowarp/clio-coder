@@ -9,7 +9,7 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
 
 /**
  * NDJSON audit writer. One line per recorded event, file rotated on
- * local-date rollover. Rows are written with writeSync, so in-process readers
+ * UTC-date rollover; legacy local-date files remain untouched (#434). Rows are written with writeSync, so in-process readers
  * see them immediately; durability fsync happens on flush(), on close, on
  * rotation, and on a low-frequency background interval instead of once per
  * row, which kept blocking the admission hot path on disk latency. Write
@@ -255,34 +255,6 @@ export interface AuditWriter {
 
 const REDACT_KEY_RE = /(password|token|secret|key|auth|credential)/i;
 const MAX_STRING_LEN = 200;
-
-// Local-date YYYY-MM-DD. Intl.DateTimeFormat with en-CA emits ISO ordering in
-// local time, which is simpler than composing the parts manually. The formatter
-// lives at module scope because every audit row calls it and constructing one is
-// expensive enough to matter on a path this file's header says must not block.
-//
-// A formatter resolves its zone at construction and never re-reads it, so it is
-// rebuilt when process.env.TZ no longer matches the zone it was built for. This
-// is the same idiom as src/core/format-time.ts; it costs one string
-// comparison per row and keeps a mid-process TZ change from writing rows into
-// the previous zone's file.
-const DATE_OPTIONS: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit" };
-let dateFormatterZone = process.env.TZ;
-let dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
-
-function localDateString(d: Date): string {
-	if (process.env.TZ !== dateFormatterZone) {
-		dateFormatterZone = process.env.TZ;
-		// The zone is passed explicitly, not left for Intl to pick up from
-		// process.env.TZ implicitly: see src/core/format-time.ts's
-		// syncZone() for the traced repro (issue #84) of a rebuilt formatter
-		// resolving to the wrong zone while process.env.TZ read correctly at
-		// both construction and format time. Same idiom, same fix.
-		const zone = dateFormatterZone === undefined ? undefined : { timeZone: dateFormatterZone };
-		dateFormatter = new Intl.DateTimeFormat("en-CA", { ...DATE_OPTIONS, ...zone });
-	}
-	return dateFormatter.format(d);
-}
 
 function newCorrelationId(): string {
 	// 8 bytes -> base36 -> pad to 12 to keep the id length stable.
@@ -562,7 +534,7 @@ export function openAuditWriter(opts?: { dateFn?: () => Date }): AuditWriter {
 		try {
 			const dir = join(clioStateDir(), "audit");
 			mkdirSync(dir, { recursive: true });
-			const filePath = join(dir, `${date}.jsonl`);
+			const filePath = join(dir, `${date}.utc.jsonl`);
 			const fd = openSync(filePath, "a");
 			current = { fd, date, path: filePath };
 			return current;
@@ -576,7 +548,7 @@ export function openAuditWriter(opts?: { dateFn?: () => Date }): AuditWriter {
 		write(record: AuditRecord): void {
 			if (closed) return;
 			try {
-				const date = localDateString(dateFn());
+				const date = dateFn().toISOString().slice(0, 10);
 				const handle = ensureFor(date);
 				if (handle === null) return;
 				const line = `${JSON.stringify(record)}\n`;
