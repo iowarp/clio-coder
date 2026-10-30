@@ -14,9 +14,10 @@ const record = (value: unknown): Record<string, unknown> =>
 	value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 const fields = ["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning"] as const;
 
-interface ExternalUsageObservation {
+export interface ExternalUsageObservation {
 	usage: Record<string, unknown>;
 	coverage: RunUsage["coverage"];
+	costEstimateMethod?: "peer-report";
 	stopReason?: "stop" | "toolUse" | "length";
 	/** Normalized fallback rows may contain placeholders; only positive verified fields survive (#434). */
 	normalized?: boolean;
@@ -53,10 +54,14 @@ export function externalUsageFacts(
 	const token = (key: string): Fact<number> =>
 		!tokensVerified || (observation.normalized && raw[key] === 0) ? unknown : read(raw[key]);
 	const usage = Object.fromEntries(fields.map((key) => [key, token(key)])) as CallUsage;
+	const cost = record(raw.cost).total ?? raw.costUsd;
 	const usd =
-		raw.costProvenance === "unknown" || external.cost === "missing" || external.cost === "unverified"
+		raw.costProvenance === "unknown" ||
+		external.cost === "missing" ||
+		external.cost === "unverified" ||
+		(observation.normalized && cost === 0)
 			? unknown
-			: read(record(raw.cost).total ?? raw.costUsd, false);
+			: read(cost, false);
 	const estimatedUsd =
 		usd.kind === "measured" &&
 		(raw.costProvenance === "estimated" || raw.costProvenance === "known") &&
@@ -64,7 +69,9 @@ export function externalUsageFacts(
 			? {
 					kind: "estimated" as const,
 					value: usd.value,
-					method: raw.costProvenance === "known" ? ("target-rates" as const) : ("catalog" as const),
+					method:
+						observation.costEstimateMethod ??
+						(raw.costProvenance === "known" ? ("target-rates" as const) : ("catalog" as const)),
 				}
 			: usd;
 	return {
@@ -76,9 +83,11 @@ export function externalUsageFacts(
 			usd: estimatedUsd,
 			pricedBy:
 				estimatedUsd.kind === "estimated"
-					? raw.costProvenance === "known"
-						? "target-rates"
-						: "catalog"
+					? observation.costEstimateMethod === "peer-report"
+						? "provider"
+						: raw.costProvenance === "known"
+							? "target-rates"
+							: "catalog"
 					: estimatedUsd.kind === "measured"
 						? "provider"
 						: "none",
@@ -90,11 +99,80 @@ export function externalUsageFacts(
 	};
 }
 
+function externalTarget(input: WorkerRunInput) {
+	return {
+		targetId: input.target.id,
+		runtimeId: input.runtime.id,
+		api: input.runtime.id,
+		requestedModel: input.wireModelId,
+		reportedModel: { kind: "unknown", reason: "not-observed" } as const,
+	};
+}
+
+function priceExternalUsage(input: WorkerRunInput, facts: ReturnType<typeof externalUsageFacts>) {
+	if (facts.pricing.usd.kind !== "unknown" || !input.target.pricing) return facts;
+	const rates = input.target.pricing;
+	if (
+		rates === "free" ||
+		[rates.input, rates.output, rates.cacheRead ?? 0, rates.cacheWrite ?? 0].every((rate) => rate === 0)
+	)
+		return {
+			...facts,
+			pricingCoverage: "complete" as const,
+			pricing: {
+				usd: { kind: "measured" as const, value: 0, source: "local-count" as const },
+				pricedBy: "free" as const,
+			},
+		};
+	const keys = ["input", "output", "cacheRead", "cacheWrite"] as const;
+	if (keys.some((key) => (rates[key] ?? 0) !== 0 && facts.usage[key].kind !== "measured")) return facts;
+	const counts = Object.fromEntries(
+		keys.map((key) => [key, facts.usage[key].kind === "measured" ? facts.usage[key].value : 0]),
+	) as Record<(typeof keys)[number], number>;
+	return {
+		...facts,
+		pricingCoverage: "complete" as const,
+		pricing: {
+			usd: {
+				kind: "estimated" as const,
+				value: calculatePricingCostUsd(
+					{ input: rates.input, output: rates.output, cacheRead: rates.cacheRead ?? 0, cacheWrite: rates.cacheWrite ?? 0 },
+					counts,
+				),
+				method: "target-rates" as const,
+			},
+			pricedBy: "target-rates" as const,
+		},
+	};
+}
+
+/** A peer's incremental report describes a disjoint scope, without asserting an API invocation (#434). */
+export function recordExternalUsagePart(
+	input: WorkerRunInput,
+	partId: string,
+	observation: ExternalUsageObservation,
+): void {
+	if (!input.telemetryContext) return;
+	recordTelemetry(
+		"run.usage",
+		{
+			...priceExternalUsage(input, externalUsageFacts(observation)),
+			source: "external-cli",
+			scope: "run",
+			partId,
+			revision: 0,
+			target: externalTarget(input),
+		},
+		input.telemetryContext,
+	);
+}
+
 /** The engine observes external summaries without pretending each summary is one provider request (#434). */
 export function observeExternalWorkerRun(
 	input: WorkerRunInput,
 	emit: WorkerEventEmit,
 	start: (emit: WorkerEventEmit) => WorkerRunHandle,
+	aggregateMessages = true,
 ): WorkerRunHandle {
 	const context = input.telemetryContext;
 	if (!context) return start(emit);
@@ -103,49 +181,8 @@ export function observeExternalWorkerRun(
 		{ host: hostname(), pid: process.pid, birthToken: processBirthToken(), monoEpochWallMs: performance.timeOrigin },
 		emit,
 	);
-	const target = {
-		targetId: input.target.id,
-		runtimeId: input.runtime.id,
-		api: input.runtime.id,
-		requestedModel: input.wireModelId,
-		reportedModel: { kind: "unknown", reason: "not-observed" } as const,
-	};
-	const price = (facts: ReturnType<typeof externalUsageFacts>) => {
-		if (facts.pricing.usd.kind !== "unknown" || !input.target.pricing) return facts;
-		const rates = input.target.pricing;
-		if (
-			rates === "free" ||
-			[rates.input, rates.output, rates.cacheRead ?? 0, rates.cacheWrite ?? 0].every((rate) => rate === 0)
-		)
-			return {
-				...facts,
-				pricingCoverage: "complete" as const,
-				pricing: {
-					usd: { kind: "measured" as const, value: 0, source: "local-count" as const },
-					pricedBy: "free" as const,
-				},
-			};
-		const keys = ["input", "output", "cacheRead", "cacheWrite"] as const;
-		if (keys.some((key) => (rates[key] ?? 0) !== 0 && facts.usage[key].kind !== "measured")) return facts;
-		const counts = Object.fromEntries(
-			keys.map((key) => [key, facts.usage[key].kind === "measured" ? facts.usage[key].value : 0]),
-		) as Record<(typeof keys)[number], number>;
-		return {
-			...facts,
-			pricingCoverage: "complete" as const,
-			pricing: {
-				usd: {
-					kind: "estimated" as const,
-					value: calculatePricingCostUsd(
-						{ input: rates.input, output: rates.output, cacheRead: rates.cacheRead ?? 0, cacheWrite: rates.cacheWrite ?? 0 },
-						counts,
-					),
-					method: "target-rates" as const,
-				},
-				pricedBy: "target-rates" as const,
-			},
-		};
-	};
+	const target = externalTarget(input);
+
 	let revision = 0;
 	const calls = new Set<string>();
 	recordTelemetry("process.started", {}, context);
@@ -158,7 +195,7 @@ export function observeExternalWorkerRun(
 				const identity = payload.responseId ?? String(payload.callIndex);
 				if (observed && !calls.has(identity)) {
 					calls.add(identity);
-					const facts = price(externalUsageFacts(observed));
+					const facts = priceExternalUsage(input, externalUsageFacts(observed));
 					const callId = newCallId();
 					const attemptId = newAttemptId();
 					const settlement = callSettlementFromMessage(
@@ -193,10 +230,11 @@ export function observeExternalWorkerRun(
 						{ ...context, callId, attemptId },
 					);
 				}
-			} else if (event.type === "message_end" && event.message.role === "assistant") {
+			} else if (aggregateMessages && event.type === "message_end" && event.message.role === "assistant") {
 				const message = event.message;
 				const bound = observations.get(message);
-				const facts = price(
+				const facts = priceExternalUsage(
+					input,
 					externalUsageFacts(bound ?? { usage: record(message.usage), coverage: "unknown", normalized: true }),
 				);
 				recordTelemetry(

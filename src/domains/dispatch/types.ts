@@ -1121,7 +1121,7 @@ export interface RunReceipt {
 	/** External CLI observation, distinct from Clio's target-pricing estimate. */
 	externalTelemetry?: {
 		tokenUsage: "provider-reported" | "missing" | "unverified";
-		cost: "provider-reported" | "missing" | "unverified";
+		cost: "provider-reported" | "peer-estimated" | "missing" | "unverified";
 		sessionId: string | null;
 		exitReason: "stop" | "error" | "aborted" | "unknown";
 		toolObservability: "unavailable";

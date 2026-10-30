@@ -31,7 +31,10 @@ export function externalCliConnector(runtimeId: string): ExternalCliConnector | 
 export function startExternalCliWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const connector = externalCliConnector(input.runtime.id);
 	if (!connector) throw new Error(`no managed CLI connector for runtime '${input.runtime.id}'`);
-	return ["codex-cli", "claude-code", "antigravity-code"].includes(input.runtime.id)
-		? observeExternalWorkerRun(input, emit, (observedEmit) => connector.start(input, observedEmit))
-		: connector.start(input, emit);
+	return observeExternalWorkerRun(
+		input,
+		emit,
+		(observedEmit) => connector.start(input, observedEmit),
+		!["pi-cli", "opencode-cli"].includes(input.runtime.id),
+	);
 }

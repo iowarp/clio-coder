@@ -158,7 +158,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 	}
 });
 
-test("managed Pi CLI dispatch seals provider-reported cost and session identity", { timeout: 20_000 }, async () => {
+test("managed Pi CLI dispatch seals peer-estimated cost and session identity", { timeout: 20_000 }, async () => {
 	const executable = join(root, "bin", "pi");
 	writeFileSync(
 		executable,
@@ -207,10 +207,10 @@ for (const event of [
 		equal(receipt.outcome, "succeeded");
 		equal(receipt.tokenCount, 12);
 		equal(receipt.costUsd, 0.02);
-		equal(receipt.costProvenance, "known");
+		equal(receipt.costProvenance, "estimated");
 		deepStrictEqual(receipt.externalTelemetry, {
 			tokenUsage: "provider-reported",
-			cost: "provider-reported",
+			cost: "peer-estimated",
 			sessionId: "pi-session",
 			exitReason: "stop",
 			toolObservability: "unavailable",

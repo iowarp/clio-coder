@@ -7739,7 +7739,10 @@ export function createDispatchBundle(
 							evidence?.tokenUsage === "provider-reported" || evidence?.tokenUsage === "missing"
 								? evidence.tokenUsage
 								: "unverified",
-						cost: evidence?.cost === "provider-reported" || evidence?.cost === "missing" ? evidence.cost : "unverified",
+						cost:
+							evidence?.cost === "provider-reported" || evidence?.cost === "peer-estimated" || evidence?.cost === "missing"
+								? evidence.cost
+								: "unverified",
 						sessionId: readStringOrNull(evidence?.sessionId),
 						exitReason: stopReason === "stop" || stopReason === "error" || stopReason === "aborted" ? stopReason : "unknown",
 						toolObservability: "unavailable",
@@ -8266,9 +8269,10 @@ export function createDispatchBundle(
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd,
 				costProvenance:
-					externalTelemetry?.cost === "provider-reported"
+					callUsage?.snapshot()?.costProvenance ??
+					(externalTelemetry?.cost === "provider-reported"
 						? "known"
-						: meterCostProvenance(tokenMeter, lifecycle.target.effectivePricing.provenance, costUsd),
+						: meterCostProvenance(tokenMeter, lifecycle.target.effectivePricing.provenance, costUsd)),
 				...(externalTelemetry ? { externalTelemetry } : {}),
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,

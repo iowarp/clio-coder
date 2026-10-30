@@ -203,7 +203,7 @@ export function foldCallsBy(
 }
 
 /** A run snapshot includes its constituent calls. Pick one accounting source, independent of replay order (#434). */
-export function foldRunJournal(records: Iterable<TelemetryRecord>) {
+function foldRunScope(records: Iterable<TelemetryRecord>) {
 	const rows = [...records];
 	const calls = foldCallJournal(rows);
 	const aggregates = rows.flatMap((row) => (row.k === "run.usage" ? [row.data] : []));
@@ -273,5 +273,62 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 					aggregate.missingTokenCalls.kind === "unknown" ||
 					aggregate.missingTokenCalls.kind === "absent"
 				: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0),
+	};
+}
+
+function sumFactSums(sums: readonly FactSum[]): FactSum {
+	const result = emptyFactSum();
+	for (const sum of sums) {
+		result.measured += sum.measured;
+		result.estimated += sum.estimated;
+		result.unknownCount += sum.unknownCount;
+		result.absentCount += sum.absentCount;
+		for (const kind of ["measured", "estimated", "unknown"] as const) result.coverage[kind] += sum.coverage[kind];
+	}
+	return result;
+}
+
+/** Parts are disjoint reported contributions, not inferred calls; a whole-scope snapshot replaces them (#434). */
+export function foldRunJournal(records: Iterable<TelemetryRecord>) {
+	const rows = [...records];
+	const whole = rows.filter((row) => row.k !== "run.usage" || row.data.partId === undefined);
+	const base = foldRunScope(whole);
+	const parts = new Map<string, TelemetryRecord[]>();
+	for (const row of rows) {
+		if (row.k !== "run.usage" || row.data.partId === undefined) continue;
+		const group = parts.get(row.data.partId) ?? [];
+		group.push(row);
+		parts.set(row.data.partId, group);
+	}
+	const allKnownFree = (scope: ReturnType<typeof foldRunScope>) => {
+		const invoked = scope.calls.attempts.filter((attempt) => attempt.settled?.disposition !== "never_sent");
+		return scope.source === "aggregate"
+			? scope.aggregate?.pricing.pricedBy === "free"
+			: scope.source === "calls" &&
+					invoked.length > 0 &&
+					invoked.every((attempt) => attempt.settled?.pricing.pricedBy === "free");
+	};
+	if (base.source !== "calls" || parts.size === 0) return { ...base, allKnownFree: allKnownFree(base) };
+	const scopes = [...parts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, part]) => foldRunScope(part));
+	const sources = new Set(scopes.map((scope) => `${scope.aggregate?.source}/${scope.aggregate?.scope}`));
+	if (sources.size > 1) return { ...foldRunScope(rows), allKnownFree: false };
+	const sum = (key: "totalTokens" | "usd" | "apiCalls" | "missingTokenCalls") =>
+		sumFactSums(scopes.map((scope) => scope[key]));
+	const apiCalls = sum("apiCalls");
+	// Identified constituent calls and reported part counts overlap; either can establish a lower bound (#434).
+	if (apiCalls.unknownCount > 0) apiCalls.measured = Math.max(apiCalls.measured, base.apiCalls.measured);
+	return {
+		...base,
+		source: "parts" as const,
+		usage: Object.fromEntries(
+			fields.map((field) => [field, sumFactSums(scopes.map((scope) => scope.usage[field]))]),
+		) as Record<keyof CallUsage, FactSum>,
+		totalTokens: sum("totalTokens"),
+		usd: sum("usd"),
+		apiCalls,
+		missingTokenCalls: sum("missingTokenCalls"),
+		amountCoverageUnknown: base.amountCoverageUnknown || scopes.some((scope) => scope.amountCoverageUnknown),
+		unknownCoverage: base.unknownCoverage || scopes.some((scope) => scope.unknownCoverage),
+		allKnownFree: scopes.every(allKnownFree),
 	};
 }

@@ -61,7 +61,7 @@ export const OPENCODE_CLI_CONNECTOR: JsonlCliConnector = {
 	},
 	// OpenCode's run command emits text/step/error events and then exits on session idle.
 	requireTerminalEvent: false,
-	onEvent(event, state, append) {
+	onEvent(event, state, append, observeUsage) {
 		if (typeof event.sessionID === "string") {
 			state.responseId = event.sessionID;
 			state.sessionId = event.sessionID;
@@ -72,6 +72,23 @@ export const OPENCODE_CLI_CONNECTOR: JsonlCliConnector = {
 		} else if (event.type === "step_finish" && part?.type === "step-finish") {
 			const tokens = cliEventRecord(part.tokens);
 			const cache = cliEventRecord(tokens?.cache);
+			observeUsage(
+				{
+					usage: {
+						input: tokens?.input,
+						output: tokens?.output,
+						cacheRead: cache?.read,
+						cacheWrite: cache?.write,
+						reasoning: tokens?.reasoning,
+						totalTokens: tokens?.total,
+						costUsd: part.cost,
+						costProvenance: "estimated",
+					},
+					coverage: "complete",
+					costEstimateMethod: "peer-report",
+				},
+				typeof part.id === "string" ? part.id : undefined,
+			);
 			const usage = state.usage ?? emptyCliUsage();
 			usage.input += finiteUsage(tokens?.input);
 			usage.output += finiteUsage(tokens?.output);

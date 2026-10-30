@@ -178,7 +178,7 @@ export const PI_CLI_CONNECTOR: JsonlCliConnector = {
 			.join("\n\n");
 	},
 	requireTerminalEvent: true,
-	onEvent(event, state, append) {
+	onEvent(event, state, append, observeUsage) {
 		if (event.type === "session" && typeof event.id === "string") {
 			state.sessionId = event.id;
 		} else if (event.type === "message_end") {
@@ -188,15 +188,33 @@ export const PI_CLI_CONNECTOR: JsonlCliConnector = {
 			if (text) append(`${state.text ? "\n" : ""}${text}`);
 			if (typeof message.model === "string") state.model = message.model;
 			if (typeof message.responseId === "string") state.responseId = message.responseId;
-			state.usage = piUsage(message.usage);
+			const contribution = piUsage(message.usage);
+			if (contribution) {
+				const total = state.usage ?? emptyCliUsage();
+				for (const field of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const)
+					total[field] += contribution[field];
+				for (const field of ["input", "output", "cacheRead", "cacheWrite", "total"] as const)
+					total.cost[field] += contribution.cost[field];
+				state.usage = total;
+			}
 			const rawUsage = cliEventRecord(message.usage);
-			state.usageReported =
+			observeUsage(
+				{
+					usage: { ...rawUsage, costProvenance: "estimated" },
+					coverage: "complete",
+					costEstimateMethod: "peer-report",
+					// Pi's message usage is normalized before JSONL; its zero placeholders prove no measurement (#434).
+					normalized: true,
+				},
+				typeof message.responseId === "string" ? message.responseId : undefined,
+			);
+			state.usageReported ||=
 				rawUsage !== null &&
 				[rawUsage.input, rawUsage.output, rawUsage.totalTokens].some(
 					(value) => typeof value === "number" && Number.isFinite(value),
 				);
 			const rawCost = cliEventRecord(rawUsage?.cost);
-			state.costReported = typeof rawCost?.total === "number" && Number.isFinite(rawCost.total);
+			state.costReported ||= typeof rawCost?.total === "number" && Number.isFinite(rawCost.total);
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
 				state.error =
 					typeof message.errorMessage === "string" ? message.errorMessage : "Pi returned a failed assistant turn";

@@ -4,6 +4,8 @@ import type { Readable, Writable } from "node:stream";
 
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../core/safe-exec.js";
+import type { ExternalUsageObservation } from "../external-call-telemetry.js";
+import { recordExternalUsagePart } from "../external-call-telemetry.js";
 import {
 	createProcessTreeTerminator,
 	EXTERNAL_PROCESS_KILL_GRACE_MS,
@@ -38,7 +40,12 @@ export interface JsonlCliConnector {
 	args(input: WorkerRunInput): string[];
 	prompt(input: WorkerRunInput): string;
 	/** Parse only the peer's own JSONL envelope; lifecycle and bounded IO are shared. */
-	onEvent(event: Record<string, unknown>, state: JsonlCliState, append: (text: string) => void): void;
+	onEvent(
+		event: Record<string, unknown>,
+		state: JsonlCliState,
+		append: (text: string) => void,
+		usage: (observation: ExternalUsageObservation, partId?: string) => void,
+	): void;
 	/** Some peers emit only a process exit after their final text event. */
 	requireTerminalEvent: boolean;
 }
@@ -119,6 +126,11 @@ export function startJsonlCliRun(
 	let aborted = false;
 	let settled = false;
 	let transportError = "";
+	let usageParts = 0;
+	const observeUsage = (observation: ExternalUsageObservation, partId?: string) => {
+		usageParts += 1;
+		recordExternalUsagePart(input, partId === undefined ? `ordinal:${usageParts}` : `peer:${partId}`, observation);
+	};
 	const terminator = createProcessTreeTerminator(child, dependencies.killGraceMs ?? EXTERNAL_PROCESS_KILL_GRACE_MS);
 	const abort = (): void => {
 		if (settled) return;
@@ -147,7 +159,7 @@ export function startJsonlCliRun(
 		const usage = (state.usage ?? emptyCliUsage()) as Usage & { clioExternal?: Record<string, unknown> };
 		usage.clioExternal = {
 			tokenUsage: state.usageReported ? "provider-reported" : "missing",
-			cost: state.costReported ? "provider-reported" : "missing",
+			cost: state.costReported ? "peer-estimated" : "missing",
 			sessionId: state.sessionId,
 		};
 		const result: AgentMessage & { role: "assistant" } = {
@@ -204,7 +216,7 @@ export function startJsonlCliRun(
 					const event = record(decoded);
 					if (!event || typeof event.type !== "string")
 						throw new Error(`${connector.label} returned an invalid JSONL event`);
-					connector.onEvent(event, state, append);
+					connector.onEvent(event, state, append, observeUsage);
 				}
 			})().catch((cause) => {
 				transportError ||= boundedExternalDiagnostic(cause instanceof Error ? cause.message : String(cause));
@@ -226,6 +238,15 @@ export function startJsonlCliRun(
 					(!state.text.trim() ? `${connector.label} ended without an assistant response` : "") ||
 					(exitCode !== 0 ? stderr || `${connector.label} exited with status ${exitCode}` : "");
 			const finalMessage = message(exitCode, diagnostic);
+			if (
+				usageParts === 0 ||
+				transportError ||
+				aborted ||
+				exitCode !== 0 ||
+				state.error ||
+				(connector.requireTerminalEvent && !state.terminal)
+			)
+				recordExternalUsagePart(input, "unobserved-tail", { usage: {}, coverage: "unknown" });
 			if (!messageStarted) emit({ type: "message_start", message: finalMessage } as AgentEvent);
 			emit({ type: "message_end", message: finalMessage } as AgentEvent);
 			const messages: AgentMessage[] = [finalMessage];

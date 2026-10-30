@@ -307,6 +307,15 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 				type: "message_end",
 				message: {
 					role: "assistant",
+					responseId: "tool-turn",
+					stopReason: "toolUse",
+					usage: { input: 3, output: 1, totalTokens: 4, cacheRead: 0, cost: { total: 0.01 } },
+				},
+			},
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
 					model: "selected",
 					responseId: "response-1",
 					content: [{ type: "text", text: "PONG" }],
@@ -316,25 +325,48 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 			},
 			{ type: "agent_settled" },
 		]);
-		const run = input(root, piCliRuntime, { readOnly: true });
-		const result = await startJsonlCliRun(PI_CLI_CONNECTOR, run, () => undefined, {
-			binary,
-			workspaceRoot: root,
-			environment: {
-				PATH: process.env.PATH,
-				HOME: root,
-				PI_CODING_AGENT_DIR: join(root, "pi-home"),
-				FAKE_SECRET: "hidden",
+		const run = input(root, piCliRuntime, {
+			readOnly: true,
+			telemetryContext: { sessionId: null, runId: "pi-parts", label: "worker" },
+		});
+		const frames: WorkerTelemetryFrame[] = [];
+		const result = await observeExternalWorkerRun(
+			run,
+			(event) => {
+				if (event.type === "clio_coder_telemetry") frames.push(event);
 			},
-		}).promise;
+			(emit) =>
+				startJsonlCliRun(PI_CLI_CONNECTOR, run, emit, {
+					binary,
+					workspaceRoot: root,
+					environment: {
+						PATH: process.env.PATH,
+						HOME: root,
+						PI_CODING_AGENT_DIR: join(root, "pi-home"),
+						FAKE_SECRET: "hidden",
+					},
+				}),
+			false,
+		).promise;
 		equal(result.exitCode, 0);
 		const message = assistant(result.messages);
 		equal(message.model, "selected");
 		equal(message.responseId, "response-1");
-		equal(message.usage.cost.total, 0.02);
+		ok(Math.abs(message.usage.cost.total - 0.03) < 1e-12);
+		const records = frames.flatMap((frame) => {
+			const read = readTelemetryRecord(frame.record);
+			return read.kind === "record" ? [read.record] : [];
+		});
+		const folded = runUsageFromCallRecords(records);
+		equal(folded.totalTokens, 7);
+		equal(folded.apiCalls, 0);
+		equal(folded.costSummary.unknownCallCoverageRuns, 1);
+		equal(folded.costProvenance, "estimated");
+		ok(folded.usageFacts.cacheRead.unknownCount > 0);
+		ok(Math.abs(folded.costUsd - 0.03) < 1e-12);
 		deepStrictEqual((message.usage as unknown as { clioExternal?: unknown }).clioExternal, {
 			tokenUsage: "provider-reported",
-			cost: "provider-reported",
+			cost: "peer-estimated",
 			sessionId: "session-1",
 		});
 		const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8"));
@@ -368,7 +400,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		equal(message.usage.cost.total, 0.1);
 		deepStrictEqual((message.usage as unknown as { clioExternal?: unknown }).clioExternal, {
 			tokenUsage: "provider-reported",
-			cost: "provider-reported",
+			cost: "peer-estimated",
 			sessionId: "session-1",
 		});
 		const observed = JSON.parse(readFileSync(join(root, "observed.json"), "utf8"));

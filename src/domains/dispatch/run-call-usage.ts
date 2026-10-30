@@ -7,7 +7,6 @@ import type { CostAggregate } from "../observability/cost.js";
 import type { CallTotals } from "../observability/folds.js";
 import { foldRunJournal } from "../observability/folds.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
-import { usageCallsFromAttempts } from "../session/journal-usage.js";
 
 export interface RunCallUsage {
 	callIds: string[];
@@ -34,17 +33,13 @@ const subtotal = (sum: FactSum) => sum.measured + sum.estimated;
 export function runUsageFromCallRecords(records: Iterable<TelemetryRecord>): RunCallUsage {
 	const folded = foldRunJournal(records);
 	const facts = folded;
-	const calls = usageCallsFromAttempts(folded.calls.attempts);
 	const apiCalls = subtotal(folded.apiCalls);
 	const unknownCoverage = folded.unknownCoverage;
 	const costSummary: CostAggregate = {
 		knownUsd: subtotal(facts.usd),
 		hasEstimated: facts.usd.coverage.estimated > 0,
 		hasUnknown: facts.usd.unknownCount > 0 || folded.amountCoverageUnknown,
-		allKnownFree:
-			folded.source === "aggregate"
-				? folded.aggregate?.pricing.pricedBy === "free"
-				: folded.source === "calls" && calls.length > 0 && calls.every((call) => call.costSummary?.allKnownFree === true),
+		allKnownFree: folded.allKnownFree,
 		calls: apiCalls,
 		...(unknownCoverage ? { unknownCallCoverageRuns: 1 } : {}),
 	};

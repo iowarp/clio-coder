@@ -167,6 +167,8 @@ export const RunUsageSchema = Type.Object(
 	{
 		source: vocabulary(["claude-sdk", "external-cli", "acp", "legacy-import"]),
 		scope: vocabulary(["run", "peer-session"]),
+		/** Disjoint contribution within the scope; omission denotes its whole-scope snapshot (#434). */
+		partId: Type.Optional(text),
 		revision: count,
 		coverage: vocabulary(["complete", "partial", "unknown"]),
 		pricingCoverage: vocabulary(["complete", "partial", "unknown"]),
