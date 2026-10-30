@@ -11,7 +11,10 @@ import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/inde
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
 import type { CallJournalRead } from "../domains/observability/call-journal.js";
 import { readCallJournal } from "../domains/observability/call-journal.js";
-import { summarizeFailedCompactionUsage } from "../domains/observability/compaction-usage.js";
+import {
+	failedCompactionUsageFromCalls,
+	summarizeFailedCompactionUsage,
+} from "../domains/observability/compaction-usage.js";
 import type { CostAggregate } from "../domains/observability/cost.js";
 import {
 	accumulateCostAmount,
@@ -309,8 +312,13 @@ function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
 }
 
 /** Existing numeric accumulators sum known contributions; the report retains missing coverage. */
-function reportedUsageTotals(totals: UsageTotals, rows: ReadonlyArray<OutOfTurnUsageRow>, missingSessionCalls = 0) {
-	const failedCompaction = summarizeFailedCompactionUsage(rows);
+function reportedUsageTotals(
+	totals: UsageTotals,
+	rows: ReadonlyArray<OutOfTurnUsageRow>,
+	calls: readonly LedgerUsageCall[] = [],
+) {
+	const failedCompaction = summarizeFailedCompactionUsage([...rows, ...failedCompactionUsageFromCalls(calls)]);
+	const missingSessionCalls = calls.reduce((sum, call) => sum + (call.missingTokenCalls ?? 0), 0);
 	const missingTokenCalls =
 		rows.filter((row) => row.usage.totalTokens === null && row.failure?.invoked !== false).length + missingSessionCalls;
 	if (failedCompaction.calls === 0 && missingTokenCalls === 0) return totals;
@@ -625,6 +633,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	>();
 	const usageTotals = emptyUsageTotals();
+	const sessionCalls = sessions.flatMap((session) => session.usageCalls);
 	const callOrigins = emptyCallOrigins();
 	const foldCall = (call: LedgerUsageCall): void => {
 		addUsageCall(usageTotals, call);
@@ -651,6 +660,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			else if (call.label === "system-one") callOrigins.systemOne += 1;
 			else if (call.label === "safety-judge") callOrigins.safetyJudge += 1;
 			else if (call.label === "background-memory") callOrigins.backgroundMemory += 1;
+			else if (call.label === "failed-compaction") callOrigins.failedCompaction += 1;
 		}
 	}
 	for (const row of outOfTurnRows) {
@@ -666,8 +676,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		(sum, session) => sum + session.usageCalls.reduce((missing, call) => missing + (call.missingTokenCalls ?? 0), 0),
 		0,
 	);
-	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows, missingSessionCalls);
-	const failedCompaction = summarizeFailedCompactionUsage(outOfTurnRows);
+	const reportedTotals = reportedUsageTotals(usageTotals, outOfTurnRows, sessionCalls);
+	const compactionRows = [...outOfTurnRows, ...failedCompactionUsageFromCalls(sessionCalls)];
+	const failedCompaction = summarizeFailedCompactionUsage(compactionRows);
 	const allRecordedTokens = usageTotals.totalTokens + workerUsage.totalTokens;
 	const missingTokenCalls =
 		missingSessionCalls +
@@ -822,6 +833,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 						outOfTurnRows.filter(
 							(call) => call.target === row.providerId && call.attributedModelId === row.attributedModelId,
 						),
+						sessionCalls.filter(
+							(call) => call.providerId === row.providerId && call.attributedModelId === row.attributedModelId,
+						),
 					),
 				});
 			}
@@ -968,7 +982,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 		if (failedCompaction.calls > 0) {
 			const erroredCompactionCost = aggregateCostAmounts(
-				outOfTurnRows
+				compactionRows
 					.filter(
 						(row) => row.label === "failed-compaction" && row.callOutcome === "error" && row.failure?.invoked !== false,
 					)

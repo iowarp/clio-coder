@@ -1073,15 +1073,14 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			input.skillContextState === null ? undefined : (input.skillContextState ?? latestSkillContextState(input.entries));
 		const skillContext = captureSkillContext(input.entries, selection);
 		const scope = await openCallScope(input.telemetry, input.model);
+		const observations: CompactionCallObservation[] = [];
 		scope.startAttempt({ roundKind: "normal", toolChoice: "auto" });
 		try {
 			if (!skillContext && input.entries.some((entry) => entry.kind === "skillActivation" && !entry.activation.runId))
 				throw new ProviderCompactionError("native-skills-unverified");
 			await input.beforeSummaryCall?.();
 			input.signal?.throwIfAborted();
-			const native = await scope.withContext(() =>
-				providerCompaction((call) => input.onCall?.({ ...call, ...scope.identity() }), scope),
-			);
+			const native = await scope.withContext(() => providerCompaction((call) => observations.push(call), scope));
 			scope.settle({ stopReason: "stop", usage: native.usage });
 			nativeUsage = addCompactionUsage(undefined, native.usage);
 			input.signal?.throwIfAborted();
@@ -1136,6 +1135,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			if (!(error instanceof ProviderCompactionError)) throw error;
 			fallbackReason = error.category;
 		} finally {
+			for (const call of observations) input.onCall?.({ ...call, ...scope.identity() });
 			await scope.close();
 		}
 	}

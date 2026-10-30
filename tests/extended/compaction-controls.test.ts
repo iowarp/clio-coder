@@ -14,7 +14,10 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
 import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import { summarizeFailedCompactionUsage } from "../../src/domains/observability/compaction-usage.js";
+import {
+	failedCompactionUsageFromCalls,
+	summarizeFailedCompactionUsage,
+} from "../../src/domains/observability/compaction-usage.js";
 import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import {
 	appendOutOfTurnUsageRow,
@@ -77,7 +80,7 @@ describe("production compaction controls", () => {
 		faux.unregister();
 		scratch.restore();
 	});
-	function fixture(literalUsage = false, withHistory = true) {
+	function fixture(literalUsage = false, withHistory = true, journaled = false) {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.chat.target = "chat-target";
 		settings.chat.model = "chat";
@@ -244,6 +247,10 @@ describe("production compaction controls", () => {
 		return {
 			session,
 			liveUsage,
+			journal: async () =>
+				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records.map(
+					({ record }) => record,
+				),
 			journalOutcomes: async () =>
 				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
 					.map(({ record }) => record)
@@ -271,7 +278,7 @@ describe("production compaction controls", () => {
 			},
 			run: createProductionAutoCompact(session, () => settings, providers, {
 				recordTokens: (...args) => liveUsage.push(args),
-				acquireTelemetrySession: journals.acquire,
+				...(journaled ? { acquireTelemetrySession: journals.acquire } : {}),
 			}),
 		};
 	}
@@ -357,6 +364,35 @@ describe("production compaction controls", () => {
 			loop.dispose();
 		}
 	});
+
+	for (const outcome of ["committed", "discarded", "failed"] as const) {
+		it(`folds journaled ${outcome} compaction once in live and replayed totals`, async () => {
+			const f = fixture(true, true, true);
+			if (outcome === "discarded") f.response.text = syntheticCompactionSummary("large ".repeat(100000));
+			if (outcome === "failed") f.response.fail = true;
+			if (outcome === "failed") await rejects(f.run(), /fixture stream error/);
+			else await f.run();
+			strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
+			const journal = await f.journal();
+			const calls = ledgerUsageCalls(f.entries(), {}, journal);
+			strictEqual(calls.length, f.calls.length);
+			strictEqual(calls.length, f.liveUsage.length);
+			strictEqual(
+				calls.reduce((sum, call) => sum + call.totalTokens, 0),
+				f.liveUsage.reduce((sum, row) => sum + Number(row[2]), 0),
+			);
+			ok(calls.every((call) => call.facts && call.compactionOutcome === outcome));
+			ok(calls.every((call) => call.label === (outcome === "committed" ? "compaction" : "failed-compaction")));
+			if (outcome === "committed") {
+				const incomplete = ledgerUsageCalls(
+					f.entries(),
+					{},
+					journal.filter((row) => row.k !== "compaction.closed"),
+				);
+				ok(incomplete.every((call) => call.compactionOutcome === "unknown" && call.label === "compaction"));
+			}
+		});
+	}
 
 	it("manual compaction explains a short conversation with its context usage", async () => {
 		const f = fixture(false, false);
@@ -953,7 +989,7 @@ describe("production compaction controls", () => {
 	});
 
 	it("routes a configured dedicated summary model through the production callback", async () => {
-		const f = fixture();
+		const f = fixture(false, true, true);
 		f.settings.context.compaction.model = "summary-target/summary";
 		await f.run();
 		ok(f.calls.length > 0);
@@ -1172,7 +1208,7 @@ describe("production compaction controls", () => {
 		strictEqual(f.liveUsage[0]?.[5], "unknown");
 	});
 	it("retains both calls when a split compaction's second stream fails", async () => {
-		const f = fixture(true);
+		const f = fixture(true, true, true);
 		f.settings.context.compaction.model = "summary-target/summary";
 		const tail = appendTurn(f.state, {
 			parentId: f.entries().at(-1)?.turnId ?? null,
@@ -1198,29 +1234,26 @@ describe("production compaction controls", () => {
 			(await f.journalOutcomes()).map((row) => row.data),
 			[{ callIds: journalCalls.map((row) => row.data.callId), outcome: "failed", checkpointTurnId: null }],
 		);
-		const read = readOutOfTurnUsageRows(clioStateDir());
-		deepStrictEqual(read.errors, []);
-		strictEqual(read.rows.length, 2);
-		deepStrictEqual(
-			read.rows.map((row) => row.usage.totalTokens),
-			[15, 15],
-		);
-		deepStrictEqual(
-			read.rows.map((row) => row.callOutcome),
-			["success", "error"],
-		);
-		const summary = summarizeFailedCompactionUsage(read.rows);
-		strictEqual(summary.knownUsage.totalTokens, 30);
-		strictEqual(summary.erroredKnownUsage.totalTokens, 15);
+		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
+		const calls = ledgerUsageCalls(f.entries(), {}, await f.journal());
+		const rows = failedCompactionUsageFromCalls(calls);
+		const summary = summarizeFailedCompactionUsage(rows);
+		strictEqual(summary.calls, 2);
+		strictEqual(summary.successfulCalls, 1);
+		strictEqual(summary.erroredCalls, 1);
+		strictEqual(summary.knownUsage.totalTokens, 15);
+		strictEqual(summary.erroredKnownUsage.totalTokens, null);
+		strictEqual(summary.unobservedUsageCalls.totalTokens, 2, "even the completed call omitted its cache counts");
 		strictEqual(summary.unobservedUsageCalls.costUsd, 2);
 		strictEqual(f.liveUsage.length, 2);
-		for (const row of read.rows) {
-			strictEqual(row.target, "summary-target");
-			strictEqual(row.repoIdentity, f.state.meta.cwdHash);
-		}
+		strictEqual(
+			f.liveUsage.reduce((sum, row) => sum + Number(row[2]), 0),
+			15,
+		);
+		ok(calls.every((call) => call.providerId === "summary-target" && call.label === "failed-compaction"));
 	});
 	it("keeps ambiguous zero failed usage null and reports it as unknown in the built CLI", async () => {
-		const f = fixture(true);
+		const f = fixture(true, true, true);
 		f.response.fail = true;
 		f.response.usage = {
 			input: 0,
@@ -1231,7 +1264,8 @@ describe("production compaction controls", () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		};
 		await rejects(f.run(), /fixture stream error/);
-		const rows = readOutOfTurnUsageRows(clioStateDir()).rows;
+		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
+		const rows = failedCompactionUsageFromCalls(ledgerUsageCalls(f.entries(), {}, await f.journal()));
 		strictEqual(rows.length, 1);
 		// Rows carry pricing provenance again (5996f82c6); a null cost reads as unknown.
 		deepStrictEqual(rows[0]?.usage, {
@@ -1442,7 +1476,7 @@ describe("production compaction controls", () => {
 		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 1);
 	});
 	it("does not duplicate usage if checkpoint append wrote before throwing", async () => {
-		const f = fixture(true);
+		const f = fixture(true, true, true);
 		const append = f.session.appendEntry;
 		f.session.appendEntry = (entry) => {
 			append(entry);
@@ -1454,7 +1488,7 @@ describe("production compaction controls", () => {
 		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
 	});
 	it("reports ambiguous checkpoint persistence without a speculative second accounting write", async () => {
-		const f = fixture(true);
+		const f = fixture(true, true, true);
 		f.session.appendEntry = () => {
 			appendFileSync(sessionPaths(f.state.meta).current, '{"kind":"compactionSummary"');
 			throw new Error("partial append failure");

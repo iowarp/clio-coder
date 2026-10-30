@@ -1,8 +1,10 @@
 /** Preserve spending from summary streams that did not produce a checkpoint. */
 
+import type { FactSum } from "../../core/telemetry/fact.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { CompactionCallObservation } from "../session/compaction/compact.js";
 import { extractReasoningTokens } from "../session/context-accounting.js";
+import type { LedgerUsageCall } from "../session/usage.js";
 import type { BackgroundMemoryUsageSink } from "./background-memory-usage.js";
 import { appendOutOfTurnUsageRow, type OutOfTurnUsage, type OutOfTurnUsageRow } from "./out-of-turn-usage.js";
 
@@ -39,9 +41,9 @@ function observedUsage(call: CompactionCallObservation): OutOfTurnUsage & { cost
 }
 
 /**
- * The checkpoint is the sole accounting source on success. Call this only when
- * no checkpoint exists; each row is one actual stream invocation, not a retry.
- * Missing amounts remain null on disk. Numeric live counters are known subtotals.
+ * Legacy clients without a journal retain usage when no checkpoint exists.
+ * Journaled observations already have one durable owner and never write here (#434).
+ * Missing legacy amounts remain null on disk; live counters are known subtotals.
  */
 export function recordFailedCompactionCalls(
 	origin: CompactionUsageOrigin,
@@ -49,6 +51,7 @@ export function recordFailedCompactionCalls(
 	observability?: BackgroundMemoryUsageSink,
 ): void {
 	for (const call of calls) {
+		if (call.callId) continue;
 		const usage = observedUsage(call);
 		const row: OutOfTurnUsageRow = {
 			label: "failed-compaction",
@@ -93,8 +96,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const USAGE_FIELDS = ["input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "costUsd"] as const;
 type UsageField = (typeof USAGE_FIELDS)[number];
 
+type CompactionUsageObservation = Pick<OutOfTurnUsageRow, "label" | "callOutcome" | "failure" | "usage"> & {
+	unknownUsageFields?: readonly UsageField[];
+};
+
+/** Compatibility reporting shape only; journal projections never write a second usage store (#434). */
+export function failedCompactionUsageFromCalls(calls: readonly LedgerUsageCall[]): CompactionUsageObservation[] {
+	return calls.flatMap((call) => {
+		if (call.label !== "failed-compaction" || !call.callOutcome || !call.facts) return [];
+		const facts = call.facts;
+		const fields: Record<UsageField, FactSum> = {
+			input: facts.usage.input,
+			output: facts.usage.output,
+			cacheRead: facts.usage.cacheRead,
+			cacheWrite: facts.usage.cacheWrite,
+			reasoning: facts.usage.reasoning,
+			totalTokens: facts.totalTokens,
+			costUsd: facts.usd,
+		};
+		const known = (sum: FactSum): number | null =>
+			sum.coverage.measured + sum.coverage.estimated > 0 ? sum.measured + sum.estimated : null;
+		return [
+			{
+				label: "failed-compaction" as const,
+				callOutcome: call.callOutcome,
+				usage: {
+					input: known(fields.input),
+					output: known(fields.output),
+					cacheRead: known(fields.cacheRead),
+					cacheWrite: known(fields.cacheWrite),
+					reasoning: known(fields.reasoning),
+					totalTokens: known(fields.totalTokens),
+					costUsd: known(fields.costUsd),
+					...(call.costProvenance ? { costProvenance: call.costProvenance } : {}),
+				},
+				unknownUsageFields: USAGE_FIELDS.filter((field) => fields[field].unknownCount > 0),
+			},
+		];
+	});
+}
+
 /** Known subtotals and missing-field coverage; zero missing values are never inferred. */
-export function summarizeFailedCompactionUsage(rows: ReadonlyArray<OutOfTurnUsageRow>) {
+export function summarizeFailedCompactionUsage(rows: ReadonlyArray<CompactionUsageObservation>) {
 	// #430: a compaction cancelled before its request left the process is not a
 	// stream, and its null fields are not missing usage.
 	const calls = rows.filter((row) => row.label === "failed-compaction" && row.failure?.invoked !== false);
@@ -104,8 +147,8 @@ export function summarizeFailedCompactionUsage(rows: ReadonlyArray<OutOfTurnUsag
 	for (const row of calls) {
 		for (const field of USAGE_FIELDS) {
 			const value = row.usage[field];
-			if (value === null) unobservedUsageCalls[field] += 1;
-			else {
+			if (value === null || row.unknownUsageFields?.includes(field)) unobservedUsageCalls[field] += 1;
+			if (value !== null) {
 				knownUsage[field] = (knownUsage[field] ?? 0) + value;
 				if (row.callOutcome === "error") erroredKnownUsage[field] = (erroredKnownUsage[field] ?? 0) + value;
 			}

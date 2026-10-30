@@ -1516,6 +1516,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		`compaction failed: ${error instanceof Error ? error.message : String(error)}`;
 
 	const recordCompactionUsage = (agentRuntime: AgentRuntime, result: CompactResult): void => {
+		if (result.callIds?.length) return;
 		const usage = result.usage;
 		if (!usage || !deps.observability) return;
 		deps.observability.recordTokens(

@@ -27,7 +27,33 @@ export function usageCallsFromJournal(
 	records: Iterable<TelemetryRecord>,
 	callIds?: ReadonlySet<string>,
 ): LedgerUsageCall[] {
-	return usageCallsFromAttempts(foldCallJournal(records, callIds).attempts);
+	const rows = [...records];
+	const outcomes = new Map<string, NonNullable<LedgerUsageCall["compactionOutcome"]>>();
+	for (const row of rows) {
+		if (row.k !== "compaction.closed") continue;
+		for (const id of row.data.callIds) {
+			const previous = outcomes.get(id);
+			outcomes.set(id, previous !== undefined && previous !== row.data.outcome ? "unknown" : row.data.outcome);
+		}
+	}
+	return usageCallsFromAttempts(foldCallJournal(rows, callIds).attempts).map((call) =>
+		call.label === "compaction" ? withCompactionOutcome(call, outcomes.get(call.callId ?? "") ?? "unknown") : call,
+	);
+}
+
+/** A completed provider call can still fail to produce a checkpoint; absence alone proves neither outcome (#434). */
+export function withCompactionOutcome(
+	call: LedgerUsageCall,
+	outcome: NonNullable<LedgerUsageCall["compactionOutcome"]>,
+): LedgerUsageCall {
+	return {
+		...call,
+		compactionOutcome: outcome,
+		label:
+			outcome === "failed" || outcome === "discarded" || call.callOutcome === "error" || call.callOutcome === "aborted"
+				? "failed-compaction"
+				: "compaction",
+	};
 }
 
 /** Live settlement and durable replay share the same projection (#434). */
@@ -56,6 +82,14 @@ export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): Ledg
 			{
 				callId: started.callId,
 				attemptId: started.attemptId,
+				...(settled
+					? {
+							callOutcome:
+								settled.stop.reason === "error" || settled.stop.reason === "aborted"
+									? settled.stop.reason
+									: ("success" as const),
+						}
+					: {}),
 				facts,
 				providerId: target.targetId,
 				requestedModelId: target.requestedModel,
@@ -88,7 +122,7 @@ export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): Ledg
 	});
 }
 
-/** Labels whose usage writer has moved from out-of-turn.jsonl to the call journal (#434). */
+/** Labels whose journal owns usage even without a transcript or checkpoint row (#434). */
 export function journalOwnsSideUsage(label: CallLabel): boolean {
 	return (
 		label === "btw" ||
@@ -97,7 +131,8 @@ export function journalOwnsSideUsage(label: CallLabel): boolean {
 		label === "prewarm" ||
 		label === "system-one" ||
 		label === "safety-judge" ||
-		label === "memory"
+		label === "memory" ||
+		label === "compaction"
 	);
 }
 

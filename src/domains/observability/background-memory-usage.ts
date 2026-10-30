@@ -39,6 +39,7 @@ export interface BackgroundMemoryStepUsage {
 
 /** The subset of the observability contract this accounting needs. */
 export interface BackgroundMemoryUsageSink {
+	recordNeverSentCalls?: ObservabilityContract["recordNeverSentCalls"];
 	acquireTelemetrySession?: ObservabilityContract["acquireTelemetrySession"];
 	recordTokens(
 		providerId: string,

@@ -65,7 +65,7 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
-import type { Payload } from "../core/telemetry/schemas.js";
+import type { CallSettled, Payload } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -282,7 +282,7 @@ import {
 	parseSessionEntries,
 	SessionDomainModule,
 } from "../domains/session/index.js";
-import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
+import { usageCallsFromAttempts, withCompactionOutcome } from "../domains/session/journal-usage.js";
 import {
 	clearPendingProtectedArtifact,
 	reconcilePendingProtectedArtifacts,
@@ -1541,6 +1541,7 @@ async function runCompactionFlow(
 	// Keep this owner alive through checkpoint publication, after individual streams close (#434).
 	const lease = await observability?.acquireTelemetrySession?.(meta, "compaction");
 	const callIds = new Set<string>();
+	const settledCalls: CallSettled[] = [];
 	const closure: Payload<"compaction.closed"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
 	try {
 		// Folded over the full applicable ledger before this compaction cuts it, so
@@ -1635,7 +1636,10 @@ async function runCompactionFlow(
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
 								costProvenance: resolved.costProvenance,
-								onSettled: (facts) => callIds.add(facts.callId),
+								onSettled: (facts) => {
+									callIds.add(facts.callId);
+									settledCalls.push(facts);
+								},
 							},
 						}
 					: {}),
@@ -1852,6 +1856,17 @@ async function runCompactionFlow(
 	} finally {
 		if (lease && callIds.size > 0)
 			recordTelemetry("compaction.closed", { ...closure, callIds: [...callIds] }, lease.context);
+		if (observability && session.current()?.id === meta.id) {
+			try {
+				for (const facts of settledCalls) {
+					if (facts.disposition === "never_sent") observability.recordNeverSentCalls?.(1);
+					for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
+						recordUsageCall(observability, withCompactionOutcome(call, closure.outcome));
+				}
+			} catch {
+				writeDiagnostic("[clio-coder:telemetry] live compaction projection failed; journal retains the calls\n");
+			}
+		}
 		await lease?.release();
 	}
 }

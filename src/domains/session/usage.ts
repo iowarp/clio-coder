@@ -12,6 +12,7 @@ import {
 	responseModelIdObservationFromRecord,
 } from "../../core/response-model-id.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
 import type { CallTotals } from "../observability/folds.js";
@@ -27,6 +28,8 @@ export interface LedgerUsageCall {
 	attemptId?: string;
 	facts?: CallTotals;
 	costSummary?: CostAggregate;
+	callOutcome?: "success" | "error" | "aborted";
+	compactionOutcome?: Payload<"compaction.closed">["outcome"] | "unknown";
 	providerId: string;
 	/** Model id the accounting row uses, or `unknown` when an observed response omitted it. */
 	attributedModelId: string;
@@ -88,6 +91,8 @@ export function ledgerUsageCalls(
 ): LedgerUsageCall[] {
 	const calls: LedgerUsageCall[] = [];
 	const journalCalls = new Map<string, LedgerUsageCall[]>();
+	for (const row of journal)
+		if (row.k === "call.started" || row.k === "call.settled") journalCalls.set(row.data.callId, []);
 	for (const call of usageCallsFromJournal(journal)) {
 		if (!call.callId) continue;
 		const group = journalCalls.get(call.callId) ?? [];
@@ -98,12 +103,17 @@ export function ledgerUsageCalls(
 	let currentTarget = defaults.target ?? null;
 	let currentModel = defaults.model ?? null;
 	for (const entry of entries) {
-		// A compaction summarizes history through a real model call, billed like
-		// any other. Its usage rides on the compactionSummary entry rather than on
-		// an assistant message, because the summary is context machinery and never
-		// enters the conversation; folding it here is what puts it on `/usage` and
-		// in `clio-coder usage report`.
+		// Checkpoints link their calls; older checkpoints retain an aggregate fallback (#434).
 		if (entry?.kind === "compactionSummary") {
+			if (entry.callIds?.length && entry.callIds.every((id) => journalCalls.has(id))) {
+				for (const id of entry.callIds) {
+					if (!projected.has(id)) calls.push(...(journalCalls.get(id) ?? []));
+					projected.add(id);
+				}
+				continue;
+			}
+			// If any referenced facts are missing, the legacy aggregate substitutes for the whole group (#434).
+			for (const id of entry.callIds ?? []) projected.add(id);
 			const usage = entry.usage;
 			if (!usage) continue;
 			calls.push({
@@ -195,6 +205,7 @@ export function ledgerCallFailureCounts(
 ) {
 	const linked = new Set(
 		entries.flatMap((entry) => {
+			if (entry.kind === "compactionSummary") return entry.callIds ?? [];
 			if (entry.kind !== "message" || entry.role !== "assistant") return [];
 			const callId = (entry.payload as { callId?: unknown } | null)?.callId;
 			return typeof callId === "string" ? [callId] : [];
