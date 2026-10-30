@@ -86,7 +86,7 @@ function rotatedName(fileName: JournalFileName, id: string): string {
 	return fileName === "calls.jsonl" ? `calls.${id}.jsonl` : `events.${id}.ndjson`;
 }
 
-function journalFiles(names: string[], fileName: JournalFileName): string[] {
+export function journalFiles(names: string[], fileName: JournalFileName): string[] {
 	const pattern = fileName === "calls.jsonl" ? /^calls\.rec_[0-9a-f-]+\.jsonl$/ : /^events\.rec_[0-9a-f-]+\.ndjson$/;
 	const files = names.filter((name) => pattern.test(name)).sort();
 	if (names.includes(fileName)) files.push(fileName);

@@ -34,6 +34,7 @@ import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
+import { exportTelemetryBundle, importTelemetryBundle } from "../../src/domains/observability/bundle.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
 import { openCallJournal, readCallJournal, readCallJournalSync } from "../../src/domains/observability/call-journal.js";
 import {
@@ -705,6 +706,108 @@ test("a session stores prompt text only under content capture, once per distinct
 	} finally {
 		await journals.closeAll();
 		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("a research export round-trips through import-bundle into a fixture with the same fold (#434)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-bundle-"));
+	const stateDir = join(root, "state");
+	const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
+	const journals = createSessionJournals(stateDir, () => {}, {
+		current: () => effectiveTelemetryCapture({ mode: "research", research }, true),
+	});
+	const origin = { id: "bundle-session", cwdHash: "bundlehash" };
+	const measured = (value: number) => ({ kind: "measured", value, source: "provider" }) as const;
+	const settled = {
+		...unsent,
+		disposition: "settled" as const,
+		stop: { reason: "stop" as const },
+		usage: {
+			input: measured(100),
+			cacheRead: measured(400),
+			cacheWrite: measured(0),
+			cacheWrite1h: measured(0),
+			output: measured(20),
+			reasoning: measured(0),
+		},
+		pricing: {
+			usd: { kind: "estimated", value: 0.01, method: "target-rates" } as const,
+			pricedBy: "target-rates" as const,
+		},
+	};
+	const call = (label: "main" | "worker", ctx: Parameters<typeof beginCall>[1], objects?: CallStarted["objects"]) =>
+		beginCall(
+			{
+				label,
+				...(objects ? { objects } : {}),
+				target: { targetId: "t", runtimeId: "r", api: "a", requestedModel: "m", reportedModel: unknown },
+				roundKind: "normal",
+				toolChoice: "auto",
+			},
+			ctx,
+		);
+	const runId = "bundlerun";
+	const runContext = { sessionId: origin.id, runId, label: "worker" as const };
+	const run = await openCallJournal({
+		sessionDirectory: join(stateDir, "runs", runId),
+		fileName: "events.ndjson",
+		context: runContext,
+		writer,
+	});
+	try {
+		const lease = await journals.acquire(origin, "main");
+		const objects = await lease.storeRequestObjects?.({
+			prompt: { sections: [{ id: "s", tokenEstimate: 1 }], fragmentManifest: [], systemPrompt: "fixture prompt" },
+			tools: [{ name: "read" }],
+		});
+		call("main", lease.context, objects).settle(settled);
+		const worker = call("worker", runContext);
+		worker.settle(settled);
+		recordTelemetry("call.ref", { runId, callId: worker.callId }, lease.context);
+		await lease.release();
+		await run.flush();
+		const sources = async (directory: string) => [
+			...(await readCallJournal(directory)).records,
+			...(await readCallJournal(join(directory, "runs", runId), "events.ndjson")).records,
+		];
+		const sessionDirectory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		const source = foldCallJournal(
+			[
+				...(await readCallJournal(sessionDirectory)).records,
+				...(await readCallJournal(join(stateDir, "runs", runId), "events.ndjson")).records,
+			].map(({ record }) => record),
+		);
+		strictEqual(source.attempts.length, 2);
+		for (const content of [true, false]) {
+			const bundle = join(root, `bundle-${content}`);
+			const fixture = join(root, `fixture-${content}`);
+			await exportTelemetryBundle({
+				stateDir,
+				...{ cwdHash: origin.cwdHash, sessionId: origin.id },
+				out: bundle,
+				content,
+				writer,
+			});
+			const imported = await importTelemetryBundle(bundle, fixture);
+			deepStrictEqual(imported.manifest.source.runs, [runId]);
+			strictEqual(imported.manifest.ceiling.mode, "research");
+			strictEqual(imported.manifest.ceiling.capture.content, content);
+			const rows = (await sources(fixture)).map(({ record }) => record);
+			deepStrictEqual(foldCallJournal(rows).totals, source.totals, "the fixture folds to the session's totals");
+			strictEqual(
+				rows.some((row) => row.cc === "content-bearing"),
+				content,
+			);
+			const objects = await readdir(join(fixture, "objects"));
+			strictEqual(objects.length, content ? 3 : 2, "structure and tool schemas always; prompt text only with content");
+			strictEqual(imported.manifest.excluded.contentBearing, content ? 0 : 1);
+		}
+		await appendFile(join(root, "bundle-false", "calls.jsonl"), "x");
+		await rejects(importTelemetryBundle(join(root, "bundle-false"), join(root, "tampered")), /sha256/);
+	} finally {
+		await run.close();
+		await journals.closeAll();
+		await rm(root, { recursive: true, force: true });
 	}
 });
 
