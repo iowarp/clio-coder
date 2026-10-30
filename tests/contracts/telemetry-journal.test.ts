@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -1078,6 +1078,9 @@ test("usage report discovers a standalone run journal that has no session and no
 			}),
 		);
 		await run.close();
+		// Appends never bump the run directory; a run created before the window still settled inside it.
+		const created = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
+		await utimes(join(stateDir, "runs", owner.runId), created, created);
 		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
 		const report = spawnSync(
 			process.execPath,

@@ -192,6 +192,20 @@ function runCallContribution(call: LedgerUsageCall, audience: string): WorkerUsa
 	};
 }
 
+async function newestSegmentWriteMs(directory: string): Promise<number> {
+	let newest = Number.NEGATIVE_INFINITY;
+	for (const name of await readdir(directory)) {
+		if (!/^events(?:\.rec_[0-9a-f-]+)?\.ndjson$/u.test(name)) continue;
+		try {
+			newest = Math.max(newest, (await stat(join(directory, name))).mtimeMs);
+		} catch {
+			// A segment rotated away mid-scan was written recently; read the run rather than skip it.
+			return Number.POSITIVE_INFINITY;
+		}
+	}
+	return newest;
+}
+
 /**
  * A run with no parent session and no receipt (a standalone `run` that crashed before sealing, say) still spent
  * money; only its own journal says how much. Parented runs belong to their session's accounting (#434).
@@ -217,7 +231,10 @@ async function standaloneRunCalls(
 		if (!/^[a-zA-Z0-9_-]+$/u.test(runId) || known(runId) || (repoRunIds !== null && !repoRunIds.has(runId))) continue;
 		const directory = join(root, runId);
 		try {
-			if ((await stat(directory)).mtimeMs < from) continue;
+			// An append bumps its segment's mtime, never the directory's, so a run created before the window can
+			// still settle inside it. Only a run whose newest segment predates the window, beyond worker clock skew,
+			// is skipped; runJournalsInWindow then selects by each call's own settled time (#434).
+			if ((await newestSegmentWriteMs(directory)) < from - USAGE_WINDOW_FUTURE_SKEW_MS) continue;
 			const journal = await readCallJournal(directory, "events.ndjson");
 			if (journal.records.some(({ record }) => record.ctx.sessionId !== null)) continue;
 			runs.set(runId, { ...journal, throughMs: to });
