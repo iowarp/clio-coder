@@ -18,7 +18,15 @@ export function bindCodexUserTurn(message: unknown, turnId: string): void {
 	if (record(message) && message.role === "user") message.clioCodexTurnId = turnId;
 }
 
-/** Replay updates before their user boundary, including full resends and retries (#423). */
+/**
+ * Replay updates before their user boundary, including full resends and retries (#423).
+ *
+ * Measured on gpt-6-luna over SSE, 2026-10-30: a body that differed from the previous one only in top-level
+ * reasoning.effort read 0 of 5,635 prompt tokens, and switching the effort back read 0 again, so the backend keeps
+ * one entry per prompt_cache_key tagged with the top-level effort. With the effort pinned to the generation's
+ * initial value and the change carried by a configuration_update item, the next request read 5,504 of 5,686
+ * (the full 128-aligned prefix), as did the identical requests after it.
+ */
 export function withCodexConfiguration<T extends StreamOptions | SimpleStreamOptions>(
 	model: Model<Api>,
 	options: T | undefined,

@@ -10,6 +10,7 @@ import { compactionBudget, getCatalogModelForRuntime } from "../domains/provider
 import {
 	appendEnginePolicyMessage,
 	compactEngineCodex,
+	engineCodexConfiguration,
 	engineCodexUserTurn,
 	engineInitialSystemPrompt,
 	replaceEngineMessages,
@@ -3248,6 +3249,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const replayTruncationHash =
 				truncated.length > 0 ? createHash("sha256").update(JSON.stringify(truncated)).digest("hex") : undefined;
 			const now = Date.now();
+			// #423: on Codex the wire effort is the generation's initial effort for every call; a /thinking change
+			// travels as a configuration_update item and keeps the cache (measured 2026-10-30), so it is no break cause.
+			const wireEffort = state.runtime ? engineCodexConfiguration(state.runtime.agent)?.initialEffort : undefined;
 			// #423: the lifetime the keepalive would have refreshed against is the one idle is judged by.
 			const model = state.runtime?.agent.state.model;
 			const lifetimeSeconds = model ? cacheLifetimeSeconds(model, undefined) : undefined;
@@ -3260,7 +3264,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					? {
 							targetId: state.runtime.targetId,
 							modelId: state.runtime.wireModelId,
-							thinkingLevel: state.runtime.runtimeResolution.effectiveThinkingLevel,
+							thinkingLevel: wireEffort ?? state.runtime.runtimeResolution.effectiveThinkingLevel,
 							toolChoice: cacheRequestToolChoice,
 							...(replayTruncationHash === undefined ? {} : { replayTruncationHash }),
 						}
