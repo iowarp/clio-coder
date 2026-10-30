@@ -22,8 +22,6 @@ export interface TurnSpend {
 	cost: string | null;
 	/** The calls that reported no usage or never left, or null when every call reported. */
 	coverage: string | null;
-	/** The session's own calls the fold holds for the turn, which tells when a run's calls have all landed. */
-	ownCalls: number;
 }
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
@@ -51,10 +49,9 @@ function nonZero(quantity: Quantity): boolean {
 
 /** Null when the view cannot resolve the turn's references. */
 export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null {
-	const read = (metric: FactMetric, scope: "session" | "own" = "session") =>
-		view.quantity(factRef({ scope, owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
+	const read = (metric: FactMetric) =>
+		view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
 	const calls = read("calls");
-	const ownCalls = read("calls", "own");
 	const input = read("input");
 	const output = read("output");
 	const cacheRead = read("cacheRead");
@@ -62,8 +59,7 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 	const usd = read("usd");
 	const unreported = read("missingTokenCalls");
 	const neverSent = read("neverSent");
-	if (!calls || !ownCalls || !input || !output || !cacheRead || !cacheWrite || !usd || !unreported || !neverSent)
-		return null;
+	if (!calls || !input || !output || !cacheRead || !cacheWrite || !usd || !unreported || !neverSent) return null;
 	const unknownCalls = known(unreported);
 	const skipped = known(neverSent);
 	return {
@@ -75,6 +71,16 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 		// A turn nothing priced makes no cost claim, so the receipt names none rather than "not measured".
 		cost: contributed(usd) && usd.display !== COST_NOT_MEASURED ? usd.display : null,
 		coverage: unknownCalls > 0 || skipped > 0 ? usageCoverageLabel(unknownCalls, skipped) : null,
-		ownCalls: known(ownCalls),
 	};
+}
+
+/**
+ * Whether the view's fold holds every call a run settled. Compared by id, not by count: the turn's other runs, such
+ * as one an auth refresh continues, and its side calls journal under the same turn, so the turn's count can reach the
+ * run's before the run's last call lands (#434 §11.3).
+ */
+export function turnHoldsCalls(view: TelemetryView, turnId: string, callIds: ReadonlyArray<string>): boolean {
+	if (callIds.length === 0) return true;
+	const held = new Set(view.calls({ turnIds: [turnId] }).calls.map((call) => call.callId));
+	return callIds.every((callId) => held.has(callId));
 }

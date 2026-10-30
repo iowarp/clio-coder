@@ -66,7 +66,7 @@ import {
 } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
-import { type TurnSpend, turnSpend } from "./turn-spend.js";
+import { type TurnSpend, turnHoldsCalls, turnSpend } from "./turn-spend.js";
 
 // Every fenced code block, top level or nested in a list or quote, reaches the
 // screen through pi-tui's Markdown component, which exposes the
@@ -1616,7 +1616,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			entry.turnUsage = { ...usage, spend };
 			markDirty();
 		}
-		if (spend.ownCalls >= (usage.callIds?.length ?? 0) && !runningTurns.has(usage.turnId)) liveReceipts.delete(entry);
+		if (!runningTurns.has(usage.turnId) && turnHoldsCalls(view, usage.turnId, usage.callIds ?? []))
+			liveReceipts.delete(entry);
 	};
 	/** The turns with a referenced run still going, read once per view. */
 	const runningTurns = (view: TelemetryView): Set<string> =>
