@@ -42,7 +42,6 @@ import {
 import {
 	type AssistantCallTiming,
 	assistantSessionPayload,
-	estimatedUsageForInterruptedTurn,
 	explainInterruptedAssistant,
 	extractUserText,
 	hasPersistableAssistantContent,
@@ -394,12 +393,6 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			payload.continuityDeliveryId = deliveryId;
 			payload.stopReason = message.stopReason;
 		}
-		// A synthetic notice is not output, so it can only carry the hollow call's display estimate (#423, #430).
-		const interruptedUsage =
-			(message as { estimatedUsage?: Record<string, unknown> }).estimatedUsage ??
-			(interruptClosure === undefined ? estimatedUsageForInterruptedTurn(message, deps.promptSideTokens()) : null);
-		if (payload.callInvoked !== false && interruptedUsage !== null) payload.estimatedUsage = interruptedUsage;
-
 		if (isLengthStopAssistantMessage(message) && state.runtime) {
 			const contextExhaustion = recordValue(payload.contextExhaustion);
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;

@@ -153,23 +153,25 @@ describe("contracts/metering integrity", () => {
 			strictEqual(payload.usage, usage);
 			strictEqual(payload.callId, "call-fixture");
 			strictEqual(payload.attemptId, "attempt-fixture");
-			const entry = assistant("immutable", "aborted", usage, payload);
+			// The ledger is the conversation record; the journal owns usage, so annotations stay on the live message (#434 §5.3).
+			strictEqual(payload.callAccounting, undefined);
+			strictEqual(payload.estimatedUsage, undefined);
+			strictEqual(sumRunUsage([message]).tokens, reported.totalTokens);
+			const projected = messageUsageForAccounting(message);
+			ok(projected);
+			strictEqual(projected.targetId, "selected-target");
+			projected.input = 999;
+			strictEqual(usage.input, reported.input);
+			// Old ledgers persisted the annotations beside usage, and older ones inside it; both still read alike.
+			const accounting = (message as unknown as { callAccounting: Record<string, unknown> }).callAccounting;
+			const entry = assistant("immutable", "aborted", usage, { ...payload, callAccounting: accounting });
 			const calls = ledgerUsageCalls([entry]);
 			strictEqual(calls[0]?.providerId, "selected-target");
 			strictEqual(calls[0]?.totalTokens, reported.totalTokens);
-			strictEqual(sumRunUsage([message]).tokens, reported.totalTokens);
-			const projected = messageUsageForAccounting(payload);
-			ok(projected);
-			projected.input = 999;
-			strictEqual(usage.input, reported.input);
 			const legacy = assistant(
 				"legacy",
 				"aborted",
-				{
-					...usage,
-					...(payload.callAccounting as Record<string, unknown>),
-					callInvoked: true,
-				},
+				{ ...usage, ...accounting, callInvoked: true },
 				{ responseModelIdObservation: payload.responseModelIdObservation },
 			);
 			strictEqual(calls[0]?.callId, "call-fixture");

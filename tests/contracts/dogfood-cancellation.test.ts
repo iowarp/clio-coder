@@ -379,15 +379,10 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			strictEqual(payload.stopReason, "aborted");
 			const usage = recordValue(payload.usage);
 			ok(usage);
-			strictEqual(recordValue(payload.callAccounting)?.usageObserved, false);
-			strictEqual(recordValue(payload.callAccounting)?.costProvenance, "unknown");
 			for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"]) strictEqual(usage[key], 0);
-			const estimatedUsage = recordValue(payload.estimatedUsage);
-			ok(estimatedUsage);
-			strictEqual(estimatedUsage.estimated, true);
-			ok(Number(estimatedUsage.input) > 0);
-			if (mode !== "empty") ok(Number(estimatedUsage.output) > 0);
-			else strictEqual(estimatedUsage.output, 0);
+			// The ledger is the conversation record; the journal owns the call's accounting and estimate (#434 §5.3).
+			strictEqual(payload.callAccounting, undefined);
+			strictEqual(payload.estimatedUsage, undefined);
 			const serialized = JSON.stringify(assistant);
 			doesNotMatch(serialized, /LiteLLM route|\/model/u);
 			if (mode === "partial") ok(serialized.includes(PARTIAL));
@@ -549,11 +544,11 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			const assistant = assistants[0];
 			ok(assistant?.kind === "message");
 			const payload = recordValue(assistant.payload);
-			strictEqual(recordValue(payload?.callAccounting)?.usageObserved, false);
+			strictEqual(payload?.callAccounting, undefined);
 			strictEqual(recordValue(payload?.usage)?.input, 0);
 			strictEqual(recordValue(payload?.failure)?.invoked, true);
 			strictEqual(recordValue(payload?.interruptClosure)?.operatorCancel, source === "stream_cancel");
-			strictEqual(recordValue(payload?.estimatedUsage)?.output, 0);
+			strictEqual(payload?.estimatedUsage, undefined);
 			ok(typeof payload?.apiMs === "number");
 			const replay = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => view });
 			rehydrateChatPanelFromTurns(replay, f.entries());

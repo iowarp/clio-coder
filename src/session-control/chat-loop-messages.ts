@@ -649,8 +649,6 @@ export function assistantSessionPayload(
 		"callId",
 		"attemptId",
 		"callInvoked",
-		"callAccounting",
-		"estimatedUsage",
 		"failure",
 		"api",
 		"provider",
@@ -672,7 +670,6 @@ export function assistantSessionPayload(
 		// Keep the SDK's in-memory shape, but never persist synthetic usage for an unsent call (#434).
 		payload.usage = null;
 		payload.callInvoked = false;
-		delete payload.estimatedUsage;
 	}
 	if (failure && !isSelfExplainingAbort({ stopReason: raw.stopReason, errorMessage: raw.errorMessage, text })) {
 		payload.stopReason = failure.stopReason;
