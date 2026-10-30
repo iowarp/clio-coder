@@ -14,7 +14,11 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { classifyCallFailure } from "../../src/core/call-failure.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../src/core/oauth-retry.js";
 import { isProviderAuthRejection } from "../../src/core/provider-auth-error.js";
+import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { AuthStorage, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
@@ -335,6 +339,36 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(a.apiKey, "access-once");
 		strictEqual(b.apiKey, "access-once");
 		strictEqual(calls.length, 1, "double-checked locking: the second store sees the first store's token");
+	});
+
+	it("records one auth.event per locked refresh, naming the writer and never a token (#427)", async () => {
+		seed(-1000);
+		globalThis.fetch = (async () => {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			return globusResponse("access-recorded");
+		}) as typeof fetch;
+		const records: PendingTelemetry[] = [];
+		const release = registerTelemetrySink("auth-events", { enqueue: (record) => Boolean(records.push(record)) });
+		try {
+			await withTelemetryContext({ sessionId: "auth-events", label: "main" }, () =>
+				Promise.all([open().resolveApiKey("alcf"), open().resolveApiKey("alcf")]),
+			);
+		} finally {
+			release();
+		}
+		const events = records.filter((record) => record.kind === "auth.event");
+		strictEqual(events.length, 2);
+		for (const event of events) ok(validPayload("auth.event", event.data), JSON.stringify(event.data));
+		const byOutcome = Object.fromEntries(
+			events.map((event) => [(event.data as { outcome: string }).outcome, event.data]),
+		);
+		deepStrictEqual(Object.keys(byOutcome).sort(), ["adopted", "refreshed"]);
+		const refreshed = byOutcome.refreshed as { attempted: boolean; writerPid: number | null; updatedAtBefore?: string };
+		strictEqual(refreshed.attempted, true);
+		strictEqual(refreshed.writerPid, process.pid);
+		strictEqual(refreshed.updatedAtBefore, "2026-01-01T00:00:00.000Z");
+		strictEqual((byOutcome.adopted as { attempted: boolean }).attempted, false);
+		ok(!JSON.stringify(events).includes("access-recorded") && !JSON.stringify(events).includes("refresh-"));
 	});
 
 	it("leaves the file byte-identical and reports no key when the refresh is rejected", async () => {

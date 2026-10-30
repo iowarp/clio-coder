@@ -19,6 +19,7 @@ const workerKinds = new Set([
 	"process.exited",
 	"tool.settled",
 	"middleware.fired",
+	"auth.event",
 ]);
 
 /** The parent owns identity and publication; a worker cannot attribute facts to a different run or session (#434). */

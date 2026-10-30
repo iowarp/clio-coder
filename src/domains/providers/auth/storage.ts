@@ -1,5 +1,6 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
+import { recordTelemetry } from "../../../core/telemetry/producer.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
 import type { AuthOperationOptions } from "../../../engine/types.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
@@ -16,6 +17,8 @@ import {
 
 // Refresh before clock skew or request latency can make a locally valid token fail (#427).
 const OAUTH_EXPIRY_MARGIN_MS = 5 * 60_000;
+/** The journal's UTC form; an older credential stamped otherwise just omits its updatedAt (#434). */
+const UTC_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export interface ApiKeyCredential {
 	type: "api_key";
@@ -537,10 +540,54 @@ export class AuthStorage {
 		return resolution;
 	}
 
+	/**
+	 * One auth.event per refresh under the lock: whether this process called the provider, what came back, and the
+	 * credential's updatedAt before and after, so another writer's rotation is visible. No token is recorded (#427).
+	 */
 	private async refreshOAuthCredentialWithLock(
 		providerId: string,
 		signal: AbortSignal,
 		rejectedApiKey?: string,
+	): Promise<{ apiKey: string; credential: OAuthCredential; refreshed: boolean } | null> {
+		const started = performance.now();
+		const held = this.data[providerId];
+		const attempt = { called: false };
+		let outcome: "refreshed" | "adopted" | "failed" | "cancelled" = "failed";
+		let after: string | undefined;
+		try {
+			const result = await this.refreshOAuthCredentialLocked(providerId, signal, rejectedApiKey, attempt);
+			if (result) {
+				outcome = result.refreshed ? "refreshed" : "adopted";
+				after = result.credential.updatedAt;
+			}
+			return result;
+		} catch (error) {
+			if (signal.aborted) outcome = "cancelled";
+			throw error;
+		} finally {
+			const before = held?.type === "oauth" ? held.updatedAt : undefined;
+			try {
+				recordTelemetry("auth.event", {
+					provider: providerId,
+					trigger: rejectedApiKey === undefined ? "expiry" : "rejected",
+					attempted: outcome === "refreshed" || (outcome !== "adopted" && attempt.called),
+					outcome,
+					writerPid: outcome === "refreshed" ? process.pid : null,
+					...(before !== undefined && UTC_MS.test(before) ? { updatedAtBefore: before } : {}),
+					...(after !== undefined && UTC_MS.test(after) ? { updatedAtAfter: after } : {}),
+					durationMs: Math.max(0, performance.now() - started),
+				});
+			} catch {
+				// Recording a refresh never changes the credential it describes (#434).
+			}
+		}
+	}
+
+	private async refreshOAuthCredentialLocked(
+		providerId: string,
+		signal: AbortSignal,
+		rejectedApiKey: string | undefined,
+		attempt: { called: boolean },
 	): Promise<{ apiKey: string; credential: OAuthCredential; refreshed: boolean } | null> {
 		let latestData: AuthStorageData | undefined;
 		const result = await this.backend.withLockAsync(
@@ -562,6 +609,7 @@ export class AuthStorage {
 				) {
 					return { result: { apiKey: await getOAuthApiKey(providerId, stored), credential: stored, refreshed: false } };
 				}
+				attempt.called = true;
 				const refreshed = await refreshOAuthCredentials(providerId, stored, signal);
 				const next: OAuthCredential = {
 					type: "oauth",

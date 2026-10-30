@@ -108,6 +108,7 @@ Pricing is separate from token provenance: `pricing.usd` is a fact, and `pricing
 | `health.window` | operational | content-free | One window of this process's health every 10 s, written to each open session writer: event-loop lag p50/p99/max past a 10 ms sampler, RSS, and the writer's queue depth and drops. Absent loop lag means no sample landed in the window. |
 | `tool.settled` | operational | content-free | Each tool call the model's tool wrapper settles, in a session or a worker's run: the tool, `ok`, `error` or `blocked` and which refusal blocked it, its own duration without an approval wait, the wait itself, and the bytes of the result text the model receives. `ctx` names the turn, the tool call and the model call that asked for it; the safety audit keeps the decision. |
 | `prompt.compiled` | operational | structural | The first call of a writer to cite a compiled prompt structure, which `ctx` names: the `prompt-structure` object, the layout version, the token estimate, the section count and the thinking level. A writer reopened after an idle close records it again, so a reader keeps the earliest per structure. |
+| `auth.event` | operational | content-free | Each OAuth refresh under the credential lock, in a session or a worker's run: the provider, whether the stored token was near expiry or the provider rejected it, whether this process called the refresh endpoint, the outcome (`refreshed`, `adopted` when another writer had already replaced it, `failed` or `cancelled`), the pid that wrote the credential in use when it was this process, and the credential's `updatedAt` before and after. No token is recorded. |
 | `middleware.fired` | operational | content-free | Each middleware rule that emitted effects at a hook, in a session or a worker's run: the hook, the sync, async or awaited phase, the rule id, its effect kinds, its strongest reminder severity, the tool at a tool hook, and the evidence class the rule names, such as `regex:PLAN_REQUEST@operator-request` for plan-close or `count:read-only-calls@prior-turn` for the exploration advisory. |
 | `context.snapshot` | operational | content-free | Each persisted context snapshot's token split, window and source, under the real session and turn, and the call it was reconciled against. |
 | `health.samples` | research | content-free | The same window's full lag percentile curve, event-loop utilization and heap, in research mode. |
@@ -165,7 +166,7 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 These parts of the design are not in this build and are planned for 0.6.7:
 
-- The records `auth.event`, `system_one.decision` and `worker.channel`.
+- The records `system_one.decision` and `worker.channel`.
 - Research capture of request bodies and allow-listed provider response headers.
 - Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
 - `clio-coder telemetry rebuild`, which rebuilds projections from journals and reports rule drift.
