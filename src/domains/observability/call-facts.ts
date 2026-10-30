@@ -97,7 +97,9 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
  * object without that mark is the seed pi writes before a response arrives, and every field stays unknown.
  * A response that never reached its end keeps the positive counts its provider reported as a lower bound, and its
  * zeros stay unknown, because they may only mark where the stream stopped. A reported total above its own
- * breakdown leaves the breakdown's zeros unknown too, and the total is kept beside it.
+ * breakdown is kept beside it. A settled breakdown keeps its measured zeros even then, because Gemini's total also
+ * counts tool-use prompt tokens that Pi maps to no field; only a breakdown with no count at all, the legacy
+ * total-only row, leaves its zeros unknown.
  */
 export function callSettlementFromMessage(
 	message: unknown,
@@ -119,9 +121,10 @@ export function callSettlementFromMessage(
 		0,
 	);
 	const breakdownIncomplete = providerTotal !== null && providerTotal > breakdown;
+	const totalOnly = breakdownIncomplete && breakdown === 0;
 	const read = (key: keyof CallUsage | "totalTokens"): Fact<number> => {
 		const value = amount(usage[key]);
-		if (value === 0 && (!terminal || breakdownIncomplete)) return unknown;
+		if (value === 0 && (!terminal || totalOnly)) return unknown;
 		if (
 			usage.estimated === true ||
 			(usage.clioExternal !== undefined && external.tokenUsage !== "provider-reported") ||

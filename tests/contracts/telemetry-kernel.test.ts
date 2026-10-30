@@ -224,6 +224,22 @@ test("monotonic spans never cross a process or segment origin", () => {
 	}
 });
 
+test("a settled breakdown keeps its measured zeros beside a larger total; only a total-only row loses them (#434)", () => {
+	// Gemini's total also counts tool-use prompt tokens that Pi maps to no breakdown field.
+	const gemini = callSettlementFromMessage(
+		{ stopReason: "stop", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 180 } },
+		"unknown",
+	);
+	deepStrictEqual(gemini.usage?.cacheRead, { kind: "measured", value: 0, source: "provider" });
+	deepStrictEqual(gemini.usage?.total, { kind: "measured", value: 180, source: "provider" });
+	const totalOnly = callSettlementFromMessage(
+		{ stopReason: "stop", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 500 } },
+		"unknown",
+	);
+	strictEqual(totalOnly.usage?.input.kind, "unknown");
+	deepStrictEqual(totalOnly.usage?.total, { kind: "measured", value: 500, source: "provider" });
+});
+
 test("message facts preserve unknown placeholders, explicit zero, terminal errors and unsent calls", () => {
 	const usage = { input: 0, output: 0, cacheRead: 0, cost: { total: 0 } };
 	const omitted = callSettlementFromMessage({ stopReason: "stop", usage }, "unknown");
